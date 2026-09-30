@@ -1,6 +1,6 @@
 # REST API + SSE Specification
 
-**Status:** v2.56 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
+**Status:** v2.57 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
 **Last updated:** 2026-09-29
@@ -389,7 +389,7 @@ its executions and promotion history stay — and the sticky pointer recomputes 
 WAS the pointer (D60: highest eligible live version, else NULL; a DRAFT is eligible only
 under development posture). Refusals: `409 pipeline.version.not_released` (a draft is
 purged, never discarded; an already-discarded version needs restore), `409
-pipeline.version.pinned` (a live parent version exact-pins v), `404
+pipeline.version.pinned` (a live parent version — or, since #320, a live dashboard version whose source — exact-pins v; `details.pinned_by` names the pipelines, `details.referencing_dashboards` the dashboards), `404
 pipeline.execution.not_found` (unknown version), `403 pipeline.authoring.disabled`
 (hardened). **Session-only**; audited as `pipeline.version.discarded` (pointer
 before/after in `details`).
@@ -488,7 +488,12 @@ pipeline exclusively pins; the response carries the offered set either way, so t
 show the cleanup. **Session-only**; audited as `pipeline.purged`.
 
 Response: `200 OK` with `{"purged": true, "exclusive_draft_templates": [...],
-"exclusive_draft_templates_purged": bool}`.
+"exclusive_draft_templates_purged": bool, "kept_draft_templates": [...]}`. Since #320
+"exclusive" spans every aggregate that pins templates: a draft-only template that a parameter
+set or a visualization ALSO pins is never offered and never purged — `kept_draft_templates` lists
+each one as `{"id", "referencing_parameter_sets"?, "referencing_visualizations"?}` (the keys
+`template.in_use` uses), so the caller sees what the purge left and why
+([Versioning §3.5.3](versioning.md#353-the-reverse-arrows-into-other-families-320)).
 
 ### 5.7 List pipelines
 
@@ -1146,7 +1151,12 @@ If-Match: <the draft's body_hash>
 **Purges** the draft (101 — historical route spelling): always a hard delete (nothing
 references a template version by FK — versioning §6), and the sole-draft case takes the
 template entity with it. **Session-only**; audited as `template.version.purged`.
-Response: `204 No Content`.
+Response: `204 No Content`. **Refused `409 template.in_use`** (#320) while a pipeline, a parameter
+set or a visualization pins the draft — the exact version when the template keeps other versions,
+any version when the draft is the only one and the purge takes the template with it; `details`
+carry `pinned_by`, `referencing_parameter_sets` and `referencing_visualizations`
+([Versioning §3.5.3](versioning.md#353-the-reverse-arrows-into-other-families-320)). Before #320
+this route ran no pin check.
 
 ### 8.11 Discard / restore / purge a template version, and the manual switch (101)
 
@@ -2412,17 +2422,19 @@ Reads follow the working-version rule ([Versioning §7.1](versioning.md#71-autho
 | `GET /api/v1/parameter-sets/{id}/versions/{version}` | `parameter_set.read` | One version. A version other than RELEASED is 404 under a narrowing lens (the promoter's). |
 | `PUT /api/v1/parameter-sets/{id}` | `parameter_set.update` | The draft write (copy-on-write, then in-place; `If-Match` required). The hash precondition is checked BEFORE the body is parsed. An identical body is a no-op and reports the current state. |
 | `POST /api/v1/parameter-sets/{id}/release?release_pinned_templates=` | `parameter_set.release` | Release (lock) the draft. Every pinned template version must be RELEASED (`409 parameter.release.template_not_released`, `details.pins_not_released`) — or, with `release_pinned_templates=true`, is released WITH the set in one transaction, templates first (142). Release re-runs the §4 source validation against the pins as they are now. |
-| `POST /api/v1/parameter-sets/{id}/draft/discard` | `parameter_set.version.manage` | Purge the DRAFT (versioning §5.4); the sole draft takes the set with it. Session-only. |
-| `POST /api/v1/parameter-sets/{id}/versions/{version}/discard` | `parameter_set.version.manage` | Discard a RELEASED version (reversible); the pointer falls back per D60. |
+| `POST /api/v1/parameter-sets/{id}/draft/discard` | `parameter_set.version.manage` | Purge the DRAFT (versioning §5.4); the sole draft takes the set with it. Session-only. **`409 parameter.in_use`** while a dashboard pins it (#320) — see the note below the table. |
+| `POST /api/v1/parameter-sets/{id}/versions/{version}/discard` | `parameter_set.version.manage` | Discard a RELEASED version (reversible); the pointer falls back per D60. `409 parameter.in_use` while a live dashboard version pins it (#320). |
 | `POST /api/v1/parameter-sets/{id}/versions/{version}/restore` | `parameter_set.version.manage` | Restore a DISCARDED version; the pointer moves only above-current-or-NULL. |
-| `DELETE /api/v1/parameter-sets/{id}/versions/{version}` | `parameter_set.version.manage` | Purge a DRAFT version. A release is discarded, never purged (`409 parameter.version.last_release`). |
+| `DELETE /api/v1/parameter-sets/{id}/versions/{version}` | `parameter_set.version.manage` | Purge a DRAFT version. A release is discarded, never purged (`409 parameter.version.last_release`); `409 parameter.in_use` while a dashboard pins the draft (#320). |
 | `POST /api/v1/parameter-sets/{id}/current` | `parameter_set.switch_version` | The manual switch (the promotion receiver's rollout/rollback lever): body `{"version": n}`. A missing `version` — or one that is not an integer — refuses `400 parameter.validation.body_invalid` (`details.path = "version"`, `details.reason = "missing"` / `"wrong_type"`); the set lookup happens only after the body's shape is judged. Session-only. |
-| `DELETE /api/v1/parameter-sets/{id}` | `parameter_set.delete` | The entity purge — only when the set's only version is a DRAFT. |
+| `DELETE /api/v1/parameter-sets/{id}` | `parameter_set.delete` | The entity purge — only when the set's only version is a DRAFT; `409 parameter.in_use` while ANY stored dashboard version of a live dashboard pins any version of the set (#320). |
 | `GET /api/v1/parameter-sets/{id}/export` | `parameter_set.read` | The export bundle (§21.4). Released-only: a never-released set is `404 parameter.not_found` naming the set. Lensed (auth §7.6's `lens` cell, §11A.1): a set the promoter lens hides is the same `404` — never a body, never an existence oracle. |
 | `POST /api/v1/parameter-sets/import` | `parameter_set.import` | Import the bundle (§21.4): templates first, then the set; the exported id is KEPT. |
 | `POST /api/v1/parameter-sets/{id}/evaluate` | `parameter_set.evaluate` | **Evaluate** (§21.3) — the whole set re-rendered against the submitted selections. |
 
 Every read and write is workspace-scoped: a set of another workspace — or one the promoter lens hides — answers the same `404 parameter.not_found` an absent id gets; nothing confirms existence across workspaces.
+
+**`parameter.in_use` (#320).** A dashboard pins a set by name and exact version (`parameter_set`), and a set a dashboard pins is not purged or discarded out from under it: `409 parameter.in_use`, `details` `{id, version?, pinned_by: [{dashboard, version, status}]}` — the exact version for a discard and for a draft purge that leaves other versions, every stored dashboard version for an entity purge and for a draft purge that takes the entity ([Versioning §3.5.3](versioning.md#353-the-reverse-arrows-into-other-families-320)). Every verb that can refuse it is an author verb (auth §7.6), so the refusal names dashboards to a caller who may read them all.
 
 ### 21.3 Evaluate
 
@@ -2532,6 +2544,7 @@ A source whose pinned release does not DECLARE its caller columns — a SQL call
 
 ## Appendix A: Change Log
 
+| 2026-09-30 | v2.57 | 320 (#320) dependency guards | **§5.6:** the pipeline entity purge's response gains `kept_draft_templates` — the draft-only templates the exclusive offer skipped because a parameter set or a visualization also pins them. **§8.10:** the template draft purge is refused `409 template.in_use` while a pipeline, set or visualization pins the draft (it ran no pin check before). **§21.2:** the parameter-set purge and discard routes refuse the new `409 parameter.in_use` while a dashboard pins the set. |
 | 2026-09-29 | v2.56 | 321 (#323) the parameter-set routes read their body the #291 way — renumbered at merge: L1b took v2.55 | **§4.2 and §21.4's error table:** a parameter-set request body that cannot be read — not JSON, or nested past §13.21's depth of 100 — is `400 parameter.validation.body_invalid` with `details.reason: malformed_json` on create, update, evaluate and import (the four routes that parse their own text, now through the request mapper) and on the switch (bound by the message converter; the malformed-body handler had no row for the family and answered the pipeline family's `schema_version_unsupported`). The four text routes answered the `500` backstop before (reproduced on the wire: `{` as the body). Well-formed bodies are unchanged; no route, permission or §13 code added. |
 | 2026-09-29 | v2.55 | L1b (#10) the visualization and dashboard surfaces | Additive. **New §22 Visualizations and §23 Dashboards** — the parameter-set routes' shape addressed by id (P24): create, the flat listing and the `?prefix=` browse (lens-true totals, #312), the working-version read, versions, the `If-Match` draft write, release (the visualization under the evidence gate, which refuses `visualization.release.tests_missing` / `gate_not_installed` until L4; the dashboard's D61 cascade under `release_pinned_visualizations`), the draft and version purges, discard/restore, the switch and the entity purge — and **`POST /api/v1/dashboards/{id}/validate`**, the §3.2 rules against current state with the verdict as a `200` answer, an author verb on `dashboard.update` (owner ruling 2026-09-29; the spec named `dashboard.read`). The pin guard (`visualization.version.pinned`) and the promoter lens over both families (§23.1) are stated. A malformed body is the family's own `body_invalid` 400. Export/import (L1c), the test sessions (L4), the runtime and refresh routes (L2) and key bindings (L5) are not routes yet. The §13.22/§13.23 codes existed (L1a); none added. |
 | 2026-09-29 | v2.54 | 312 (#312) the flat listing lists — renumbered from v2.53 at merge, which 302 takes | **§21.2, one row:** `GET /api/v1/parameter-sets` without a prefix now lists EVERY set the caller's lens admits at its listed version, paged against a lens-true `total` — a flat repository read (the pipelines §5.7 mould). It had reused the ROOT tree level's read, and the name grammar's `folder_required` kept that level empty: every workspace answered `[]` / `total 0`. The tree routes (`?prefix=`) are unchanged; no permission, code or route added. |
