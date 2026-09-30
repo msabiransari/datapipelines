@@ -412,7 +412,9 @@ statement shape and differ only in their scope predicate.
 dependency (a dashboard source must be RELEASED; a release refuses a DRAFT pin, or cascades it to RELEASED under
 consent), and a RELEASED version never returns to DRAFT and is never purged (`last_release`). So an entity whose only
 version is a DRAFT — the only entity an entity purge accepts — can never have been pinned by a DISCARDED dependent version.
-The scans still ask the any-version question for the pipeline, set and template arms (the cost is one scan, and the
+The same argument is why the pipeline VERSION purge (which carries no pin guard by design, D58) needs none for
+dashboards: it takes only DRAFT versions, and a dashboard source pins only a RELEASED one. The scans still ask the
+any-version question for the pipeline, set and template arms (the cost is one scan, and the
 argument above rests on lifecycle transitions a future flow could change); the visualization's own guard (`visualization.version.pinned`) counts LIVE
 dashboard versions only, and is moot for the same reason.
 
