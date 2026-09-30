@@ -36,6 +36,29 @@
   --edge-done: var(--accent-success);
 }
 
+/* #10 L3a — CHART tokens (dashboards): what the Plotly adapter reads into `layout` at each render
+ * (D25, the record's theme contract). Every one bridges the THEME's own tokens — no literal colour,
+ * the same rule the 080 block above follows — so all nine themes and both modes carry a coherent
+ * chart surface without the adapter knowing a hex. The four categorical series hues are the theme's
+ * four accents in the design system's own order (info, success, warning, danger); the two blended
+ * series are color-mix steps between accent pairs so a six-trace chart stays inside the theme's
+ * range. The adapter resolves these through a probe element (a `color-mix()` token stream reads
+ * back verbatim otherwise) and maps them onto Plotly's paper/plot/grid/font/colorway — see
+ * datapipelines-dashboard-plotly.js and dashboards.md §4. */
+:root {
+  --chart-canvas: var(--surface-default);
+  --chart-plot: var(--surface-page);
+  --chart-grid: color-mix(in srgb, var(--border-subtle) 55%, var(--surface-page));
+  --chart-ink: var(--text-primary);
+  --chart-muted: var(--text-muted);
+  --chart-series-1: var(--accent-info);
+  --chart-series-2: var(--accent-success);
+  --chart-series-3: var(--accent-warning);
+  --chart-series-4: var(--accent-danger);
+  --chart-series-5: color-mix(in srgb, var(--accent-info) 55%, var(--accent-success));
+  --chart-series-6: color-mix(in srgb, var(--accent-warning) 55%, var(--accent-danger));
+}
+
 /* 188 (#188) — the type-coloured element declares its TYPE, not its colour: `data-type`
    on a node card (graph.js buildCardHtml), the details pane and a legend chip
    (pipelines/editor.html) resolves to the pair every type-coloured rule reads. It used

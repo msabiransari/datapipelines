@@ -4,14 +4,24 @@ import co.datapipelines.application.dashboards.RefreshAdmission
 import co.datapipelines.executor.ExecutionSlots
 import co.datapipelines.persistence.FailureShape
 import co.datapipelines.visualization.ActionScope
+import co.datapipelines.visualization.ArtifactJson
+import co.datapipelines.visualization.ArtifactRecord
+import co.datapipelines.visualization.ArtifactVersion
+import co.datapipelines.visualization.ArtifactVersionDetail
 import co.datapipelines.visualization.DashboardBody
 import co.datapipelines.visualization.DashboardLayout
 import co.datapipelines.visualization.DashboardRefreshRepository
 import co.datapipelines.visualization.DashboardRuntimeConfig
 import co.datapipelines.visualization.DashboardTimeouts
+import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.visualization.RefreshExecutionLink
 import co.datapipelines.visualization.RefreshRecord
 import co.datapipelines.visualization.RefreshStatus
+import co.datapipelines.visualization.RendererConfigValidators
+import co.datapipelines.visualization.RendererKind
+import co.datapipelines.visualization.RendererSpec
+import co.datapipelines.visualization.VisualizationBody
+import com.fasterxml.jackson.databind.node.ObjectNode
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
@@ -64,6 +74,51 @@ class RuntimeSupportTest {
         RuntimeViews.refreshSeconds(body(250), runtime) shouldBe 250
         // the validator refuses this at save; the view would still not exceed it
         RuntimeViews.refreshSeconds(body(9_999), runtime) shouldBe 300
+    }
+
+    @Test
+    fun `the bundle is 3d only when a pinned plotly visualization carries a 3D trace - otherwise 2d`() {
+        fun pinned(
+            kind: RendererKind,
+            config: String,
+        ): ArtifactVersion<VisualizationBody> {
+            val at = Instant.parse("2026-09-29T00:00:00Z")
+            val user = UUID.randomUUID()
+            val id = UUID.randomUUID()
+            return ArtifactVersion(
+                ArtifactRecord(id, UUID.randomUUID(), "dbr/viz", "v", "", 1, at, at, user),
+                ArtifactVersionDetail(id, 1, PipelineVersionStatus.RELEASED, "h", at, user),
+                VisualizationBody(
+                    displayName = "v",
+                    renderer = RendererSpec(kind, "1"),
+                    inputs = emptyMap(),
+                    config = ArtifactJson.mapper.readTree(config) as ObjectNode,
+                ),
+            )
+        }
+
+        // A 2D trace, a table renderer, a KPI renderer and a config without data stay on the 2D bundle.
+        RuntimeViews.rendererBundle(emptyList()) shouldBe "2d"
+        RuntimeViews.rendererBundle(listOf(pinned(RendererKind.PLOTLY, """{"data":[{"type":"bar"}]}"""))) shouldBe "2d"
+        RuntimeViews.rendererBundle(listOf(pinned(RendererKind.TABLE, """{"columns":[]}"""))) shouldBe "2d"
+        RuntimeViews.rendererBundle(listOf(pinned(RendererKind.KPI, """{}"""))) shouldBe "2d"
+        RuntimeViews.rendererBundle(
+            listOf(
+                pinned(RendererKind.PLOTLY, """{"layout":{"title":{"text":"x"}}}"""),
+                pinned(RendererKind.TABLE, """{"columns":[]}"""),
+            ),
+        ) shouldBe "2d"
+        // The trace types the derivation reads are the validator's closed list, not a re-spelled copy.
+        RendererConfigValidators.PLOTLY_3D_TRACES.forEach { trace ->
+            RuntimeViews.rendererBundle(listOf(pinned(RendererKind.PLOTLY, """{"data":[{"type":"$trace"}]}"""))) shouldBe "3d"
+        }
+        // One 3D trace anywhere loads the heavy bundle for the whole board — the two are never on one page.
+        RuntimeViews.rendererBundle(
+            listOf(
+                pinned(RendererKind.PLOTLY, """{"data":[{"type":"bar"}]}"""),
+                pinned(RendererKind.PLOTLY, """{"data":[{"type":"surface"}]}"""),
+            ),
+        ) shouldBe "3d"
     }
 
     @Test
