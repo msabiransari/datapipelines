@@ -62,10 +62,14 @@ class LogRedactorTest {
 
     @Test
     fun `scrubbing is linear in the number of open quotes on one line`() {
-        // A hostile line of 50,000 `password="` fragments must not backtrack quadratically: each
-        // pair of quotes is one match, so 25,000 masks come out.
+        // A hostile line of 50,000 `password="` fragments must not backtrack quadratically. Each
+        // fragment's quoted value runs to the next fragment's quote, so every nested `password=`
+        // starts inside the previous value and ends past it: the spans chain into ONE region, masked
+        // once (#337-c: overlapping spans are merged, not cut at the first one's end).
         val hostile = "password=\"".repeat(50_000)
-        LogRedactor.scrubText(hostile) shouldBe "password=***".repeat(25_000)
+        val measured = LogRedactor.scrubMeasured(hostile)
+        measured.text shouldBe "password=***"
+        (measured.work <= WORK_PER_CHARACTER_CEILING * hostile.length + WORK_SLACK) shouldBe true
     }
 
     // The delivered pattern threw StackOverflowError on a few-KB a_a_a_ token (one recursion per
