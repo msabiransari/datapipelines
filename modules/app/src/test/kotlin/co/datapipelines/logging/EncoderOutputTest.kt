@@ -57,49 +57,86 @@ class EncoderOutputTest {
     @Test
     fun `console message channel emits every plant scrubbed to the expected text`() {
         val encoder = started("console")
-        (SyntheticPlants.REDACTED + SyntheticPlants.KEPT).forEach { plant ->
-            probe.info(plant.raw)
-            val line = encode(encoder, appender.list.last())
-            withClue("console message: ${plant.label}\n$line") { line shouldContain plant.scrubbed }
-            SyntheticPlants.SECRET_MARKERS.forEach { withClue(plant.label) { line shouldNotContain it } }
-        }
+        val failures =
+            (SyntheticPlants.REDACTED + SyntheticPlants.KEPT).mapNotNull { plant ->
+                probe.info(plant.raw)
+                val line = encode(encoder, appender.list.last())
+                failure("console message", plant, line, line.contains(plant.scrubbed))
+            }
+        expectNone(failures)
     }
 
     @Test
     fun `console exception channel emits every plant scrubbed to the expected text`() {
         val encoder = started("console")
-        (SyntheticPlants.REDACTED + SyntheticPlants.KEPT).forEach { plant ->
-            probe.error("boom", IllegalStateException(plant.raw))
-            val text = encode(encoder, appender.list.last())
-            withClue("console exception: ${plant.label}\n$text") { text shouldContain "IllegalStateException: ${plant.scrubbed}" }
-            SyntheticPlants.SECRET_MARKERS.forEach { withClue(plant.label) { text shouldNotContain it } }
-        }
+        val failures =
+            (SyntheticPlants.REDACTED + SyntheticPlants.KEPT).mapNotNull { plant ->
+                probe.error("boom", IllegalStateException(plant.raw))
+                val text = encode(encoder, appender.list.last())
+                failure("console exception", plant, text, text.contains("IllegalStateException: ${plant.scrubbed}"))
+            }
+        expectNone(failures)
     }
 
     @Test
     fun `json message channel emits every plant scrubbed to the expected text`() {
         val encoder = started("json")
-        (SyntheticPlants.REDACTED + SyntheticPlants.KEPT).forEach { plant ->
-            probe.info(plant.raw)
-            val line = encode(encoder, appender.list.last())
-            val message = mapper.readTree(line).path("message").asText()
-            withClue("json message: ${plant.label}\n$line") { message shouldBe plant.scrubbed }
-            SyntheticPlants.SECRET_MARKERS.forEach { withClue(plant.label) { line shouldNotContain it } }
-        }
+        val failures =
+            (SyntheticPlants.REDACTED + SyntheticPlants.KEPT).mapNotNull { plant ->
+                probe.info(plant.raw)
+                val line = encode(encoder, appender.list.last())
+                val message = mapper.readTree(line).path("message").asText()
+                failure("json message", plant, line, message == plant.scrubbed)
+            }
+        expectNone(failures)
     }
 
     @Test
     fun `json exception channel emits every plant scrubbed to the expected text`() {
         val encoder = started("json")
-        (SyntheticPlants.REDACTED + SyntheticPlants.KEPT).forEach { plant ->
-            probe.error("boom", IllegalStateException(plant.raw))
-            val line = encode(encoder, appender.list.last())
-            val trace = mapper.readTree(line).path("stack_trace").asText()
-            withClue("json exception: ${plant.label}\n$line") { trace shouldContain "IllegalStateException: ${plant.scrubbed}" }
-            withClue("json exception keeps the frames after an unterminated quote: ${plant.label}") {
-                trace shouldContain "\tat "
+        val failures =
+            (SyntheticPlants.REDACTED + SyntheticPlants.KEPT).mapNotNull { plant ->
+                probe.error("boom", IllegalStateException(plant.raw))
+                val line = encode(encoder, appender.list.last())
+                val trace = mapper.readTree(line).path("stack_trace").asText()
+                // The frames after an unterminated quote must survive too: a stray quote masks its
+                // own line and never the rest of the trace.
+                failure(
+                    "json exception",
+                    plant,
+                    line,
+                    trace.contains("IllegalStateException: ${plant.scrubbed}") && trace.contains("\tat "),
+                )
             }
-            SyntheticPlants.SECRET_MARKERS.forEach { withClue(plant.label) { line shouldNotContain it } }
+        expectNone(failures)
+    }
+
+    @Test
+    fun `hostile long inputs come through every format and channel unchanged and without error`() {
+        // #337-c F6 smoke through the REAL encoders: text that holds no secret must be emitted
+        // byte-for-byte however many sensitive-looking prefixes it repeats, with no stack overflow
+        // and no error. The BOUND on the work is asserted by counted scan steps in LogRedactorTest
+        // (a timing here would measure the machine); this proves the encoders survive the shapes.
+        val hostile =
+            listOf(
+                "password_".repeat(8_000) + "z:",
+                "password_secret_api_key_".repeat(3_000) + "z:",
+                "\"" + "password_".repeat(8_000) + "\" z:",
+                "a_".repeat(40_000) + "z=1",
+                "\\\"".repeat(20_000) + ":",
+            )
+        listOf("console", "json").forEach { format ->
+            val encoder = started(format)
+            hostile.forEachIndexed { index, text ->
+                probe.info(text)
+                val message = messageText(format, encode(encoder, appender.list.last()))
+                withClue("$format message, hostile input #$index (${text.length} chars)") {
+                    if (format == "json") message shouldBe text else message shouldContain text
+                }
+                probe.error("boom", IllegalStateException(text))
+                val trace = traceText(format, encode(encoder, appender.list.last()))
+                withClue("$format exception, hostile input #$index") { trace shouldContain text.take(4_000) }
+            }
         }
     }
 
@@ -166,6 +203,37 @@ class EncoderOutputTest {
         bare.has("correlation_id") shouldBe false
         bare.has("execution_id") shouldBe false
     }
+
+    /**
+     * A failure line for [plant] when [matched] is false OR any secret marker survives in [output];
+     * null when the channel did exactly what §9.2 says. Collected so one red run lists every plant
+     * that leaks, not just the first.
+     */
+    private fun failure(
+        channel: String,
+        plant: Plant,
+        output: String,
+        matched: Boolean,
+    ): String? {
+        val leaked = SyntheticPlants.SECRET_MARKERS.filter { output.contains(it) }
+        return if (matched && leaked.isEmpty()) null else "$channel / ${plant.label}: leaked $leaked\n$output"
+    }
+
+    private fun expectNone(failures: List<String>) {
+        withClue("plants the encoder did not scrub exactly:\n${failures.joinToString("\n")}") { failures.isEmpty() shouldBe true }
+    }
+
+    /** The message as the format carries it: the `message` member under json, the whole line under console. */
+    private fun messageText(
+        format: String,
+        line: String,
+    ): String = if (format == "json") mapper.readTree(line).path("message").asText() else line
+
+    /** The exception text as the format carries it: the `stack_trace` member under json, the whole output under console. */
+    private fun traceText(
+        format: String,
+        line: String,
+    ): String = if (format == "json") mapper.readTree(line).path("stack_trace").asText() else line
 
     private fun started(format: String): FormatSwitchingEncoder {
         if (format == "json") {

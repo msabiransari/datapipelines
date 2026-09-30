@@ -38,11 +38,6 @@ class ObservabilityLoggingFormatPostProcessorTest {
     }
 
     @Test
-    fun `the replace option strings are safe for a logback pattern`() {
-        LogRedactor.patternsSafeForReplaceOptions() shouldBe true
-    }
-
-    @Test
     fun `an unknown value refuses with the offending value named`() {
         val failure =
             shouldThrow<IllegalStateException> {

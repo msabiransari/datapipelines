@@ -5,6 +5,7 @@ import ch.qos.logback.classic.joran.JoranConfigurator
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
 import io.kotest.assertions.withClue
+import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
@@ -70,6 +71,30 @@ class FormatSwitchingEncoderTest {
         console.shouldContain("\"api_key\": \"***\"")
         console.shouldContain("jdbc_url=***")
         console.shouldNotContain("planted-secret-")
+    }
+
+    @Test
+    fun `the console line holds no unparsed pattern text and every redaction word ran`() {
+        // A redaction word the pattern parser did not recognise prints itself literally and scrubs
+        // nothing (logback reads a `%` right after a composite's `)` as plain text): the line must
+        // carry neither the word nor a stray pattern delimiter, and the secret must still be gone.
+        val encoder = FormatSwitchingEncoder().apply { format = "console" }
+        encoder.context = context
+        encoder.start()
+        probe.error("message password=planted-secret-one", IllegalStateException("cause secret=planted-secret-two"))
+        val line = String(encoder.encode(appender.list.single()) ?: ByteArray(0))
+
+        withClue("rendered line:\n$line") {
+            line.shouldNotContain("dpRedact")
+            line.shouldNotContain("%")
+            line.shouldNotContain("PARSER_ERROR")
+            line.shouldContain("password=***")
+            line.shouldContain("IllegalStateException: cause secret=***")
+            line.shouldNotContain("planted-secret-")
+        }
+        context.statusManager.copyOfStatusList
+            .filter { it.level >= ch.qos.logback.core.status.Status.ERROR && it.message.contains("dpRedact") }
+            .shouldBeEmpty()
     }
 
     @Test

@@ -43,6 +43,31 @@ class RedactingStackTracePrinterTest {
     }
 
     @Test
+    fun `an overlapping json value holding an assignment and an escaped quote crossing the cutoff leaves no prefix or suffix`() {
+        // #337-c F5 at the bound: the nested `secret=abc\"` sits before the cutoff, the secret tail
+        // after it. Redaction runs over the whole trace first, so the outer value is decided on
+        // the original text and nothing of it survives the cut.
+        listOf(-400, -100, -45, -5, 0, 50).forEach { offset ->
+            assertBoundedAndClean("{\"password\":\"prefix secret=abc\\\"$secretBody\"}", offset)
+        }
+    }
+
+    @Test
+    fun `a quoted assignment holding json-like text crossing the cutoff leaves no prefix or suffix`() {
+        listOf(-400, -100, -45, -5, 0, 50).forEach { offset ->
+            assertBoundedAndClean("password=\"{\\\"api_key\\\":\\\"$secretBody\\\"}\"", offset)
+        }
+    }
+
+    @Test
+    fun `two adjacent overlapping secrets crossing the cutoff leave no prefix or suffix`() {
+        assertBoundedAndClean(
+            "{\"password\":\"a secret=b\\\"planted-secret-one\",\"api_key\":\"$secretBody\"}",
+            -60,
+        )
+    }
+
+    @Test
     fun `the same secret in a short exception is redacted without truncation`() {
         // No frames: a test runner's own stack is deep enough to pass the bound by itself, which
         // would make "no truncation" untestable for a secret this size.

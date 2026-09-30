@@ -24,6 +24,77 @@ internal object SyntheticPlants {
     /** The markers that must never survive in any output. */
     val SECRET_MARKERS: List<String> = listOf("planted-secret-", "998877665544")
 
+    /**
+     * #337-c F5 — supported forms that OVERLAP: a sensitive key's quoted value that itself contains
+     * text shaped like another sensitive assignment or pair. Masking must decide the value's extent
+     * from the ORIGINAL text, so the inner match cannot consume an escape and end the outer value
+     * early (the delivered two-pass scrubber emitted `{"password":"***"planted-secret-tail"}` for
+     * the first plant).
+     */
+    val OVERLAPPING: List<Plant> =
+        listOf(
+            Plant(
+                "overlap json value holding an assignment then an escaped quote (F5)",
+                """{"password":"prefix secret=abc\"planted-secret-tail"}""",
+                """{"password":"***"}""",
+            ),
+            Plant(
+                "overlap mixed-case json key and nested assignment key",
+                """{"Password":"x SECRET=abc\"planted-secret-tail2"} after""",
+                """{"Password":"***"} after""",
+            ),
+            Plant(
+                "overlap escaped backslash then escaped quote after the nested assignment",
+                """{"password":"x secret=abc\\\"planted-secret-p"} after""",
+                """{"password":"***"} after""",
+            ),
+            Plant(
+                "overlap nested assignment inside a json value, no escape involved",
+                """{"secret":"a password=planted-secret-o b"} after""",
+                """{"secret":"***"} after""",
+            ),
+            Plant(
+                "overlap quoted assignment holding json-like text",
+                """password="{\"api_key\":\"planted-secret-n\"}" tail""",
+                "password=*** tail",
+            ),
+            Plant(
+                "overlap single-quoted assignment holding an assignment",
+                "secret='a password=planted-secret-v' tail",
+                "secret=*** tail",
+            ),
+            Plant(
+                "overlap json value holding another sensitive json pair",
+                """{"password":"{\"secret\":\"planted-secret-w\"}"} tail""",
+                """{"password":"***"} tail""",
+            ),
+            Plant(
+                "overlap authorization value holding a password assignment",
+                """"Authorization": "Bearer planted-secret-x password=planted-secret-y" tail""",
+                """"Authorization": "***" tail""",
+            ),
+            Plant(
+                "overlap adjacent json pairs",
+                """{"password":"planted-secret-q","secret":"planted-secret-r"}""",
+                """{"password":"***","secret":"***"}""",
+            ),
+            Plant(
+                "overlap adjacent assignments",
+                "password=planted-secret-s;secret=planted-secret-t",
+                "password=***;secret=***",
+            ),
+            Plant(
+                "overlap unclosed json value holding an assignment and an escaped quote",
+                """{"password":"prefix secret=abc\"planted-secret-u""",
+                """{"password":"***"""",
+            ),
+            Plant(
+                "overlap second pair after an overlapping first",
+                """{"password":"a secret=b\"planted-secret-z1","api_key":"planted-secret-z2"}""",
+                """{"password":"***","api_key":"***"}""",
+            ),
+        )
+
     val REDACTED: List<Plant> =
         listOf(
             Plant("json upper-case key", """{"PASSWORD":"planted-secret-upper"}""", """{"PASSWORD":"***"}"""),
@@ -122,7 +193,7 @@ internal object SyntheticPlants {
                 "(password=planted-secret-m),next=1",
                 "(password=***),next=1",
             ),
-        )
+        ) + OVERLAPPING
 
     /** Never-redacted and non-matching keys: the redactor must return these byte-for-byte. */
     val KEPT: List<Plant> =
@@ -134,6 +205,8 @@ internal object SyntheticPlants {
             ),
             keep("non-matching json keys", """{"passwordless":"keep-4","secrets":"keep-5"}"""),
             keep("non-matching assignment keys", "passwordless=keep-6 pipeline_id=p-2"),
+            keep("non-sensitive json value holding assignment-like text", """{"note":"prefix plain=abc\"keep-10"} tail"""),
+            keep("non-sensitive assignment holding quoted json-like text", """note="{\"plain\":\"keep-11\"}" tail"""),
             keep("non-matching compound and separators", """{"passwordless_x":"keep-7","user-id":"keep-8","node.id":"keep-9"}"""),
         )
 
