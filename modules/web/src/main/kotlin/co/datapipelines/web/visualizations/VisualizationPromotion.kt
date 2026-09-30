@@ -5,6 +5,7 @@ import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.visualization.ArtifactExport
 import co.datapipelines.visualization.ArtifactImported
 import co.datapipelines.visualization.ArtifactTransferService
+import co.datapipelines.visualization.ArtifactVersion
 import co.datapipelines.visualization.DashboardBody
 import co.datapipelines.visualization.DashboardErrorCodes
 import co.datapipelines.visualization.DashboardRepository
@@ -62,13 +63,23 @@ class VisualizationPromotion(
         view: PromotableView,
     ): JsonNode? {
         if (!view.visualizationsLens.admits(name)) return null
+        val version = promotableRelease(workspaceId, name, target) ?: return null
+        return ArtifactTransferService.payloadOf(version)
+    }
+
+    /** The current release iff it is RELEASED and NEWER than the target's entry (§10.3's guards). */
+    private fun promotableRelease(
+        workspaceId: UUID,
+        name: String,
+        target: PromotionWire.Entry?,
+    ): ArtifactVersion<VisualizationBody>? {
         val record = repository.findRecordByName(workspaceId, name) ?: return null
         val current = record.currentVersion ?: return null
-        val detail = repository.findVersionDetail(workspaceId, record.id, current) ?: return null
-        if (detail.status != PipelineVersionStatus.RELEASED) return null
-        if (!PromotableView.isNewer(current, detail.bodyHash, target)) return null
-        val version = repository.findVersion(workspaceId, record.id, current) ?: return null
-        return ArtifactTransferService.payloadOf(version)
+        val detail = repository.findVersionDetail(workspaceId, record.id, current)
+        if (detail?.status == PipelineVersionStatus.RELEASED && PromotableView.isNewer(current, detail.bodyHash, target)) {
+            return repository.findVersion(workspaceId, record.id, current)
+        }
+        return null
     }
 
     /**
@@ -83,11 +94,16 @@ class VisualizationPromotion(
         version: Int,
         target: PromotionWire.Entry?,
     ): JsonNode? {
-        val record = repository.findRecordByName(workspaceId, name) ?: throw visualizationNotFound(name)
-        val detail = repository.findVersionDetail(workspaceId, record.id, version) ?: throw visualizationNotFound("$name@$version")
-        if (detail.status != PipelineVersionStatus.RELEASED) throw visualizationNotFound("$name@$version")
+        // A missing release, a non-RELEASED one and a missing body are the SAME refusal: the sender cannot
+        // build the entry the batch promises, addressed by the name@version the dashboard pins.
+        val address = "$name@$version"
+        val record = repository.findRecordByName(workspaceId, name)
+        val detail = record?.let { repository.findVersionDetail(workspaceId, it.id, version) }
+        if (record == null || detail == null || detail.status != PipelineVersionStatus.RELEASED) {
+            throw visualizationNotFound(address)
+        }
         if (target != null && target.currentVersion == version && target.bodyHash == detail.bodyHash) return null
-        val found = repository.findVersion(workspaceId, record.id, version) ?: throw visualizationNotFound("$name@$version")
+        val found = repository.findVersion(workspaceId, record.id, version) ?: throw visualizationNotFound(address)
         return ArtifactTransferService.payloadOf(found)
     }
 
@@ -151,13 +167,7 @@ class DashboardPromotion(
         visualizationTargets: Map<String, PromotionWire.Entry>,
         visualizationPromotion: VisualizationPromotion,
     ): List<JsonNode>? {
-        if (!view.dashboardsLens.admits(name)) return null
-        val record = repository.findRecordByName(workspaceId, name) ?: return null
-        val current = record.currentVersion ?: return null
-        val detail = repository.findVersionDetail(workspaceId, record.id, current) ?: return null
-        if (detail.status != PipelineVersionStatus.RELEASED) return null
-        if (!PromotableView.isNewer(current, detail.bodyHash, target)) return null
-        val version = repository.findVersion(workspaceId, record.id, current) ?: return null
+        val version = promotableDashboardRelease(workspaceId, name, target, view) ?: return null
         val dependencies =
             version.body.visualizations
                 .map { it.visualization }
@@ -166,6 +176,23 @@ class DashboardPromotion(
                     visualizationPromotion.entryForPin(workspaceId, pin.name, pin.version, visualizationTargets[pin.name])
                 }
         return dependencies + ArtifactTransferService.payloadOf(version)
+    }
+
+    /** The admitted, released, newer-than-target current release of dashboard [name] — the root guards in one read. */
+    private fun promotableDashboardRelease(
+        workspaceId: UUID,
+        name: String,
+        target: PromotionWire.Entry?,
+        view: PromotableView,
+    ): ArtifactVersion<DashboardBody>? {
+        val record = repository.findRecordByName(workspaceId, name)
+        val current = record?.currentVersion
+        val detail = current?.let { repository.findVersionDetail(workspaceId, record.id, it) }
+        val promotable =
+            view.dashboardsLens.admits(name) && record != null && current != null &&
+                detail?.status == PipelineVersionStatus.RELEASED && PromotableView.isNewer(current, detail.bodyHash, target)
+        if (!promotable || record == null || current == null) return null
+        return repository.findVersion(workspaceId, record.id, current)
     }
 
     /** The receiver's BIND of one dashboard entry — the ONE entry bind through the dashboard READER. */

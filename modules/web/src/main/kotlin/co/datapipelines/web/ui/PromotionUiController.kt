@@ -106,11 +106,11 @@ class PromotionUiController(
         @RequestParam(name = "visualization", required = false) visualizationNames: List<String>?,
         @RequestParam(name = "dashboard", required = false) dashboardNames: List<String>?,
     ): String {
-        val selected = names?.map { it.trim() }?.filter { it.isNotEmpty() }.orEmpty()
-        val selectedSets = parameterSetNames?.map { it.trim() }?.filter { it.isNotEmpty() }.orEmpty()
-        val selectedVisualizations = visualizationNames?.map { it.trim() }?.filter { it.isNotEmpty() }.orEmpty()
-        val selectedDashboards = dashboardNames?.map { it.trim() }?.filter { it.isNotEmpty() }.orEmpty()
-        if (selected.isEmpty() && selectedSets.isEmpty() && selectedVisualizations.isEmpty() && selectedDashboards.isEmpty()) {
+        val selected = names.selection()
+        val selectedSets = parameterSetNames.selection()
+        val selectedVisualizations = visualizationNames.selection()
+        val selectedDashboards = dashboardNames.selection()
+        if (listOf(selected, selectedSets, selectedVisualizations, selectedDashboards).all { it.isEmpty() }) {
             return "redirect:/promotion?error=nothing_selected"
         }
         return try {
@@ -128,6 +128,9 @@ class PromotionUiController(
             "redirect:/promotion?error=${e.code.substringAfterLast('.')}"
         }
     }
+
+    /** The form's selection: trimmed, empty entries dropped, null-safe to an empty list (the 313 mould). */
+    private fun List<String>?.selection(): List<String> = orEmpty().map { it.trim() }.filter { it.isNotEmpty() }
 
     private fun requirePrincipal(): AuthenticatedPrincipal =
         SecurityContextHolder.getContext().authentication?.principal as? AuthenticatedPrincipal

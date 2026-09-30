@@ -217,37 +217,10 @@ class PromotionService(
         setEntries
             .flatMap { parameterSetPromotion.templatePins(it) }
             .forEach(closure::addTemplate)
-        // #10 L1c — the visualization roots (released + newer + the view admits), then each dashboard
-        // root's own entries (its pinned visualizations first). A root the view hides or that has no
-        // promotable release REFUSES with the family's 404 naming the submitted name (76e8af98's
-        // refuse-not-drop, the families' spelling); a dashboard's missing pin dependency refuses too —
-        // the batch must be able to keep the dashboard's promise.
-        val visualizationTargets = inventory.visualizationByName()
-        val visualizationEntries =
-            visualizationNames
-                .distinct()
-                .map { name ->
-                    visualizationPromotion.entryFor(workspaceId, name, visualizationTargets[name], view)
-                        ?: throw ApiErrors.visualizationNotFound(name)
-                }
-        val dashboardTargets = inventory.dashboardByName()
-        val dashboardEntries =
-            dashboardNames
-                .distinct()
-                .map { name ->
-                    dashboardPromotion.entriesForRoot(
-                        workspaceId,
-                        name,
-                        dashboardTargets[name],
-                        view,
-                        visualizationTargets,
-                        visualizationPromotion,
-                    )
-                        ?: throw ApiErrors.dashboardNotFound(name)
-                }
-        (visualizationEntries + dashboardEntries.flatten()).forEach { entry ->
-            visualizationPromotion.templatePins(entry).forEach(closure::addTemplate)
-        }
+        // #10 L1c — the transfer roots' entries and their template pins, merged into the batch's
+        // closure: [addTransferRoots] states the guards and the refuse-not-drop rule.
+        val (visualizationEntries, dashboardEntries) =
+            addTransferRoots(workspaceId, view, inventory, closure, visualizationNames, dashboardNames)
         verifyDatasources(closure, inventory)
 
         val batch =
@@ -263,7 +236,8 @@ class PromotionService(
                 dashboards = dashboardEntries.flatten(),
             )
         log.info(
-            "event=pipeline.promotion.pushing target={} workspace={} roots={} templates={} sets={} pipelines={} endpoints={} visualizations={} dashboards={}",
+            "event=pipeline.promotion.pushing target={} workspace={} roots={} templates={} sets={} pipelines={}" +
+                " endpoints={} visualizations={} dashboards={}",
             client.targetBaseUrl,
             workspaceName,
             names.size + batch.parameterSets.size + batch.visualizations.size + batch.dashboards.size,
@@ -275,6 +249,43 @@ class PromotionService(
             batch.dashboards.size,
         )
         return client.push(batch).also { client.invalidate(workspaceName) }
+    }
+
+    /**
+     * #10 L1c — the transfer roots' entries and their template pins, merged into the batch's closure.
+     * A root the view hides or that has no promotable release REFUSES with the family's 404 naming
+     * the submitted name (76e8af98's refuse-not-drop, the families' spelling); a dashboard's missing
+     * pin dependency refuses too — the batch must be able to keep the dashboard's promise.
+     */
+    private fun addTransferRoots(
+        workspaceId: UUID,
+        view: PromotableView,
+        inventory: PromotionWire.Inventory,
+        closure: Closure,
+        visualizationNames: List<String>,
+        dashboardNames: List<String>,
+    ): Pair<List<JsonNode>, List<List<JsonNode>>> {
+        val visualizationTargets = inventory.visualizationByName()
+        val visualizationEntries =
+            visualizationNames
+                .distinct()
+                .map { name ->
+                    visualizationPromotion.entryFor(workspaceId, name, visualizationTargets[name], view)
+                        ?: throw ApiErrors.visualizationNotFound(name)
+                }
+        val dashboardTargets = inventory.dashboardByName()
+        val dashboardEntries =
+            dashboardNames
+                .distinct()
+                .map { name ->
+                    dashboardPromotion
+                        .entriesForRoot(workspaceId, name, dashboardTargets[name], view, visualizationTargets, visualizationPromotion)
+                        ?: throw ApiErrors.dashboardNotFound(name)
+                }
+        (visualizationEntries + dashboardEntries.flatten()).forEach { entry ->
+            visualizationPromotion.templatePins(entry).forEach(closure::addTemplate)
+        }
+        return visualizationEntries to dashboardEntries
     }
 
     /**

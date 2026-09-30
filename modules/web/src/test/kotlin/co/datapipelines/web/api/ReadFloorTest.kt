@@ -222,14 +222,16 @@ class ReadFloorTest {
             matches = { path -> path.startsWith("/api/v1/parameter-sets") },
         ),
 
-        /** #10 L1b: the visualizations — an every-role read (the lens aside); floor = the family's six GET handlers (L1c's export joined). */
+        /** #10 L1b: the visualizations — an every-role read (the lens aside); floor = the family's six GET handlers
+         * (L1c's export joined). */
         VISUALIZATIONS(
             floor = 6,
             permissions = setOf(Permission.VISUALIZATION_READ),
             matches = { path -> path.startsWith("/api/v1/visualizations") },
         ),
 
-        /** #10 L1b: the dashboards — the same row shape; floor = the family's six GET handlers (L1c's export joined). */
+        /** #10 L1b: the dashboards — the same row shape; floor = the family's six GET handlers
+         * (L1c's export joined). */
         DASHBOARDS(
             floor = 6,
             permissions = setOf(Permission.DASHBOARD_READ),

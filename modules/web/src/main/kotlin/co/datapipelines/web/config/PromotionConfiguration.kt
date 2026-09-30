@@ -39,6 +39,9 @@ import org.springframework.transaction.support.TransactionTemplate
 @Configuration
 class PromotionConfiguration {
     @Bean
+    // A DI factory's arity is the container's business: every parameter is a bean the inventory genuinely
+    // needs (the receive-service bean's own suppression states the same for its factory).
+    @Suppress("LongParameterList")
     fun promotionInventoryService(
         environment: Environment,
         workspaces: WorkspaceRepository,

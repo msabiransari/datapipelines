@@ -43,7 +43,12 @@ import org.springframework.transaction.support.TransactionTemplate
  * a deployment that authors must not receive promoted content (D7). Everything after that is
  * §9.2's preserved-version import table, unchanged — conflict, idempotency, hash recompute —
  * because those semantics are right and promotion calls them rather than restating them.
+ *
+ * The constructor's arity is the container's business (@Suppress LongParameterList): every
+ * parameter is a bean this service genuinely needs — the PromotionConfiguration bean method's
+ * own suppression states the same for its factory.
  */
+@Suppress("LongParameterList")
 class PromotionReceiveService(
     private val inventory: PromotionInventoryService,
     private val pipelineImportService: PipelineImportService,
@@ -142,25 +147,22 @@ class PromotionReceiveService(
             // must find it already stored. Republishing an unchanged endpoint is a no-op
             // rather than a conflict, so a re-push is idempotent like every other entry.
             batch.endpoints.forEach { entry -> endpointPromotion.apply(entry, promoter) }
-            // #10 L1c — the two transfer families LAST (D61's order: templates → sets → pipelines →
-            // endpoints → visualizations → dashboards), and — unlike the sets — bound AND landed
-            // INSIDE the transaction: neither validator opens a customer datasource (the template
-            // facts render dry, the pipeline facts take only a resolver), so there is no lease wall,
-            // and validating here means the just-landed templates and pipelines ARE what the
-            // import lens resolves against. A shape refusal (the family's body_invalid, bound
-            // through the READER) or a dependency refusal rolls the WHOLE batch back — the C36
-            // property, proven at E2E level for a refused dashboard.
-            batch.visualizations.forEach { entry ->
-                visualizationPromotion.land(visualizationPromotion.bind(entry), workspace.id, actor)
-            }
-            batch.dashboards.forEach { entry ->
-                dashboardPromotion.land(dashboardPromotion.bind(entry), workspace.id, actor)
-            }
+            // #10 L1c — the two transfer families LAST (D61's order), bound AND landed inside the
+            // transaction: [landTransferFamilies] states the rule and its reasons.
+            landTransferFamilies(batch, workspace.id, actor)
         }
 
         // C4: the promoted rows are stamped with the peer's identity (the System actor for the
-        // config value), and WHERE they came from is recorded here — the source deployment's name and a fingerprint of the key that
-        // authorised the push. Never the key.
+        // config value), and WHERE they came from is recorded here — the source deployment's name and a
+        // fingerprint of the key that authorised the push. Never the key.
+        reportApplied(batch, actor)
+    }
+
+    /** The applied report, the audit row and the log line — one spelling of the counts, per kind. */
+    private fun reportApplied(
+        batch: PromotionWire.Batch,
+        actor: java.util.UUID,
+    ): PromotionWire.Applied {
         auditLogger.log(
             event = AUDIT_ACCEPTED,
             userId = actor,
@@ -198,6 +200,29 @@ class PromotionReceiveService(
             visualizations = batch.visualizations.size,
             dashboards = batch.dashboards.size,
         )
+    }
+
+    /**
+     * #10 L1c — the two transfer families LAST (D61's order: templates → sets → pipelines →
+     * endpoints → visualizations → dashboards), and — unlike the sets — bound AND landed
+     * INSIDE the transaction: neither validator opens a customer datasource (the template
+     * facts render dry, the pipeline facts take only a resolver), so there is no lease wall,
+     * and validating here means the just-landed templates and pipelines ARE what the
+     * import lens resolves against. A shape refusal (the family's body_invalid, bound
+     * through the READER) or a dependency refusal rolls the WHOLE batch back — the C36
+     * property, proven at E2E level for a refused dashboard.
+     */
+    private fun landTransferFamilies(
+        batch: PromotionWire.Batch,
+        workspaceId: java.util.UUID,
+        actor: java.util.UUID,
+    ) {
+        batch.visualizations.forEach { entry ->
+            visualizationPromotion.land(visualizationPromotion.bind(entry), workspaceId, actor)
+        }
+        batch.dashboards.forEach { entry ->
+            dashboardPromotion.land(dashboardPromotion.bind(entry), workspaceId, actor)
+        }
     }
 
     /**
