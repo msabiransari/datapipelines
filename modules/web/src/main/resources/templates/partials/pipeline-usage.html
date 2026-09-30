@@ -11,10 +11,14 @@
      this pipeline, read through the scheduler's lensed by-target read. A discard does not
      refuse over a schedule — it refuses over nothing here — but the schedule then blocks
      (pointer_null / target_not_found) at its next occurrence, which is exactly the
-     consequence a reader is weighing. A schedule the lens hides is not on the list. -->
+     consequence a reader is weighing. A schedule the lens hides is not on the list.
+
+     DASHBOARDS (#320) are refusal evidence like the parents: a live dashboard version whose source pins a
+     version of this pipeline is `pipeline.version.pinned`'s `referencing_dashboards`, so a pinned version's
+     discard is refused, and the row names which dashboard and which pinned version. -->
 <div xmlns:th="http://www.thymeleaf.org" th:fragment="usage" class="tplx-usage">
   <p class="ds-empty-description" th:if="${usage.total == 0 and #lists.isEmpty(usage.schedules)}">
-    Nothing depends on this pipeline — no published endpoint serves it, no live pipeline pins it and no schedule runs it.
+    Nothing depends on this pipeline — no published endpoint serves it, no live pipeline or dashboard pins it and no schedule runs it.
   </p>
 
   <th:block th:if="${!#lists.isEmpty(usage.endpoints)}">
@@ -36,6 +40,18 @@
       <span class="tplx-vmeta">
         <span th:text="'node ' + ${p.nodeId}">node child</span>
         <span> · </span><span th:text="'pins v' + ${p.pinnedVersion}">pins v1</span>
+      </span>
+    </div>
+  </th:block>
+
+  <th:block th:if="${!#lists.isEmpty(usage.dashboards)}">
+    <h4 class="tplx-usage-h">Dashboards pinning it</h4>
+    <div class="tplx-vrow" data-usage-dashboard th:each="d : ${usage.dashboards}">
+      <span class="u-mono" th:text="${d.name}">acme/boards/revenue</span>
+      <span class="ds-badge ds-badge-default app-chip-mono" th:text="${'v' + d.version}">v2</span>
+      <span class="tplx-vmeta">
+        <span th:text="'source pins v' + ${d.pinnedVersion}">source pins v1</span>
+        <span> · </span><span th:text="${d.status}">RELEASED</span>
       </span>
     </div>
   </th:block>

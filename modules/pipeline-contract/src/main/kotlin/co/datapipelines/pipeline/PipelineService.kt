@@ -103,6 +103,8 @@ open class PipelineService(
     private val releases: PipelineReleaseService,
     private val authoring: AuthoringGuard,
     private val draftTemplates: ExclusiveDraftTemplates,
+    /** #320 — the dashboards that pin a release: a source pins `pipeline {name, version}` exactly (graph rule 1). */
+    private val dashboards: PipelineVersionConsumers,
     private val deserializer: PipelineDeserializer = PipelineDeserializer(),
     private val serializer: PipelineSerializer = PipelineSerializer(),
 ) {
@@ -720,6 +722,8 @@ open class PipelineService(
         val exclusiveDraftTemplates: List<String>,
         /** Whether [exclusiveDraftTemplates] were purged with the entity (the `include` flag). */
         val exclusiveTemplatesPurged: Boolean,
+        /** #320 (D5) — draft-only templates this draft pins that the offer SKIPPED because a set or a visualization also pins them. */
+        val keptDraftTemplates: List<KeptDraftTemplate> = emptyList(),
     )
 
     /**
@@ -756,9 +760,10 @@ open class PipelineService(
         // Graph rule 3: no inbound edges of any kind. A never-released pipeline cannot be
         // published (the pointer is NULL) and cannot be pinned by a saved parent (D58), but
         // the check is stated, not assumed — a template-style pin edge would refuse here.
-        refuseIfPinned(workspaceId, record, versions[0].version)
+        refuseIfPinned(workspaceId, record, versions[0].version, entityPurge = true)
 
         val exclusive = exclusiveDraftTemplates(workspaceId, record)
+        val kept = draftTemplates.keptIds(workspaceId, record.id)
         val purged =
             pipelines.purgeDraft(
                 workspaceId,
@@ -777,7 +782,7 @@ open class PipelineService(
             exclusive.forEach { templateId -> draftTemplates.purge(workspaceId, templateId) }
             purgedTemplates = true
         }
-        return EntityPurgeResult(purged.executionsDeleted, exclusive, purgedTemplates)
+        return EntityPurgeResult(purged.executionsDeleted, exclusive, purgedTemplates, kept)
     }
 
     /**
@@ -814,37 +819,61 @@ open class PipelineService(
         record: PipelineRecord,
     ): List<String> = draftTemplates.exclusiveIds(workspaceId, record.id)
 
-    /** Graph rule 1's service-side arm: names the pinning entities in `details`. */
+    /**
+     * Graph rule 1's service-side arm: names the pinning entities in `details` — the parent PIPELINES under
+     * `pinned_by`, and since #320 the DASHBOARDS whose sources pin this release under `referencing_dashboards`
+     * beside it (the C32 shape the parameter sets took). A discard asks the exact-pin question; the entity purge
+     * asks the any-version one (rule 3, R12) — moot for a pipeline that was never released, and stated rather than
+     * assumed: a dashboard source must be RELEASED, so a draft-only pipeline has nothing to be pinned by.
+     */
     private fun refuseIfPinned(
         workspaceId: UUID,
         record: PipelineRecord,
         version: Int,
+        entityPurge: Boolean = false,
     ) {
         val pinners = pipelines.findLiveParentsPinningVersion(workspaceId, record.name, version)
-        if (pinners.isNotEmpty()) {
-            throw pinned(workspaceId, record, version, pinners)
+        val dashboardPins =
+            if (entityPurge) {
+                dashboards.anyVersionPins(workspaceId, record.name)
+            } else {
+                dashboards.liveVersionPins(workspaceId, record.name, version)
+            }
+        if (pinners.isNotEmpty() || dashboardPins.isNotEmpty()) {
+            throw pinned(record, version, pinners, dashboardPins)
         }
     }
 
-    @Suppress("UnusedParameter") // workspaceId rides for a future per-workspace pin report
     private fun pinned(
-        workspaceId: UUID,
         record: PipelineRecord,
         version: Int,
         pinners: List<TemplatePin>,
+        dashboardPins: List<DashboardPin> = emptyList(),
     ): DatapipelinesException =
         DatapipelinesException(
             code = PipelineErrorCodes.Versioning.PINNED,
             message =
-                "Version $version of '${record.name.truncateForError()}' is pinned by ${pinners.size} " +
-                    "live pipeline version(s); discard or repoint them first.",
+                "Version $version of '${record.name.truncateForError()}' is pinned by " +
+                    listOfNotNull(
+                        pinners.takeIf { it.isNotEmpty() }?.let { "${it.size} live pipeline version(s)" },
+                        dashboardPins.takeIf { it.isNotEmpty() }?.let { "${it.size} dashboard version(s)" },
+                    ).joinToString(" and ") +
+                    "; discard or repoint them first.",
             details =
-                mapOf(
-                    "pipeline_id" to record.id.toString(),
-                    "version" to version,
-                    "pinned_by" to
+                buildMap {
+                    put("pipeline_id", record.id.toString())
+                    put("version", version)
+                    put(
+                        "pinned_by",
                         pinners.map { mapOf("pipeline" to it.pipelineName, "version" to it.pipelineVersion, "node" to it.nodeId) },
-                ),
+                    )
+                    if (dashboardPins.isNotEmpty()) {
+                        put(
+                            "referencing_dashboards",
+                            dashboardPins.map { mapOf("dashboard" to it.name, "version" to it.version, "status" to it.status.name) },
+                        )
+                    }
+                },
         )
 
     /**
@@ -857,7 +886,8 @@ open class PipelineService(
         version: Int,
     ): DatapipelinesException {
         val pinners = pipelines.findLiveParentsPinningVersion(workspaceId, record.name, version)
-        if (pinners.isNotEmpty()) return pinned(workspaceId, record, version, pinners)
+        val dashboardPins = dashboards.liveVersionPins(workspaceId, record.name, version)
+        if (pinners.isNotEmpty() || dashboardPins.isNotEmpty()) return pinned(record, version, pinners, dashboardPins)
         val current = pipelines.findVersionDetail(workspaceId, record.id, version) ?: throw versionNotFound(record.id, version)
         return when (current.status) {
             PipelineVersionStatus.RELEASED -> {

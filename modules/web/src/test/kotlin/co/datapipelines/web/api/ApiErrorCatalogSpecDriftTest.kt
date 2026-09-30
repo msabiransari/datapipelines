@@ -298,8 +298,12 @@ class ApiErrorCatalogSpecDriftTest {
          * verbs need — landed in the SAME commit as their constants (`PipelineErrorCodes.Visualization` /
          * `.Dashboard` and the module's mirrors), these catalog rows and the two `AuthErrors` anchors.
          * Re-derived from the document's own parse.
+         *
+         * 371 → 372 with #320: `parameter.in_use` (§13.20, 409 — the consumer binding the parameter record reserved),
+         * landed in the SAME commit as `ParameterErrorCodes.IN_USE`, its `PipelineErrorCodes.Parameters` mirror and its
+         * explicit catalog row (it shares no family prefix with the `parameter.version.` 409s).
          */
-        const val SECTION_13_ROW_COUNT = 371
+        const val SECTION_13_ROW_COUNT = 372
 
         /**
          * §12's distinct validation codes.

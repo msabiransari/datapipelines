@@ -42,6 +42,7 @@ class TemplatesUsedByToolTest {
                 pipelineReferences =
                     listOf(reference("p1", "fetch"), reference("p2", "load", status = PipelineVersionStatus.DRAFT)),
                 parameterSetReferences = emptyList(),
+                visualizationReferences = emptyList(),
             )
 
         val payload = tool.call(McpArguments(mapOf("id" to "fetch_orders.sql", "version" to 2)), ctx) as Map<*, *>
@@ -59,6 +60,39 @@ class TemplatesUsedByToolTest {
                     (first as Map<*, *>)["pipeline_version"] shouldBe 7
                     first["pipeline_version_status"] shouldBe "RELEASED"
                 }
+            },
+        )
+    }
+
+    @Test
+    fun `a visualization-only pin is a real reference - named on the wire beside the pipelines and the sets (#320)`() {
+        val chart = UUID.fromString("22222222-2222-2222-2222-222222222222")
+        every { usage.usedBy(any(), any(), "shape.sql", 3) } returns
+            co.datapipelines.application.templates.TemplateUsage.Combined(
+                templateId = "shape.sql",
+                version = 3,
+                pipelineCount = 0,
+                pipelineReferences = emptyList(),
+                parameterSetReferences = emptyList(),
+                visualizationReferences =
+                    listOf(co.datapipelines.visualization.ArtifactPin(chart, "acme/charts/revenue", 5, PipelineVersionStatus.DRAFT, 3)),
+            )
+
+        val payload = tool.call(McpArguments(mapOf("id" to "shape.sql", "version" to 3)), ctx) as Map<*, *>
+
+        assertAll(
+            { payload["pipeline_count"] shouldBe 0 },
+            { payload["references"] shouldBe emptyList<Any>() },
+            {
+                payload["visualization_references"] shouldBe
+                    listOf(
+                        mapOf(
+                            "visualization" to "acme/charts/revenue",
+                            "visualization_id" to chart.toString(),
+                            "visualization_version" to 5,
+                            "visualization_version_status" to "DRAFT",
+                        ),
+                    )
             },
         )
     }

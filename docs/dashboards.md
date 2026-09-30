@@ -1,6 +1,6 @@
 # Dashboards
 
-**Status:** v0.2 — the two documents and their lifecycle (#10, lane L1a); the REST routes, the MCP tools and the
+**Status:** v0.3 — the two documents and their lifecycle (#10, lane L1a); the REST routes, the MCP tools and the
 permissions (§4, lane L1b). The transfer routes (L1c), the runtime (L2), the client runtime and the first-party page
 (L3), the visualization tests and their release gate (L4) and the `dashboard` key kind (L5) add their sections as they land.
 **Owner:** datapipelines.co core
@@ -198,7 +198,15 @@ The evidence gate is installed by the tests lane (L4); until then every visualiz
 
 A version that a live (DRAFT or RELEASED) dashboard version pins is never discarded or purged, and a visualization
 with any pinned version is never purged whole — `visualization.version.pinned`, `details.pinned_by` naming the
-dashboards.
+dashboards. This guard lives in the visualization module and counts LIVE dashboard versions only, which is complete:
+an entity purge is legal only while the visualization's only version is a DRAFT, and a DISCARDED dashboard version can
+never have pinned such a visualization (a RELEASED dashboard pins only a RELEASED visualization, and a RELEASED version
+never returns to DRAFT). #320 (Versioning §3.5.3) guards the OTHER direction — the things a dashboard or a visualization
+pins: a pipeline release a dashboard source pins is refused `pipeline.version.pinned` (`referencing_dashboards`), a
+parameter set a dashboard pins `parameter.in_use`, a transform template a visualization pins `template.in_use`
+(`referencing_visualizations`). **Restoring a DISCARDED dashboard version re-judges its dependencies against today's state**
+(a DISCARDED version protects nothing, so its pins may have been discarded meanwhile) and is refused
+`dashboard.validation.dependency_not_found` naming the dead pin; only the dependency failures block a restore.
 
 ### 3.2 Releasing a dashboard
 
@@ -288,5 +296,6 @@ authoring loop in the order an agent needs it.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-30 | v0.3 | 320 (#320) dependency guards | §3.1: the guard's other direction — a pipeline release, parameter set or transform template a dashboard or visualization pins can no longer be discarded or purged from under it (`pipeline.version.pinned`, `parameter.in_use`, `template.in_use`; [Versioning §3.5.3](versioning.md#353-the-reverse-arrows-into-other-families-320)); why the visualization's own LIVE-only guard is complete; restoring a DISCARDED dashboard version re-judges its dependencies. |
 | 2026-09-29 | v0.2 | L1b (#10) the surfaces | **New §4 The surfaces** — the fourteen permission rows and the promoter's lens (§4.1), validate as an author verb (§4.2, owner ruling), what a source must declare for the save-time input check (§4.3), and the eleven MCP tools (§4.4); the REST routes are rest-api §22/§23. The status line names what L1b added. |
 | 2026-09-29 | v0.1 | L1a (#10) the module | The two documents, their bounds and their lifecycle (§1–§3). |

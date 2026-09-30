@@ -131,8 +131,21 @@ class UiConfig {
         runStats: PipelineRunStats,
         authoring: co.datapipelines.pipeline.AuthoringGuard,
         schedules: co.datapipelines.scheduler.ScheduleService,
+        // #320 — the dashboards that pin a release; the Usage tab lists what the discard would be refused over.
+        dashboards: co.datapipelines.pipeline.PipelineVersionConsumers,
     ): PipelineBrowseModel =
-        PipelineBrowseModel(pipelines, repository, executions, endpoints, datasources, actorNames, runStats, authoring, schedules)
+        PipelineBrowseModel(
+            pipelines,
+            repository,
+            executions,
+            endpoints,
+            datasources,
+            actorNames,
+            runStats,
+            authoring,
+            schedules,
+            dashboards,
+        )
 
     /** 102: the lifecycle dialogs' facts — the same scans the services' own guards read. */
     @Bean
@@ -149,6 +162,8 @@ class UiConfig {
         reviewMarks: co.datapipelines.pipeline.TemplateReviewMarks,
         // #273 — the discard dialog's schedules evidence, the Usage tab's by-target read.
         schedules: co.datapipelines.scheduler.ScheduleService,
+        // #320 — the dashboards that pin a release, the port the service's discard guard asks.
+        dashboards: co.datapipelines.pipeline.PipelineVersionConsumers,
     ): PipelineLifecycleDialogModel =
         PipelineLifecycleDialogModel(
             repository,
@@ -161,14 +176,16 @@ class UiConfig {
             reviewMarks,
             co.datapipelines.pipeline.PipelineDeserializer(),
             schedules,
+            dashboards,
         )
 
     /** 102: the template twin of [pipelineLifecycleDialogModel]. */
     @Bean
     fun templateLifecycleDialogModel(
         templates: TemplateRepository,
-        pipelines: co.datapipelines.pipeline.PipelineRepository,
+        // #320 — the SAME composed reverse arrow the release service's guards refuse with.
+        usage: co.datapipelines.application.templates.TemplateUsage,
         actorNames: ActorNames,
         authoring: co.datapipelines.pipeline.AuthoringGuard,
-    ): TemplateLifecycleDialogModel = TemplateLifecycleDialogModel(templates, pipelines, actorNames, authoring)
+    ): TemplateLifecycleDialogModel = TemplateLifecycleDialogModel(templates, usage, actorNames, authoring)
 }

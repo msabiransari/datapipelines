@@ -93,7 +93,35 @@ internal class ParametersHarness(
     val runner: SelectorRunner? = customers?.let { SelectorRunner(engines, it, config) }
 
     val validator = ParameterSetValidator(config, registry, statuses, datasources, runner ?: probe)
-    val service = ParameterSetService(repository, validator, AuthoringGuard(authoringEnabled), statuses, releaser, transactions)
+
+    /**
+     * #320 — the dashboards that pin a set: none unless a case seeds [pinnedByDashboards]. [consumerQuestions] records
+     * WHICH question each verb asked (`live name@version` for graph rule 1, `any name` for rule 3), so a case can
+     * assert the right rule was applied, not only that a refusal happened.
+     */
+    val pinnedByDashboards = mutableListOf<co.datapipelines.pipeline.DashboardPin>()
+    val consumerQuestions = mutableListOf<String>()
+    private val consumers =
+        object : ParameterSetConsumers {
+            override fun liveVersionPins(
+                workspaceId: UUID,
+                setName: String,
+                version: Int,
+            ): List<co.datapipelines.pipeline.DashboardPin> {
+                consumerQuestions += "live $setName@$version"
+                return pinnedByDashboards.toList()
+            }
+
+            override fun anyVersionPins(
+                workspaceId: UUID,
+                setName: String,
+            ): List<co.datapipelines.pipeline.DashboardPin> {
+                consumerQuestions += "any $setName"
+                return pinnedByDashboards.toList()
+            }
+        }
+    val service =
+        ParameterSetService(repository, validator, AuthoringGuard(authoringEnabled), statuses, consumers, releaser, transactions)
 
     /** Seeds an `sql` template (POSTGRES — the fake `warehouse`'s dialect) and answers its pin. */
     fun template(

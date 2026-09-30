@@ -9,17 +9,19 @@
     <h2 class="ds-title u-m0 u-mb-md" id="tlc-discard-title"
         th:text="'Discard v' + ${dlg.version} + '?'">Discard v1?</h2>
 
-    <th:block th:if="${!#lists.isEmpty(dlg.pinnerPipelines)}">
+    <th:block th:if="${!#lists.isEmpty(dlg.pinnerPipelines) or !#lists.isEmpty(dlg.pinnerParameterSets) or !#lists.isEmpty(dlg.pinnerVisualizations)}">
       <p class="u-secondary u-text-sm">
         <strong th:text="'v' + ${dlg.version}">v1</strong> cannot be discarded: it is pinned by live
-        pipeline version(s) — remove or repoint them first.
+        pipeline, parameter set or visualization version(s) — remove or repoint them first.
       </p>
       <ul class="u-text-sm u-mb-md" data-discard-pinnerPipelines>
         <li th:each="p : ${dlg.pinnerPipelines}" class="u-mono" th:text="${p}">parent/pipeline</li>
+        <li th:each="p : ${dlg.pinnerParameterSets}" class="u-mono" data-discard-pinner-set th:text="${p}">parameter/set</li>
+        <li th:each="p : ${dlg.pinnerVisualizations}" class="u-mono" data-discard-pinner-visualization th:text="${p}">a/visualization</li>
       </ul>
     </th:block>
 
-    <th:block th:if="${#lists.isEmpty(dlg.pinnerPipelines)}">
+    <th:block th:if="${#lists.isEmpty(dlg.pinnerPipelines) and #lists.isEmpty(dlg.pinnerParameterSets) and #lists.isEmpty(dlg.pinnerVisualizations)}">
       <p class="u-secondary u-text-sm" th:if="${dlg.isCurrent}">
         v<span th:text="${dlg.version}">1</span> is the resolved version —
         <span th:text="${dlg.fallback}">v2 becomes the version a pin without a number resolves to.</span>

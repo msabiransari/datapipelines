@@ -41,6 +41,8 @@ class TemplateUiControllerTest {
         co.datapipelines.application.templates.TemplateUsage(
             TemplateUsageService(templates, pipelines),
             io.mockk.mockk<co.datapipelines.parameters.ParameterSetTemplatePins>(relaxed = true),
+            pipelines,
+            io.mockk.mockk<co.datapipelines.visualization.ArtifactDependents>(relaxed = true),
         )
 
     private val repository = mockk<TemplateRepository>()

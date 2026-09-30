@@ -1,8 +1,8 @@
 package co.datapipelines.web.templates
 
+import co.datapipelines.application.templates.TemplateUsage
 import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.PipelineErrorCodes
-import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.templates.Template
 import co.datapipelines.templates.TemplateDraft
@@ -25,18 +25,25 @@ import java.util.UUID
  * The draft verb is PURGE (a hard delete — nothing references a `template_versions` row by
  * FK); DISCARD is the RELEASED verb with `template.in_use` as its pin guard; RESTORE brings
  * a discarded version back. All are authoring writes (§3.1) except the manual switch.
+ *
+ * ## The pin guard (versioning §3.5, graph rules 1 and 3; #320)
+ * EVERY verb that removes a template version — the draft purges included — asks [usage] who pins it, over all three
+ * aggregates that pin templates: pipelines, parameter sets and visualizations. Discard and the draft purge of a
+ * template that keeps other versions ask the LIVE-exact question (rule 1); an entity purge, and a draft purge that
+ * takes the entity with it (the only version), ask the ANY-version question (rule 3, R12: a discarded dependent
+ * version can be restored and must keep what it pins).
  */
 open class TemplateReleaseService(
     private val templates: TemplateRepository,
     private val validator: TemplateValidator,
     private val authoring: AuthoringGuard,
-    private val pipelines: PipelineRepository,
     /**
-     * #194 lane D (the record's §8.4): template-backed selectors make a SET an inbound edge —
-     * the guards below scan it beside the pipelines, and the refusal's details name the sets
-     * (`referencing_parameter_sets` beside `pinned_by`).
+     * The reverse arrow, all three aggregates (#194 lane D made a SET an inbound edge — `referencing_parameter_sets`
+     * beside `pinned_by`; #320 adds the VISUALIZATION — `referencing_visualizations`). The guards ask its UNLENSED
+     * evidence methods: the verbs here are held by roles whose view is everything (auth §7.6), so the refusal names
+     * every pinner.
      */
-    private val parameterSets: co.datapipelines.parameters.ParameterSetTemplatePins,
+    private val usage: TemplateUsage,
 ) {
     /** What a release produced: the released version detail and the stored template at it. */
     data class Released(
@@ -152,7 +159,8 @@ open class TemplateReleaseService(
         // §5.5: purging authored content is authoring — a promotion receiver refuses it.
         authoring.requireTemplateAuthoring()
 
-        templates.findDraftDetail(workspaceId, id) ?: throw notDraft(id)
+        val draft = templates.findDraftDetail(workspaceId, id) ?: throw notDraft(id)
+        refuseIfDraftPinned(workspaceId, id, draft.version)
         if (!templates.purgeDraft(workspaceId, id, expectedHash, authoring.developmentPosture)) {
             throw conflictAfterGuardFailure(workspaceId, id)
         }
@@ -210,6 +218,7 @@ open class TemplateReleaseService(
         requireTemplate(workspaceId, id)
         val detail = findVersionOr404(workspaceId, id, version)
         if (detail.status != PipelineVersionStatus.DRAFT) throw lastRelease(id, version, detail.status)
+        refuseIfDraftPinned(workspaceId, id, version)
         if (!templates.purgeDraft(workspaceId, id, null, authoring.developmentPosture)) {
             throw templateNotFound(id, version)
         }
@@ -231,13 +240,10 @@ open class TemplateReleaseService(
         if (versions.size != 1 || versions[0].status != PipelineVersionStatus.DRAFT) {
             throw lastReleaseEntity(id, versions.size)
         }
-        // Graph rule 3: no inbound edges — any pin of ANY version, from any live pipeline
-        // version, and since 194d from any live PARAMETER SET version (the record's §8.4).
-        val pinners = pipelines.findAnyVersionTemplatePins(workspaceId, id)
-        val setPinners = parameterSets.anyVersionPins(workspaceId, id)
-        if (pinners.isNotEmpty() || setPinners.isNotEmpty()) {
-            throw inUse(id, pinners.map { it.pipelineName }, setPinners)
-        }
+        // Graph rule 3: no inbound edges — any pin of ANY version, from any stored pipeline version, since 194d
+        // from any parameter set version (the record's §8.4), and since #320 from any visualization version.
+        val pins = usage.everPins(workspaceId, id)
+        if (!pins.isEmpty()) throw inUse(id, pins)
         templates.deleteTemplateRow(workspaceId, id)
     }
 
@@ -274,11 +280,23 @@ open class TemplateReleaseService(
         id: String,
         version: Int,
     ) {
-        val pinners = pipelines.findLiveVersionsPinningTemplateVersion(workspaceId, id, version)
-        val setPinners = parameterSets.liveVersionPins(workspaceId, id, version)
-        if (pinners.isNotEmpty() || setPinners.isNotEmpty()) {
-            throw inUse(id, pinners.map { it.pipelineName }, setPinners)
-        }
+        val pins = usage.liveVersionPins(workspaceId, id, version)
+        if (!pins.isEmpty()) throw inUse(id, pins)
+    }
+
+    /**
+     * The draft purges' guard. A draft purge of a template that KEEPS other versions removes one version, so the
+     * exact-pin question (rule 1); when the draft is the template's ONLY version the purge takes the entity row with
+     * it (D57's twin), so it is an entity purge and asks rule 3's any-version question.
+     */
+    private fun refuseIfDraftPinned(
+        workspaceId: UUID,
+        id: String,
+        version: Int,
+    ) {
+        val takesTheEntity = templates.listVersions(workspaceId, id).size == 1
+        val pins = if (takesTheEntity) usage.everPins(workspaceId, id) else usage.liveVersionPins(workspaceId, id, version)
+        if (!pins.isEmpty()) throw inUse(id, pins)
     }
 
     private fun pinnedOrConcurrent(
@@ -286,11 +304,8 @@ open class TemplateReleaseService(
         id: String,
         version: Int,
     ): DatapipelinesException {
-        val pinners = pipelines.findLiveVersionsPinningTemplateVersion(workspaceId, id, version)
-        val setPinners = parameterSets.liveVersionPins(workspaceId, id, version)
-        if (pinners.isNotEmpty() || setPinners.isNotEmpty()) {
-            return inUse(id, pinners.map { it.pipelineName }, setPinners)
-        }
+        val pins = usage.liveVersionPins(workspaceId, id, version)
+        if (!pins.isEmpty()) return inUse(id, pins)
         val current = findVersionOr404(workspaceId, id, version)
         return if (current.status == PipelineVersionStatus.RELEASED) {
             DatapipelinesException(
@@ -305,33 +320,30 @@ open class TemplateReleaseService(
 
     private fun inUse(
         id: String,
-        pinnedBy: List<String>,
-        setPinners: List<co.datapipelines.parameters.ParameterSetPin> = emptyList(),
+        pins: TemplateUsage.Pins,
     ): DatapipelinesException {
-        val setNames = setPinners.map { it.setName }.distinct()
+        val pipelineNames = pins.pipelines.map { it.pipelineName }.distinct()
+        val setNames = pins.parameterSets.map { it.setName }.distinct()
+        val visualizationNames = pins.visualizations.map { it.name }.distinct()
+        val sentences =
+            listOfNotNull(
+                pipelineNames.takeIf { it.isNotEmpty() }?.let {
+                    "${pins.pipelines.size} live pipeline version(s): ${it.joinToString(
+                        ", ",
+                    )}"
+                },
+                setNames.takeIf { it.isNotEmpty() }?.let { "${it.size} parameter set version(s): ${it.joinToString(", ")}" },
+                visualizationNames.takeIf { it.isNotEmpty() }?.let { "${it.size} visualization version(s): ${it.joinToString(", ")}" },
+            )
         return DatapipelinesException(
             code = PipelineErrorCodes.Template.IN_USE,
-            message =
-                buildString {
-                    append("Version of template '$id' is pinned by")
-                    if (pinnedBy.isNotEmpty()) {
-                        append(" ${pinnedBy.size} live pipeline version(s): ")
-                        append(pinnedBy.distinct().joinToString(", "))
-                    }
-                    if (setPinners.isNotEmpty()) {
-                        if (pinnedBy.isNotEmpty()) append(" and")
-                        append(" ${setNames.size} parameter set version(s): ")
-                        append(setNames.joinToString(", "))
-                    }
-                    append("; discard or repoint them first.")
-                },
+            message = "Version of template '$id' is pinned by ${sentences.joinToString(" and ")}; discard or repoint them first.",
             details =
                 buildMap {
                     put("template_id", id)
-                    put("pinned_by", pinnedBy.distinct())
-                    if (setPinners.isNotEmpty()) {
-                        put("referencing_parameter_sets", setPinners.map { it.setName }.distinct())
-                    }
+                    put("pinned_by", pipelineNames)
+                    if (setNames.isNotEmpty()) put("referencing_parameter_sets", setNames)
+                    if (visualizationNames.isNotEmpty()) put("referencing_visualizations", visualizationNames)
                 },
         )
     }

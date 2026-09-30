@@ -1134,8 +1134,9 @@ object PipelineErrorCodes {
 
         /**
          * §13.13 / versioning §3.5 (101, graph rule 1) — discard or purge refused: a LIVE
-         * (non-discarded) version of another pipeline exact-pins this version. `details`
-         * names the pinning entities.
+         * (non-discarded) version of another pipeline — or, since #320, of a DASHBOARD whose
+         * source pins it — exact-pins this version. `details` names the pinning entities:
+         * `pinned_by` the pipelines, `referencing_dashboards` the dashboards.
          */
         const val PINNED = "pipeline.version.pinned"
 
@@ -1665,6 +1666,8 @@ object PipelineErrorCodes {
         const val EVALUATE_SELECTORS_SATURATED = "parameter.evaluate.selectors_saturated"
 
         const val NOT_FOUND = "parameter.not_found"
+
+        const val IN_USE = "parameter.in_use"
 
         const val VERSION_CONFLICT = "parameter.version.conflict"
 

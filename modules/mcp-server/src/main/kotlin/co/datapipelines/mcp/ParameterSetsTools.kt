@@ -508,6 +508,7 @@ class ParameterSetsPurgeDraftTool(
                     "restorable. Requires expected_hash — the body_hash you read from parameter_sets_get — so you " +
                     "purge the draft you actually looked at. If the draft is the set's ONLY version, the set goes " +
                     "with it. A RELEASED version is never touched here (discard it over REST if that is the intent). " +
+                    "A draft a dashboard pins is refused parameter.in_use, naming the dashboards (#320). " +
                     "This is a write: it is audited as one.",
             schema =
                 """

@@ -26,17 +26,18 @@ class TemplatesUsedByTool(
         McpTools.tool(
             name = "templates_used_by",
             description =
-                "Which pipelines AND parameter sets pin a given template version in their working version (the " +
+                "Which pipelines, parameter sets AND visualizations pin a given template version in their working version (the " +
                     "draft when unreleased edits exist, else the latest released). Returns one reference per node — " +
                     "pipeline name and id, node id, and the pipeline version carrying the pin — plus the distinct " +
                     "pipeline count, and one row per pinning parameter set (#194: set name and id, the parameter, " +
-                    "the set version carrying the pin). Use it " +
+                    "the set version carrying the pin), and one row per pinning visualization (#320: its `transform.template` " +
+                    "pin — visualization name and id, the visualization version carrying the pin and its status). Use it " +
                     "before editing or retiring a template version to see who you would affect. It does not answer " +
                     "'is it safe to delete' (that scan includes historical pipeline versions and lives in the " +
                     "delete refusal), and it never changes anything." +
                     " A promoter's key sees only RELEASED templates newer than the promotion target's (the promoter " +
-                    "lens); every other template resolves as not-found, and pinning pipelines it cannot see are " +
-                    "left out of the answer.",
+                    "lens); every other template resolves as not-found, and pinning pipelines, sets or visualizations it " +
+                    "cannot see are left out of the answer.",
             schema =
                 """
                 {
@@ -86,6 +87,16 @@ class TemplatesUsedByTool(
                         "parameter" to it.parameter,
                         "set_version" to it.setVersion,
                         "set_version_status" to it.versionStatus.name,
+                    )
+                },
+            // #320 — a visualization pins a transform template too; a visualization-only pin is a real reference.
+            "visualization_references" to
+                used.visualizationReferences.map {
+                    mapOf(
+                        "visualization" to it.name,
+                        "visualization_id" to it.artifactId.toString(),
+                        "visualization_version" to it.version,
+                        "visualization_version_status" to it.status.name,
                     )
                 },
         )

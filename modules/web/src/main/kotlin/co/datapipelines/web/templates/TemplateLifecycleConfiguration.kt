@@ -41,10 +41,14 @@ class TemplateLifecycleConfiguration {
         pipelines: PipelineRepository,
         templates: TemplateRepository,
         parameterSets: co.datapipelines.parameters.ParameterSetTemplatePins,
+        // #320 — the visualizations' transform pins are the third arm.
+        dependents: co.datapipelines.visualization.ArtifactDependents,
     ): co.datapipelines.application.templates.TemplateUsage =
         co.datapipelines.application.templates.TemplateUsage(
             co.datapipelines.templates.TemplateUsageService(templates, pipelines),
             parameterSets,
+            pipelines,
+            dependents,
         )
 
     @Bean
@@ -52,9 +56,7 @@ class TemplateLifecycleConfiguration {
         templates: TemplateRepository,
         validator: TemplateValidator,
         authoring: AuthoringGuard,
-        pipelines: PipelineRepository,
-        // #194 lane D — the delete guards cover parameter-set pins (the record's §8.4).
-        parameterSets: co.datapipelines.parameters.ParameterSetTemplatePins,
-    ): TemplateReleaseService =
-        TemplateReleaseService(templates, validator, authoring, pipelines, parameterSets)
+        // The guards cover pipeline, parameter-set (#194 lane D) and visualization (#320) pins — one composed answer.
+        usage: co.datapipelines.application.templates.TemplateUsage,
+    ): TemplateReleaseService = TemplateReleaseService(templates, validator, authoring, usage)
 }

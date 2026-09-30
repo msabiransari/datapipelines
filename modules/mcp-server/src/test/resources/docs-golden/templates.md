@@ -30,7 +30,7 @@ renders escaped output and takes no `dialect`; the transform types are their own
    call `templates_update` with the body and the hash (**the dialect is inherited**); it
    writes the DRAFT the same way `pipelines_update` writes a pipeline's. `templates_purge_draft`
    is for a template that should not exist, not for editing one, and is refused once a
-   pipeline pins the template.
+   pipeline, a parameter set or a visualization pins the template.
 
 ## Libraries
 

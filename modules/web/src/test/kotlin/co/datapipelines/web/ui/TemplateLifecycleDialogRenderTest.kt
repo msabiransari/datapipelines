@@ -97,6 +97,58 @@ class TemplateLifecycleDialogRenderTest {
     }
 
     @Test
+    fun `320 - a pinned template's dialogs list the parameter sets and the visualizations beside the pipelines, buttonless`() {
+        val purge =
+            render("partials/template-lifecycle-purge") {
+                setVariable(
+                    "dlg",
+                    purgeDialog(inUse = emptyList()).copy(
+                        inUseParameterSets = listOf("acme/sales/regions"),
+                        inUseVisualizations = listOf("acme/charts/revenue"),
+                        refusal = TemplateLifecycleDialogModel.Refusal("template.in_use", "pinned by a set and a visualization"),
+                    ),
+                )
+                setVariable("from", "explorer")
+            }
+        purge shouldContain "data-purge-pinner-set"
+        purge shouldContain "acme/sales/regions"
+        purge shouldContain "data-purge-pinner-visualization"
+        purge shouldContain "acme/charts/revenue"
+        purge shouldNotContain "<button type=\"submit\""
+
+        val discard =
+            render("partials/template-lifecycle-discard") {
+                setVariable(
+                    "dlg",
+                    discardDialog().copy(
+                        pinnerParameterSets = listOf("acme/sales/regions"),
+                        pinnerVisualizations = listOf("acme/charts/revenue"),
+                    ),
+                )
+                setVariable("from", "explorer")
+            }
+        discard shouldContain "cannot be discarded"
+        discard shouldContain "data-discard-pinner-set"
+        discard shouldContain "data-discard-pinner-visualization"
+        discard shouldContain "acme/charts/revenue"
+        discard shouldNotContain "<button type=\"submit\""
+
+        val entity =
+            render("partials/template-lifecycle-purge-entity") {
+                setVariable(
+                    "dlg",
+                    purgeEntityDialog(TemplateLifecycleDialogModel.Refusal("template.in_use", "pinned")).copy(
+                        inUseParameterSets = listOf("acme/sales/regions"),
+                        inUseVisualizations = listOf("acme/charts/revenue"),
+                    ),
+                )
+            }
+        entity shouldContain "data-purge-entity-pinner-set"
+        entity shouldContain "data-purge-entity-pinner-visualization"
+        entity shouldNotContain "<button type=\"submit\""
+    }
+
+    @Test
     fun `restore - states the pointer outcome both ways`() {
         val moves =
             render("partials/template-lifecycle-restore") {

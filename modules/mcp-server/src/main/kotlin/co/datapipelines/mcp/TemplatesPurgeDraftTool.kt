@@ -24,8 +24,8 @@ import io.modelcontextprotocol.spec.McpSchema
  *    refused: humans release, and humans discard releases — D4/D57 stay with the UI);
  *  - the draft was created by THIS key's user (templates carry a creator USER id, no key-id
  *    column — "this key created it" degrades to "this key's user");
- *  - NOTHING pins any version of it, ever — [TemplateUsageService.referencedAnywhere], the
- *    delete guard's every-version-ever scan (D4), not the working-version scan
+ *  - NOTHING pins any version of it, ever — pipelines, parameter sets and (#320) visualizations,
+ *    [TemplateUsage]'s every-version-ever scans (D4), not the working-version scan
  *    `templates_used_by` answers.
  *
  * The purge itself is [TemplateRepository.purgeDraft] with the draft's current `body_hash` as
@@ -48,8 +48,9 @@ class TemplatesPurgeDraftTool(
             description =
                 "Hard-delete a template that has NEVER been released: the only version is a DRAFT, created by " +
                     "this key's user, and pinned by nothing — no pipeline version anywhere, draft or released, " +
-                    "and no parameter-set version either (#194), " +
-                    "may reference any version of it (the refusal names the pinning pipelines; templates_used_by " +
+                    "no parameter-set version either (#194), and no visualization version (#320) " +
+                    "may reference any version of it (the refusal names the pinning pipelines, sets or visualizations " +
+                    "your view admits; templates_used_by " +
                     "answers the working-version scan if you need to inspect them). The sole-draft purge takes " +
                     "the entity row with it. A template holding any RELEASED or discarded version, another " +
                     "user's draft, or a pinned draft is refused — humans release and humans discard releases; " +
@@ -68,13 +69,15 @@ class TemplatesPurgeDraftTool(
         )
 
     /**
-     * The D4 guard, both aggregates: every pipeline version ever, then every set version ever.
+     * The D4 guard, all three aggregates: every pipeline version ever, then every set version ever, then (#320) every
+     * visualization version ever.
      * #300 (the 194d security pass, observation 11): BOTH scans run under the WHOLE workspace —
      * the web guard's rule, unlensed ([TemplateUsage.referencedAnywhere] under a narrowing view
      * dropped hidden sets, so a lensed caller could purge a template a hidden set still pins).
      * Only the ECHO narrows: the refusal names the pins the caller's view admits and flags that others exist
      * ("pins_hidden": true) — never a name, and never a count, of what the caller cannot see.
      */
+    @Suppress("ThrowsCount") // one refusal per aggregate that pins templates — each names its own arm and lens
     private fun refuseIfPinned(
         workspaceId: java.util.UUID,
         id: String,
@@ -100,6 +103,8 @@ class TemplatesPurgeDraftTool(
             )
         }
         val setPinners = usage.referencedAnywhere(workspaceId, co.datapipelines.application.lens.LensedView.EVERYTHING, id)
+        val visualizationPinners =
+            usage.visualizationsReferencedAnywhere(workspaceId, co.datapipelines.application.lens.LensedView.EVERYTHING, id)
         if (setPinners.isNotEmpty()) {
             val setNames = setPinners.map { it.setName }.distinct()
             val (admitted, hidden) = splitByAdmission(setNames, caller.parameterSets)
@@ -112,6 +117,22 @@ class TemplatesPurgeDraftTool(
                     buildMap {
                         put("template_id", id)
                         put("referencing_parameter_sets", admitted)
+                        if (hidden > 0) put("pins_hidden", true)
+                    },
+            )
+        }
+        if (visualizationPinners.isNotEmpty()) {
+            val names = visualizationPinners.map { it.name }.distinct()
+            val (admitted, hidden) = splitByAdmission(names, caller.visualizations)
+            throw DatapipelinesException(
+                code = PipelineErrorCodes.Template.IN_USE,
+                message =
+                    "Version of template '$id' is pinned by " + pinnedBy("visualization version(s)", names.size, admitted, hidden) +
+                        "; discard or repoint them first.",
+                details =
+                    buildMap {
+                        put("template_id", id)
+                        put("referencing_visualizations", admitted)
                         if (hidden > 0) put("pins_hidden", true)
                     },
             )

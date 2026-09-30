@@ -13,8 +13,11 @@
 
     <th:block th:if="${dlg.refusal != null}">
       <p class="u-secondary u-text-sm" th:text="${dlg.refusal.message}">refused</p>
-      <ul th:if="${!#lists.isEmpty(dlg.inUsePipelines)}" class="u-text-sm u-mb-md" data-purge-entity-pinnerPipelines>
+      <ul th:if="${!#lists.isEmpty(dlg.inUsePipelines) or !#lists.isEmpty(dlg.inUseParameterSets) or !#lists.isEmpty(dlg.inUseVisualizations)}"
+          class="u-text-sm u-mb-md" data-purge-entity-pinnerPipelines>
         <li th:each="p : ${dlg.inUsePipelines}" class="u-mono" th:text="${p}">parent/pipeline</li>
+        <li th:each="p : ${dlg.inUseParameterSets}" class="u-mono" data-purge-entity-pinner-set th:text="${p}">parameter/set</li>
+        <li th:each="p : ${dlg.inUseVisualizations}" class="u-mono" data-purge-entity-pinner-visualization th:text="${p}">a/visualization</li>
       </ul>
     </th:block>
 

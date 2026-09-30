@@ -255,6 +255,9 @@ object ApiErrorCatalog {
             // has no status family at all, so unmapped it would answer 500). Wired explicitly so
             // each code owns a row, the 025 A2 convention:
             PipelineErrorCodes.Parameters.NOT_FOUND to HttpStatus.NOT_FOUND,
+            // #320 — `parameter.in_use` shares no family prefix (`parameter.version.` is the 409 family): a dashboard
+            // pins the set, so the purge or discard is refused like `template.in_use` and `pipeline.version.pinned`.
+            PipelineErrorCodes.Parameters.IN_USE to HttpStatus.CONFLICT,
             PipelineErrorCodes.Parameters.EVALUATE_UNKNOWN_PARAMETER to HttpStatus.BAD_REQUEST,
             PipelineErrorCodes.Parameters.EVALUATE_RESPONSE_TOO_LARGE to HttpStatus.PAYLOAD_TOO_LARGE,
             PipelineErrorCodes.Parameters.EVALUATE_TIMEOUT to HttpStatus.GATEWAY_TIMEOUT,
@@ -540,7 +543,9 @@ object ApiErrorCatalog {
             PipelineErrorCodes.Datasource.IN_USE to
                 "This connection is still used by one or more pipelines, so it can't be deleted yet.",
             PipelineErrorCodes.Template.IN_USE to
-                "This template is still used by one or more pipelines, so it can't be deleted yet.",
+                "This template is still used by a pipeline, a parameter set or a visualization, so it can't be removed yet.",
+            PipelineErrorCodes.Parameters.IN_USE to
+                "This parameter set is still used by a dashboard, so it can't be removed yet.",
             PipelineErrorCodes.Datasource.DUPLICATE_NAME to
                 "A connection with that name already exists. Pick a different name.",
             PipelineErrorCodes.Datasource.NOT_FOUND to

@@ -1,12 +1,16 @@
 package co.datapipelines.web.pipelines
 
+import co.datapipelines.application.lens.LensedView
+import co.datapipelines.application.templates.TemplateUsage
 import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.ExclusiveDraftTemplates
+import co.datapipelines.pipeline.KeptDraftTemplate
 import co.datapipelines.pipeline.PipelineDraftService
 import co.datapipelines.pipeline.PipelineReleaseService
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.pipeline.PipelineValidator
+import co.datapipelines.pipeline.PipelineVersionConsumers
 import co.datapipelines.pipeline.ReleaseCheckGate
 import co.datapipelines.pipeline.TemplateReleaser
 import co.datapipelines.pipeline.TemplateReviewMarks
@@ -109,12 +113,49 @@ class PipelineLifecycleConfiguration {
      * [templateVersionStatuses] above.
      */
     @Bean
-    fun exclusiveDraftTemplates(templates: TemplateRepository): ExclusiveDraftTemplates =
+    fun exclusiveDraftTemplates(
+        templates: TemplateRepository,
+        usage: TemplateUsage,
+    ): ExclusiveDraftTemplates =
         object : ExclusiveDraftTemplates {
+            /**
+             * The templates module's statement answers "no OTHER PIPELINE pins it" (R12: every stored version of
+             * every other pipeline). A parameter set or a visualization that pins the draft template is an inbound
+             * edge that statement cannot see — #320 found the offer deleting a set's template — so the candidates
+             * are judged here, over the whole workspace, by the same [TemplateUsage] evidence every other guard reads.
+             */
+            private fun blockers(
+                workspaceId: java.util.UUID,
+                templateId: String,
+            ): Map<String, List<String>> =
+                buildMap {
+                    usage
+                        .referencedAnywhere(workspaceId, LensedView.EVERYTHING, templateId)
+                        .map { it.setName }
+                        .distinct()
+                        .takeIf { it.isNotEmpty() }
+                        ?.let { put("referencing_parameter_sets", it) }
+                    usage
+                        .visualizationsReferencedAnywhere(workspaceId, LensedView.EVERYTHING, templateId)
+                        .map { it.name }
+                        .distinct()
+                        .takeIf { it.isNotEmpty() }
+                        ?.let { put("referencing_visualizations", it) }
+                }
+
             override fun exclusiveIds(
                 workspaceId: java.util.UUID,
                 pipelineId: java.util.UUID,
-            ) = templates.exclusiveDraftTemplateIds(workspaceId, pipelineId)
+            ) = templates
+                .exclusiveDraftTemplateIds(workspaceId, pipelineId)
+                .filter { blockers(workspaceId, it).isEmpty() }
+
+            override fun keptIds(
+                workspaceId: java.util.UUID,
+                pipelineId: java.util.UUID,
+            ) = templates.exclusiveDraftTemplateIds(workspaceId, pipelineId).mapNotNull { id ->
+                blockers(workspaceId, id).takeIf { it.isNotEmpty() }?.let { KeptDraftTemplate(id, it) }
+            }
 
             override fun purge(
                 workspaceId: java.util.UUID,
@@ -122,7 +163,17 @@ class PipelineLifecycleConfiguration {
             ) {
                 // The offered set was verified draft-only and exclusively pinned at offer
                 // time, and the sole pinner (the purged pipeline) is already gone; the
-                // entity delete cascades its one version row.
+                // entity delete cascades its one version row. A set or a visualization that
+                // pinned it since the offer refuses here, and the caller's transaction rolls
+                // the whole purge back (the port's contract).
+                val pinned = blockers(workspaceId, templateId)
+                if (pinned.isNotEmpty()) {
+                    throw co.datapipelines.typesystem.DatapipelinesException(
+                        code = co.datapipelines.pipeline.PipelineErrorCodes.Template.IN_USE,
+                        message = "Template '$templateId' is now pinned by another parameter set or visualization; it is not purged.",
+                        details = mapOf<String, Any>("template_id" to templateId) + pinned,
+                    )
+                }
                 if (!templates.deleteTemplateRow(workspaceId, templateId)) {
                     throw co.datapipelines.typesystem.DatapipelinesException(
                         code = co.datapipelines.pipeline.PipelineErrorCodes.Template.NOT_FOUND,
@@ -141,5 +192,7 @@ class PipelineLifecycleConfiguration {
         releases: PipelineReleaseService,
         authoring: AuthoringGuard,
         draftTemplates: ExclusiveDraftTemplates,
-    ): PipelineService = PipelineService(pipelines, validator, drafts, releases, authoring, draftTemplates)
+        // #320 — the dashboards that pin a release: `pipeline.version.pinned`'s `referencing_dashboards`.
+        dashboards: PipelineVersionConsumers,
+    ): PipelineService = PipelineService(pipelines, validator, drafts, releases, authoring, draftTemplates, dashboards)
 }

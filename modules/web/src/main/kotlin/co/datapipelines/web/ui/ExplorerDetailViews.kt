@@ -112,8 +112,10 @@ data class UsageView(
     val endpoints: List<EndpointUse>,
     val parents: List<ParentUse>,
     val schedules: List<ScheduleUse> = emptyList(),
+    /** #320 — the dashboards whose sources pin a version of this pipeline: refusal evidence, like [parents]. */
+    val dashboards: List<DashboardUse> = emptyList(),
 ) {
-    val total: Int get() = endpoints.size + parents.size + schedules.size
+    val total: Int get() = endpoints.size + parents.size + schedules.size + dashboards.size
 
     /** A published endpoint serving this pipeline (`GET /api{path}`). */
     data class EndpointUse(
@@ -128,6 +130,14 @@ data class UsageView(
         val pipelineName: String,
         val pipelineVersion: Int,
         val nodeId: String,
+        val pinnedVersion: Int,
+    )
+
+    /** A live dashboard version whose source pins [pinnedVersion] of this pipeline (#320, `pipeline.version.pinned`). */
+    data class DashboardUse(
+        val name: String,
+        val version: Int,
+        val status: String,
         val pinnedVersion: Int,
     )
 

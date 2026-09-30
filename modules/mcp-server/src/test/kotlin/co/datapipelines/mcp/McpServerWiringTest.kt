@@ -63,16 +63,21 @@ class McpServerWiringTest {
             TemplatesPurgeDraftTool(templates, usage, authoringGuard, McpFixtures.EVERYTHING_LENS),
         )
 
+    /** The composed reverse arrow over its four collaborators (#320 added the pipeline repository and the visualization scans). */
+    private fun usage() =
+        co.datapipelines.application.templates.TemplateUsage(
+            co.datapipelines.templates.TemplateUsageService(templates, pipelines),
+            io.mockk.mockk<co.datapipelines.parameters.ParameterSetTemplatePins>(),
+            pipelines,
+            io.mockk.mockk<co.datapipelines.visualization.ArtifactDependents>(),
+        )
+
     private fun tools(): List<McpTool> {
         val validator = mockk<PipelineValidator>()
         val templateValidator = mockk<TemplateValidator>()
         val engines = mockk<WorkspaceTemplateEngines>()
         val introspector = mockk<SchemaIntrospector>()
-        val usage =
-            co.datapipelines.application.templates.TemplateUsage(
-                co.datapipelines.templates.TemplateUsageService(templates, pipelines),
-                io.mockk.mockk<co.datapipelines.parameters.ParameterSetTemplatePins>(),
-            )
+        val usage = usage()
         val service = McpFixtures.pipelineService(pipelines, validator, authoringGuard)
         val drafts = co.datapipelines.templates.TemplateDraftService(templates, authoringGuard, mockk(relaxed = true))
         val semantics = mockk<co.datapipelines.application.semantics.SemanticsService>()

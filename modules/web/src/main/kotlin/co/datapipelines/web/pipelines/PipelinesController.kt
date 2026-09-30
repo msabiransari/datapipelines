@@ -410,6 +410,7 @@ class PipelinesController(
                 "executions_deleted" to result.executionsDeleted,
                 "exclusive_draft_templates" to result.exclusiveDraftTemplates,
                 "exclusive_templates_purged" to result.exclusiveTemplatesPurged,
+                "kept_draft_templates" to result.keptDraftTemplates.map { it.templateId },
             ),
         )
         return ApiResponse.of(
@@ -418,6 +419,9 @@ class PipelinesController(
                 "purged" to true,
                 "exclusive_draft_templates" to result.exclusiveDraftTemplates,
                 "exclusive_draft_templates_purged" to result.exclusiveTemplatesPurged,
+                // #320 (D5) — the draft templates the offer SKIPPED because a parameter set or a visualization also
+                // pins them, and who: the keys are `template.in_use`'s (`referencing_parameter_sets`, `referencing_visualizations`).
+                "kept_draft_templates" to result.keptDraftTemplates.map { mapOf("id" to it.templateId) + it.referencedBy },
             ),
         )
     }
