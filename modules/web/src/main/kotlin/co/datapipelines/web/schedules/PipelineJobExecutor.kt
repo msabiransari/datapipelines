@@ -44,6 +44,7 @@ import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import co.datapipelines.persistence.FailureShape
 import org.slf4j.LoggerFactory
 import java.time.Duration
 import java.time.LocalDate
@@ -417,20 +418,64 @@ class PipelineJobExecutor(
 
     private fun abortedOutcome(record: ExecutionRecord): ExecutionOutcome.Finished {
         // A5: the sweeper's `instance_lost` is NOT a conclusive abort — the worker may be alive.
-        val code = record.errorJson?.let { runCatching { mapper.readTree(it).path("code").asText() }.getOrNull() }
-        if (code == PipelineErrorCodes.Execution.INSTANCE_LOST) {
-            return ExecutionOutcome.Finished(RunState.UNKNOWN, INSTANCE_LOST, record.startedAt, record.completedAt)
+        val errorJson = record.errorJson
+        if (errorJson != null) {
+            runCatching { mapper.readTree(errorJson).path("code").asText() }.fold(
+                onSuccess = { code ->
+                    if (code == PipelineErrorCodes.Execution.INSTANCE_LOST) {
+                        return ExecutionOutcome.Finished(RunState.UNKNOWN, INSTANCE_LOST, record.startedAt, record.completedAt)
+                    }
+                    // Parseable but code-less: not the sweeper's marker; the abort event decides.
+                },
+                onFailure = { failure ->
+                    // #336 D6: the row's OWN outcome evidence is unreadable, and an ABORTED
+                    // row's error_json is exactly where the sweeper's `instance_lost` marker
+                    // lives — the one reason that BLOCKS. Unreadable is not "not
+                    // instance_lost", so the outcome falls to the state whose definition is
+                    // "nobody can say whether its work happened" (scheduler.md §5), with a
+                    // reason naming the unreadable evidence. A readable abort payload must
+                    // never re-label it (`cancelled` from the event stream would silently
+                    // un-block a run the evidence may have blocked).
+                    LOG.warn(
+                        "event=scheduler.outcome_evidence_unreadable execution={} evidence=error_json error={}",
+                        record.executionId,
+                        FailureShape.cause(failure),
+                    )
+                    return ExecutionOutcome.Finished(RunState.UNKNOWN, OUTCOME_UNREADABLE, record.startedAt, record.completedAt)
+                },
+            )
         }
         val reason =
             events
                 .findByExecution(record.executionId)
                 .lastOrNull { it.eventType == EXECUTION_ABORTED_EVENT }
-                ?.let { runCatching { mapper.readTree(it.payloadJson).path("reason").asText() }.getOrNull() }
+                ?.let { readAbortReason(record.executionId, it.payloadJson) }
         return when (reason) {
             ABORT_CANCELLED -> ExecutionOutcome.Finished(RunState.CANCELLED, ABORT_CANCELLED, record.startedAt, record.completedAt)
             else -> ExecutionOutcome.Finished(RunState.ABORTED, reason?.takeIf { it.isNotBlank() }, record.startedAt, record.completedAt)
         }
     }
+
+    /**
+     * The abort event's `reason`, with an unreadable payload reported (#336 D6): the state stays
+     * `aborted` — the execution record itself proves the run ended by abort, and `unknown` would
+     * block a schedule on an outcome that IS known — while the lost reason gets one WARN.
+     */
+    private fun readAbortReason(
+        executionId: UUID,
+        payloadJson: String,
+    ): String? =
+        runCatching { mapper.readTree(payloadJson).path("reason").asText() }.fold(
+            onSuccess = { it },
+            onFailure = { failure ->
+                LOG.warn(
+                    "event=scheduler.outcome_evidence_unreadable execution={} evidence=abort_payload error={}",
+                    executionId,
+                    FailureShape.cause(failure),
+                )
+                null
+            },
+        )
 
     // ---------------------------------------------------------------------------- lens
 
@@ -665,6 +710,14 @@ class PipelineJobExecutor(
         const val LAUNCH_REFUSED_WITHOUT_CODE = "launch_refused"
         const val EXECUTION_FAILED = "execution_failed"
         const val INSTANCE_LOST = "instance_lost"
+
+        /**
+         * #336 D6 — the row's outcome evidence was unreadable, so nobody can say whether the
+         * work happened (an ABORTED row's `error_json` is where the sweeper's `instance_lost`
+         * marker lives). State `unknown`; blocks, per scheduler.md §5.2. Catalogued in
+         * scheduler.md §5's `unknown` reasons; the trail's WARN names the evidence kind.
+         */
+        const val OUTCOME_UNREADABLE = "outcome_unreadable"
         const val VERSION_LATEST_REFUSED = "version_latest_refused"
 
         private const val EXECUTION_ABORTED_EVENT = "execution_aborted"

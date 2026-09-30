@@ -172,6 +172,7 @@ The scheduler ([Scheduler](scheduler.md)) logs its own work under `scheduler.*`.
 | ERROR | `scheduler.inspect_refused` | The system identity was refused `execution.read` in a workspace — the reconciler cannot see outcomes there, and its runs stay `running` until it can. A configuration defect: the identity's fixed set is code, not data | `workspace_id` |
 | INFO | `scheduler.admission_closed` | Shutdown: admission closed and no launch was in progress, so the execution drain may start | — |
 | WARN | `scheduler.admission_wait_expired` | Shutdown: launches were still in progress when `shutdown-wait-seconds` ran out; their runs reconcile from the execution record | `launching`, `wait_ms` |
+| WARN | `scheduler.outcome_evidence_unreadable` (#336) | A finished run's persisted outcome evidence could not be read: the execution row's `error_json` (the run lands `unknown` / `outcome_unreadable` — it may have said `instance_lost`), or the last `execution_aborted` event's payload (the run stays `aborted`; only the reason is lost) | `execution`, `evidence` (`error_json`/`abort_payload`), `error` |
 
 A `scheduler.schedule_blocked` needs a person. A steady `scheduler.run_not_started` means `max-concurrent-runs` is too low for this instance's schedules, or runs are too long for their cadence — `datapipelines.scheduler.capacity.retries` (§4.1) is the leading signal.
 
