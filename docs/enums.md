@@ -1,6 +1,6 @@
 # Enumerations Reference
 
-**Status:** v1.24 (living document — updated as enums evolve)
+**Status:** v1.25 (living document — updated as enums evolve)
 **Owner:** datapipelines.co core
 **Purpose:** Single source of truth for every enum value used across the system. Prevents spelling drift across specs and across the codebase.
 
@@ -965,6 +965,7 @@ This document itself is **additive-only** — values are never removed (only mar
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-30 | v1.25 | 320 (#320) dependency guards | §16 registers `parameter.in_use` (pipeline-contract §13.20, 409 — a dashboard pins the set) as a two-segment code beside `parameter.not_found`: a parameter set is the entity, and "a dashboard pins it" is a state of the set, the `template.in_use` shape; the `parameter.*` domain row lists it. The `pipeline.purged` audit row gains `kept_draft_templates`. |
 | 2026-09-29 | v1.24 | L1a (#10) the visualization module | New **§31 `RendererKind`**, **§32 `AssertionKind`**, **§33 `TestRunStatus`**, **§34 `DashboardObjectType`**, **§35 `ActionScope`**, **§36 `StateSetting`**, **§37 `LayoutPosition`** — the dashboard documents' closed vocabularies, each held to its Kotlin enum by `VisualizationEnumsSpecDriftTest`; §16 registers the `visualization.*` and `dashboard.*` domains (pipeline-contract §13.22/§13.23) and their entity-level `not_found`s as two-segment. |
 | 2026-09-28 | v1.23 | 279 (#279) the request-body cap | §16 registers the `request.*` domain (pipeline-contract §13.21) with `request.body_too_large` as its one two-segment code; §17 gains the `413 Content Too Large` row. |
 | 2026-09-26 | v1.22 | 194b (#194) parameter engine lane B | New **§27 `ParameterKind`** (`INPUT`, `SELECT`), **§28 `SelectorSourceKind`** (`constants`, `template` — derived, never a wire key), **§29 `PresentationControl`** (twelve controls, the record's §3.7 table) and **§30 `NumericFormatKind`** (`plain`, `currency`, `percent`); §16 registers the `parameter.*` domain (pipeline-contract §13.20) and `parameter.not_found` as its one two-segment code. |
