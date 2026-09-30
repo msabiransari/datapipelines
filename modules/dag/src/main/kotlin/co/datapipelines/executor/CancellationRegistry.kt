@@ -376,9 +376,15 @@ class InMemoryCancellationRegistry : CancellationRegistry {
         private fun scheduleReissue() {
             if (statements.isEmpty()) return
             if (!reissuing.compareAndSet(false, true)) return
-            Thread({ reissueUntilDrained() }, "dag-cancel-reissue-$executionId")
-                .apply { isDaemon = true }
-                .start()
+            // #337 (observability §3.3): the re-issue work belongs to the canceller's request —
+            // capture THIS thread's MDC and install it on the daemon thread, restored after. The
+            // caller here is an HTTP worker (DELETE /executions), the SSE grace timer or the
+            // shutdown hook, so a line from the re-issue names the request that ordered the stop.
+            val submitted = MdcTask.capture()
+            Thread(
+                MdcTask.wrap(submitted) { reissueUntilDrained() },
+                "dag-cancel-reissue-$executionId",
+            ).apply { isDaemon = true }.start()
         }
 
         private fun reissueUntilDrained() {

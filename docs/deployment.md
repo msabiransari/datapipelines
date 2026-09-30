@@ -173,6 +173,20 @@ Optional keys — executor concurrency, staging memory, result TTLs and caps, SS
 
 The keys an operator most often changes at deploy time are `datapipelines.result.max-size-bytes` (Redis sizing, §4.2.2), `datapipelines.executor.max-concurrent-executions-per-instance` and `datapipelines.staging.h2.max-memory-mb` (heap sizing, §6.6), and `datapipelines.executor.execution-timeout-seconds` (the wall clock that bounds any single execution).
 
+#### Log output format — turning JSON on (#337)
+
+`DATAPIPELINES_OBSERVABILITY_LOGGING_FORMAT` decides what stdout carries ([Configuration §3.15](configuration.md#315-observability), [Observability §3.1](observability.md#31-format)): `json` — one structured JSON object per line, the machine-parsed format a log collector wants — or `console`, the human-readable development format. The value is resolved before logging initialises; the set is closed, and a mistyped value **refuses startup** with the offending value named rather than silently falling back. Redaction ([Observability §9.2](observability.md#92-redaction--normative)) runs under both values — there is no format that bypasses it.
+
+What each deploy path resolves **today**, with nothing set beyond what the repo ships:
+
+| Path | Resolves | Because |
+|---|---|---|
+| `app.sh` deploy, the VPS included | `console` | `deploy/env/defaults.env` sets it; unchanged until the operator moves it. Turn JSON on by setting `DATAPIPELINES_OBSERVABILITY_LOGGING_FORMAT=json` in `deploy/secrets.env` (or the environment the compose stack reads) and redeploying. |
+| Raw `docker compose` run | `json` | `deploy/compose.yml` passes `${DATAPIPELINES_OBSERVABILITY_LOGGING_FORMAT:-json}` through. |
+| Bare jar (`java -jar`) | `json` | The shipped `application.yml` default. |
+
+A container deployment that turns JSON on changes nothing else: the container runtime already collects stdout, and the JSON line carries `correlation_id`/`execution_id` at the root — the fields an operator quotes in an incident ([Observability §3.3](observability.md#33-correlation-id-propagation)). Log **levels** stay Spring Boot's own `logging.level.*` ([Observability §9.1](observability.md#91-configuration-keys)).
+
 ### 5.3 Full config file
 
 Every setting is an environment variable, and `deploy/env/defaults.env` lists all the non-secret ones with their shipped values (`deploy/secrets.env.example` names the rest) — [Environments](environments.md) is the operator's page for what to set and where. Operators who prefer a YAML file can mount `application.yml` at `/etc/datapipelines/application.yml` (configurable via `SPRING_CONFIG_ADDITIONAL_LOCATION`); this is the supported route for **more than one OIDC provider**, whose nested list is awkward as variables. Every key is expressible either as YAML or as its derived env var; the OIDC provider list is a nested structure and is normally supplied as YAML with `${...}` placeholders for the secrets. A complete annotated template is in [Configuration §5](configuration.md#5-full-applicationyml-template).
@@ -1104,6 +1118,7 @@ operator.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-30 | v1.38 | 337 (#337) structured local logging | **§5.2 gains "Log output format — turning JSON on"**: what each deploy path resolves today (`app.sh`/VPS `console` from `defaults.env`, raw compose and bare jar `json`), the operator recipe for turning JSON on (set the env in `secrets.env`, redeploy), the startup refusal on an unknown value, and the statement that redaction runs under both values. No deploy file changed — the declared env var just works now. |
 | 2026-09-29 | v1.37 | the 316 merge's review (#316, #266) | §6's Deployment bullet and §8.3.2: the grace is **60 s** (chart and compose) — the sum had left out 266's persistence drain (`shutdown-drain-ms`, 10 s), so at the configured maxima the runtime could kill mid-drain; §8.3.1 step 4 names the persistence drain and the scheduled jobs' scheduler stop (#316), which sits after every drain and outside the sum. `ShutdownGraceArithmeticTest` carries the new term (red at 50 s: compose needed 55, Helm 60). |
 | 2026-09-28 | v1.36 | 301 (#305) | §6.2's CSP row prints the style-src hash LITERALLY again — 195's rewrite had left a `'<hash>'` placeholder where the value stood: `'sha256-pgvDUBa4IjFA2yuSJ2cqcyxmNYJMborsd0ORcRv9vw8='`, the SHA-256 of the one `<style>` element Cytoscape injects on the editor page. The value is derived, not typed: `SecurityHeadersTest` computes it from `SecurityHeaders.CYTOSCAPE_STYLESHEET` (the vendored sheet verbatim), and `ApplicationSmokeTest` asserts the header the way an operator reads it, literal included — a Cytoscape bump that changes the sheet goes red rather than documented wrong. No code, route or policy change. |
 | 2026-09-28 | v1.35 | 195 (#195) the editor's eval exemption retired — renumbered at merge after 298's v1.33/v1.34 | §6.2's CSP row rewritten: the route-scoped `'unsafe-eval'` exception 188 carried on `GET /pipelines/{id}/editor` is GONE — the editor runs Alpine's CSP build (`@alpinejs/csp` 3.14.1, same vendored path, the vendor manifest records the npm tarball's sha256) and its expressions are pure property paths. One policy covers every policed route; `style-src` carries Cytoscape's one sheet hash on every route (a hash admits exactly that sheet, so no route's posture is weakened). `SecurityHeaders.kt` lost `CSP_POLICY_EDITOR`/`isEditorRoute`; `SecurityHeadersTest` pins the directive's absence on the editor route (falsified by re-adding it), and the browser suite's zero-violation collector is the live proof. No route, permission or role changed. |

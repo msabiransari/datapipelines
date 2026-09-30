@@ -1,6 +1,6 @@
 # Observability Specification
 
-**Status:** v1.27 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
+**Status:** v1.30 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-09-30
@@ -39,14 +39,14 @@ Four parts of it are **normative** today and binding on implementation:
 
 ### 3.1 Format
 
-JSON via `logstash-logback-encoder`. Every log entry:
+JSON via Spring Boot's structured logging (`logging.structured.format`'s `logstash` format) with the house redacting customizer — **no new dependency** (#337). Every log entry:
 
 ```json
 {
-  "@timestamp": "2026-08-05T14:30:00.123Z",
+  "@timestamp": "2026-09-30T14:30:00.123456789-04:00",
   "level": "INFO",
   "logger": "co.datapipelines.dag.PipelineExecutor",
-  "thread": "executor-worker-3",
+  "thread": "dag-executor-3",
   "message": "Node completed",
   "correlation_id": "uuid",
   "execution_id": "uuid",
@@ -57,7 +57,9 @@ JSON via `logstash-logback-encoder`. Every log entry:
 }
 ```
 
-Standard fields: `@timestamp`, `level`, `logger`, `thread`, `message`. Context fields added via MDC (SLF4J's Mapped Diagnostic Context).
+Standard fields: `@timestamp`, `level`, `logger`, `thread`, `message` — the `logstash` format's `logger_name`/`thread_name` are renamed to `logger`/`thread` by the binding. MDC entries and SLF4J key-value pairs are flattened at the root (so `correlation_id` and `execution_id` sit beside the standard fields, not nested), which is what makes the example's context fields the same shape the code writes. The format also carries `@version`, `level_value`, `tags` (marker names) and `stack_trace` (when a throwable is logged); they are additional, never a replacement for the standard fields.
+
+The switch is `datapipelines.observability.logging.format` ([configuration.md §3.15](configuration.md#315-observability)): `json` selects this line, `console` selects the human-readable development format (§3.5). It is resolved before logging initialises, and the value set is closed — anything else refuses startup. Under `json` the binding also switches Spring's banner off (`spring.main.banner-mode=off`, bound after any operator setting): the banner prints to stdout before logging exists, and stdout under `json` is a stream of records — every non-blank line of a normal startup is one JSON object (#337-b, pinned by a normal-boot test). Under `console` the banner stays.
 
 ### 3.2 Levels
 
@@ -73,9 +75,11 @@ Standard fields: `@timestamp`, `level`, `logger`, `thread`, `message`. Context f
 
 - Set on inbound request from the `DP-Correlation-Id` header, or generated if absent; echoed back on the response ([REST API §3.4](rest-api.md#34-correlation)).
 - Stored in MDC at request start, cleared at request end.
-- Propagated through async work via Spring's `TaskDecorator` (for thread pools) and Kotlin coroutine context (for executor work).
-- Included in every log line in the request's call tree.
+- Propagated through async work: a coroutine `ThreadContextElement` built from the REQUEST's ids carries `correlation_id` and `execution_id` across every suspension of the execution's coroutines (installed once in `PipelineExecutor.execute`, re-added explicitly at the per-node deadline scope, whose fresh `CoroutineScope` inherits no elements), and every pool whose threads run inside node work captures the submitter's MDC at submission and restores the thread's state after — the script-evaluation, selector-statement (and its abandon thread), template-render, template-parse and cancel-re-issue threads (#337).
+- Included in every log line in the request's call tree — as the `correlation_id` / `execution_id` members under `json`, and as `correlation_id=<id>` / `execution_id=<id>` fields before the message under `console` (`-` when the event has no such context, never an id left over from an earlier event; the console names exactly these two MDC keys and never dumps the MDC) (#337-b).
 - Pipeline executions add `execution_id` and propagate it to every node-execution log.
+
+**Deliberately NOT propagated, by design** (#337) — a line there must not wear a caller's id, because the unit of work outlives or spans callers: the persistence batching writer's threads and the shutdown drain (one batch spans many callers), the scheduled jobs' scheduler (`dp-scheduled`) and the SSE log/heartbeat schedulers (no request), and the mail worker (a claim row is picked up long after the request that queued it returned).
 
 **Normative — propagation past the HTTP boundary.** A correlation ID that stops at the response header is useless for the two asynchronous surfaces this system exposes:
 
@@ -270,7 +274,7 @@ A refusal is named by `error` (its class) and `sql_state` (`FailureShape`, the �
 
 - **Stdout** by default — collected by container runtime (Docker / k8s) and shipped to the operator's log aggregator (CloudWatch, Stackdriver, Loki, ELK, etc.).
 - **No file logging in container.** Operators choose the aggregation strategy.
-- **Local dev**: human-readable console output (via `logback-spring.xml` dev profile).
+- **Local dev**: human-readable console output — the `console` value of `datapipelines.observability.logging.format` ([configuration.md §3.15](configuration.md#315-observability)), the value `deploy/env/defaults.env` ships for local runs (#337).
 
 ---
 
@@ -493,12 +497,12 @@ Uncaught exceptions in any thread / coroutine:
 
 ### 9.1 Configuration keys
 
-[configuration.md](configuration.md) is the single authority for config keys — YAML path, env var, default and description all live there (D8). This spec **references keys by name and never restates a default.** The observability keys are defined in [configuration.md §3.14](configuration.md#315-observability):
+[configuration.md](configuration.md) is the single authority for config keys — YAML path, env var, default and description all live there (D8). This spec **references keys by name and never restates a default.** The observability keys are defined in [configuration.md §3.15](configuration.md#315-observability):
 
 | Key | What it controls here |
 |---|---|
-| `datapipelines.observability.logging.format` | `json` (§3.1) vs human-readable console (§3.5, dev) |
-| `datapipelines.observability.tracing.enabled` | Whether the OpenTelemetry SDK and exporter are wired at all (§5) |
+| `datapipelines.observability.logging.format` | `json` (§3.1) vs human-readable console (§3.5, dev). Bound at startup (#337): resolved before logging initialises, the value set is closed, and an unknown value refuses startup. |
+| `datapipelines.observability.tracing.enabled` | Whether the OpenTelemetry SDK and exporter are wired at all (§5). Declared and not wired — the export is #270's deferred part. |
 | `datapipelines.observability.tracing.endpoint` | OTLP collector endpoint (§5.3) — the standard `OTEL_EXPORTER_OTLP_ENDPOINT` env var |
 
 Two families deliberately have **no** datapipelines-namespaced key, because their frameworks already own the surface and duplicating it would create a second authority:
@@ -510,10 +514,12 @@ Sampling rates (§5.4) are set with the OpenTelemetry SDK's own `otel.traces.sam
 
 ### 9.2 Redaction — normative
 
-Redaction is **not configurable and not opt-in**. There is no `redaction.enabled` key: a switch that can turn secret-scrubbing off is a switch that will be off in some deployment. The mechanism is two layers inside the logging pipeline, so that **no logger call site can bypass it** — a developer cannot leak a secret by choosing the wrong logging idiom, only by inventing a key name that is not on the list.
+Redaction is **not configurable and not opt-in**. There is no `redaction.enabled` key: a switch that can turn secret-scrubbing off is a switch that will be off in some deployment. The mechanism is two layers inside the logging pipeline, so that **no logger call site can bypass it** — a developer cannot leak a secret by choosing the wrong logging idiom, only by inventing a key name that is not on the list. (#337 builds both on Spring Boot's structured-logging customizer point — no `logstash-logback-encoder`, no `logback-spring.xml` converter entry; the console format's one redaction word is registered by the house encoder itself; every behavioural rule of this section is unchanged.)
 
-1. **Field filter in the JSON encoder.** `logstash-logback-encoder` is configured with a field-name filter over structured fields (MDC entries, key-value pairs, `StructuredArguments`, and marker-attached objects). Any field whose key matches the sensitive-key list is emitted as `"***"` — the key is kept (its presence is itself diagnostic), the value never is.
-2. **A `MessageConverter` over the rendered message.** Registered in `logback-spring.xml` in place of the stock `%message`/`%msg` converter, it scans the formatted message text for `key=value` and `"key": "value"` occurrences of the same list and rewrites the value to `***`. This catches the case the field filter cannot: a secret interpolated into a message string or arriving inside an exception message (a driver's `SQLException` quoting the JDBC URL is the realistic one).
+1. **Field filter in the JSON encoder.** The house JSON members customizer applies a value processor to EVERY member the formatter writes — MDC entries, SLF4J key-value pairs, and any member added later. Any member whose key matches the sensitive-key list is emitted as `"***"` — the key is kept (its presence is itself diagnostic), the value never is.
+2. **The rendered text, message and stack trace.** The same redactor rewrites the two shapes a secret takes inside free text — `key=value` and `"key": "value"` — wherever text is rendered: on the structured format's `message` member, in the stack-trace printer's output (a driver's `SQLException` quoting the JDBC URL is the realistic one), and under the console format in the pattern's redaction word (`%dpRedact`, a house converter over the rendered message, correlation fields and exception word). Both formats call the SAME single recognizer (`RedactionScanner`, reached through `LogRedactor.scrubText`), so they cannot drift. **Recognition is one left-to-right pass over the ORIGINAL text, and overlapping spans merge:** every key start is tried against the original characters, spans that overlap become one region, and the region is replaced once, by the replacement of the span that started it — so a secret-shaped fragment INSIDE a value (`{"password":"x secret=abc\"tail"}`, `password="{\"api_key\":\"…\"}"`) is part of that value and can never end the outer value early, and a nested match whose own value runs past the end of the one holding it (`"secret": secret=  tail`) extends the mask to its end. Nothing is rewritten until the pass is over. The work is linear in the text length and a failed match is never rescanned (a repeated `password_password_…` token with no value costs the same per character as any other text); the tests hold it to a counted number of scan steps rather than a timing. The shapes are matched **case-insensitively in both forms** (`{"PASSWORD":"…"}` is masked like `password=…`), by the same key rule, and the WHOLE value is masked with its delimiters kept: a quoted value (double- or single-quoted) runs to its first UNESCAPED closing quote, so an escaped quote or backslash inside it (`\"`, `\\`) never ends it; a quote never closed masks to the end of its line only; a bare token ends at whitespace or a delimiter; the JSON form also masks a bare scalar (`"secret":12345`). The stack trace is redacted as a whole **before** its 8192-character output bound is applied, so a value the bound would have cut is already masked.
+
+   **Known limits of the text layer** (the field filter in layer 1 has none of them — a member is judged by its key): a value that is an object or array under a sensitive key (its own members are matched by their own keys); a JSON key whose quotes are themselves escaped (`\"password\":` — text that was JSON-encoded before it was logged); Python-style single-quoted keys (`'password': 'x'`); the unquoted colon form (`password: x`); and a secret under a key that is not on the list. Text matching over-matches on purpose — `dbPassword=` and `"client-secret"` are masked though they are not `*_<key>` compounds — and the member matcher is boundary-strict (`db_password_v2` matches, `dbpassword` does not).
 
 Both layers read the same **sensitive-key list** (case-insensitive, matched on the whole key and on `*_<key>` / `<key>_*` compounds):
 
@@ -553,6 +559,9 @@ This is a construction rule, not a filter — the redacting encoder covers logs,
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-30 | v1.30 | 337-c (#337) redaction composed on the original text | **§9.2**: the rendered-text layer is ONE left-to-right recognizer over the original text, shared by the JSON `message`/`stack_trace` members and the console format — not an assignment pass followed by a JSON pass (and, on the console, two nested `%replace` calls). The delivered composition let the first pass rewrite text inside a quoted value (consuming an escape with it), so the second pass read an orphaned quote as the end of the outer value and a secret tail survived (`{"password":"x secret=abc\"tail"}`); a secret-shaped fragment inside a value is now part of that value, and overlapping spans merge into one masked region (a nested match that outruns its container extends the mask). A failed match is no longer rescanned from every later key start (a repeated `password_…` token with no value was quadratic, measured 4 s at 72 KB); the bound is a counted-step test. The console pattern's redaction word `%dpRedact` is a house logback converter registered by the encoder. The sensitive-key list, the never-redacted set, `***`-keeps-key, the redact-before-bound order and the no-disable rule are unchanged (drift-tested); the known limits are unchanged. |
+| 2026-09-30 | v1.29 | 337-b (#337) redaction and console correlation completed | **§9.2**: the rendered-text layer is now stated as built — case-insensitive in BOTH text forms by one key rule (the JSON form was case-sensitive), the whole value masked with delimiters kept (escaped quotes and backslashes never end a quoted value; single-quoted values; bare JSON scalars; a never-closed quote masks to the end of its line), the stack trace redacted BEFORE its 8192-character bound — and its known limits are listed rather than implied (object/array values, escaped-quote JSON keys, Python-style keys, the unquoted colon form). The member matcher now also accepts the prefixed-and-suffixed compound the text matcher always masked (`db_password_v2`). **§3.3**: the console format prints `correlation_id=` / `execution_id=` before the message (`-` when absent; the two named MDC keys, no MDC dump). **§3.1**: under `json` the binding switches Spring's banner off so a normal startup's stdout is JSON lines only (pinned by a normal-boot test). The scrubber's key pattern lost its prefix group loop: measured on the delivered pattern, a 4 KB `a_a_a_…` token overflowed the stack inside the logging call and a 50 KB word before `=` took ~15 s. The sensitive-key list, the never-redacted set, `***`-keeps-key and the no-disable rule are unchanged (drift-tested). |
+| 2026-09-30 | v1.28 | 337 (#337) structured local logging | **§3.1 shipped**: the JSON line is real — Boot 3.5's structured `logstash` format with a house redacting members customizer, `logger_name`/`thread_name` renamed to the standard fields, MDC and key-value pairs flattened at the root; §3.1's mechanism sentence no longer names `logstash-logback-encoder` (the D1 deviation, no new dependency; every behavioural rule kept). **§3.3 shipped**: the propagation bullets name what was built — a request-built `ThreadContextElement` (`correlation_id` + `execution_id`) over the execution's coroutines and per-pool submitter-MDC capture — replacing "Spring's `TaskDecorator`" (the D3 mechanism deviation), plus the normative NOT-propagated list (batching writer and drain, the schedulers, the mail worker). **§9.2's mechanism sentences amended** to the built two layers: the members value processor and the rendered-text scrub (message member, stack-trace printer, console `%replace`) — the record's `logstash-logback-encoder` field filter and `logback-spring.xml` `MessageConverter` are gone, the list and the never-redacted set unchanged and drift-tested against the code. **§9.1**: the logging-format row states the binding (resolved before logging initialises, closed value set, unknown refuses startup) and the `tracing.enabled` row says declared-and-not-wired; the §3.14 anchor text corrected to §3.15. **§3.5**: local dev's console format is the switch's `console` value, not a logback-spring.xml profile. `logging.format` values: `json` prod default (compose passes it), `console` dev (`defaults.env`), both now actually bound. |
 | 2026-09-30 | v1.27 | lane 336 (#336 D7) | New **§3.4K the live-write outage events**: `execution.progress_write_failed` (WARN, once per execution per outage — §3.2's rule at heartbeat cadence) and `execution.progress_write_recovered` (INFO), named by class and SQLState through `FailureShape`. §4.1 gains `datapipelines.executions.progress_write_failed` (counter, no tags): a live heartbeat/progress write refused — the state that makes a LIVE execution look dead to another instance's stale sweep. Renumbered at merge: L2 retains §3.4J. New **§3.4L**: the selector-lease cleanup WARN `datasource.lease_cleanup_failed` (operation-named, class + SQLState — a refused connection close discards the connection). |
 | 2026-09-29 | v1.26 | L2 (#10) the dashboard runtime | New **§3.4J** — the refresh events (`dashboard.refresh_finished`, the failure lines by class and SQLState only, the stream cut / grace lines, the sweep and retention lines) — and five **§4.1 rows**: `datapipelines.dashboard.refreshes` (by terminal status), `…refresh.duration`, `…refresh.refused` (`saturated` / `stream_limit`), and the two gauges `…refreshes.active` and `…executions.reserved`. |
 | 2026-09-29 | v1.25 | 321 (#321) the scheduled jobs' failure lines — renumbered at merge: 306/316 and their reviews took v1.21–v1.24 | §3.4's `dag` row states the rule for the crash sweep's and the event retention's failure lines: a failed tick logs `error=<class> sql_state=<state>` where it logged the store's message (`FailureShape`, the §3.4G rule; `dag` gains the `persistence` edge for it, module-structure §4.2). The event names are not cited here: on this base the docs audit reads `execution.*` as a permission family (#307), and the events' own table arrives with the 316 merge (§3.4I). §7's retention paragraph said `audit.retention_failed … message=…`; the line has logged `error=`/`sql_state=` since #310 — corrected. |

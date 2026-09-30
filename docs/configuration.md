@@ -1,6 +1,6 @@
 # Configuration Reference
 
-**Status:** v1.41 (single source of truth for every config key)
+**Status:** v1.42 (single source of truth for every config key)
 **Owner:** datapipelines.co core
 **Last updated:** 2026-09-29
 
@@ -229,7 +229,7 @@ These framework key paths appear in `application.yml` as internal wiring. They a
 |---|---|---|---|
 | `datapipelines.observability.tracing.enabled` | `DATAPIPELINES_OBSERVABILITY_TRACING_ENABLED` | `false` | Enable OpenTelemetry tracing |
 | `datapipelines.observability.tracing.endpoint` | `OTEL_EXPORTER_OTLP_ENDPOINT` | (none) | OTLP collector endpoint (standard OTel env var, exception to §1 derivation) |
-| `datapipelines.observability.logging.format` | `DATAPIPELINES_OBSERVABILITY_LOGGING_FORMAT` | `json` (prod), `console` (dev) | Log output format |
+| `datapipelines.observability.logging.format` | `DATAPIPELINES_OBSERVABILITY_LOGGING_FORMAT` | `json` (prod), `console` (dev) | Log output format — the closed set `json` \| `console` ([Observability §3.1](observability.md#31-format)). **Bound at startup (#337)**: resolved before logging initialises, and an unknown value refuses startup with the offending value named. `console` is the human-readable development output (`defaults.env` ships it for local runs); `json` is the structured §3.1 line a log collector parses (compose passes `json`, the VPS included, until an operator sets the env otherwise). `json` also switches Spring's startup banner off, so stdout carries JSON lines only; `console` keeps it (#337-b). |
 
 ### 3.16 Pipelines
 
@@ -1030,6 +1030,7 @@ Validation runs in `@PostConstruct` of a `ConfigValidator` bean. Failures stop s
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-30 | v1.42 | 337 (#337) | §3.15's `logging.format` row is now TRUE instead of aspirational: the key is bound before logging initialises (environment post-processor), the value set is closed (`json` \| `console`), an unknown value refuses startup, and the row documents what each value produces and which deploy shape ships which. No new key, no YAML or deploy-mirror change — the declared key just works. |
 | 2026-09-29 | v1.41 | L2 (#10) the dashboard runtime | New **§3.34 The dashboard runtime**: `datapipelines.dashboards.*`, the ten admission / result / deadline numbers of the spec's §9.4–§9.6, each the owner-confirmed default (4 / 16 / 40 / 10 s; 4 MiB / 32 MiB; 600 / 900 / 30 / 20 s), with three boot-time relations, in the §5 template, `application.yml`, `deploy/compose.yml`, `deploy/env/defaults.env`, `deploy/secrets.env.example` and `ConfigValidator` (§7). The admission counters are stated JVM-LOCAL. §3.33 had already promised these keys. |
 | 2026-09-29 | v1.40 | 306/#311 (the execution row's order and bounds) — renumbered at merge: L1a took v1.39 | §3.2 gains **`datapipelines.executor.lifecycle-write-timeout-seconds`** (`10`): the bound on the two `pipeline_executions` lifecycle writes, read by two layers — a JDBC `queryTimeout` on exactly the RUNNING insert and the terminal UPDATE (`ExecutionRepository`; a database that answers slowly is cancelled at the statement) and the emitter's caller-side wait (`WebEventEmitter`; the layer that bounds a never-answering database, which a statement timeout cannot reach — measured). A past-bound write is stated, never fabricated: insert failure = the existing `recorded = false` path, terminal failure = the row left RUNNING for the stale sweep, counted (`datapipelines.executions.lifecycle_write_failed`). Mirrored in `application.yml`, `defaults.env`, `secrets.env.example`, `compose.yml`; `WebPropertiesSpecDriftTest` pins the default. |
 | 2026-09-29 | v1.39 | L1a (#10) the visualization module | New **§3.33 Visualizations and dashboards**: `datapipelines.visualization.*`, the seven collection bounds of the two documents' readers — `max-visualizations-per-dashboard` 50, `max-cases-per-visualization` 20, `max-fixture-rows-per-case` 1000, `max-config-bytes` 262144, `max-bindings-per-visualization` 64, `max-inputs-per-visualization` 8, `max-columns-per-input` 256 (proposed; confirmed at review) — in the §5 template, `application.yml`, `deploy/compose.yml`'s pass-through, `deploy/env/defaults.env` and `ConfigValidator` (§7). The spec reserved §3.32 for the dashboard keys; 266 took it. |
