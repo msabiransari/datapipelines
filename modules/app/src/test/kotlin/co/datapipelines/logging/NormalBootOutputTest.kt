@@ -16,7 +16,8 @@ import java.util.concurrent.TimeUnit
  * `json` every non-blank line is one JSON object — Boot's banner, which prints to stdout before
  * logging exists, is suppressed by the switch's binding; under `console` the banner is still
  * there, which is the non-vacuity witness for the json case (the same boot, one line of
- * difference). An unknown value refuses loudly and BEFORE startup: no banner, no context.
+ * difference), and an operator's own `spring.main.banner-mode` cannot switch it back on under
+ * `json`. An unknown value refuses loudly and BEFORE startup: no banner, no context.
  *
  * Each case runs `PlantBootMain` in a fresh JVM over this test's runtime classpath, so logging's
  * process-global state stays out of the test JVM.
@@ -42,6 +43,18 @@ class NormalBootOutputTest {
         withClue("the planted line is masked") {
             parsed.any { it.path("message").asText("").contains("password=*** tail") } shouldBe true
         }
+    }
+
+    @Test
+    fun `json startup stays JSON-only even when an operator asks for the banner`() {
+        val run = boot("json", extraJvmArgs = listOf("-Dspring.main.banner-mode=console"))
+
+        val lines = run.stdout.lines().filter { it.isNotBlank() }
+        withClue("non-vacuity: a normal boot writes startup lines\n${run.stderr}") { lines.size shouldBeGreaterThanOrEqual 3 }
+        lines.forEachIndexed { index, line ->
+            withClue("stdout line ${index + 1} must be one JSON object: $line") { mapper.readTree(line) }
+        }
+        run.stdout shouldNotContain ":: Spring Boot ::"
     }
 
     @Test
@@ -81,6 +94,7 @@ class NormalBootOutputTest {
     private fun boot(
         format: String,
         expectSuccess: Boolean = true,
+        extraJvmArgs: List<String> = emptyList(),
     ): Run {
         val errFile = File.createTempFile("normal-boot", ".err")
         try {
@@ -88,6 +102,7 @@ class NormalBootOutputTest {
                 ProcessBuilder(
                     "${System.getProperty("java.home")}/bin/java",
                     "-D${ObservabilityLoggingFormatPostProcessor.SWITCH_KEY}=$format",
+                    *extraJvmArgs.toTypedArray(),
                     "-cp",
                     System.getProperty("java.class.path"),
                     "co.datapipelines.logging.PlantBootMainKt",
