@@ -73,8 +73,8 @@ class SemanticsToolsTest {
             {
                 // 120 appended the two docs tools after these three, 140 the check run after
                 // those, #194 lane D the six parameter_sets_* tools, and #10 L1b the eleven visualization and
-                // dashboard tools last — the tail is now twenty-three.
-                realShippedTools().map { it.name }.takeLast(23) shouldContainExactly
+                // dashboard tools, and #353 the two visualizations_test_* tools beside them — the tail is now twenty-five.
+                realShippedTools().map { it.name }.takeLast(25) shouldContainExactly
                     listOf(
                         "semantics_record",
                         "semantics_list",
@@ -93,6 +93,8 @@ class SemanticsToolsTest {
                         "visualizations_create",
                         "visualizations_update",
                         "visualizations_purge_draft",
+                        "visualizations_test_start",
+                        "visualizations_test_submit",
                         "dashboards_list",
                         "dashboards_get",
                         "dashboards_create",

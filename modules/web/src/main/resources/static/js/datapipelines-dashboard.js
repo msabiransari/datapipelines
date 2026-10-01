@@ -35,6 +35,14 @@
  * proxy mode (`credentials: { proxyBaseUrl }`) sends the same paths under the proxy's base with
  * `credentials: "omit"` and NO csrf header — the proxy holds the key (the wire contract is documented
  * in dashboards.md and is what L5's reference proxy implements).
+ *
+ * ## Fixture mode (the visualization test preview, #353)
+ * `server: { fixtures: { config, results } }` swaps the TRANSPORT and nothing else: the configuration
+ * read answers `fixtures.config`, a refresh's stream answers one frame sequence per target from
+ * `fixtures.results[name]` (stamped with the client's own refresh id, so the freshness gate judges it
+ * exactly as a live refresh), and an abort answers at once. No `fetch` is issued in this mode — no
+ * cookie, no csrf header, no `/api/v1` path — and init refuses `fixtures` beside a `baseUrl` or
+ * `credentials`. The instance lifecycle, the adapters, the renderers and the layout are unchanged.
  */
 (function () {
   "use strict";
@@ -208,6 +216,7 @@
     this._instanceId = env.uuid();
     this._adapter = initOptions.adapter;
     this._server = initOptions.server;
+    this._fixtures = initOptions.server.fixtures || null;
     this._options = initOptions.options || {};
     this._config = null;
     this._parameters = null;
@@ -274,6 +283,7 @@
 
   /** The dispose path's best-effort abort: the disposed check cannot veto it (it must not be awaited). */
   DashboardInstance.prototype._callEvenDisposed = function (path, body, accept) {
+    if (this._fixtures) return this._fixtureCall(path);
     var self = this;
     var url = this._baseUrl() + path;
     var headers = { Accept: accept || "application/json" };
@@ -336,6 +346,7 @@
    * handle closes the READ (the refresh runs on server-side) and never throws.
    */
   DashboardInstance.prototype._openStream = function (body, handlers) {
+    if (this._fixtures) return this._fixtureStream(body, handlers);
     var self = this;
     var url = this._baseUrl() + this._streamPath();
     var headers = { "Content-Type": "application/json", Accept: "text/event-stream" };
@@ -421,6 +432,57 @@
             /* closing twice is nothing */
           }
         }
+      },
+      settled: settled,
+    };
+  };
+
+  // ------------------------------------------------------------------------------ fixture transport
+
+  /** Fixture mode's answer to the three calls (§ Fixture mode above): config, abort — anything else is refused. */
+  DashboardInstance.prototype._fixtureCall = function (path) {
+    if (path === this._configPath()) return Promise.resolve(JSON.parse(JSON.stringify(this._fixtures.config)));
+    if (/\/abort$/.test(path)) return Promise.resolve(null);
+    return Promise.reject(this._fail("fixtures.unsupported", "the fixture transport answers no " + path));
+  };
+
+  /**
+   * Fixture mode's stream: the frames a live refresh would send for the same targets — `refresh_started`, then per
+   * target its data (`{bindings, rows}`), its empty state (no rows) or its refusal (`{error}`), then
+   * `refresh_completed` — each carrying THIS refresh's id, delivered asynchronously like a read.
+   */
+  DashboardInstance.prototype._fixtureStream = function (body, handlers) {
+    var results = this._fixtures.results || {};
+    var names = body.scope === "targets" ? body.targets : (this._config.visualizations || []).map(function (v) {
+      return v.name;
+    });
+    var id = body.refresh_id;
+    var closed = false;
+    var frames = [["refresh_started", { refresh_id: id, targets: names, sources: [], deadline_at: null }]];
+    var outcomes = {};
+    names.forEach(function (name) {
+      var result = results[name] || { rows: 0 };
+      if (result.error) {
+        frames.push(["visualization_status", { refresh_id: id, name: name, type: "visualization", state: "error", stage: "transform", reason: result.error }]);
+        outcomes[name] = { outcome: "error", stage: "transform", reason: result.error };
+      } else if (result.rows > 0) {
+        frames.push(["visualization_data", { refresh_id: id, name: name, type: "visualization", bindings: result.bindings || {}, rows: result.rows, bytes: 0 }]);
+        outcomes[name] = { outcome: "ok" };
+      } else {
+        frames.push(["visualization_status", { refresh_id: id, name: name, type: "visualization", state: "no-data" }]);
+        outcomes[name] = { outcome: "no-data" };
+      }
+    });
+    frames.push(["refresh_completed", { refresh_id: id, status: "COMPLETED", targets: outcomes }]);
+    var settled = Promise.resolve().then(function () {
+      frames.forEach(function (frame) {
+        if (!closed) handlers.onFrame(frame[0], frame[1]);
+      });
+      if (!closed) handlers.onEnd();
+    });
+    return {
+      close: function () {
+        closed = true;
       },
       settled: settled,
     };
@@ -1580,7 +1642,15 @@
       mounted.name = "DashboardAlreadyMounted";
       throw mounted;
     }
-    if (options.dashboard.version !== "released") {
+    var fixtures = options.server.fixtures;
+    if (fixtures !== undefined) {
+      if (!isPlainObject(fixtures) || !isPlainObject(fixtures.config)) {
+        throw DashboardError("init.invalid", "fixtures require a config object");
+      }
+      if (options.server.baseUrl !== undefined || options.server.credentials !== undefined) {
+        throw DashboardError("init.invalid", "fixture mode names no server: no baseUrl, no credentials");
+      }
+    } else if (options.dashboard.version !== "released") {
       // The server serves the current release only (spec §18.12: no version route exists); a number
       // is refused with a clear error until the preview lane (L4) defines it.
       throw DashboardError("init.version_unsupported", 'this runtime serves version "released" only', {
@@ -1588,7 +1658,7 @@
       });
     }
     var credentials = options.server.credentials;
-    if (credentials !== "session" && !isPlainObject(credentials)) {
+    if (fixtures === undefined && credentials !== "session" && !isPlainObject(credentials)) {
       throw DashboardError("init.invalid", 'credentials is "session" or { proxyBaseUrl }');
     }
     if (isPlainObject(credentials) && typeof credentials.proxyBaseUrl !== "string") {

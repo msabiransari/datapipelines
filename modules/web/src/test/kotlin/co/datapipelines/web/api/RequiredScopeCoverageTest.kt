@@ -39,6 +39,12 @@ import kotlin.reflect.jvm.javaMethod
 class RequiredScopeCoverageTest {
     private val controllers: List<KClass<*>> = scanForRestControllers()
 
+    /**
+     * The first arm: every REST handler declares its operation — except one the §8.3 allowlist makes public, which
+     * `ScopeInterceptor.isScopeGoverned` un-governs at run time (the third arm's rule). Since #353 one REST handler is
+     * public by design: the test screenshot upload, authenticated by its single-use capability alone; the
+     * classifier test below pins it public and its governed siblings not.
+     */
     @Test
     fun `every api handler declares its section-7-6 operation`() {
         val missing = mutableListOf<String>()
@@ -46,6 +52,7 @@ class RequiredScopeCoverageTest {
             val classLevel = controller.findAnnotation<RequiredScope>() != null
             controller.functions
                 .filter { it.javaMethod?.getAnnotation(RequestMapping::class.java) != null || isHttpHandler(it.javaMethod) }
+                .filter { fn -> !isPublic(fullPath(controller, fn.javaMethod)) }
                 .forEach { fn ->
                     val annotated = fn.findAnnotation<RequiredScope>() != null || classLevel
                     if (!annotated) missing.add("${controller.simpleName}#${fn.name}")
@@ -145,7 +152,12 @@ class RequiredScopeCoverageTest {
         isPublic("/api/v1/pipelines") shouldBe false
         isPublic("/partials/pipelines") shouldBe false
 
+        isPublic("/api/v1/visualizations/{id}/tests/sessions/{sessionId}/results") shouldBe false
+        isPublic("/api/v1/visualizations/{id}/tests/runs/{runId}/screenshot") shouldBe false
+
         isPublic("/login") shouldBe true
+        isPublic("/api/v1/visualizations/{id}/tests/sessions/{sessionId}/screenshot") shouldBe true
+        isPublic("/visualizations/{id}/preview") shouldBe true
         isPublic("/docs/{slug}") shouldBe true
         isPublic("/compare/dbt") shouldBe true
         isPublic("/") shouldBe true

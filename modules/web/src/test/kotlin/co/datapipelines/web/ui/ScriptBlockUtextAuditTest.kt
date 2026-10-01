@@ -56,8 +56,8 @@ class ScriptBlockUtextAuditTest {
      * its size makes that a deliberate, reviewed act (the AlpineCloakAuditTest rule).
      */
     @Test
-    fun `the allowlist is exactly the five files argued for`() {
-        ALLOWED.size shouldBe 5
+    fun `the allowlist is exactly the six files argued for`() {
+        ALLOWED.size shouldBe 6
     }
 
     @Test
@@ -89,11 +89,12 @@ class ScriptBlockUtextAuditTest {
         val UTEXT = Regex("""\sth:utext=""")
 
         /**
-         * Every `th:utext` slot, with the count each file may carry. All five writers are
+         * Every `th:utext` slot, with the count each file may carry. All six writers are
          * safe TODAY: `docs/doc.html` and `docs/doc-public.html` render packaged Markdown
          * through a renderer that escapes raw HTML (188, #190), and the three JSON writers go through
          * [ScriptSafeJson] — the docs' JSON-LD via `DocJsonLd`, the FAQ blocks via
-         * `FaqJsonLd`, the editor's two blobs via `PipelineEditorController`.
+         * `FaqJsonLd`, the editor's two blobs via `PipelineEditorController`, the test preview's block via
+         * `VisualizationPreviewController` (#353).
          */
         val ALLOWED =
             mapOf(
@@ -102,6 +103,10 @@ class ScriptBlockUtextAuditTest {
                 "pipelines/editor.html" to 2,
                 "site/_layout.html" to 1,
                 "site/faq.html" to 1,
+                // #353 — the visualization test preview's one JSON block (the per-case configuration and fixture
+                // results the runtime's fixture mode mounts), written through ScriptSafeJson by
+                // VisualizationPreviewController; case names and assertion labels render through th:text.
+                "visualizations/preview.html" to 1,
             )
     }
 }

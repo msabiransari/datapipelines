@@ -1,6 +1,7 @@
 package co.datapipelines.visualization
 
 import co.datapipelines.typesystem.DatapipelinesException
+import com.fasterxml.jackson.databind.JsonNode
 import org.springframework.dao.DuplicateKeyException
 import org.springframework.transaction.support.TransactionOperations
 import java.time.Instant
@@ -134,6 +135,41 @@ class VisualizationTestSessionService(
         val row = runs.findBySession(workspaceId, id, sessionId) ?: throw sessionNotFound()
         return runs.screenshotOf(row.id) ?: throw screenshotInvalid("no_screenshot")
     }
+
+    // ---- the evidence reads by RUN id (#353's routes address a run, not a session) -------------------
+
+    /** One run by its id, redacted; an unknown or foreign run is `session_not_found`. Sweeps a due session first. */
+    fun runById(
+        workspaceId: UUID,
+        id: UUID,
+        runId: UUID,
+    ): TestRunView {
+        val row = runs.findById(workspaceId, id, runId) ?: throw sessionNotFound()
+        return view(swept(row))
+    }
+
+    /**
+     * The run's stored screenshot bytes with the media type detected at upload — the evidence read's payload.
+     * An unknown run is `session_not_found`; a run that stores no image (none uploaded, or superseded by a
+     * newer draft-era upload — the D35 retention) is `screenshot_invalid` / `no_screenshot`.
+     */
+    fun screenshotBytes(
+        workspaceId: UUID,
+        id: UUID,
+        runId: UUID,
+    ): ScreenshotBytes {
+        val row = runs.findById(workspaceId, id, runId) ?: throw sessionNotFound()
+        return runs.screenshotBytes(row.id) ?: throw screenshotInvalid("no_screenshot")
+    }
+
+    /**
+     * The §11.3 mechanical test on demand (`POST …/versions/{v}/check`, the spec's §6.1): the same check submit
+     * and release run, over [body] as stored, at this moment — no session, no write, nothing recorded.
+     */
+    fun check(
+        workspaceId: UUID,
+        body: VisualizationBody,
+    ): JsonNode = mechanical.run(workspaceId, body, now()).toJson()
 
     // ---- submit ---------------------------------------------------------------------------------------
 

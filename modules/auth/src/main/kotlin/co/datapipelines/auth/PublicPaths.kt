@@ -313,6 +313,23 @@ object PublicPaths {
                 "Boot's default error page with no stack trace or message; an anonymous error must not loop through login.",
                 "P8",
             ),
+            // 353: the first two CAPABILITY-authenticated routes (the implementation spec's §11.2, the owner's
+            // ruling (b)). An agent's browser holds no key — an `mcp` key reaches no MVC route — so each of these
+            // is reachable without a session and authenticates by ONE capability, re-checked by its handler
+            // against the run and the starter's current authority; neither carries @RequiredScope, neither reads
+            // a cookie, and every capability failure is the same 404. Enumerated to the segment, never globbed open.
+            PublicPath(
+                "/visualizations/*/preview",
+                "The visualization test preview: its ONLY credential is the ?session= preview token, checked by " +
+                    "VisualizationTestCapabilities.preview; no session cookie, no other route.",
+                "353",
+            ),
+            PublicPath(
+                "/api/v1/visualizations/*/tests/sessions/*/screenshot",
+                "The test screenshot upload: its ONLY credential is the single-use DP-Upload-Token, checked by " +
+                    "VisualizationTestCapabilities.storeScreenshot; no cookie is read.",
+                "353",
+            ),
         )
 
     /** The patterns alone, in declaration order — what [SecurityConfig] feeds `requestMatchers`. */

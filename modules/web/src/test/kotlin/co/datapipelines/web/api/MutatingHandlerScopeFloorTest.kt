@@ -200,6 +200,11 @@ class MutatingHandlerScopeFloorTest {
                     "the local sign-in POST — it authenticates the caller, so it cannot require a credential. " +
                     "Explicitly permitted in SecurityConfig's permitAll() list alongside \"/login\"; brute force is " +
                     "bounded by LoginRateLimitFilter and the per-account lockout (auth.md §5A), not by a scope",
+                "VisualizationTestsController#screenshot" to
+                    "the visualization test screenshot upload (#353, the owner's ruling (b)) — an agent's browser holds no " +
+                    "key, so its ONE credential is the single-use DP-Upload-Token, verified against the run it names and the " +
+                    "starter's current authority by VisualizationTestCapabilities; its PublicPaths entry permits it, " +
+                    "UploadCapabilityRouteMatcher exempts it from CSRF (no cookie is read), and the request filter caps it at 4 MiB",
             )
 
         /** What a key-surface entry asserts: whether the kind's key role HOLDS the handler's permission, and why the pair exists. */

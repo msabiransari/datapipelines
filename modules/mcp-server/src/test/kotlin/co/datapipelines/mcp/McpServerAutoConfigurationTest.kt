@@ -140,6 +140,11 @@ class McpServerAutoConfigurationTest {
 
         @Bean fun dashboardRefreshHistory(): co.datapipelines.visualization.DashboardRefreshHistory = mockk()
 
+        // #353 — the test-session tools' collaborators (declared by `web` in the assembled application).
+        @Bean fun visualizationTestSessions(): co.datapipelines.visualization.VisualizationTestSessionService = mockk()
+
+        @Bean fun visualizationTestLinks() = co.datapipelines.visualization.TestSessionLinks(null)
+
         @Bean fun mcpToolLearnings(): co.datapipelines.application.mcp.McpToolLearnings = mockk()
 
         @Bean fun schemaIntrospector(): SchemaIntrospector = mockk()

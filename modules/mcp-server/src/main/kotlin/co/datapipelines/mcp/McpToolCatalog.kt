@@ -142,13 +142,15 @@ object McpToolCatalog {
             // #10 L1b — the visualization and dashboard authoring tools (the implementation spec's §7). list/get and
             // validate are reads; create/update write definitions; purge_draft is the bounded self-service verb. No
             // tool releases or executes anything (the house rule); dashboards_validate is an AUTHOR verb on
-            // dashboard.update (owner ruling 2026-09-29 — the validator reads pin statuses unlensed, O5). The two
-            // visualizations_test_* tools land with L4's sessions.
+            // dashboard.update (owner ruling 2026-09-29 — the validator reads pin statuses unlensed, O5). #353 (L4b) adds
+            // the two visualizations_test_* tools on visualization.update: a session's start and its verdicts are writes.
             Entry("visualizations_list", mutating = false, permission = Permission.VISUALIZATION_READ),
             Entry("visualizations_get", mutating = false, permission = Permission.VISUALIZATION_READ),
             Entry("visualizations_create", mutating = true, permission = Permission.VISUALIZATION_CREATE),
             Entry("visualizations_update", mutating = true, permission = Permission.VISUALIZATION_UPDATE),
             Entry("visualizations_purge_draft", mutating = true, permission = Permission.VISUALIZATION_VERSION_MANAGE),
+            Entry("visualizations_test_start", mutating = true, permission = Permission.VISUALIZATION_UPDATE),
+            Entry("visualizations_test_submit", mutating = true, permission = Permission.VISUALIZATION_UPDATE),
             Entry("dashboards_list", mutating = false, permission = Permission.DASHBOARD_READ),
             Entry("dashboards_get", mutating = false, permission = Permission.DASHBOARD_READ),
             Entry("dashboards_create", mutating = true, permission = Permission.DASHBOARD_CREATE),

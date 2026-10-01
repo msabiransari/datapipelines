@@ -73,7 +73,7 @@ class McpServerAutoConfiguration {
     }
 
     /**
-     * The 59 tools of §6.1, in `tools/list` order. The BODY is now grouped into per-family
+     * The 61 tools of §6.1, in `tools/list` order. The BODY is now grouped into per-family
      * helpers; what remains is the DI FACTORY's arity — the parameters ARE the wiring, and a
      * holder type would exist only to be counted (the DomainConfiguration `TooManyFunctions`
      * precedent). 139 and 140 each grew it; 194d's six parameter-set tools passed the ceiling.
@@ -171,6 +171,12 @@ class McpServerAutoConfiguration {
         dashboardReader: co.datapipelines.visualization.DashboardReader,
         pipelineReleaseFacts: co.datapipelines.visualization.PipelineReleaseFacts,
         dashboardRefreshHistory: co.datapipelines.visualization.DashboardRefreshHistory,
+        // #353 — the test-session service (352's, declared by `web`'s VisualizationTestConfiguration) and the capability
+        // links (`web`'s VisualizationTestSurfacesConfiguration, from `datapipelines.auth.base-url`), so the two tools
+        // start and submit through the SAME service and hand out the SAME URLs REST does. Plain parameters, the 068/074
+        // pattern.
+        visualizationTestSessions: co.datapipelines.visualization.VisualizationTestSessionService,
+        visualizationTestLinks: co.datapipelines.visualization.TestSessionLinks,
     ): List<McpTool> {
         val runtime =
             inlineRuntime(pipelines, templates, templateEngines, datasources, introspector, jdbc)
@@ -246,6 +252,7 @@ class McpServerAutoConfiguration {
                 lens,
             ) +
             visualizationTools(visualizationService, dashboardService, visualizationReader, lens) +
+            visualizationTestTools(visualizationTestSessions, visualizationTestLinks) +
             dashboardTools(dashboardService, visualizationService, pipelineReleaseFacts, dashboardReader, lens, dashboardRefreshHistory)
     }
 

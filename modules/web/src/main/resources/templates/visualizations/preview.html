@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org" th:attr="data-theme=${activeTheme}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!--/* #353 — THE VISUALIZATION TEST PREVIEW (ui-screens.md §4.x; the implementation spec's §11.2).
+       A session-less page: the ?session= capability in this page's URL is its only credential, so
+       nothing here may carry it onward. `no-referrer` keeps it out of every subresource request's
+       Referer (the app logs no query string; a reverse proxy's access log might log a Referer). The
+       page deliberately has NO layout: `layouts/default` and `layouts/auth` both render the CSRF token,
+       and materialising it would set a dp_csrf cookie on a page that must set none. The theme is the
+       ?theme= the agent asked for (light | dark), else the deployment default. */-->
+  <meta name="referrer" content="no-referrer">
+  <title>Visualization test preview</title>
+  <link th:href="@{/vendor/design-system/tokens.css}" rel="stylesheet">
+  <link th:href="@{/vendor/design-system/themes/{theme}.css(theme=${activeTheme})}" rel="stylesheet">
+  <link th:href="@{/vendor/design-system/base.css}" rel="stylesheet">
+  <link th:href="@{/vendor/design-system/primitives.css}" rel="stylesheet">
+  <link th:href="@{/css/app.css}" rel="stylesheet">
+  <link th:href="@{/css/dashboards.css}" rel="stylesheet">
+  <link th:if="${available}" th:href="@{/vendor/plotly/plotly.css}" rel="stylesheet">
+</head>
+<body class="dp-preview-body">
+  <main class="dp-preview">
+    <th:block th:if="${available}">
+      <header class="dp-preview-head">
+        <h1 class="ds-headline" th:text="${displayName}">Monthly revenue</h1>
+        <p class="u-secondary u-text-sm">
+          <span class="u-mono" th:text="${visualizationName}">finance/visualizations/monthly_revenue</span>
+          · version <span th:text="${version}">3</span>
+          · fixtures only — no pipeline runs, no live data
+        </p>
+        <p class="u-secondary u-text-xs">
+          This preview expires at <time th:text="${expiresAt}" th:attr="datetime=${expiresAt}">2026-10-01T22:00:00Z</time>
+          or when the session's results are submitted.
+        </p>
+      </header>
+
+      <!--/* One section per case, in the body's order; the glue mounts one runtime instance into
+           each board. Case names and assertion labels are TEXT (th:text) — never markup. */-->
+      <section class="dp-preview-case ds-card" th:each="case, iter : ${cases}"
+               th:attr="data-dp-case=${case.name}, data-dp-case-index=${iter.index}">
+        <h2 class="u-text-lg u-semibold" th:text="${case.name}">twelve months</h2>
+        <ul class="dp-preview-assertions u-text-sm u-secondary">
+          <li th:each="assertion : ${case.assertions}" class="u-mono" th:text="${assertion}">rendered</li>
+        </ul>
+        <div class="dp-preview-board" th:attr="data-dp-case-board=${iter.index}"></div>
+      </section>
+
+      <!--/* The fixtures, the per-case configuration and the results, as ONE JSON block through
+           ScriptSafeJson — the glue parses it; no server value reaches a script body. */-->
+      <script type="application/json" id="dp-preview-data" th:utext="${previewJson}"></script>
+      <script th:src="@{/vendor/plotly/plotly-{bundle}.min.js(bundle=${bundle})}"
+              th:attr="data-dp-plotly-bundle=${bundle}"></script>
+      <script th:src="@{/js/datapipelines-dashboard.js}"></script>
+      <script th:src="@{/js/datapipelines-dashboard-plotly.js}"></script>
+      <script th:src="@{/js/datapipelines-dashboard-table.js}"></script>
+      <script th:src="@{/js/datapipelines-dashboard-kpi.js}"></script>
+      <script th:src="@{/js/visualization-preview.js}"></script>
+    </th:block>
+
+    <!--/* Every refusal is this one state, byte for byte: no id, no reason, no hint. */-->
+    <div th:unless="${available}" class="ds-empty dp-preview-unavailable">
+      <p class="ds-empty-title">This preview is not available</p>
+      <p class="ds-empty-description">
+        The link is wrong, expired, or its session's results were already submitted.
+        Start a new test session to get a fresh preview link.
+      </p>
+    </div>
+  </main>
+</body>
+</html>

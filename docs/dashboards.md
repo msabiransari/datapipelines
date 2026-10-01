@@ -1,17 +1,18 @@
 # Dashboards
 
-**Status:** v0.16 — the two documents and their lifecycle (#10, lane L1a); the REST routes, the MCP tools and the
+**Status:** v0.17 — the two documents and their lifecycle (#10, lane L1a); the REST routes, the MCP tools and the
 permissions (§4, lane L1b); the transfer routes and their limits' honest contract (§3.3, lanes L1c/L1c-b/L1c-c: the
 import's atomicity, the RELEASE rules on a landing, the aggregate count ceiling, the wire's per-family arms); the server
 runtime (§5, lane L2; #343's released pins and stream authority); the client runtime (§6, lanes L3a/L3a-b/L3a-c); the
 first-party pages (§7, lane L3b); the tests' backend — sessions, capabilities, the mechanical check and the release
-gate — is §3.4 (lane L4a, #352). The test sessions' HTTP/MCP surfaces (L4b, #353), the dashboard draft preview (#369) and
-the `dashboard` key kind (L5) add their sections as they land.
+gate — is §3.4 (lane L4a, #352), and its workflow on the wire — the session routes, the preview page, the screenshot
+upload and the two test tools — §3.4.1 (lane L4b, #353). The dashboard draft preview (#369) and the `dashboard` key kind (L5)
+add their sections as they land.
 **Owner:** datapipelines.co core
 **Depends on:** [Versioning](versioning.md) (§3.5 — the lifecycle table), [Pipeline Contract](pipeline-contract.md)
 (§13.22, §13.23 — the codes), [Metadata DB](metadata-db.md) (§4.28–§4.35 — the tables), [Enumerations](enums.md)
 (§31–§38), [Configuration](configuration.md) (§3.33, §3.34 — the bounds and the runtime's numbers), [REST API](rest-api.md) (§22, §23 — the routes),
-[MCP Server](mcp-server.md) (§6.2.50–§6.2.60 — the tools), [Auth](auth.md) (§7.6 — the permissions)
+[MCP Server](mcp-server.md) (§6.2.50–§6.2.62 — the tools), [Auth](auth.md) (§7.6 — the permissions)
 **Design:** the [dashboard implementation spec](superpowers/specs/2026-09-28-dashboard-implementation-spec.md) and
 the [design record](superpowers/specs/2026-09-25-dashboard-authoring-design-draft.md) (decisions D1–D63)
 **Last updated:** 2026-10-01
@@ -277,9 +278,8 @@ lensed BEFORE it is built — a visualization or dashboard the promoter lens hid
 ### 3.4 The test sessions and the evidence (#352, the spec's §11)
 
 A visualization's release needs evidence: an agent's run of the saved test cases against the exact draft content
-plus the server's own mechanical check. The backend behind it is live (this section); its HTTP and MCP transport —
-the session routes, the tools and the preview page — lands with L4b (#353); **until that lane, no route or tool
-serves sessions, results, screenshots or preview, and the manual's authoring loop cannot drive them.**
+plus the server's own mechanical check. The backend is this section (#352); the workflow on the wire — the routes,
+the preview page, the upload and the two tools — is §3.4.1 (#353).
 
 - **A session** (`tests.cases`' run) pins workspace, artifact, version, body hash, the case inventory and the
   actor; it opens over the artifact's WORKING version and lives for `datapipelines.visualization.session-ttl-minutes`
@@ -313,6 +313,46 @@ serves sessions, results, screenshots or preview, and the manual's authoring loo
   deleted; for a RELEASED version, the run whose GREEN result qualified the release — and its screenshot — is
   kept for the version's life. Expiry touches RUNNING sessions only: a completed GREEN record is never
   retrospectively erased, and a run whose version's hash moved on reads `EXPIRED` and can never qualify a release.
+  **An author who re-tests a draft many times keeps only the LAST screenshot**: each newer upload for the same
+  draft version deletes the older runs' images (the runs themselves, their verdicts and reports, stay).
+
+#### 3.4.1 The workflow on the wire (#353)
+
+An agent proves a visualization in five steps; the routes are [REST API §22.2](rest-api.md#222-routes), the tools
+[MCP Server §6.2.61–62](mcp-server.md), the permissions [Auth §7.6](auth.md) (`visualization.update` for the
+session and the verdicts, `visualization.read` for the evidence and the on-demand check):
+
+1. **Start** — `POST /api/v1/visualizations/{id}/tests/sessions` or `visualizations_test_start`: a session on the
+   WORKING version; the answer's `preview_url` carries the preview capability, shown once.
+2. **Preview** — the agent's browser opens `GET /visualizations/{id}/preview?session=<capability>` (ui-screens §4.22):
+   no login, no cookie read or set; the page mounts the SAME vendored runtime (§6) in its **fixture mode**, one
+   instance per case, with the case's saved fixtures evaluated exactly as the mechanical check evaluates them —
+   no pipeline, no datasource, no request to `/api/v1`. `?theme=light|dark` picks the theme.
+3. **Submit** — `POST …/tests/sessions/{sessionId}/results` or `visualizations_test_submit`, by the SAME principal:
+   the verdicts, notes and environment; the server's mechanical check decides GREEN with them; the preview dies.
+4. **Upload** — on GREEN only, `POST …/tests/sessions/{sessionId}/screenshot` with the raw PNG/WebP (≤ 4 MiB, the
+   route's OWN cap — the platform's 2 MiB stays on every other route) and the single-use capability in
+   `DP-Upload-Token`: no session and no key — an `mcp` key reaches no REST route, which is why this capability
+   exists (the owner's ruling (b)) — and no CSRF pair, because no cookie is read there.
+5. **Release** — a person, in the UI or over REST, through §3.1's gate: the latest run GREEN for the exact content,
+   the mechanical check passing again now. No tool releases.
+
+**Confinement.** Each capability opens ONE route for ONE run: the preview its page for that visualization's version,
+until the submit or the deadline; the upload its screenshot route, once. Neither opens any other route — on a
+lifecycle route, a runtime route or `/mcp` the request is simply anonymous. Because a capability-bearing request has
+no principal, the run's STARTER is re-judged at the moment of use: a member demoted below `visualization.update`, a
+member removed, a revoked or expired key, a deactivated person, identity or workspace all void the capability. Every
+failure on these two routes — absent, malformed, wrong, consumed, expired-and-swept, another visualization's, a starter
+who lost the right — is one indistinguishable answer (the page's one 404; the upload's `session_not_found`). The
+capabilities ride a URL and a header, never a cookie, are never logged by the application, and the page's
+`<meta name="referrer" content="no-referrer">` keeps them out of its subresources' `Referer`; the deadline (60 minutes) and the revocation at submit bound
+what a leaked preview URL can show — the saved fixtures of one version, nothing live.
+
+**Evidence reads.** `GET …/tests/runs` (the newest 100), `GET …/tests/runs/{runId}` and
+`GET …/tests/runs/{runId}/screenshot` answer the redacted runs — capabilities as presence and stamps only — and the
+stored image; `POST …/versions/{version}/check` runs the mechanical check on demand over a stored version and records
+nothing. All four pass the caller's lens: a promoter reads evidence only of versions the lens admits (RELEASED ones).
+The agent's `notes` and `environment` are JSON fields, never rendered as markup.
 
 ---
 
@@ -367,14 +407,13 @@ columns (L2) — a guess would refuse or admit on nothing.
 | `visualizations_list`, `visualizations_get` | `visualization.read` | Browse a level (each row with `used_by`: the dashboards that pin it); read the working version |
 | `visualizations_create`, `visualizations_update` | create / update | Write the document (the arguments ARE its keys); the new-root confirmation on create; `expected_hash` on update |
 | `visualizations_purge_draft` | `visualization.version.manage` | Purge a draft at its hash — never one a live dashboard pins |
+| `visualizations_test_start`, `visualizations_test_submit` | `visualization.update` | §3.4.1's start and submit — the preview URL on start, the single-use upload on a GREEN submit (the upload itself is the REST route) |
 | `dashboards_list`, `dashboards_get` | `dashboard.read` | Browse; read the working version with each pin's status, each source's release and read-only verdict (lensed), and `last_refresh` (the CALLER's own latest refresh — id, version, status, stamps — or null; through an MCP key, which is its own identity, it is null today: no tool refreshes a dashboard, §5) |
 | `dashboards_create`, `dashboards_update`, `dashboards_purge_draft` | create / update / version.manage | As the visualization tools |
 | `dashboards_validate` | `dashboard.update` | §4.2 |
 
-No tool releases or executes anything; the visualization test tools (`visualizations_test_start`,
-`visualizations_test_submit`) and the session/screenshot routes land with L4b (#353) — the backend contracts
-they will bind are §3.4's (§2.1 of the record). The served manual's `dashboards` guide is the
-authoring loop in the order an agent needs it.
+No tool releases or executes anything. The served manual's `dashboards` guide is the authoring loop in the order
+an agent needs it, including the test loop of §3.4.1.
 
 ---
 
@@ -513,7 +552,7 @@ dashboard she can read but holds no `execution.read`, so her refresh names no ex
 
 ### 5.8 What is not here
 
-The dashboard draft preview (#369, unowned after the L4 split) and the test sessions' HTTP/MCP surfaces (L4b, #353 — the backend behind them is §3.4) and the `dashboard` key kind and its confinement (L5): until L5, only signed-in sessions reach these routes and no MCP tool refreshes a dashboard. The first-party pages are §7 (L3b).
+The dashboard draft preview (#369, unowned after the L4 split) and the `dashboard` key kind and its confinement (L5): until L5, only signed-in sessions reach these routes and no MCP tool refreshes a dashboard. The first-party pages are §7 (L3b).
 
 ## 6. The client runtime (L3a)
 
@@ -641,6 +680,13 @@ boost); the first-party pages apply that (L3b), and the runtime's two-bundle ref
   routes byte-for-byte — the SSE stream proxied as a STREAM (never buffered), the `DP-CSRF-Token`
   header absent, no cookie forwarded, and the §4 error envelopes passed through verbatim. The proxy
   authorizes its own application user; Datapipelines sees the key.
+- **Fixture mode — `server: { fixtures: { config, results } }`** (#353, the visualization test preview, §3.4.1) —
+  no server at all: the configuration read answers `fixtures.config`, a refresh's stream answers each target's
+  `results[name]` (`{bindings, rows}`, `{rows: 0}` for the empty state, `{error: {code, message}}` for an evaluator
+  refusal) as the frames a live refresh would send, stamped with the client's own refresh id so the freshness gate
+  judges them unchanged, and an abort answers at once. The runtime issues NO `fetch` in this mode, and `init` refuses
+  `fixtures` beside a `baseUrl` or `credentials`; the lifecycle, the adapters, the renderers and the layout are the
+  same code a board runs.
 
 ### 6.6 The states, notifications and the CSP
 
@@ -752,6 +798,7 @@ full navigation).
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-01 | v0.17 | L4b (#353) the test workflow on the wire | **New §3.4.1** — the five-step workflow over REST and MCP (start, the session-less preview page, submit, the single-use screenshot upload, the human release), the confinement (each capability opens one route for one run; the starter re-judged at the moment of use; one indistinguishable answer for every capability failure) and the lensed evidence reads; §3.4's retention bullet gains the UI sentence (an author who re-tests keeps only the last screenshot). **§6.5:** the runtime's fixture mode (the transport swapped, nothing else; no `fetch`). §4.4 names the two test tools; §5.8 no longer lists the test surfaces. |
 | 2026-10-01 | v0.16 | 332 (#332, #330, #331) the lifecycle audit + the pins projection | **§3:** the five human verbs and the release audit (the `dashboard.*` events, the cascaded visualization releases named with `cascade_from_dashboard_id`) — the pipelines mould, ids/names/versions/counts only. |
 | 2026-10-01 | v0.15 | L4a (#352) the test sessions and the release gate — renumbered at merge after #356's v0.14 | **New §3.4 The test sessions and the evidence** — the durable run per session over the exact draft hash, the two hash-only capabilities (preview; the single-use screenshot upload minted at submit), the mechanical check (the reduced vendored 4.1.1 plot-schema at save AND release, binding type rules, the real fixture evaluation, static assertion feasibility, `not_available` rendered state), the screenshot's detected-type validation and retention (D35), and the release gate's installed verdicts (§3.1). §2.1.2's Plotly schema is the deep one now; §4.4's test tools and §5.8's test surfaces are explicitly L4b's (#353), the dashboard draft preview is #369's and marked unavailable until then. No new route, tool or permission row. **At merge (the orchestrator's follow-up):** an OPEN latest session refuses `tests_missing`/`run_open` and a RUNNING row past its deadline is `run_expired` without a sweep (F1/F6); the mechanical report keeps its first 100 failures and COUNTS the rest (`failures_dropped`, F2); the upload consume stamps the app clock (F3); a 12-byte or top-bit RIFF WebP is `truncated`, not a 500 (F4); the gate's draft lock is `FOR NO KEY UPDATE` so two releases serialize (F5). |
 | 2026-10-01 | v0.14 | #356 the abort before the row — renumbered at merge after L3b's v0.13 | **§5.6:** an abort arriving before `insertRunning` writes its row is honoured — the start registers a transient, per-principal-bounded marker, a matching caller is answered the same 202 and the refresh ends `ABORTED` before any source runs; the four no-cases (unknown, another person's, another instance's, finished) answer the identical `dashboard.refresh.not_found`. **§6.6:** the abort chip renders `abort.requested` until the server answers; a 202 sets `abortAcked`, a 404 re-renders `abort not confirmed` and the terminal frame decides — a delivered `ok` restores its state, and the stream stays open through the abort. Merge follow-up: the marker is written once (SET NX, before the bound set) — a replayed start of an id already in flight is the reused-id 400 and cannot delete the first start's marker or slot. |
