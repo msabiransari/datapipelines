@@ -20,7 +20,114 @@
     this.pollCount = 0;
     this.maxPolls = 2;
     this.executionId = null;
+    // #358: disposal marks a handler whose PAGE went away (boosted navigation,
+    // history save). A disposed handler consumes nothing further and owns no
+    // timers; disposal NEVER sends a cancellation — the run keeps going.
+    this.disposed = false;
+    this.pollController = null;
+    this.pollTimer = null;
+    this.cancelTimer = null;
+    // #358: the re-attach loop (a restored page following a run that outlived
+    // the navigation) replays the execution's event stream through the §10.3
+    // GET endpoint until the terminal arrives or the budget runs out.
+    this.replayCount = 0;
+    this.maxReplays = 15;
+    this.reattachTimer = null;
   }
+
+  /**
+   * Detach this page from the run. Aborts the open reader and every armed
+   * timer, and refuses everything that arrives afterwards — a recovery poll's
+   * late result, a stream chunk, a cancel fallback — without sending a
+   * cancellation request of its own (cancel is a verb with its own permission;
+   * navigation is not it). Idempotent: teardown and the history-save cleanup
+   * may both reach for it.
+   */
+  SseHandler.prototype.dispose = function () {
+    if (this.disposed) return;
+    this.disposed = true;
+    this.isConnected = false;
+    if (this.abortController) this.abortController.abort();
+    if (this.pollController) this.pollController.abort();
+    if (this.pollTimer !== null) clearTimeout(this.pollTimer);
+    if (this.cancelTimer !== null) clearTimeout(this.cancelTimer);
+    if (this.reattachTimer !== null) clearTimeout(this.reattachTimer);
+    this.pollTimer = null;
+    this.cancelTimer = null;
+    this.reattachTimer = null;
+  };
+
+  /** The recovery poll's next tick — armed through a handle dispose() can clear. */
+  SseHandler.prototype.schedulePoll = function () {
+    var self = this;
+    if (self.disposed) return;
+    self.pollTimer = setTimeout(function () {
+      self.pollTimer = null;
+      self.pollExecution();
+    }, 2000);
+  };
+
+  /**
+   * #358 — follow a run that outlived this document's previous page view. The
+   * stream is the §10.3 replay (GET /api/v1/executions/{id}/events): it re-sends
+   * the event log as it stands, so the restored page rebuilds the run's timeline,
+   * and — once the terminal event is IN the log — delivers it exactly once. A
+   * replay that ends before the terminal (the run is still going) is re-armed
+   * within [maxReplays]; a budget that runs out says what a lost connection says.
+   * Never sends a cancellation.
+   */
+  SseHandler.prototype.reattach = function (executionId) {
+    var self = this;
+    if (self.disposed || !executionId || self.executionId) return;
+    self.executionId = executionId;
+    self.isConnected = true;
+    // The re-attach mode flag: a stream that ends without a terminal re-plays
+    // instead of walking the live connection-loss path (see readStream).
+    self.detached = true;
+    self.editor.isExecuting = true;
+    self.replayStream();
+  };
+
+  SseHandler.prototype.replayStream = function () {
+    var self = this;
+    if (self.disposed) return;
+    self.abortController = new AbortController();
+    fetch("/api/v1/executions/" + self.executionId + "/events", {
+      headers: { Accept: "text/event-stream" },
+      credentials: "same-origin",
+      signal: self.abortController.signal,
+    })
+      .then(function (response) {
+        if (self.disposed) return;
+        if (!response.ok) {
+          // 404 (unknown/foreign) or 410 (log past retention): nothing to follow.
+          self.editor.isExecuting = false;
+          self.editor.setBanner("Connection lost — refresh to check status", "connection-lost");
+          return;
+        }
+        return self.readStream(response);
+      })
+      .catch(function (err) {
+        if (self.disposed || err.name === "AbortError") return;
+        self.scheduleReplay();
+      });
+  };
+
+  /** The re-attach loop's next replay — armed through a handle dispose() can clear. */
+  SseHandler.prototype.scheduleReplay = function () {
+    var self = this;
+    if (self.disposed || self.terminalSeen) return;
+    if (self.replayCount >= self.maxReplays) {
+      self.editor.setBanner("Connection lost — refresh to check status", "connection-lost");
+      self.editor.isExecuting = false;
+      return;
+    }
+    self.replayCount++;
+    self.reattachTimer = setTimeout(function () {
+      self.reattachTimer = null;
+      self.replayStream();
+    }, 2000);
+  };
 
   function pipelineLabel(editor) {
     var p = editor.pipeline || {};
@@ -29,10 +136,12 @@
 
   SseHandler.prototype.connect = function (executionId, pipelineId) {
     var self = this;
+    if (self.disposed) return;
     self.executionId = executionId;
     self.connectionLost = false;
     self.terminalSeen = false;
     self.pollCount = 0;
+    self.detached = false;
     self.isConnected = true;
     self.abortController = new AbortController();
 
@@ -75,8 +184,10 @@
       signal: self.abortController.signal,
     })
       .then(function (response) {
+        if (self.disposed) return;
         if (!response.ok) {
           return response.json().then(function (err) {
+            if (self.disposed) return;
             self.editor.showError(
               (err && err.error && err.error.message) || "Execution request failed: " + response.status
             );
@@ -86,6 +197,7 @@
         return self.readStream(response);
       })
       .catch(function (err) {
+        if (self.disposed) return;
         if (err.name === "AbortError") return;
         self.isConnected = false;
         // A teardown error AFTER a terminal event is noise, not loss — the
@@ -96,6 +208,7 @@
 
   SseHandler.prototype.readStream = function (response) {
     var self = this;
+    if (self.disposed) return;
     var reader = response.body.getReader();
     var decoder = new TextDecoder();
     var buffer = "";
@@ -113,13 +226,17 @@
       reader
         .read()
         .then(function (result) {
+          if (self.disposed) return;
           if (result.done) {
             self.isConnected = false;
             // A stream that ends AFTER a terminal event completed normally — §7.1.7:
             // only a stream that ends WITHOUT one is connection loss. Treating every
             // end as loss overwrote the success banner with "Connection lost" (027).
+            // The re-attach loop re-plays instead: a replay that ends before the
+            // terminal means the run is still going, and the next replay carries it.
             if (!self.connectionLost && !self.terminalSeen) {
-              self.handleConnectionLoss();
+              if (self.detached) self.scheduleReplay();
+              else self.handleConnectionLoss();
             }
             return;
           }
@@ -152,11 +269,16 @@
           pump();
         })
         .catch(function (err) {
+          if (self.disposed) return;
           if (err.name === "AbortError") return;
           self.isConnected = false;
           // Same guard as the stream-end branch: a reader error after a
-          // terminal event must not resurrect the loss path (027).
-          if (!self.terminalSeen) self.handleConnectionLoss();
+          // terminal event must not resurrect the loss path (027); the
+          // re-attach loop retries within its budget instead.
+          if (!self.terminalSeen) {
+            if (self.detached) self.scheduleReplay();
+            else self.handleConnectionLoss();
+          }
         });
     }
 
@@ -165,12 +287,29 @@
 
   SseHandler.prototype.dispatch = function (eventType, data) {
     var self = this;
+    if (self.disposed) return;
     var editor = self.editor;
     var payload = null;
     try {
       payload = JSON.parse(data);
     } catch (e) {
       payload = data;
+    }
+
+    // #358 — the record a restored page follows (init.js's activation re-attaches
+    // through it): armed at the run's start, cleared at its terminal event, so a
+    // finished run is never re-announced and a fresh document never re-attaches.
+    if (typeof window !== "undefined") {
+      if (eventType === "execution_started") {
+        var runId = (payload && payload.execution_id) || self.executionId;
+        if (runId) window.__peLiveExecution = { executionId: runId };
+      } else if (
+        eventType === "pipeline_completed" ||
+        eventType === "pipeline_failed" ||
+        eventType === "execution_aborted"
+      ) {
+        window.__peLiveExecution = null;
+      }
     }
 
     // 080 §B: EVERY event lands in the dock's Events tab, in arrival order — the
@@ -448,6 +587,7 @@
 
   SseHandler.prototype.cancel = function () {
     var self = this;
+    if (self.disposed) return;
     if (!self.executionId) return;
     // §6.3/§15.2: the DELETE makes the server emit execution_aborted ON the
     // still-open stream. The old order aborted the reader FIRST, so the client
@@ -469,8 +609,10 @@
       credentials: "same-origin",
     })
       .then(function (res) {
+        if (self.disposed) return;
         if (res.ok) {
-          setTimeout(function () {
+          self.cancelTimer = setTimeout(function () {
+            if (self.disposed) return;
             if (!self.terminalSeen && self.abortController) {
               self.abortController.abort();
               self.isConnected = false;
@@ -482,18 +624,21 @@
         res
           .json()
           .then(function (err) {
+            if (self.disposed) return;
             var message =
               (err && err.error && (err.error.user_message || err.error.message)) ||
               "The execution could not be cancelled (HTTP " + res.status + "). It is still running.";
             if (window.DpToast && window.DpToast.show) window.DpToast.show("danger", "Cancel failed", message);
           })
           .catch(function () {
+            if (self.disposed) return;
             if (window.DpToast && window.DpToast.show) {
               window.DpToast.show("danger", "Cancel failed", "The execution could not be cancelled. It is still running.");
             }
           });
       })
       .catch(function () {
+        if (self.disposed) return;
         if (window.DpToast && window.DpToast.show) {
           window.DpToast.show("danger", "Cancel failed", "The server could not be reached. The execution is still running.");
         }
@@ -502,6 +647,7 @@
 
   SseHandler.prototype.handleConnectionLoss = function () {
     var self = this;
+    if (self.disposed) return;
     if (self.connectionLost) return;
     self.connectionLost = true;
     // 151: nothing about the run is observed from here on — freeze every moving
@@ -537,17 +683,20 @@
 
   SseHandler.prototype.pollExecution = function () {
     var self = this;
+    if (self.disposed) return;
     if (self.pollCount >= self.maxPolls || !self.executionId) {
       self.editor.setBanner("Connection lost — refresh to check status", "connection-lost");
       self.editor.isExecuting = false;
       return;
     }
     self.pollCount++;
-    fetch("/api/v1/executions/" + self.executionId)
+    self.pollController = self.pollController || new AbortController();
+    fetch("/api/v1/executions/" + self.executionId, { signal: self.pollController.signal })
       .then(function (res) {
+        if (self.disposed) return;
         if (!res.ok) {
           if (self.pollCount < self.maxPolls) {
-            setTimeout(function () { self.pollExecution(); }, 2000);
+            self.schedulePoll();
           } else {
             self.editor.setBanner("Connection lost — refresh to check status", "connection-lost");
             self.editor.isExecuting = false;
@@ -557,6 +706,7 @@
         return res.json();
       })
       .then(function (data) {
+        if (self.disposed) return;
         if (!data) return;
         // The executions API reports UPPER-CASE statuses (SUCCESS/FAILED/RUNNING);
         // the editor compared them case-sensitively against lowercase words, so
@@ -589,7 +739,7 @@
           self.editor.announceStatus("Execution aborted");
         } else if (status === "running") {
           if (self.pollCount <= self.maxPolls) {
-            setTimeout(function () { self.pollExecution(); }, 2000);
+            self.schedulePoll();
           } else {
             self.editor.setBanner("Connection lost — refresh to check status", "connection-lost");
             self.editor.isExecuting = false;
@@ -600,8 +750,9 @@
         }
       })
       .catch(function () {
+        if (self.disposed) return;
         if (self.pollCount < self.maxPolls) {
-          setTimeout(function () { self.pollExecution(); }, 2000);
+          self.schedulePoll();
         } else {
           self.editor.setBanner("Connection lost — refresh to check status", "connection-lost");
           self.editor.isExecuting = false;

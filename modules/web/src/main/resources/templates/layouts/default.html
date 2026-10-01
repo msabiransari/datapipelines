@@ -511,8 +511,12 @@
        same gutter (065's editor opt-in became the rule). Reading content sits
        in .app-reading inside it; nothing sets a container per page any more.
        076 §B: id="app-main" is the boosted-navigation swap target (shell.js);
-       hx-boost makes in-main links and plain forms navigate through the swap. -->
-  <main id="app-main" class="app-container app-main" hx-boost="true">
+       hx-boost makes in-main links and plain forms navigate through the swap.
+       #358: hx-history-elt scopes the htmx history cache to THIS region — without
+       it htmx snapshots the whole <body>, footer scripts included, and a cached
+       restore re-executed every one of them (the shell's history shape guard
+       drops entries saved before this attribute existed and refetches). -->
+  <main id="app-main" class="app-container app-main" hx-boost="true" hx-history-elt>
     <!-- Full-page redirect flashes, rendered server-side (§4.13): the workspaces
          mutations keep their redirect contract — only how the result is DISPLAYED
          changed (banner → toast). They render into this HIDDEN bin inside the
