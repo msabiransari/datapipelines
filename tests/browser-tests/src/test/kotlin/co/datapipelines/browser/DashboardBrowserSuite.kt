@@ -20,7 +20,12 @@ import java.sql.DriverManager
  * templates are created through the API, then stamped RELEASED by SQL — nothing is releasable
  * until L4 (`ReleaseEvidence.NOT_INSTALLED`), so SQL seeding is the only way a runtime read can
  * serve a board. Each test seeds its OWN user and workspace (the suite's order-independence rule).
+ *
+ * `LargeClass` is suppressed with the house reason (SiteShotsMain): the L3a fixture seeders and the
+ * #356 abort-window harness share the suite's private Playwright page, its seeded session and its
+ * SQL access — a split would thread all three through a helper class for no reader's benefit.
  */
+@Suppress("LargeClass")
 abstract class DashboardBrowserSuite : BrowserSuite() {
     private lateinit var seededEmail: String
 
@@ -261,6 +266,32 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
                     Triple("slowchart", slowChart, "slow"),
                 ),
             initial = true,
+        )
+    }
+
+    /**
+     * A board whose single source sleeps a minute — the #356 abort-window case's long-running
+     * holder: a refresh of it holds its workspace place for as long as the window needs, and the
+     * abort (the executor's own cancel path) ends the sleep at once. No initial action, so the
+     * bootstrap runs no refresh and the case controls every start itself.
+     */
+    protected fun seedHungBoard(root: String): String {
+        val datasource = registerSourceDatasource()
+        createTemplate("test/${root}_hang.sql", "SELECT 1 AS n FROM (SELECT pg_sleep(60)) s")
+        createPipeline("$root/pipelines/hang", "test/${root}_hang.sql", datasource)
+        releasePipelines(listOf("$root/pipelines/hang"))
+        val cells =
+            seedVisualization(
+                "$root/visualizations/hungcells",
+                """{"display_name":"Hung cells","renderer":{"kind":"table","version":"1"},""" +
+                    """"inputs":{"main":{"columns":[{"name":"n","type":"INTEGER","nullable":false}]}},""" +
+                    """"config":{"columns":[{"label":"N","values":"n","format":"integer"}]},"bindings":{"n":"n"}}""",
+            )
+        return seedDashboard(
+            "$root/boards/hung",
+            sources = listOf("s1" to "$root/pipelines/hang"),
+            occurrences = listOf(Triple("hungcells", cells, "s1")),
+            initial = false,
         )
     }
 
@@ -639,6 +670,119 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
             "SELECT id::text AS i FROM dashboards WHERE name = '$name' AND workspace_id = " +
                 "(SELECT id FROM workspaces WHERE name = '${currentWorkspace()}')",
         ).single()["i"] as String
+    }
+
+    // ------------------------------------------------------------------ the #356 abort-window harness
+
+    /** The deployment default refresh places per workspace (the runtime key's owner-confirmed 4). */
+    protected val workspacePlaces = 4
+
+    /**
+     * The window case's holders: [workspacePlaces] raw stream POSTs whose hung sources hold every
+     * refresh place, so the instance's own refresh blocks INSIDE admission with no row — the
+     * #356 window, forced, never raced. Returns their refresh ids.
+     */
+    protected fun startHolderStreams(board: String): List<String> =
+        (1..workspacePlaces).map {
+            page.evaluate(
+                """async () => {
+                  const csrf = document.cookie.match(/(?:^|;\s*)dp_csrf=([^;]*)/);
+                  const config = await (await fetch('/api/v1/dashboards/$board/runtime/config', { credentials: 'same-origin' })).json();
+                  const body = {
+                    configuration_id: config.data.configuration_id, instance_id: window.__dp.instance._instanceId,
+                    refresh_id: crypto.randomUUID(), parameter_revision: 0, selections: {}, scope: 'all', targets: [],
+                  };
+                  await fetch('/api/v1/dashboards/$board/runtime/visualizations', {
+                    method: 'POST', credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json', 'DP-CSRF-Token': csrf ? decodeURIComponent(csrf[1]) : '' },
+                    body: JSON.stringify(body) });
+                  return body.refresh_id;
+                }""",
+            ) as String
+        }
+
+    /** Every listed refresh's row has reached [status] — polled at the real read route, never slept. */
+    protected fun awaitHolderRows(
+        board: String,
+        refreshIds: List<String>,
+        status: String,
+    ) {
+        page.waitForFunction(
+            """async (ids) => {
+              for (const id of ids) {
+                const res = await fetch('/api/v1/dashboards/$board/refreshes/' + id, { credentials: 'same-origin' });
+                if (!res.ok) return false;
+                const doc = await res.json();
+                if (!doc.data || doc.data.status !== '$status') return false;
+              }
+              return true;
+            }""",
+            refreshIds,
+        )
+    }
+
+    /** One refresh's row waits until it reads [status]. */
+    protected fun awaitRefreshStatus(
+        board: String,
+        refreshId: String,
+        status: String,
+    ) {
+        page.waitForFunction(
+            """async () => {
+              const res = await fetch('/api/v1/dashboards/$board/refreshes/$refreshId', { credentials: 'same-origin' });
+              if (!res.ok) return false;
+              const doc = await res.json();
+              return doc.data && doc.data.status === '$status';
+            }""",
+        )
+    }
+
+    /** The window's positive signal: the start's marker exists in Redis while its row does not. */
+    protected fun awaitStartMarker(
+        board: String,
+        refreshId: String,
+    ) {
+        val deadline = System.currentTimeMillis() + 30_000L
+        while (System.currentTimeMillis() < deadline) {
+            val scan = SharedBrowserE2e.redis.execInContainer("redis-cli", "--scan", "--pattern", "dp:refresh-start:*:$refreshId")
+            if (scan.stdout.trim().isNotEmpty()) {
+                val status = readRow(board, refreshId)["status"]
+                check(status == null) { "the row for $refreshId already exists — the window was missed, not held" }
+                return
+            }
+            Thread.sleep(100)
+        }
+        error("no start marker for $refreshId within 30 s — the start never reached its registration")
+    }
+
+    /** A refresh's read-route row: `status` (null when absent) and whether `finished_at` is set. */
+    protected fun readRow(
+        board: String,
+        refreshId: String,
+    ): Map<*, *> =
+        page.evaluate(
+            """async () => {
+              const res = await fetch('/api/v1/dashboards/$board/refreshes/$refreshId', { credentials: 'same-origin' });
+              if (!res.ok) return { status: null, finished: 'false' };
+              const doc = await res.json();
+              return { status: doc.data.status, finished: (doc.data.finished_at !== null).toString() };
+            }""",
+        ) as Map<*, *>
+
+    /** The owner's abort of one refresh, as the page's own session sends it. */
+    protected fun abortHolder(
+        board: String,
+        refreshId: String,
+    ) {
+        page.evaluate(
+            """async () => {
+              const csrf = document.cookie.match(/(?:^|;\s*)dp_csrf=([^;]*)/);
+              await fetch('/api/v1/dashboards/$board/runtime/refreshes/$refreshId/abort', {
+                method: 'POST', credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json', 'DP-CSRF-Token': csrf ? decodeURIComponent(csrf[1]) : '' },
+                body: JSON.stringify({ instance_id: window.__dp.instance._instanceId }) });
+            }""",
+        )
     }
 
     private fun currentWorkspace(): String {
