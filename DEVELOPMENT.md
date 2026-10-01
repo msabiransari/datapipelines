@@ -497,6 +497,14 @@ could open the NEW run while it was still queued — not prepared, so its §20.1
 `resolved_parameters` and the slot it waited for never appeared (30 s on the box, 90 s on CI).
 A loop in a test re-synchronises in every iteration; no iteration inherits the previous one's state.
 
+**A page's FIRST render gets the loaded-box bound, not the action default (#327).** The one wait
+that competes with everything else the box is doing — the create-workspace form's appearance after
+`navigate("/workspaces")`, the switcher's after the create's reload — has red three gates
+(#283/#303/#327) at 30 s while every assertion held, each green on the incremental. Those waits
+use `BrowserSuite.FIRST_RENDER_TIMEOUT_MS` (90 s, CI and local alike); every action after them
+acts on a present DOM and keeps the ordinary patience (30 s locally, where a 30 s wait IS the
+defect).
+
 ```bash
 # The marketing site's screenshots, produced by a script rather than by hand (070 §C).
 ./app.sh --start --demo nyc                      # the deployment being photographed
@@ -740,7 +748,20 @@ off every module's `check`, so the gate's `build` reaches them before any test);
 every module the diff touched — its **unfiltered** `test` (so `verifyTestsExecuted` stays
 meaningful), every other test task it carries (scripting's `breachSuite`, web's `editorJsTest`) and
 its coverage floor (`koverVerify`), each floor printed as a number beside it (2026-09-28's landing
-failed two gates on floors no pregate had run, #297); (3) the
+failed two gates on floors no pregate had run, #297); (2b) for the two `tests/*` modules the
+changed test classes, focused — where the changed file is not itself a runnable test class (an
+abstract base, an interface, an object, a helper), its real runnable consumers run, found through
+intermediate bases; when consumers cannot be established — an orphan helper, a deleted or renamed
+file, a changed test resource or build file — the WHOLE module runs. The selection reads the
+file's DECLARED class, never its file name: a runnable file schedules the one concrete class it
+declares, and a file whose identity is not derivable — zero or several concrete declarations in
+one file, or an unparseable declaration line — runs the whole module rather than focusing on a
+guess, so no declaration can silently disappear behind a partial parse (342-c). The selection is never a
+no-op while test sources changed: an earlier version skipped abstract/sealed files, and a lane
+editing the browser suite's shared base passed stage 2b without any browser test executing
+(#342's round review, 2026-09-30). `./scripts/pregate.sh --self-test` drives that selector over
+isolated fixtures and a recording, refusing Gradle stand-in and asserts the real consumer
+selection — run it after changing the selector; (3) the
 cross-cutting guard classes, filtered, with the zero-test guard skipped for those modules — the
 spec-drift tests, the route and read floors, the coverage scans, the page-count and keyword pins,
 the served-manual guards, the config-key drift tests (the list lives in the script; a new guard that

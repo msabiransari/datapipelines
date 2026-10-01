@@ -8,6 +8,7 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.AfterAll
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.springframework.beans.factory.annotation.Autowired
@@ -58,7 +59,26 @@ import java.util.Base64
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.DEFINED_PORT)
 class OidcLoginIntegrationTest {
-    @LocalServerPort private var port: Int = 0
+    /**
+     * Every assertion names the STABLE origin (the forwarder's port, = base-url), never the
+     * app's own kernel-allocated port — the redirect_uri on the wire and the callback URL
+     * the driver follows are the origin, and the forwarder carries them to the app.
+     */
+    private val port: Int get() = origin.originPort
+
+    /** The app's own port; used only to aim the origin's forwarder before the first request. */
+    @LocalServerPort private var appPort: Int = 0
+
+    @BeforeEach
+    fun aimOriginAtTheApp() {
+        origin.forwardTo(appPort)
+    }
+
+    /** The origin's listener is closed on success and failure alike. */
+    @AfterAll
+    fun closeOrigin() {
+        origin.close()
+    }
 
     @Autowired private lateinit var jwtService: JwtService
 
@@ -320,16 +340,20 @@ class OidcLoginIntegrationTest {
         const val SECRET_BYTES = 32
 
         /**
-         * A pre-reserved local port, so `datapipelines.auth.base-url` (auth.md §5.2)
-         * can name this server's exact origin BEFORE the context starts. The v2.4
-         * redirect URI is absolute and configured, not derived from the request, so
-         * `RANDOM_PORT` — whose value only exists after startup — is no longer usable
-         * here. The realm registers `*` as its redirect URI, so Keycloak accepts
-         * whatever port we reserve; the server itself must actually be reachable there,
-         * which is what makes this the real end-to-end callback.
+         * The suite's STABLE ORIGIN (#334, second round): [StableOriginForwarder] binds a
+         * loopback port at class-load and owns it — in the kernel — until [closeOrigin] in
+         * @AfterAll. Nothing is ever released, so there is no window for a contender to win:
+         * the first #334 delivery released inside the `server.port` supplier (the last read
+         * before the bind) and an independent witness owned the port immediately after that
+         * release — a smaller gap, not a closed one. The origin this listener serves is the
+         * origin every assertion names: `datapipelines.auth.base-url` (auth.md §5.2) is
+         * absolute and configured, so the redirect URI must exist before the context starts,
+         * and the callback stays a real end-to-end round trip — the driver connects to the
+         * origin listener, whose bytes are forwarded over real TCP to the application's own
+         * kernel-allocated loopback port (`server.port=0`, aimed with [forwardTo] once
+         * startup reports it).
          */
-        @JvmStatic
-        val serverPort: Int = java.net.ServerSocket(0).use { it.localPort }
+        private val origin = StableOriginForwarder.open()
 
         // The module's shared, already-started containers: any @DynamicPropertySource
         // supplier resolves them lazily, so no explicit static-init ordering is needed.
@@ -344,10 +368,14 @@ class OidcLoginIntegrationTest {
             registry.add("spring.datasource.username", postgres::getUsername)
             registry.add("spring.datasource.password", postgres::getPassword)
 
-            registry.add("server.port") { serverPort }
+            // The app binds its OWN kernel-allocated loopback port — allocation is atomic,
+            // there is nothing to race and nothing changes hands (#334, second round).
+            registry.add("server.port") { 0 }
+            registry.add("server.address") { "127.0.0.1" }
             registry.add("datapipelines.jwt.secret") { Base64.getEncoder().encodeToString(ByteArray(SECRET_BYTES) { 9 }) }
-            // §5.2 / configuration.md §3.4: the redirect URI is built absolutely from this.
-            registry.add("datapipelines.auth.base-url") { "http://localhost:$serverPort" }
+            // §5.2 / configuration.md §3.4: the redirect URI is built absolutely from this —
+            // the stable origin, owned by the forwarder for the suite's whole life.
+            registry.add("datapipelines.auth.base-url") { "http://localhost:${origin.originPort}" }
             registry.add("datapipelines.auth.bootstrap-admin-email") { "Alice@Datapipelines.CO" }
             registry.add("datapipelines.auth.allowlist.domains") { "datapipelines.co" }
             registry.add("datapipelines.auth.oidc.providers[0].name") { "keycloak" }

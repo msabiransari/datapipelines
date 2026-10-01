@@ -3,6 +3,7 @@ package co.datapipelines.browser
 import com.microsoft.playwright.Browser
 import com.microsoft.playwright.BrowserContext
 import com.microsoft.playwright.BrowserType
+import com.microsoft.playwright.Locator
 import com.microsoft.playwright.Page
 import com.microsoft.playwright.Playwright
 import com.microsoft.playwright.Tracing
@@ -120,6 +121,13 @@ abstract class BrowserSuite {
     ) {
         page.navigate("$baseUrl/workspaces")
         page.waitForURL("**/workspaces")
+        // The form arrives with the page's first render, and its first appearance is the one
+        // wait the whole flow hangs on: under a loaded gate it has outrun the action default
+        // three gates running (#327, and #283/#303 before it). Wait for THAT event with the
+        // loaded-box bound, then fill — the input is present, so the fill keeps the default.
+        page
+            .locator("form[action*='/workspaces/create'] input[name=name]")
+            .waitFor(Locator.WaitForOptions().setTimeout(FIRST_RENDER_TIMEOUT_MS))
         page.fill("form[action*='/workspaces/create'] input[name=name]", name)
         // Wait for the form-submit navigation to settle, THEN the row — a selector wait
         // started before the submit can bind to the outgoing document. `?` is a glob
@@ -140,6 +148,9 @@ abstract class BrowserSuite {
     protected fun createWorkspaceWithoutEntering(name: String) {
         page.navigate("$baseUrl/workspaces")
         page.waitForURL("**/workspaces")
+        page
+            .locator("form[action*='/workspaces/create'] input[name=name]")
+            .waitFor(Locator.WaitForOptions().setTimeout(FIRST_RENDER_TIMEOUT_MS))
         page.fill("form[action*='/workspaces/create'] input[name=name]", name)
         page.click("form[action*='/workspaces/create'] button[type=submit]")
         page.locator("td", Page.LocatorOptions().setHasText(name)).first().waitFor()
@@ -159,7 +170,10 @@ abstract class BrowserSuite {
     ) {
         // A full reload first: the create submit is hx-boosted, so only the main content was
         // swapped and the rail still holds the switcher rendered BEFORE this workspace existed.
+        // The switcher's first render after the reload is a first-render wait too (#327): the
+        // loaded-box bound, then the select acts on a present element at the default patience.
         page.reload()
+        page.locator("#workspace-switcher").waitFor(Locator.WaitForOptions().setTimeout(FIRST_RENDER_TIMEOUT_MS))
         // `force`: the select is an invisible overlay on the switcher card (the label is the
         // hit target), so Playwright's visibility precondition never clears on it.
         page.selectOption("#workspace-switcher", arrayOf(name), Page.SelectOptionOptions().setForce(true))
@@ -186,6 +200,16 @@ abstract class BrowserSuite {
      * single page load (2026-09-11, every GitHub run) while every assertion they make held.
      * Under `CI=true` (GitHub sets it) the same assertions get 90 s of patience per action;
      * locally the 30 s stays, because on a laptop a 30 s wait IS the defect.
+     *
+     * One class of action is exempt from that principle and always gets
+     * [FIRST_RENDER_TIMEOUT_MS]: the FIRST appearance of a page's chrome after a navigation or
+     * reload — the create form's input after `navigate("/workspaces")`, the switcher after the
+     * create's reload. That wait competes with everything else the box is doing (a gate's
+     * clean build, four lanes compiling), so its overrun is the BOX's load, not a product
+     * defect — and a shots test runs dozens of navigations, so one unlucky render reds a
+     * whole gate while every assertion it would have made held (#327's red was exactly this,
+     * on a local gate's clean build under load ~11; the incremental run passed minutes
+     * later). A genuinely broken render still fails the same assertion, 90 s later, once.
      */
     private fun Page.patient(): Page = apply { if (System.getenv("CI") == "true") setDefaultTimeout(CI_ACTION_TIMEOUT_MS) }
 
@@ -279,6 +303,13 @@ abstract class BrowserSuite {
 
     companion object {
         const val CI_ACTION_TIMEOUT_MS = 90_000.0
+
+        /**
+         * The bound for FIRST-RENDER waits (see [patient]'s KDoc for which waits and why):
+         * the loaded-box bound that survived #283/#303/#327 — one number on CI and off it,
+         * because a loaded local gate and a 2-vCPU runner are the same condition for these.
+         */
+        const val FIRST_RENDER_TIMEOUT_MS = 90_000.0
 
         private const val SECRET_BYTES = 32
         private const val BASE32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"

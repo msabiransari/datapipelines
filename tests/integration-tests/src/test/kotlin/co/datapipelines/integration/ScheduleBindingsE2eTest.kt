@@ -19,6 +19,7 @@ import org.junit.jupiter.api.TestMethodOrder
 import org.junit.jupiter.api.assertTimeoutPreemptively
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.web.server.LocalServerPort
+import org.springframework.context.annotation.Import
 import org.springframework.test.annotation.DirtiesContext
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
@@ -35,11 +36,18 @@ import java.util.UUID
  * YESTERDAY, composed over a child that inherits the frozen reference (A13), fired by the REAL
  * dispatcher on the product's HTTP surface.
  *
- * The clock trick is [SchedulerE2eTest]'s, pointed at the brief's exact scenario: the schedule
- * fires at 23:45 America/New_York, and the test moves `next_due_at` back to YESTERDAY's 23:45.
- * The run's frozen `reference_at` is therefore 23:45 on day D while its ACTUAL start is now —
- * day D+1, whatever wall-clock moment the suite runs at (the context's catch-up window is
- * widened to 48 h so yesterday's occurrence always qualifies). TODAY must resolve to D — the
+ * The clock is [SchedulerClockTestConfiguration]'s (#342): the suite's context replaces the
+ * `schedulerClock` bean with one pinned a few seconds after midnight New York, so the scenario
+ * holds at any wall-clock moment. The schedule fires at 23:45 America/New_York, and the test
+ * moves `next_due_at` back to YESTERDAY's 23:45 — yesterday computed from the PINNED now, never
+ * from the JVM clock, so a real-midnight crossing mid-suite cannot re-pick the occurrence. At
+ * the pinned instant yesterday's 23:45 is the latest occurrence the pattern has produced, which
+ * is exactly what the latest-occurrence catch-up fires (`missed_run_policy = latest`); before
+ * the pin (#342) a run in the 23:45–24:00 New York window made today's 23:45 the latest, and
+ * the dispatcher fired that one instead. The run's frozen `reference_at` is therefore 23:45 on
+ * day D while its `started_at` — stamped by the ledger from the SAME pinned clock — is 00:00:05
+ * on D+1: the brief's scenario by construction. (The execution's own start, which `$current_date`
+ * reads, is the executor's real clock — see the Order-2 assertion.) TODAY resolves to D — the
  * SCHEDULE'S logical day, not the start's — and YESTERDAY to D−1 (a calendar day, through DST
  * or not). The resolved values are read from the run's own `reference_at`, never re-derived in
  * the test's arithmetic.
@@ -53,6 +61,7 @@ import java.util.UUID
  * no `pipeline_executions` column exposes a reference, so rows cannot show it directly.
  */
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
+@Import(SchedulerClockTestConfiguration::class)
 @SpringBootTest(
     classes = [DatapipelinesApplication::class],
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
@@ -88,10 +97,12 @@ class ScheduleBindingsE2eTest {
                 .statusCode(403)
         }
 
-        // The occurrence is due: yesterday's 23:45 New York. Its actual start is on the next day.
+        // The occurrence is due: yesterday's 23:45 New York, on the clock the dispatcher sees —
+        // the pinned one (#342), not the JVM's, so the pin decides which occurrence is latest.
+        // Its actual start is on the next day (the pinned now is just past midnight).
         val due =
             LocalDate
-                .ofInstant(Instant.now(), NY_ZONE)
+                .ofInstant(SchedulerClockTestConfiguration.SCHEDULER_NOW, NY_ZONE)
                 .minusDays(1)
                 .atTime(23, 45)
                 .atZone(NY_ZONE)
@@ -107,8 +118,10 @@ class ScheduleBindingsE2eTest {
             listOf("catch_up", "cron").contains(run["origin"].asText()) shouldBe true
         }
 
-        // The frozen reference is late on day D; the actual start is on D+1 — the brief's scenario,
-        // whatever wall-clock moment the suite runs at.
+        // The frozen reference is late on day D; the run's start is on D+1 — the brief's
+        // scenario, pinned by construction: the ledger stamps `started_at` from the same
+        // controlled clock the dispatcher used for the occurrence, and the pin sits just past
+        // midnight (#342).
         logicalDay = LocalDate.ofInstant(Instant.parse(run["reference_at"].asText()), NY_ZONE)
         val startDay = LocalDate.ofInstant(Instant.parse(run["started_at"].asText()), NY_ZONE)
         withClue("the scenario is the one the brief names: frozen on D, started on D+1") {
@@ -139,9 +152,12 @@ class ScheduleBindingsE2eTest {
             rootParameters["previous_date"].asText() shouldBe logicalDay.minusDays(1).toString()
             rootParameters["note"].asText() shouldBe "TODAY"
             // §5.1's "two todays": the pipeline's own $current_date is still the ACTUAL start's
-            // date in the org zone — the frozen reference changes bindings, never the Context.
-            rootParameters["current_date"].asText() shouldBe
-                LocalDate.ofInstant(Instant.parse(run["started_at"].asText()), ZoneId.of("UTC")).toString()
+            // date — the frozen reference changes bindings, never the Context. The actual start
+            // is the execution row's own stamp, which is the executor's real clock, NOT the
+            // scheduler's pinned one (#342): anchoring there keeps the assertion about the
+            // semantics (bindings frozen, Context not) rather than about two clocks agreeing on
+            // the calendar day.
+            rootParameters["current_date"].asText() shouldBe executionStartedDate(rootExecution).toString()
         }
 
         // The child executed with the date resolved on the PARENT's frozen reference — the same
@@ -195,6 +211,13 @@ class ScheduleBindingsE2eTest {
     /** The execution row's `parameters_json` — what the request that started it carried. */
     private fun executionParameters(executionId: String): String =
         scalar("SELECT parameters_json::text FROM pipeline_executions WHERE execution_id = '$executionId'").shouldNotBeNull()
+
+    /** The execution's own start date in UTC — the executor's stamp, not the scheduler's clock. */
+    private fun executionStartedDate(executionId: String): LocalDate =
+        LocalDate.parse(
+            scalar("SELECT (started_at AT TIME ZONE 'UTC')::date::text FROM pipeline_executions WHERE execution_id = '$executionId'")
+                .shouldNotBeNull(),
+        )
 
     private fun <T : Any> poll(
         what: String,

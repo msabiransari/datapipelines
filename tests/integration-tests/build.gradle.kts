@@ -105,3 +105,44 @@ tasks.named<Test>("test") {
     // tracked input, so a changed trial count invalidates the task instead of riding a cached run.
     providers.gradleProperty("sse157.trials").orNull?.let { systemProperty("sse157.trials", it) }
 }
+
+// #345 — the gate's security-assurance classes run in THEIR OWN task, never as a filtered
+// re-run of `test`. The old stage (`test --rerun --tests <four classes>`) pointed the same
+// task at the same `build/test-results/test/` directory the cycle had just filled, and
+// Gradle replaced the cycle's ~500 result files with the four classes' — so on a118efde
+// (2026-09-30) a cycle with a REAL integration failure recounted `failures=0` over five
+// XML files. This task writes `build/test-results/securityAssuranceTest/` instead: the
+// cycle's results stay the cycle's, and every post-gate recount (test-recount.sh globs
+// every test-results directory) sees both. The heap, the staging budget and the bootJar
+// guarantee mirror `test` — these are the same suites in the same shared-container JVM
+// (SharedE2e is per JVM); one fork, because the stage runs the four classes alone and the
+// class order is the module's pinned one. The class list lives here (the task's inputs);
+// gate.sh names the same four when it reads the verdict, and a drifted list fails the
+// gate loudly — the verdict treats a missing result file as a failure.
+tasks.register<Test>("securityAssuranceTest") {
+    group = "verification"
+    description =
+        "The gate's security-assurance stage: the four security-critical E2E classes, " +
+            "always forced, into build/test-results/securityAssuranceTest (#345 — never into test/)."
+    val testSourceSet = sourceSets.named("test").get()
+    testClassesDirs = testSourceSet.output.classesDirs
+    classpath = testSourceSet.runtimeClasspath
+    dependsOn(":modules:app:bootJar")
+    include(
+        listOf(
+            "co.datapipelines.integration.EntryInventoryE2eTest",
+            "co.datapipelines.integration.PublicContractE2eTest",
+            "co.datapipelines.integration.PermissionSeamE2eTest",
+            "co.datapipelines.integration.PackagedResolverTest",
+        ).map { it.replace('.', '/') + ".class" },
+    )
+    // The stage's `--rerun` semantics, moved into the task: the verdict is always about
+    // this tree, never an UP-TO-DATE echo of an earlier run.
+    outputs.upToDateWhen { false }
+    maxHeapSize = "6g"
+    environment("DATAPIPELINES_STAGING_H2_MAX_MEMORY_MB", "4096")
+    maxParallelForks = 1
+    if (project.providers.gradleProperty("junit.jupiter.testclass.order.default").orNull == null) {
+        systemProperty("junit.jupiter.testclass.order.default", "org.junit.jupiter.api.ClassOrderer\$ClassName")
+    }
+}

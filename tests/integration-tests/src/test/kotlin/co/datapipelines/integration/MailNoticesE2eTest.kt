@@ -18,6 +18,7 @@ import jakarta.mail.Session
 import jakarta.mail.internet.InternetAddress
 import jakarta.mail.internet.MimeMessage
 import org.junit.jupiter.api.AfterAll
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.slf4j.LoggerFactory
@@ -66,8 +67,11 @@ import java.util.concurrent.atomic.AtomicBoolean
  * `LocalAdminSeedE2eTest` arm (that suite boots with no mail configured, as every suite before
  * 137 did).
  *
- * DEFINED_PORT with a pre-reserved port: `datapipelines.auth.base-url` must name the exact
- * origin — it is the OIDC redirect's origin AND the login URL in the welcome mail.
+ * DEFINED_PORT on a STABLE ORIGIN: `datapipelines.auth.base-url` must name the exact origin
+ * before the context starts — it is the OIDC redirect's origin AND the login URL in the
+ * welcome mail — and that origin is [StableOriginForwarder]'s listener, owned in the kernel
+ * for the whole suite life and forwarded over real TCP to the app's own kernel-allocated
+ * loopback port (#334, second round).
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @SpringBootTest(
@@ -75,8 +79,22 @@ import java.util.concurrent.atomic.AtomicBoolean
     webEnvironment = SpringBootTest.WebEnvironment.DEFINED_PORT,
 )
 class MailNoticesE2eTest {
+    /**
+     * Every assertion names the STABLE origin (the forwarder's port, = base-url), never the
+     * app's own kernel-allocated port — the mail links are built from base-url (§5.2), and
+     * the OIDC callback the driver follows is the origin, carried to the app by the
+     * forwarder.
+     */
+    private val port: Int get() = origin.originPort
+
+    /** The app's own port; used only to aim the origin's forwarder before the first request. */
     @LocalServerPort
-    private var port: Int = 0
+    private var appPort: Int = 0
+
+    @BeforeEach
+    fun aimOriginAtTheApp() {
+        origin.forwardTo(appPort)
+    }
 
     private val http: HttpClient =
         HttpClient
@@ -514,9 +532,21 @@ class MailNoticesE2eTest {
         /** Generated per run — no literal secret in any test fixture (HIGH-2). */
         private val ADMIN_PASSWORD = "e2e-mail-" + (1..24).map { BASE32[random.nextInt(BASE32.length)] }.joinToString("")
 
-        /** A pre-reserved local port, so `datapipelines.auth.base-url` names the exact origin. */
-        @JvmStatic
-        val serverPort: Int = java.net.ServerSocket(0).use { it.localPort }
+        /**
+         * The suite's STABLE ORIGIN (#334, second round): [StableOriginForwarder] binds a
+         * loopback port at class-load and owns it — in the kernel — until [tearDown] closes
+         * it in @AfterAll. Nothing is ever released, so there is no window for a contender
+         * to win: the first #334 delivery released inside the `server.port` supplier (the
+         * last read before the bind) and an independent witness owned the port immediately
+         * after that release — a smaller gap, not a closed one. The origin this listener
+         * serves is the origin every assertion names: `datapipelines.auth.base-url` is
+         * absolute and configured, so the redirect URI must exist before the context starts,
+         * and the callback stays a real end-to-end round trip — the driver connects to the
+         * origin listener, whose bytes are forwarded over real TCP to the application's own
+         * kernel-allocated loopback port (`server.port=0`, aimed with [forwardTo] once
+         * startup reports it).
+         */
+        private val origin = StableOriginForwarder.open()
 
         private val postgres get() = SharedE2e.postgres
 
@@ -599,8 +629,12 @@ class MailNoticesE2eTest {
         @DynamicPropertySource
         @JvmStatic
         fun properties(registry: DynamicPropertyRegistry) {
-            registry.add("server.port") { serverPort }
+            // The app binds its OWN kernel-allocated loopback port — allocation is atomic,
+            // there is nothing to race and nothing changes hands (#334, second round).
+            registry.add("server.port") { 0 }
+            registry.add("server.address") { "127.0.0.1" }
             registry.add("management.server.port") { "0" }
+            registry.add("management.server.address") { "127.0.0.1" }
 
             registry.add("spring.datasource.url") { postgres.jdbcUrl }
             registry.add("spring.datasource.username") { postgres.username }
@@ -615,7 +649,7 @@ class MailNoticesE2eTest {
             registry.add("datapipelines.jwt.secret") { randomSecret() }
             registry.add("datapipelines.db.encryption-key") { randomSecret() }
 
-            registry.add("datapipelines.auth.base-url") { "http://localhost:$serverPort" }
+            registry.add("datapipelines.auth.base-url") { "http://localhost:${origin.originPort}" }
             registry.add("datapipelines.auth.local.enabled") { true }
             registry.add("datapipelines.auth.rate-limit.login-per-minute") { 100 }
             registry.add("datapipelines.auth.oidc.providers[0].name") { "mail-keycloak" }
@@ -640,6 +674,9 @@ class MailNoticesE2eTest {
 
         @JvmStatic
         @AfterAll
-        fun tearDown() = Unit
+        fun tearDown() {
+            // The origin's listener is closed on success and failure alike.
+            origin.close()
+        }
     }
 }

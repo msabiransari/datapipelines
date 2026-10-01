@@ -217,20 +217,20 @@ esac
 # The local merge gate is the enforcement point (P1: direct push), so the security
 # aggregate is a stage of it, with a verdict line of its own rather than four classes
 # lost among the build's thousands. The build above already ran these classes; this
-# stage runs them again ALONE and forced (--rerun: never UP-TO-DATE, so the verdict is
-# about this tree), and reads the verdict from the JUnit XML, never from the exit code
-# (§9.4). A class with no result file, zero tests or a skip FAILS the stage — a missing
-# report is non-passing, not neutral (record §10.2). A tooling crash is classified like
-# every other stage (gate_crashed). CI re-runs the same classes cold in `integration`.
+# stage runs them again ALONE and FORCED (the securityAssuranceTest task carries
+# `outputs.upToDateWhen { false }` — the old inline `test --rerun --tests` form is gone:
+# it pointed the cycle's own test task at the cycle's own results directory, and Gradle
+# replaced ~500 result files with the four classes' — #345: a cycle with a genuine
+# integration failure recounted failures=0), and reads the verdict from the JUnit XML,
+# never from the exit code (§9.4). A class with no result file, zero tests or a skip
+# FAILS the stage — a missing report is non-passing, not neutral (record §10.2). The
+# four classes are named in the task (tests/integration-tests/build.gradle.kts); this
+# list is what the VERDICT asserts, so a class that stops producing a report fails here
+# by name. CI re-runs the same classes cold in `integration`.
 echo
 SEC_CLASSES=(EntryInventoryE2eTest PublicContractE2eTest PermissionSeamE2eTest PackagedResolverTest)
-SEC_RESULTS="$ROOT/tests/integration-tests/build/test-results/test"
-sec_args=()
-for c in "${SEC_CLASSES[@]}"; do
-  rm -f "$SEC_RESULTS/TEST-co.datapipelines.integration.$c.xml"
-  sec_args+=(--tests "co.datapipelines.integration.$c")
-done
-sec=$(run "$LOGDIR/security-assurance.log" :tests:integration-tests:test --rerun "${sec_args[@]}" -x :tests:integration-tests:verifyTestsExecuted)
+SEC_RESULTS="$ROOT/tests/integration-tests/build/test-results/securityAssuranceTest"
+sec=$(run "$LOGDIR/security-assurance.log" :tests:integration-tests:securityAssuranceTest)
 sec_verdict="$(python3 - "$SEC_RESULTS" "${SEC_CLASSES[@]}" <<'SECPY'
 import os, sys, xml.etree.ElementTree as ET
 results, classes = sys.argv[1], sys.argv[2:]
