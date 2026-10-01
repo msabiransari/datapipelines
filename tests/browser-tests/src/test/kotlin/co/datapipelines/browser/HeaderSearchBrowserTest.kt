@@ -5,6 +5,7 @@ import io.kotest.matchers.booleans.shouldBeFalse
 import io.kotest.matchers.booleans.shouldBeTrue
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldMatch
 import org.junit.jupiter.api.Test
 import java.nio.file.Paths
 import kotlin.io.path.absolutePathString
@@ -61,8 +62,9 @@ class HeaderSearchBrowserTest : BrowserSuite() {
         // Enter clicks the row's anchor — the app's own boosted navigation — and the
         // boosted settle closes the palette behind it.
         page.keyboard().press("Enter")
-        page.waitForURL("**/editor")
-        page.url() shouldContain "/editor"
+        // The row carries the compatibility URL; the redirect lands the canonical workspace (#348).
+        page.waitForURL(PipelineWorkspaceUrl.PATTERN)
+        page.url() shouldMatch PipelineWorkspaceUrl.DOCUMENT
         page.waitForFunction("() => document.getElementById('app-search-palette').hidden === true")
     }
 

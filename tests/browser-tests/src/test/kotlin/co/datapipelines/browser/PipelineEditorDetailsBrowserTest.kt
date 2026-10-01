@@ -139,8 +139,8 @@ class PipelineEditorDetailsBrowserTest : BrowserSuite() {
     private fun openEditorFor(name: String) {
         page.navigate("$baseUrl/pipelines?q=$name")
         page.locator("button.tpl-result, button.tpl-leaf").first().click()
-        page.locator("a:has-text('Open in editor')").first().click()
-        page.waitForURL("**/pipelines/*/editor")
+        page.locator("a.tplx-detail-open").first().click()
+        page.waitForURL(PipelineWorkspaceUrl.PATTERN)
         page.locator(".pe-card").first().waitFor()
     }
 
@@ -255,8 +255,8 @@ class PipelineEditorDetailsBrowserTest : BrowserSuite() {
 
         page.navigate("$baseUrl/pipelines?q=$name")
         page.locator("button.tpl-result, button.tpl-leaf").first().click()
-        page.locator("a:has-text('Open in editor')").first().click()
-        page.waitForURL("**/pipelines/*/editor")
+        page.locator("a.tplx-detail-open").first().click()
+        page.waitForURL(PipelineWorkspaceUrl.PATTERN)
         val card = page.locator(".pe-card").first()
         card.waitFor()
         page.locator(".pe-legend-chip").first().waitFor()
@@ -293,8 +293,8 @@ class PipelineEditorDetailsBrowserTest : BrowserSuite() {
         // document load (hx-boost="false", 87c20d4), so this is a plain navigation wait.
         page.navigate("$baseUrl/pipelines?q=$name")
         page.locator("button.tpl-result, button.tpl-leaf").first().click()
-        page.locator("a:has-text('Open in editor')").first().click()
-        page.waitForURL("**/pipelines/*/editor")
+        page.locator("a.tplx-detail-open").first().click()
+        page.waitForURL(PipelineWorkspaceUrl.PATTERN)
 
         // The canvas laid its cards out; the four-tab dock is there from page load.
         page.locator(".pe-card").first().waitFor()

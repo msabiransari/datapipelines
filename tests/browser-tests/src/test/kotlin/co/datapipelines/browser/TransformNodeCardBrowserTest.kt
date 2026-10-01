@@ -22,7 +22,7 @@ import java.nio.file.Paths
  * The card's language is the pinned template's type, which is not on the node JSON: the card
  * says `transform` until graph.js resolves the pin (GET /api/v1/templates/versions, the
  * loadDialects pattern), then `jsonata`. The walk rides the app's doors (explorer search →
- * result row → Open in editor). Screenshots under build/reports/7d-screenshots.
+ * result row → the detail's Open). Screenshots under build/reports/7d-screenshots.
  */
 class TransformNodeCardBrowserTest : BrowserSuite() {
     @Test
@@ -38,8 +38,8 @@ class TransformNodeCardBrowserTest : BrowserSuite() {
 
         page.navigate("$baseUrl/pipelines?q=$slug")
         page.locator("button.tpl-result, button.tpl-leaf").first().click()
-        page.locator("a:has-text('Open in editor')").first().click()
-        page.waitForURL("**/pipelines/*/editor")
+        page.locator("a.tplx-detail-open").first().click()
+        page.waitForURL(PipelineWorkspaceUrl.PATTERN)
         page.locator(".pe-card[data-node-id='shape_orders']").waitFor()
         // The pin resolves after the first paint — wait for the language, never for time.
         page.waitForFunction(

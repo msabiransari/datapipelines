@@ -35,7 +35,7 @@ class SilentFailurePathsBrowserTest : SchedulesBrowserSuite() {
         EditorRunFixtures.registerSourceDatasource(page, baseUrl, datasource) shouldBe emptyList<String>()
         val name = "$root/jobs/sleep"
         val pipelineId = sleepPipeline(name, datasource)
-        page.navigate("$baseUrl/pipelines/$pipelineId/editor")
+        page.navigate("$baseUrl/pipelines/$pipelineId")
         page.locator(".pe-card").first().waitFor()
 
         page.locator("[data-verb='pipeline-execute']").click()
@@ -74,7 +74,7 @@ class SilentFailurePathsBrowserTest : SchedulesBrowserSuite() {
     }
 
     @Test
-    fun `a malformed lifecycle block refuses the run with the error modal`() {
+    fun `a malformed version context refuses the run with the error modal`() {
         startTrace()
         val root = ready("d8draft")
         val name = "$root/jobs/plain"
@@ -82,11 +82,12 @@ class SilentFailurePathsBrowserTest : SchedulesBrowserSuite() {
         EditorRunFixtures.registerSourceDatasource(page, baseUrl, datasource) shouldBe emptyList<String>()
         val pipelineId = sleepPipeline(name, datasource)
         // The store-side fault, delivered the way a bad deploy or a manual JSONB edit would
-        // land: the page is SERVED with the lifecycle block already unreadable, so draft.js's
-        // init parses the broken JSON exactly as a real editor page would.
-        page.route("**/pipelines/*/editor") { route ->
+        // land: the page is SERVED with the #pipeline-workspace block UNREADABLE (present, but
+        // not JSON), so workspace.js's read parses the broken text exactly as a real page
+        // would. The lane's own case removes the block; this one breaks its content (#348).
+        page.route(PipelineWorkspaceUrl.PATTERN) { route ->
             val body = route.fetch().text()
-            val tampered = body.replaceFirst("\"hasDraft\":true", "\"hasDraft\":broken-")
+            val tampered = body.replaceFirst("\"hasBody\":true", "\"hasBody\":broken-")
             route.fulfill(
                 com.microsoft.playwright.Route
                     .FulfillOptions()
@@ -94,7 +95,7 @@ class SilentFailurePathsBrowserTest : SchedulesBrowserSuite() {
                     .setContentType("text/html"),
             )
         }
-        page.navigate("$baseUrl/pipelines/$pipelineId/editor")
+        page.navigate("$baseUrl/pipelines/$pipelineId")
         page.locator(".pe-card").first().waitFor()
 
         var executeHits = 0
@@ -107,7 +108,7 @@ class SilentFailurePathsBrowserTest : SchedulesBrowserSuite() {
 
             val modal = page.locator(".pe-modal-backdrop:visible")
             modal.waitFor(Locator.WaitForOptions().setTimeout(10_000.0))
-            modal.innerText() shouldContain "could not read the pipeline's lifecycle state"
+            modal.innerText() shouldContain "could not read the pipeline's version state"
             executeHits shouldBe 0 // nothing was sent: the version pin is unknown, so nothing runs
         } finally {
             page.unroute("**/api/v1/pipelines/*/execute")
