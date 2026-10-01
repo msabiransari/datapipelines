@@ -89,11 +89,33 @@ class VisualizationTestCapabilities(
     }
 
     /**
-     * Stores the screenshot of session [sessionId] under visualization [id], authenticated by [capability]
-     * alone. The run is resolved without a workspace (the request has none) and the starter re-judged FIRST;
-     * the service then refuses empty/over-size bytes, verifies and consumes the capability, and inserts.
+     * The upload's gate WITHOUT the body (#353's security pass): the route calls this BEFORE it reads a byte, so a
+     * request that carries no valid capability of a still-authorised starter is refused on one row read and never
+     * makes the server buffer up to 4 MiB. Answers the run's workspace for the store. Pre-verified here so that EVERY
+     * request without the right capability — a RUNNING run (352's `no_capability`), a consumed one, a wrong or
+     * malformed token — gets the one identical answer; the service verifies again and consumes under its row lock,
+     * which stays the replay fence.
      */
-    @Suppress("LongParameterList", "ThrowsCount") // the route's whole input; every gate is the same named refusal
+    @Suppress("ThrowsCount") // every gate is the same named refusal
+    fun authorizeUpload(
+        id: UUID,
+        sessionId: UUID,
+        capability: String?,
+    ): UploadGrant {
+        val presented = capability?.takeIf { it.isNotBlank() } ?: throw notFound()
+        val hash = hashOrNull(TestCapability.UPLOAD_PURPOSE, presented) ?: throw notFound()
+        val row = runs.findBySessionUnscoped(id, sessionId) ?: throw notFound()
+        if (row.uploadTokenHash != hash || row.uploadConsumedAt != null) throw notFound()
+        if (!authority.holdsUpdate(row.workspaceId, row.startedBy)) throw notFound()
+        return UploadGrant(row.workspaceId, presented)
+    }
+
+    /**
+     * Stores the screenshot of session [sessionId] under visualization [id], authenticated by [capability]
+     * alone: [authorizeUpload] again (the run, the capability and the starter re-judged at the store), then the
+     * service refuses empty/over-size bytes, verifies and consumes the capability, and inserts.
+     */
+    @Suppress("LongParameterList") // the route's whole input: the address, the credential and the image
     fun storeScreenshot(
         id: UUID,
         sessionId: UUID,
@@ -102,16 +124,15 @@ class VisualizationTestCapabilities(
         bytes: ByteArray,
         depictedCase: String?,
     ): ScreenshotView {
-        val presented = capability?.takeIf { it.isNotBlank() } ?: throw notFound()
-        val hash = hashOrNull(TestCapability.UPLOAD_PURPOSE, presented) ?: throw notFound()
-        val row = runs.findBySessionUnscoped(id, sessionId) ?: throw notFound()
-        // Pre-verified here so that EVERY request without the right capability — a RUNNING run (352's
-        // `no_capability`), a consumed one, a wrong or malformed token — gets the one identical answer; the
-        // service verifies again and consumes under its row lock, which stays the replay fence.
-        if (row.uploadTokenHash != hash || row.uploadConsumedAt != null) throw notFound()
-        if (!authority.holdsUpdate(row.workspaceId, row.startedBy)) throw notFound()
-        return sessions.storeScreenshot(row.workspaceId, id, sessionId, presented, declaredMediaType, bytes, depictedCase)
+        val grant = authorizeUpload(id, sessionId, capability)
+        return sessions.storeScreenshot(grant.workspaceId, id, sessionId, grant.capability, declaredMediaType, bytes, depictedCase)
     }
+
+    /** What [authorizeUpload] establishes: the run's workspace and the verified capability's wire form. */
+    class UploadGrant(
+        val workspaceId: UUID,
+        val capability: String,
+    )
 
     /** The stored form of a presented capability, or null when it is malformed — never a distinct refusal. */
     private fun hashOrNull(

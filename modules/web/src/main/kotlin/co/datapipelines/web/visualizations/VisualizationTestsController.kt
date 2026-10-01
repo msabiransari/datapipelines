@@ -91,8 +91,9 @@ class VisualizationTestsController(
 
     /**
      * §22.2 — the session's ONE screenshot, authenticated by the upload capability alone (a `PublicPaths` entry: no
-     * `@RequiredScope`, no cookie read). The body is read here, bounded at the cap + 1 byte; the request filter has
-     * already refused a declared length over the cap, and its counting stream refuses a chunked body past it.
+     * `@RequiredScope`, no cookie read). The capability is checked FIRST, then the body is read, bounded at the cap +
+     * 1 byte; the request filter has already refused a declared length over the cap, and its counting stream refuses
+     * a chunked body past it.
      */
     @PostMapping("/{id}/tests/sessions/{sessionId}/screenshot")
     @ResponseStatus(HttpStatus.CREATED)
@@ -103,6 +104,8 @@ class VisualizationTestsController(
         @RequestParam(value = "case", required = false) depictedCase: String?,
         request: HttpServletRequest,
     ): ApiResponse<Map<String, Any?>> {
+        // The capability is judged BEFORE a byte is read: an unauthorised caller never makes the server buffer the body.
+        capabilities.authorizeUpload(id, sessionId, capability)
         val bytes = readImage(request)
         val stored = capabilities.storeScreenshot(id, sessionId, capability, declaredType(request), bytes, depictedCase)
         return ApiResponse.of(TestSessionWire.screenshot(stored))

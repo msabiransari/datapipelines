@@ -68,8 +68,35 @@ class VisualizationTestsControllerTest {
     private val sessionId = UUID.randomUUID()
     private val runId = UUID.randomUUID()
 
+    init {
+        // The upload gate admits by default; the gate's own refusal case overrides it.
+        every { capabilities.authorizeUpload(any(), any(), any()) } returns
+            VisualizationTestCapabilities.UploadGrant(UUID.randomUUID(), "granted")
+    }
+
     @AfterEach
     fun clearContext() = SecurityContextHolder.clearContext()
+
+    @Test
+    fun `an upload without a valid capability is refused before a byte of the body is read`() {
+        every { capabilities.authorizeUpload(id, sessionId, "WRONG") } throws
+            DatapipelinesException(
+                VisualizationErrorCodes.TEST_SESSION_NOT_FOUND,
+                "No such test session.",
+                mapOf("reason" to "session_unknown"),
+            )
+        val stream = CountingStream()
+        val request =
+            object : HttpServletRequestWrapper(MockHttpServletRequest("POST", "/")) {
+                override fun getInputStream(): ServletInputStream = stream
+            }
+
+        shouldThrow<DatapipelinesException> { controller.screenshot(id, sessionId, "WRONG", null, request) }.code shouldBe
+            VisualizationErrorCodes.TEST_SESSION_NOT_FOUND
+
+        stream.reads shouldBe 0 // the server buffered nothing for an unauthorised caller
+        verify(exactly = 0) { capabilities.storeScreenshot(any(), any(), any(), any(), any(), any()) }
+    }
 
     @Test
     fun `start opens the session as the caller and answers the preview URL from the configured origin`() {
@@ -334,6 +361,23 @@ class VisualizationTestsControllerTest {
                     """.trimIndent(),
                 ),
             ).body
+
+    /** A container stream that counts every read — zero proves the body was never touched. */
+    private class CountingStream : ServletInputStream() {
+        var reads = 0
+            private set
+
+        override fun read(): Int {
+            reads++
+            return -1
+        }
+
+        override fun isFinished(): Boolean = true
+
+        override fun isReady(): Boolean = true
+
+        override fun setReadListener(listener: ReadListener?) = throw UnsupportedOperationException()
+    }
 
     /** A container stream that behaves like the cap filter's counting stream past its cap. */
     private class ThrowingStream : ServletInputStream() {
