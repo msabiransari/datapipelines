@@ -5,6 +5,21 @@
 // TemplateReleaser), which `templates` implements — the house "allowed ahead, undeclared" rule.
 plugins { id("datapipelines.common-conventions") }
 
+// The vendored Plotly schema's deterministic regeneration (modules/visualization/schema/plotly/PROVENANCE.md):
+// the CHECKED-IN upstream source is the only input — a clean, offline build never fetches anything. The
+// reduced output is committed; this task rewrites it for a version bump, and PlotlySchemaProvenanceTest
+// proves the committed bytes ARE the reducer's output.
+val reducePlotlySchema by tasks.registering(JavaExec::class) {
+    group = "build"
+    description = "Regenerates the committed reduced Plotly schema from the checked-in 4.1.1 upstream source."
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass = "co.datapipelines.visualization.PlotlySchemaReducerKt"
+    args(
+        "schema/plotly/plot-schema-4.1.1.json",
+        "src/main/resources/co/datapipelines/visualization/plot-schema-reduced.json",
+    )
+}
+
 dependencies {
     // LogicalType (an input contract's column vocabulary), DatapipelinesException.
     implementation(project(":modules:typesystem"))

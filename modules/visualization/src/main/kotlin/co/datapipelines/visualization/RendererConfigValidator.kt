@@ -66,6 +66,20 @@ object RendererConfigValidators {
             problems
         }
 
+    /**
+     * The L4a production validator (the spec's §11.3 step 1): Plotly goes through [PlotlySchemaValidator] —
+     * the reduced 4.1.1 plot-schema, unknown attributes and wrong types refused with the path, the house
+     * data-array checks kept in force — while `table` and `kpi` stay the house schemas. Save, submit and
+     * release all read through THIS composition, so they refuse the same configurations.
+     */
+    fun deep(schema: PlotlySchemaValidator = PlotlySchemaValidator()): RendererConfigValidator =
+        RendererConfigValidator { kind, config ->
+            when (kind) {
+                RendererKind.PLOTLY -> schema.validate(kind, config)
+                else -> default().validate(kind, config)
+            }
+        }
+
     private fun plotly(
         config: ObjectNode,
         problems: MutableList<ConfigProblem>,

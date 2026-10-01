@@ -13,6 +13,10 @@ import org.springframework.boot.context.properties.ConfigurationProperties
  * document cannot make the read — or the validator's per-row, per-column work — grow with its own size. Their
  * defaults are L1a's PROPOSAL (50 / 20 / 1,000 / 256 KiB / 64 from the brief; 8 inputs and 256 columns added by
  * L1a's security pass: the fixture check is rows × columns) — the orchestrator confirms them at review.
+ * [VisualizationKey.TESTS_SESSION_TTL_MINUTES] is not a collection cap but the test session's TTL (the spec's
+ * §11.2, owner-confirmed 60 minutes); its key is the FLAT `session-ttl-minutes` — the shipped key grammar is
+ * exactly two levels (`datapipelines.visualization.<key>`, the drift test's neighbour rule), so the spec's
+ * informal `tests.session-ttl-minutes` spelling has no YAML form here.
  */
 enum class VisualizationKey(
     val key: String,
@@ -27,6 +31,7 @@ enum class VisualizationKey(
     MAX_BINDINGS_PER_VISUALIZATION(key = "max-bindings-per-visualization", default = 64, min = 1, max = 1_024),
     MAX_INPUTS_PER_VISUALIZATION(key = "max-inputs-per-visualization", default = 8, min = 1, max = 64),
     MAX_COLUMNS_PER_INPUT(key = "max-columns-per-input", default = 256, min = 1, max = 4_096),
+    TESTS_SESSION_TTL_MINUTES(key = "session-ttl-minutes", default = 60, min = 1, max = 1_440),
     ;
 
     /** The full YAML path. */
@@ -54,6 +59,7 @@ data class VisualizationConfig(
     val maxBindingsPerVisualization: Int = VisualizationKey.MAX_BINDINGS_PER_VISUALIZATION.default.toInt(),
     val maxInputsPerVisualization: Int = VisualizationKey.MAX_INPUTS_PER_VISUALIZATION.default.toInt(),
     val maxColumnsPerInput: Int = VisualizationKey.MAX_COLUMNS_PER_INPUT.default.toInt(),
+    val sessionTtlMinutes: Int = VisualizationKey.TESTS_SESSION_TTL_MINUTES.default.toInt(),
 ) {
     init {
         valuesByKey().forEach { (key, value) -> key.check(value) }
@@ -69,6 +75,7 @@ data class VisualizationConfig(
             VisualizationKey.MAX_BINDINGS_PER_VISUALIZATION to maxBindingsPerVisualization.toLong(),
             VisualizationKey.MAX_INPUTS_PER_VISUALIZATION to maxInputsPerVisualization.toLong(),
             VisualizationKey.MAX_COLUMNS_PER_INPUT to maxColumnsPerInput.toLong(),
+            VisualizationKey.TESTS_SESSION_TTL_MINUTES to sessionTtlMinutes.toLong(),
         )
 }
 
@@ -87,6 +94,7 @@ data class VisualizationProperties(
     val maxBindingsPerVisualization: Int = VisualizationKey.MAX_BINDINGS_PER_VISUALIZATION.default.toInt(),
     val maxInputsPerVisualization: Int = VisualizationKey.MAX_INPUTS_PER_VISUALIZATION.default.toInt(),
     val maxColumnsPerInput: Int = VisualizationKey.MAX_COLUMNS_PER_INPUT.default.toInt(),
+    val sessionTtlMinutes: Int = VisualizationKey.TESTS_SESSION_TTL_MINUTES.default.toInt(),
 ) {
     /** The domain config — constructing it enforces every bound, naming the key. */
     fun toConfig(): VisualizationConfig =
@@ -98,5 +106,6 @@ data class VisualizationProperties(
             maxBindingsPerVisualization = maxBindingsPerVisualization,
             maxInputsPerVisualization = maxInputsPerVisualization,
             maxColumnsPerInput = maxColumnsPerInput,
+            sessionTtlMinutes = sessionTtlMinutes,
         )
 }
