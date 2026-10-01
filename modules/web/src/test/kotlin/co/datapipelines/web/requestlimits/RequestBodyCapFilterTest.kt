@@ -4,7 +4,6 @@ import co.datapipelines.auth.AuthErrorWriter
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.RequestLimits
 import co.datapipelines.visualization.VisualizationErrorCodes
-import co.datapipelines.visualization.VisualizationTestSessionService
 import co.datapipelines.web.api.ApiErrorCatalog.userMessageFor
 import co.datapipelines.web.api.ApiExceptionHandler
 import co.datapipelines.web.config.RequestLimitsProperties
@@ -312,7 +311,8 @@ class RequestBodyCapFilterTest {
     }
 
     private companion object {
-        const val SCREENSHOT_CAP = VisualizationTestSessionService.MAX_SCREENSHOT_BYTES
+        /** The spec's §6.1/§17 number, written out — the oracle is never the production constant under test. */
+        const val SCREENSHOT_CAP = 4 * 1024 * 1024
         const val ID = "6f1c2e7a-0000-4000-8000-000000000001"
         const val SCREENSHOT_PATH = "/api/v1/visualizations/$ID/tests/sessions/$ID/screenshot"
     }
