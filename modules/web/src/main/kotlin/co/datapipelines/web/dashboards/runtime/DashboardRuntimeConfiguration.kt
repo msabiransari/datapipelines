@@ -15,7 +15,9 @@ import co.datapipelines.executor.ExecutionSlots
 import co.datapipelines.executor.ExecutorConfig
 import co.datapipelines.executor.ExecutorDispatcher
 import co.datapipelines.executor.RedisRefreshAbortFlags
+import co.datapipelines.executor.RedisRefreshStartMarkers
 import co.datapipelines.executor.RefreshAbortFlags
+import co.datapipelines.executor.RefreshStartMarkers
 import co.datapipelines.parameters.ParameterEvaluator
 import co.datapipelines.parameters.ParameterSetRepository
 import co.datapipelines.pipeline.PipelineRepository
@@ -91,6 +93,10 @@ class DashboardRuntimeConfiguration {
     @Bean
     fun refreshAbortFlags(redis: StringRedisTemplate): RefreshAbortFlags = RedisRefreshAbortFlags(redis)
 
+    /** The in-flight starts an abort can honour before the row exists (#356) — the abort flag's transient twin. */
+    @Bean
+    fun refreshStartMarkers(redis: StringRedisTemplate): RefreshStartMarkers = RedisRefreshStartMarkers(redis)
+
     @Bean
     fun refreshAbortSignal(
         flags: RefreshAbortFlags,
@@ -153,6 +159,7 @@ class DashboardRuntimeConfiguration {
         streamAuthority: RefreshStreamAuthority,
         abortSignal: RefreshAbortSignal,
         abortFlags: RefreshAbortFlags,
+        startMarkers: RefreshStartMarkers,
         cancellation: ExecutionCancellationService,
         audit: AuditEventSink,
         dashboards: DashboardService,
@@ -171,6 +178,7 @@ class DashboardRuntimeConfiguration {
             streamAuthority,
             abortSignal,
             abortFlags,
+            startMarkers,
             cancellation,
             audit,
             dashboards,

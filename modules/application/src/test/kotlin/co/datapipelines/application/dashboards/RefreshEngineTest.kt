@@ -85,6 +85,12 @@ class RefreshEngineTest {
         data object Hang : Script
 
         data object Aborted : Script
+
+        /** The source ends (with [outcome]) after [millis] of virtual time — mid-work raises and polls become orderable. */
+        data class After(
+            val millis: Long,
+            val outcome: Script,
+        ) : Script
     }
 
     private val starter =
@@ -113,6 +119,25 @@ class RefreshEngineTest {
 
                     Script.Aborted -> {
                         SourceOutcome.Aborted(id)
+                    }
+
+                    is Script.After -> {
+                        delay(script.millis).let {
+                            when (val outcome = script.outcome) {
+                                is Script.Rows -> {
+                                    launch.sink.accept(outcome.schema, outcome.rows.asSequence())
+                                    SourceOutcome.Succeeded(id)
+                                }
+
+                                Script.Aborted -> {
+                                    SourceOutcome.Aborted(id)
+                                }
+
+                                else -> {
+                                    error("After() wraps a terminal Rows or Aborted script, was $outcome")
+                                }
+                            }
+                        }
                     }
 
                     Script.Hang -> {
@@ -496,9 +521,14 @@ class RefreshEngineTest {
         runTest {
             // The abort route cancels the execution AND raises the refresh flag; the execution can end before the
             // watcher's next poll, so the work finishes with every target failed and nobody yet told the engine why.
+            // The flag is raised WHILE the refresh runs (#356's start check only owns a flag already there at job
+            // start), the execution ends aborted 20 ms later, still before the first poll.
             val body = dashboard(listOf(source("s1")), listOf(occurrence("v", inputs = mapOf("main" to "s1"))))
-            scripts = { Script.Aborted }
-            abortFlag.set(true)
+            scripts = { Script.After(30, Script.Aborted) }
+            launch {
+                delay(10)
+                abortFlag.set(true)
+            }
 
             val result = engine().run(RefreshFixtures.job(body), ports)
 
@@ -510,13 +540,44 @@ class RefreshEngineTest {
     }
 
     @Test
-    fun `an abort flag raised after every target succeeded does not turn a complete refresh into an abort`() {
+    fun `an abort flag raised while the work ran does not turn a refresh whose every target succeeded into an abort`() {
         runTest {
+            // The flag lands mid-work (t=10) but the source's rows are delivered at t=30, the last poll never fires
+            // before the work joins, and noticeLateAbort deliberately skips a refresh that fully succeeded: the
+            // refresh is COMPLETED — the abort that arrives after the last visualization completed changes nothing.
+            val body = dashboard(listOf(source("s1")), listOf(occurrence("v", inputs = mapOf("main" to "s1"))))
+            scripts = { Script.After(30, Script.Rows(columns("x" to LogicalType.INTEGER), listOf(listOf(1)))) }
+            launch {
+                delay(10)
+                abortFlag.set(true)
+            }
+
+            engine().run(RefreshFixtures.job(body), ports).status shouldBe RefreshStatus.COMPLETED
+        }
+    }
+
+    @Test
+    fun `an abort recorded before the job starts ends the refresh ABORTED before any source runs - no execution, the row closed`() {
+        runTest {
+            // #356: the flag was written while the refresh was still starting — the runtime answered 202 before the
+            // row existed. The engine's check at job start ends it through the one terminal path: every target
+            // aborted, the row closed ABORTED, audited, the last frame sent — and NO source was ever launched.
             val body = dashboard(listOf(source("s1")), listOf(occurrence("v", inputs = mapOf("main" to "s1"))))
             scripts = { Script.Rows(columns("x" to LogicalType.INTEGER), listOf(listOf(1))) }
             abortFlag.set(true)
 
-            engine().run(RefreshFixtures.job(body), ports).status shouldBe RefreshStatus.COMPLETED
+            val result = engine().run(RefreshFixtures.job(body), ports)
+
+            result.status shouldBe RefreshStatus.ABORTED
+            result.targets.getValue("v") shouldBe TargetOutcome.Aborted
+            launches.shouldBeEmpty() // no source execution was started for an aborted-at-start refresh
+            cancelled.shouldBeEmpty() // nothing ran, so there is nothing to cancel
+            finishes.single().status shouldBe RefreshStatus.ABORTED
+            audited.single().status shouldBe RefreshStatus.ABORTED
+            events.first().shouldBeInstanceOf<RefreshEvent.Started>()
+            events.last().shouldBeInstanceOf<RefreshEvent.Completed>().status shouldBe "ABORTED"
+            events.filterIsInstance<RefreshEvent.SourceStarted>().shouldBeEmpty()
+            events.filterIsInstance<RefreshEvent.VisualizationData>().shouldBeEmpty()
         }
     }
 

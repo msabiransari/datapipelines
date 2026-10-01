@@ -71,3 +71,155 @@ class RedisRefreshAbortFlags(
         val LOG = LoggerFactory.getLogger(RedisRefreshAbortFlags::class.java)
     }
 }
+
+/** A start that is on its way but has no `RUNNING` row yet (#356): who started it, where, for which dashboard. */
+data class RefreshStartMarker(
+    val workspaceId: UUID,
+    val refreshId: UUID,
+    val principalUserId: UUID,
+    val instanceId: UUID,
+    val dashboardId: UUID,
+)
+
+/**
+ * The in-flight starts of this deployment — the pre-row half of an abort (#356). A refresh id is CLIENT-minted, so an
+ * abort can arrive while `startRefresh` is still evaluating or waiting for admission, before `insertRunning` creates
+ * the row an abort is judged against. The start registers itself here as soon as the dashboard is resolved, and the
+ * abort route consults it when — and ONLY when — no row exists: a matching marker (same workspace, same dashboard,
+ * the caller's own principal AND client instance, or `execution.cancel_all`) is the proof that the caller owns the
+ * id, so the abort intent is recorded under it and answered 202; the engine re-reads the flag at job start and ends
+ * the refresh ABORTED before any source runs.
+ *
+ * The store is transient and TTL'd by design — a start's own exit removes its marker (the row is then the only
+ * authority), and a start whose process died expires like a flag whose refresh never read it. It is Redis, not
+ * JVM-local, because an abort may land on any instance while the start runs on another — the same reason
+ * [RefreshAbortFlags] is.
+ */
+interface RefreshStartMarkers {
+    /**
+     * Registers an in-flight start, expiring after [ttlSeconds]. False when [principalUserId] already holds
+     * [perPrincipalLimit] markers — the start is refused (the per-user stream cap refuses it soon anyway; refusing
+     * here keeps the bound exact instead of dropping an older start's abort authorization).
+     */
+    fun register(
+        marker: RefreshStartMarker,
+        ttlSeconds: Long,
+        perPrincipalLimit: Int,
+    ): Boolean
+
+    /** The marker for [refreshId] in [workspaceId], or null — no such start, or its exit already removed it. */
+    fun find(
+        workspaceId: UUID,
+        refreshId: UUID,
+    ): RefreshStartMarker?
+
+    /**
+     * Removes the marker — `startRefresh`'s own cleanup on EVERY exit (the row, or the refusal, speaks from there).
+     * [principalUserId] is the STARTING principal (the caller knows its own): the per-principal bound counts only
+     * starts still in flight.
+     */
+    fun clear(
+        workspaceId: UUID,
+        principalUserId: UUID,
+        refreshId: UUID,
+    )
+}
+
+/**
+ * Redis-backed [RefreshStartMarkers]: the marker at `dp:refresh-start:{workspace}:{refresh}`, the per-principal bound
+ * in a set beside it (`dp:refresh-starts:{workspace}:{principal}` — the count of starts still in flight).
+ */
+class RedisRefreshStartMarkers(
+    private val redis: StringRedisTemplate,
+) : RefreshStartMarkers {
+    override fun register(
+        marker: RefreshStartMarker,
+        ttlSeconds: Long,
+        perPrincipalLimit: Int,
+    ): Boolean =
+        try {
+            val set = principalSetKey(marker.workspaceId, marker.principalUserId)
+            redis.opsForSet().add(set, marker.refreshId.toString())
+            redis.expire(set, Duration.ofSeconds(ttlSeconds))
+            if ((redis.opsForSet().size(set) ?: 0L) > perPrincipalLimit) {
+                // The bound is the point: the NEWEST start is the refused one, so an older start never loses its
+                // abort authorization. The set entry of a refused start goes with it.
+                redis.opsForSet().remove(set, marker.refreshId.toString())
+                false
+            } else {
+                redis.opsForValue().set(markerKey(marker.workspaceId, marker.refreshId), value(marker), Duration.ofSeconds(ttlSeconds))
+                true
+            }
+        } catch (e: DataAccessException) {
+            // A store fault must not refuse the start (the flags' own posture): the start proceeds un-marked, and
+            // a pre-row abort of it answers 404 exactly as before this store existed — never a false grant.
+            LOG.warn("event=dashboard.refresh_start_marker_unwritable refresh_id={} error={}", marker.refreshId, e.javaClass.simpleName)
+            true
+        }
+
+    @Suppress("SwallowedException")
+    override fun find(
+        workspaceId: UUID,
+        refreshId: UUID,
+    ): RefreshStartMarker? =
+        try {
+            redis.opsForValue().get(markerKey(workspaceId, refreshId))?.let { parse(workspaceId, refreshId, it) }
+        } catch (e: DataAccessException) {
+            // "Could not read" is "no marker": an authorization is never granted by a fault.
+            LOG.warn("event=dashboard.refresh_start_marker_unreadable refresh_id={} error={}", refreshId, e.javaClass.simpleName)
+            null
+        }
+
+    @Suppress("SwallowedException")
+    override fun clear(
+        workspaceId: UUID,
+        principalUserId: UUID,
+        refreshId: UUID,
+    ) {
+        try {
+            redis.delete(markerKey(workspaceId, refreshId))
+            redis.opsForSet().remove(principalSetKey(workspaceId, principalUserId), refreshId.toString())
+        } catch (e: DataAccessException) {
+            // Both keys carry a TTL, so a failed cleanup expires on its own.
+            LOG.warn("event=dashboard.refresh_start_marker_not_cleared refresh_id={} error={}", refreshId, e.javaClass.simpleName)
+        }
+    }
+
+    private fun value(marker: RefreshStartMarker): String = "${marker.principalUserId} ${marker.instanceId} ${marker.dashboardId}"
+
+    /** The stored `principal instance dashboard` triple; a value that does not parse reads as no marker. */
+    private fun parse(
+        workspaceId: UUID,
+        refreshId: UUID,
+        raw: String,
+    ): RefreshStartMarker? {
+        val parts = raw.split(' ')
+        if (parts.size != VALUE_PARTS) return null
+        return runCatching {
+            RefreshStartMarker(
+                workspaceId = workspaceId,
+                refreshId = refreshId,
+                principalUserId = UUID.fromString(parts[0]),
+                instanceId = UUID.fromString(parts[1]),
+                dashboardId = UUID.fromString(parts[2]),
+            )
+        }.getOrNull()
+    }
+
+    private fun markerKey(
+        workspaceId: UUID,
+        refreshId: UUID,
+    ) = "$KEY_PREFIX$workspaceId:$refreshId"
+
+    private fun principalSetKey(
+        workspaceId: UUID,
+        principalUserId: UUID,
+    ) = "$SET_PREFIX$workspaceId:$principalUserId"
+
+    private companion object {
+        const val KEY_PREFIX = "dp:refresh-start:"
+        const val SET_PREFIX = "dp:refresh-starts:"
+        const val VALUE_PARTS = 3
+        val LOG = LoggerFactory.getLogger(RedisRefreshStartMarkers::class.java)
+    }
+}

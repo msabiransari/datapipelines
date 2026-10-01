@@ -1,0 +1,92 @@
+package co.datapipelines.executor
+
+import io.kotest.matchers.booleans.shouldBeFalse
+import io.kotest.matchers.booleans.shouldBeTrue
+import io.kotest.matchers.longs.shouldBeInRange
+import io.kotest.matchers.shouldBe
+import io.kotest.matchers.types.shouldBeTypeOf
+import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.TestInstance
+import java.util.UUID
+
+/**
+ * [RedisRefreshStartMarkers] against a real Redis (#356): the key is the documented
+ * `dp:refresh-start:{workspace}:{refresh}`, it expires by itself, the per-principal bound refuses the NEWEST start
+ * (an older start never loses its abort authorization), and `clear` — the start's own exit — frees the bound. The
+ * honouring itself (a matching marker recording the abort intent, the engine ending the refresh ABORTED) is
+ * `DashboardRuntimeAbortTest`'s and `RefreshEngineTest`'s; the E2E proves it over the real HTTP surface.
+ */
+@TestInstance(TestInstance.Lifecycle.PER_CLASS)
+class RedisRefreshStartMarkersIntegrationTest {
+    private val redis = RedisSupport.template()
+    private val markers = RedisRefreshStartMarkers(redis)
+
+    private val workspace = UUID.randomUUID()
+    private val user = UUID.randomUUID()
+    private val refresh = UUID.randomUUID()
+
+    @BeforeEach
+    fun setUp() {
+        RedisSupport.flush(redis)
+    }
+
+    private fun marker(
+        refreshId: UUID = refresh,
+        userId: UUID = user,
+    ) = RefreshStartMarker(workspace, refreshId, userId, UUID.randomUUID(), UUID.randomUUID())
+
+    @Test
+    fun `a registration is readable for that refresh only, with the given expiry and the documented fields`() {
+        val instance = UUID.randomUUID()
+        val dashboard = UUID.randomUUID()
+        val registered =
+            markers
+                .register(RefreshStartMarker(workspace, refresh, user, instance, dashboard), ttlSeconds = 60, perPrincipalLimit = 4)
+        registered.shouldBeTrue()
+
+        val found = markers.find(workspace, refresh)
+        found.shouldBeTypeOf<RefreshStartMarker>()
+        found.principalUserId shouldBe user
+        found.instanceId shouldBe instance
+        found.dashboardId shouldBe dashboard
+        markers.find(workspace, UUID.randomUUID()) shouldBe null
+        markers.find(UUID.randomUUID(), refresh) shouldBe null // another workspace's start is absent, not forbidden
+        redis.getExpire("dp:refresh-start:$workspace:$refresh") shouldBeInRange 1L..60L
+    }
+
+    @Test
+    fun `clear removes the marker and the bound entry, and is idempotent`() {
+        markers.register(marker(), ttlSeconds = 60, perPrincipalLimit = 4).shouldBeTrue()
+
+        markers.clear(workspace, user, refresh)
+        markers.clear(workspace, user, refresh)
+
+        markers.find(workspace, refresh) shouldBe null
+        // The bound slot is free again: another start registers.
+        markers.register(marker(), ttlSeconds = 60, perPrincipalLimit = 1).shouldBeTrue()
+    }
+
+    @Test
+    fun `the per-principal bound refuses the newest start and keeps the older ones`() {
+        (1L..3L).forEach { n ->
+            val id = UUID.nameUUIDFromBytes(n.toString().toByteArray())
+            markers.register(marker(refreshId = id), ttlSeconds = 60, perPrincipalLimit = 3).shouldBeTrue()
+        }
+
+        // The fourth start of the same principal is refused; every earlier marker still authorises its own abort.
+        val refused = UUID.randomUUID()
+        markers.register(marker(refreshId = refused), ttlSeconds = 60, perPrincipalLimit = 3).shouldBeFalse()
+        markers.find(workspace, refused) shouldBe null
+
+        // Another principal's bound is their own.
+        markers.register(marker(refreshId = refused, userId = UUID.randomUUID()), ttlSeconds = 60, perPrincipalLimit = 3).shouldBeTrue()
+    }
+
+    @Test
+    fun `the marker is not the abort flag - the two key spaces never overlap`() {
+        markers.register(marker(), ttlSeconds = 60, perPrincipalLimit = 4).shouldBeTrue()
+
+        redis.hasKey("dp:refresh-abort:$refresh") shouldBe false
+    }
+}

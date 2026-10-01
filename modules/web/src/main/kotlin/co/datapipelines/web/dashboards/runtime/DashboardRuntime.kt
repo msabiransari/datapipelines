@@ -16,6 +16,8 @@ import co.datapipelines.auth.Permission
 import co.datapipelines.executor.AbortReason
 import co.datapipelines.executor.ExecutionCancellationService
 import co.datapipelines.executor.RefreshAbortFlags
+import co.datapipelines.executor.RefreshStartMarker
+import co.datapipelines.executor.RefreshStartMarkers
 import co.datapipelines.parameters.EvaluateResponseJson
 import co.datapipelines.parameters.ParameterEvaluator
 import co.datapipelines.visualization.DashboardErrorCodes
@@ -71,6 +73,7 @@ class DashboardRuntime internal constructor(
     private val streamAuthority: RefreshStreamAuthority,
     private val abortSignal: RefreshAbortSignal,
     private val abortFlags: RefreshAbortFlags,
+    private val startMarkers: RefreshStartMarkers,
     private val cancellation: ExecutionCancellationService,
     private val audit: AuditEventSink,
     private val dashboards: DashboardService,
@@ -133,18 +136,51 @@ class DashboardRuntime internal constructor(
         if (refreshes.find(workspaceId, request.refreshId) != null) throw RuntimeRequests.bad("refresh_id", RuntimeRequests.REUSED)
         val resolved = resolve(principal, id)
         requireCurrent(resolved, request.configurationId)
-        val values = evaluatedValues(principal, resolved, request)
-        val plan = planner.plan(resolved.served.body, request.scope, request.targets, values)
-        val admitted = admit(workspaceId, plan)
+        registerStartMarker(principal, workspaceId, resolved, request)
         var opened = false
+        var admitted: Admission? = null
         try {
-            val job = job(principal, resolved, request, plan, admitted)
+            val values = evaluatedValues(principal, resolved, request)
+            val plan = planner.plan(resolved.served.body, request.scope, request.targets, values)
+            val granted = admit(workspaceId, plan)
+            admitted = granted
+            val job = job(principal, resolved, request, plan, granted)
             val started = refreshes.insertRunning(recordOf(principal, resolved, request, job))
             if (!started) throw RuntimeRequests.bad("refresh_id", RuntimeRequests.REUSED)
-            return open(principal, job, admitted).also { opened = true }
+            return open(principal, job, granted).also { opened = true }
         } finally {
-            if (!opened) admitted.close() // nothing was started: every place taken comes back
+            // The window is closed: from here the row (or the refusal) is the only authority an abort consults, so
+            // the in-flight start's marker is removed on EVERY exit (#356). A refresh that fails after an abort was
+            // already recorded leaves its TTL'd flag behind — inert, the id is single-use.
+            startMarkers.clear(workspaceId, principal.userId, request.refreshId)
+            if (!opened) admitted?.close() // nothing was started: every place taken comes back
         }
+    }
+
+    /**
+     * Marks this start as in flight so an abort arriving before the row is honoured (#356). A principal at the
+     * marker bound — more starts in flight than their stream cap — is refused the saturated 429: the bound stays
+     * exact, no start ever loses its own abort authorization to a newer one.
+     */
+    private fun registerStartMarker(
+        principal: AuthenticatedPrincipal,
+        workspaceId: UUID,
+        resolved: ResolvedDashboard,
+        request: RefreshRequest,
+    ) {
+        val registered =
+            startMarkers.register(
+                RefreshStartMarker(
+                    workspaceId = workspaceId,
+                    refreshId = request.refreshId,
+                    principalUserId = principal.userId,
+                    instanceId = request.instanceId,
+                    dashboardId = resolved.served.record.id,
+                ),
+                ttlSeconds = (config.maxRefreshSeconds + FLAG_GRACE_SECONDS).toLong(),
+                perPrincipalLimit = streams.maxStreamsPerUser,
+            )
+        if (!registered) throw refused()
     }
 
     private fun evaluatedValues(
@@ -290,7 +326,10 @@ class DashboardRuntime internal constructor(
      * Aborts a RUNNING refresh the caller owns (their principal AND their client instance) — or any, with
      * `execution.cancel_all`. Answers without waiting: the flag is written for the owning instance, the local trigger is
      * pulled when this IS the owner, and every execution the refresh has started is cancelled through the executor's own
-     * path. Anything else — no such refresh, another dashboard's, someone else's, one that already finished — is the
+     * path. An abort that arrives while the refresh is still STARTING — no row yet, but an in-flight start marker
+     * matching the caller (same workspace and dashboard, their principal AND instance, or `execution.cancel_all`,
+     * #356) — records the intent under the id the same way, and the engine ends the refresh ABORTED at job start.
+     * Anything else — no such refresh, another dashboard's, someone else's, one that already finished — is the
      * same `dashboard.refresh.not_found`, so an id proves nothing about a refresh the caller may not touch.
      */
     internal fun abort(
@@ -299,18 +338,51 @@ class DashboardRuntime internal constructor(
         refreshId: UUID,
         request: AbortRequest,
     ) {
-        val record = refreshes.find(principal.requireWorkspace().id, refreshId)
+        val workspaceId = principal.requireWorkspace().id
+        val record = refreshes.find(workspaceId, refreshId)
         val mine = record != null && record.principalUserId == principal.userId && record.instanceId == request.instanceId
         val abortable = record != null && record.dashboardId == id && record.status == RefreshStatus.RUNNING
-        if (!abortable || !(mine || principal.holds(Permission.EXECUTION_CANCEL_ALL))) throw refreshNotFound(refreshId)
-        abortFlags.request(refreshId, ttlSeconds = (config.maxRefreshSeconds + FLAG_GRACE_SECONDS).toLong())
-        if (abortSignal.owns(refreshId)) abortSignal.triggerLocal(refreshId)
-        refreshes.linksOf(refreshId).map { it.executionId }.distinct().forEach {
-            runCatching { cancellation.cancel(it, AbortReason.CANCELLED) }
-                .onFailure { e ->
-                    log.warn("event=dashboard.refresh_abort_cancel_failed refresh_id={} error={}", refreshId, e.javaClass.simpleName)
+        when {
+            abortable && (mine || principal.holds(Permission.EXECUTION_CANCEL_ALL)) -> {
+                abortFlags.request(refreshId, ttlSeconds = abortFlagTtlSeconds())
+                if (abortSignal.owns(refreshId)) abortSignal.triggerLocal(refreshId)
+                refreshes.linksOf(refreshId).map { it.executionId }.distinct().forEach {
+                    runCatching { cancellation.cancel(it, AbortReason.CANCELLED) }
+                        .onFailure { e ->
+                            log.warn(
+                                "event=dashboard.refresh_abort_cancel_failed refresh_id={} error={}",
+                                refreshId,
+                                e.javaClass.simpleName,
+                            )
+                        }
                 }
+            }
+
+            // No row (or not abortable): only a truly absent row can still be a start in flight — a finished
+            // or foreign-dashboard row is 404 exactly as before, never rescued by a marker (#356).
+            record == null && abortStarting(principal, id, workspaceId, refreshId, request) -> {
+                abortFlags.request(refreshId, ttlSeconds = abortFlagTtlSeconds())
+            }
+
+            else -> {
+                throw refreshNotFound(refreshId)
+            }
         }
+    }
+
+    private fun abortFlagTtlSeconds(): Long = (config.maxRefreshSeconds + FLAG_GRACE_SECONDS).toLong()
+
+    /** True when the caller's own start of this id is still in flight for this dashboard; the intent is then recorded. */
+    private fun abortStarting(
+        principal: AuthenticatedPrincipal,
+        id: UUID,
+        workspaceId: UUID,
+        refreshId: UUID,
+        request: AbortRequest,
+    ): Boolean {
+        val starting = startMarkers.find(workspaceId, refreshId)?.takeIf { it.dashboardId == id } ?: return false
+        return principal.holds(Permission.EXECUTION_CANCEL_ALL) ||
+            (starting.principalUserId == principal.userId && starting.instanceId == request.instanceId)
     }
 
     // ---- GET /refreshes, GET /refreshes/{refresh_id} ------------------------------------------------------
