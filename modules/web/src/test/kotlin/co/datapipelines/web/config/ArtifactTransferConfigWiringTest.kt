@@ -264,7 +264,7 @@ class ArtifactTransferConfigWiringTest {
                 .withIndex()
                 .mapNotNull { (index, line) ->
                     val trimmed = line.trim()
-                    if (trimmed.isEmpty() || trimmed.startsWith("//") || trimmed.startsWith("*") || trimmed.startsWith("/*")) {
+                    if (trimmed.isEmpty() || COMMENT_LINE.containsMatchIn(trimmed)) {
                         return@mapNotNull null
                     }
                     if (MATCHER.containsMatchIn(line)) matcherLines++
@@ -307,7 +307,10 @@ class ArtifactTransferConfigWiringTest {
         }
     }
 
-    private fun depthAt(line: String, index: Int): Int {
+    private fun depthAt(
+        line: String,
+        index: Int,
+    ): Int {
         var depth = 0
         for (i in 0 until index) {
             when (line[i]) {
@@ -414,13 +417,18 @@ class ArtifactTransferConfigWiringTest {
      * null, and a SQL COUNT is never null — the delivered suite's residue checks were of that shape
      * and executed zero assertions (L1c-d).
      */
-    private fun residue(): Residue =
-        Residue(
-            jdbc.jdbcTemplate.queryForObject("SELECT count(*) FROM visualizations", Int::class.java) ?: 0,
-            jdbc.jdbcTemplate.queryForObject("SELECT count(*) FROM dashboards", Int::class.java) ?: 0,
-        )
+    private fun residue(): Residue {
+        // The queries are LOCAL values: the assertions downstream are unconditional, and a matcher
+        // bound to an Elvis fallback would run only on a null left side — a SQL COUNT is never null.
+        val visualizations = jdbc.jdbcTemplate.queryForObject("SELECT count(*) FROM visualizations", Int::class.java) ?: 0
+        val dashboards = jdbc.jdbcTemplate.queryForObject("SELECT count(*) FROM dashboards", Int::class.java) ?: 0
+        return Residue(visualizations, dashboards)
+    }
 
-    private data class Residue(val visualizations: Int, val dashboards: Int)
+    private data class Residue(
+        val visualizations: Int,
+        val dashboards: Int,
+    )
 
     private fun nothingLanded() {
         val after = residue()
@@ -450,6 +458,9 @@ class ArtifactTransferConfigWiringTest {
 
         /** A Kotest infix matcher: the bare word, or the word followed by a capital continuation. */
         val MATCHER = Regex("""\bshould(?:[A-Z]\w*)?\b""")
+
+        /** A comment line, by its first non-blank characters — skipped by the guard's scan. */
+        val COMMENT_LINE = Regex("""^(?://|/\*|\*)""")
 
         /** Matcher-bearing CODE lines this file held at the guard's birth (the non-vacuity floor). */
         const val MATCHER_FLOOR = 25
@@ -540,8 +551,7 @@ class ArtifactTransferConfigWiringTest {
             fun authoringGuard(): co.datapipelines.pipeline.AuthoringGuard = co.datapipelines.pipeline.AuthoringGuard(true)
 
             @Bean
-            fun transactionManager(dataSource: javax.sql.DataSource): PlatformTransactionManager =
-                DataSourceTransactionManager(dataSource)
+            fun transactionManager(dataSource: javax.sql.DataSource): PlatformTransactionManager = DataSourceTransactionManager(dataSource)
         }
     }
 }
