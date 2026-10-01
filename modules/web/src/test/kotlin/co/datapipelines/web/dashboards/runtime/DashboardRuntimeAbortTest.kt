@@ -15,6 +15,7 @@ import co.datapipelines.executor.ExecutionCancellationService
 import co.datapipelines.executor.RefreshAbortFlags
 import co.datapipelines.executor.RefreshStartMarker
 import co.datapipelines.executor.RefreshStartMarkers
+import co.datapipelines.executor.StartMarkerRegistration
 import co.datapipelines.parameters.ParameterEvaluator
 import co.datapipelines.visualization.ArtifactRecord
 import co.datapipelines.visualization.ArtifactVersion
@@ -123,7 +124,8 @@ class DashboardRuntimeAbortTest {
         every { streams.atStreamLimit(userId) } returns false
         every { streams.maxStreamsPerUser } returns MARKER_BOUND
         every { resolver.resolve(workspaceId, any(), dashboardId) } returns resolvedDashboard
-        every { startMarkers.register(any(), ttlSeconds = any(), perPrincipalLimit = MARKER_BOUND) } returns true
+        every { startMarkers.register(any(), ttlSeconds = any(), perPrincipalLimit = MARKER_BOUND) } returns
+            StartMarkerRegistration.REGISTERED
         every { planner.plan(any(), any(), any(), any()) } returns mockk<RefreshPlan> { every { invocations } returns emptyList() }
         coEvery { admission.admit(workspaceId, 0) } returns mockk<Admission>()
     }
@@ -154,6 +156,38 @@ class DashboardRuntimeAbortTest {
 
         verify { abortFlags.request(refreshId, ttlSeconds = any()) }
         verify(exactly = 0) { abortSignal.triggerLocal(any()) }
+        verify(exactly = 0) { cancellation.cancel(any(), any()) }
+    }
+
+    @Test
+    fun `execution cancel_all reaches another person's start during the window too - the one permission the row path admits`() {
+        val marker =
+            RefreshStartMarker(workspaceId, refreshId, UUID.randomUUID(), UUID.randomUUID(), dashboardId)
+        every { refreshes.find(workspaceId, refreshId) } returns null
+        every { startMarkers.find(workspaceId, refreshId) } returns marker
+        every { abortSignal.owns(refreshId) } returns false
+        val canceller = principal()
+        every { canceller.holds(Permission.EXECUTION_CANCEL_ALL) } returns true
+
+        runtime.abort(canceller, dashboardId, refreshId, AbortRequest(instanceId))
+
+        verify { abortFlags.request(refreshId, ttlSeconds = any()) }
+    }
+
+    @Test
+    fun `the marker path fires the local trigger when the row landed on this instance between the two reads`() {
+        // The row read saw nothing, the marker read still found the start — but the stream is already running
+        // here: the local trigger spares it the remote poll (356 merge follow-up).
+        val marker =
+            RefreshStartMarker(workspaceId, refreshId, userId, instanceId, dashboardId)
+        every { refreshes.find(workspaceId, refreshId) } returns null
+        every { startMarkers.find(workspaceId, refreshId) } returns marker
+        every { abortSignal.owns(refreshId) } returns true
+
+        runtime.abort(principal(), dashboardId, refreshId, AbortRequest(instanceId))
+
+        verify { abortFlags.request(refreshId, ttlSeconds = any()) }
+        verify(exactly = 1) { abortSignal.triggerLocal(refreshId) }
         verify(exactly = 0) { cancellation.cancel(any(), any()) }
     }
 
@@ -213,7 +247,8 @@ class DashboardRuntimeAbortTest {
     @Test
     fun `a start removes its marker on the refused exit - admission found no room`() {
         stubStart()
-        every { startMarkers.register(any(), ttlSeconds = any(), perPrincipalLimit = MARKER_BOUND) } returns true
+        every { startMarkers.register(any(), ttlSeconds = any(), perPrincipalLimit = MARKER_BOUND) } returns
+            StartMarkerRegistration.REGISTERED
         coEvery { admission.admit(workspaceId, 0) } returns null
 
         val thrown = assertThrows<ApiException> { runtime.startRefresh(principal(), dashboardId, request()) }
@@ -223,14 +258,44 @@ class DashboardRuntimeAbortTest {
     }
 
     @Test
+    fun `a fault in the marker's clear never keeps the admission place - the places come back first`() {
+        // The store's clear maps Redis faults to a log line; anything else must still not skip the close (356 merge
+        // follow-up): the place is the scarce thing, the marker is TTL'd.
+        stubStart()
+        val granted = mockk<Admission>(relaxed = true)
+        coEvery { admission.admit(workspaceId, 0) } returns granted
+        every { refreshes.insertRunning(any()) } returns false
+        every { startMarkers.clear(workspaceId, userId, refreshId) } throws IllegalStateException("connection factory closed")
+
+        assertThrows<IllegalStateException> { runtime.startRefresh(principal(), dashboardId, request()) }
+
+        verify(exactly = 1) { granted.close() }
+    }
+
+    @Test
     fun `a principal at the marker bound is refused the saturated 429 and registers nothing further`() {
         stubStart()
-        every { startMarkers.register(any(), ttlSeconds = any(), perPrincipalLimit = MARKER_BOUND) } returns false
+        every { startMarkers.register(any(), ttlSeconds = any(), perPrincipalLimit = MARKER_BOUND) } returns
+            StartMarkerRegistration.AT_BOUND
 
         val thrown = assertThrows<ApiException> { runtime.startRefresh(principal(), dashboardId, request()) }
 
         thrown.code shouldBe DashboardErrorCodes.REFRESH_SATURATED
         verify(exactly = 0) { startMarkers.clear(any(), any(), any()) }
+    }
+
+    @Test
+    fun `a start of an id already in flight is the reused-id 400 - the first start keeps its marker`() {
+        // No row exists during the window, so only the store can see the replay (356 merge follow-up).
+        stubStart()
+        every { startMarkers.register(any(), ttlSeconds = any(), perPrincipalLimit = MARKER_BOUND) } returns
+            StartMarkerRegistration.ALREADY_IN_FLIGHT
+
+        val thrown = assertThrows<ApiException> { runtime.startRefresh(principal(), dashboardId, request()) }
+
+        thrown.code shouldBe DashboardErrorCodes.BODY_INVALID
+        verify(exactly = 0) { startMarkers.clear(any(), any(), any()) }
+        verify(exactly = 0) { planner.plan(any(), any(), any(), any()) }
     }
 
     @Test

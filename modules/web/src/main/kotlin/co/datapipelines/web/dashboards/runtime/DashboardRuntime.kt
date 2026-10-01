@@ -18,6 +18,7 @@ import co.datapipelines.executor.ExecutionCancellationService
 import co.datapipelines.executor.RefreshAbortFlags
 import co.datapipelines.executor.RefreshStartMarker
 import co.datapipelines.executor.RefreshStartMarkers
+import co.datapipelines.executor.StartMarkerRegistration
 import co.datapipelines.parameters.EvaluateResponseJson
 import co.datapipelines.parameters.ParameterEvaluator
 import co.datapipelines.visualization.DashboardErrorCodes
@@ -152,15 +153,19 @@ class DashboardRuntime internal constructor(
             // The window is closed: from here the row (or the refusal) is the only authority an abort consults, so
             // the in-flight start's marker is removed on EVERY exit (#356). A refresh that fails after an abort was
             // already recorded leaves its TTL'd flag behind — inert, the id is single-use.
-            startMarkers.clear(workspaceId, principal.userId, request.refreshId)
+            // Admission first: the place is the scarce thing, the marker is TTL'd — a fault in the store's clear
+            // that is not a DataAccessException must not skip the close (356 merge follow-up).
             if (!opened) admitted?.close() // nothing was started: every place taken comes back
+            startMarkers.clear(workspaceId, principal.userId, request.refreshId)
         }
     }
 
     /**
      * Marks this start as in flight so an abort arriving before the row is honoured (#356). A principal at the
      * marker bound — more starts in flight than their stream cap — is refused the saturated 429: the bound stays
-     * exact, no start ever loses its own abort authorization to a newer one.
+     * exact, no start ever loses its own abort authorization to a newer one. A start of an id ALREADY in flight
+     * (a replayed request; the row check above cannot see it, no row exists yet) is the reused-id 400: the first
+     * start keeps its marker and its abort (356 merge follow-up).
      */
     private fun registerStartMarker(
         principal: AuthenticatedPrincipal,
@@ -168,7 +173,7 @@ class DashboardRuntime internal constructor(
         resolved: ResolvedDashboard,
         request: RefreshRequest,
     ) {
-        val registered =
+        val registration =
             startMarkers.register(
                 RefreshStartMarker(
                     workspaceId = workspaceId,
@@ -180,7 +185,11 @@ class DashboardRuntime internal constructor(
                 ttlSeconds = (config.maxRefreshSeconds + FLAG_GRACE_SECONDS).toLong(),
                 perPrincipalLimit = streams.maxStreamsPerUser,
             )
-        if (!registered) throw refused()
+        when (registration) {
+            StartMarkerRegistration.REGISTERED -> Unit
+            StartMarkerRegistration.AT_BOUND -> throw refused()
+            StartMarkerRegistration.ALREADY_IN_FLIGHT -> throw RuntimeRequests.bad("refresh_id", RuntimeRequests.REUSED)
+        }
     }
 
     private fun evaluatedValues(
@@ -362,6 +371,9 @@ class DashboardRuntime internal constructor(
             // or foreign-dashboard row is 404 exactly as before, never rescued by a marker (#356).
             record == null && abortStarting(principal, id, workspaceId, refreshId, request) -> {
                 abortFlags.request(refreshId, ttlSeconds = abortFlagTtlSeconds())
+                // The row may have landed on THIS instance between the row read and the marker read: then the
+                // stream is running here and the local trigger spares it the remote poll (356 merge follow-up).
+                if (abortSignal.owns(refreshId)) abortSignal.triggerLocal(refreshId)
             }
 
             else -> {

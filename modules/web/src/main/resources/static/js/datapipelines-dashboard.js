@@ -1108,7 +1108,9 @@
       var name = refresh.targets[i];
       var occurrence = this._occurrences[name];
       if (!occurrence || occurrence.owner !== refreshId) continue;
-      if (occurrence.status === "in-progress" || occurrence.status === "success") {
+      // An "abort" chip is a target still waiting for the server's word (#356: the click no longer ends the
+      // refresh), so a dropped stream lists it as pending with the rest — never a chip stuck on "abort".
+      if (occurrence.status === "in-progress" || occurrence.status === "success" || occurrence.status === "abort") {
         occurrence.status = "ready";
         occurrence.stale = true;
         try {

@@ -1023,6 +1023,35 @@ test("a 202 abort acks with the requested reason and the ABORTED terminal frame 
   assert.equal(instance._refreshes[refreshId].ended, true, "the terminal frame ended the refresh");
 });
 
+test("an abort followed by a dropped stream leaves no chip stuck on abort: the targets are pending, stale, with Retry", async () => {
+  // #356 moved the end of a refresh from the click to the server's terminal frame — so a stream that drops
+  // AFTER the click must treat the "abort" chips as the still-pending targets they are (merge follow-up).
+  const fetchImpl = fakeFetch();
+  const holders = [];
+  fetchImpl.on("/runtime/visualizations", () => {
+    const holder = [];
+    holders.push(holder);
+    return fetchImpl.heldStream(null, holder);
+  });
+  const { instance, adapter } = await boot({ fetch: fetchImpl });
+  const refreshId = await instance.refresh({ scope: "all" });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  const outcome = await instance.abort(refreshId);
+  assert.deepEqual(outcome, { abort_requested: true });
+
+  holders[0][0](""); // the stream ends with no terminal frame: a connection loss
+  await new Promise((resolve) => setTimeout(resolve, 40));
+
+  const disconnected = adapter.log.find((line) => line.startsWith("notify:transport.disconnected"));
+  assert.ok(disconnected, adapter.log.join("|"));
+  assert.ok(adapter.log.includes("status:chart:ready:stale"), "the abort chip became a stale pending target: " + adapter.log.join("|"));
+  assert.ok(adapter.log.includes("status:cells:ready:stale"), adapter.log.join("|"));
+  assert.equal(instance._occurrences.chart.status, "ready", "no occurrence is left in the abort state");
+  assert.equal(instance._occurrences.cells.status, "ready");
+  const retry = await instance.recover("retry");
+  assert.ok(retry && retry !== refreshId, "Retry is on offer and mints a fresh refresh id");
+});
+
 test("a 404 abort is not an ack: the chips say not-confirmed, nothing publishes, and the intent may be asked again", async () => {
   const fetchImpl = fakeFetch();
   const holders = [];

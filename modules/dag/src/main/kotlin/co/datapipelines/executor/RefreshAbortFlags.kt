@@ -81,6 +81,22 @@ data class RefreshStartMarker(
     val dashboardId: UUID,
 )
 
+/** The outcome of [RefreshStartMarkers.register]. */
+enum class StartMarkerRegistration {
+    /** The marker is written — or the store could not be reached and the start proceeds unmarked (fail-open). */
+    REGISTERED,
+
+    /** The principal already holds the per-principal limit of in-flight starts: the start is refused. */
+    AT_BOUND,
+
+    /**
+     * A start of this refresh id is ALREADY in flight: a replayed request (or a guessed id), never a second
+     * owner. The first start's marker is untouched, and nothing of the replay reaches the bound set — so the
+     * replay's exit cannot delete the first start's entry (the 356 merge's security pass).
+     */
+    ALREADY_IN_FLIGHT,
+}
+
 /**
  * The in-flight starts of this deployment — the pre-row half of an abort (#356). A refresh id is CLIENT-minted, so an
  * abort can arrive while `startRefresh` is still evaluating or waiting for admission, before `insertRunning` creates
@@ -97,15 +113,17 @@ data class RefreshStartMarker(
  */
 interface RefreshStartMarkers {
     /**
-     * Registers an in-flight start, expiring after [ttlSeconds]. False when [principalUserId] already holds
-     * [perPrincipalLimit] markers — the start is refused (the per-user stream cap refuses it soon anyway; refusing
-     * here keeps the bound exact instead of dropping an older start's abort authorization).
+     * Registers an in-flight start, expiring after [ttlSeconds]. [StartMarkerRegistration.AT_BOUND] when the
+     * principal already holds [perPrincipalLimit] markers — the start is refused (the per-user stream cap refuses
+     * it soon anyway; refusing here keeps the bound exact instead of dropping an older start's abort
+     * authorization); [StartMarkerRegistration.ALREADY_IN_FLIGHT] when a start of [RefreshStartMarker.refreshId]
+     * is already marked — the marker is written once and never overwritten.
      */
     fun register(
         marker: RefreshStartMarker,
         ttlSeconds: Long,
         perPrincipalLimit: Int,
-    ): Boolean
+    ): StartMarkerRegistration
 
     /** The marker for [refreshId] in [workspaceId], or null — no such start, or its exit already removed it. */
     fun find(
@@ -136,25 +154,35 @@ class RedisRefreshStartMarkers(
         marker: RefreshStartMarker,
         ttlSeconds: Long,
         perPrincipalLimit: Int,
-    ): Boolean =
+    ): StartMarkerRegistration =
         try {
-            val set = principalSetKey(marker.workspaceId, marker.principalUserId)
-            redis.opsForSet().add(set, marker.refreshId.toString())
-            redis.expire(set, Duration.ofSeconds(ttlSeconds))
-            if ((redis.opsForSet().size(set) ?: 0L) > perPrincipalLimit) {
-                // The bound is the point: the NEWEST start is the refused one, so an older start never loses its
-                // abort authorization. The set entry of a refused start goes with it.
-                redis.opsForSet().remove(set, marker.refreshId.toString())
-                false
+            val key = markerKey(marker.workspaceId, marker.refreshId)
+            val ttl = Duration.ofSeconds(ttlSeconds)
+            // The marker is written ONCE (SET NX), and FIRST: a replayed start of an id already in flight never
+            // overwrites the first start's owner and never touches the bound set — a same-principal replay would
+            // otherwise share the set member, and its rollback would take the first start's slot with it.
+            val written = redis.opsForValue().setIfAbsent(key, value(marker), ttl) ?: false
+            if (!written) {
+                StartMarkerRegistration.ALREADY_IN_FLIGHT
             } else {
-                redis.opsForValue().set(markerKey(marker.workspaceId, marker.refreshId), value(marker), Duration.ofSeconds(ttlSeconds))
-                true
+                val set = principalSetKey(marker.workspaceId, marker.principalUserId)
+                redis.opsForSet().add(set, marker.refreshId.toString())
+                redis.expire(set, ttl)
+                if ((redis.opsForSet().size(set) ?: 0L) > perPrincipalLimit) {
+                    // The bound is the point: the NEWEST start is the refused one, so an older start never loses
+                    // its abort authorization. The set entry AND the marker of a refused start go with it.
+                    redis.opsForSet().remove(set, marker.refreshId.toString())
+                    redis.delete(key)
+                    StartMarkerRegistration.AT_BOUND
+                } else {
+                    StartMarkerRegistration.REGISTERED
+                }
             }
         } catch (e: DataAccessException) {
             // A store fault must not refuse the start (the flags' own posture): the start proceeds un-marked, and
             // a pre-row abort of it answers 404 exactly as before this store existed — never a false grant.
             LOG.warn("event=dashboard.refresh_start_marker_unwritable refresh_id={} error={}", marker.refreshId, e.javaClass.simpleName)
-            true
+            StartMarkerRegistration.REGISTERED
         }
 
     @Suppress("SwallowedException")

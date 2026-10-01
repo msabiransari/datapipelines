@@ -55,6 +55,9 @@ class RefreshEngineTest {
     private val audited = CopyOnWriteArrayList<RefreshResult>()
     private val cancelled = CopyOnWriteArrayList<UUID>()
     private val abortFlag = AtomicBoolean(false)
+
+    /** When set, the abort signal's read itself fails — a store fault at the job-start check (356 merge follow-up). */
+    private var abortThrows = false
     private val launches = CopyOnWriteArrayList<SourceLaunch>()
     private val transformCalls = CopyOnWriteArrayList<Map<String, List<Map<String, Any?>>>>()
     private var scripts: (String) -> Script = { Script.Rows(columns("x" to LogicalType.INTEGER), listOf(listOf(1), listOf(2))) }
@@ -178,7 +181,7 @@ class RefreshEngineTest {
                     }
                 },
             audit = RefreshAudit { _, result -> audited += result },
-            abort = AbortSignal { abortFlag.get() },
+            abort = AbortSignal { if (abortThrows) error("abort store unreachable") else abortFlag.get() },
             canceller = ExecutionCanceller { cancelled += it },
         )
 
@@ -596,6 +599,23 @@ class RefreshEngineTest {
             audited.single().status shouldBe RefreshStatus.ABORTED
             events.last().shouldBeInstanceOf<RefreshEvent.Completed>().status shouldBe "ABORTED"
             cancelled.size shouldBe 1
+        }
+
+    @Test
+    fun `a fault in the job-start abort read ends the refresh FAILED like any bug in the work - never a row left RUNNING`() =
+        runTest {
+            // The #356 check reads the abort store before the fan-out; a read that THROWS (not a DataAccessException,
+            // which the store already maps to false) was outside the try and escaped run() — the row stayed RUNNING
+            // with no terminal frame. The read now sits inside the try (356 merge follow-up).
+            val body = dashboard(listOf(source("s1")), listOf(occurrence("v", inputs = mapOf("main" to "s1"))))
+            abortThrows = true
+
+            val result = engine().run(RefreshFixtures.job(body), ports)
+
+            result.status shouldBe RefreshStatus.FAILED
+            finishes.single().status shouldBe RefreshStatus.FAILED
+            launches.shouldBeEmpty()
+            events.last().shouldBeInstanceOf<RefreshEvent.Completed>().status shouldBe "FAILED"
         }
 
     @Test
