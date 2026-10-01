@@ -149,6 +149,8 @@ class FlywayMigrationIntegrationTest {
                 "42|visualizations and dashboards|true",
                 // #10 L2 — DASHBOARD in chk_triggered_via, dashboard_refreshes and its execution link.
                 "43|dashboard refreshes|true",
+                // #10 L4a — the screenshot upload capability's durable columns on the runs table.
+                "44|visualization test capabilities|true",
             )
     }
 
@@ -574,9 +576,94 @@ class FlywayMigrationIntegrationTest {
                 "cases_json",
                 "environment_json",
                 "mechanical_json",
+                // #10 L4a (V44) — the upload capability: hash-only at rest, deadline ≤ the session's, consumed once.
+                "upload_token_hash",
+                "upload_expires_at",
+                "upload_consumed_at",
             )
         columnsOf("visualization_test_screenshots") shouldContainExactlyInAnyOrder
             listOf("run_id", "media_type", "bytes", "sha256", "width", "height", "depicted_case", "uploaded_by", "uploaded_at")
+    }
+
+    /**
+     * #10 L4a (V44) — the upload capability's durable columns (metadata-db §4.32): hash-only at rest, the
+     * three columns are one capability (nothing without the hash, nothing beside a minted one), and the
+     * consumption stamp only before the deadline. A constraint that parses but does not bind is invisible —
+     * each rule is refused by an INSERT that tries to violate it (the V17 rule).
+     */
+    @Test
+    fun `V44 adds the upload capability columns with the all-or-nothing and consumed-before-deadline checks`() {
+        query(
+            "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'chk_visualization_test_runs_upload'",
+        ) { it.getString(1) }.single().let { def ->
+            org.junit.jupiter.api.Assertions.assertTrue("upload_token_hash IS NULL" in def, def)
+            org.junit.jupiter.api.Assertions.assertTrue("upload_consumed_at < upload_expires_at" in def, def)
+        }
+        val probe = visualizationTestRunRow()
+        fun update(set: String): Int =
+            dataSource.connection.use { c ->
+                c.createStatement().use { s -> s.executeUpdate("UPDATE visualization_test_runs SET $set WHERE id = '$probe'") }
+        }
+        // A capability: hash + deadline, unconsumed — fine. Consumed before the deadline — fine.
+        org.junit.jupiter.api.Assertions.assertEquals(1, update("upload_token_hash = '${"a".repeat(64)}', upload_expires_at = '2036-01-01T00:00:00Z'"))
+        org.junit.jupiter.api.Assertions.assertEquals(
+            1,
+            update("upload_token_hash = '${"a".repeat(64)}', upload_expires_at = '2036-01-01T00:00:00Z', upload_consumed_at = '2035-06-01T00:00:00Z'"),
+        )
+        // A hash without a deadline, a deadline without a hash, a consumption without a capability:
+        // each is the CHECK refusing the UPDATE. Every probe sets all three columns, so the refused
+        // state is self-contained, never a residue of the case before it. Each refusal names its probe.
+        fun refused(probe: String) =
+            org.junit.jupiter.api.Assertions.assertThrows(
+                java.sql.SQLException::class.java,
+                { update(probe) },
+                "the CHECK did not refuse: $probe (live constraint: ${liveUploadConstraint()})",
+            )
+
+        refused("upload_token_hash = NULL, upload_expires_at = '2036-01-01T00:00:00Z', upload_consumed_at = NULL")
+        refused("upload_token_hash = '${"a".repeat(64)}', upload_expires_at = NULL, upload_consumed_at = NULL")
+        refused("upload_token_hash = NULL, upload_expires_at = NULL, upload_consumed_at = '2035-06-01T00:00:00Z'")
+        // Consumed at the deadline is refused — the capability never outlives the session.
+        refused("upload_token_hash = '${"a".repeat(64)}', upload_expires_at = '2036-01-01T00:00:00Z', upload_consumed_at = '2036-01-01T00:00:00Z'")
+    }
+
+    /** The upload CHECK as the SHIPPED database carries it — the probes' refusal message names it. */
+    private fun liveUploadConstraint(): String =
+        query("SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'chk_visualization_test_runs_upload'") { it.getString(1) }
+            .singleOrNull() ?: "constraint absent"
+
+    /** One RUNNING run row to hang capability columns off — the ids the FKs demand, seeded once. */
+    private fun visualizationTestRunRow(): UUID {
+        val ws = UUID.fromString("defa0000-0000-0000-0000-00000000f100")
+        val user = UUID.fromString("defa0000-0000-0000-0000-00000000f101")
+        val run = UUID.randomUUID()
+        dataSource.connection.use { c ->
+            c.createStatement().use { s ->
+                s.execute(
+                    "INSERT INTO workspaces (id, name, display_name, is_personal, created_by) VALUES ('$ws', 'flyway44', 'Flyway44', FALSE, NULL)" +
+                        " ON CONFLICT (id) DO NOTHING",
+                )
+                s.execute(
+                    "INSERT INTO users (id, email, display_name, provider, provider_subject, kind) VALUES " +
+                        "('$user', 'flyway44@migration.test', 'Flyway44', 'local', 'flyway44@migration.test', 'human') ON CONFLICT (id) DO NOTHING",
+                )
+                val viz = UUID.randomUUID()
+                s.execute(
+                    "INSERT INTO visualizations (id, workspace_id, name, display_name, current_version, created_by) VALUES " +
+                        "('$viz', '$ws', 'finance/flyway44/viz', 'Viz', 1, '$user')",
+                )
+        s.execute(
+            "INSERT INTO visualization_versions (visualization_id, version, body_json, status, body_hash, created_by, updated_by, " +
+                "created_via, updated_via) VALUES " +
+                "('$viz', 1, '{}', 'DRAFT', '${"a".repeat(64)}', '$user', '$user', 'mcp', 'mcp')",
+        )
+                s.execute(
+                    "INSERT INTO visualization_test_runs (id, visualization_id, version, body_hash, session_id, expires_at, started_by) VALUES " +
+                        "('$run', '$viz', 1, '${"a".repeat(64)}', '${UUID.randomUUID()}', NOW() + INTERVAL '1 hour', '$user')",
+                )
+            }
+        }
+        return run
     }
 
     /**
@@ -1375,6 +1462,7 @@ class FlywayMigrationIntegrationTest {
                 "chk_visualization_test_runs_completed",
                 "chk_visualization_test_runs_json",
                 "chk_visualization_test_runs_status",
+                "chk_visualization_test_runs_upload",
                 "chk_visualization_test_screenshots_dimensions",
                 "chk_visualization_test_screenshots_media_type",
                 "chk_visualization_test_screenshots_sha256",
