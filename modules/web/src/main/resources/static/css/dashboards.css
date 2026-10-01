@@ -1,0 +1,112 @@
+/*
+ * dashboards.css (#10 L3a) — the dashboard client runtime's own classes, TOKENS ONLY (the THEME
+ * SYSTEM rule: no literal colour, the same discipline app.css's chart-token block follows).
+ *
+ * The first-party composite adapter builds its grid inline from the configuration (CSSOM from a
+ * file is CSP-clean); this sheet styles the classes it and the renderers emit — the status chip,
+ * the parameter rows, the table and the KPI. Wired into the layout head by L3b (the pages' lane);
+ * the conformance host page loads it directly.
+ */
+
+/* The status chip: state as TEXT first (accessible without colour), colour only as reinforcement. */
+.dp-dashboard-status {
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  background: var(--surface-inset);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 2px var(--space-2, 8px);
+  margin-bottom: 8px;
+  display: inline-block;
+}
+
+.dp-dashboard-status[data-dp-state="error"],
+.dp-dashboard-status[data-dp-state="abort"] {
+  color: var(--text-danger);
+  border-color: var(--border-danger);
+}
+
+.dp-dashboard-status[data-dp-state="no-data"] {
+  color: var(--text-warning);
+}
+
+.dp-dashboard-status[data-dp-state="success"] {
+  color: var(--text-success);
+}
+
+/* The parameters pane: one row per parameter; the control is the engine's own select. */
+.dp-dashboard-parameters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap-sm);
+  align-items: end;
+  margin-bottom: var(--gap-md);
+}
+
+.dp-dashboard-parameter {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.dp-dashboard-parameter label {
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+/* The table renderer: text-only cells, the app's data-table voice. */
+.dp-dashboard-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+}
+
+.dp-dashboard-table th {
+  text-align: left;
+  color: var(--text-muted);
+  font-weight: var(--weight-semibold);
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 6px 8px;
+}
+
+.dp-dashboard-table td {
+  border-bottom: 1px solid var(--border-faint, var(--border-subtle));
+  padding: 6px 8px;
+  overflow-wrap: anywhere;
+}
+
+/* The KPI renderer: the value is the loudest thing on the card. */
+.dp-dashboard-kpi-label {
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.dp-dashboard-kpi-value {
+  font-family: var(--font-sans);
+  font-size: var(--text-xl);
+  font-weight: var(--weight-semibold);
+  color: var(--text-primary);
+}
+
+.dp-dashboard-kpi-unit {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  font-weight: var(--weight-normal);
+}
+
+.dp-dashboard-kpi-comparison {
+  margin-top: 4px;
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.dp-dashboard-kpi-comparison-value {
+  color: var(--text-secondary);
+  font-weight: var(--weight-medium);
+}

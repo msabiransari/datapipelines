@@ -3,11 +3,15 @@ package co.datapipelines.web.dashboards.runtime
 import co.datapipelines.parameters.EvaluateResponse
 import co.datapipelines.parameters.EvaluateResponseJson
 import co.datapipelines.visualization.ArtifactJson
+import co.datapipelines.visualization.ArtifactVersion
 import co.datapipelines.visualization.DashboardBody
 import co.datapipelines.visualization.DashboardRuntimeConfig
 import co.datapipelines.visualization.RefreshExecutionLink
 import co.datapipelines.visualization.RefreshRecord
+import co.datapipelines.visualization.RendererConfigValidators
+import co.datapipelines.visualization.RendererKind
 import co.datapipelines.visualization.StateSetting
+import co.datapipelines.visualization.VisualizationBody
 import co.datapipelines.visualization.VisualizationOccurrence
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node.JsonNodeFactory
@@ -36,6 +40,9 @@ internal object RuntimeViews {
         val mapper = ArtifactJson.mapper
         return nodes.objectNode().also { out ->
             out.put("configuration_id", resolved.configurationId)
+            out.putObject("renderer").also {
+                it.put("bundle", rendererBundle(resolved.visualizations.values))
+            }
             out.putObject("dashboard").also {
                 it.put("id", served.record.id.toString())
                 it.put("name", served.record.name)
@@ -96,6 +103,24 @@ internal object RuntimeViews {
         body: DashboardBody,
         runtime: DashboardRuntimeConfig,
     ): Int = minOf(body.timeouts?.refreshSeconds ?: runtime.defaultRefreshSeconds, runtime.maxRefreshSeconds)
+
+    /**
+     * The Plotly bundle the host page loads (the implementation spec's §10.4, D63): `"3d"` when ANY pinned
+     * visualization is a Plotly renderer whose traces name a 3D type (WebGL), else `"2d"` — the default. One
+     * dashboard, exactly one bundle: the two are never on one page, so the derivation is dashboard-level and a
+     * single 3D trace loads the heavier bundle for the whole board. Trace types are the validator's closed list
+     * at save; anything else here is `"2d"` by the same reading that makes the page default light.
+     */
+    fun rendererBundle(visualizations: Collection<ArtifactVersion<VisualizationBody>>): String {
+        val threeD =
+            visualizations.any { pinned ->
+                pinned.body.renderer.kind == RendererKind.PLOTLY &&
+                    pinned.body.config
+                        .path("data")
+                        .any { trace -> trace.path("type").asText("") in RendererConfigValidators.PLOTLY_3D_TRACES }
+            }
+        return if (threeD) "3d" else "2d"
+    }
 
     /**
      * `POST /runtime/parameters` (spec §8.2): the engine's [EvaluateResponseJson] UNCHANGED plus
