@@ -49,9 +49,9 @@
 pg2b::is_runnable_test_file() {
   local f="$1"
   [ -f "$f" ] || return 1
-  # A file whose own top-level declaration cannot be selected by --tests.
-  if grep -qE '^[[:space:]]*(abstract|sealed)[[:space:]]+(class|interface)[[:space:]]' "$f"; then return 1; fi
-  if grep -qE '^[[:space:]]*(interface|object)[[:space:]]+[A-Z]' "$f"; then return 1; fi
+  # A helper beside a concrete test does not make that test disappear. Mixed
+  # declarations go through file_classes, whose conservative fallback runs all tests.
+  pg2b::declared_types "$f" | grep -q '^concrete ' || return 1
   # And a concrete class is a TEST class only if it carries a test annotation
   # (@TestInstance alone does not make a file runnable; @TestConfiguration is not @Test;
   # the annotation may be fully qualified — @org.junit.jupiter.api.Test).
@@ -99,7 +99,10 @@ pg2b::file_classes() {
   local -a concrete=()
   local line
   while IFS= read -r line; do
-    [ "${line%% *}" = concrete ] && concrete+=("${line#* }")
+    # A helper can have consumers in other files while this file owns tests too.
+    # Focusing either side alone is incomplete; the whole module is the safe plan.
+    [ "${line%% *}" = concrete ] || return 1
+    concrete+=("${line#* }")
   done < <(pg2b::declared_types "$f")
   # Exactly one concrete declaration, or the conservative fallback: two runnable classes
   # in one file (or a test beside a helper) must not silently drop the second case.
@@ -167,6 +170,8 @@ pg2b::consumers_of() {
     done < <(grep -rlE "\\b${probe}\\b" "$src" --include='*.kt' 2>/dev/null)
   done
   printf '%s' "$consumers"
+  # Status crosses command substitution; a mutated shell variable does not.
+  [ "$PG2B_UNCERTAIN" -eq 0 ]
 }
 
 # stdout: "whole" (fallback: consumers or identity not derivable — build file, resource,
@@ -222,7 +227,7 @@ pg2b::plan_module() {
         fallback=whole
         continue
       fi
-      consumers="$(pg2b::consumers_of "$src" "$f" "${seed[@]}")"
+      consumers="$(pg2b::consumers_of "$src" "$f" "${seed[@]}")" || PG2B_UNCERTAIN=1
       if [ "$PG2B_UNCERTAIN" -ne 0 ]; then
         echo "  2b tests/$module: $(basename "$f") — an intermediate helper's declarations are not derivable; consumers not establishable → whole module" >&2
         fallback=whole
@@ -493,6 +498,53 @@ EOF
   ck "package-directory-mismatch-uses-declared-package" "focused co.y.PkgMismatchTest" "$src/mismatch/PkgMismatchTest.kt"
   # A runnable test and a helper declared together: not derivable → whole module.
   ck "mixed-helper-and-test-declarations" "whole" "$src/MixedDeclarations.kt"
+
+  # A runnable class beside a non-runnable helper owns tests AND has consumers.
+  # Selecting only the helper's consumers silently drops the changed file's own test.
+  cat > "$src/OwnAndHelper.kt" <<'EOF'
+package co.x
+class OwnTest {
+    @org.junit.jupiter.api.Test
+    fun own() {}
+}
+object SharedHelper
+EOF
+  cat > "$src/OtherTest.kt" <<'EOF'
+package co.x
+class OtherTest {
+    val helper = SharedHelper
+    @org.junit.jupiter.api.Test
+    fun other() {}
+}
+EOF
+  ck "runnable-and-object-with-consumer" "whole" "$src/OwnAndHelper.kt"
+
+  # The traversal runs inside command substitution. An uncertainty flag set only
+  # in that subshell must not disappear while its partial consumer list survives.
+  cat > "$src/RootBase.kt" <<'EOF'
+package co.x
+abstract class RootBase
+EOF
+  cat > "$src/Intermediate.kt" <<'EOF'
+package co.x
+abstract class
+    Intermediate : RootBase()
+EOF
+  cat > "$src/DirectTest.kt" <<'EOF'
+package co.x
+class DirectTest : RootBase() {
+    @org.junit.jupiter.api.Test
+    fun direct() {}
+}
+EOF
+  cat > "$src/IndirectTest.kt" <<'EOF'
+package co.x
+class IndirectTest : Intermediate() {
+    @org.junit.jupiter.api.Test
+    fun indirect() {}
+}
+EOF
+  ck "uncertain-intermediate-with-known-consumer" "whole" "$src/RootBase.kt"
 
   # --- the recording, refusing Gradle stand-in --------------------------------
   # Records the argv it is handed and REFUSES anything that is not a :tests:*:test
