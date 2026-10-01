@@ -45,6 +45,7 @@ class VisualizationTestSessionService(
      * no case inventory (`test_case_invalid`) and — the uniqueness constraint's mapping — a duplicate
      * session id (`version.conflict`; a reused session id is a caller bug, never a second run).
      */
+    @Suppress("ThrowsCount") // each refusal is a distinct catalogued outcome the surfaces map
     fun start(
         workspaceId: UUID,
         id: UUID,
@@ -54,7 +55,10 @@ class VisualizationTestSessionService(
             transactions.execute {
                 val working = visualizations.findWorking(workspaceId, id) ?: throw lifecycleNotFound(id)
                 val record = checkNotNull(visualizations.findRecord(workspaceId, id))
-                val cases = working.body.tests?.cases.orEmpty()
+                val cases =
+                    working.body.tests
+                        ?.cases
+                        .orEmpty()
                 if (cases.isEmpty()) {
                     throw DatapipelinesException(
                         code = VisualizationErrorCodes.TEST_CASE_INVALID,
@@ -65,7 +69,7 @@ class VisualizationTestSessionService(
                 val session = newId()
                 val at = now()
                 val previewMaterial = randomBytes(TestCapability.BYTES)
-                val expiresAt = at.plusSeconds(config.sessionTtlMinutes * 60L)
+                val expiresAt = at.plusSeconds(config.sessionTtlMinutes * SECONDS_PER_MINUTE)
                 val runId = newId()
                 try {
                     runs.insertRunning(
@@ -81,7 +85,8 @@ class VisualizationTestSessionService(
                             startedAt = at,
                         ),
                     )
-                } catch (e: DuplicateKeyException) {
+                } catch (_: DuplicateKeyException) {
+                    // mapped to the family's catalogued conflict; the driver detail is noise
                     throw DatapipelinesException(
                         code = VisualizationErrorCodes.VERSION_CONFLICT,
                         message = "Session '$session' already exists for this version.",
@@ -137,6 +142,7 @@ class VisualizationTestSessionService(
      * may not name unknown ones or name one twice; [environment] carries only the closed field set, each
      * bounded. Returns the upload capability's material on a GREEN run — evidence of failure needs none.
      */
+    @Suppress("ThrowsCount") // each refusal is a distinct catalogued outcome the surfaces map
     fun submit(
         workspaceId: UUID,
         id: UUID,
@@ -151,8 +157,9 @@ class VisualizationTestSessionService(
                 val row = swept(runs.findBySession(workspaceId, id, sessionId) ?: throw sessionNotFound())
                 if (row.startedBy != actor) throw sessionNotFound() // a session is its owner's; absence, not a leak
                 if (row.status != TestRunStatus.RUNNING) throw sessionExpired("not_running")
-                val version = visualizations.findVersion(workspaceId, id, row.version)
-                    ?: throw sessionExpired("version_gone")
+                val version =
+                    visualizations.findVersion(workspaceId, id, row.version)
+                        ?: throw sessionExpired("version_gone")
                 if (version.detail.bodyHash != row.bodyHash) throw sessionExpired("content_moved_on")
 
                 val at = now()
@@ -200,6 +207,7 @@ class VisualizationTestSessionService(
      * transaction (a malformed upload stores and consumes nothing); the winner is decided by the guarded
      * UPDATE, the loser inserts nothing.
      */
+    @Suppress("ThrowsCount") // each refusal is a distinct catalogued outcome the surfaces map
     fun storeScreenshot(
         workspaceId: UUID,
         id: UUID,
@@ -217,24 +225,19 @@ class VisualizationTestSessionService(
                 val row =
                     swept(runs.findBySession(workspaceId, id, sessionId) ?: throw sessionNotFound())
                 when {
-                    row.status == TestRunStatus.RUNNING ->
+                    row.status == TestRunStatus.RUNNING -> {
                         throw DatapipelinesException(
                             code = VisualizationErrorCodes.TEST_SESSION_NOT_FOUND,
                             message = "The screenshot follows results submission; the run has no upload capability yet.",
                             details = mapOf("reason" to "no_capability"),
                         )
+                    }
 
-                    row.status == TestRunStatus.EXPIRED || row.effectiveStatus == TestRunStatus.EXPIRED ->
+                    row.status == TestRunStatus.EXPIRED || row.effectiveStatus == TestRunStatus.EXPIRED -> {
                         throw sessionExpired("run_expired")
+                    }
                 }
-                val hash = row.uploadTokenHash ?: throw sessionNotFound()
-                if (row.uploadExpiresAt != null && !row.uploadExpiresAt.isAfter(now())) throw sessionExpired("capability_expired")
-                if (row.uploadConsumedAt != null) throw sessionNotFound() // consumed: indistinguishable from absent
-                if (TestCapability.hashEncoded(TestCapability.UPLOAD_PURPOSE, capability) != hash) throw sessionNotFound()
-                if (depictedCase != null) {
-                    val names = row.casesJson?.map { it.path("name").asText() }.orEmpty()
-                    if (depictedCase !in names) throw screenshotInvalid("case_unknown")
-                }
+                val hash = capabilityGate(row, capability, depictedCase)
                 if (!runs.consumeUploadCapability(row.id, hash, now())) throw sessionExpired("capability_expired")
                 val inserted =
                     runs.insertScreenshot(
@@ -264,6 +267,29 @@ class VisualizationTestSessionService(
     }
 
     // ---- internals ------------------------------------------------------------------------------------
+
+    /**
+     * The capability gate: the run's minted hash, unexpired and unconsumed, must verify against the
+     * presented material, and a depicted case must belong to the run's inventory. Wrong or consumed is
+     * `session_not_found` (indistinguishable from absent — no oracle); past the deadline is
+     * `session_expired`. Answers the stored hash the consume statement re-checks.
+     */
+    @Suppress("ThrowsCount") // each gate refusal is its own named exit (the ReadOnlyPipelineRule mould)
+    private fun capabilityGate(
+        row: TestRunRow,
+        capability: String,
+        depictedCase: String?,
+    ): String {
+        val hash = row.uploadTokenHash ?: throw sessionNotFound()
+        if (row.uploadExpiresAt != null && !row.uploadExpiresAt.isAfter(now())) throw sessionExpired("capability_expired")
+        if (row.uploadConsumedAt != null) throw sessionNotFound() // consumed: indistinguishable from absent
+        if (TestCapability.hashEncoded(TestCapability.UPLOAD_PURPOSE, capability) != hash) throw sessionNotFound()
+        if (depictedCase != null) {
+            val names = row.casesJson?.map { it.path("name").asText() }.orEmpty()
+            if (depictedCase !in names) throw screenshotInvalid("case_unknown")
+        }
+        return hash
+    }
 
     /** Sweeps a due RUNNING row and re-reads it; a completed row is returned untouched. */
     private fun swept(row: TestRunRow): TestRunRow {
@@ -329,6 +355,7 @@ class VisualizationTestSessionService(
             ),
         )
 
+    @Suppress("ThrowsCount") // each bound is its own named refusal, collected before anything runs
     private fun validateSubmission(
         verdicts: List<SubmittedCase>,
         environment: TestEnvironment?,
@@ -400,6 +427,8 @@ class VisualizationTestSessionService(
     companion object {
         /** The spec's §17 cap, mirrored by the schema's CHECK — enforced here BEFORE the database sees bytes. */
         const val MAX_SCREENSHOT_BYTES = 4 * 1024 * 1024
+
+        private const val SECONDS_PER_MINUTE = 60L
     }
 }
 

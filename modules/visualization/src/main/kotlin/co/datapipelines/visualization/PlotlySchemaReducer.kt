@@ -62,7 +62,12 @@ object PlotlySchemaReducer {
     }
 
     private fun container(node: JsonNode): ObjectNode {
-        val children = node.fieldNames().asSequence().map { it to node.path(it) }.toMap()
+        val children =
+            node
+                .fieldNames()
+                .asSequence()
+                .map { it to node.path(it) }
+                .toMap()
         return container(children)
     }
 
@@ -70,14 +75,20 @@ object PlotlySchemaReducer {
     private fun attribute(node: JsonNode): JsonNode {
         check(node.isObject) { "an attribute is an object; the vendored release changed shape" }
         val out = ArtifactJson.mapper.createObjectNode()
-        node.properties().asSequence()
+        node
+            .properties()
+            .asSequence()
             .filter { (key, _) -> !key.startsWith("_") && key !in DROPPED_FIELDS }
             .sortedBy { it.key }
             .forEach { (key, value) ->
                 when {
-                    key in KEPT_FIELDS -> out.set<JsonNode>(key, value)
+                    key in KEPT_FIELDS -> {
+                        out.set<JsonNode>(key, value)
+                    }
 
-                    value.isObject -> out.set<JsonNode>(key, attribute(value))
+                    value.isObject -> {
+                        out.set<JsonNode>(key, attribute(value))
+                    }
 
                     // An attribute container with no attribute fields of its own (e.g. an empty items map).
                     value.isArray && value.size() > 0 && value.first().isObject -> {

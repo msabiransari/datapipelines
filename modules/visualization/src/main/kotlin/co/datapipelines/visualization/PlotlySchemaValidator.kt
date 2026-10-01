@@ -12,11 +12,13 @@ import com.fasterxml.jackson.databind.node.ObjectNode
  * runtime refuse the same configurations with the same paths.
  *
  * The walk is bounded twice: a configuration is ≤ `max-config-bytes` (256 KiB) before it gets here, and
- * the walker carries its own node budget ([MAX_NODES]) plus a depth cap — a pathological document is
- * refused `too_complex`, never spun on. Value checks follow the attribute's `valType` exactly
+ * the walker carries its own node budget ([Walker]) plus a depth cap — a pathological document is
+ * refused `too_complex` ONCE, never spun on. Value checks follow the attribute's `valType` exactly
  * ([ValueChecks]); an `arrayOk` attribute accepts the scalar form or an array of them; compound
  * (`role: object` + `items`) and `info_array` attributes validate element-wise; numbered subplot keys
- * (`xaxis2`, `scene3`, …) normalize onto their family's tree.
+ * (`xaxis2`, `scene3`, …) normalize onto their family's tree; a binding placeholder (`$.x`, the spec's
+ * §3.1 substitution grammar) is accepted where a leaf is expected — the mechanical test's step 2, which
+ * holds the bindings map, judges placeholder coverage.
  */
 class PlotlySchemaValidator(
     private val schema: PlotlySchemaHandle = PlotlySchemaHandle.DEFAULT,
@@ -31,33 +33,13 @@ class PlotlySchemaValidator(
 
         companion object {
             /** The committed reduced schema. */
-            val DEFAULT = PlotlySchemaHandle({ PlotlySchema.traceAttributes(it) }, { PlotlySchema.layoutAttributes() }, { PlotlySchema.configAttributes() })
+            val DEFAULT =
+                PlotlySchemaHandle(
+                    { PlotlySchema.traceAttributes(it) },
+                    { PlotlySchema.layoutAttributes() },
+                    { PlotlySchema.configAttributes() },
+                )
         }
-    }
-
-    override fun validate(
-        kind: RendererKind,
-        config: ObjectNode,
-    ): List<ConfigProblem> {
-        if (kind != RendererKind.PLOTLY) return emptyList() // the house schemas own table and kpi
-        val problems = mutableListOf<ConfigProblem>()
-        val data = config.get("data")
-        when {
-            data == null || !data.isArray || data.isEmpty -> problems += ConfigProblem("data", "traces_missing", "A Plotly config needs a non-empty data array of traces.")
-
-            data.size() > RendererConfigValidators.MAX_TRACES -> problems += ConfigProblem("data", "too_many_traces", "At most ${RendererConfigValidators.MAX_TRACES} traces.")
-
-            else -> data.forEachIndexed { index, trace -> traceNode(trace, "data[$index]", Walker(), problems) }
-        }
-        listOf("layout" to schema.layout(), "config" to schema.config()).forEach { (key, attributes) ->
-            val node = config.get(key) ?: return@forEach
-            if (!node.isObject) {
-                problems += ConfigProblem(key, "wrong_type", "'$key' must be an object.")
-            } else {
-                objectNode(node, attributes, key, Walker(), problems)
-            }
-        }
-        return problems
     }
 
     /** The walk's budget: nodes left. A spent budget is ONE refusal, never a truncated pass. */
@@ -87,6 +69,38 @@ class PlotlySchemaValidator(
         }
     }
 
+    override fun validate(
+        kind: RendererKind,
+        config: ObjectNode,
+    ): List<ConfigProblem> {
+        if (kind != RendererKind.PLOTLY) return emptyList() // the house schemas own table and kpi
+        val problems = mutableListOf<ConfigProblem>()
+        val data = config.get("data")
+        when {
+            data == null || !data.isArray || data.isEmpty -> {
+                problems += ConfigProblem("data", "traces_missing", "A Plotly config needs a non-empty data array of traces.")
+            }
+
+            data.size() > RendererConfigValidators.MAX_TRACES -> {
+                problems += ConfigProblem("data", "too_many_traces", "At most ${RendererConfigValidators.MAX_TRACES} traces.")
+            }
+
+            else -> {
+                data.forEachIndexed { index, trace -> traceNode(trace, "data[$index]", Walker(), problems) }
+            }
+        }
+        listOf("layout" to schema.layout(), "config" to schema.config()).forEach { (key, attributes) ->
+            val node = config.get(key) ?: return@forEach
+            if (!node.isObject) {
+                problems += ConfigProblem(key, "wrong_type", "'$key' must be an object.")
+            } else {
+                objectNode(node, attributes, key, Walker(), problems)
+            }
+        }
+        return problems
+    }
+
+    @Suppress("ReturnCount") // each refusal is its own named exit, at its own path
     private fun traceNode(
         trace: JsonNode,
         path: String,
@@ -112,7 +126,11 @@ class PlotlySchemaValidator(
 
             typeText !in RendererConfigValidators.PLOTLY_TRACES -> {
                 problems +=
-                    ConfigProblem("$path.type", "trace_type_unsupported", "Trace types are ${RendererConfigValidators.PLOTLY_TRACES} (the vendored bundles).")
+                    ConfigProblem(
+                        "$path.type",
+                        "trace_type_unsupported",
+                        "Trace types are ${RendererConfigValidators.PLOTLY_TRACES} (the vendored bundles).",
+                    )
                 return
             }
         }
@@ -140,12 +158,7 @@ class PlotlySchemaValidator(
             if (walker.depth > MAX_DEPTH) return@forEach
             val attribute = attributes.get(key) ?: normalizeSubplot(key)?.let { attributes.get(it) }
             if (attribute == null || !attribute.isObject) {
-                problems +=
-                    ConfigProblem(
-                        "$path.$key",
-                        "unknown_attribute",
-                        "'${key.safeEcho()}' is not an attribute here.",
-                    )
+                problems += ConfigProblem("$path.$key", "unknown_attribute", "'${key.safeEcho()}' is not an attribute here.")
                 return@forEach
             }
             value(attribute, value, "$path.$key", walker, problems)
@@ -160,76 +173,93 @@ class PlotlySchemaValidator(
         walker: Walker,
         problems: MutableList<ConfigProblem>,
     ) {
-        // A binding placeholder (the spec's §3.1: the stored configuration carries "$.x" where the render
-        // substitutes the bound column's values) is the substitution grammar, judged for BINDING coverage
-        // by the mechanical test's step 2, which holds the bindings map — not by the schema walk.
         if (node.isTextual && PLACEHOLDER.matches(node.asText())) return
         if (attribute.path("arrayOk").asBoolean(false) && node.isArray) {
             node.forEachIndexed { index, element -> value(attributeWithoutArrayOk(attribute), element, "$path[$index]", walker, problems) }
             return
         }
-        val items = attribute.get("items")
         when (val valType = attribute.path("valType").asText("")) {
-            "" -> {
-                // An object attribute (role: object) or a compound array (role: object + items).
-                if (items != null && node.isArray && items.isObject) {
-                    val singular = items.fieldNames().asSequence().firstOrNull()
-                    val element = singular?.let { items.path(it) }
-                    if (element == null) {
-                        problems += ConfigProblem(path, "wrong_type", "The schema's items carry no element tree.")
-                    } else {
-                        node.forEachIndexed { index, item ->
-                            walker.depth += 1
-                            objectNode(item, element, "$path[$index]", walker, problems)
-                            walker.depth -= 1
-                        }
-                    }
-                } else if (node.isObject) {
-                    walker.depth += 1
-                    objectNode(node, attribute, path, walker, problems)
-                    walker.depth -= 1
-                } else {
-                    problems += ConfigProblem(path, "wrong_type", "This attribute is an object.")
-                }
-            }
-
-            "info_array" -> {
-                if (!node.isArray) {
-                    problems += ConfigProblem(path, "wrong_type", "This attribute is an array.")
-                } else {
-                    node.forEachIndexed { index, element ->
-                        walker.depth += 1
-                        when {
-                            // Fixed-length form: one attribute per position (layout.xaxis.range's two).
-                            items != null && items.isArray ->
-                                items.get(minOf(index, items.size() - 1))?.let { value(it, element, "$path[$index]", walker, problems) }
-
-                            // Uniform form: one attribute for every element.
-                            items != null && items.isObject && items.has("valType") ->
-                                value(items, element, "$path[$index]", walker, problems)
-
-                            // Named form: each element is judged against the named element tree.
-                            items != null && items.isObject && node.isObject -> {
-                                val singular = items.fieldNames().asSequence().firstOrNull()
-                                val tree = singular?.let { items.get(it) }
-                                if (tree != null) {
-                                    objectNode(element, tree, "$path[$index]", walker, problems)
-                                }
-                            }
-
-                            else -> problems += ConfigProblem(path, "schema_shape", "The schema's info_array carries no items tree.")
-                        }
-                        walker.depth -= 1
-                    }
-                }
-            }
-
+            "" -> compound(attribute, node, path, walker, problems)
+            "info_array" -> infoArray(attribute, node, path, walker, problems)
             else -> ValueChecks.check(valType, attribute, node, path, problems)
         }
     }
 
+    /** An object attribute (`role: object`) or a compound array (`role: object` + named `items`). */
+    private fun compound(
+        attribute: JsonNode,
+        node: JsonNode,
+        path: String,
+        walker: Walker,
+        problems: MutableList<ConfigProblem>,
+    ) {
+        val items = attribute.get("items")
+        if (items != null && node.isArray && items.isObject) {
+            val singular = items.fieldNames().asSequence().firstOrNull()
+            val element = singular?.let { items.path(it) }
+            if (element == null) {
+                problems += ConfigProblem(path, "wrong_type", "The schema's items carry no element tree.")
+            } else {
+                node.forEachIndexed { index, item ->
+                    walker.depth += 1
+                    objectNode(item, element, "$path[$index]", walker, problems)
+                    walker.depth -= 1
+                }
+            }
+        } else if (node.isObject) {
+            walker.depth += 1
+            objectNode(node, attribute, path, walker, problems)
+            walker.depth -= 1
+        } else {
+            problems += ConfigProblem(path, "wrong_type", "This attribute is an object.")
+        }
+    }
+
+    /** An `info_array` attribute: its `items` may be positional (fixed length), uniform, or named. */
+    private fun infoArray(
+        attribute: JsonNode,
+        node: JsonNode,
+        path: String,
+        walker: Walker,
+        problems: MutableList<ConfigProblem>,
+    ) {
+        val items = attribute.get("items")
+        if (!node.isArray) {
+            problems += ConfigProblem(path, "wrong_type", "This attribute is an array.")
+            return
+        }
+        node.forEachIndexed { index, element ->
+            walker.depth += 1
+            when {
+                // Fixed-length form: one attribute per position (layout.xaxis.domain's two).
+                items != null && items.isArray -> {
+                    items.get(minOf(index, items.size() - 1))?.let { value(it, element, "$path[$index]", walker, problems) }
+                }
+
+                // Uniform form: one attribute for every element.
+                items != null && items.isObject && items.has("valType") -> {
+                    value(items, element, "$path[$index]", walker, problems)
+                }
+
+                // Named form: each element is judged against the named element tree.
+                items != null && items.isObject && node.isObject -> {
+                    val singular = items.fieldNames().asSequence().firstOrNull()
+                    val tree = singular?.let { items.get(it) }
+                    if (tree != null) {
+                        objectNode(element, tree, "$path[$index]", walker, problems)
+                    }
+                }
+
+                else -> {
+                    problems += ConfigProblem(path, "schema_shape", "The schema's info_array carries no items tree.")
+                }
+            }
+            walker.depth -= 1
+        }
+    }
+
     private fun attributeWithoutArrayOk(attribute: JsonNode): JsonNode {
-        val copy = attribute.deepCopy<com.fasterxml.jackson.databind.node.ObjectNode>()
+        val copy = attribute.deepCopy<ObjectNode>()
         copy.remove("arrayOk")
         return copy
     }
@@ -237,7 +267,8 @@ class PlotlySchemaValidator(
     /** `xaxis2` → `xaxis`, `scene3` → `scene`, … — numbered subplot instances share their family's tree. */
     private fun normalizeSubplot(key: String): String? =
         SUBPLOT_FAMILIES.firstOrNull { family ->
-            key == family || (key.startsWith(family) && key.removePrefix(family).all { it.isDigit() } && key.removePrefix(family).isNotEmpty())
+            key == family ||
+                (key.startsWith(family) && key.removePrefix(family).all { it.isDigit() } && key.removePrefix(family).isNotEmpty())
         }
 
     private companion object {
@@ -262,22 +293,47 @@ private object ValueChecks {
     ) {
         val ok =
             when (valType) {
-                "number", "integer" -> node.isNumber && (valType == "number" || node.isIntegralNumber)
+                "number", "integer" -> numeric(valType, node)
                 "boolean" -> node.isBoolean
                 "data_array" -> node.isArray
                 "string", "angle", "subplotid" -> node.isTextual
-                "color" -> node.isTextual || node.isNumber
-                "colorlist" -> node.isTextual || (node.isArray && node.all { it.isTextual || it.isNumber })
-                "colorscale" -> node.isTextual || (node.isArray && node.all { it.isArray })
-                "enumerated" -> node.isTextual && (allowed(attribute)?.let { values -> node.asText() in values } ?: true)
-                "flaglist" ->
-                    node.isTextual && (allowed(attribute)?.let { values -> node.asText().split(Regex("\\s+")).all { it in values } } ?: true)
-                "any" -> true
+                "color" -> color(node)
+                "colorlist" -> colorList(node)
+                "colorscale" -> colorscale(node)
+                "enumerated" -> node.isTextual && inValues(attribute, node)
+                "flaglist" -> node.isTextual && flagsInValues(attribute, node)
                 else -> true // a valType this lane's schema carries but round one does not judge tighter
             }
         if (!ok) {
             problems += ConfigProblem(path, "wrong_type", "The value does not satisfy '$valType'.")
         }
+    }
+
+    private fun numeric(
+        valType: String,
+        node: JsonNode,
+    ): Boolean = node.isNumber && (valType == "number" || node.isIntegralNumber)
+
+    private fun color(node: JsonNode): Boolean = node.isTextual || node.isNumber
+
+    private fun colorList(node: JsonNode): Boolean = node.isTextual || (node.isArray && node.all { it.isTextual || it.isNumber })
+
+    private fun colorscale(node: JsonNode): Boolean = node.isTextual || (node.isArray && node.all { it.isArray })
+
+    private fun inValues(
+        attribute: JsonNode,
+        node: JsonNode,
+    ): Boolean {
+        val values = allowed(attribute) ?: return true
+        return node.asText() in values
+    }
+
+    private fun flagsInValues(
+        attribute: JsonNode,
+        node: JsonNode,
+    ): Boolean {
+        val values = allowed(attribute) ?: return true
+        return node.asText().split(Regex("\\s+")).all { it in values }
     }
 
     private fun allowed(attribute: JsonNode): List<String>? {

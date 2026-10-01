@@ -1,7 +1,6 @@
 package co.datapipelines.web.config
 
 import co.datapipelines.application.templates.TemplateEvaluateService
-import co.datapipelines.visualization.PipelineReleaseFacts
 import co.datapipelines.visualization.ReleaseEvidence
 import co.datapipelines.visualization.RenderedStateCheck
 import co.datapipelines.visualization.TestFixtureEvaluator
@@ -29,17 +28,21 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 class VisualizationTestConfigurationWiringTest {
     private val context =
         ApplicationContextRunner()
-            .withUserConfiguration(VisualizationTestConfiguration::class.java, VisualizationConfiguration::class.java, Collaborators::class.java)
+            .withUserConfiguration(
+                VisualizationTestConfiguration::class.java,
+                VisualizationConfiguration::class.java,
+                Collaborators::class.java,
+            )
 
     @Test
     fun `the session graph builds - runs repository, evaluator, no-op rendered state, mechanical check, sessions, gate`() {
-        context.run { it ->
-            it.getBean(TestRunRepository::class.java).shouldNotBeNull()
-            it.getBean(TestFixtureEvaluator::class.java).shouldBeInstanceOf<WebVisualizationFixtureEvaluator>()
-            it.getBean(RenderedStateCheck::class.java) shouldBe RenderedStateCheck.NOT_AVAILABLE
-            it.getBean(VisualizationMechanicalCheck::class.java).shouldNotBeNull()
-            it.getBean(VisualizationTestSessionService::class.java).shouldNotBeNull()
-            it.getBean(ReleaseEvidence::class.java).shouldBeInstanceOf<VisualizationReleaseEvidence>()
+        context.run { ctx ->
+            ctx.getBean(TestRunRepository::class.java).shouldNotBeNull()
+            ctx.getBean(TestFixtureEvaluator::class.java).shouldBeInstanceOf<WebVisualizationFixtureEvaluator>()
+            ctx.getBean(RenderedStateCheck::class.java) shouldBe RenderedStateCheck.NOT_AVAILABLE
+            ctx.getBean(VisualizationMechanicalCheck::class.java).shouldNotBeNull()
+            ctx.getBean(VisualizationTestSessionService::class.java).shouldNotBeNull()
+            ctx.getBean(ReleaseEvidence::class.java).shouldBeInstanceOf<VisualizationReleaseEvidence>()
         }
     }
 
@@ -51,8 +54,8 @@ class VisualizationTestConfigurationWiringTest {
             VisualizationConfiguration::class.java.declaredMethods.single { it.name == "visualizationService" }
         factory.parameters.any { it.type == ReleaseEvidence::class.java } shouldBe true
         // And the wired evidence IS the real gate, composed over the real runs repository and mechanics.
-        context.run { it ->
-            it.getBean(ReleaseEvidence::class.java).shouldBeInstanceOf<VisualizationReleaseEvidence>()
+        context.run { ctx ->
+            ctx.getBean(ReleaseEvidence::class.java).shouldBeInstanceOf<VisualizationReleaseEvidence>()
         }
     }
 

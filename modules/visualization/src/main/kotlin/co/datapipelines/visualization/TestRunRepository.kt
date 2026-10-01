@@ -309,7 +309,8 @@ class TestRunRepository(
          * The read joins the version row so a reader sees the version's CURRENT hash beside the run's —
          * [TestRunRow.effectiveStatus] projects EXPIRED for a run whose content moved on (the spec's §2.1).
          */
-        val SELECT = """
+        val SELECT =
+            """
             SELECT r.id, s.workspace_id, r.visualization_id, r.version, r.body_hash, r.session_id, r.preview_token_hash,
                    r.expires_at, r.started_by, r.started_at, r.completed_at, r.status,
                    r.cases_json, r.environment_json, r.mechanical_json,
@@ -318,7 +319,7 @@ class TestRunRepository(
               FROM visualization_test_runs r
               JOIN visualizations s ON s.id = r.visualization_id
               JOIN visualization_versions v ON v.visualization_id = r.visualization_id AND v.version = r.version
-        """.trimIndent()
+            """.trimIndent()
 
         val MAPPER =
             RowMapper { rs: ResultSet, _ ->

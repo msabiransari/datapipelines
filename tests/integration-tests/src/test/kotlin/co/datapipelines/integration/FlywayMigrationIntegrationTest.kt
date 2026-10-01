@@ -596,20 +596,31 @@ class FlywayMigrationIntegrationTest {
         query(
             "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'chk_visualization_test_runs_upload'",
         ) { it.getString(1) }.single().let { def ->
-            org.junit.jupiter.api.Assertions.assertTrue("upload_token_hash IS NULL" in def, def)
-            org.junit.jupiter.api.Assertions.assertTrue("upload_consumed_at < upload_expires_at" in def, def)
+            org.junit.jupiter.api.Assertions
+                .assertTrue("upload_token_hash IS NULL" in def, def)
+            org.junit.jupiter.api.Assertions
+                .assertTrue("upload_consumed_at < upload_expires_at" in def, def)
         }
         val probe = visualizationTestRunRow()
+
         fun update(set: String): Int =
             dataSource.connection.use { c ->
                 c.createStatement().use { s -> s.executeUpdate("UPDATE visualization_test_runs SET $set WHERE id = '$probe'") }
-        }
+            }
         // A capability: hash + deadline, unconsumed — fine. Consumed before the deadline — fine.
-        org.junit.jupiter.api.Assertions.assertEquals(1, update("upload_token_hash = '${"a".repeat(64)}', upload_expires_at = '2036-01-01T00:00:00Z'"))
         org.junit.jupiter.api.Assertions.assertEquals(
             1,
-            update("upload_token_hash = '${"a".repeat(64)}', upload_expires_at = '2036-01-01T00:00:00Z', upload_consumed_at = '2035-06-01T00:00:00Z'"),
+            update("upload_token_hash = '${"a".repeat(64)}', upload_expires_at = '2036-01-01T00:00:00Z'"),
         )
+        org.junit.jupiter.api.Assertions.assertEquals(
+            1,
+            update(
+                "upload_token_hash = '${"a".repeat(
+                    64,
+                )}', upload_expires_at = '2036-01-01T00:00:00Z', upload_consumed_at = '2035-06-01T00:00:00Z'",
+            ),
+        )
+
         // A hash without a deadline, a deadline without a hash, a consumption without a capability:
         // each is the CHECK refusing the UPDATE. Every probe sets all three columns, so the refused
         // state is self-contained, never a residue of the case before it. Each refusal names its probe.
@@ -624,12 +635,18 @@ class FlywayMigrationIntegrationTest {
         refused("upload_token_hash = '${"a".repeat(64)}', upload_expires_at = NULL, upload_consumed_at = NULL")
         refused("upload_token_hash = NULL, upload_expires_at = NULL, upload_consumed_at = '2035-06-01T00:00:00Z'")
         // Consumed at the deadline is refused — the capability never outlives the session.
-        refused("upload_token_hash = '${"a".repeat(64)}', upload_expires_at = '2036-01-01T00:00:00Z', upload_consumed_at = '2036-01-01T00:00:00Z'")
+        refused(
+            "upload_token_hash = '${"a".repeat(
+                64,
+            )}', upload_expires_at = '2036-01-01T00:00:00Z', upload_consumed_at = '2036-01-01T00:00:00Z'",
+        )
     }
 
     /** The upload CHECK as the SHIPPED database carries it — the probes' refusal message names it. */
     private fun liveUploadConstraint(): String =
-        query("SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'chk_visualization_test_runs_upload'") { it.getString(1) }
+        query(
+            "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'chk_visualization_test_runs_upload'",
+        ) { it.getString(1) }
             .singleOrNull() ?: "constraint absent"
 
     /** One RUNNING run row to hang capability columns off — the ids the FKs demand, seeded once. */
@@ -652,11 +669,11 @@ class FlywayMigrationIntegrationTest {
                     "INSERT INTO visualizations (id, workspace_id, name, display_name, current_version, created_by) VALUES " +
                         "('$viz', '$ws', 'finance/flyway44/viz', 'Viz', 1, '$user')",
                 )
-        s.execute(
-            "INSERT INTO visualization_versions (visualization_id, version, body_json, status, body_hash, created_by, updated_by, " +
-                "created_via, updated_via) VALUES " +
-                "('$viz', 1, '{}', 'DRAFT', '${"a".repeat(64)}', '$user', '$user', 'mcp', 'mcp')",
-        )
+                s.execute(
+                    "INSERT INTO visualization_versions (visualization_id, version, body_json, status, body_hash, created_by, updated_by, " +
+                        "created_via, updated_via) VALUES " +
+                        "('$viz', 1, '{}', 'DRAFT', '${"a".repeat(64)}', '$user', '$user', 'mcp', 'mcp')",
+                )
                 s.execute(
                     "INSERT INTO visualization_test_runs (id, visualization_id, version, body_hash, session_id, expires_at, started_by) VALUES " +
                         "('$run', '$viz', 1, '${"a".repeat(64)}', '${UUID.randomUUID()}', NOW() + INTERVAL '1 hour', '$user')",

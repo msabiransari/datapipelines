@@ -129,13 +129,20 @@ class VisualizationMechanicalCheck(
         workspaceId: UUID,
         body: VisualizationBody,
     ): Map<String, LogicalType> {
-        val transform = body.transform ?: return body.inputs.values.singleOrNull()?.columns?.associate { it.name to it.type } ?: emptyMap()
+        val transform =
+            body.transform ?: return body.inputs.values
+                .singleOrNull()
+                ?.columns
+                ?.associate { it.name to it.type } ?: emptyMap()
         return when (val pin = templates.pinOf(workspaceId, transform.template)) {
-            is TemplatePin.Transform ->
+            is TemplatePin.Transform -> {
                 (pin.contract.output as? TransformContractView.Output.Table)?.columns?.associate { it.name to it.type } ?: emptyMap()
+            }
 
             // The pin died after save; the fixture run's evaluator refusal names it per case.
-            else -> emptyMap()
+            else -> {
+                emptyMap()
+            }
         }
     }
 
@@ -148,17 +155,21 @@ class VisualizationMechanicalCheck(
             val at = "bindings.$path"
             val steps = BindingPath.parse(path)
             when {
-                steps == null -> failures += Failure("bindings", VisualizationErrorCodes.BINDING_UNBOUND, at, "Not a binding path.")
+                steps == null -> {
+                    failures += Failure("bindings", VisualizationErrorCodes.BINDING_UNBOUND, at, "Not a binding path.")
+                }
 
-                !BindingPath.resolves(body.config, steps) ->
+                !BindingPath.resolves(body.config, steps) -> {
                     failures += Failure("bindings", VisualizationErrorCodes.BINDING_UNBOUND, at, "Does not resolve inside config.")
+                }
             }
             val type = output[column]
             when {
-                type == null ->
+                type == null -> {
                     failures += Failure("bindings", VisualizationErrorCodes.BINDING_UNBOUND, at, "Column not in the output contract.")
+                }
 
-                !BindingTypes.accepts(path, type) ->
+                !BindingTypes.accepts(path, type) -> {
                     failures +=
                         Failure(
                             "bindings",
@@ -166,6 +177,7 @@ class VisualizationMechanicalCheck(
                             at,
                             "Column type ${type.wire} is not accepted at this path.",
                         )
+                }
             }
         }
     }
@@ -199,14 +211,18 @@ class VisualizationMechanicalCheck(
         val outcome = CaseOutcome(case.name)
         val transform = body.transform
         if (transform == null) {
-            val rows = case.fixtures.values.singleOrNull().orEmpty()
+            val rows =
+                case.fixtures.values
+                    .singleOrNull()
+                    .orEmpty()
             FixtureValues.validate(body, case, index, rows, outcome.failures)
             outcome.rows = rows.size
             outcome.boundValues = boundValues(body.bindings.values, rows.map(::toRowMap))
         } else {
             when (val evaluation = fixtures.evaluate(workspaceId, transform.template, case.fixtures)) {
-                is FixtureEvaluation.Refused ->
+                is FixtureEvaluation.Refused -> {
                     outcome.failures += Failure("fixtures", evaluation.code, "tests.cases[$index]", evaluation.message, case.name)
+                }
 
                 is FixtureEvaluation.Rows -> {
                     outcome.rows = evaluation.rows.size
@@ -258,60 +274,99 @@ class VisualizationMechanicalCheck(
             case.assertions.forEachIndexed { assertionIndex, assertion ->
                 val at = "tests.cases[$index].assertions[$assertionIndex]"
                 when (assertion.kind) {
-                    AssertionKind.TRACE_COUNT ->
-                        if (body.renderer.kind != RendererKind.PLOTLY || !body.config.path("data").isArray) {
-                            failures +=
-                                Failure(
-                                    "assertions",
-                                    VisualizationErrorCodes.TEST_CASE_INVALID,
-                                    at,
-                                    "trace_count needs a Plotly config with a data array.",
-                                    case.name,
-                                )
-                        } else {
-                            val traces = body.config.path("data").size()
-                            if (assertion.equals != null && assertion.equals != traces) {
-                                failures +=
-                                    Failure(
-                                        "assertions",
-                                        VisualizationErrorCodes.TEST_CASE_INVALID,
-                                        at,
-                                        "The configuration renders $traces traces; the case asserts ${assertion.equals}.",
-                                        case.name,
-                                    )
-                            }
-                        }
+                    AssertionKind.TRACE_COUNT -> {
+                        traceCount(body, assertion, at, case.name, failures)
+                    }
 
-                    AssertionKind.NO_DATA ->
-                        if (outcome.rows != 0) {
-                            failures +=
-                                Failure(
-                                    "assertions",
-                                    VisualizationErrorCodes.TEST_CASE_INVALID,
-                                    at,
-                                    "The case expects the empty state; the fixture run produced ${outcome.rows} rows.",
-                                    case.name,
-                                )
-                        }
+                    AssertionKind.NO_DATA -> {
+                        noData(outcome, at, case.name, failures)
+                    }
 
                     AssertionKind.TEXT_VISIBLE, AssertionKind.VALUE_VISIBLE -> {
-                        val text = assertion.text
-                        if (text != null && configStrings.none { it.contains(text) } && outcome.boundValues.none { it.contains(text) }) {
-                            failures +=
-                                Failure(
-                                    "assertions",
-                                    VisualizationErrorCodes.TEST_CASE_INVALID,
-                                    at,
-                                    "The text appears neither in the configuration nor in the bound values.",
-                                    case.name,
-                                )
-                        }
+                        textPresent(configStrings, outcome, assertion, at, case.name, failures)
                     }
 
                     // Step 5's assertions are a later lane's; the state is RECORDED, never judged here.
-                    AssertionKind.RENDERED, AssertionKind.NO_CONSOLE_ERRORS -> Unit
+                    AssertionKind.RENDERED, AssertionKind.NO_CONSOLE_ERRORS -> {
+                        recordedNotJudged()
+                    }
                 }
             }
+        }
+    }
+
+    private fun traceCount(
+        body: VisualizationBody,
+        assertion: Assertion,
+        at: String,
+        case: String,
+        failures: MutableList<Failure>,
+    ) {
+        if (body.renderer.kind != RendererKind.PLOTLY || !body.config.path("data").isArray) {
+            failures +=
+                Failure(
+                    "assertions",
+                    VisualizationErrorCodes.TEST_CASE_INVALID,
+                    at,
+                    "trace_count needs a Plotly config with a data array.",
+                    case,
+                )
+            return
+        }
+        val traces = body.config.path("data").size()
+        if (assertion.equals != null && assertion.equals != traces) {
+            failures +=
+                Failure(
+                    "assertions",
+                    VisualizationErrorCodes.TEST_CASE_INVALID,
+                    at,
+                    "The configuration renders $traces traces; the case asserts ${assertion.equals}.",
+                    case,
+                )
+        }
+    }
+
+    /** Step 5's assertions are a later lane's; the rendered state is RECORDED per case, never judged here. */
+    private fun recordedNotJudged() {
+        // deliberately empty: the no-op rendered-state check's answer is recorded, not judged
+    }
+
+    private fun noData(
+        outcome: CaseOutcome,
+        at: String,
+        case: String,
+        failures: MutableList<Failure>,
+    ) {
+        if (outcome.rows != 0) {
+            failures +=
+                Failure(
+                    "assertions",
+                    VisualizationErrorCodes.TEST_CASE_INVALID,
+                    at,
+                    "The case expects the empty state; the fixture run produced ${outcome.rows} rows.",
+                    case,
+                )
+        }
+    }
+
+    private fun textPresent(
+        configStrings: List<String>,
+        outcome: CaseOutcome,
+        assertion: Assertion,
+        at: String,
+        case: String,
+        failures: MutableList<Failure>,
+    ) {
+        val text = assertion.text
+        if (text != null && configStrings.none { it.contains(text) } && outcome.boundValues.none { it.contains(text) }) {
+            failures +=
+                Failure(
+                    "assertions",
+                    VisualizationErrorCodes.TEST_CASE_INVALID,
+                    at,
+                    "The text appears neither in the configuration nor in the bound values.",
+                    case,
+                )
         }
     }
 
@@ -355,13 +410,13 @@ private object FixtureValues {
                 val value = row.get(column.name)
                 val at = "tests.cases[$caseIndex].fixtures[${case.fixtures.keys.first()}][$rowIndex].${column.name}"
                 when {
-                    !column.nullable && (value == null || value.isNull) ->
+                    !column.nullable && (value == null || value.isNull) -> {
                         failures += refusal(at, "The column is not nullable.", case.name)
+                    }
 
-                    value == null || value.isNull -> Unit
-
-                    !inWireForm(column.type, value) ->
+                    value != null && !value.isNull && !inWireForm(column.type, value) -> {
                         failures += refusal(at, "The value is not in ${column.type.wire}'s wire form.", case.name)
+                    }
                 }
             }
         }

@@ -59,7 +59,10 @@ class TestSessionServiceIntegrationTest {
         title: String,
     ) {
         val current = h.visualizationRepository.findDraft(TestEvidenceHarness.WORKSPACE, session.visualizationId)!!
-        val document = ValidatorFakes.visualizationDocument(DocumentFixtures.visualization().also { it.obj("presentation").put("title", title) })
+        val document =
+            ValidatorFakes.visualizationDocument(
+                DocumentFixtures.visualization().also { it.obj("presentation").put("title", title) },
+            )
         h.visualizations.write(
             TestEvidenceHarness.WORKSPACE,
             session.visualizationId,
@@ -80,7 +83,10 @@ class TestSessionServiceIntegrationTest {
         row.startedBy shouldBe TestEvidenceHarness.AUTHOR
         row.bodyHash shouldBe session.bodyHash
         row.status shouldBe TestRunStatus.RUNNING
-        val material = java.util.Base64.getUrlDecoder().decode(session.previewToken)
+        val material =
+            java.util.Base64
+                .getUrlDecoder()
+                .decode(session.previewToken)
         row.previewTokenHash shouldBe TestCapability.hash(TestCapability.PREVIEW_PURPOSE, material)
         row.previewTokenHash shouldNotBe session.previewToken // the raw form is nowhere at rest
     }
@@ -116,12 +122,22 @@ class TestSessionServiceIntegrationTest {
         submitted.status shouldBe TestRunStatus.GREEN
         submitted.uploadToken shouldNotBe null
         // No later than the session deadline (the database rounds to microseconds; a microsecond is the slack).
-        java.time.Duration.between(session.expiresAt, submitted.uploadExpiresAt).abs().minus(java.time.Duration.ofMillis(1)).isNegative shouldBe true
+        java.time.Duration
+            .between(
+                session.expiresAt,
+                submitted.uploadExpiresAt,
+            ).abs()
+            .minus(java.time.Duration.ofMillis(1))
+            .isNegative shouldBe
+            true
 
         val row = h.runRepository.findBySession(TestEvidenceHarness.WORKSPACE, session.visualizationId, session.sessionId)!!
         row.completedAt shouldNotBe null
         row.previewTokenHash.shouldBeNull() // revoked by the submit
-        val material = java.util.Base64.getUrlDecoder().decode(submitted.uploadToken)
+        val material =
+            java.util.Base64
+                .getUrlDecoder()
+                .decode(submitted.uploadToken)
         row.uploadTokenHash shouldBe TestCapability.hash(TestCapability.UPLOAD_PURPOSE, material)
         row.uploadConsumedAt.shouldBeNull()
         row.mechanicalJson!!.path("ok").asBoolean() shouldBe true // the §11.3 report, stored verbatim
@@ -134,8 +150,10 @@ class TestSessionServiceIntegrationTest {
             submitted.status shouldBe TestRunStatus.RED
             submitted.uploadToken.shouldBeNull()
         }
-        h.runRepository.findBySession(TestEvidenceHarness.WORKSPACE, session.visualizationId, session.sessionId)!!
-            .uploadTokenHash.shouldBeNull()
+        h.runRepository
+            .findBySession(TestEvidenceHarness.WORKSPACE, session.visualizationId, session.sessionId)!!
+            .uploadTokenHash
+            .shouldBeNull()
     }
 
     @Test
@@ -148,19 +166,30 @@ class TestSessionServiceIntegrationTest {
         h.fixtureRefusal = FixtureEvaluation.Refused("template.type_gate_refused", "row 0 is not a number")
         val mechanical = start()
         submit(mechanical).status shouldBe TestRunStatus.RED
-        h.runRepository.findBySession(TestEvidenceHarness.WORKSPACE, mechanical.visualizationId, mechanical.sessionId)!!
-            .mechanicalJson!!.path("ok").asBoolean() shouldBe false
+        h.runRepository
+            .findBySession(TestEvidenceHarness.WORKSPACE, mechanical.visualizationId, mechanical.sessionId)!!
+            .mechanicalJson!!
+            .path("ok")
+            .asBoolean() shouldBe false
     }
 
     @Test
     fun `unknown and duplicate case names and over-long notes refuse and the run stays open`() {
         val session = start()
+
         fun refusal(
             verdicts: List<SubmittedCase>,
             environment: TestEnvironment? = null,
         ): DatapipelinesException =
             shouldThrow {
-                h.sessions.submit(TestEvidenceHarness.WORKSPACE, session.visualizationId, session.sessionId, TestEvidenceHarness.AUTHOR, verdicts, environment)
+                h.sessions.submit(
+                    TestEvidenceHarness.WORKSPACE,
+                    session.visualizationId,
+                    session.sessionId,
+                    TestEvidenceHarness.AUTHOR,
+                    verdicts,
+                    environment,
+                )
             }
 
         refusal(listOf(SubmittedCase("no such case", CaseVerdict.GREEN))).details["reason"] shouldBe "unknown_case"
@@ -194,13 +223,21 @@ class TestSessionServiceIntegrationTest {
     fun `a completed run is never re-submitted - no replacement capability, no overwrite`() {
         val session = start()
         submit(session)
-        val hash = h.runRepository.findBySession(TestEvidenceHarness.WORKSPACE, session.visualizationId, session.sessionId)!!.uploadTokenHash
+        val hash =
+            h.runRepository
+                .findBySession(
+                    TestEvidenceHarness.WORKSPACE,
+                    session.visualizationId,
+                    session.sessionId,
+                )!!
+                .uploadTokenHash
 
         shouldThrow<DatapipelinesException> { submit(session) }.let {
             it.code shouldBe VisualizationErrorCodes.TEST_SESSION_EXPIRED
             it.details["reason"] shouldBe "not_running"
         }
-        h.runRepository.findBySession(TestEvidenceHarness.WORKSPACE, session.visualizationId, session.sessionId)!!
+        h.runRepository
+            .findBySession(TestEvidenceHarness.WORKSPACE, session.visualizationId, session.sessionId)!!
             .uploadTokenHash shouldBe hash // the same capability, never minted anew
     }
 
@@ -232,7 +269,8 @@ class TestSessionServiceIntegrationTest {
             it.details["reason"] shouldBe "not_running"
         }
         // The completed GREEN record for the SAME version is untouched by the sweep.
-        h.runRepository.findBySession(TestEvidenceHarness.WORKSPACE, greenSession.visualizationId, greenSession.sessionId)!!
+        h.runRepository
+            .findBySession(TestEvidenceHarness.WORKSPACE, greenSession.visualizationId, greenSession.sessionId)!!
             .status shouldBe TestRunStatus.GREEN
     }
 
@@ -265,19 +303,34 @@ class TestSessionServiceIntegrationTest {
                 stored.height shouldBe 240
                 stored.sha256 shouldBe ScreenshotImages.sha256(bytes)
             }
-        h.runRepository.findBySession(TestEvidenceHarness.WORKSPACE, session.visualizationId, session.sessionId)!!
+        h.runRepository
+            .findBySession(TestEvidenceHarness.WORKSPACE, session.visualizationId, session.sessionId)!!
             .uploadConsumedAt shouldNotBe null
 
         // Replay of the SAME capability: indistinguishable from absent.
         shouldThrow<DatapipelinesException> {
-            h.sessions.storeScreenshot(TestEvidenceHarness.WORKSPACE, session.visualizationId, session.sessionId, submitted.uploadToken, "image/png", bytes)
+            h.sessions.storeScreenshot(
+                TestEvidenceHarness.WORKSPACE,
+                session.visualizationId,
+                session.sessionId,
+                submitted.uploadToken,
+                "image/png",
+                bytes,
+            )
         }.code shouldBe VisualizationErrorCodes.TEST_SESSION_NOT_FOUND
 
         // Another run's capability verifies nothing here.
         val other = start()
         val otherSubmitted = submit(other)
         shouldThrow<DatapipelinesException> {
-            h.sessions.storeScreenshot(TestEvidenceHarness.WORKSPACE, session.visualizationId, session.sessionId, otherSubmitted.uploadToken!!, "image/png", bytes)
+            h.sessions.storeScreenshot(
+                TestEvidenceHarness.WORKSPACE,
+                session.visualizationId,
+                session.sessionId,
+                otherSubmitted.uploadToken!!,
+                "image/png",
+                bytes,
+            )
         }.code shouldBe VisualizationErrorCodes.TEST_SESSION_NOT_FOUND
 
         // A depicted case outside the run's inventory is refused.
@@ -302,7 +355,14 @@ class TestSessionServiceIntegrationTest {
         val submitted = submit(session)
 
         shouldThrow<DatapipelinesException> {
-            h.sessions.storeScreenshot(TestEvidenceHarness.WORKSPACE, session.visualizationId, session.sessionId, submitted.uploadToken!!, "image/png", ByteArray(0))
+            h.sessions.storeScreenshot(
+                TestEvidenceHarness.WORKSPACE,
+                session.visualizationId,
+                session.sessionId,
+                submitted.uploadToken!!,
+                "image/png",
+                ByteArray(0),
+            )
         }
         shouldThrow<DatapipelinesException> {
             h.sessions.storeScreenshot(
@@ -315,11 +375,25 @@ class TestSessionServiceIntegrationTest {
             )
         }.code shouldBe VisualizationErrorCodes.TEST_SCREENSHOT_TOO_LARGE
         shouldThrow<DatapipelinesException> {
-            h.sessions.storeScreenshot(TestEvidenceHarness.WORKSPACE, session.visualizationId, session.sessionId, submitted.uploadToken!!, "image/png", "junk".toByteArray())
+            h.sessions.storeScreenshot(
+                TestEvidenceHarness.WORKSPACE,
+                session.visualizationId,
+                session.sessionId,
+                submitted.uploadToken!!,
+                "image/png",
+                "junk".toByteArray(),
+            )
         }.code shouldBe VisualizationErrorCodes.TEST_SCREENSHOT_INVALID
 
         // Nothing consumed, nothing stored: a fresh, valid upload still wins.
-        h.sessions.storeScreenshot(TestEvidenceHarness.WORKSPACE, session.visualizationId, session.sessionId, submitted.uploadToken!!, "image/png", png())
+        h.sessions.storeScreenshot(
+            TestEvidenceHarness.WORKSPACE,
+            session.visualizationId,
+            session.sessionId,
+            submitted.uploadToken!!,
+            "image/png",
+            png(),
+        )
         h.runRepository.screenshotOf(session.runId) shouldNotBe null
     }
 
@@ -333,17 +407,25 @@ class TestSessionServiceIntegrationTest {
         val outcome =
             ForcedRace.holdingThenCommitting(
                 hold = { connection ->
-                    connection.prepareStatement(
-                        "UPDATE visualization_test_runs SET upload_consumed_at = NOW()" +
-                            " WHERE id = ? AND upload_token_hash = ? AND upload_consumed_at IS NULL",
-                    ).use { statement ->
-                        statement.setObject(1, session.runId)
-                        statement.setString(2, TestCapability.hash(TestCapability.UPLOAD_PURPOSE, base64(submitted.uploadToken!!)))
-                        statement.executeUpdate() shouldBe 1
-                    }
+                    connection
+                        .prepareStatement(
+                            "UPDATE visualization_test_runs SET upload_consumed_at = NOW()" +
+                                " WHERE id = ? AND upload_token_hash = ? AND upload_consumed_at IS NULL",
+                        ).use { statement ->
+                            statement.setObject(1, session.runId)
+                            statement.setString(2, TestCapability.hash(TestCapability.UPLOAD_PURPOSE, base64(submitted.uploadToken!!)))
+                            statement.executeUpdate() shouldBe 1
+                        }
                 },
                 contender = {
-                    h.sessions.storeScreenshot(TestEvidenceHarness.WORKSPACE, session.visualizationId, session.sessionId, submitted.uploadToken!!, "image/png", bytes)
+                    h.sessions.storeScreenshot(
+                        TestEvidenceHarness.WORKSPACE,
+                        session.visualizationId,
+                        session.sessionId,
+                        submitted.uploadToken!!,
+                        "image/png",
+                        bytes,
+                    )
                     "stored"
                 },
             )
@@ -360,13 +442,27 @@ class TestSessionServiceIntegrationTest {
     fun `the draft's superseded screenshot is deleted on a newer store - a released version's evidence survives`() {
         val session = start()
         val submitted = submit(session)
-        h.sessions.storeScreenshot(TestEvidenceHarness.WORKSPACE, session.visualizationId, session.sessionId, submitted.uploadToken!!, "image/png", png(11, 11))
+        h.sessions.storeScreenshot(
+            TestEvidenceHarness.WORKSPACE,
+            session.visualizationId,
+            session.sessionId,
+            submitted.uploadToken!!,
+            "image/png",
+            png(11, 11),
+        )
         h.runRepository.screenshotOf(session.runId) shouldNotBe null
 
         // A second session over the same DRAFT version supersedes the first's screenshot.
         val second = start()
         val secondSubmitted = submit(second)
-        h.sessions.storeScreenshot(TestEvidenceHarness.WORKSPACE, session.visualizationId, second.sessionId, secondSubmitted.uploadToken!!, "image/png", png(22, 22))
+        h.sessions.storeScreenshot(
+            TestEvidenceHarness.WORKSPACE,
+            session.visualizationId,
+            second.sessionId,
+            secondSubmitted.uploadToken!!,
+            "image/png",
+            png(22, 22),
+        )
         h.runRepository.screenshotOf(session.runId).shouldBeNull()
         h.runRepository.screenshotOf(second.runId) shouldNotBe null
 
@@ -380,7 +476,14 @@ class TestSessionServiceIntegrationTest {
         )
         val afterRelease = start()
         val afterSubmitted = submit(afterRelease)
-        h.sessions.storeScreenshot(TestEvidenceHarness.WORKSPACE, session.visualizationId, afterRelease.sessionId, afterSubmitted.uploadToken!!, "image/png", png(33, 33))
+        h.sessions.storeScreenshot(
+            TestEvidenceHarness.WORKSPACE,
+            session.visualizationId,
+            afterRelease.sessionId,
+            afterSubmitted.uploadToken!!,
+            "image/png",
+            png(33, 33),
+        )
         // The released version's evidence is never superseded: the second run's screenshot survives the
         // later store, while the superseded DRAFT-era one stays gone.
         h.runRepository.screenshotOf(afterRelease.runId) shouldNotBe null
@@ -396,7 +499,14 @@ class TestSessionServiceIntegrationTest {
             "UPDATE visualization_test_runs SET upload_expires_at = NOW() - INTERVAL '1 minute' WHERE session_id = '${session.sessionId}'",
         )
         shouldThrow<DatapipelinesException> {
-            h.sessions.storeScreenshot(TestEvidenceHarness.WORKSPACE, session.visualizationId, session.sessionId, submitted.uploadToken!!, "image/png", png())
+            h.sessions.storeScreenshot(
+                TestEvidenceHarness.WORKSPACE,
+                session.visualizationId,
+                session.sessionId,
+                submitted.uploadToken!!,
+                "image/png",
+                png(),
+            )
         }.let {
             it.code shouldBe VisualizationErrorCodes.TEST_SESSION_EXPIRED
             it.details["reason"] shouldBe "capability_expired"
@@ -417,7 +527,10 @@ class TestSessionServiceIntegrationTest {
         }
     }
 
-    private fun base64(material: String): ByteArray = java.util.Base64.getUrlDecoder().decode(material)
+    private fun base64(material: String): ByteArray =
+        java.util.Base64
+            .getUrlDecoder()
+            .decode(material)
 
     /** A minimal valid PNG, for the byte-level cases. */
     private fun png(
@@ -427,14 +540,23 @@ class TestSessionServiceIntegrationTest {
         val signature = byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A)
         val ihdr = ByteArray(25)
         writeInt(ihdr, 0, 13)
-        ihdr[4] = 'I'.code.toByte(); ihdr[5] = 'H'.code.toByte(); ihdr[6] = 'D'.code.toByte(); ihdr[7] = 'R'.code.toByte()
+        ihdr[4] = 'I'.code.toByte()
+        ihdr[5] = 'H'.code.toByte()
+        ihdr[6] = 'D'.code.toByte()
+        ihdr[7] = 'R'.code.toByte()
         writeInt(ihdr, 8, width)
         writeInt(ihdr, 12, height)
         val idat = ByteArray(13)
         writeInt(idat, 0, 1)
-        idat[4] = 'I'.code.toByte(); idat[5] = 'D'.code.toByte(); idat[6] = 'A'.code.toByte(); idat[7] = 'T'.code.toByte()
+        idat[4] = 'I'.code.toByte()
+        idat[5] = 'D'.code.toByte()
+        idat[6] = 'A'.code.toByte()
+        idat[7] = 'T'.code.toByte()
         val iend = ByteArray(12)
-        iend[4] = 'I'.code.toByte(); iend[5] = 'E'.code.toByte(); iend[6] = 'N'.code.toByte(); iend[7] = 'D'.code.toByte()
+        iend[4] = 'I'.code.toByte()
+        iend[5] = 'E'.code.toByte()
+        iend[6] = 'N'.code.toByte()
+        iend[7] = 'D'.code.toByte()
         return signature + ihdr + idat + iend
     }
 

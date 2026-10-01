@@ -1,9 +1,9 @@
 package co.datapipelines.visualization
 
 import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.pipeline.WriteSurface
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.visualization.DocumentFixtures.obj
-import co.datapipelines.pipeline.WriteSurface
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.shouldBe
@@ -46,7 +46,13 @@ class VisualizationReleaseEvidenceIntegrationTest {
     /** A GREEN run for the candidate's exact hash, through the real session service. */
     private fun greenRun(candidate: ReleaseCandidate): TestSessionStarted {
         val session = h.sessions.start(TestEvidenceHarness.WORKSPACE, candidate.visualizationId, TestEvidenceHarness.AUTHOR)
-        h.sessions.submit(TestEvidenceHarness.WORKSPACE, candidate.visualizationId, session.sessionId, TestEvidenceHarness.AUTHOR, listOf(SubmittedCase("twelve months", CaseVerdict.GREEN)))
+        h.sessions.submit(
+            TestEvidenceHarness.WORKSPACE,
+            candidate.visualizationId,
+            session.sessionId,
+            TestEvidenceHarness.AUTHOR,
+            listOf(SubmittedCase("twelve months", CaseVerdict.GREEN)),
+        )
         return session
     }
 
@@ -65,8 +71,18 @@ class VisualizationReleaseEvidenceIntegrationTest {
 
         // The draft moves on: the version's LATEST run still holds the OLD hash — stale for the new content.
         val current = h.visualizationRepository.findDraft(TestEvidenceHarness.WORKSPACE, created.detail.artifactId)!!
-        val edited = ValidatorFakes.visualizationDocument(DocumentFixtures.visualization().also { it.obj("presentation").put("title", "v2") })
-        h.visualizations.write(TestEvidenceHarness.WORKSPACE, created.detail.artifactId, VisualizationDocument(DocumentFixtures.VISUALIZATION_NAME, edited.body), current.bodyHash, TestEvidenceHarness.AUTHOR, WriteSurface.MCP)
+        val edited =
+            ValidatorFakes.visualizationDocument(
+                DocumentFixtures.visualization().also { it.obj("presentation").put("title", "v2") },
+            )
+        h.visualizations.write(
+            TestEvidenceHarness.WORKSPACE,
+            created.detail.artifactId,
+            VisualizationDocument(DocumentFixtures.VISUALIZATION_NAME, edited.body),
+            current.bodyHash,
+            TestEvidenceHarness.AUTHOR,
+            WriteSurface.MCP,
+        )
 
         val newDraft = h.visualizationRepository.findDraft(TestEvidenceHarness.WORKSPACE, created.detail.artifactId)!!
         evidenceFor(candidateOf(newDraft)).shouldBeRefused(VisualizationErrorCodes.RELEASE_TESTS_STALE, "run_hash_mismatch")
@@ -80,11 +96,23 @@ class VisualizationReleaseEvidenceIntegrationTest {
         val candidate = candidateOf(created.detail)
 
         val red = h.sessions.start(TestEvidenceHarness.WORKSPACE, created.detail.artifactId, TestEvidenceHarness.AUTHOR)
-        h.sessions.submit(TestEvidenceHarness.WORKSPACE, created.detail.artifactId, red.sessionId, TestEvidenceHarness.AUTHOR, listOf(SubmittedCase("twelve months", CaseVerdict.RED)))
+        h.sessions.submit(
+            TestEvidenceHarness.WORKSPACE,
+            created.detail.artifactId,
+            red.sessionId,
+            TestEvidenceHarness.AUTHOR,
+            listOf(SubmittedCase("twelve months", CaseVerdict.RED)),
+        )
         evidenceFor(candidate).shouldBeRefused(VisualizationErrorCodes.RELEASE_TESTS_RED, "red")
 
         val incomplete = h.sessions.start(TestEvidenceHarness.WORKSPACE, created.detail.artifactId, TestEvidenceHarness.AUTHOR)
-        h.sessions.submit(TestEvidenceHarness.WORKSPACE, created.detail.artifactId, incomplete.sessionId, TestEvidenceHarness.AUTHOR, emptyList())
+        h.sessions.submit(
+            TestEvidenceHarness.WORKSPACE,
+            created.detail.artifactId,
+            incomplete.sessionId,
+            TestEvidenceHarness.AUTHOR,
+            emptyList(),
+        )
         evidenceFor(candidate).shouldBeRefused(VisualizationErrorCodes.RELEASE_TESTS_RED, "incomplete")
     }
 
@@ -93,7 +121,9 @@ class VisualizationReleaseEvidenceIntegrationTest {
         val created = h.createVisualization()
         val candidate = candidateOf(created.detail)
         val session = h.sessions.start(TestEvidenceHarness.WORKSPACE, created.detail.artifactId, TestEvidenceHarness.AUTHOR)
-        h.jdbc.jdbcTemplate.update("UPDATE visualization_test_runs SET status = 'EXPIRED', preview_token_hash = NULL WHERE session_id = '${session.sessionId}'")
+        h.jdbc.jdbcTemplate.update(
+            "UPDATE visualization_test_runs SET status = 'EXPIRED', preview_token_hash = NULL WHERE session_id = '${session.sessionId}'",
+        )
         evidenceFor(candidate).shouldBeRefused(VisualizationErrorCodes.RELEASE_TESTS_STALE, "run_expired")
     }
 
@@ -115,7 +145,14 @@ class VisualizationReleaseEvidenceIntegrationTest {
     fun `the real release flips on GREEN evidence - and the same release refuses with no evidence`() {
         val created = h.createVisualization()
         val candidate = candidateOf(created.detail)
-        val release = { h.visualizations.release(TestEvidenceHarness.WORKSPACE, created.detail.artifactId, candidate.bodyHash, TestEvidenceHarness.AUTHOR) }
+        val release = {
+            h.visualizations.release(
+                TestEvidenceHarness.WORKSPACE,
+                created.detail.artifactId,
+                candidate.bodyHash,
+                TestEvidenceHarness.AUTHOR,
+            )
+        }
 
         shouldThrow<DatapipelinesException>(release).code shouldBe VisualizationErrorCodes.RELEASE_TESTS_MISSING
 
@@ -138,16 +175,22 @@ class VisualizationReleaseEvidenceIntegrationTest {
         val outcome =
             ForcedRace.holdingThenCommitting(
                 hold = { connection ->
-                    connection.prepareStatement(
-                        "UPDATE visualization_versions SET body_json = body_json || '{\"stale\":true}', body_hash = 'fedcba'" +
-                            " WHERE visualization_id = ? AND version = 1 AND status = 'DRAFT'",
-                    ).use { statement ->
-                        statement.setObject(1, created.detail.artifactId)
-                        statement.executeUpdate() shouldBe 1
-                    }
+                    connection
+                        .prepareStatement(
+                            "UPDATE visualization_versions SET body_json = body_json || '{\"stale\":true}', body_hash = 'fedcba'" +
+                                " WHERE visualization_id = ? AND version = 1 AND status = 'DRAFT'",
+                        ).use { statement ->
+                            statement.setObject(1, created.detail.artifactId)
+                            statement.executeUpdate() shouldBe 1
+                        }
                 },
                 contender = {
-                    h.visualizations.release(TestEvidenceHarness.WORKSPACE, created.detail.artifactId, candidate.bodyHash, TestEvidenceHarness.AUTHOR)
+                    h.visualizations.release(
+                        TestEvidenceHarness.WORKSPACE,
+                        created.detail.artifactId,
+                        candidate.bodyHash,
+                        TestEvidenceHarness.AUTHOR,
+                    )
                     "released"
                 },
             )
@@ -165,7 +208,8 @@ class VisualizationReleaseEvidenceIntegrationTest {
             .query(
                 "SELECT body_hash FROM visualization_versions WHERE visualization_id = :id AND version = 1",
                 mapOf("id" to created.detail.artifactId),
-            ) { rs, _ -> rs.getString(1) }.single() shouldBe "fedcba"
+            ) { rs, _ -> rs.getString(1) }
+            .single() shouldBe "fedcba"
     }
 
     @Test
@@ -178,7 +222,12 @@ class VisualizationReleaseEvidenceIntegrationTest {
 
         // The visualization's own release WITHOUT consent: dependency_not_released, no evidence spent.
         shouldThrow<DatapipelinesException> {
-            h.visualizations.release(TestEvidenceHarness.WORKSPACE, created.detail.artifactId, candidate.bodyHash, TestEvidenceHarness.AUTHOR)
+            h.visualizations.release(
+                TestEvidenceHarness.WORKSPACE,
+                created.detail.artifactId,
+                candidate.bodyHash,
+                TestEvidenceHarness.AUTHOR,
+            )
         }.code shouldBe VisualizationErrorCodes.RELEASE_DEPENDENCY_NOT_RELEASED
 
         // The dashboard's cascade releases the DRAFT visualization pin — through ITS OWN gate — but the
@@ -192,7 +241,13 @@ class VisualizationReleaseEvidenceIntegrationTest {
             )
         val dashboardHash = dashboardVersion.detail.bodyHash
         shouldThrow<DatapipelinesException> {
-            h.dashboards.release(TestEvidenceHarness.WORKSPACE, dashboardVersion.detail.artifactId, dashboardHash, TestEvidenceHarness.AUTHOR, releasePinnedVisualizations = true)
+            h.dashboards.release(
+                TestEvidenceHarness.WORKSPACE,
+                dashboardVersion.detail.artifactId,
+                dashboardHash,
+                TestEvidenceHarness.AUTHOR,
+                releasePinnedVisualizations = true,
+            )
         }.code shouldBe VisualizationErrorCodes.RELEASE_DEPENDENCY_NOT_RELEASED
         h.templatesReleased.shouldBeEmpty()
         // The visualization stayed DRAFT: the cascade's gate refused for the template, not for evidence.

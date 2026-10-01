@@ -25,17 +25,19 @@ class VisualizationReleaseEvidence(
     private val mechanical: VisualizationMechanicalCheck,
     private val now: () -> Instant = Instant::now,
 ) : ReleaseEvidence {
+    @Suppress("LongMethod", "ReturnCount") // the verdict ladder: each refusal is its own named exit (the ReadOnlyPipelineRule mould)
     override fun verdict(
         workspaceId: UUID,
         candidate: ReleaseCandidate,
     ): EvidenceVerdict {
-        val draftHash = runs.lockCandidateDraft(candidate.visualizationId, candidate.version)
-            ?: return refused(
-                VisualizationErrorCodes.RELEASE_TESTS_STALE,
-                "Visualization '${candidate.name.safeEcho()}' version ${candidate.version} has no live DRAFT to release; " +
-                    "the candidate moved on after the release began.",
-                mapOf("reason" to "draft_missing", "version" to candidate.version),
-            )
+        val draftHash =
+            runs.lockCandidateDraft(candidate.visualizationId, candidate.version)
+                ?: return refused(
+                    VisualizationErrorCodes.RELEASE_TESTS_STALE,
+                    "Visualization '${candidate.name.safeEcho()}' version ${candidate.version} has no live DRAFT to release; " +
+                        "the candidate moved on after the release began.",
+                    mapOf("reason" to "draft_missing", "version" to candidate.version),
+                )
         if (draftHash != candidate.bodyHash) {
             return refused(
                 VisualizationErrorCodes.RELEASE_TESTS_STALE,
@@ -43,34 +45,38 @@ class VisualizationReleaseEvidence(
                 mapOf("reason" to "draft_changed", "version" to candidate.version),
             )
         }
-        val latest = runs.latestRun(candidate.visualizationId, candidate.version)
-            ?: return refused(
-                VisualizationErrorCodes.RELEASE_TESTS_MISSING,
-                "Visualization '${candidate.name.safeEcho()}' version ${candidate.version} has no test run; a release needs " +
-                    "the agent's GREEN run for this exact content.",
-                mapOf("reason" to "no_runs", "version" to candidate.version),
-            )
+        val latest =
+            runs.latestRun(candidate.visualizationId, candidate.version)
+                ?: return refused(
+                    VisualizationErrorCodes.RELEASE_TESTS_MISSING,
+                    "Visualization '${candidate.name.safeEcho()}' version ${candidate.version} has no test run; a release needs " +
+                        "the agent's GREEN run for this exact content.",
+                    mapOf("reason" to "no_runs", "version" to candidate.version),
+                )
         when {
-            latest.status == TestRunStatus.EXPIRED ->
+            latest.status == TestRunStatus.EXPIRED -> {
                 return refused(
                     VisualizationErrorCodes.RELEASE_TESTS_STALE,
                     "The latest test run expired; start a fresh session for this exact content.",
                     mapOf("reason" to "run_expired", "session_id" to latest.sessionId.toString()),
                 )
+            }
 
-            latest.bodyHash != candidate.bodyHash ->
+            latest.bodyHash != candidate.bodyHash -> {
                 return refused(
                     VisualizationErrorCodes.RELEASE_TESTS_STALE,
                     "The latest test run is for other content; a release qualifies only for the exact body hash it tested.",
                     mapOf("reason" to "run_hash_mismatch", "session_id" to latest.sessionId.toString()),
                 )
+            }
 
-            latest.status == TestRunStatus.RED || latest.status == TestRunStatus.INCOMPLETE ->
+            latest.status == TestRunStatus.RED || latest.status == TestRunStatus.INCOMPLETE -> {
                 return refused(
                     VisualizationErrorCodes.RELEASE_TESTS_RED,
                     "The latest test run is ${latest.status.name}; a release needs its run GREEN.",
                     mapOf("reason" to latest.status.name.lowercase(), "session_id" to latest.sessionId.toString()),
                 )
+            }
         }
         val report = mechanical.run(workspaceId, candidate.body, now())
         if (!report.ok) {

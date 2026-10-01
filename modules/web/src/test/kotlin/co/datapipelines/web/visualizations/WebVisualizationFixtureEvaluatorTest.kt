@@ -5,8 +5,8 @@ import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.TemplateDryRenderer
 import co.datapipelines.pipeline.TransformContractView
 import co.datapipelines.templates.TransformTestInput
-import co.datapipelines.visualization.ArtifactRef
 import co.datapipelines.typesystem.DatapipelinesException
+import co.datapipelines.visualization.ArtifactRef
 import co.datapipelines.visualization.FixtureEvaluation
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.node.ObjectNode

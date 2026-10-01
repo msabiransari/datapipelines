@@ -6,10 +6,10 @@ import co.datapipelines.pipeline.TemplateDryRenderer
 import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.pipeline.TransformContractView
 import co.datapipelines.templates.TransformTestInput
+import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.visualization.ArtifactRef
 import co.datapipelines.visualization.FixtureEvaluation
 import co.datapipelines.visualization.TestFixtureEvaluator
-import co.datapipelines.typesystem.DatapipelinesException
 import com.fasterxml.jackson.core.type.TypeReference
 import com.fasterxml.jackson.databind.node.ObjectNode
 import java.util.UUID
@@ -40,14 +40,23 @@ class WebVisualizationFixtureEvaluator(
             val mode = contracts.transformContract(workspaceId, TemplateRef(pin.name, pin.version))?.mode
             val input =
                 if (mode == TransformContractView.Mode.ROW) {
-                    TransformTestInput(rows = fixtures.values.singleOrNull().orEmpty().map(::toRow), inputs = emptyMap())
+                    TransformTestInput(
+                        rows =
+                            fixtures.values
+                                .singleOrNull()
+                                .orEmpty()
+                                .map(::toRow),
+                        inputs = emptyMap(),
+                    )
                 } else {
                     TransformTestInput(inputs = fixtures.mapValues { (_, rows) -> rows.map(::toRow) })
                 }
             val evaluation = evaluate.evaluate(workspaceId, pin.name, pin.version, input)
+
             @Suppress("UNCHECKED_CAST") // the type gate has already shaped the output; the cast only labels it
-            val rows = evaluation.output as? List<Map<String, Any?>>
-                ?: return FixtureEvaluation.Refused(OUTPUT_SHAPE_REFUSED, "The transform's output is not a table of rows.")
+            val rows =
+                evaluation.output as? List<Map<String, Any?>>
+                    ?: return FixtureEvaluation.Refused(OUTPUT_SHAPE_REFUSED, "The transform's output is not a table of rows.")
             FixtureEvaluation.Rows(rows)
         } catch (e: DatapipelinesException) {
             FixtureEvaluation.Refused(e.code, e.message ?: "The fixture run refused.")
@@ -60,7 +69,9 @@ class WebVisualizationFixtureEvaluator(
         )
 
     private companion object {
-        val MAPPER = com.fasterxml.jackson.databind.ObjectMapper()
+        val MAPPER =
+            com.fasterxml.jackson.databind
+                .ObjectMapper()
 
         /** The shape refusal the runtime transformer uses for a non-table output — the same verdict here. */
         val OUTPUT_SHAPE_REFUSED = PipelineErrorCodes.Transform.ROW_SHAPE_MISMATCH

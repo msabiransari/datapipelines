@@ -33,12 +33,14 @@ class PlotlySchemaProvenanceTest {
     @Test
     fun `the reduction is deterministic - a second run over the same source yields the same bytes`() {
         val sourceSha = sha256(SOURCE_FILE.readBytes())
-        val first = ArtifactJson.mapper.writerWithDefaultPrettyPrinter().writeValueAsString(
-            PlotlySchemaReducer.reduce(source, sourceSha, PROVENANCE_COMMIT, PROVENANCE_VERSION),
-        )
-        val second = ArtifactJson.mapper.writerWithDefaultPrettyPrinter().writeValueAsString(
-            PlotlySchemaReducer.reduce(source, sourceSha, PROVENANCE_COMMIT, PROVENANCE_VERSION),
-        )
+        val first =
+            ArtifactJson.mapper.writerWithDefaultPrettyPrinter().writeValueAsString(
+                PlotlySchemaReducer.reduce(source, sourceSha, PROVENANCE_COMMIT, PROVENANCE_VERSION),
+            )
+        val second =
+            ArtifactJson.mapper.writerWithDefaultPrettyPrinter().writeValueAsString(
+                PlotlySchemaReducer.reduce(source, sourceSha, PROVENANCE_COMMIT, PROVENANCE_VERSION),
+            )
         first shouldBe second
     }
 
@@ -60,8 +62,7 @@ class PlotlySchemaProvenanceTest {
         LICENSE_FILE.readText() shouldContain "MIT License"
     }
 
-    private fun sha256(bytes: ByteArray): String =
-        MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+    private fun sha256(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
 
     private companion object {
         val SOURCE_FILE = VisualizationTestFiles.repoFile("modules/visualization/schema/plotly/plot-schema-4.1.1.json")

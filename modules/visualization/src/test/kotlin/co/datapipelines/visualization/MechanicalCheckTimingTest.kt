@@ -16,7 +16,13 @@ class MechanicalCheckTimingTest {
     fun `a max-cased, max-rowed body runs well inside the second scale - measured, printed, and ceiling-asserted`() {
         val rows = (1..1_000).map { index -> mapOf("month_labels" to "row-$index", "amounts" to index.toDouble()) }
         val evaluator = TestFixtureEvaluator { _, _, _ -> FixtureEvaluation.Rows(rows) }
-        val facts = TemplateContractFacts { _, _ -> TemplatePin.Transform(co.datapipelines.pipeline.PipelineVersionStatus.RELEASED, ValidatorFakes.CONTRACT) }
+        val facts =
+            TemplateContractFacts {
+                _,
+                _,
+                ->
+                TemplatePin.Transform(co.datapipelines.pipeline.PipelineVersionStatus.RELEASED, ValidatorFakes.CONTRACT)
+            }
         val check =
             VisualizationMechanicalCheck(
                 renderers = RendererConfigValidators.deep(),
@@ -30,10 +36,13 @@ class MechanicalCheckTimingTest {
         val elapsed = Duration.ofNanos(System.nanoTime() - started)
 
         report.ok shouldBe true
-        report.cases.values.single().rows shouldBe 1_000
+        report.cases.values
+            .single()
+            .rows shouldBe 1_000
         // The ceiling is generous for CI noise; the MEASURED value is the record, printed below.
         val ceiling = Duration.ofSeconds(5)
-        println("MECHANICAL-CHECK TIMING: single case, 1,000 fixture rows, deep schema: ${elapsed.toMillis()} ms (ceiling ${ceiling.toSeconds()}s)")
-        (elapsed < ceiling) shouldBe true
+        val measured = "MECHANICAL-CHECK TIMING: single case, 1,000 fixture rows, deep schema: ${elapsed.toMillis()} ms"
+        println("$measured (ceiling ${ceiling.toSeconds()}s)")
+        check(elapsed < ceiling) { measured }
     }
 }

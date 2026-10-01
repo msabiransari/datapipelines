@@ -103,7 +103,9 @@ internal class TestEvidenceHarness(
     ): DashboardDocument {
         val tree = DocumentFixtures.dashboard().put("name", DocumentFixtures.DASHBOARD_NAME)
         (tree.get("visualizations").get(0) as com.fasterxml.jackson.databind.node.ObjectNode)
-            .putObject("visualization").put("name", visualizationName).put("version", version)
+            .putObject("visualization")
+            .put("name", visualizationName)
+            .put("version", version)
         return ValidatorFakes.dashboardDocument(tree)
     }
 

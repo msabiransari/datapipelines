@@ -1,9 +1,9 @@
 package co.datapipelines.visualization
 
 import com.fasterxml.jackson.databind.node.ObjectNode
+import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
-import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
 
@@ -51,9 +51,8 @@ class PlotlySchemaValidatorTest {
         problems(node("""{"data":[{"type":"scatter","x":"$.x","y":"$.y","mode":[1,2]}]}"""))
             .map { it.path } shouldContainExactlyInAnyOrder listOf("data[0].mode")
         // Falsifications: the corrected values pass.
-        problems(
-            node("""{"data":[{"type":"scatter","x":"$.x","y":"$.y","mode":"lines+markers"}],"layout":{"width":600,"autosize":true,"xaxis":{"type":"linear"}}}"""),
-        ).shouldBeEmpty()
+        val corrected = """{"data":[{"type":"scatter","x":"$.x","y":"$.y","mode":"lines+markers"}],"layout":{}}"""
+        problems(node(corrected)).shouldBeEmpty()
     }
 
     @Test

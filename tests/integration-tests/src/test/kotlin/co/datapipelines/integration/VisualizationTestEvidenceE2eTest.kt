@@ -69,7 +69,10 @@ class VisualizationTestEvidenceE2eTest {
         context.getBeanNamesForType(sessionService).size shouldBe 1
         val evidenceBeans = context.getBeansOfType(gate)
         evidenceBeans.size shouldBe 1
-        withClue("the ReleaseEvidence bean IS the real gate, not a fake") { evidenceBeans.keys.single() shouldBe "visualizationReleaseEvidence" }
+        withClue("the ReleaseEvidence bean IS the real gate, not a fake") {
+            evidenceBeans.keys.single() shouldBe
+                "visualizationReleaseEvidence"
+        }
     }
 
     @Test
@@ -109,7 +112,9 @@ class VisualizationTestEvidenceE2eTest {
 
     // ---- HTTP helpers (the L1b E2E's shape) ------------------------------------------------------------
 
-    private val mapper = com.fasterxml.jackson.databind.ObjectMapper()
+    private val mapper =
+        com.fasterxml.jackson.databind
+            .ObjectMapper()
 
     private fun refused(
         response: io.restassured.response.Response,
@@ -153,7 +158,11 @@ class VisualizationTestEvidenceE2eTest {
         path: String,
         session: String,
     ): io.restassured.response.Response =
-        given().port(port).asSession(session).contentType(ContentType.JSON).get(path)
+        given()
+            .port(port)
+            .asSession(session)
+            .contentType(ContentType.JSON)
+            .get(path)
 
     private fun seed() {
         sql("INSERT INTO workspaces (id, name, display_name) VALUES ('$WORKSPACE_ID', '$WORKSPACE', 'Test evidence E2E')")

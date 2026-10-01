@@ -4,9 +4,9 @@ import co.datapipelines.application.templates.TemplateEvaluateService
 import co.datapipelines.pipeline.TemplateDryRenderer
 import co.datapipelines.pipeline.TemplateVersionStatuses
 import co.datapipelines.visualization.ReleaseEvidence
+import co.datapipelines.visualization.RenderedStateCheck
 import co.datapipelines.visualization.RendererConfigValidator
 import co.datapipelines.visualization.RendererConfigValidators
-import co.datapipelines.visualization.RenderedStateCheck
 import co.datapipelines.visualization.TemplateContractFacts
 import co.datapipelines.visualization.TestFixtureEvaluator
 import co.datapipelines.visualization.TestRunRepository

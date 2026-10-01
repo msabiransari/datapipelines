@@ -5,10 +5,10 @@ import co.datapipelines.typesystem.LogicalType
 import co.datapipelines.visualization.DocumentFixtures.obj
 import com.fasterxml.jackson.databind.node.ObjectNode
 import io.kotest.assertions.withClue
-import io.kotest.matchers.shouldBe
-import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
+import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
 import java.util.UUID
 
@@ -34,10 +34,11 @@ class VisualizationMechanicalCheckTest {
 
         fun reset() {
             evaluatorReturnsRows.clear()
-            evaluatorReturnsRows += listOf(
-                mapOf("month_labels" to "Jan", "amounts" to 10.5),
-                mapOf("month_labels" to "Feb", "amounts" to 12.0),
-            )
+            evaluatorReturnsRows +=
+                listOf(
+                    mapOf("month_labels" to "Jan", "amounts" to 10.5),
+                    mapOf("month_labels" to "Feb", "amounts" to 12.0),
+                )
             evaluatorRefusal = null
         }
     }
@@ -170,7 +171,8 @@ class VisualizationMechanicalCheckTest {
             )
         withClue("a DRAFT pin passes the fixture run") { draftCheck.run(WORKSPACE, body()).ok shouldBe true }
         // And the same run REFUSES when the pin is gone entirely: the evaluator's refusal names it.
-        Fakes.evaluatorRefusal = FixtureEvaluation.Refused("template.not_found", "Template 'finance/transforms/revenue_bars' does not exist.")
+        Fakes.evaluatorRefusal =
+            FixtureEvaluation.Refused("template.not_found", "Template 'finance/transforms/revenue_bars' does not exist.")
         draftCheck.run(WORKSPACE, body()).ok shouldBe false
         Fakes.reset()
     }
@@ -216,16 +218,28 @@ class VisualizationMechanicalCheckTest {
     @Test
     fun `a no_data case with produced rows fails - and passes at zero rows`() {
         val noData = body { objAssertion(it, 0, """{"kind":"no_data"}""") }
-        check.run(WORKSPACE, noData).failures.single { it.step == "assertions" }.message shouldContain "produced 2 rows"
+        check
+            .run(WORKSPACE, noData)
+            .failures
+            .single { it.step == "assertions" }
+            .message shouldContain "produced 2 rows"
         Fakes.evaluatorReturnsRows.clear()
-        check.run(WORKSPACE, noData).failures.filter { it.step == "assertions" }.shouldBeEmpty()
+        check
+            .run(WORKSPACE, noData)
+            .failures
+            .filter { it.step == "assertions" }
+            .shouldBeEmpty()
         Fakes.reset()
     }
 
     @Test
     fun `text_visible must appear in the configuration or the bound values - and un-falsifies`() {
         val absent = body { objAssertion(it, 0, """{"kind":"text_visible","text":"NEITHER"}""") }
-        check.run(WORKSPACE, absent).failures.single { it.step == "assertions" }.message shouldContain "appears neither"
+        check
+            .run(WORKSPACE, absent)
+            .failures
+            .single { it.step == "assertions" }
+            .message shouldContain "appears neither"
         // "Feb" is a bound value of the case's evaluation; "Revenue" is the layout title text.
         check.run(WORKSPACE, body { objAssertion(it, 0, """{"kind":"text_visible","text":"Feb"}""") }).ok shouldBe true
         check.run(WORKSPACE, body { objAssertion(it, 0, """{"kind":"text_visible","text":"Revenue"}""") }).ok shouldBe true
@@ -237,7 +251,9 @@ class VisualizationMechanicalCheckTest {
     fun `the default rendered state records not_available - never success, never a browser claim`() {
         RenderedStateCheck.NOT_AVAILABLE.state(WORKSPACE, body(), "twelve months") shouldBe "not_available"
         val report = check.run(WORKSPACE, body())
-        report.cases.values.single().rendered shouldBe "not_available"
+        report.cases.values
+            .single()
+            .rendered shouldBe "not_available"
     }
 
     @Test
