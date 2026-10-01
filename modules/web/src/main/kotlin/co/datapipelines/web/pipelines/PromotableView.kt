@@ -4,7 +4,7 @@ import co.datapipelines.pipeline.CurrentPipelineVersion
 import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.templates.CurrentTemplateVersion
 import co.datapipelines.visualization.CurrentArtifactVersion
-import co.datapipelines.visualization.DashboardBody
+import co.datapipelines.visualization.DashboardCurrentPins
 
 /**
  * **What this workspace could promote to the target, right now** — versioning §10.2's rule,
@@ -39,10 +39,15 @@ import co.datapipelines.visualization.DashboardBody
  * HIDDEN — proven red-first in the lens test). [dashboardsLens] is their names — the promoter's
  * `dashboard.read` lens, L1b's rule with its arm finally load-bearing. [visualizations] are the
  * pins of admitted dashboards that are ALSO newer than the target — the promotion page's rows.
- * [visualizationsLens] is ALL the pins of admitted dashboards WITHOUT the newer filter, because
- * §6.1's confirmed rule admits a visualization by its dashboard's admission alone: a dashboard
- * can be promotable on a NEW version while pinning the SAME visualization the target already
- * holds, and hiding that pin would blind the read the promoter judges the promotion with.
+ * [visualizationsLens] is the admitted dashboards' pins — the pin of a hidden dashboard is not
+ * admitted either (the 404 rule holds through the arm; the lens test pins both readings).
+ *
+ * ## The pins projection (#330)
+ * The dashboard arms read a [DashboardCurrentPins] projection — per current RELEASED dashboard
+ * its identity plus the two NAME lists the derivation needs (its source pipelines, its pins) —
+ * in ONE statement; the bodies are never loaded. The derivation itself lives in ONE function,
+ * [dashboardArms]: the page's full view and the lens's first use run the same rule over the
+ * same projection, so they cannot disagree.
  */
 class PromotableView private constructor(
     /** §10.2's set for pipelines, name-ordered. */
@@ -55,8 +60,8 @@ class PromotableView private constructor(
     val visualizations: List<Candidate>,
     /** #10 L1c — the admitted dashboards: pipeline-lens-true AND newer than the target, name-ordered. */
     val dashboards: List<Candidate>,
-    /** The current RELEASED bodies of [dashboards] — the pins the visualization lens reads. */
-    private val dashboardsBodies: Map<String, DashboardBody>,
+    /** #330 — the two dashboard arms, derived once by [dashboardArms] over the projection. */
+    private val arms: DashboardArms,
     /** How many live pipelines held a current version — so an empty listing reads as "in sync", not "broken". */
     val examinedPipelines: Int,
     val examinedTemplates: Int,
@@ -71,18 +76,27 @@ class PromotableView private constructor(
         val bodyHash: String,
     )
 
+    /** The two dashboard arms (#330): the admitted dashboards, and the pin names their lenses read. */
+    data class DashboardArms(
+        val dashboards: List<Candidate>,
+        val pinNames: Set<String>,
+    ) {
+        /** #10 L1c — the promoter's dashboard lens: the admitted dashboards (sources admitted AND newer than the target). */
+        val dashboardsLens: ReadLens get() = ReadLens.Only(dashboards.mapTo(LinkedHashSet()) { it.name })
+
+        /** #10 L1c — the promoter's visualization lens: the admitted dashboards' pins (§6.1's rule; see the class KDoc). */
+        val visualizationsLens: ReadLens get() = ReadLens.Only(pinNames)
+    }
+
     val pipelineLens: ReadLens = ReadLens.Only(pipelines.mapTo(LinkedHashSet()) { it.name })
     val templateLens: ReadLens = ReadLens.Only(templates.mapTo(LinkedHashSet()) { it.name })
     val parameterSetLens: ReadLens = ReadLens.Only(parameterSets.mapTo(LinkedHashSet()) { it.name })
 
-    /** #10 L1c — the promoter's visualization lens: ALL the pins of admitted dashboards (§6.1's rule; see the class KDoc). */
-    val visualizationsLens: ReadLens =
-        ReadLens.Only(
-            dashboardsBodies.values.flatMapTo(LinkedHashSet()) { body -> body.visualizations.map { it.visualization.name } },
-        )
+    /** #10 L1c — the promoter's visualization lens (the arms'; see [DashboardArms.visualizationsLens]). */
+    val visualizationsLens: ReadLens get() = arms.visualizationsLens
 
-    /** #10 L1c — the promoter's dashboard lens: the admitted dashboards (sources admitted AND newer than the target). */
-    val dashboardsLens: ReadLens = ReadLens.Only(dashboards.mapTo(LinkedHashSet()) { it.name })
+    /** #10 L1c — the promoter's dashboard lens (the arms'; see [DashboardArms.dashboardsLens]). */
+    val dashboardsLens: ReadLens get() = arms.dashboardsLens
 
     /** The listing row for [name], or null when [name] is not promotable — the promote path's root guard reads this. */
     fun pipeline(name: String): Candidate? = pipelines.firstOrNull { it.name == name }
@@ -91,15 +105,44 @@ class PromotableView private constructor(
     fun parameterSet(name: String): Candidate? = parameterSets.firstOrNull { it.name == name }
 
     companion object {
-        /** The rule over the local current-version lists and the target's inventory. */
+        /**
+         * The dashboard arms' derivation, the ONE function (#330): a current dashboard is admitted when
+         * every source pipeline the [pipelineLens] admits, then §10.2's rules 2–4 against the target's
+         * entry decide whether it is a [Candidate]; the visualization arm reads the ADMITTED dashboards'
+         * pins. The page's [of] and the lens's lazy first use both run this, over the same projection.
+         */
+        fun dashboardArms(
+            pipelineLens: ReadLens,
+            inventory: PromotionWire.Inventory,
+            currentDashboards: List<DashboardCurrentPins>,
+        ): DashboardArms {
+            val dashboardsOnTarget = inventory.dashboardByName()
+            // A dashboard whose projection is missing is not admitted — the body-unread fail-closed
+            // rule, now "projection-missing" (the projection read answers every current dashboard).
+            val admitted: Map<String, DashboardCurrentPins> =
+                currentDashboards
+                    .filter { pins -> pins.sourcePipelineNames.all(pipelineLens::admits) }
+                    .associateBy { it.name }
+            val dashboards =
+                admitted.values
+                    .mapNotNull { local ->
+                        candidate(local.name, local.displayName, local.version, local.bodyHash, dashboardsOnTarget[local.name])
+                    }.sortedBy { it.name }
+            val pinNames =
+                dashboards
+                    .mapNotNull { admitted[it.name] }
+                    .flatMapTo(LinkedHashSet()) { it.pinnedVisualizationNames }
+            return DashboardArms(dashboards, pinNames)
+        }
+
+        /** The rule over the local current-version lists, the pins projection, and the target's inventory. */
         fun of(
             localPipelines: List<CurrentPipelineVersion>,
             localTemplates: List<CurrentTemplateVersion>,
             inventory: PromotionWire.Inventory,
             localParameterSets: List<co.datapipelines.parameters.CurrentParameterSetVersion> = emptyList(),
             localVisualizations: List<CurrentArtifactVersion> = emptyList(),
-            localDashboards: List<CurrentArtifactVersion> = emptyList(),
-            dashboardBodies: Map<String, DashboardBody> = emptyMap(),
+            currentDashboards: List<DashboardCurrentPins> = emptyList(),
         ): PromotableView {
             val pipelinesOnTarget = inventory.pipelineByName()
             val templatesOnTarget = inventory.templateById()
@@ -114,28 +157,13 @@ class PromotableView private constructor(
                     }.sortedBy { it.name }
             val pipelineLens = ReadLens.Only(pipelines.mapTo(LinkedHashSet()) { it.name })
 
-            // The admitted dashboards (L1b's derivation, its "newer than the target" arm real since the wire
-            // carries the inventory): every source pipeline the PIPELINE lens admits, and rules 2–4 against
-            // the target's own entry. A dashboard whose body is unread is not admitted (fail closed).
-            val admittedBodies: Map<String, DashboardBody> =
-                localDashboards
-                    .mapNotNull { local -> dashboardBodies[local.name]?.let { local.name to it } }
-                    .toMap()
-                    .filterValues { body -> body.sources.all { pipelineLens.admits(it.pipeline.name) } }
-            val dashboards =
-                localDashboards
-                    .mapNotNull { local ->
-                        val body = admittedBodies[local.name] ?: return@mapNotNull null
-                        candidate(local.name, local.displayName, local.version, local.bodyHash, dashboardsOnTarget[local.name])
-                    }.sortedBy { it.name }
-            val admittedDashboardsBodies = dashboards.mapNotNull { admittedBodies[it.name] }
+            // The dashboard arms over the pins projection — the ONE derivation, shared with the lens.
+            val arms = dashboardArms(pipelineLens, inventory, currentDashboards)
 
             val visualizations =
                 localVisualizations
                     .mapNotNull { local ->
-                        val admittedPin =
-                            admittedDashboardsBodies.any { body -> body.visualizations.any { it.visualization.name == local.name } }
-                        if (!admittedPin) return@mapNotNull null
+                        if (local.name !in arms.pinNames) return@mapNotNull null
                         candidate(local.name, local.displayName, local.version, local.bodyHash, visualizationsOnTarget[local.name])
                     }.sortedBy { it.name }
 
@@ -152,8 +180,8 @@ class PromotableView private constructor(
                             candidate(local.name, local.displayName, local.version, local.bodyHash, setsOnTarget[local.name])
                         }.sortedBy { it.name },
                 visualizations = visualizations,
-                dashboards = dashboards,
-                dashboardsBodies = admittedBodies.filterKeys { key -> dashboards.any { it.name == key } },
+                dashboards = arms.dashboards,
+                arms = arms,
                 examinedPipelines = localPipelines.size,
                 examinedTemplates = localTemplates.size,
             )

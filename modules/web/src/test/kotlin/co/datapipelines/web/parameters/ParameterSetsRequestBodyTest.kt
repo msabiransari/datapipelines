@@ -55,6 +55,17 @@ class ParameterSetsRequestBodyTest {
                     ParameterSetTransferService(mockk(), mockk(), mockk(), mockk()),
                     ParametersConfig(),
                     EVERYTHING_LENS,
+                    // The body-shape refusals under test throw before any audit row could exist.
+                    object : co.datapipelines.auth.AuditEventSink {
+                        override fun log(
+                            event: String,
+                            userId: UUID?,
+                            keyId: String?,
+                            sourceIp: String?,
+                            userAgent: String?,
+                            details: Map<String, Any?>,
+                        ) = Unit
+                    },
                 ),
             ).setControllerAdvice(ApiExceptionHandler())
             .build()

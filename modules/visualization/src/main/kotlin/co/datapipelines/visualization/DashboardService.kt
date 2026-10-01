@@ -237,18 +237,42 @@ class DashboardService(
         workspaceId: UUID,
         lens: ReadLens,
         visualizationName: String,
-    ): List<String> {
-        if (lens.isEverything) return repository.livePinsOf(workspaceId, visualizationName, null)
-        return lifecycle
-            .currentVersions(workspaceId)
-            .filter { lens.admits(it.name) }
-            .mapNotNull { current ->
+    ): List<String> = pinnedByAll(workspaceId, lens, listOf(visualizationName))[visualizationName] ?: emptyList()
+
+    /**
+     * [pinnedBy] for a PAGE of names in ONE answer (#331): each queried visualization -> the dashboards pinning it
+     * (`name@version`), the same per-name semantics and the same [lens]. Under the whole view the answer is ONE
+     * statement; under a narrowing lens also ONE (the current-RELEASED pins read whole, the lens filters the
+     * dashboard names in memory — the house shape, never in a template). The `visualizations_list` tool calls
+     * this ONCE per page, never per row.
+     */
+    fun pinnedByAll(
+        workspaceId: UUID,
+        lens: ReadLens,
+        names: Collection<String>,
+    ): Map<String, List<String>> {
+        if (names.isEmpty()) return emptyMap()
+        val found =
+            if (lens.isEverything) {
+                repository.livePinsOfAll(workspaceId, names)
+            } else {
                 repository
-                    .findVersion(workspaceId, current.id, current.version)
-                    ?.takeIf { loaded -> loaded.body.visualizations.any { it.visualization.name == visualizationName } }
-                    ?.let { "${current.name}@${current.version}" }
-            }.sorted()
+                    .currentPinsOfAll(workspaceId, names)
+                    .filter { lens.admits(it.dashboardName) }
+                    .groupBy({ it.pinnedName }, { "${it.dashboardName}@${it.dashboardVersion}" })
+                    .mapValues { (_, refs) -> refs.sorted() }
+            }
+        // Every queried name is answered — an unpinned or wholly hidden visualization is an EMPTY
+        // list, the same answer the per-row read gave (never an absent key).
+        return names.associateWith { found[it] ?: emptyList() }
     }
+
+    /**
+     * The current RELEASED dashboards' pins-and-sources projection (#330), ONE statement: per dashboard the
+     * identity the promotion page's rows name plus the pinned-visualization and source-pipeline NAME lists —
+     * the only parts of the body the dashboard-arm derivation reads. Never the bodies themselves.
+     */
+    fun findCurrentPinsAndSources(workspaceId: UUID): List<DashboardCurrentPins> = repository.findCurrentPinsAndSources(workspaceId)
 
     fun listVersions(
         workspaceId: UUID,

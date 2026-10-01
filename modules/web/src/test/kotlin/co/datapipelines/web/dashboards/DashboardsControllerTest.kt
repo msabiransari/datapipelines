@@ -49,7 +49,8 @@ import java.util.UUID
 class DashboardsControllerTest {
     private val service = mockk<DashboardService>()
     private val reader = DashboardReader()
-    private val controller = DashboardsController(service, reader, co.datapipelines.web.EVERYTHING_LENS)
+    private val audit = RecordingAudit()
+    private val controller = DashboardsController(service, reader, co.datapipelines.web.EVERYTHING_LENS, audit)
 
     private val userId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()
@@ -143,7 +144,7 @@ class DashboardsControllerTest {
         val narrowing = ReadLens.Only(setOf("finance/dashboards/other"))
         every { service.findVersion(workspaceId, narrowing, id, 1) } returns null
         val lens = PromoterLens { LensedView(ReadLens.NOTHING, ReadLens.NOTHING, dashboards = narrowing) }
-        val promoter = DashboardsController(service, reader, lens)
+        val promoter = DashboardsController(service, reader, lens, audit)
 
         val error = shouldThrow<ApiException> { promoter.getVersion(id, 1) }
 
@@ -179,6 +180,10 @@ class DashboardsControllerTest {
             PipelineErrorCodes.Auth.SESSION_REQUIRED
 
         authenticate()
+        // #332 — the audit rows' pre-reads ride the caller's lens (Everything for this principal).
+        every { service.findWorking(workspaceId, ReadLens.Everything, id) } returns draft()
+        every { service.findVersion(workspaceId, ReadLens.Everything, id, 1) } returns released()
+        every { service.findVersion(workspaceId, ReadLens.Everything, id, 2) } returns draft()
         every { service.purgeEntity(workspaceId, id) } returns Unit
         every { service.purgeDraft(workspaceId, id, "hash-v1") } returns Unit
         every { service.discardVersion(workspaceId, id, 1, userId) } returns detail(1, PipelineVersionStatus.DISCARDED)
@@ -193,6 +198,19 @@ class DashboardsControllerTest {
         controller.switchCurrent(id, """{"version": 1}""").data["current_version"] shouldBe 1
         shouldThrow<ApiException> { controller.switchCurrent(id, """{"version": 1.5}""") }.details["reason"] shouldBe
             ApiErrors.REASON_WRONG_TYPE
+        // #332 — every verb audited, in the order they ran, the pipelines mould's event per verb.
+        audit.events shouldBe
+            listOf(
+                "dashboard.purged",
+                "dashboard.version.purged",
+                "dashboard.version.discarded",
+                "dashboard.version.restored",
+                "dashboard.version.purged",
+                "dashboard.current_switched",
+            )
+        // The purge rows name the artifact and its version (ids and versions only, never a body).
+        audit.details.map { it["dashboard_name"] } shouldBe listOf(NAME, NAME, NAME, NAME, NAME, NAME)
+        audit.details.map { it["version"] } shouldBe listOf(1, 1, 1, 1, 2, null)
     }
 
     @Test
@@ -246,6 +264,24 @@ class DashboardsControllerTest {
     private fun draft() = ArtifactVersion(record(null), detail(1, PipelineVersionStatus.DRAFT), body())
 
     private fun released() = ArtifactVersion(record(1), detail(1, PipelineVersionStatus.RELEASED), body())
+
+    /** The recording fake the #332 assertions read: the events in order, and the details beside each. */
+    private class RecordingAudit : co.datapipelines.auth.AuditEventSink {
+        val events = mutableListOf<String>()
+        val details = mutableListOf<Map<String, Any?>>()
+
+        override fun log(
+            event: String,
+            userId: UUID?,
+            keyId: String?,
+            sourceIp: String?,
+            userAgent: String?,
+            details: Map<String, Any?>,
+        ) {
+            events.add(event)
+            this.details.add(details)
+        }
+    }
 
     private companion object {
         const val NAME = "finance/dashboards/revenue_overview"

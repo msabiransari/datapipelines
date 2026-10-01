@@ -1,6 +1,8 @@
 package co.datapipelines.web.dashboards
 
 import co.datapipelines.application.lens.PromoterLens
+import co.datapipelines.auth.AuditEventSink
+import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.visualization.ArtifactValidation
@@ -59,6 +61,8 @@ class DashboardsController(
     private val reader: DashboardReader,
     /** The promoter lens: every read below passes the caller's view, never `Everything`. */
     private val lens: PromoterLens,
+    /** #332 — every lifecycle verb and the release audit, the pipelines mould (enums.md §15). */
+    private val audit: AuditEventSink,
 ) {
     /** §23 — create; the server assigns the id (P24) and lands version 1 DRAFT (D55). */
     @PostMapping
@@ -151,14 +155,46 @@ class DashboardsController(
         releasePinnedVisualizations: Boolean = false,
     ): ApiResponse<JsonNode> {
         val principal = currentPrincipal()
+        val workspaceId = principal.requireWorkspace().id
         val released =
             dashboards.release(
-                principal.requireWorkspace().id,
+                workspaceId,
                 id,
                 IfMatchHeader.required(ifMatch),
                 principal.userId,
                 releasePinnedVisualizations = releasePinnedVisualizations,
             )
+        // #332 — the release audit, the auditRelease twin: each cascaded VISUALIZATION's own event
+        // first (the 142 "who released X v2 and why" provenance, cascade_from_dashboard_id), then the
+        // dashboard's own event naming them — after the one transaction committed, never on a refusal.
+        val cascade = LifecycleVerbs.FamilyCascade("dashboard_id", id, released.version.detail.version)
+        released.visualizationsReleased.forEach { pin ->
+            LifecycleVerbs.audit(
+                audit,
+                LifecycleVerbs.VISUALIZATION_EVENTS.versionReleased,
+                principal,
+                workspaceId,
+                LifecycleVerbs.cascadedReleaseDetails(principal, null, null, pin.version, cascade) + mapOf("name" to pin.name),
+            )
+        }
+        LifecycleVerbs.audit(
+            audit,
+            LifecycleVerbs.DASHBOARD_EVENTS.versionReleased,
+            principal,
+            workspaceId,
+            LifecycleVerbs.familyReleaseDetails(
+                principal,
+                LifecycleVerbs.FamilyIdentity(
+                    "dashboard_id",
+                    "dashboard_name",
+                    id,
+                    released.version.record.name,
+                    released.version.detail.version,
+                ),
+                "visualizations_released",
+                released.visualizationsReleased.map { mapOf("name" to it.name, "version" to it.version) },
+            ),
+        )
         val data = ArtifactResponses.full(released.version) as com.fasterxml.jackson.databind.node.ObjectNode
         data.putArray("visualizations_released").also { array ->
             released.visualizationsReleased.forEach { array.addObject().put("name", it.name).put("version", it.version) }
@@ -197,8 +233,19 @@ class DashboardsController(
         @PathVariable id: UUID,
         @RequestHeader(value = IfMatchHeader.NAME, required = false) ifMatch: String?,
     ) {
-        LifecycleVerbs.requireSession()
-        dashboards.purgeDraft(currentPrincipal().requireWorkspace().id, id, IfMatchHeader.required(ifMatch))
+        val principal = LifecycleVerbs.requireSession()
+        val workspaceId = principal.requireWorkspace().id
+        // The name and version for the audit row, read through the caller's lens BEFORE the purge —
+        // a sole-draft purge takes the dashboard, so afterwards there is nothing to read (#332).
+        val audited = workingForAudit(principal, workspaceId, id)
+        dashboards.purgeDraft(workspaceId, id, IfMatchHeader.required(ifMatch))
+        LifecycleVerbs.audit(
+            audit,
+            LifecycleVerbs.DASHBOARD_EVENTS.versionPurged,
+            principal,
+            workspaceId,
+            auditedDetails(id, audited),
+        )
     }
 
     /** §23 — discard RELEASED version v (reversible via restore); the served pointer falls back (D60). Session-only. */
@@ -209,7 +256,16 @@ class DashboardsController(
         @PathVariable version: Int,
     ): ApiResponse<Map<String, Any?>> {
         val principal = LifecycleVerbs.requireSession()
-        val detail = dashboards.discardVersion(principal.requireWorkspace().id, id, version, principal.userId)
+        val workspaceId = principal.requireWorkspace().id
+        val audited = versionForAudit(principal, workspaceId, id, version)
+        val detail = dashboards.discardVersion(workspaceId, id, version, principal.userId)
+        LifecycleVerbs.audit(
+            audit,
+            LifecycleVerbs.DASHBOARD_EVENTS.versionDiscarded,
+            principal,
+            workspaceId,
+            auditedDetails(id, audited, version),
+        )
         return ApiResponse.of(ArtifactResponses.lifecycleSummary(detail))
     }
 
@@ -221,7 +277,16 @@ class DashboardsController(
         @PathVariable version: Int,
     ): ApiResponse<Map<String, Any?>> {
         val principal = LifecycleVerbs.requireSession()
-        val detail = dashboards.restoreVersion(principal.requireWorkspace().id, id, version)
+        val workspaceId = principal.requireWorkspace().id
+        val audited = versionForAudit(principal, workspaceId, id, version)
+        val detail = dashboards.restoreVersion(workspaceId, id, version)
+        LifecycleVerbs.audit(
+            audit,
+            LifecycleVerbs.DASHBOARD_EVENTS.versionRestored,
+            principal,
+            workspaceId,
+            auditedDetails(id, audited, version),
+        )
         return ApiResponse.of(ArtifactResponses.lifecycleSummary(detail))
     }
 
@@ -233,8 +298,17 @@ class DashboardsController(
         @PathVariable id: UUID,
         @PathVariable version: Int,
     ) {
-        LifecycleVerbs.requireSession()
-        dashboards.purgeVersion(currentPrincipal().requireWorkspace().id, id, version)
+        val principal = LifecycleVerbs.requireSession()
+        val workspaceId = principal.requireWorkspace().id
+        val audited = versionForAudit(principal, workspaceId, id, version)
+        dashboards.purgeVersion(workspaceId, id, version)
+        LifecycleVerbs.audit(
+            audit,
+            LifecycleVerbs.DASHBOARD_EVENTS.versionPurged,
+            principal,
+            workspaceId,
+            auditedDetails(id, audited, version),
+        )
     }
 
     /** §23 — the manual switch (D60, the receiver's lever); the body's shape is judged before the lookup. Session-only. */
@@ -245,8 +319,20 @@ class DashboardsController(
         @RequestBody body: String,
     ): ApiResponse<Map<String, Any?>> {
         val principal = LifecycleVerbs.requireSession()
+        val workspaceId = principal.requireWorkspace().id
         val target = ArtifactHttp.switchTarget(FAMILY, body)
-        val current = dashboards.switchCurrent(principal.requireWorkspace().id, id, target)
+        val current = dashboards.switchCurrent(workspaceId, id, target)
+        LifecycleVerbs.audit(
+            audit,
+            LifecycleVerbs.DASHBOARD_EVENTS.currentSwitched,
+            principal,
+            workspaceId,
+            mapOf(
+                "dashboard_id" to id.toString(),
+                "dashboard_name" to dashboards.findVersion(workspaceId, lens.viewFor(principal).dashboards, id, current)?.record?.name,
+                "to" to current,
+            ),
+        )
         return ApiResponse.of(mapOf("id" to id.toString(), "current_version" to current))
     }
 
@@ -257,8 +343,17 @@ class DashboardsController(
     fun delete(
         @PathVariable id: UUID,
     ) {
-        LifecycleVerbs.requireSession()
-        dashboards.purgeEntity(currentPrincipal().requireWorkspace().id, id)
+        val principal = LifecycleVerbs.requireSession()
+        val workspaceId = principal.requireWorkspace().id
+        val audited = workingForAudit(principal, workspaceId, id)
+        dashboards.purgeEntity(workspaceId, id)
+        LifecycleVerbs.audit(
+            audit,
+            LifecycleVerbs.DASHBOARD_EVENTS.entityPurged,
+            principal,
+            workspaceId,
+            auditedDetails(id, audited),
+        )
     }
 
     /** §23 — ONE level of the tree, the `?prefix=` browse (a multi-segment name never travels in a path — P24). */
@@ -305,6 +400,37 @@ class DashboardsController(
         val total = dashboards.countAll(workspaceId, view)
         return ApiResponse.of(PagedData(items, Pagination.of(page, size, total.toLong(), items.size)))
     }
+
+    // ---- the audit rows' pre-reads (#332) ----------------------------------------------------------
+
+    /** The working version's (name, number) for an audit row — read through the caller's lens, before the verb. */
+    private fun workingForAudit(
+        principal: AuthenticatedPrincipal,
+        workspaceId: UUID,
+        id: UUID,
+    ): Pair<String, Int>? =
+        dashboards.findWorking(workspaceId, lens.viewFor(principal).dashboards, id)?.let { it.record.name to it.detail.version }
+
+    /** A named version's (name, number) — the same lens rule. */
+    private fun versionForAudit(
+        principal: AuthenticatedPrincipal,
+        workspaceId: UUID,
+        id: UUID,
+        version: Int,
+    ): Pair<String, Int>? =
+        dashboards.findVersion(workspaceId, lens.viewFor(principal).dashboards, id, version)?.let { it.record.name to it.detail.version }
+
+    /** The purge row's details: the id, plus the pre-read name and version when the artifact still existed. */
+    private fun auditedDetails(
+        id: UUID,
+        audited: Pair<String, Int>?,
+        version: Int? = null,
+    ): Map<String, Any?> =
+        buildMap {
+            put("dashboard_id", id.toString())
+            put("dashboard_name", audited?.first)
+            put("version", version ?: audited?.second)
+        }
 
     private companion object {
         val FAMILY = ArtifactFamily.DASHBOARD

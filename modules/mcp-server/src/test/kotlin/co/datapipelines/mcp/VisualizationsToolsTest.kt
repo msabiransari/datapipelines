@@ -53,7 +53,10 @@ class VisualizationsToolsTest {
             listOf(ArtifactFolder("acme/charts", "charts", 2))
         every { visualizations.listChildren(workspaceId, ReadLens.Everything, "acme", 0, 50) } returns
             listOf(loaded(PipelineVersionStatus.RELEASED))
-        every { dashboards.pinnedBy(workspaceId, ReadLens.Everything, NAME) } returns listOf("acme/boards/revenue@2")
+        // #331 — used_by for the PAGE in one batched call: the per-row reads are gone, the tool loop
+        // only reads the answer's map. Red if anyone restores the per-row `pinnedBy` call.
+        every { dashboards.pinnedByAll(workspaceId, ReadLens.Everything, listOf(NAME)) } returns
+            mapOf(NAME to listOf("acme/boards/revenue@2"))
 
         val answer =
             VisualizationsListTool(visualizations, dashboards, McpFixtures.EVERYTHING_LENS).call(
@@ -71,6 +74,8 @@ class VisualizationsToolsTest {
                     mapOf("path" to "acme/charts", "segment" to "charts", "visualization_count" to 2)
             },
             { ((answer["visualizations"] as List<*>).single() as Map<*, *>)["used_by"] shouldBe listOf("acme/boards/revenue@2") },
+            { verify(exactly = 1) { dashboards.pinnedByAll(workspaceId, any(), any<Collection<String>>()) } },
+            { verify(exactly = 0) { dashboards.pinnedBy(any(), any(), any()) } },
         )
     }
 

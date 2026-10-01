@@ -1,6 +1,8 @@
 package co.datapipelines.web.parameters
 
 import co.datapipelines.application.lens.PromoterLens
+import co.datapipelines.auth.AuditEventSink
+import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.parameters.EvaluateResponseJson
@@ -73,6 +75,8 @@ class ParameterSetsController(
     private val config: ParametersConfig,
     /** 178 — the promoter lens: every read below passes the caller's view, never `Everything`. */
     private val lens: PromoterLens,
+    /** #332 — every lifecycle verb and the release audit, the pipelines mould (enums.md §15). */
+    private val audit: AuditEventSink,
 ) {
     /** §21 — create; the server assigns the id (P24) and lands version 1 DRAFT (D55). */
     @PostMapping
@@ -171,14 +175,47 @@ class ParameterSetsController(
         @RequestParam(value = "release_pinned_templates", required = false, defaultValue = "false") releasePinnedTemplates: Boolean = false,
     ): ApiResponse<JsonNode> {
         val principal = currentPrincipal()
+        val workspaceId = principal.requireWorkspace().id
         val released =
             sets.release(
-                principal.requireWorkspace().id,
+                workspaceId,
                 id,
                 IfMatchHeader.required(ifMatch),
                 principal.userId,
                 releasePinnedTemplates,
             )
+        // #332 — the release audit, the auditRelease twin (the T187 gap would otherwise be recreated
+        // here): each cascaded template's own event FIRST — the order the writes happened in — then
+        // the set's own event naming them. Called only after the service returned, i.e. after the one
+        // transaction committed; a refusal anywhere threw before this and logs nothing.
+        val cascade = LifecycleVerbs.FamilyCascade("parameter_set_id", id, released.version.detail.version)
+        released.templatesReleased.forEach { template ->
+            LifecycleVerbs.audit(
+                audit,
+                LifecycleVerbs.TEMPLATE_AUDIT_VERSION_RELEASED,
+                principal,
+                workspaceId,
+                LifecycleVerbs.cascadedReleaseDetails(principal, "template_id", template.id, template.version, cascade),
+            )
+        }
+        LifecycleVerbs.audit(
+            audit,
+            LifecycleVerbs.PARAMETER_SET_EVENTS.versionReleased,
+            principal,
+            workspaceId,
+            LifecycleVerbs.familyReleaseDetails(
+                principal,
+                LifecycleVerbs.FamilyIdentity(
+                    "parameter_set_id",
+                    "parameter_set_name",
+                    id,
+                    released.version.record.name,
+                    released.version.detail.version,
+                ),
+                "templates_released",
+                released.templatesReleased.map { mapOf("template_id" to it.id, "version" to it.version) },
+            ),
+        )
         return ApiResponse.of(ParameterSetResponses.full(released.version.record, released.version.body, released.version.detail))
     }
 
@@ -190,8 +227,19 @@ class ParameterSetsController(
         @PathVariable id: UUID,
         @RequestHeader(value = IfMatchHeader.NAME, required = false) ifMatch: String?,
     ) {
-        LifecycleVerbs.requireSession()
-        sets.purgeDraft(currentPrincipal().requireWorkspace().id, id, IfMatchHeader.required(ifMatch))
+        val principal = LifecycleVerbs.requireSession()
+        val workspaceId = principal.requireWorkspace().id
+        // The row's name and version for the audit row — read through the caller's lens BEFORE the
+        // purge: a sole-draft purge takes the set, so afterwards there is nothing to read.
+        val audited = workingForAudit(principal, workspaceId, id)
+        sets.purgeDraft(workspaceId, id, IfMatchHeader.required(ifMatch))
+        LifecycleVerbs.audit(
+            audit,
+            LifecycleVerbs.PARAMETER_SET_EVENTS.versionPurged,
+            principal,
+            workspaceId,
+            auditedDetails(id, audited),
+        )
     }
 
     /** §21 — discard RELEASED version v (reversible via restore); pointer per D60. Session-only. */
@@ -202,7 +250,24 @@ class ParameterSetsController(
         @PathVariable version: Int,
     ): ApiResponse<Map<String, Any?>> {
         val principal = LifecycleVerbs.requireSession()
-        val detail = sets.discardVersion(principal.requireWorkspace().id, id, version, principal.userId)
+        val workspaceId = principal.requireWorkspace().id
+        // The pointer pair the pipelines mould records: the D60 question is whether the discard moved it.
+        val before = repository.findRecord(workspaceId, id)
+        val detail = sets.discardVersion(workspaceId, id, version, principal.userId)
+        val after = repository.findRecord(workspaceId, id)
+        LifecycleVerbs.audit(
+            audit,
+            LifecycleVerbs.PARAMETER_SET_EVENTS.versionDiscarded,
+            principal,
+            workspaceId,
+            buildMap {
+                put("parameter_set_id", id.toString())
+                put("parameter_set_name", before?.name)
+                put("version", version)
+                put("current_version_before", before?.currentVersion)
+                put("current_version_after", after?.currentVersion)
+            },
+        )
         return ApiResponse.of(summary(detail))
     }
 
@@ -213,8 +278,23 @@ class ParameterSetsController(
         @PathVariable id: UUID,
         @PathVariable version: Int,
     ): ApiResponse<Map<String, Any?>> {
-        LifecycleVerbs.requireSession()
-        val detail = sets.restoreVersion(currentPrincipal().requireWorkspace().id, id, version)
+        val principal = LifecycleVerbs.requireSession()
+        val workspaceId = principal.requireWorkspace().id
+        val before = repository.findRecord(workspaceId, id)
+        val detail = sets.restoreVersion(workspaceId, id, version)
+        val after = repository.findRecord(workspaceId, id)
+        LifecycleVerbs.audit(
+            audit,
+            LifecycleVerbs.PARAMETER_SET_EVENTS.versionRestored,
+            principal,
+            workspaceId,
+            buildMap {
+                put("parameter_set_id", id.toString())
+                put("parameter_set_name", before?.name)
+                put("version", version)
+                put("current_version_after", after?.currentVersion)
+            },
+        )
         return ApiResponse.of(summary(detail))
     }
 
@@ -226,8 +306,17 @@ class ParameterSetsController(
         @PathVariable id: UUID,
         @PathVariable version: Int,
     ) {
-        LifecycleVerbs.requireSession()
-        sets.purgeVersion(currentPrincipal().requireWorkspace().id, id, version)
+        val principal = LifecycleVerbs.requireSession()
+        val workspaceId = principal.requireWorkspace().id
+        val audited = versionForAudit(principal, workspaceId, id, version)
+        sets.purgeVersion(workspaceId, id, version)
+        LifecycleVerbs.audit(
+            audit,
+            LifecycleVerbs.PARAMETER_SET_EVENTS.versionPurged,
+            principal,
+            workspaceId,
+            auditedDetails(id, audited, version),
+        )
     }
 
     /** §21 — the manual switch (the promotion receiver's rollout/rollback lever). Session-only. */
@@ -247,8 +336,20 @@ class ParameterSetsController(
         if (versionNode == null || versionNode.isNull) throw ApiErrors.parameterSetBodyInvalid("version", ApiErrors.REASON_MISSING)
         if (!versionNode.canConvertToInt()) throw ApiErrors.parameterSetBodyInvalid("version", ApiErrors.REASON_WRONG_TYPE)
         val target = versionNode.asInt()
-        repository.findRecord(workspaceId, id) ?: throw ApiErrors.parameterNotFound(id.toString())
+        val recordBefore = repository.findRecord(workspaceId, id) ?: throw ApiErrors.parameterNotFound(id.toString())
         val current = sets.switchCurrent(workspaceId, id, target)
+        LifecycleVerbs.audit(
+            audit,
+            LifecycleVerbs.PARAMETER_SET_EVENTS.currentSwitched,
+            principal,
+            workspaceId,
+            mapOf(
+                "parameter_set_id" to id.toString(),
+                "parameter_set_name" to recordBefore.name,
+                "from" to recordBefore.currentVersion,
+                "to" to current,
+            ),
+        )
         return ApiResponse.of(mapOf("id" to id.toString(), "current_version" to current))
     }
 
@@ -259,8 +360,18 @@ class ParameterSetsController(
     fun delete(
         @PathVariable id: UUID,
     ) {
-        LifecycleVerbs.requireSession()
-        sets.purgeEntity(currentPrincipal().requireWorkspace().id, id)
+        val principal = LifecycleVerbs.requireSession()
+        val workspaceId = principal.requireWorkspace().id
+        // Read BEFORE the purge: the entity-purge takes the set's only (draft) version with it.
+        val audited = workingForAudit(principal, workspaceId, id)
+        sets.purgeEntity(workspaceId, id)
+        LifecycleVerbs.audit(
+            audit,
+            LifecycleVerbs.PARAMETER_SET_EVENTS.entityPurged,
+            principal,
+            workspaceId,
+            auditedDetails(id, audited),
+        )
     }
 
     /** §21 — ONE level of the set tree, the `?prefix=` browse (a multi-segment name never travels in a path — P24). */
@@ -421,6 +532,38 @@ class ParameterSetsController(
     }
 
     // ---- helpers ----------------------------------------------------------------------------------
+
+    /** The working version's (name, number) for an audit row — read through the caller's lens, before the verb. */
+    private fun workingForAudit(
+        principal: AuthenticatedPrincipal,
+        workspaceId: UUID,
+        id: UUID,
+    ): Pair<String, Int>? =
+        sets.findWorking(workspaceId, lens.viewFor(principal).parameterSets, id)?.let { it.record.name to it.detail.version }
+
+    /** A named version's (name, number) for an audit row — the same lens rule. */
+    private fun versionForAudit(
+        principal: AuthenticatedPrincipal,
+        workspaceId: UUID,
+        id: UUID,
+        version: Int,
+    ): Pair<String, Int>? =
+        sets.findVersion(workspaceId, lens.viewFor(principal).parameterSets, id, version)?.let { it.record.name to it.detail.version }
+
+    /**
+     * The purge row's details: the id, plus the pre-read name and version. The name is null when the
+     * set was already absent — an audit row records what was there when the verb began, never a guess.
+     */
+    private fun auditedDetails(
+        id: UUID,
+        audited: Pair<String, Int>?,
+        version: Int? = null,
+    ): Map<String, Any?> =
+        buildMap {
+            put("parameter_set_id", id.toString())
+            put("parameter_set_name", audited?.first)
+            put("version", version ?: audited?.second)
+        }
 
     private fun summary(detail: co.datapipelines.parameters.ParameterSetVersionDetail) =
         mapOf<String, Any?>(

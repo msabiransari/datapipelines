@@ -61,7 +61,7 @@ class VisualizationTransferController(
         val envelope = transfer.exportVisualization(workspaceId, id)
         LifecycleVerbs.audit(
             audit,
-            AUDIT_EXPORTED,
+            VisualizationAuditEvents.EXPORTED,
             principal,
             workspaceId,
             mapOf(
@@ -84,7 +84,7 @@ class VisualizationTransferController(
         val imported = transfer.importVisualization(workspaceId, envelope, principal.userId)
         LifecycleVerbs.audit(
             audit,
-            AUDIT_IMPORTED,
+            VisualizationAuditEvents.IMPORTED,
             principal,
             workspaceId,
             mapOf(
@@ -104,7 +104,7 @@ class VisualizationTransferController(
     ) {
         // The working read names the record; under a narrowing lens it answers RELEASED-only, so a hidden or
         // draft-only artifact is the same 404 an absent id gets (never a hint). ONE view per request — the
-        // derivation reads every released dashboard's body (#330).
+        // lens derivation reads the pins-and-sources projection once (#330).
         val view = lens.viewFor(principal).visualizations
         val loaded =
             visualizations.findWorking(workspaceId, view, id)
@@ -114,10 +114,6 @@ class VisualizationTransferController(
 
     companion object {
         private val FAMILY = ArtifactFamily.VISUALIZATION
-
-        /** enums.md §15 — the transfer's audit events (the pipelines' lifecycle shape). */
-        const val AUDIT_EXPORTED = "visualization.exported"
-        const val AUDIT_IMPORTED = "visualization.imported"
 
         private fun ArtifactImported.asResponse(): Map<String, Any?> =
             ArtifactResponses.lifecycleSummary(detail) +

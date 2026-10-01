@@ -51,9 +51,10 @@ enum class PinScope {
  * module's SQL names another module's tables — graph rule 1's composition is `application`'s).
  *
  * **Every statement is workspace-scoped** — the pinned name is per workspace, so a same-named artifact in another
- * workspace never matches, and every probe is a BOUND JSON value (no JSON path is built from input). **No index**:
- * `body_json` has no GIN index (V42) and none is proposed; one scan per arrow per verb over a workspace's stored
- * versions is the cost, measured in the #320 evidence.
+ * workspace never matches, and every probe is a BOUND JSON value (no JSON path is built from input). **The pins
+ * path is indexed (V46)**: the GIN index on `body_json -> 'visualizations'` serves the containment probes
+ * (#331); the reverse arrows' remaining scans — `body_json -> 'sources'`, the set pin, the transform pin — stay
+ * one scan per arrow per verb over a workspace's stored versions, measured in the #320 evidence.
  *
  * **Public and UNLENSED, by design (#340):** every row comes back, drafts and hidden names included, because the guards
  * that ask it are author-or-above verbs. A consumer that answers a caller whose lens narrows (a promoter) applies BOTH

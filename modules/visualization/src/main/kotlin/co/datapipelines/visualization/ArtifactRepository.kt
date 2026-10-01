@@ -582,4 +582,125 @@ class DashboardRepository(
             mapOf("workspaceId" to workspaceId, "probe" to ArtifactJson.mapper.writeValueAsString(probe)),
         ) { rs, _ -> rs.getString("pinned_by") }
     }
+
+    /**
+     * [livePinsOf] for MANY visualization names in ONE statement (#331): every LIVE version's pin
+     * occurrences naming one of [names], as `pinned visualization name -> pinning `name@version``.
+     * The names are a bind list (`IN`), never concatenated; the DISTINCT collapses a dashboard that
+     * places the same pin twice — the containment probe answered it once, so does this.
+     */
+    fun livePinsOfAll(
+        workspaceId: UUID,
+        names: Collection<String>,
+    ): Map<String, List<String>> {
+        if (names.isEmpty()) return emptyMap()
+        val rows =
+            jdbc.query(
+                """
+                SELECT DISTINCT pin -> 'visualization' ->> 'name' AS pinned_name,
+                       s.name || '@' || v.version AS pinned_by
+                  FROM dashboard_versions v JOIN dashboards s ON s.id = v.dashboard_id
+                 CROSS JOIN LATERAL jsonb_array_elements(v.body_json -> 'visualizations') pin
+                 WHERE s.workspace_id = :workspaceId AND v.status IN ('DRAFT', 'RELEASED')
+                   AND pin -> 'visualization' ->> 'name' IN (:names)
+                 ORDER BY 2
+                """.trimIndent(),
+                mapOf("workspaceId" to workspaceId, "names" to names),
+            ) { rs, _ -> rs.getString("pinned_name") to rs.getString("pinned_by") }
+        return rows.groupBy({ it.first }, { it.second })
+    }
+
+    /**
+     * The page's pins under a NARROWING lens' source query (#331): the current RELEASED dashboards'
+     * pin occurrences naming one of [names], as plain rows — the LENS filters the dashboard names
+     * afterwards (in memory, the house `through` shape), so the statement count stays ONE whatever
+     * the lens admits.
+     */
+    fun currentPinsOfAll(
+        workspaceId: UUID,
+        names: Collection<String>,
+    ): List<CurrentPinRow> {
+        if (names.isEmpty()) return emptyList()
+        return jdbc.query(
+            """
+            SELECT DISTINCT s.name AS dashboard_name, v.version AS dashboard_version,
+                   pin -> 'visualization' ->> 'name' AS pinned_name
+              FROM dashboards s
+              JOIN dashboard_versions v ON v.dashboard_id = s.id AND v.version = s.current_version
+              CROSS JOIN LATERAL jsonb_array_elements(v.body_json -> 'visualizations') pin
+             WHERE s.workspace_id = :workspaceId AND v.status = 'RELEASED'
+               AND pin -> 'visualization' ->> 'name' IN (:names)
+            """.trimIndent(),
+            mapOf("workspaceId" to workspaceId, "names" to names),
+        ) { rs, _ ->
+            CurrentPinRow(rs.getString("dashboard_name"), rs.getInt("dashboard_version"), rs.getString("pinned_name"))
+        }
+    }
+
+    /**
+     * The current RELEASED dashboards' promotion projection (#330), ONE statement: the identity
+     * [CurrentArtifactVersion] carries plus the two NAME lists the lens derivation reads out of the
+     * body — the pinned visualization names and the source pipeline names. The body itself is never
+     * loaded; the JSON paths are read inside the statement and parsed off the returned jsonb text.
+     */
+    fun findCurrentPinsAndSources(workspaceId: UUID): List<DashboardCurrentPins> =
+        jdbc.query(
+            """
+            SELECT s.id, s.name, s.display_name, v.version, v.body_hash,
+                   COALESCE(v.body_json -> 'sources', '[]'::jsonb)::TEXT AS sources,
+                   COALESCE(v.body_json -> 'visualizations', '[]'::jsonb)::TEXT AS pins
+              FROM dashboards s
+              JOIN dashboard_versions v ON v.dashboard_id = s.id AND v.version = s.current_version
+             WHERE s.workspace_id = :workspaceId AND v.status = 'RELEASED'
+             ORDER BY s.name
+            """.trimIndent(),
+            mapOf("workspaceId" to workspaceId),
+        ) { rs, _ ->
+            DashboardCurrentPins(
+                id = rs.getObject("id", UUID::class.java),
+                name = rs.getString("name"),
+                displayName = rs.getString("display_name"),
+                version = rs.getInt("version"),
+                bodyHash = rs.getString("body_hash"),
+                sourcePipelineNames = namesOf(rs.getString("sources")) { it.path("pipeline").path("name") },
+                pinnedVisualizationNames = namesOf(rs.getString("pins")) { it.path("visualization").path("name") },
+            )
+        }
+
+    /** The `name` strings of [json]'s array elements, read at [at]; a malformed stored array reads as none. */
+    private fun namesOf(
+        json: String,
+        at: (JsonNode) -> JsonNode,
+    ): List<String> =
+        runCatching { ArtifactJson.mapper.readTree(json) }
+            .getOrNull()
+            ?.takeIf(JsonNode::isArray)
+            ?.mapNotNull { element -> at(element).asText(null) }
+            ?: emptyList()
+
+    /** One [currentPinsOfAll] row: the pinning dashboard by name and CURRENT version, and the pin it holds. */
+    data class CurrentPinRow(
+        val dashboardName: String,
+        val dashboardVersion: Int,
+        val pinnedName: String,
+    )
+}
+
+/**
+ * One current RELEASED dashboard's promotion projection (#330) — the identity fields of
+ * [CurrentArtifactVersion] plus the two name lists the promoter-lens derivation reads out of the
+ * body: which pipelines it sources and which visualizations it pins. The body is NOT loaded.
+ */
+data class DashboardCurrentPins(
+    val id: UUID,
+    val name: String,
+    val displayName: String,
+    val version: Int,
+    val bodyHash: String,
+    val sourcePipelineNames: List<String>,
+    val pinnedVisualizationNames: List<String>,
+) {
+    /** The identity half, for the promotion page's dashboard rows (the shape `currentVersions` answered). */
+    fun toCurrentVersion(): CurrentArtifactVersion =
+        CurrentArtifactVersion(id = id, name = name, displayName = displayName, version = version, bodyHash = bodyHash)
 }

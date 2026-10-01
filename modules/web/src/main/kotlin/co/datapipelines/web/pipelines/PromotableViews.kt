@@ -23,13 +23,14 @@ import java.util.UUID
  *
  * ## Cost
  * A non-lensed principal: zero queries, zero target calls — [LensedView.EVERYTHING] is a
- * constant. A lensed principal: the current-version reads (one join each) plus the cached
- * inventory, per request that asks. Promoters are ops people; the read surfaces they
- * reach are the listing screens, not the execution hot path. The dashboard derivation reads
- * each current released dashboard's BODY once per lensed request (#330, filed LOW): the pins
- * and the source names live inside the version body, and a pins-only projection would be a new
- * repository statement outside the L1c fence — left for a follow-up with the number that
- * justifies it.
+ * constant. A lensed principal: the pipelines/template/set arms derive per request (the three
+ * current-version reads they always cost); the TWO DASHBOARD ARMS derive on FIRST USE of
+ * either (#330) — a request that never asks for visualizations or dashboards issues zero
+ * dashboard reads, and one that does pays ONE pins-and-sources statement for the whole answer,
+ * never the dashboards' bodies. The arms' thunk closes over the SAME [PromotionWire.Inventory]
+ * snapshot the eager arms were computed from, so one request's view is one §10.2 world.
+ * Promoters are ops people; the read surfaces they reach are the listing screens, not the
+ * execution hot path.
  */
 class PromotableViews(
     private val pipelines: PipelineRepository,
@@ -47,19 +48,32 @@ class PromotableViews(
         // A lensed principal holds a workspace role, hence a workspace; the fallback is the
         // fail-closed answer rather than a 403 from a read that never named a workspace.
         val workspace = principal.workspace ?: return unavailable("no_workspace")
-        return when (val computed = compute(workspace.id, workspace.name)) {
-            is Computed.Ready -> {
-                LensedView(
-                    computed.view.pipelineLens,
-                    computed.view.templateLens,
-                    parameterSets = computed.view.parameterSetLens,
-                    visualizations = computed.view.visualizationsLens,
-                    dashboards = computed.view.dashboardsLens,
+        return when (val cached = client.cachedInventory(workspace.name)) {
+            is PromotionTargetClient.CachedInventory.Present -> {
+                // The three families every read asks are derived now; the dashboard arms wait for a
+                // reader (#330) — the ONE projection statement runs when a visualization or dashboard
+                // lens is first read on this view, and never otherwise.
+                val families =
+                    PromotableView.of(
+                        pipelines.findCurrentVersions(workspace.id),
+                        templates.findCurrentVersions(workspace.id),
+                        cached.inventory,
+                        parameterSets.findCurrentVersions(workspace.id),
+                    )
+                LensedView.withLazyDashboardArms(
+                    pipelines = families.pipelineLens,
+                    templates = families.templateLens,
+                    parameterSets = families.parameterSetLens,
+                    arms = {
+                        PromotableView
+                            .dashboardArms(families.pipelineLens, cached.inventory, dashboards.findCurrentPinsAndSources(workspace.id))
+                            .let { it.visualizationsLens to it.dashboardsLens }
+                    },
                 )
             }
 
-            is Computed.Unavailable -> {
-                unavailable(computed.reason)
+            is PromotionTargetClient.CachedInventory.Unreachable -> {
+                unavailable(cached.reason)
             }
         }
     }
@@ -82,25 +96,15 @@ class PromotableViews(
     fun compute(
         workspaceId: UUID,
         inventory: PromotionWire.Inventory,
-    ): PromotableView {
-        val currentDashboards = dashboards.currentVersions(workspaceId)
-        val bodiesByName =
-            currentDashboards
-                .mapNotNull { current ->
-                    dashboards
-                        .findVersion(workspaceId, ReadLens.Everything, current.id, current.version)
-                        ?.let { current.name to it.body }
-                }.toMap()
-        return PromotableView.of(
+    ): PromotableView =
+        PromotableView.of(
             pipelines.findCurrentVersions(workspaceId),
             templates.findCurrentVersions(workspaceId),
             inventory,
             parameterSets.findCurrentVersions(workspaceId),
             visualizations.currentVersions(workspaceId),
-            currentDashboards,
-            bodiesByName,
+            dashboards.findCurrentPinsAndSources(workspaceId),
         )
-    }
 
     /** Fail closed: every lens — the dashboard and visualization arms included — admits NOTHING. */
     private fun unavailable(reason: String): LensedView =

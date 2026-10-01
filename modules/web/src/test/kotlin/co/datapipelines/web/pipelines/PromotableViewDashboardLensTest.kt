@@ -118,18 +118,22 @@ class PromotableViewDashboardLensTest {
             listOf(CurrentPipelineVersion(UUID.randomUUID(), "ops/pipelines/a", "A", 1, "h"))
         every { templates.findCurrentVersions(workspace) } returns emptyList()
         every { sets.findCurrentVersions(workspace) } returns emptyList()
-        every { visualizations.currentVersions(workspace) } returns emptyList()
         val shown = UUID.randomUUID()
         val hidden = UUID.randomUUID()
-        every { dashboards.currentVersions(workspace) } returns
+        // #330 — the lens reads the pins-and-sources projection (ONE statement), never the bodies;
+        // and it reads it on FIRST USE of a dashboard arm, which this test's reads force.
+        every { dashboards.findCurrentPinsAndSources(workspace) } returns
             listOf(
-                CurrentArtifactVersion(shown, "ops/dashboards/shown", "Shown", 1, "h1"),
-                CurrentArtifactVersion(hidden, "ops/dashboards/hidden", "Hidden", 2, "h2"),
+                projection(shown, "ops/dashboards/shown", 1, "h1", listOf("ops/pipelines/a"), listOf("ops/visualizations/shown")),
+                projection(
+                    hidden,
+                    "ops/dashboards/hidden",
+                    2,
+                    "h2",
+                    listOf("ops/pipelines/elsewhere"),
+                    listOf("ops/visualizations/hidden"),
+                ),
             )
-        every { dashboards.findVersion(workspace, ReadLens.Everything, shown, 1) } returns
-            released(shown, "ops/dashboards/shown", dashboard(listOf("ops/pipelines/a"), listOf("ops/visualizations/shown")))
-        every { dashboards.findVersion(workspace, ReadLens.Everything, hidden, 2) } returns
-            released(hidden, "ops/dashboards/hidden", dashboard(listOf("ops/pipelines/elsewhere"), listOf("ops/visualizations/hidden")))
 
         val view = PromotableViews(pipelines, templates, client, sets, dashboards, visualizations).viewFor(promoter(workspace))
 
@@ -138,6 +142,38 @@ class PromotableViewDashboardLensTest {
             { view.visualizations shouldBe ReadLens.Only(setOf("ops/visualizations/shown")) },
             { view.isLensed shouldBe true },
         )
+    }
+
+    @Test
+    fun `a view that never reads a dashboard arm runs no dashboard read - the arms are lazy (#330)`() {
+        val workspace = UUID.randomUUID()
+        val pipelines = mockk<PipelineRepository>()
+        val client = mockk<PromotionTargetClient>()
+        val dashboards = mockk<DashboardService>()
+        every { client.cachedInventory("ops") } returns
+            PromotionTargetClient.CachedInventory.Present(PromotionWire.Inventory("uat", false, "ops"))
+        every { pipelines.findCurrentVersions(workspace) } returns
+            listOf(CurrentPipelineVersion(UUID.randomUUID(), "ops/pipelines/a", "A", 1, "h"))
+
+        val view =
+            PromotableViews(
+                pipelines,
+                mockk<TemplateRepository>().also { every { it.findCurrentVersions(workspace) } returns emptyList() },
+                client,
+                mockk<co.datapipelines.parameters.ParameterSetRepository>()
+                    .also { every { it.findCurrentVersions(workspace) } returns emptyList() },
+                dashboards,
+                mockk<VisualizationService>(),
+            ).viewFor(promoter(workspace))
+
+        // The pipelines-shaped request: the pipeline lens only, so no dashboard statement may run.
+        view.pipelines shouldBe ReadLens.Only(setOf("ops/pipelines/a"))
+        verify(exactly = 0) { dashboards.findCurrentPinsAndSources(any()) }
+        // A request that DOES touch the families derives both arms from the ONE projection read.
+        every { dashboards.findCurrentPinsAndSources(workspace) } returns emptyList()
+        view.dashboards shouldBe ReadLens.Only(emptySet())
+        view.visualizations shouldBe ReadLens.Only(emptySet())
+        verify(exactly = 1) { dashboards.findCurrentPinsAndSources(workspace) }
     }
 
     @Test
@@ -154,7 +190,7 @@ class PromotableViewDashboardLensTest {
             { view.visualizations shouldBe ReadLens.NOTHING },
             { view.unavailable?.reason shouldBe "connect_refused" },
         )
-        verify(exactly = 0) { dashboards.currentVersions(any()) }
+        verify(exactly = 0) { dashboards.findCurrentPinsAndSources(any()) }
     }
 
     // ---- fixtures -------------------------------------------------------------------------------------
@@ -166,9 +202,10 @@ class PromotableViewDashboardLensTest {
         dashboardsOnTarget: List<PromotionWire.Entry> = emptyList(),
     ): PromotableView {
         val localPipelines = pipelines.map { CurrentPipelineVersion(UUID.randomUUID(), it, "P", 1, "p-hash-$it") }
-        val localDashboards =
-            dashboards.mapIndexed { index, (name, _, _) -> CurrentArtifactVersion(UUID.randomUUID(), name, "D", 3, "d-hash-$name") }
-        val bodies = dashboards.associate { (name, sources, pins) -> name to dashboard(sources, pins) }
+        val currentDashboards =
+            dashboards.mapIndexed { index, (name, sources, pins) ->
+                projection(UUID.randomUUID(), name, 3, "d-hash-$name", sources, pins)
+            }
         val inventory =
             PromotionWire.Inventory(
                 "uat",
@@ -176,8 +213,18 @@ class PromotableViewDashboardLensTest {
                 "ops",
                 dashboards = dashboardsOnTarget,
             )
-        return PromotableView.of(localPipelines, emptyList(), inventory, emptyList(), emptyList(), localDashboards, bodies)
+        return PromotableView.of(localPipelines, emptyList(), inventory, emptyList(), emptyList(), currentDashboards)
     }
+
+    /** The #330 projection row: the identity plus the two name lists, no body. */
+    private fun projection(
+        id: UUID,
+        name: String,
+        version: Int,
+        bodyHash: String,
+        sources: List<String>,
+        pins: List<String>,
+    ) = co.datapipelines.visualization.DashboardCurrentPins(id, name, "D", version, bodyHash, sources, pins)
 
     private fun promoter(workspace: UUID) =
         AuthenticatedPrincipal(
@@ -187,31 +234,4 @@ class PromotableViewDashboardLensTest {
             AuthMethod.OIDC,
             workspace = WorkspaceContext(workspace, "ops", role = WorkspaceRole.PROMOTER),
         )
-
-    private fun dashboard(
-        pipelines: List<String>,
-        visualizations: List<String>,
-    ) = DashboardBody(
-        displayName = "D",
-        sources = pipelines.mapIndexed { index, name -> DashboardSource("s$index", ArtifactRef(name, 1)) },
-        visualizations =
-            visualizations.mapIndexed { index, name ->
-                VisualizationOccurrence("v$index", DashboardObjectType.VISUALIZATION, ArtifactRef(name, 1))
-            },
-        layout = DashboardLayout(),
-    )
-
-    private fun released(
-        id: UUID,
-        name: String,
-        body: DashboardBody,
-    ): ArtifactVersion<DashboardBody> {
-        val at = Instant.parse("2026-09-29T00:00:00Z")
-        val user = UUID.randomUUID()
-        return ArtifactVersion(
-            ArtifactRecord(id, UUID.randomUUID(), name, "D", "", 1, at, at, user),
-            ArtifactVersionDetail(id, 1, PipelineVersionStatus.RELEASED, "h", at, user),
-            body,
-        )
-    }
 }

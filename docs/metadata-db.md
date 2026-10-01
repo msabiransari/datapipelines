@@ -1,6 +1,6 @@
 # Metadata Database Schema Specification
 
-**Status:** v1.36 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
+**Status:** v1.37 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
 **Owner:** datapipelines.co core
 **Depends on:** all specs (this is the physical schema for every logical model)
 **Last updated:** 2026-09-29
@@ -1229,6 +1229,14 @@ CREATE TABLE dashboard_versions (
 
 CREATE UNIQUE INDEX uq_dashboard_versions_one_draft
     ON dashboard_versions (dashboard_id) WHERE status = 'DRAFT';
+
+-- #331 (V46): the pins path, indexed for the containment probe — `livePinsOf`'s
+-- `body_json -> 'visualizations' @> :probe` (the pin guards and `visualizations_get`
+-- pay it once per probe). Measured on demo-shaped content: a bitmap index scan,
+-- 5.3 ms → 0.9 ms at 4 000 dashboards. The batched page answer reads the pins
+-- whole and does not use the index; it is not written for it.
+CREATE INDEX idx_dashboard_versions_pins
+    ON dashboard_versions USING GIN ((body_json -> 'visualizations'));
 ```
 
 ### 4.32 `visualization_test_runs`
@@ -1476,6 +1484,7 @@ CREATE INDEX idx_dashboard_refresh_executions_execution ON dashboard_refresh_exe
 | `dashboards` | `uq_dashboards_workspace_name` | via UNIQUE | V42: one name per workspace forever; the tree browse ([§4.30](#430-dashboards)) |
 | `dashboard_versions` | `dashboard_versions_pkey` | via PK | `(dashboard_id, version)` — every version read |
 | `dashboard_versions` | `uq_dashboard_versions_one_draft` | explicit (partial, unique) | V42: the one-DRAFT rule ([§4.31](#431-dashboard_versions)) |
+| `dashboard_versions` | `idx_dashboard_versions_pins` | explicit (GIN, expression) | V46 (#331): the pins path the containment probe reads — `body_json -> 'visualizations' @> :probe` — as a bitmap index scan (the visualization purge/discard/restore guards and `visualizations_get`'s `used_by`); the batched page answer reads the pins whole and does not use it |
 | `visualization_test_runs` | `visualization_test_runs_pkey` | via PK | Lookup by run id |
 | `visualization_test_runs` | `uq_visualization_test_runs_session` | via UNIQUE | V42: one run per (visualization, version, session); its leading `(visualization_id, version)` is the per-version run lookup and the cascade's index ([§4.32](#432-visualization_test_runs)) |
 | `visualization_test_screenshots` | `visualization_test_screenshots_pkey` | via PK | One image per run, fetched by the run ([§4.33](#433-visualization_test_screenshots)) |
@@ -1845,6 +1854,7 @@ Three pieces of execution state that a reader might reasonably expect to find he
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-01 | v1.37 | 332 (#332, #330, #331) | **V46 `idx_dashboard_versions_pins`**: the GIN index on `dashboard_versions (body_json -> 'visualizations')` — the exact expression `livePinsOf`'s containment probe reads (the visualization purge/discard/restore guards and `visualizations_get`'s `used_by`), a bitmap index scan where a whole-table scan ran (measured 5.3 ms → 0.9 ms at 4 000 dashboards; the up-and-down rehearsal on a copy of the demo-shaped database is the lane's evidence). §4.31 carries the index row. No other DDL: #330's projection and #331's batched page answer are statements over the existing tables. |
 | 2026-10-01 | v1.36 | V44 (#10 L4a, the test capabilities) | **§4.32 `visualization_test_runs` gains the screenshot upload capability** (`upload_token_hash`, `upload_expires_at`, `upload_consumed_at` + `chk_visualization_test_runs_upload`): the three columns are one capability — hash-only at rest, the consumption stamp strictly before the deadline — and the hash's `IS NOT NULL` is load-bearing (`NULL ~ regex` is NULL, and a CHECK passes on NULL; caught by the behavioral probe). The notes carry the single-use consumption's guarded-UPDATE fence. |
 | 2026-09-29 | v1.35 | V43 (#10 L2, dashboards round one) | New **§4.34 `dashboard_refreshes`** and **§4.35 `dashboard_refresh_executions`** (the refresh per run, the link D52 requires; a refused refresh writes no row, the terminal write is non-cancellable), `pipeline_executions.triggered_via` gains **`DASHBOARD`** (§4.6's CHECK text and column comment), the §5 index rows and the §5A rows (both `derived`), **§8.1** gains the refresh retention (the events' cutoff — the spec's "the executions' own policy" was none) and a new **§8.4 Stale dashboard refresh sweep**. V43 is L2's only (the `api_keys` kind/role CHECKs, `executed_by_key_kind = 'dashboard'` and `dashboard_key_bindings` are L5's V44). |
 | 2026-09-29 | v1.34 | V42 (#10 L1a, dashboards round one) | New **§4.28 `visualizations`**, **§4.29 `visualization_versions`**, **§4.30 `dashboards`**, **§4.31 `dashboard_versions`** (V39's two tables twice, the names changed: the kept UUID, the per-workspace name unique forever, the index row over the current body, the one-draft partial index, the database-computed hash, the release/discard/via stamps) and the test evidence L4 writes — **§4.32 `visualization_test_runs`** (a run per version and session, hanging off the version by a composite foreign key that cascades, the preview token stored hashed with its expiry, the closed status list) and **§4.33 `visualization_test_screenshots`** (PNG/WebP, ≤ 4 MiB in the schema, the server's SHA-256). §5 gains their eleven indexes; §5A classifies the four artifact tables promotable and the evidence environment-local. The spec's `byte_length(bytes)` is Postgres's `octet_length`. Down path documented in the migration's header and proven on a copy of the demo database. |
