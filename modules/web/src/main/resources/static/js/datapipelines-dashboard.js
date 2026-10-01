@@ -90,12 +90,13 @@
   /**
    * A free (INPUT) control's typed read: the DOM string is parsed toward the parameter's wire type
    * and an unparsable text travels AS TEXT — the server's validator (P28) is the authority and its
-   * error lands on the row. BIGINTEGER/BIGDECIMAL travel as strings by wire contract.
+   * error lands on the row. BIGINTEGER/BIGDECIMAL travel as strings by wire contract. A BOOLEAN
+   * INPUT never reaches this reader: its tri-state select is read in its own branch (null stays
+   * null — a two-state read would conflate the unresolved value with false).
    */
   function typedInputRead(type, control) {
     return function () {
       var text = typeof control.value === "string" ? control.value : "";
-      if (type === "BOOLEAN") return control.checked === true;
       if (text === "") return null;
       if (type === "INTEGER" || type === "DECIMAL") {
         var parsed = Number(text);
@@ -604,6 +605,8 @@
    * One parameter attempt (§8.2): the FULL selections — the server's current state with the host's
    * committed values — under `intent`. The lock is acquired before the call and released only by the
    * accepted response (applied and rendered), its deadline, or disposal — never by a late timer.
+   * The deadline is the ABSOLUTE clock: both admission points re-read it, so an overdue response
+   * or render is refused even when the timer's callback has not run yet.
    */
   DashboardInstance.prototype._evaluateParameters = function (intent) {
     if (this._lock) {
@@ -637,6 +640,13 @@
       if (attempt.finished) {
         throw self._fail("parameters.superseded", "a late parameter response after its deadline changes nothing");
       }
+      // The ABSOLUTE clock is the authority, not the timer's callback: a continuation that runs
+      // after the deadline but BEFORE the delayed timer fires expires the attempt here (release,
+      // notification, exactly once), and the overdue response never reaches the adapter.
+      if (self._env.now() > attempt.deadline) {
+        self._lockExpired(attempt);
+        throw self._fail("parameters.superseded", "a late parameter response after its deadline changes nothing");
+      }
       return self._acceptParameterResponse(attempt, evaluated);
     });
   };
@@ -664,8 +674,9 @@
    * The accepted response (§5.6's order, corrected 2026-09-30): the gate releases only AFTER the
    * host has applied the state — the lock, its deadline and the attempt's timer stay LIVE through
    * the asynchronous `renderParameters`. Before any runtime state changes, the attempt is
-   * re-validated: liveness, its finished flag (the deadline may have fired mid-render) and LOCK
-   * OWNERSHIP (a newer attempt may hold it). A late render — after timeout, replacement or
+   * re-validated: liveness, its finished flag (the deadline may have fired mid-render), LOCK
+   * OWNERSHIP (a newer attempt may hold it) and the ABSOLUTE clock (a render that resolved after
+   * the deadline commits nothing — L3a-c). A late render — after timeout, replacement or
    * disposal — changes nothing and releases nothing it does not own. A synchronous throw and a
    * rejected render promise follow the same bounded path: the attempt terminates exactly once, the
    * gate releases, and a recoverable host-render failure is published.
@@ -681,6 +692,14 @@
     return render.then(
       function () {
         if (self._disposed || attempt.finished || self._lock !== attempt) {
+          throw self._fail("parameters.superseded", "a late parameter render changes nothing");
+        }
+        // The absolute deadline again, at the COMMIT: a render that resolved after the deadline
+        // installs nothing and clears no newer lock — the attempt expires here (release,
+        // notification, exactly once) and the timer becomes a no-op. An arrival exactly AT the
+        // deadline is still admitted; strictly after it, the attempt is superseded.
+        if (self._env.now() > attempt.deadline) {
+          self._lockExpired(attempt);
           throw self._fail("parameters.superseded", "a late parameter render changes nothing");
         }
         attempt.finished = true;
@@ -720,7 +739,11 @@
     );
   };
 
-  /** The deadline expired: release, publish, best-effort cancellation — never awaiting it (§5.6). */
+  /**
+   * The deadline expired — by the timer's callback OR an admission check's absolute-clock reading,
+   * whichever notices first: release, publish, exactly once (a second caller is a no-op) — never
+   * awaiting it (§5.6).
+   */
   DashboardInstance.prototype._lockExpired = function (attempt) {
     if (attempt.finished) return;
     attempt.finished = true;
@@ -1610,6 +1633,10 @@
     var implemented = {};
     var listeners = { edit: null, commit: null, action: null };
     var notifications = [];
+    // Radio groups are named PER ADAPTER: two composites in one document (two boards, a preview
+    // beside a board) must never share a native radio group — one instance's pick would clear the
+    // other's. The token is stable for the adapter's lifetime, so re-renders regroup correctly.
+    var radioGroupToken = randomUuid();
 
     function ensure(kind) {
       var implementation = REGISTERED_RENDERERS[kind];
@@ -1769,7 +1796,7 @@
               for (let r = 0; r < options.length; r++) {
                 let input = document.createElement("input");
                 input.setAttribute("type", "radio");
-                input.setAttribute("name", "dp-param-" + parameter.name);
+                input.setAttribute("name", "dp-param-" + radioGroupToken + "-" + parameter.name);
                 input.checked = selected === r;
                 if (!enabled) input.disabled = true;
                 let radioText = document.createElement("span");
@@ -1805,13 +1832,39 @@
                 return selectControl.value === "" ? null : typedValues[Number(selectControl.value)];
               };
             }
+          } else if (parameter.type === "BOOLEAN") {
+            // The house BOOLEAN control (the schedules form's mould): a tri-state select —
+            // "— not given —" / true / false. A two-state control cannot display the unresolved
+            // null, and reading one would turn it into false; here all three wire values survive
+            // the round trip untouched. The `toggle`/`checkbox` hints are deliberately not
+            // honoured yet (P23 lets a renderer ignore a hint): neither shows the third state.
+            let booleanSelect = document.createElement("select");
+            let unset = document.createElement("option");
+            unset.setAttribute("value", "");
+            unset.textContent = "— not given —";
+            booleanSelect.appendChild(unset);
+            let yes = document.createElement("option");
+            yes.setAttribute("value", "true");
+            yes.textContent = "true";
+            booleanSelect.appendChild(yes);
+            let no = document.createElement("option");
+            no.setAttribute("value", "false");
+            no.textContent = "false";
+            booleanSelect.appendChild(no);
+            booleanSelect.value =
+              definitionState.value === true ? "true" : definitionState.value === false ? "false" : "";
+            if (!enabled) booleanSelect.disabled = true;
+            interactives.push(booleanSelect);
+            row.appendChild(booleanSelect);
+            read = function () {
+              return booleanSelect.value === "true" ? true : booleanSelect.value === "false" ? false : null;
+            };
           } else {
             // INPUT: one free control; the read parses toward the wire type (typedInputRead).
             let free = document.createElement("input");
             free.setAttribute("type", "text");
             let raw = definitionState.value;
             free.value = raw === null || raw === undefined ? "" : String(raw);
-            free.checked = raw === true;
             if (!enabled) free.disabled = true;
             interactives.push(free);
             read = typedInputRead(parameter.type, free);

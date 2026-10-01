@@ -478,9 +478,13 @@ bootstrap, before any execution.
 overrides) wins over the engine's `hidden`/`disabled`, and `valid: false` (any parameter in error)
 refuses actions until a commit's re-evaluation restores it. The composite renders each control from
 the definition — a `<select>` for a SINGLE dropdown/list, a radio group for `radio`, a checkbox group
-for a MULTI, a free input for an `INPUT` — and reads selections back in the WIRE type (option
-identity is the typed value, never a DOM string); repeated renders REPLACE the rows, and `dispose`
-removes every element the composite mounted (a host sibling stands).
+for a MULTI, a free input for an `INPUT` (a BOOLEAN `INPUT` renders the house tri-state select —
+`— not given —` / `true` / `false`, the schedules form's control — so the unresolved `null` is
+displayed and read as null, never silently as false; the `toggle`/`checkbox` hints are not honoured
+yet, P23 lets a renderer ignore a hint) — and reads selections back in the WIRE type (option
+identity is the typed value, never a DOM string; radio groups are named per adapter instance, so two
+boards in one document never share a native radio group); repeated renders REPLACE the rows, and
+`dispose` removes every element the composite mounted (a host sibling stands).
 
 ### 6.3 The renderers
 
@@ -549,7 +553,11 @@ asynchronous application of the accepted state: the gate releases, the committed
 the timer clears only after `renderParameters` resolves, with the attempt re-validated first (liveness,
 its finished flag, lock ownership). The absolute deadline stays live through the render: an expiry
 mid-render publishes the timeout, frees the gate for a NEWER attempt, and the late render changes
-nothing and releases nothing it does not own. A rejected render (or one that throws synchronously)
+nothing and releases nothing it does not own. The deadline is enforced by the ABSOLUTE clock at both
+admission points — a response is refused before the adapter is invoked with it, and a resolved render
+again before anything commits — so an overdue arrival changes nothing even when the timer's callback
+has not fired yet; the boundary is inclusive (an arrival exactly at the deadline is admitted,
+strictly after it is `parameters.superseded`). A rejected render (or one that throws synchronously)
 follows the same bounded path: the attempt terminates exactly once and a recoverable
 `parameters.render_failed` outcome is published. Reset's install yields the same way — a baseline
 re-rendered while a newer evaluation was accepted does not clobber the newer revision.
@@ -565,6 +573,7 @@ the conformance suite proves the rules APPLY and is red when the stylesheet is r
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-30 | v0.7 | L3a-c (#10) typed controls and the absolute deadline | The composite's BOOLEAN `INPUT` renders the house tri-state select (`— not given —` / `true` / `false`) so an unresolved null is read as null and a visible edit travels as a wire boolean (§6.2); radio groups are named per adapter instance, so two boards in one document never share a native group (§6.2). The lock's absolute deadline is enforced by the clock at both admission points — before the adapter is invoked with a response and again before a resolved render commits — with the inclusive boundary stated (§6.6). |
 | 2026-09-30 | v0.6 | L3a-b (#10) the client runtime corrections | The client consumed the WIRE now (corrections on the delivered tip, the server wire authoritative): §6.2 states the parameter state's real writer shape (flat definition + `state`, typed values, `overrides_applied`, `valid`), the composite's per-definition controls and typed selections, the row-replacing renders and dispose's DOM removal; §6.6 states the lock's corrected coverage — held through the host's asynchronous render, deadline live through it, late renders and reset installs yield to a newer attempt. The abort route is the controller's one-`runtime`-segment path (§5's route table unchanged). |
 | 2026-09-30 | v0.5 | L3a (#10) the client runtime | **New §6 The client runtime** — the vendored artifact and what it owns (§6.1's API), the twelve-function adapter contract (§6.2), the three renderers and the data-is-text rule (§6.3), the two Plotly bundles and the one-bundle rule (§6.4), both credential modes' wire contract including the proxy contract L5's reference proxy implements (§6.5), and the states, notifications and the CSP design-around (§6.6). §5.8's "not here" loses the client runtime; the pages remain L3b's. |
 | 2026-09-29 | v0.4 | L2 (#10) the runtime — renumbered at merge after 320's v0.3 | **New §5 The runtime** — the delegated act (D50) and what keeps it safe, the six routes, `configuration_id`, the parameter evaluation, a refresh (order, sharing, admission, caps, dependencies, deadlines, the stream), abort, the record. §4.4's `last_refresh` is live (the caller's own). |
