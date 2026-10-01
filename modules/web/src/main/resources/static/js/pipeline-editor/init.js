@@ -275,7 +275,12 @@
           if (checksTarget && Array.isArray(data.checks) && data.checks.length > 0 && window.htmx) {
             self.checksToken = "t" + self.nextToken();
             checksTarget.setAttribute("data-pe-token", self.checksToken);
-            window.htmx.ajax("GET", checksTarget.getAttribute("data-checks-url"), "#pe-checks-latest");
+            window.htmx.ajax("GET", checksTarget.getAttribute("data-checks-url"), {
+              source: document.getElementById("pe-sql-requester") || undefined,
+              target: "#pe-checks-latest",
+              swap: "innerHTML",
+              headers: { "DP-PE-Sink-Token": self.checksToken },
+            });
           }
 
           // The first fit ran at layoutstop, which can precede Alpine's x-show
@@ -700,7 +705,44 @@
         self.checksToken = "t" + self.nextToken();
         target.setAttribute("data-pe-token", self.checksToken);
         target.innerHTML = '<p class="u-secondary u-text-sm">Loading checks…</p>';
-        window.htmx.ajax("GET", url, "#pe-checks-latest");
+        window.htmx.ajax("GET", url, {
+          source: document.getElementById("pe-sql-requester") || undefined,
+          target: "#pe-checks-latest",
+          swap: "innerHTML",
+          headers: { "DP-PE-Sink-Token": self.checksToken },
+        });
+      },
+
+      /**
+       * #349 — Run checks commissions a fresh `ui` run of the VIEWED version's checks
+       * into the same container (the explorer Overview's own POST). Role-gated
+       * server-side; the client gates on the SAME server-stamped canExecute the
+       * Execute button renders, refuses without a valid version pin, and stamps the
+       * sink token so a version switch supersedes the run's fragment (stale verdicts
+       * never paint). CSRF rides the body's hx-headers, the pair every htmx POST on
+       * this app carries.
+       */
+      runChecks: function () {
+        var self = this;
+        if (!self.canExecute || typeof window === "undefined" || !window.htmx) return;
+        var target = document.getElementById("pe-checks-latest");
+        if (!target) return;
+        var pin = window.PEWorkspaceLogic ? window.PEWorkspaceLogic.executeVersion(window.PEWorkspace) : null;
+        if (pin == null) {
+          self.announceStatus("The page could not read the pipeline's version state, so it cannot run this version's checks.");
+          return;
+        }
+        var url =
+          "/partials/pipelines/" + encodeURIComponent(self.pipeline.id) +
+          "/versions/" + encodeURIComponent(pin) + "/checks/run";
+        self.checksToken = "t" + self.nextToken();
+        target.setAttribute("data-pe-token", self.checksToken);
+        window.htmx.ajax("POST", url, {
+          source: document.getElementById("pe-sql-requester") || undefined,
+          target: "#pe-checks-latest",
+          swap: "innerHTML",
+          headers: { "DP-PE-Sink-Token": self.checksToken },
+        });
       },
 
       /** The selector rows, the viewed marks and every [data-pe-viewed-label] chip. */
