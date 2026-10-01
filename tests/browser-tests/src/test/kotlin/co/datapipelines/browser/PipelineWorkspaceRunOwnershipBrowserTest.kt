@@ -64,8 +64,12 @@ class PipelineWorkspaceRunOwnershipBrowserTest : BrowserSuite() {
                   const b = cur.data; const hash = b.body_hash;
                   delete b.body_hash; delete b.draft;
                   b.display_name = 'Run ownership v2';
-                  b.nodes = [{ id: 'v2_calc', type: 'CALCULATOR', kind: 'fiscal_quarter', context_key: 'q_v2',
-                    inputs: { date: '${'$'}current_date', fiscal_start: '${'$'}org_fiscal_start_date' } }];
+                  b.nodes = [
+                    { id: 'stage_calendar', type: 'CALCULATOR', kind: 'fiscal_quarter', context_key: 'q_shared',
+                      inputs: { date: '${'$'}current_date', fiscal_start: '${'$'}org_fiscal_start_date' } },
+                    { id: 'v2_calc', type: 'CALCULATOR', kind: 'fiscal_quarter', context_key: 'q_v2',
+                      inputs: { date: '${'$'}current_date', fiscal_start: '${'$'}org_fiscal_start_date' } },
+                  ];
                   const res = await fetch('/api/v1/pipelines/' + id, { method: 'PUT', credentials: 'same-origin',
                     headers: { 'Content-Type': 'application/json', 'DP-CSRF-Token': csrf ? decodeURIComponent(csrf[1]) : '', 'If-Match': hash },
                     body: JSON.stringify(b) });
@@ -219,6 +223,16 @@ class PipelineWorkspaceRunOwnershipBrowserTest : BrowserSuite() {
         // v1 node id exists on this body to carry a state.
         page.evaluate("() => { const i = window.__peInstance; return i.nodeStates && Object.keys(i.nodeStates).length > 0; }") shouldBe true
         page.evaluate("() => { const i = window.__peInstance; return i.runMatchesViewed(); }") shouldBe false
+
+        // The run's states keep arriving for v1's nodes — one of which (stage_calendar)
+        // EXISTS on the v2 body with a different meaning. The v2 graph's card must stay
+        // IDLE: the run paints only its own version's view (spec §4.2).
+        page.waitForFunction("() => Object.keys(window.__peInstance.nodeStates).some(id => window.__peInstance.nodeStates[id] !== 'idle')", 30000.0)
+        val v2CardState =
+            page.evaluate("() => { const i = window.__peInstance; const n = i.cy && i.cy.getElementById('stage_calendar'); return n && n.length ? n.data('state') || 'idle' : 'absent'; }")
+        withClue("the v2 graph's shared-id card while the v1 run runs: $v2CardState") {
+            v2CardState shouldBe "idle"
+        }
 
         // View run's version: back to v1 in page, the run's states return with it.
         page.locator(".pe-run-strip button").click()
