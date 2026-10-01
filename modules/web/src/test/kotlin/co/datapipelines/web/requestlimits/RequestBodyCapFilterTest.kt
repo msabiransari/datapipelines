@@ -3,6 +3,8 @@ package co.datapipelines.web.requestlimits
 import co.datapipelines.auth.AuthErrorWriter
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.RequestLimits
+import co.datapipelines.visualization.VisualizationErrorCodes
+import co.datapipelines.visualization.VisualizationTestSessionService
 import co.datapipelines.web.api.ApiErrorCatalog.userMessageFor
 import co.datapipelines.web.api.ApiExceptionHandler
 import co.datapipelines.web.config.RequestLimitsProperties
@@ -161,6 +163,87 @@ class RequestBodyCapFilterTest {
         body.error.userMessage shouldBe userMessageFor(PipelineErrorCodes.Request.BODY_TOO_LARGE)
     }
 
+    // ---- #353: the screenshot route's ONE exemption — its own 4 MiB cap, its own refusal ---------------------
+
+    @Test
+    fun `the screenshot route admits a body over the platform cap and under its own 4 MiB`() {
+        val size = 3 * 1024 * 1024
+        val request = screenshotRequest(ByteArray(size))
+        var readBytes = -1
+        val chain = FilterChain { wrapped, _ -> readBytes = wrapped.getInputStream().readAllBytes().size }
+
+        filter.doFilter(request, response, chain)
+
+        (size > cap) shouldBe true // the platform cap would refuse this very body anywhere else
+        readBytes shouldBe size
+        response.contentAsString shouldNotContain PipelineErrorCodes.Request.BODY_TOO_LARGE
+    }
+
+    @Test
+    fun `the screenshot route refuses 4 MiB + 1 declared unread - with its own code, never the platform's`() {
+        val request = screenshotRequest(ByteArray(SCREENSHOT_CAP + 1))
+        val chain = MockFilterChain()
+
+        filter.doFilter(request, response, chain)
+
+        response.status shouldBe 413
+        response.contentAsString shouldContain """"code":"${VisualizationErrorCodes.TEST_SCREENSHOT_TOO_LARGE}""""
+        response.contentAsString shouldContain """"cap_bytes":$SCREENSHOT_CAP"""
+        response.contentAsString shouldNotContain PipelineErrorCodes.Request.BODY_TOO_LARGE
+        chain.request.shouldBeNull()
+    }
+
+    @Test
+    fun `a chunked screenshot past 4 MiB is refused by the counting stream - never pulled past the cap`() {
+        val recording = RecordingStream(ByteArray(SCREENSHOT_CAP + 1024))
+        val request =
+            object : HttpServletRequestWrapper(MockHttpServletRequest("POST", SCREENSHOT_PATH)) {
+                override fun getInputStream(): ServletInputStream = recording
+
+                override fun getContentLengthLong(): Long = -1
+            }
+        val chain = FilterChain { wrapped, _ -> wrapped.getInputStream().readAllBytes() }
+
+        filter.doFilter(request, response, chain)
+
+        response.status shouldBe 413
+        response.contentAsString shouldContain VisualizationErrorCodes.TEST_SCREENSHOT_TOO_LARGE
+        (recording.maxPulled <= SCREENSHOT_CAP + 1L) shouldBe true // the one probe byte, never the rest
+    }
+
+    @Test
+    fun `the exemption is the one route - a near spelling and another visualization route keep the platform cap`() {
+        listOf(
+            "/api/v1/visualizations/$ID",
+            "/api/v1/visualizations/$ID/tests/sessions/$ID/screenshot/extra",
+            "/api/v1/visualizations/$ID/tests/sessions/$ID/results",
+            "/api/v1/visualizations/$ID/tests/runs/$ID/screenshot",
+        ).forEach { path ->
+            val refused = MockHttpServletResponse()
+            filter.doFilter(
+                MockHttpServletRequest("POST", path).apply { setContent(ByteArray(cap.toInt() + 1)) },
+                refused,
+                MockFilterChain(),
+            )
+            refused.status shouldBe 413
+            refused.contentAsString shouldContain PipelineErrorCodes.Request.BODY_TOO_LARGE
+        }
+        // PUT on the screenshot path is not the route either.
+        val put = MockHttpServletResponse()
+        filter.doFilter(
+            MockHttpServletRequest("PUT", SCREENSHOT_PATH).apply { setContent(ByteArray(cap.toInt() + 1)) },
+            put,
+            MockFilterChain(),
+        )
+        put.contentAsString shouldContain PipelineErrorCodes.Request.BODY_TOO_LARGE
+    }
+
+    private fun screenshotRequest(body: ByteArray): HttpServletRequest =
+        MockHttpServletRequest("POST", SCREENSHOT_PATH).apply {
+            contentType = "image/png"
+            setContent(body)
+        }
+
     /** A `POST /api/v1/pipelines` whose declared length is the body's size (MockHttpServletRequest derives it). */
     private fun postRequest(body: ByteArray): HttpServletRequest =
         MockHttpServletRequest("POST", "/api/v1/pipelines").apply { setContent(body) }
@@ -226,5 +309,11 @@ class RequestBodyCapFilterTest {
         override fun isReady(): Boolean = true
 
         override fun setReadListener(listener: ReadListener?) = throw UnsupportedOperationException()
+    }
+
+    private companion object {
+        const val SCREENSHOT_CAP = VisualizationTestSessionService.MAX_SCREENSHOT_BYTES
+        const val ID = "6f1c2e7a-0000-4000-8000-000000000001"
+        const val SCREENSHOT_PATH = "/api/v1/visualizations/$ID/tests/sessions/$ID/screenshot"
     }
 }

@@ -2,6 +2,7 @@ package co.datapipelines.web.api
 
 import co.datapipelines.scheduler.ScheduleErrorCodes
 import io.kotest.assertions.withClue
+import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import org.junit.jupiter.api.Test
 
@@ -37,5 +38,18 @@ class ApiErrorCatalogUserMessageTest {
                 ApiErrorCatalog.userMessageFor(code) shouldNotBe family
             }
         }
+    }
+
+    @Test
+    fun `the two screenshot refusals speak about the image - never the family's start-a-new-session line`() {
+        val family = ApiErrorCatalog.userMessageFor("visualization.test.no_such_code_probe")
+        listOf(
+            co.datapipelines.visualization.VisualizationErrorCodes.TEST_SCREENSHOT_TOO_LARGE,
+            co.datapipelines.visualization.VisualizationErrorCodes.TEST_SCREENSHOT_INVALID,
+        ).forEach { code ->
+            withClue(code) { ApiErrorCatalog.userMessageFor(code) shouldNotBe family }
+        }
+        // The session codes keep the family line: restarting IS the remedy there.
+        ApiErrorCatalog.userMessageFor(co.datapipelines.visualization.VisualizationErrorCodes.TEST_SESSION_EXPIRED) shouldBe family
     }
 }

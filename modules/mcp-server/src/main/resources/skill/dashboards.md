@@ -40,15 +40,46 @@ Build in this order — each step's refusal names the path to fix.
    with every failure. `dashboards_get` shows each pin's status and each source's read-only verdict, and
    `last_refresh` — the latest refresh made under YOUR identity, which for a key is null today: no tool refreshes a
    dashboard (people do, in the UI, as themselves).
-7. **Release and import are human verbs.** No tool releases anything, and no tool imports an exported
+7. **Test every visualization you wrote** — the loop in "Proving a visualization" below. A
+   visualization is released only on a GREEN test run of its exact current content: the release
+   refuses `visualization.release.tests_missing` with no run (or an open one, `run_open`),
+   `tests_stale` after any edit, `tests_red` on a red or incomplete run.
+8. **Release and import are human verbs.** No tool releases anything, and no tool imports an exported
    envelope — `POST /api/v1/visualizations|dashboards/import` is a workspace-admin verb, and a
-   promotion lands artifacts through the promotion wire, never through the import route. A
-   visualization release also needs its evidence gate, which refuses every release until the
-   visualization test sessions ship (`visualization.release.tests_missing`); tell the person the
-   dashboard is ready for review instead.
-8. **Clean up** a draft you abandoned with `visualizations_purge_draft` / `dashboards_purge_draft`
+   promotion lands artifacts through the promotion wire, never through the import route. When the
+   tests are GREEN, tell the person the visualization and the dashboard are ready for review.
+9. **Clean up** a draft you abandoned with `visualizations_purge_draft` / `dashboards_purge_draft`
    (`expected_hash` required). A visualization draft a live dashboard pins is refused
    `visualization.version.pinned` — the refusal names the dashboards.
+
+## Proving a visualization — the test loop
+
+A visualization's `tests.cases` are its proof: fixture rows for every input and the assertions a
+reader checks (`rendered`, `trace_count`, `no_console_errors`, `text_visible`, `no_data`,
+`value_visible`). Run them against the real renderer before you hand the work over:
+
+1. **Start** with `visualizations_test_start` (`id`). It tests the WORKING version (the draft) and
+   answers `preview_url`, the case names and `expires_at`. Any edit afterwards voids the session —
+   finish editing first.
+2. **Open `preview_url` in a browser** (Playwright or any headless browser). The page needs no
+   login: the token inside the URL is its only credential, so never paste the URL anywhere else.
+   It renders every case from its saved fixtures through the same runtime the dashboards use — no
+   pipeline runs, no live data. Each case is a `section[data-dp-case="<name>"]`; it gains
+   `data-dp-ready="true"` once mounted (or `data-dp-error="<code>"`), and the chart's status chip
+   is `.dp-dashboard-status[data-dp-state]` (`success` or `ready` once rendered; `no-data`; `error`). Check
+   each case's assertions there. Add `&theme=light` or `&theme=dark` to see both themes.
+3. **Submit** with `visualizations_test_submit` — the SAME key that started: `id`, `session_id`,
+   one `{name, verdict: "green" | "red", notes}` per case, and optionally the `environment` you
+   looked in (`theme`, `viewport`, `browser`, `locale`, `renderer_version`). The server re-runs its
+   own mechanical test and answers the status: GREEN only when every verdict is green and that
+   test passes; a missing verdict is INCOMPLETE. The preview link stops working.
+4. **Upload one screenshot** when the answer is GREEN: `upload` names the `url`, the `header` and
+   the single-use `token`. POST the PNG or WebP bytes (raw body, `Content-Type: image/png` or
+   `image/webp`, at most 4 MiB) to `url` with the token in that header — from your browser or any
+   HTTP client; your MCP key is not used there. The token works once; a second upload is refused.
+   The screenshot is review evidence for the person, not a server check.
+5. **Hand over.** Tell the person the run is GREEN and the visualization awaits their release in
+   the UI. A RED or INCOMPLETE run: fix the visualization (or the case), then start a new session.
 
 ## What the refusals mean
 
@@ -63,6 +94,9 @@ Build in this order — each step's refusal names the path to fix.
 - `dashboard.validation.source_not_released` / `source_not_read_only` — the pinned pipeline release.
 - `dashboard.validation.layout_invalid` — an occurrence or control not placed exactly once.
 - `dashboard.validation.dependency_not_found` — a pin this workspace does not hold.
+- `visualization.test.session_not_found` — the session is not yours (another key started it), or
+  the id or token is wrong; `visualization.test.session_expired` — it was already submitted, it
+  expired, or the visualization changed since it started: start a new session.
 
 ## Rules that hold everywhere here
 

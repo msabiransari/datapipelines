@@ -136,6 +136,7 @@ class McpServerWiringTest {
     /** #10 L1b — the five visualization and six dashboard tools, appended last. */
     private fun visualizationAndDashboardTools(): List<McpTool> =
         visualizationTools(mockk(), mockk(), co.datapipelines.visualization.VisualizationReader(), McpFixtures.EVERYTHING_LENS) +
+            visualizationTestTools(mockk(), co.datapipelines.visualization.TestSessionLinks(null)) +
             dashboardTools(
                 mockk(),
                 mockk(),
@@ -163,7 +164,7 @@ class McpServerWiringTest {
      * `datasources_create`; 30 → 34 with 107's probe/cancel/purge four; 34 → 35 with 117's `templates_update`; 35 → 38 with 118's
      * `semantics_*` three; 38 → 40 with 120's `docs_*` two; 40 → 41 with 140's `pipelines_run_checks`;
      * 41 → 48 with #194 lane D's six `parameter_sets_*` tools; 48 → 59 with #10 L1b's `visualizations_*` five and
-     * `dashboards_*` six.)
+     * `dashboards_*` six; 59 → 61 with #353's `visualizations_test_start` / `_submit`.)
      */
     @Test
     fun `the tool surface is exactly the catalog the scope matrix knows`() {
@@ -176,7 +177,7 @@ class McpServerWiringTest {
     }
 
     @Test
-    fun `the server builds with all 59 tools and all three prompts registered`() {
+    fun `the server builds with all 61 tools and all three prompts registered`() {
         val transport = McpServerFactory.transport()
         val server =
             McpServerFactory.server(

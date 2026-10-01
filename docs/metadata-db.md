@@ -1,6 +1,6 @@
 # Metadata Database Schema Specification
 
-**Status:** v1.36 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
+**Status:** v1.37 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
 **Owner:** datapipelines.co core
 **Depends on:** all specs (this is the physical schema for every logical model)
 **Last updated:** 2026-09-29
@@ -1295,7 +1295,7 @@ ALTER TABLE visualization_test_runs
 
 **Notes:**
 - **The run hangs off the VERSION** (`fk_visualization_test_runs_version`, `ON DELETE CASCADE`), not only the visualization: purging a draft takes its evidence, and a release keeps the run that qualified it for the version's life (the retention rule of spec §2.1 is the SERVICE's — at most one completed run per draft keeps its screenshot).
-- **The preview token is stored hashed** (`preview_token_hash`, spec §11.2): the 32-byte capability the agent's browser presents is never in the database; `expires_at` is its TTL (`tests.session-ttl-minutes`, 60 by default) and the hash is cleared on submit or expiry.
+- **The preview token is stored hashed** (`preview_token_hash`, spec §11.2): the 32-byte capability the agent's browser presents is never in the database; `expires_at` is its TTL (`datapipelines.visualization.session-ttl-minutes`, 60 by default) and the hash is cleared on submit or expiry.
 - `cases_json` (per case: name, verdict, notes ≤ 2,000 characters), `environment_json` (agent-reported — theme, viewport, browser, locale, renderer version) and `mechanical_json` (the server's §11.3 outcome) are bounded by the service; the schema holds only their JSON kind.
 - **The upload capability (V44) is the second, purpose-bound credential**: minted at successful submission, hash-only (`upload_token_hash`), expiring no later than the session's `expires_at` (`upload_expires_at`), consumed once (`upload_consumed_at`, strictly before the deadline). The three columns are one capability — nothing without the hash, nothing beside a minted one — and the single-use consumption is one guarded UPDATE, so the replay fence survives a process restart. The hash's `IS NOT NULL` is load-bearing in the CHECK: `NULL ~ regex` is NULL, and a CHECK passes on NULL.
 
@@ -1845,6 +1845,7 @@ Three pieces of execution state that a reader might reasonably expect to find he
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-01 | v1.37 | L4b (#353) a key name | **§4.32, no DDL change:** the preview token's TTL names the shipped key `datapipelines.visualization.session-ttl-minutes` (the spec's `tests.session-ttl-minutes` has no YAML form — configuration.md §3.33). |
 | 2026-10-01 | v1.36 | V44 (#10 L4a, the test capabilities) | **§4.32 `visualization_test_runs` gains the screenshot upload capability** (`upload_token_hash`, `upload_expires_at`, `upload_consumed_at` + `chk_visualization_test_runs_upload`): the three columns are one capability — hash-only at rest, the consumption stamp strictly before the deadline — and the hash's `IS NOT NULL` is load-bearing (`NULL ~ regex` is NULL, and a CHECK passes on NULL; caught by the behavioral probe). The notes carry the single-use consumption's guarded-UPDATE fence. |
 | 2026-09-29 | v1.35 | V43 (#10 L2, dashboards round one) | New **§4.34 `dashboard_refreshes`** and **§4.35 `dashboard_refresh_executions`** (the refresh per run, the link D52 requires; a refused refresh writes no row, the terminal write is non-cancellable), `pipeline_executions.triggered_via` gains **`DASHBOARD`** (§4.6's CHECK text and column comment), the §5 index rows and the §5A rows (both `derived`), **§8.1** gains the refresh retention (the events' cutoff — the spec's "the executions' own policy" was none) and a new **§8.4 Stale dashboard refresh sweep**. V43 is L2's only (the `api_keys` kind/role CHECKs, `executed_by_key_kind = 'dashboard'` and `dashboard_key_bindings` are L5's V44). |
 | 2026-09-29 | v1.34 | V42 (#10 L1a, dashboards round one) | New **§4.28 `visualizations`**, **§4.29 `visualization_versions`**, **§4.30 `dashboards`**, **§4.31 `dashboard_versions`** (V39's two tables twice, the names changed: the kept UUID, the per-workspace name unique forever, the index row over the current body, the one-draft partial index, the database-computed hash, the release/discard/via stamps) and the test evidence L4 writes — **§4.32 `visualization_test_runs`** (a run per version and session, hanging off the version by a composite foreign key that cascades, the preview token stored hashed with its expiry, the closed status list) and **§4.33 `visualization_test_screenshots`** (PNG/WebP, ≤ 4 MiB in the schema, the server's SHA-256). §5 gains their eleven indexes; §5A classifies the four artifact tables promotable and the evidence environment-local. The spec's `byte_length(bytes)` is Postgres's `octet_length`. Down path documented in the migration's header and proven on a copy of the demo database. |

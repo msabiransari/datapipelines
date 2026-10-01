@@ -122,6 +122,10 @@ class PublicRouteWalkerTest {
                 "LlmsTxtController#index",
                 "SkillController#reference",
                 "SkillController#skill",
+                // 353: the visualization test workflow's two capability-authenticated routes — each
+                // authenticates by ONE capability its handler checks (VisualizationTestCapabilities).
+                "VisualizationPreviewController#preview",
+                "VisualizationTestsController#screenshot",
             ).sorted()
     }
 

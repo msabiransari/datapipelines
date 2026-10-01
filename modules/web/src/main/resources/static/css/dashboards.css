@@ -257,3 +257,62 @@ a.tpl-leaf {
 .app-nav-branch-tree .tpl-label {
   font-size: var(--text-xs);
 }
+
+/* #353 — the visualization test preview: a session-less page with no app shell (no rail, no
+   top bar), one card per test case, each holding one runtime-mounted board. Tokens only. */
+.dp-preview-body {
+  background: var(--surface-page);
+  color: var(--text-primary);
+  min-height: 100vh;
+}
+
+.dp-preview {
+  display: grid;
+  gap: var(--gap-lg);
+  max-width: 72rem;
+  margin: 0 auto;
+  padding: var(--gap-lg);
+}
+
+.dp-preview-head {
+  display: grid;
+  gap: var(--gap-xs);
+}
+
+.dp-preview-case {
+  display: grid;
+  gap: var(--gap-sm);
+}
+
+.dp-preview-assertions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap-sm);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.dp-preview-board {
+  min-width: 0;
+}
+
+/* The composite adapter's grid sets its columns and each slot's row span inline but no ROW
+   height, and a responsive Plotly chart sizes itself to its host — so with nothing else in the
+   grid the chart collapses to Plotly's minimum. The preview gives its grid a row unit and lets
+   the visualization host fill its slot, scoped to the preview: the board page's own sizing is
+   L3's to settle (#371). */
+.dp-preview-board .dp-dashboard {
+  grid-auto-rows: minmax(5rem, auto);
+}
+
+.dp-preview-board .dp-dashboard-slot {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.dp-preview-board .dp-dashboard-viz {
+  flex: 1 1 auto;
+  min-height: 0;
+}

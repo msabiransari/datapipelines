@@ -1,9 +1,9 @@
 # UI Screens Inventory
 
-**Status:** v1.97
+**Status:** v1.98
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
-**Last updated:** 2026-10-01 (348-c, #358; L3b, #10)
+**Last updated:** 2026-10-01 (L4b, #353; 348-c, #358; L3b, #10)
 
 ---
 
@@ -1781,6 +1781,33 @@ a viewer executing; light/dark screens of both pages).
 
 ---
 
+### 4.22 Visualization test preview (session-less — #353)
+
+| Attribute | Value |
+|---|---|
+| URL | `GET /visualizations/{id}/preview?session=<preview capability>` (`&theme=light\|dark` optional) |
+| Auth required | **No session** — the FIRST capability-authenticated page: its ONLY credential is the preview capability in `?session=` (a `PublicPaths` entry, auth.md §8.3), minted by a test session's start and valid for THAT visualization version until the session's results are submitted or its deadline passes; the starter's current `visualization.update` is re-checked on every load. No cookie is read and none is set. Every refusal — wrong, expired, revoked, another visualization's, a malformed id — renders the one **unavailable** state with HTTP 404, byte-identical whatever the cause |
+| Purpose | An agent's browser (Playwright) checks each saved test case against the real renderer before it submits its verdicts ([Dashboards §3.4.1](dashboards.md)); a person may open the same link |
+| Design primitives | A standalone page with NO layout (no rail, no top bar, no htmx, no CSRF token — rendering one would set a cookie): the design-system sheets, `app.css`, `dashboards.css` (`dp-preview*`, the runtime's status chips) and the vendored `plotly.css` in its own head — the one page outside §3.0's head-loading rule, because it has no layout to load them; `.ds-card` per case, `.ds-empty` for the unavailable state |
+| JS | L3a's vendored runtime + the three renderers (the ONE Plotly bundle the server chose, declared on its tag) and `static/js/visualization-preview.js` — the glue, a FILE: it reads the page's one `<script type="application/json" id="dp-preview-data">` block (written through `ScriptSafeJson`) and mounts one runtime instance per case in the runtime's **fixture mode** — no request leaves the page |
+| htmx | None |
+
+Content: the visualization's display name, folder-path name and version, the deadline, and one card
+per test case in the body's order — the case name and its assertions as text, then the board the
+runtime mounts. Each case section is `section[data-dp-case="<name>"]` and gains `data-dp-ready="true"`
+when its instance's bootstrap held (or `data-dp-error="<code>"`); the chart's status chip is the
+composite adapter's `.dp-dashboard-status[data-dp-state]` (`success`/`ready`, `no-data`, `error` with
+the evaluator's code). The page never echoes its capability, carries `<meta name="referrer"
+content="no-referrer">`, and renders case names and assertion labels through `th:text` only; the
+agent's notes and environment never appear here.
+
+Guards: `VisualizationPreviewControllerTest` (the one 404 state, the per-case configuration and
+results, the script-safe block, the closed theme set), `VisualizationTestSurfacesE2eTest` (no cookie
+in or out, the 404 body-equal across causes, confinement), `VisualizationPreviewBrowserTest` (both
+themes under the live CSP with zero violations, the rendered trace count per case, the whole
+start → preview → screenshot → submit → upload → release flow), `PublicPathsTest`,
+`PublicRouteWalkerTest`, `PublicContractE2eTest`.
+
 ## 5. htmx Usage Pattern
 
 Standard pattern for list/filter/pagination. The page (`GET /pipelines`) renders the shell **and** the initial fragment; every subsequent refresh hits the partial endpoint (`GET /partials/pipelines`) and swaps the fragment only.
@@ -1944,6 +1971,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-01 | v1.98 | L4b (#353) the visualization test preview | **New §4.22** — the first session-less, capability-authenticated page: `GET /visualizations/{id}/preview?session=`, its standalone head (no layout, no CSRF token, no cookie), the per-case cards mounted by the vendored runtime in its fixture mode, the one byte-identical 404 state for every refusal, and its guards. |
 | 2026-10-01 | v1.97 | #358 the history cache is region-scoped, and its restores are single-init (lane 348-c) — renumbered at merge after L3b's v1.94 | **§3.2**: `#app-main` carries `hx-history-elt` — the cache snapshots the workspace region, never the body, so footer scripts are never cached and never re-executed on a Back; a one-time purge plus a restore-time shape guard (drop + full fetch — htmx's own `refreshOnHistoryMiss`, since a cancelled `htmx:historyCacheHit` in 2.0.10 simply dies) refuse any body-shaped entry saved by a pre-scoped build, keyed on the one honest tell (`id="app-main"` as a CHILD). **§3.2's scripts bullet rewritten:** the pipeline editor's restore is single-init through its runtime (inert catalog, `x-ignore`, one `mutateDom` activation — the 080 rescue is gone); a run outliving a navigation is detached, never cancelled, and the restored page re-attaches through the replay stream (terminal event exactly once). **The shell's transient chrome** (`is-pending`/`app-busy`/their `aria-disabled`) comes off before every snapshot and is purged from restored pages — a restored link no longer looks clicked (the #358 browser suite caught it as a dead `.pe-back` on the restored page). **§3.7's data-table paragraph**: "the history element is `document.body`" corrected to `#app-main`. Routes, permissions, roles: none changed. |
 | 2026-09-30 | v1.96 | 348-b (#348) the workspace's version-context corrections — renumbered at merge after L3b's v1.94 | **Correction of the record first:** v1.92's sentence "the version rows' Open links carry their row's version" described the intended end state — the code still targeted the unqualified `/editor` URL at that tip, so every row opened the default. **§4.3:** the version rows' Open now really enters `/pipelines/{id}?version=<row>` (full document), and the detail header's Open is the canonical `GET /pipelines/{id}` with the old "in editor" wording gone (tree/search rows keep the redirect-covered URLs). **§4.4:** the page's serialized projection carries only the LENS-VISIBLE current pointer — a development-posture current draft's number can no longer leak into `current_version` of the script JSON for a promoter (the model's `currentVisible`, not the raw index value; PipelineResponses' REST shape untouched). The client's version context has ONE validated initialization path (`workspace.js`: bounded positive integer, body presence, pipeline identity) shared by full load, boost and cached-history restore — the restore re-reads the block through it (clearing stale refusal flags) — and the workspace's node-SQL preview REFUSES visibly with zero requests when no valid pin exists (the legacy working-version default stays with callers that omit the parameter). The cached-restore leg's own residual defects (duplicated subtrees, stacked bindings, Cytoscape CSP re-init) are shell-owned: #358. |
 | 2026-09-30 | v1.95 | 348 (#348) the version-explicit pipeline workspace — renumbered at merge after L3b's v1.94 | **§2.1**: `/pipelines/{id}` is a UI page route. **§4.3**: the explorer's Open action (detail header) and every historical `/pipelines/{id}/editor` link enter the canonical read workspace; the version rows' Open links carry their row's version (they targeted the editor with none — every row's link was the same URL, the design record's second migration trap). **§4.4**: the route statement — `GET /pipelines/{id}?version=N&tab=…` at the `pipeline.read` floor, explicit-version-or-404, current-pointer-first default, choose-a-version/empty states, the header's read-only version selector, and the old editor URL as a compatibility redirect (preserving a valid version/tab; the execute floor of 122 is gone with the page it guarded). Execute pins the VIEWED version on the wire (released included); the node-SQL GET carries an optional `version` the workspace always sends; the page's JSON blocks are `#pipeline-data` + `#pipeline-workspace` (the lifecycle draft-pin block and `draft.js` are gone). Floor/auth wording lives in auth.md v3.26; the page's layout itself is #349's. |
