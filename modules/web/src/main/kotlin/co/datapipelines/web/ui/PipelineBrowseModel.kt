@@ -24,6 +24,7 @@ import co.datapipelines.web.schedules.PrincipalTargetViewer
 import org.springframework.ui.Model
 import java.security.MessageDigest
 import java.time.Instant
+import java.time.ZoneId
 import java.util.UUID
 
 /**
@@ -310,26 +311,7 @@ class PipelineBrowseModel(
         record: PipelineRecord,
         versions: List<PipelineVersionRecord>,
     ) {
-        val now = Instant.now()
-        val runs = runStats.runsByVersion(record.id)
-        val names = actors.lookup(versions.map { it.createdBy })
-        model.addAttribute(
-            "versions",
-            versions.map { v ->
-                VersionRowView.of(
-                    version = v.version,
-                    status = v.status,
-                    createdAt = v.createdAt,
-                    actor = names[v.createdBy] ?: ActorNames.fallback(v.createdBy),
-                    now = now,
-                    usage = runs[v.version] ?: 0,
-                    usageUnit = "run",
-                    isCurrent = record.currentVersion == v.version,
-                    // The chip's fact (V20): a draft row shows its last write's surface.
-                    via = if (v.status == PipelineVersionStatus.DRAFT) v.updatedVia else v.createdVia,
-                )
-            },
-        )
+        model.addAttribute("versions", versionRows(record, versions))
         // The HEADER's verbs (101 §7, reshaped by 102 §B.1's one-destructive rule): a draft
         // is what Release acts on; Purge pipeline is the ENTITY purge, which 101 allows only
         // while the only version is a draft; otherwise the destructive verb on offer is
@@ -357,6 +339,85 @@ class PipelineBrowseModel(
         // The reading column's Created line chip (V20): the FIRST version's surface.
         model.addAttribute("createdVia", versions.minByOrNull { it.version }?.createdVia)
     }
+
+    /**
+     * #349 — the pipeline workspace's composition facts, filled for the canonical page's
+     * Versions tab and Overview pane in ONE call from [PipelineWorkspaceController].
+     *
+     * The Versions tab is the explorer's fragment (`partials/pipeline-versions :: versions`)
+     * composed into the workspace page, so the model carries the SAME row shapes the explorer
+     * fills ([versionRows]) — visibility, per-row verbs and run counts are the explorer's
+     * unchanged contract — plus the viewed-version mark the workspace adds to every row. The
+     * returned facts are the Overview's record-level and registry-resolved halves
+     * ([WorkspaceTabFacts]): who created the pipeline and on what surface, its last visible
+     * run, and the datasource→dialect map across EVERY ADMITTED version's body — the
+     * in-page version switch (a client-side fetch of another admitted body) must be able to
+     * relabel the new body's datasources without a second round trip, and the lens decides
+     * admission per body exactly as the page's own resolution did.
+     *
+     * Everything here is a read; nothing here changes a verb, a flag or a visibility rule the
+     * explorer didn't already state.
+     */
+    fun fillWorkspaceTabs(
+        model: Model,
+        workspaceId: UUID,
+        view: LensedView,
+        record: PipelineRecord,
+        versions: List<PipelineVersionRecord>,
+        viewedVersion: Int?,
+    ): WorkspaceTabFacts {
+        model.addAttribute("pipeline", record)
+        model.addAttribute("versions", versionRows(record, versions, viewedVersion))
+        return WorkspaceTabFacts(
+            createdBy = actorName(record.ownerId),
+            createdVia = versions.minByOrNull { it.version }?.createdVia,
+            lastRun = lastRunView(workspaceId, record.id),
+            datasourceDialects = workspaceDialects(workspaceId, view, record, versions),
+        )
+    }
+
+    /** The version rows one tab renders — the explorer's and the workspace's one mapping. */
+    private fun versionRows(
+        record: PipelineRecord,
+        versions: List<PipelineVersionRecord>,
+        viewedVersion: Int? = null,
+    ): List<VersionRowView> {
+        val runs = runStats.runsByVersion(record.id)
+        val names = actors.lookup(versions.map { it.createdBy })
+        val now = Instant.now()
+        return versions.map { v ->
+            VersionRowView.of(
+                version = v.version,
+                status = v.status,
+                createdAt = v.createdAt,
+                actor = names[v.createdBy] ?: ActorNames.fallback(v.createdBy),
+                now = now,
+                usage = runs[v.version] ?: 0,
+                usageUnit = "run",
+                isCurrent = record.currentVersion == v.version,
+                // The chip's fact (V20): a draft row shows its last write's surface.
+                via = if (v.status == PipelineVersionStatus.DRAFT) v.updatedVia else v.createdVia,
+                isViewed = viewedVersion != null && v.version == viewedVersion,
+            )
+        }
+    }
+
+    /**
+     * The datasource names ONE body touches — the registry decides what is a datasource
+     * (`tempdb` is the reserved literal and never a registered name, §4.8), extracted once so
+     * the explorer's working-body rows and the workspace's all-versions dialect map read the
+     * same rule.
+     */
+    private fun datasourceNames(body: Pipeline): List<String> =
+        body.nodes
+            .flatMap { node ->
+                listOfNotNull(
+                    (NodeSource.from(node.source) as? NodeSource.Datasource)?.name,
+                    (node.output as? NodeOutput.Datasource)?.datasource,
+                )
+            }
+            .distinct()
+            .sorted()
 
     /**
      * Fills [model] for the Runs tab — this pipeline's last [RUNS_LIMIT] executions.
@@ -482,6 +543,50 @@ class PipelineBrowseModel(
         pipelineId: UUID,
     ) = executions.findAll(workspaceId, pipelineId, limit = 1).firstOrNull()
 
+    /** The Overview's last-run line, as the workspace's JSON facts carry it (#349). */
+    private fun lastRunView(
+        workspaceId: UUID,
+        pipelineId: UUID,
+    ): WorkspaceLastRunView? =
+        lastRun(workspaceId, pipelineId)?.let { last ->
+            WorkspaceLastRunView(
+                executionId = last.executionId,
+                status = last.status.name,
+                durationMs = last.durationMs,
+                rowCount = last.resultRowCount?.toInt(),
+                ago = RelativeTime.since(last.startedAt, Instant.now()),
+                at = LAST_RUN_FORMAT.withZone(ZoneId.systemDefault()).format(last.startedAt),
+                by = actorName(last.executedBy),
+            )
+        }
+
+    /**
+     * The datasource→dialect map across every ADMITTED version's body (#349): the in-page
+     * version switch fetches another admitted body client-side and must relabel its
+     * datasources without a second round trip. Admission is the lens's own — a body the
+     * caller cannot read contributes nothing — and a name the registry cannot resolve from
+     * this workspace is left out, exactly as [datasourceRows] leaves it out.
+     */
+    private fun workspaceDialects(
+        workspaceId: UUID,
+        view: LensedView,
+        record: PipelineRecord,
+        versions: List<PipelineVersionRecord>,
+    ): Map<String, String> {
+        val out = LinkedHashMap<String, String>()
+        versions.forEach { v ->
+            val bodyJson =
+                pipelines.findVersionBody(workspaceId, view.pipelines, record.id, v.version) ?: return@forEach
+            val body = runCatching { deserializer.readOrThrow(bodyJson) }.getOrNull() ?: return@forEach
+            datasourceNames(body).forEach { name ->
+                if (!out.containsKey(name)) {
+                    datasources.describe(name, workspaceId)?.let { out[name] = it.dialect.name }
+                }
+            }
+        }
+        return out
+    }
+
     private fun actorName(actor: UUID): String = actors.lookup(listOf(actor))[actor] ?: ActorNames.fallback(actor)
 
     /**
@@ -498,16 +603,7 @@ class PipelineBrowseModel(
         workspaceId: UUID,
     ): List<DatasourceRowView> {
         if (body == null) return emptyList()
-        val names =
-            body.nodes.flatMap { node ->
-                listOfNotNull(
-                    (NodeSource.from(node.source) as? NodeSource.Datasource)?.name,
-                    (node.output as? NodeOutput.Datasource)?.datasource,
-                )
-            }
-        return names
-            .distinct()
-            .sorted()
+        return datasourceNames(body)
             .mapNotNull { name -> datasources.describe(name, workspaceId)?.let { DatasourceRowView(name, it.dialect) } }
     }
 
@@ -549,6 +645,9 @@ class PipelineBrowseModel(
 
         /** The Runs tab's ceiling (106) — "the last 20", never the whole history. */
         const val RUNS_LIMIT = 20
+
+        /** The last-run line's exact stamp — the explorer's own `yyyy-MM-dd HH:mm` reading. */
+        private val LAST_RUN_FORMAT = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
 
         /** Hex characters of a nested level's id digest — 64 bits, over one screen's folders. */
         private const val LEVEL_ID_HEX_LENGTH = 16

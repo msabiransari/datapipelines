@@ -126,6 +126,50 @@
          is gone; Details is the dock's landing tab. */
       dock: window.PEDock.createDock(),
       eventsLog: window.PEEvents.createEventsLog(),
+      /* #349 — the workspace's six-tab state (tabs.js, pure; admission re-read from the
+         root's server-stamped attributes in init()). Created with the flow default so
+         the template's bindings resolve even before init() runs. */
+      tabs: window.PETabs ? window.PETabs.createTabs(false, "flow") : null,
+      /* #349 — the composition state the page's ONE workspace block carries: the
+         admitted history (the header selector, the viewed chip and the Versions tab's
+         marks read it), the Overview's record-level facts and the datasource dialect
+         map across every admitted body. All of it is the lens's answer, written by the
+         server; the client re-reads it per version switch. */
+      versionRows: [],
+      pageFacts: {},
+      datasourceDialects: {},
+      /* The VIEWED version as a reactive field (#349): the getters that branch on it
+         (the run strip, the chips, the selector) must re-evaluate when an in-page
+         switch moves it — window.PEWorkspace is a plain global Alpine cannot track. */
+      viewedVersion: null,
+      /* The record-level draft flag (the server's hasDraft), read off the root. */
+      pageHasDraft: false,
+      /* #349 — the page/view state key's generation (spec §4.3): workspace + pipeline +
+         viewed version + request generation. Every in-page fetch is stamped; a response
+         that disagrees with the CURRENT stamp is stale and never applied — successes,
+         refusals and toasts alike (A8). */
+      viewGeneration: 0,
+      /* #349 — run input drafts are PER VERSION within the page (spec §4.3): switching
+         the viewed version saves this version's overrides and loads the other
+         version's own, filtered to its schema. Never persisted anywhere. */
+      overrideStore: window.PEWorkspaceLogic ? window.PEWorkspaceLogic.createOverrideStore() : null,
+      /* #349 — the execution state's identity (spec §4.2/§4.3): ONE captured run with
+         the submitted pipeline/version/parameter snapshot, kept while the viewed
+         version moves under it. The strip and every run-fact gate read this. */
+      runIdentity: null,
+      executionVersion: null,
+      runsLoading: false,
+      runsLoadFailed: false,
+      runsLoaded: false,
+      usageLoading: false,
+      usageLoadFailed: false,
+      usageLoaded: false,
+      /* The sink tokens (workspace.js tokenMatches): the record each pane read was
+         issued under; a stale response's swap is cancelled before it paints. */
+      sqlToken: null,
+      checksToken: null,
+      runsToken: null,
+      usageToken: null,
       // 149: the node-operation view model (node-ops.js) — every lifecycle and
       // node_progress event reduces into it (sse.js); the cards, the Details pane and
       // the a11y list read it; 151's output connector will too.
@@ -204,7 +248,11 @@
           self.parameterOverrides = overrides;
           // 195: the sidebar's per-field view models — placeholder, description,
           // type, branch flags — built once here, read as paths by the template.
+          // #349: the sidebar is the Parameters tab now; the view models are the same.
           self.paramFields = window.PEParamFields ? window.PEParamFields.buildParamFields(self.parameters) : [];
+          // #349 — the per-version override store seeds THIS version's bag; switching
+          // versions swaps bags (workspace.js createOverrideStore).
+          if (self.overrideStore) self.overrideStore.save(self.viewedVersionOrNull(), self.parameterOverrides);
 
           self.resultPanelInstance = new ResultPanel(self);
           self.setupResultPanelMethods();
@@ -212,14 +260,21 @@
           self.graph = new PipelineGraph("cy-canvas", self.nodes, self);
           self.graph.render();
           self.cy = self.graph.cy;
+          self.wireGraphEventsOn();
 
-          /* 140: the body's release checks — the Details pane's verdict summary lazy-loads
-             from the read-only checks partial, and only when the body DECLARES any (a check-less
-             pipeline pays no request). htmx.ajax fires the same CSRF-wired request an hx-get
-             would; the swapped fragment carries no hx-* of its own, so nothing needs
-             re-processing. */
+          // #349 — the composition state: tabs admission, selector rows, Overview facts.
+          self.readComposition();
+
+          /* 140: the body's release checks — the Overview tab's verdict list lazy-loads
+             from the read-only checks partial, and only when the body DECLARES any (a
+             check-less pipeline pays no request). htmx.ajax fires the same CSRF-wired
+             request an hx-get would; the swapped fragment carries no hx-* of its own,
+             so nothing needs re-processing. #349: the read is stamped with the page's
+             sink token — a version switch re-issues it and cancels the stale one. */
           var checksTarget = document.getElementById("pe-checks-latest");
           if (checksTarget && Array.isArray(data.checks) && data.checks.length > 0 && window.htmx) {
+            self.checksToken = "t" + self.nextToken();
+            checksTarget.setAttribute("data-pe-token", self.checksToken);
             window.htmx.ajax("GET", checksTarget.getAttribute("data-checks-url"), "#pe-checks-latest");
           }
 
@@ -252,45 +307,6 @@
           };
           document.body.addEventListener("htmx:afterSwap", sqlHighlightHandler);
 
-          // 080 §B: a tap SELECTS and fills the dock's Details tab — the pane the
-          // 065 inspector overlay became. The card's expand button and Enter on a
-          // focused row land here too (openNodeDetails delegates).
-          // 082 §B: a POINTER tap must not move DOM focus into the keyboard node
-          // list. The list is revealed by :focus-within, so focusing a row from a
-          // mouse tap floated the picker into the stage's bottom-left corner on
-          // every click (080's dark Details shot). The selection, the ring and the
-          // roving tabindex all still move — only focus() is withheld.
-          self.cy.on("tap", "node", function (evt) {
-            var nodeData = evt.target.data();
-            self.selectNodeById(nodeData.id, false);
-          });
-
-          self.cy.on("tap", function (evt) {
-            if (evt.target === self.cy) {
-              self.selectedNode = null;
-              self.dock.clearSelection();
-            }
-          });
-
-          // 151 (#127): a tap on an ARROW says what it means — in the live region, and
-          // by selecting the node that waits (its Details carry the Depends on row).
-          // Boundary connectors have no authored target to select; they announce alone.
-          self.cy.on("tap", "edge", function (evt) {
-            var e = evt.target;
-            var kind = e.data("kind");
-            if (kind === "boundary") {
-              var side = e.data("side") === "end" ? "end" : "start";
-              announceStatus(
-                side === "start"
-                  ? e.target().id() + " can start as soon as the execution starts — a boundary, not a transfer"
-                  : "the execution ends after " + e.source().id() + " — a boundary, not a transfer",
-              );
-              return;
-            }
-            announceStatus(self.edgeDescription(e.source().id(), e.target().id()));
-            self.selectNodeById(e.target().id(), false);
-          });
-
           // 076 §B: the boosted-swap teardown reaches the live component through
           // this handle (wireBoostLifecycle below).
           window.__peInstance = self;
@@ -305,10 +321,23 @@
           // never re-announces.
           // Keyed by PIPELINE as well as execution: a boosted entry into another pipeline's
           // workspace (the explorer's Open links are boosted) must not adopt this run.
+          // #349 — keyed by VERSION as well: a page restored at another version than the
+          // run's does not paint the run's replay onto that body (spec §4.2: node run
+          // facts attach only when pipeline AND version match). It still shows the run
+          // in the identity strip, with the way back to the run's version.
           var live = window.__peLiveExecution;
           var ownRun = !!(live && live.executionId && live.pipelineId && self.pipeline && live.pipelineId === self.pipeline.id);
           if (ownRun && !self.executionId && self.sseHandler && self.sseHandler.reattach) {
-            self.sseHandler.reattach(live.executionId);
+            var viewed = self.viewedVersionOrNull();
+            if (live.version !== undefined && live.version !== null && live.version !== viewed) {
+              // Another version than the run's: no stream attach, no graph paint — but
+              // the strip stays truthful about the run that is out there.
+              self.adoptLiveRunRecord(live);
+            } else if (self.sseHandler.reattach.length >= 2) {
+              self.sseHandler.reattach(live.executionId, live.version);
+            } else {
+              self.sseHandler.reattach(live.executionId);
+            }
           }
         } catch (e) {
           console.error("Pipeline Editor init failed:", e);
@@ -413,6 +442,472 @@
         this.selectNodeById(id, false);
       },
 
+      /* ==================================================== #349 — the workspace
+       * composition: six tabs, in-page version switching, run identity, and the
+       * generation/sink guards every in-page read is stamped with. The spec's state
+       * model (§4.3): page/view state key = workspace + pipeline + viewed version +
+       * generation; execution state key = workspace + execution id, kept alive while
+       * the viewed version moves under it. */
+
+      /** The viewed version as a number, or null (the choose-a-version page has none). */
+      viewedVersionOrNull: function () {
+        var self = this;
+        var v = typeof self.viewedVersion === "number" ? self.viewedVersion : window.PEWorkspace && window.PEWorkspace.viewedVersion;
+        return typeof v === "number" && isFinite(v) ? v : null;
+      },
+
+      /** The next generation counter — bumped once per issued in-page read. */
+      nextToken: function () {
+        this.viewGeneration = this.viewGeneration + 1;
+        return this.viewGeneration;
+      },
+
+      /**
+       * The composition facts, re-read from the page's ONE workspace block — at init
+       * and after every in-page version switch (the switch rewrites the block's shape
+       * in the component; the DOM block stays the server's arrival snapshot, so the
+       * component fields are the working copy, not re-read from the DOM).
+       */
+      readComposition: function () {
+        var self = this;
+        var root = typeof document !== "undefined" && document.querySelector ? document.querySelector(".pe-root") : null;
+        var canReadExecutions = !!(root && root.getAttribute && root.getAttribute("data-can-read-executions") === "true");
+        var initial = root && root.getAttribute ? root.getAttribute("data-active-tab") : "flow";
+        self.pageHasDraft = !!(root && root.getAttribute && root.getAttribute("data-has-draft") === "true");
+        if (self.tabs) {
+          self.tabs.canReadExecutions = canReadExecutions;
+          self.tabs.active = window.PETabs ? window.PETabs.resolve(initial, canReadExecutions) : "flow";
+        }
+        var pin = window.PEWorkspace;
+        self.viewedVersion = pin && typeof pin.viewedVersion === "number" ? pin.viewedVersion : null;
+        // The composition facts ride the page's ONE workspace block: the admitted
+        // history, the Overview's record-level facts and the datasource dialect map.
+        // Read raw here (the pin itself is workspace.js's job); absent or unparsable
+        // leaves the defaults — empty rows, no facts — never a throw.
+        var el = typeof document !== "undefined" && document.getElementById ? document.getElementById("pipeline-workspace") : null;
+        if (el) {
+          try {
+            var raw = JSON.parse(el.textContent);
+            if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+              if (Array.isArray(raw.versionRows)) self.versionRows = raw.versionRows;
+              if (raw.pageFacts && typeof raw.pageFacts === "object") self.pageFacts = raw.pageFacts;
+              if (raw.datasourceDialects && typeof raw.datasourceDialects === "object") {
+                self.datasourceDialects = raw.datasourceDialects;
+              }
+            }
+          } catch (e) {
+            /* the pin's own refusal path (workspace.js) already recorded it */
+          }
+        }
+      },
+
+      /**
+       * A live-run record adopted WITHOUT attaching the stream (#349): the page was
+       * restored at a version other than the run's. The strip names the run and offers
+       * the way back; nothing paints.
+       */
+      adoptLiveRunRecord: function (live) {
+        this.runIdentity = {
+          executionId: live.executionId,
+          version: live.version,
+          status: "running",
+          parameters: null,
+          attached: false,
+        };
+        this.executionVersion = live.version;
+      },
+
+      /**
+       * THE in-page version switch (spec §4.3): fetch the version's body through the
+       * admitted REST read, swap graph + metadata + parameter schema + source context
+       * as ONE view transition, keep the execution state and stream untouched, and
+       * stamp the whole page with a new generation so every stale completion — success
+       * or refusal — is dropped. A late v1 response cannot overwrite v2; returning to
+       * v1 is a new generation (A→B→A included).
+       */
+      applyVersion: function (n) {
+        var self = this;
+        var version = Number(n);
+        if (!self.pipeline || !self.pipeline.id) return Promise.resolve(false);
+        if (!isFinite(version) || version <= 0) return Promise.resolve(false);
+        var generation = self.nextToken();
+        var pipelineId = self.pipeline.id;
+        self.announceStatus("Loading v" + version + "…");
+        return fetch("/api/v1/pipelines/" + encodeURIComponent(pipelineId) + "/versions/" + version, {
+          credentials: "same-origin",
+          headers: { Accept: "application/json" },
+        })
+          .then(function (res) {
+            if (window.PEWorkspaceLogic.stale({ generation: generation, pipelineId: pipelineId }, self.currentStamp())) {
+              return null; // a newer switch superseded this one mid-flight
+            }
+            if (!res.ok) {
+              // The house refusal: absent, foreign, or (under a narrowing lens) not
+              // admitted — never a silent fallback to another body.
+              self.setBanner(
+                "Version v" + version + " is not available for your role or does not exist. Still viewing v" +
+                  (window.PEWorkspace && window.PEWorkspace.viewedVersion) + ".",
+                "error",
+              );
+              self.announceStatus("Version v" + version + " is not available");
+              return false;
+            }
+            return res.json().then(function (envelope) {
+              var data = (envelope && envelope.data) || envelope;
+              if (window.PEWorkspaceLogic.stale({ generation: generation, pipelineId: pipelineId }, self.currentStamp())) {
+                return null;
+              }
+              self.applyBodySnapshot(version, data);
+              return true;
+            });
+          })
+          .catch(function () {
+            if (window.PEWorkspaceLogic.stale({ generation: generation, pipelineId: pipelineId }, self.currentStamp())) return;
+            self.setBanner("Version v" + version + " could not be loaded — the network refused. Still viewing the previous version.", "error");
+            return false;
+          });
+      },
+
+      /** The CURRENT page/view stamp, against which every in-flight read is judged. */
+      currentStamp: function () {
+        return {
+          pipelineId: this.pipeline ? this.pipeline.id : undefined,
+          version: this.viewedVersionOrNull(),
+          generation: this.viewGeneration,
+        };
+      },
+
+      /**
+       * One fetched body becomes the viewed version: graph, metadata, parameter
+       * schema, per-version overrides, checks, selector marks, URL. The execution
+       * state (stream, run facts, result panel) is deliberately NOT touched — the run
+       * keeps streaming while the view moves (spec §4.3); only the GRAPH PAINTING
+       * gate changes, because the run's facts attach to their own version.
+       */
+      applyBodySnapshot: function (version, data) {
+        var self = this;
+        var previousVersion = self.viewedVersionOrNull();
+        // The per-version override rule FIRST (spec §4.3 — never reuse another
+        // version's fields): the old bag saves under the OLD version, the new one
+        // loads from the new version's own store. Only then does the reactive
+        // viewed-version move, so the getters re-evaluate against the new body.
+        if (self.overrideStore && previousVersion !== null) {
+          self.overrideStore.save(previousVersion, self.parameterOverrides);
+        }
+        self.viewedVersion = version;
+
+        self.pipeline = data;
+        self.nodes = data.nodes || [];
+        var byId = {};
+        self.nodes.forEach(function (node) {
+          byId[node.id] = node;
+        });
+        self.nodesById = byId;
+        self.parameters = data.parameters || {};
+        self.paramKeys = Object.keys(self.parameters);
+        self.paramFields = window.PEParamFields ? window.PEParamFields.buildParamFields(self.parameters) : [];
+        if (self.overrideStore) {
+          // The schema decides which stored keys survive; the rest are dropped (an
+          // incompatible field never leaks across a version change, spec §4.3).
+          var stored = self.overrideStore.load(version, self.paramKeys);
+          self.parameterOverrides = stored;
+          self.paramFields.forEach(function (field) {
+            field.override = stored[field.key] !== undefined ? stored[field.key] : "";
+          });
+        }
+        // 7d: the transform pins were the OLD body's lookups — the new graph resolves
+        // its own; the Details pane reads "resolving…" until they land.
+        self.transformPins = {};
+
+        // The workspace pin: the executed and previewed version IS the viewed one.
+        // canExecute is the server-stamped role grant (the root attribute) — a new
+        // body's presence is what the fetch just proved.
+        if (typeof window !== "undefined") {
+          window.PEWorkspace = {
+            pipelineId: self.pipeline.id,
+            viewedVersion: version,
+            hasBody: true,
+            canExecute: self.canExecute,
+          };
+        }
+        // The page's two script-JSON blocks are kept TRUTHFUL (textContent is a DOM
+        // text sink — no escaping question): the body block is the page's ONE body
+        // source (init reads it; a later PEWorkspaceRead identity-checks the pair),
+        // and the workspace block is the pin every execute and SQL read makes.
+        if (typeof document !== "undefined") {
+          var dataEl = document.getElementById("pipeline-data");
+          if (dataEl) dataEl.textContent = JSON.stringify(data);
+          var wsEl = document.getElementById("pipeline-workspace");
+          if (wsEl) wsEl.textContent = JSON.stringify(window.PEWorkspace);
+        }
+
+        // The graph: rebuilt for the new nodes, its events re-armed, and the RUN's
+        // states re-applied only when this IS the run's version.
+        if (self.graph && self.graph.stopStageWatch) self.graph.stopStageWatch();
+        if (self.cy) {
+          self.cy.destroy();
+          self.cy = null;
+        }
+        self.selectedNode = null;
+        self.dock.clearSelection();
+        self.graph = new PipelineGraph("cy-canvas", self.nodes, self);
+        self.graph.render();
+        self.cy = self.graph.cy;
+        self.wireGraphEventsOn();
+        setupA11y(self);
+        self.replayRunOntoGraph();
+        self.refreshChecks();
+        self.syncViewedMarkers(version);
+        self.updateViewedUrl(version);
+      },
+
+      /** The run's own states return to the graph when the view returns to its version. */
+      replayRunOntoGraph: function () {
+        var self = this;
+        if (!self.runMatchesViewed()) return;
+        if (!self.graph || !self.graph.cy) return;
+        Object.keys(self.nodeStates || {}).forEach(function (id) {
+          if (self.cy.getElementById(id).length) self.graph.setNodeState(id, self.nodeStates[id]);
+        });
+        var ops = self.nodeOps;
+        if (ops && typeof ops.all === "function" && self.graph.setNodeOperation) {
+          Object.keys(ops.all()).forEach(function (id) {
+            var op = ops.get(id);
+            var view = op && window.PENodeOps ? window.PENodeOps.describe(op) : null;
+            self.graph.setNodeOperation(id, view);
+          });
+        }
+      },
+
+      /**
+       * The checks read for the VIEWED version: URL re-stamped, request re-issued —
+       * and the previous read's response cancelled by the sink token when it lands
+       * after this one.
+       */
+      refreshChecks: function () {
+        var self = this;
+        if (typeof document === "undefined" || !window.htmx) return;
+        var target = document.getElementById("pe-checks-latest");
+        if (!target) return;
+        if (!Array.isArray(self.pipeline.checks) || self.pipeline.checks.length === 0) {
+          target.innerHTML = "";
+          return;
+        }
+        var url =
+          "/partials/pipelines/" + encodeURIComponent(self.pipeline.id) +
+          "/versions/" + encodeURIComponent(self.viewedVersionOrNull()) + "/checks";
+        target.setAttribute("data-checks-url", url);
+        self.checksToken = "t" + self.nextToken();
+        target.setAttribute("data-pe-token", self.checksToken);
+        target.innerHTML = '<p class="u-secondary u-text-sm">Loading checks…</p>';
+        window.htmx.ajax("GET", url, "#pe-checks-latest");
+      },
+
+      /** The selector rows, the viewed marks and every [data-pe-viewed-label] chip. */
+      syncViewedMarkers: function (version) {
+        var self = this;
+        self.versionRows = (self.versionRows || []).map(function (row) {
+          var copy = {};
+          Object.keys(row).forEach(function (k) {
+            copy[k] = row[k];
+          });
+          copy.viewed = row.version === version;
+          return copy;
+        });
+        var row = self.viewedRow();
+        var label = "v" + version + (row && row.status ? " · " + String(row.status).toLowerCase() : "") +
+          (row && row.current ? " · current" : "");
+        if (typeof document !== "undefined" && document.querySelectorAll) {
+          var chips = document.querySelectorAll("[data-pe-viewed-label]");
+          for (var i = 0; i < chips.length; i++) chips[i].textContent = label;
+          // The Versions tab's rows are server-rendered with the ARRIVAL version's mark;
+          // an in-page switch re-marks them here (the mark is a plain element the client
+          // owns — no re-render of the fragment, whose verbs stay server truth).
+          var rows = document.querySelectorAll("#pe-pane-versions tr[data-version-row]");
+          for (var j = 0; j < rows.length; j++) {
+            var tr = rows[j];
+            var trVersion = parseInt(tr.getAttribute("data-version-row"), 10);
+            var mark = tr.querySelector("[data-pe-viewed-mark]");
+            if (trVersion === version) {
+              if (!mark) {
+                mark = document.createElement("span");
+                mark.className = "ds-badge ds-badge-default";
+                mark.setAttribute("data-pe-viewed-mark", "");
+                mark.textContent = "viewing";
+                var cell = tr.querySelector("td");
+                if (cell) cell.appendChild(mark);
+              }
+            } else if (mark) {
+              mark.remove();
+            }
+          }
+        }
+      },
+
+      /** The canonical URL follows the viewed version and tab — REPLACE, not push:
+          no history entries are minted the htmx shell does not own. */
+      updateViewedUrl: function (version) {
+        if (typeof history === "undefined" || !history.replaceState) return;
+        var tab = this.tabs ? this.tabs.active : "flow";
+        var params = new URLSearchParams(window.location.search);
+        params.set("version", String(version));
+        if (tab && tab !== "flow") params.set("tab", tab);
+        else params.delete("tab");
+        var qs = params.toString();
+        history.replaceState(history.state, "", window.location.pathname + (qs ? "?" + qs : ""));
+      },
+
+      /** Lazy tab reads: Runs and Usage load once, on the tab's first open. */
+      ensureTabLoaded: function (tab) {
+        var self = this;
+        if (tab !== "runs" && tab !== "usage") return;
+        var loading = tab === "runs" ? self.runsLoading : self.usageLoading;
+        var loaded = tab === "runs" ? self.runsLoaded : self.usageLoaded;
+        if (loaded || loading) return;
+        if (!self.pipeline || !self.pipeline.id || !window.htmx) return;
+        var container = document.getElementById(tab === "runs" ? "pe-runs-body" : "pe-usage-body");
+        if (!container) return;
+        var url = "/partials/pipelines/" + encodeURIComponent(self.pipeline.id) + "/" + tab;
+        var token = "t" + self.nextToken();
+        if (tab === "runs") {
+          self.runsToken = token;
+          self.runsLoading = true;
+          self.runsLoadFailed = false;
+        } else {
+          self.usageToken = token;
+          self.usageLoading = true;
+          self.usageLoadFailed = false;
+        }
+        container.setAttribute("data-pe-token", token);
+        window.htmx.ajax("GET", url, container)
+          .then(function () {
+            if (tab === "runs") {
+              self.runsLoading = false;
+              self.runsLoaded = true;
+            } else {
+              self.usageLoading = false;
+              self.usageLoaded = true;
+            }
+          })
+          .catch(function () {
+            if (tab === "runs") {
+              self.runsLoading = false;
+              self.runsLoadFailed = true;
+            } else {
+              self.usageLoading = false;
+              self.usageLoadFailed = true;
+            }
+          });
+      },
+
+      /* --- the tab and run-strip actions the CSP build can spell (no-arg) --------- */
+
+      selectFlowTab: function () {
+        this.switchTab("flow");
+      },
+      selectOverviewTab: function () {
+        this.switchTab("overview");
+      },
+      selectParametersTab: function () {
+        this.switchTab("parameters");
+      },
+      selectRunsTab: function () {
+        this.switchTab("runs");
+      },
+      selectUsageTab: function () {
+        this.switchTab("usage");
+      },
+      selectVersionsTab: function () {
+        this.switchTab("versions");
+      },
+      openRunParameters: function () {
+        // "Run overrides ... reachable here and beside Execute" (§4.1): tab navigation
+        // only — no run state is touched.
+        this.switchTab("parameters");
+      },
+      switchTab: function (tab) {
+        if (!this.tabs) return;
+        this.tabs.select(tab);
+        var viewed = this.viewedVersionOrNull();
+        if (viewed !== null) this.updateViewedUrl(viewed);
+        this.ensureTabLoaded(tab);
+      },
+      viewRunVersion: function () {
+        var v = this.executionVersion;
+        if (v === null || v === undefined) return;
+        this.applyVersion(v);
+      },
+
+      /**
+       * The execution identity (spec §4.2): armed by the run's own execution_started,
+       * which carries the submitted version and the effective parameters. sse.js calls
+       * this BEFORE painting anything, so the strip is armed first.
+       */
+      handleExecutionIdentity: function (payload, handlerVersion) {
+        this.runIdentity = {
+          executionId: payload && payload.execution_id ? payload.execution_id : null,
+          version: payload && payload.pipeline_version !== undefined && payload.pipeline_version !== null
+            ? payload.pipeline_version
+            : handlerVersion,
+          status: "running",
+          parameters: payload && payload.parameters ? payload.parameters : null,
+          attached: true,
+        };
+        this.executionVersion = this.runIdentity.version;
+      },
+      handleRunTerminal: function (status) {
+        if (this.runIdentity) this.runIdentity.status = status;
+      },
+      /** True when the live run's facts may paint THIS view (pipeline + version). */
+      runMatchesViewed: function () {
+        var self = this;
+        if (self.executionVersion === null || self.executionVersion === undefined) return false;
+        var viewed = self.viewedVersionOrNull();
+        if (viewed === null) return false;
+        var pinned = window.PEWorkspaceLogic ? window.PEWorkspaceLogic.executeVersion(window.PEWorkspace) : null;
+        return pinned === self.executionVersion;
+      },
+
+      /**
+       * The canvas handlers, armed per graph INSTANCE (080 §B's tap contract): a tap
+       * selects and fills the dock's Node Details; the background clears; an arrow
+       * announces what it means. Called at init and after every in-page version
+       * switch — the rebuilt Cytoscape instance carries no handlers of its own.
+       * 082 §B: a POINTER tap must not move DOM focus into the keyboard node list.
+       */
+      wireGraphEventsOn: function () {
+        var self = this;
+        if (!self.cy) return;
+        self.cy.on("tap", "node", function (evt) {
+          var nodeData = evt.target.data();
+          self.selectNodeById(nodeData.id, false);
+        });
+        self.cy.on("tap", function (evt) {
+          if (evt.target === self.cy) {
+            self.selectedNode = null;
+            self.dock.clearSelection();
+          }
+        });
+        // 151 (#127): a tap on an ARROW says what it means — in the live region, and
+        // by selecting the node that waits (its Details carry the Depends on row).
+        // Boundary connectors have no authored target to select; they announce alone.
+        self.cy.on("tap", "edge", function (evt) {
+          var e = evt.target;
+          var kind = e.data("kind");
+          if (kind === "boundary") {
+            var side = e.data("side") === "end" ? "end" : "start";
+            announceStatus(
+              side === "start"
+                ? e.target().id() + " can start as soon as the execution starts — a boundary, not a transfer"
+                : "the execution ends after " + e.source().id() + " — a boundary, not a transfer",
+            );
+            return;
+          }
+          announceStatus(self.edgeDescription(e.source().id(), e.target().id()));
+          self.selectNodeById(e.target().id(), false);
+        });
+      },
+
       /*
        * The Details pane's SQL section (§8). SQL does not live in pipeline nodes —
        * the server resolves the node's PINNED template and renders it against the
@@ -459,11 +954,18 @@
           "/nodes/" + encodeURIComponent(self.selectedNode.id) + "/sql" +
           "?parameters=" + encodeURIComponent(JSON.stringify(wire)) +
           "&version=" + encodeURIComponent(versionPin);
+        // #349 — the sink token (A8): the request stamps #pe-node-sql with the token
+        // it was issued under and the component records the same; a stale response —
+        // held while the user selected another node, or switched the viewed version —
+        // is cancelled at beforeSwap and never paints, its failure included.
+        self.sqlToken = "t" + self.nextToken();
         // #pe-node-sql lives inside <template x-if="selectedNode">, which Alpine
         // renders on the NEXT tick — issuing htmx.ajax synchronously off a
         // selection change hits htmx:targetError and the section never loads.
         self.$nextTick(function () {
-          if (!document.getElementById("pe-node-sql")) return;
+          var pane = document.getElementById("pe-node-sql");
+          if (!pane) return;
+          pane.setAttribute("data-pe-token", self.sqlToken);
           htmx.ajax("GET", url, {
             target: "#pe-node-sql",
             swap: "innerHTML",
@@ -538,7 +1040,9 @@
               : "—"
           );
           push("Output", self.outputText(node));
-          var childExec = self.childExecutions[node.id];
+          // #349 (spec §4.2): the spawned child is a RUN fact — attached only on the
+          // run's own version.
+          var childExec = self.runMatchesViewed() ? self.childExecutions[node.id] : null;
           push("Execution", childExec ? childExec + " (child)" : "—");
         } else if (type === "TRANSFORM") {
           self.transformRows(node).forEach(function (row) { rows.push({ k: row[0], v: row[1] }); });
@@ -573,13 +1077,20 @@
         var waits = self.dependencyRows(node);
         if (waits.dependsOn) push("Depends on", waits.dependsOn);
         if (waits.requiredBy) push("Required by", waits.requiredBy);
-        var state = self.nodeStates[node.id];
-        if (state && state !== "idle") push("Last run", state);
-        // 149: the measured operation — what the node is doing (or did), where its output
-        // went, the cumulative counts, the per-state time share and whether the write
-        // committed. Only what was observed: an operation without a terminal sample says
-        // "Commit not observed", never "Committed"; there is no percentage to show.
-        self.operationRows(node.id).forEach(function (row) { rows.push({ k: row[0], v: row[1] }); });
+        // #349 (spec §4.2): the node's RUN facts attach only when the run's pipeline
+        // AND version match the viewed body — a v1 run's state never reads as the v2
+        // node's last run, however the node ids happen to coincide.
+        if (self.runMatchesViewed()) {
+          var state = self.nodeStates[node.id];
+          if (state && state !== "idle") push("Last run", state);
+          // 149: the measured operation — what the node is doing (or did), where its output
+          // went, the cumulative counts, the per-state time share and whether the write
+          // committed. Only what was observed: an operation without a terminal sample says
+          // "Commit not observed", never "Committed"; there is no percentage to show.
+          self.operationRows(node.id).forEach(function (row) {
+            rows.push({ k: row[0], v: row[1] });
+          });
+        }
         return rows;
       },
 
@@ -631,6 +1142,10 @@
        * ordering is met when its source is done, and can never be met once it failed.
        */
       dependencyStateWord: function (nodeId) {
+        // #349 (spec §4.2): the states are RUN facts — attach only when the run's
+        // version is the viewed one; otherwise every ordering reads as its honest
+        // "pending", never another run's state.
+        if (!this.runMatchesViewed()) return "pending";
         var WORDS = { idle: "pending", running: "running", success: "done", failed: "failed", aborted: "aborted" };
         return WORDS[this.nodeStates[nodeId] || "idle"] || "pending";
       },
@@ -1079,7 +1594,9 @@
           var raw = node.inputs[name];
           var expression = typeof raw === "string" ? raw : JSON.stringify(raw);
           var resolved = null;
-          if (typeof raw === "string" && raw.charAt(0) === "$") {
+          // #349 (spec §4.2): the resolved Context is the RUN's — shown beside the
+          // expression only when the run's version is the viewed one.
+          if (self.runMatchesViewed() && typeof raw === "string" && raw.charAt(0) === "$") {
             var key = raw.slice(1);
             if (Object.prototype.hasOwnProperty.call(self.contextValues, key)) {
               resolved = String(self.contextValues[key]);
@@ -1101,9 +1618,11 @@
         return node.context_key || "—";
       },
 
-      /** The value a CALCULATOR node computed in the last run, or null before one. */
+      /** The value a CALCULATOR node computed in the last run, or null before one.
+       * #349: run-owned — attached only when the run's version is the viewed one. */
       calculatorValue: function (node) {
         if (!node || node.type !== "CALCULATOR") return null;
+        if (!this.runMatchesViewed()) return null;
         var value = this.nodeValues[node.id];
         if (value === undefined || value === null) return null;
         // 121: a multi-output node's recorded value is the whole key set it wrote.
@@ -1327,6 +1846,242 @@
         return "Page " + this.resultPanel.page + " / " + this.resultPanel.totalPages;
       },
 
+      /* --- #349: the workspace composition (selector, overview, parameters, strip) ---
+         Everything below is a no-arg getter or method over the composition state: the
+         CSP build's template expressions stay pure property paths. */
+
+      /** One admitted-history row, the workspace block's shape. */
+      viewedRow: function () {
+        var rows = this.versionRows || [];
+        for (var i = 0; i < rows.length; i++) {
+          if (rows[i].viewed) return rows[i];
+        }
+        return null;
+      },
+
+      /** The header selector's rows: label, suffixes, canonical href, viewed mark. */
+      get selectorRows() {
+        var self = this;
+        var id = self.pipeline && self.pipeline.id ? self.pipeline.id : "";
+        var tab = self.tabs && self.tabs.active ? self.tabs.active : "flow";
+        return (self.versionRows || []).map(function (row) {
+          var suffix = row.current ? "· current" : "";
+          if (!suffix && String(row.status).toUpperCase() === "DRAFT") suffix = "· draft";
+          var params = "version=" + encodeURIComponent(row.version);
+          if (tab && tab !== "flow") params += "&tab=" + encodeURIComponent(tab);
+          return {
+            version: row.version,
+            label: "v" + row.version,
+            currentSuffix: suffix,
+            titleText:
+              String(row.status || "").toLowerCase() + (row.current ? " · current" : ""),
+            href: "/pipelines/" + encodeURIComponent(id) + "?" + params,
+            ariaCurrent: row.viewed ? "page" : null,
+          };
+        });
+      },
+
+      /** The viewed-version chips: `v2 · draft`, or plain `v2` with no admitted status. */
+      get viewedChipText() {
+        var row = this.viewedRow();
+        var viewed = this.viewedVersionOrNull();
+        if (viewed === null) return "—";
+        var label = "v" + viewed;
+        if (row && row.status) label += " · " + String(row.status).toLowerCase();
+        if (row && row.current) label += " · current";
+        return label;
+      },
+      /** "released · current" — the Overview's success chip, only on the current release. */
+      get viewedIsReleasedCurrent() {
+        var row = this.viewedRow();
+        return !!(row && row.current && String(row.status).toUpperCase() === "RELEASED");
+      },
+
+      /* --- Overview (client-rendered from the body JSON + the page facts) --------- */
+
+      get overviewDescriptionText() {
+        var d = this.pipeline ? this.pipeline.description : null;
+        return d ? d : "—";
+      },
+      get overviewNodeCountText() {
+        var n = this.nodes ? this.nodes.length : 0;
+        return n + (n === 1 ? " node" : " nodes");
+      },
+      get overviewDatasourceCountText() {
+        var n = this.overviewDatasourceNames().length;
+        return n + (n === 1 ? " datasource" : " datasources");
+      },
+      get overviewNoDatasources() {
+        return this.overviewDatasourceNames().length === 0;
+      },
+      get overviewNoTemplates() {
+        return this.overviewTemplatePins.length === 0;
+      },
+      /** The datasource names THIS body touches (the registry decides what counts). */
+      overviewDatasourceNames: function () {
+        var self = this;
+        var out = [];
+        (self.nodes || []).forEach(function (n) {
+          var source = n && n.source ? String(n.source) : "";
+          var target = n && n.output ? n.output : null;
+          if (source && source !== "tempdb" && out.indexOf(source) === -1) out.push(source);
+          if (target && target.target === "datasource" && target.datasource && out.indexOf(target.datasource) === -1) {
+            out.push(target.datasource);
+          }
+        });
+        return out.sort();
+      },
+      /** The Overview's datasource rows: name, dialect (the pre-resolved map), href. */
+      get overviewDatasources() {
+        var self = this;
+        var dialects = self.datasourceDialects || {};
+        return self.overviewDatasourceNames().map(function (name) {
+          var dialect = dialects[name];
+          return {
+            name: name,
+            dialectText: dialect ? " (" + String(dialect).toLowerCase() + ")" : "",
+            href: "/datasources/" + encodeURIComponent(name),
+          };
+        });
+      },
+      /** The Overview's template pins: `id@version`, linked into the templates screen. */
+      get overviewTemplatePins() {
+        var self = this;
+        var seen = {};
+        var rows = [];
+        (self.nodes || []).forEach(function (n) {
+          var t = n && n.template;
+          if (!t || !t.id || seen[t.id + "@" + t.version]) return;
+          seen[t.id + "@" + t.version] = true;
+          rows.push({
+            label: t.id + "@" + t.version,
+            href: "/templates?q=" + encodeURIComponent(t.id),
+          });
+        });
+        return rows;
+      },
+      get overviewCreatedText() {
+        var at = this.pipeline && this.pipeline.created_at ? String(this.pipeline.created_at) : "—";
+        return at.replace("T", " ").slice(0, 16);
+      },
+      get overviewCreatedByText() {
+        return (this.pageFacts && this.pageFacts.createdBy) || "—";
+      },
+      get overviewCreatedViaText() {
+        var via = this.pageFacts ? this.pageFacts.createdVia : null;
+        if (!via || via === "session") return "";
+        return via === "api_key" ? " · via API key" : " · via MCP";
+      },
+      get overviewNoLastRun() {
+        return !(this.pageFacts && this.pageFacts.lastRun);
+      },
+      get overviewHasLastRun() {
+        return !this.overviewNoLastRun;
+      },
+      get overviewLastRunHref() {
+        return this.pageFacts && this.pageFacts.lastRun
+          ? "/executions/" + this.pageFacts.lastRun.executionId
+          : "#";
+      },
+      get overviewLastRunStatus() {
+        return this.pageFacts && this.pageFacts.lastRun ? this.pageFacts.lastRun.status : "";
+      },
+      get overviewLastRunStatusWord() {
+        var s = this.overviewLastRunStatus;
+        return s ? s.charAt(0) + s.slice(1).toLowerCase() : "";
+      },
+      get overviewLastRunChipClass() {
+        var s = this.overviewLastRunStatus;
+        if (s === "SUCCESS") return "app-chip-ok";
+        if (s === "FAILED") return "app-chip-bad";
+        if (s === "RUNNING") return "app-chip-run";
+        return "app-chip-warn";
+      },
+      get overviewLastRunDurationText() {
+        var run = this.pageFacts && this.pageFacts.lastRun;
+        return run && run.durationMs !== null && run.durationMs !== undefined ? run.durationMs + " ms" : "—";
+      },
+      get overviewLastRunRowsText() {
+        var run = this.pageFacts && this.pageFacts.lastRun;
+        return run && run.rowCount !== null && run.rowCount !== undefined ? run.rowCount + " rows" : "— rows";
+      },
+      get overviewLastRunAgoText() {
+        return this.pageFacts && this.pageFacts.lastRun ? this.pageFacts.lastRun.ago : "";
+      },
+      get overviewLastRunAtText() {
+        return this.pageFacts && this.pageFacts.lastRun ? this.pageFacts.lastRun.at : "";
+      },
+
+      /* --- Parameters tab ------------------------------------------------------- */
+
+      get parametersCountText() {
+        var n = this.paramKeys ? this.paramKeys.length : 0;
+        return n + (n === 1 ? " declared" : " declared");
+      },
+      get hasParameters() {
+        return this.paramKeys && this.paramKeys.length > 0;
+      },
+      get noParameters() {
+        return !this.hasParameters;
+      },
+      /** The declaration table's rows, materialized (the CSP paths read fields). */
+      get parameterRows() {
+        var self = this;
+        return (self.paramKeys || []).map(function (key) {
+          var p = self.parameters[key] || {};
+          return {
+            name: key,
+            type: p.type || "STRING",
+            required: p.required === true,
+            defaultText: p.default === null || p.default === undefined ? "—" : JSON.stringify(p.default),
+            descriptionText: p.description || "—",
+          };
+        });
+      },
+
+      /* --- the execution identity strip ------------------------------------------ */
+
+      get runStripVisible() {
+        return !!(this.runIdentity && this.dock && (this.dock.resultsActive || this.dock.errorsActive || this.dock.eventsActive));
+      },
+      get runStripVersionText() {
+        return this.runIdentity && this.runIdentity.version !== null && this.runIdentity.version !== undefined
+          ? "v" + this.runIdentity.version
+          : "—";
+      },
+      get runStripStatusText() {
+        return this.runIdentity ? String(this.runIdentity.status) : "";
+      },
+      get runStripExecText() {
+        var id = this.runIdentity && this.runIdentity.executionId ? String(this.runIdentity.executionId) : "";
+        return id ? "execution " + id.slice(0, 8) : "";
+      },
+      get runStripParamsText() {
+        // The EFFECTIVE SUBMITTED parameters — the pipeline's own declared keys — never
+        // the whole resolved Context (the org/platform tiers ride the same payload).
+        var params = this.runIdentity && this.runIdentity.parameters;
+        if (!params) return "";
+        var keys = (this.paramKeys || []).filter(function (k) {
+          return Object.prototype.hasOwnProperty.call(params, k);
+        });
+        if (keys.length === 0) return "";
+        return keys
+          .map(function (k) {
+            return k + "=" + String(params[k]);
+          })
+          .join(" · ");
+      },
+      /** The run ran another version than the one being viewed — say so, offer the way back. */
+      get runVersionDiffers() {
+        var viewed = this.viewedVersionOrNull();
+        return (
+          this.executionVersion !== null &&
+          this.executionVersion !== undefined &&
+          viewed !== null &&
+          this.executionVersion !== viewed
+        );
+      },
+
       /* --- the error modal --- */
       hideErrorModal: function () {
         this.errorModal.hide();
@@ -1432,6 +2187,64 @@
   }
 
   /*
+   * #349 — the version selector's and the Versions tab's Open links: EVERY
+   * `a[data-pe-version-link]` on the page applies its version IN PAGE instead of
+   * navigating. The href stays the canonical deep link (middle-click, no-JS, the
+   * explorer's full-document entry rule is untouched); a plain click here never
+   * reloads the document, because a reload would detach the page from an active run
+   * (spec §4.3: "Do not reload the document and lose an active run just to update the
+   * dropdown"). Registered ONCE per document, reading the live component through the
+   * teardown handle — the same pattern wireEventsScroll uses.
+   */
+  function wireVersionLinks() {
+    if (typeof document === "undefined" || !document.addEventListener || document.__peVersionLinksWired) return;
+    document.__peVersionLinksWired = true;
+    document.addEventListener("click", function (evt) {
+      var target = evt.target;
+      var link = target && target.closest ? target.closest("a[data-pe-version-link]") : null;
+      if (!link) return;
+      var inst = window.__peInstance;
+      if (!inst || typeof inst.applyVersion !== "function") return;
+      var version = parseInt(link.getAttribute("data-version") || link.getAttribute("data-pe-version"), 10);
+      if (!isFinite(version) || version <= 0) return;
+      evt.preventDefault();
+      inst.applyVersion(version);
+    });
+  }
+
+  /*
+   * #349 — the sink-token guard (A8): the pane reads that arrive as htmx swaps (node
+   * SQL, checks, runs, usage) are stamped with the token they were issued under; a
+   * response whose token no longer matches the component's current one is CANCELLED
+   * before it can paint — its content AND its failure. One document-level listener,
+   * registered once; every sink carries its own token pair.
+   */
+  function wireSinkTokenGuard() {
+    if (typeof document === "undefined" || !document.body || !document.body.addEventListener || document.__peSinkGuardWired) return;
+    document.__peSinkGuardWired = true;
+    var SINKS = {
+      "pe-node-sql": "sqlToken",
+      "pe-checks-latest": "checksToken",
+      "pe-runs-body": "runsToken",
+      "pe-usage-body": "usageToken",
+    };
+    document.body.addEventListener("htmx:beforeSwap", function (evt) {
+      var inst = window.__peInstance;
+      var target = evt.detail && evt.detail.target;
+      var key = target && target.id ? SINKS[target.id] : null;
+      if (!key || !inst) return;
+      var recorded = target.getAttribute("data-pe-token");
+      var current = inst[key];
+      if (window.PEWorkspaceLogic && !window.PEWorkspaceLogic.tokenMatches(recorded, current)) {
+        // A newer request superseded this one: do not swap, and do not let the
+        // cancelled response raise (a stale response is not an error the user owns).
+        evt.detail.shouldSwap = false;
+        evt.detail.isError = false;
+      }
+    });
+  }
+
+  /*
    * 195 — the component registers itself under the CSP build's rule: `x-data`
    * may only NAME a component registered with Alpine.data (no inline object, no
    * call). alpine:init fires when the deferred alpine.min.js boots, after every
@@ -1454,4 +2267,6 @@
   window.pipelineEditor = pipelineEditor;
   window.pipelineEditorBoost = { wireBoostLifecycle: wireBoostLifecycle };
   wireBoostLifecycle();
+  wireVersionLinks();
+  wireSinkTokenGuard();
 })();

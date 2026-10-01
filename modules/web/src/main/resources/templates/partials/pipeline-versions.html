@@ -1,87 +1,125 @@
-<!-- The acting column's VERSIONS tab (106; the verbs reshaped by 102) — every version of the
-      selected pipeline, newest first, with the verbs §3.5 allows THAT row.
+<!-- The VERSIONS tab (#349 house-table composition; the fragment the 106 explorer detail
+     and the pipeline workspace both compose). Every version of the selected pipeline,
+     newest first, with the verbs §3.5 allows THAT row.
 
-      COMPACT ROWS, NOT A TABLE. The pane is the narrow column of a two-column detail; a
-      six-column table there wraps its headers and hides its last column behind a scroll (the
-      failure the /api-console screenshot found on 2026-09-08). A row states the same six facts
-      in a grid that can reflow: version · status · (created · who · runs) · actions.
+     HOUSE TABLE (ui-screens §3.7, spec §4.4 "Versions: page-flow, automatically bounded
+     horizontally when necessary"): `dt-frame > dt-viewport > table.ds-table`, the actual
+     component, upgraded, sorted and resized by the shell's own data-table.js — no second
+     renderer. In the explorer's narrow pane the frame takes dt-scroll's bounded height;
+     in the workspace it is page-flow content in a card. Rows carry data-version-row so
+     the workspace's client can re-mark the VIEWED row after an in-page version switch.
 
-      The row's verbs live in a per-row overflow menu (⋯), a native <details> like the tree's
-      folders — no JS to open. The list is a `popover="manual"` too: open, it sits in the
-      browser's TOP LAYER, placed by lifecycle-dialog.js against its ⋯, because the tab panel
-      it lives in scrolls and clipped it whenever the list was shorter than the menu (owner,
-      2026-09-12). lifecycle-dialog.js closes menus on outside clicks, Escape, scroll and
-      dialog opens. A verb the §3.5 table refuses for the row's status is NOT
-      rendered (absent, never disabled), so the table and the screen cannot disagree; the POST
-      still re-runs the guard. The flags come from the model ([VersionRowView]). -->
-<div xmlns:th="http://www.thymeleaf.org" th:fragment="versions" class="tplx-vlist">
+     The row's verbs live in a per-row overflow menu (⋯), a native <details> like the
+     tree's folders — no JS to open. The list is a `popover="manual"` too: open, it sits
+     in the browser's TOP LAYER, placed by lifecycle-dialog.js against its ⋯, because a
+     scrolling panel used to clip it (owner, 2026-09-12). lifecycle-dialog.js closes menus
+     on outside clicks, Escape, scroll and dialog opens. A verb the §3.5 table refuses for
+     the row's status is NOT rendered (absent, never disabled), so the table and the screen
+     cannot disagree; the POST still re-runs the guard. The flags come from the model
+     ([VersionRowView]).
+
+     DIALOG COMPOSITION: the container and the post-success shape are the COMPOSING
+     SURFACE's choice, passed in — `dialogTarget` (#px-dialog for the explorer detail,
+     #pe-dialog for the workspace) and `dialogFrom` (`editor` from the workspace, so a
+     successful verb HX-Redirects the whole page: a lifecycle change moves the version
+     set the page's own state is built from). Both default to the explorer's shapes, so
+     the explorer's callers render exactly what they always rendered.
+
+     OPEN: a version-row Open enters the read workspace at ITS OWN version. In the
+     workspace the same anchor switches the viewed version IN PAGE (the client
+     intercepts a[data-pe-version-link]); from the explorer it is a full-document entry
+     link (the page's entry rule), so a non-current row opens the body it names, never
+     the default. -->
+<div xmlns:th="http://www.thymeleaf.org" th:fragment="versions" class="tplx-vlist"
+     th:with="dialogTarget=${dialogTarget != null ? dialogTarget : '#px-dialog'},
+              dialogFrom=${dialogFrom}">
   <p class="ds-empty-description" th:if="${#lists.isEmpty(versions)}">This pipeline has no versions.</p>
 
-  <div class="tplx-vrow" th:each="v : ${versions}">
-    <span class="ds-badge ds-badge-default app-chip-mono" th:text="${'v' + v.version}">v1</span>
-    <span class="ds-badge"
-          th:classappend="${v.status.name() == 'RELEASED'} ? 'ds-badge-success' : (${v.status.name() == 'DRAFT'} ? 'ds-badge-warning' : 'ds-badge-default')"
-          th:text="${v.status}">RELEASED</span>
-    <span class="tplx-vmeta">
-      <span th:text="${v.createdAgo}" th:title="${#temporals.format(v.createdAt, 'yyyy-MM-dd HH:mm')}">3 days ago</span>
-      <span> · </span><span th:text="${v.actor}">Muhammad</span>
-      <span th:if="${v.via != 'session'}" class="u-muted" th:text="' · via ' + ${v.via == 'api_key' ? 'API key' : 'MCP'}"> · via MCP</span>
-      <span> · </span><span th:text="${v.usageLabel}">7 runs</span>
-      <!-- D60: the sticky pointer, which is NOT "the latest released" — saying so in the row
-           is the only place a reader can see the difference. -->
-      <span th:if="${v.isCurrent}"> · </span><span th:if="${v.isCurrent}" class="tplx-current">current</span>
-    </span>
-    <span class="tplx-vacts">
-      <!-- #348-b: each row's Open enters the canonical read workspace at ITS OWN version —
-           a full-document link (the page's entry rule), so a non-current row opens the body
-           it names, never the default. The old unqualified /editor URL remains a redirect
-           for links this lane does not own (tree leaves, search rows). -->
-      <a class="ds-button ds-button-ghost ds-button-sm" hx-boost="false"
-         th:href="@{/pipelines/{id}(id=${pipeline.id}, version=${v.version})}" th:title="${pipeline.name}">Open</a>
+  <div class="dt-frame dt-scroll dt-h-sm dt-fit" th:unless="${#lists.isEmpty(versions)}">
+    <div class="dt-viewport" tabindex="-1">
+      <table class="ds-table">
+        <thead>
+          <tr>
+            <th>Version</th>
+            <th>Status</th>
+            <th>Created</th>
+            <th>By</th>
+            <th>Runs</th>
+            <th data-sort="off">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr th:each="v : ${versions}" th:attr="data-version-row=${v.version}">
+            <td class="u-mono">
+              <a data-pe-version-link hx-boost="false" class="u-mono"
+                 th:href="@{/pipelines/{id}(id=${pipeline.id}, version=${v.version})}"
+                 th:text="${'v' + v.version}">v1</a>
+              <span th:if="${v.isCurrent}" class="tplx-current">current</span>
+              <!-- D60's reader aid, kept: the workspace additionally marks the row it is
+                   VIEWING (the client re-marks it after an in-page switch). -->
+              <span th:if="${v.isViewed}" class="ds-badge ds-badge-default" data-pe-viewed-mark>viewing</span>
+            </td>
+            <td>
+              <span class="ds-badge"
+                    th:classappend="${v.status.name() == 'RELEASED'} ? 'ds-badge-success' : (${v.status.name() == 'DRAFT'} ? 'ds-badge-warning' : 'ds-badge-default')"
+                    th:text="${v.status}">RELEASED</span>
+            </td>
+            <td class="u-mono">
+              <span th:text="${v.createdAgo}" th:title="${#temporals.format(v.createdAt, 'yyyy-MM-dd HH:mm')}">3 days ago</span>
+            </td>
+            <td>
+              <span th:text="${v.actor}">Muhammad</span>
+              <span th:if="${v.via != 'session'}" class="u-muted" th:text="' · via ' + ${v.via == 'api_key' ? 'API key' : 'MCP'}"> · via MCP</span>
+            </td>
+            <td class="u-mono" th:text="${v.usageLabel}">7 runs</td>
+            <td>
+              <!-- Exactly the verbs this row's status allows (§3.5): DRAFT → Release, Purge;
+                   RELEASED → Discard, Switch-to (not current); DISCARDED → Restore. -->
+              <!-- 114 §B — state AND role. Each `may*` is the row's lifecycle flag ANDed with the
+                   ACTIVE membership's capability, and the menu itself is hidden when none survives:
+                   a ⋯ that opens on an empty list is exactly the tease the "hide, don't disable"
+                   rule forbids. Release and Switch are both `canAuthor` (D8, 2026-09-20 — the promoter promotes, the author releases). -->
+              <th:block th:with="mayRelease=${v.canRelease and canAuthor == true},
+                                 mayPurge=${v.canPurge and canAuthor == true},
+                                 mayDiscard=${v.canDiscard and canAuthor == true},
+                                 mayRestore=${v.canRestore and canAuthor == true},
+                                 maySwitch=${v.canSwitch and canAuthor == true}">
+                <th:block th:if="${mayRelease or mayPurge or mayDiscard or mayRestore or maySwitch}">
+                  <details class="tplx-vmenu">
+                    <summary class="ds-button ds-button-ghost ds-button-sm" aria-label="Version actions" title="Version actions">⋯</summary>
+                    <div class="tplx-vmenu-list" role="menu" data-vmenu popover="manual">
+                      <button th:if="${mayRelease}" data-verb="pipeline-release" type="button" role="menuitem" class="tplx-vmenu-item"
+                              th:attr="hx-get=${dialogFrom != null} ? @{'/partials/pipelines/{id}/lifecycle/release'(id=${pipeline.id}, from=${dialogFrom})} : @{'/partials/pipelines/{id}/lifecycle/release'(id=${pipeline.id})},
+                                       hx-target=${dialogTarget}, hx-swap='innerHTML'"
+                              th:text="'Release v' + ${v.version} + '…'">Release v2…</button>
 
-      <!-- Exactly the verbs this row's status allows (§3.5): DRAFT → Release, Purge;
-           RELEASED → Discard, Switch-to (not current); DISCARDED → Restore. -->
-      <!-- 114 §B — state AND role. Each `may*` is the row's lifecycle flag ANDed with the
-           ACTIVE membership's capability, and the menu itself is hidden when none survives:
-           a ⋯ that opens on an empty list is exactly the tease the "hide, don't disable"
-           rule forbids. Release and Switch are both `canAuthor` (D8, 2026-09-20 — the promoter promotes, the author releases). -->
-      <th:block th:with="mayRelease=${v.canRelease and canAuthor == true},
-                         mayPurge=${v.canPurge and canAuthor == true},
-                         mayDiscard=${v.canDiscard and canAuthor == true},
-                         mayRestore=${v.canRestore and canAuthor == true},
-                         maySwitch=${v.canSwitch and canAuthor == true}">
-      <th:block th:if="${mayRelease or mayPurge or mayDiscard or mayRestore or maySwitch}">
-        <details class="tplx-vmenu">
-          <summary class="ds-button ds-button-ghost ds-button-sm" aria-label="Version actions" title="Version actions">⋯</summary>
-          <div class="tplx-vmenu-list" role="menu" data-vmenu popover="manual">
-            <button th:if="${mayRelease}" data-verb="pipeline-release" type="button" role="menuitem" class="tplx-vmenu-item"
-                    th:attr="hx-get=@{'/partials/pipelines/{id}/lifecycle/release'(id=${pipeline.id})},
-                             hx-target='#px-dialog', hx-swap='innerHTML'"
-                    th:text="'Release v' + ${v.version} + '…'">Release v2…</button>
+                      <button th:if="${mayPurge}" data-verb="pipeline-purge" type="button" role="menuitem" class="tplx-vmenu-item tplx-danger"
+                              th:attr="hx-get=${dialogFrom != null} ? @{'/partials/pipelines/{id}/lifecycle/purge'(id=${pipeline.id}, version=${v.version}, from=${dialogFrom})} : @{'/partials/pipelines/{id}/lifecycle/purge'(id=${pipeline.id}, version=${v.version})},
+                                       hx-target=${dialogTarget}, hx-swap='innerHTML'"
+                              th:text="'Purge v' + ${v.version} + '…'">Purge v2…</button>
 
-            <button th:if="${mayPurge}" data-verb="pipeline-purge" type="button" role="menuitem" class="tplx-vmenu-item tplx-danger"
-                    th:attr="hx-get=@{'/partials/pipelines/{id}/lifecycle/purge'(id=${pipeline.id}, version=${v.version})},
-                             hx-target='#px-dialog', hx-swap='innerHTML'"
-                    th:text="'Purge v' + ${v.version} + '…'">Purge v2…</button>
+                      <button th:if="${mayDiscard}" data-verb="pipeline-discard" type="button" role="menuitem" class="tplx-vmenu-item tplx-danger"
+                              th:attr="hx-get=${dialogFrom != null} ? @{'/partials/pipelines/{id}/lifecycle/discard'(id=${pipeline.id}, version=${v.version}, from=${dialogFrom})} : @{'/partials/pipelines/{id}/lifecycle/discard'(id=${pipeline.id}, version=${v.version})},
+                                       hx-target=${dialogTarget}, hx-swap='innerHTML'"
+                              th:text="'Discard v' + ${v.version} + '…'">Discard v2…</button>
 
-            <button th:if="${mayDiscard}" data-verb="pipeline-discard" type="button" role="menuitem" class="tplx-vmenu-item tplx-danger"
-                    th:attr="hx-get=@{'/partials/pipelines/{id}/lifecycle/discard'(id=${pipeline.id}, version=${v.version})},
-                             hx-target='#px-dialog', hx-swap='innerHTML'"
-                    th:text="'Discard v' + ${v.version} + '…'">Discard v2…</button>
+                      <button th:if="${maySwitch}" data-verb="pipeline-switch" type="button" role="menuitem" class="tplx-vmenu-item"
+                              th:attr="hx-get=${dialogFrom != null} ? @{'/partials/pipelines/{id}/lifecycle/switch'(id=${pipeline.id}, version=${v.version}, from=${dialogFrom})} : @{'/partials/pipelines/{id}/lifecycle/switch'(id=${pipeline.id}, version=${v.version})},
+                                       hx-target=${dialogTarget}, hx-swap='innerHTML'"
+                              th:text="'Switch to v' + ${v.version} + '…'">Switch to v1…</button>
 
-            <button th:if="${maySwitch}" data-verb="pipeline-switch" type="button" role="menuitem" class="tplx-vmenu-item"
-                    th:attr="hx-get=@{'/partials/pipelines/{id}/lifecycle/switch'(id=${pipeline.id}, version=${v.version})},
-                             hx-target='#px-dialog', hx-swap='innerHTML'"
-                    th:text="'Switch to v' + ${v.version} + '…'">Switch to v1…</button>
-
-            <button th:if="${mayRestore}" data-verb="pipeline-restore" type="button" role="menuitem" class="tplx-vmenu-item"
-                    th:attr="hx-get=@{'/partials/pipelines/{id}/lifecycle/restore'(id=${pipeline.id}, version=${v.version})},
-                             hx-target='#px-dialog', hx-swap='innerHTML'"
-                    th:text="'Restore v' + ${v.version} + '…'">Restore v1…</button>
-          </div>
-        </details>
-      </th:block>
-      </th:block>
-    </span>
+                      <button th:if="${mayRestore}" data-verb="pipeline-restore" type="button" role="menuitem" class="tplx-vmenu-item"
+                              th:attr="hx-get=${dialogFrom != null} ? @{'/partials/pipelines/{id}/lifecycle/restore'(id=${pipeline.id}, version=${v.version}, from=${dialogFrom})} : @{'/partials/pipelines/{id}/lifecycle/restore'(id=${pipeline.id}, version=${v.version})},
+                                       hx-target=${dialogTarget}, hx-swap='innerHTML'"
+                              th:text="'Restore v' + ${v.version} + '…'">Restore v1…</button>
+                    </div>
+                  </details>
+                </th:block>
+              </th:block>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
   </div>
 </div>
