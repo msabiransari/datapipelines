@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{layouts/default :: page(~{::content})}">
+<th:block th:fragment="content">
+  <!-- #10 L3b — the dashboards tree page (ui-screens.md §4.x): the explorers' chrome over the
+       same one-level-per-request partial the sidebar's lazy branch loads, so the two can never
+       disagree about what a level holds. A leaf NAVIGATES to the board page as a full
+       navigation (hx-boost="false" on the leaf, dashboards.md §6.4's one-bundle rule), so this
+       page carries no Plotly bundle of its own and boosting the navigation TO it is safe. -->
+  <div class="tplx-page">
+
+    <!-- ONE grid child: `.tplx-page` is exactly three rows — a fourth top-level child pushes
+         the panes into an implicit row (the pipelines explorer's measured lesson). -->
+    <div class="app-page-h">
+      <div>
+        <h1 class="ds-headline">Dashboards</h1>
+        <p class="tplx-authoring-note app-page-sub">
+          Dashboards are authored through agents over the
+          <a th:href="@{/docs/mcp-server}">MCP server</a> — ask your agent to create one, giving
+          it a folder path like <code>finance/dashboards/revenue_overview</code>. A board needs a
+          release to view: opening a dashboard with no release says so instead of rendering one.
+        </p>
+      </div>
+    </div>
+
+    <!-- The tree pane. The SAME stable root id the partial route renders
+         (DashboardBrowseModel.PAGE_ROOT_ID), so the level swaps — a folder expansion, the
+         pager — replace INSIDE this pane and the pane itself never moves. -->
+    <div class="tplx-body">
+      <div class="tplx-tree tplx-tree-solo" id="dashboards-tree-pane">
+        <div th:replace="~{partials/dashboard-tree-level :: level}"></div>
+      </div>
+    </div>
+  </div>
+</th:block>
+</html>

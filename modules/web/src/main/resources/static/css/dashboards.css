@@ -110,3 +110,150 @@
   color: var(--text-secondary);
   font-weight: var(--weight-medium);
 }
+
+/* ---- The first-party pages (#10 L3b) ---------------------------------------------- */
+
+/* The board page: the board LEFT (it owns the space), the events pane RIGHT (a fixed,
+   bounded column). Below the breakpoint the pane drops under the board — the grid reads
+   the layout, no script measures the viewport. */
+.dp-board-page {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: var(--gap-md);
+  min-height: 0;
+}
+
+.dp-board-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) clamp(240px, 22vw, 20rem);
+  gap: var(--gap-lg);
+  min-height: 0;
+}
+
+/* The board region itself: the composite adapter mounts the configuration's grid inside. */
+.dp-board {
+  min-height: 20rem;
+  min-width: 0;
+}
+
+@media (max-width: 1100px) {
+  .dp-board-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* The events pane: a quiet list beside the board — status as TEXT first, the shared badge
+   a word, never a colour alone. */
+.dp-refreshes-title {
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--text-primary);
+  margin-bottom: var(--gap-sm);
+}
+
+.dp-refreshes-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+}
+
+.dp-refreshes-row {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: var(--gap-sm);
+  background: var(--surface-inset);
+}
+
+.dp-refreshes-row-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--gap-sm);
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+}
+
+.dp-refreshes-status {
+  color: var(--text-primary);
+  font-weight: var(--weight-semibold);
+}
+
+.dp-refreshes-scope,
+.dp-refreshes-ago {
+  color: var(--text-muted);
+}
+
+.dp-refreshes-executions {
+  list-style: none;
+  margin: var(--gap-xs) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dp-refreshes-executions a {
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+.dp-refreshes-shared {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  margin-left: var(--gap-xs);
+}
+
+/* The tree leaf is a LINK on the dashboards tree (it navigates, it does not select): the
+   shared .tpl-leaf row styles apply, and the link's own voice is reset. */
+a.tpl-leaf {
+  text-decoration: none;
+}
+
+/* The sidebar's Dashboards branch (D58): the item's link row stays the rail's own; the
+   disclosure is a small chevron beside it, and the loaded tree indents under the item.
+   The chevron rotates when the branch is open — the same affordance the trees' summaries
+   get from details[open]. */
+.app-nav-branch {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-xs);
+}
+
+.app-nav-branch > .app-nav-link {
+  flex: 1;
+}
+
+.app-nav-branch-tree {
+  position: relative;
+}
+
+.app-nav-branch-tree summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  padding: var(--gap-xs);
+}
+
+.app-nav-branch-tree summary::-webkit-details-marker {
+  display: none;
+}
+
+.app-nav-branch-tree[open] summary .tpl-chevron {
+  transform: rotate(90deg);
+}
+
+.app-nav-branch-tree .tpl-level {
+  margin: var(--gap-xs) 0 0 calc(var(--gap-lg) + var(--gap-sm));
+  font-size: var(--text-sm);
+}
+
+/* The template-tree row contract sizes its rows at the explorers' widths; inside the rail
+   the labels tighten so the branch reads as a rail child. */
+.app-nav-branch-tree .tpl-label {
+  font-size: var(--text-xs);
+}

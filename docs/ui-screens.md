@@ -1,6 +1,6 @@
 # UI Screens Inventory
 
-**Status:** v1.93
+**Status:** v1.94
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
 **Last updated:** 2026-09-30 (L1c-c, #10; 340, #340/#335)
@@ -179,8 +179,16 @@ marketing site); each user can choose light/system/a palette in Settings.
 **The rail** (`--app-rail-width`, 232px; 60px collapsed). Brand, then the workspace switcher as
 a card (keeping its POST form and its `<select>`, which is present and operable and simply
 styled transparent over the card), then the sections grouped **Build** / **Operate** /
-**Organisation** with Dashboard alone above them, then the collapse control at the foot. The
-nav packs to the top; the free space below it is deliberate.
+**Organisation** with Home alone above them (D58, #10 L3b — the landing item `Dashboard` was
+RENAMED Home; the route `/dashboard` and its exact-match section are unchanged), then the
+collapse control at the foot. The nav packs to the top; the free space below it is deliberate.
+Build's last item is **Dashboards** (#10 L3b, D58): the link to the tree page (§4.21), and
+BESIDE it a chevron disclosure that expands IN PLACE into the dashboards' folder hierarchy —
+lazy (the summary's first click fetches ONE level of the same `/partials/dashboards/tree`
+fragment the page's tree renders, `scope=nav`, so the sidebar's tree and the page's tree can
+coexist in one document with distinct level ids), collapsible, and carried on `app-rail-label`
+so it hides with the collapsed rail. Every role sees the item (`dashboard.read` is an
+every-role read; the promoter through the lens).
 
 - **The brand mark (163, #157, "D1").** Three rings converging into an outlined tile with three
   rising bars — the tile is a 4-unit `currentColor` stroke and the bars are `currentColor`
@@ -1703,6 +1711,70 @@ association save swaps in all render `api/keys :: keysTable` / `:: keyRows` from
 
 Guards: `SchedulesUiControllerTest` (the route's row, `canAuthor` = the five write rows, the zone list against the scheduler's parser), `SchedulesPageRenderTest` (the role ladder at the render; no htmx request attribute and no partial route; the script order), `SchedulesCssTokenTest`, `schedules-model.test.mjs`, `ApiErrorCatalogUserMessageTest` (#280 — every field-placed code carries its override), and the browser suites `SchedulesBrowserTest` (explorer by prefix and search; create with field-level refusals asserting the catalogue's own words, the draft-only pipeline named at pick time and refused at save with the release-first words, and the next five equal to §20.9; the stale revision; pause/resume/block/unblock; Run now with the merged trail; delete; the role ladder and a viewer's refused POST from the page's own request path; light/dark; no overflow at 1100/1440/1920) and `SchedulesShotsBrowserTest` (the picture set).
 
+### 4.21 Dashboards (the tree page and the board page — #10 L3b)
+
+**The tree page.**
+
+| Attribute | Value |
+|---|---|
+| URL | `GET /dashboards` |
+| Auth required | Yes — `dashboard.read`, every role (a promoter through the lens: released dashboards whose every source pipeline her pipeline lens admits; a hidden one is absent from the tree) |
+| Purpose | Browse the dashboards' folder hierarchy; open a dashboard's board |
+| Design primitives | §4.3's explorer chrome (`template-tree.css` — `tplx-*`, `tpl-*`), `.ds-empty`; the page's tree pane is single (`tplx-tree-solo`) — a leaf NAVIGATES, so there is no detail pane and the shared explorer keyboard layer is deliberately NOT wired (`data-explorer-pane` is absent: arrow-key "selection" would trigger navigation) |
+| JS | None of its own (no glue on the tree page) |
+| htmx | Yes — **one level per request** (`hx-get="/partials/dashboards/tree?prefix=…&scope=page"` on a folder's `summary`, `hx-trigger="click once"`, targeting that folder's `.tpl-level` placeholder with `outerHTML`); the shared §5 pager when a level pages |
+
+Content: the folder tree (virtual folders, the pipelines' grammar — a dashboard name needs a
+folder, so the root level lists folders only) with per-folder counts, and dashboard leaves at
+their WORKING version — a leaf's badge names the version and marks a draft (versioning §7:
+unreleased edits stay visible; opening one is the board page's refusal state, not an error).
+**A leaf is a full navigation** — `hx-boost="false"` (§3.2): the board page loads a Plotly
+bundle, and the two bundles must never travel between pages ([Dashboards §6.4](dashboards.md)).
+Empty state: dashboards are authored through the MCP server (R10) — the note says so.
+
+**The board page.**
+
+| Attribute | Value |
+|---|---|
+| URL | `GET /dashboards/{id}` |
+| Auth required | Yes — `dashboard.read` (D50 makes every reader an executor; the page must NOT declare `dashboard.execute` to "simplify"). Absent, foreign or lens-hidden → the family's 404. Present but unrunnable (no release yet, a purged pin, a source that stopped passing the read-only rule) → the in-page REFUSAL state, the code and sentence the runtime's own read refused with |
+| Purpose | The released view: the runtime mounts the board, the events pane shows the caller's refreshes |
+| Design primitives | `dashboards.css` (the runtime's emitted classes and the page's layout) and the vendored `plotly.css` (the §6.6 design-around's real stylesheet) — both head-loaded (§3.0 is normative: no page template carries its own stylesheet link) |
+| JS | `static/js/datapipelines-dashboard.js` + the three renderers (L3a's vendored runtime) and `static/js/dashboards-page.js` — the glue, a FILE (no inline script): it reads exactly two data attributes (the dashboard id on the container; the bundle name rides the script tag's `data-dp-plotly-bundle`), inits the runtime with `credentials: "session"` and `version: "released"`, and surfaces notifications; `window.__dpPage` is its test seam |
+| htmx | Only the events pane's bounded poll (below). Links TO the route are never boosted (`hx-boost="false"`, the one-bundle rule); leaving CAN be boosted (the layout's nav), so the glue disposes on `htmx:beforeHistorySave` — htmx's history snapshot must not carry the mounted container's marker, or the restored page's init hits `DashboardAlreadyMounted`. The pages' browser suite proves exactly one mount across a back/forward pass |
+
+The ONE Plotly bundle is the SERVER's choice: the page resolves the runtime configuration
+(`renderer.bundle`) server-side and writes the script tag with its `data-dp-plotly-bundle`
+declaration — the same read the client's bootstrap performs, so the declaration and the pair
+the runtime judges can never disagree ([Dashboards §6.4](dashboards.md); the runtime's
+two-bundle refusal is the backstop). A refusal page loads no bundle at all.
+
+**The events pane** — the caller's refreshes of the open dashboard, newest first, beside the
+board (`GET /partials/dashboards/{id}/refreshes`, the REST refreshes route's own read through
+`DashboardRuntime`, so the lens and the own/`execution.read_all` visibility are the route's;
+it floors at `dashboard.execute` with that route — the page that embeds it stays on
+`dashboard.read`). Each row shows status, scope and age, and links its executions to
+`/executions/{id}` — for a reader who reads executions; a promoter's refresh names none
+([REST §23.3](rest-api.md), [Dashboards §5.7](dashboards.md)). **Updates are a bounded poll**
+(`hx-trigger="load delay:15s, every 15s"`, the pane re-fetching ITSELF with `outerHTML`),
+deliberately not the runtime's notification hooks: the pane's source of truth is the DURABLE
+refresh record (including the `execution.read_all` reader's wider view), the hooks fire only
+for refreshes THIS browser started and would need a second client-side row renderer, and the
+poll keeps working when the runtime instance failed to boot. The first re-fetch is delayed
+(the server just rendered the rows); the poll dies with the page — leaving is a full
+navigation, so the element and its timer leave the DOM with it.
+
+Guards: `DashboardUiRenderTest` (the tree level's contract and the lens fixture; the ONE-bundle
+contract at the render for a 2d and a 3d board; the refusal state and no-bundle refusal page;
+the pane's rows, execution links and poll attributes), `ShellRenderTest` (Home; the Dashboards
+item and its lazy branch), `ReadFloorTest` (the pages in `DASHBOARDS`, the pane in
+`DASHBOARD_RUNTIME`), `MatrixRowReachabilityTest`/`RoleWalkE2eTest`/`PermissionSeamE2eTest`
+(the §7.6 Surfaces cells), and the browser suites `DashboardPagesBrowserTest` +
+`DashboardPageConformanceBrowserTest` (the §10.5 page half: bootstrap, freshness, the parameter
+lock, notifications, abort, connection loss, disposal across a back/forward pass, two instances
+of one dashboard on one page; zero CSP violations on both pages; the promoter lens in the tree;
+a viewer executing; light/dark screens of both pages).
+
 ---
 
 ## 5. htmx Usage Pattern
@@ -1868,6 +1940,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-01 | v1.94 | L3b (#10) the first-party dashboard pages — row added at merge (the lane's commits carried the sections without one) | **§3.4**: the landing item is **Home** (D58; the route `/dashboard` and its exact-match section unchanged) and the Build group gains **Dashboards** — the link to the tree page with a lazy disclosure beside it that expands ONE level of the tree in place (`/partials/dashboards/tree?scope=nav`, the same fragment the page renders). **New §4.21** Dashboards: the tree page `/dashboards` (one level per request; a leaf opens the board as a FULL navigation, `hx-boost="false"`) and the board page `/dashboards/{id}` (the server-declared ONE Plotly bundle on its script tag, the glue as a file, the in-page refusal state for a board that cannot run, the events pane's bounded poll). |
 | 2026-09-30 | v1.93 | L1c-c (#10) transfer limits and evidence | **§4.17**: the `body_invalid` flash renders its toast (it was unmapped, hence silent — a refused batch said nothing on the screen that issued it), the toast text points at the REST answer's bound/count/key, and the two shipped branches whose `&#39;` entities sat inside fragment-expression literals (`missing_datasources`, `key_invalid`) — a latent render-500 on those flashes — now use typographic apostrophes. Guard: `PromotionErrorFlashRenderTest` (the body_invalid toast renders; the unmapped-key closure unchanged; red-first with the branch removed). No route, permission or role changed. |
 | 2026-09-29 | v1.92 | L1c (#10 L1c) the transfer families on the promotion page — renumbered at merge after 340's v1.91 | **§4.17**: the two family tables in the parameter-set mould's shape inside the same form (`name="visualization"` / `name="dashboard"`, the Send column and role guard), the read-only arm, the four-list empty state and form condition, the flash's `visualizations=N dashboards=N`, and the action's six-argument `promote`. The plan lists are the lens (the dashboard's newer-than-target arm stated). Guards named in the section. No route, permission or role changed. |
 | 2026-09-30 | v1.91 | 340 (#340, #335) lens residue + the purge dialog's kept list | **§4.3b, the Usage tab:** the parents half applies both halves of the promoter lens — the parent NAME, and under a narrowing view RELEASED parent versions only (the live-parents query returns DRAFT ones; a draft's number never reaches a promoter, 178b) — and the badge counts what the tab lists. **§4.6, the template screen:** the per-version count's pipeline arm honours the lens too (admitted pipelines, RELEASED working versions, re-derived from rows like the set and visualization arms; the whole view keeps the aggregate). **§4.3d, the purge-entity dialog:** names the draft templates the offer keeps and the sets/visualizations that hold them (#335), from the same port the REST `kept_draft_templates` reads. No route, permission or role changed. Guards: `PipelineBrowseModelUsageTest`, `TemplateUsageTest`, `PipelineLifecycleDialogModelTest`, `PipelineLifecycleDialogRenderTest`, each falsified. |

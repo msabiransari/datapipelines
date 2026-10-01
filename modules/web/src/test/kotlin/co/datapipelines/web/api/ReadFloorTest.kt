@@ -78,6 +78,13 @@ class ReadFloorTest {
         familyOf("/executions") shouldBeFamily Family.EXECUTIONS
         familyOf("/api/v1/executions/{id}/result") shouldBeFamily Family.EXECUTIONS
         familyOf("/partials/recent-executions") shouldBeFamily Family.EXECUTIONS
+        // #10 L3b: the dashboards PAGES are the family's reads (DASHBOARD_READ — D50 makes
+        // every reader an executor, and the page must not "simplify" into execute), while the
+        // events-pane partial is the refresh routes' data and floors with them.
+        familyOf("/dashboards") shouldBeFamily Family.DASHBOARDS
+        familyOf("/dashboards/{id}") shouldBeFamily Family.DASHBOARDS
+        familyOf("/partials/dashboards/tree") shouldBeFamily Family.DASHBOARDS
+        familyOf("/partials/dashboards/{id}/refreshes") shouldBeFamily Family.DASHBOARD_RUNTIME
         familyOf("/workspaces") shouldBeFamily Family.WORKSPACES
         familyOf("/api/v1/workspaces") shouldBeFamily Family.WORKSPACES_LIST_OWN
         familyOf("/api/v1/workspaces/{name}/members") shouldBeFamily Family.WORKSPACES
@@ -237,23 +244,33 @@ class ReadFloorTest {
         /**
          * #10 L2: the dashboard RUNTIME's three GETs — the configuration and the caller's refresh list and read — floor
          * `dashboard.execute` (D50), not `dashboard.read`: reading a runtime configuration is the act of running the
-         * dashboard. AHEAD of [DASHBOARDS] because the first match wins and both start with the same prefix.
+         * dashboard. L3b's events-pane partial (/partials/dashboards/{id}/refreshes) is the SAME rows through the page,
+         * so it floors here too — the page that embeds it stays on [DASHBOARDS]. AHEAD of [DASHBOARDS] because the first
+         * match wins and both start with the same prefix.
          */
         DASHBOARD_RUNTIME(
-            floor = 3,
+            floor = 4,
             permissions = setOf(Permission.DASHBOARD_EXECUTE),
             matches = { path ->
-                path.startsWith("/api/v1/dashboards/") &&
-                    (path.contains("/runtime/") || path.endsWith("/refreshes") || path.contains("/refreshes/"))
+                (
+                    path.startsWith("/api/v1/dashboards/") &&
+                        (path.contains("/runtime/") || path.endsWith("/refreshes") || path.contains("/refreshes/"))
+                ) ||
+                    (path.startsWith("/partials/dashboards/") && path.contains("/refreshes"))
             },
         ),
 
-        /** #10 L1b: the dashboards — the same row shape; floor = the family's six GET handlers
-         * (L1c's export joined). */
+        /** #10 L1b the API family (six GET handlers, L1c's export joined), L3b the three pages: the dashboards —
+         * the same row shape; the family's reads. */
         DASHBOARDS(
-            floor = 6,
+            floor = 9,
             permissions = setOf(Permission.DASHBOARD_READ),
-            matches = { path -> path.startsWith("/api/v1/dashboards") },
+            matches = { path ->
+                path.startsWith("/api/v1/dashboards") ||
+                    path == "/dashboards" ||
+                    path.startsWith("/dashboards/") ||
+                    path == "/partials/dashboards/tree"
+            },
         ),
 
         /** Everything else a signed-in person reads: the every-role reads (the lens aside, one row shape). */

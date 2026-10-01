@@ -265,6 +265,24 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
     }
 
     /**
+     * #10 L3b — the board the PAGES' screens shoot: [seedBoard]'s fixtures with the layout
+     * grid PINNED (the seed's `grid: []` is the host suite's — the composite auto-places
+     * unpinned occurrences into single 12th-width cells, which is true to the wire and wrong
+     * for a picture). One named method, so the pages' lane does not edit L3a's helpers.
+     */
+    protected fun seedBoardWithGrid(root: String): String {
+        val board = seedBoard(root)
+        val grid =
+            """[{"name":"revenue","x":0,"y":0,"w":6,"h":4},{"name":"cells","x":6,"y":0,"w":6,"h":4},""" +
+                """{"name":"total","x":0,"y":4,"w":3,"h":2},{"name":"slowchart","x":3,"y":4,"w":9,"h":2}]"""
+        sql(
+            "UPDATE dashboard_versions SET body_json = jsonb_set(body_json, '{layout,grid}', '$grid'::jsonb) " +
+                "WHERE dashboard_id = '$board'::uuid",
+        )
+        return board
+    }
+
+    /**
      * A PARAMETERISED board (the L2 E2E's mould): one SELECT parameter with constants (no
      * datasource behind the set), a source pipeline declaring the matching pipeline parameter, and
      * the dashboard pinning the set — the flow the corrected client must drive end to end.

@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{layouts/default :: page(~{::content})}">
+<th:block th:fragment="content">
+  <!-- #10 L3b — the board page (ui-screens.md §4.x; dashboards.md §6): the released view. The
+       ONE Plotly bundle the SERVER chose (renderer.bundle, §10.4) is declared on its script
+       tag (data-dp-plotly-bundle) and the runtime judges the pair at bootstrap — the §6.4
+       backstop. The glue is a FILE (the CSP has no unsafe-inline) reading the two data
+       attributes below; no server value reaches a script body.
+
+       Links to this route are NEVER boosted (the tree leaf, the sidebar): the two bundles
+       must never travel between pages — a boosted board-to-board swap would run one page's
+       bundle scripts under the other's document. LEAVING the board can still be boosted (the
+       layout's nav links are), which is why the glue disposes on htmx:beforeHistorySave:
+       htmx saves a snapshot of this document on the way out, and a snapshot carrying the
+       mounted marker would make the restored page's init hit DashboardAlreadyMounted. -->
+  <!-- The runtime's scripts ride ONLY a board that resolved: a refusal page loads no bundle
+       at all (the refusal state is already server-rendered, and a megabyte of Plotly has
+       nothing to render into). -->
+  <th:block th:if="${bundle != null}">
+    <script th:src="@{/vendor/plotly/plotly-{bundle}.min.js(bundle=${bundle})}"
+            th:attr="data-dp-plotly-bundle=${bundle}"></script>
+    <script th:src="@{/js/datapipelines-dashboard.js}"></script>
+    <script th:src="@{/js/datapipelines-dashboard-plotly.js}"></script>
+    <script th:src="@{/js/datapipelines-dashboard-table.js}"></script>
+    <script th:src="@{/js/datapipelines-dashboard-kpi.js}"></script>
+    <script th:src="@{/js/dashboards-page.js}" defer></script>
+  </th:block>
+
+  <div class="dp-board-page">
+    <div class="app-page-h">
+      <div>
+        <h1 class="ds-headline" th:text="${dashboardName}">finance/dashboards/revenue_overview</h1>
+      </div>
+    </div>
+
+    <div class="dp-board-layout">
+      <!-- The board: the runtime mounts the configuration's grid here. The glue reads the
+           dashboard id from the container; the refusal state (below) is what shows when the
+           board cannot run. -->
+      <main id="dp-board" class="dp-board"
+            th:attr="data-dp-dashboard-id=${dashboardId}"></main>
+
+      <!-- The refusal state: the in-page answer to a board that cannot run (no release yet, a
+           dependency missing) and to a runtime boot failure — the onNotification sink's
+           region. Never a blank pane (the implementation spec's §6.3). The server fills the
+           code and message when the config read refused; the glue fills them when a later boot
+           step fails, then reveals the region. -->
+      <div id="dp-board-refusal" class="ds-empty" hidden
+           th:attr="data-dp-refusal-code=${refusalCode}, data-dp-refusal-message=${refusalMessage}"
+           th:hidden="${refusalCode == null}">
+        <p class="ds-empty-title">This dashboard cannot be shown</p>
+        <p class="ds-empty-description" id="dp-board-refusal-message"
+           th:text="${refusalMessage}">The board could not start.</p>
+        <p class="ds-empty-description">
+          <code id="dp-board-refusal-code" th:text="${refusalCode}">dashboard.not_found</code>
+        </p>
+      </div>
+
+      <!-- The events pane: the caller's refreshes, newest first, beside the board; the
+           fragment's root re-fetches itself on a bounded poll (dashboard-refreshes.html). -->
+      <aside class="dp-board-side" aria-label="Refreshes">
+        <div th:replace="~{partials/dashboard-refreshes :: pane}"></div>
+      </aside>
+    </div>
+  </div>
+</th:block>
+</html>

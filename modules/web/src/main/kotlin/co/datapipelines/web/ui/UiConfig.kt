@@ -105,6 +105,13 @@ class UiConfig {
     @Bean
     fun adminUsersBrowseModel(users: co.datapipelines.auth.UserService): AdminUsersBrowseModel = AdminUsersBrowseModel(users)
 
+    /** #10 L3b: the dashboards screens' one model, shared by the page controller and the partials. */
+    @Bean
+    fun dashboardBrowseModel(
+        dashboards: co.datapipelines.visualization.DashboardService,
+        runtime: co.datapipelines.web.dashboards.runtime.DashboardRuntime,
+    ): DashboardBrowseModel = DashboardBrowseModel(dashboards, runtime)
+
     /**
      * 161: the shell search palette's one model (#155) — pipelines, templates and executions,
      * each group read through the query the group's own screen already answers with.

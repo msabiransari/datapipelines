@@ -78,6 +78,14 @@
   <!-- #9 slice 2 — the Schedules page's own rules (its explorer rides template-tree.css
        above). Head-loaded for 090's reason: /schedules is a boosted route. -->
   <link th:href="@{/css/schedules.css}" rel="stylesheet">
+  <!-- #10 L3b — the dashboards pages' rules and Plotly's strict-CSP sheet. Head-loaded for
+       090's reason, the brief's page-template suggestion overridden by the record
+       (ui-screens.md §3.0 is normative: no page template carries its own stylesheet link).
+       dashboards.css styles the runtime's emitted classes AND the board page's layout;
+       plotly.css is the design-around's real stylesheet (dashboards.md §6.6) — the bundle
+       injects nothing, the sheet must be present wherever a board can mount. -->
+  <link th:href="@{/css/dashboards.css}" rel="stylesheet">
+  <link th:href="@{/vendor/plotly/plotly.css}" rel="stylesheet">
   <!-- 079 §A — the rail's collapsed state, applied BEFORE the first paint.
 
        Until 188 this was the ONE inline script in the layout — the round's only
@@ -250,10 +258,12 @@
            glyph now comes from lucide-sprite.svg, and IconSpriteAuditTest keeps
            it that way. -->
       <nav class="app-nav" hx-boost="true" aria-label="Sections">
+        <!-- D58 (#10 L3b): the landing item is Home — the route is unchanged (/dashboard), only
+             the label renamed. Dashboards sits in Build below, with its own lazy tree. -->
         <a th:href="@{/dashboard}" class="app-nav-link" data-nav-section="/dashboard"
-           data-nav-group="" data-nav-label="Dashboard"
+           data-nav-group="" data-nav-label="Home"
            th:classappend="${currentPath != null and currentPath == '/dashboard'} ? 'active' : null"
-           th:attr="aria-current=${currentPath != null and currentPath == '/dashboard'} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#layout-grid"></use></svg><span class="app-rail-label">Dashboard</span></a>
+           th:attr="aria-current=${currentPath != null and currentPath == '/dashboard'} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#layout-grid"></use></svg><span class="app-rail-label">Home</span></a>
 
         <div class="app-nav-section app-rail-label">Build</div>
         <a th:href="@{/pipelines}" class="app-nav-link" data-nav-section="/pipelines"
@@ -268,6 +278,29 @@
            data-nav-group="Build" data-nav-label="Datasources"
            th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/datasources')} ? 'active' : null"
            th:attr="aria-current=${currentPath != null and #strings.startsWith(currentPath, '/datasources')} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#database"></use></svg><span class="app-rail-label">Datasources</span></a>
+        <!-- D58 (#10 L3b): the Dashboards item — every role (dashboard.read is an every-role
+             read, the promoter through the lens), so unlike Executions/Promotion it rides no
+             advice boolean. The PARENT item is the link to the tree page; BESIDE it, the
+             disclosure expands IN PLACE into the hierarchy (D58), lazy: the summary's first
+             click fetches ONE level (the same /partials/dashboards/tree fragment the page's
+             tree renders, scope=nav) into the placeholder below, and htmx never touches it
+             again. The branch carries app-rail-label so it hides with the collapsed rail. -->
+        <div class="app-nav-branch">
+          <a th:href="@{/dashboards}" class="app-nav-link" data-nav-section="/dashboards"
+             data-nav-group="Build" data-nav-label="Dashboards"
+             th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/dashboards')} ? 'active' : null"
+             th:attr="aria-current=${currentPath != null and #strings.startsWith(currentPath, '/dashboards')} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#boxes"></use></svg><span class="app-rail-label">Dashboards</span></a>
+          <details class="app-nav-branch-tree app-rail-label">
+            <summary aria-label="Expand dashboards tree"
+                     th:attr="hx-get=@{/partials/dashboards/tree(scope='nav')}"
+                     hx-trigger="click once" hx-target="next .tpl-level" hx-swap="outerHTML">
+              <svg class="ds-icon ds-icon-xs tpl-chevron" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#chevron-right"></use></svg>
+            </summary>
+            <div class="tpl-level tpl-level-pending" id="dash-tree-nav">
+              <span class="ds-spinner htmx-indicator" aria-hidden="true"></span>
+            </div>
+          </details>
+        </div>
 
         <div class="app-nav-section app-rail-label">Operate</div>
         <!-- D11 (2026-09-20): the promoter reads no executions, so the item is not drawn for one. -->

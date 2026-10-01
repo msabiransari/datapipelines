@@ -18,20 +18,20 @@ package co.datapipelines.web.ui
  * ## Matching
  *
  * Exactly the rule `shell.js` mirrors client-side after a boosted swap and the rule the
- * layout's `th:classappend` has used since 076: **Dashboard by equality, everything else by
+ * layout's `th:classappend` has used since 076: **Home by equality (section /dashboard), everything else by
  * prefix** — `/pipelines/abc` is still "Pipelines". [crumbFor] resolves ties by the LONGEST
  * matching section, so a future `/settings/api-keys` row would win over `/settings`.
  */
 object AppNav {
-    /** The three group headings, in rail order. Dashboard sits above them all, ungrouped. */
+    /** The three group headings, in rail order. Home sits above them all, ungrouped. */
     const val BUILD = "Build"
     const val OPERATE = "Operate"
     const val ORGANISATION = "Organisation"
 
     /**
      * One rail item. [section] is the `data-nav-section` the template renders and `shell.js`
-     * matches on; it is a path PREFIX except for the Dashboard, which matches exactly (a
-     * prefix rule would light Dashboard up on every path, since `/` prefixes everything —
+     * matches on; it is a path PREFIX except for Home (section `/dashboard`), which matches
+     * exactly (a prefix rule would light Home up on every path, since `/` prefixes everything —
      * hence the special case rather than a cleverer general rule).
      */
     data class Item(
@@ -43,10 +43,16 @@ object AppNav {
     /** Rail order, top to bottom. The template renders the same order by hand. */
     val ITEMS: List<Item> =
         listOf(
-            Item("/dashboard", "Dashboard", null),
+            // D58 (#10 L3b): the landing item is Home — the route (/dashboard) is unchanged,
+            // only the label renamed, so the exact-match rule below keeps its section.
+            Item("/dashboard", "Home", null),
             Item("/pipelines", "Pipelines", BUILD),
             Item("/templates", "Templates", BUILD),
             Item("/datasources", "Datasources", BUILD),
+            // #10 L3b (D58): the Dashboards item — an every-role read (the promoter through
+            // the lens), so unlike Executions/Promotion it rides no advice boolean. The item
+            // links the tree page; its lazy branch expands beside it in the rail.
+            Item("/dashboards", "Dashboards", BUILD),
             Item("/executions", "Executions", OPERATE),
             // #9 slice 2: every member reads schedules (`schedule.read`), so unlike Executions
             // the item is drawn for every role — a promoter reads through the lens.
