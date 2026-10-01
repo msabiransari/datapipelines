@@ -1,5 +1,6 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.application.dashboards.DashboardKeyBindingRepository
 import co.datapipelines.application.endpoints.EndpointKeyBindingRepository
 import co.datapipelines.auth.ApiKey
 import co.datapipelines.auth.ApiKeyKind
@@ -19,6 +20,8 @@ import java.util.UUID
  */
 class ApiKeyRows(
     private val bindings: EndpointKeyBindingRepository,
+    /** L5 — the dashboard bindings twin; a `dashboard` key's folders read from its own table. */
+    private val dashboardBindings: DashboardKeyBindingRepository,
 ) {
     /**
      * One key as the table shows it. [prefix] is the public `dpk_…` handle — never the secret,
@@ -53,13 +56,15 @@ class ApiKeyRows(
         /** A key that can still authenticate — the only kind with a revoke affordance. */
         val isLive: Boolean get() = !isRevoked && !isExpired
 
-        /** The UI name (keys v2 A19): `mcp` reads "MCP key", `endpoint` reads "API key". */
+        /** The UI name (keys v2 A19): `mcp` reads "MCP key", `endpoint` reads "API key", `dashboard` (L5) "Dashboard key". */
         val kindLabel: String
             get() =
                 when (kind) {
                     ApiKeyKind.MCP.wire -> "MCP key"
                     ApiKeyKind.ENDPOINT.wire -> "API key"
-                    else -> "Server key"
+                    ApiKeyKind.SERVER.wire -> "Server key"
+                    ApiKeyKind.DASHBOARD.wire -> "Dashboard key"
+                    else -> kind
                 }
     }
 
@@ -67,8 +72,9 @@ class ApiKeyRows(
      * [keys] as rows, live ones first and newest first within each group — a revoked key stays
      * VISIBLE (its `is_revoked` is a fact an operator checks) but never at the top.
      *
-     * Bindings are read once per ENDPOINT key, and only for endpoint keys: no other kind has
-     * any, and a per-row query for keys that cannot have bindings is a page of empty reads.
+     * Bindings are read once per key that HAS them, and only for those keys — endpoint keys from
+     * `endpoint_key_bindings`, `dashboard` keys (L5) from `dashboard_key_bindings`: no other kind
+     * has any, and a per-row query for keys that cannot have bindings is a page of empty reads.
      *
      * [userLabels] maps every user id the rows name — creators and identities — to its label.
      */
@@ -98,12 +104,7 @@ class ApiKeyRows(
                     if (key.isRevoked) " (removed)" else "",
             actsAs = userLabels[key.userId] ?: UNKNOWN_OWNER,
             role = key.role?.label,
-            boundPaths =
-                if (key.kind == ApiKeyKind.ENDPOINT) {
-                    bindings.findByKey(key.id).map { it.pathPrefix }.sorted()
-                } else {
-                    emptyList()
-                },
+            boundPaths = boundPaths(key),
             createdRelative = RelativeTime.since(key.createdAt, now),
             createdAbsolute = RelativeTime.absolute(key.createdAt),
             lastUsedRelative = key.lastUsedAt?.let { RelativeTime.since(it, now) } ?: NEVER,
@@ -116,6 +117,14 @@ class ApiKeyRows(
             isExpired = key.expiresAt?.isBefore(now) ?: false,
             copyable = key.hasSealedSecret,
         )
+
+    /** The bindings a kind has, from ITS table — endpoint keys' paths, dashboard keys' folders (L5), others none. */
+    private fun boundPaths(key: ApiKey): List<String> =
+        when (key.kind) {
+            ApiKeyKind.ENDPOINT -> bindings.findByKey(key.id).map { it.pathPrefix }.sorted()
+            ApiKeyKind.DASHBOARD -> dashboardBindings.findByKey(key.id).map { it.namePrefix }.sorted()
+            else -> emptyList()
+        }
 
     companion object {
         /** `dpk_` plus eight characters — the D16 top-bar prefix length, shared by the table. */

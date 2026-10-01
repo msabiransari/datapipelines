@@ -7,9 +7,10 @@ package co.datapipelines.auth
  *
  * WHERE each kind may be presented (#215 B2, A16): the MCP key ([MCP]) reaches `/mcp` and
  * nothing else; an [ENDPOINT] key reaches the published paths bound to it and their result-paging
- * routes and nothing else; a [SERVER] key reaches the promotion route family and nothing else —
- * all refused everywhere else, centrally, so a new route cannot become reachable to a key by
- * someone forgetting a check.
+ * routes and nothing else; a [SERVER] key reaches the promotion route family and nothing else; a
+ * [DASHBOARD] key reaches the runtime routes of the dashboards its folder bindings cover and
+ * nothing else — all refused everywhere else, centrally, so a new route cannot become reachable
+ * to a key by someone forgetting a check.
  *
  * WHO each kind acts as (keys v2, A13/B1): every kind acts as its OWN `service` identity (PK5) —
  * the identity holds the key's [KeyRole] in the key's workspace exactly as a member does. There
@@ -43,6 +44,17 @@ enum class ApiKeyKind {
      * identity, an expiry, a revocation flag, a last-used stamp, rotation without a restart.
      */
     SERVER,
+
+    /**
+     * An external application's credential for the dashboard runtime (auth.md §7.7, the
+     * dashboards spec §2.2/§5, L5): minted on the Keys page by an `api_key.create` holder, acting
+     * as its own `dashboard_viewer` identity — a TRANSPORT role like `api_caller` — over the
+     * runtime routes of the dashboards its `dashboard_key_bindings` folders cover (the
+     * per-dashboard runtime and refreshes prefixes), and nowhere else. An unbound key authorises
+     * nothing (the endpoint key's rule, R-EP2 verbatim): the absence of a binding is never a
+     * fall-through, and a deeper binding replaces an inherited one.
+     */
+    DASHBOARD,
     ;
 
     /** Lowercase wire token, as stored in `api_keys.kind` and sent on the REST surface. */

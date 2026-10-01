@@ -142,41 +142,60 @@ class DashboardRefreshRepository(
                 ROW,
             ).singleOrNull()
 
-    /** A dashboard's refreshes, newest first — [principalUserId] narrows to one person's own (null = every refresh). */
+    /**
+     * A dashboard's refreshes, newest first — narrowed to ONE principal's own: [principalUserId]
+     * for a session, [principalKeyId] for a key (L5; never both). Both null = every refresh of
+     * the dashboard (`execution.read_all`).
+     */
     fun list(
         workspaceId: UUID,
         dashboardId: UUID,
-        principalUserId: UUID?,
+        principalUserId: UUID? = null,
+        principalKeyId: String? = null,
         limit: Int,
         offset: Int = 0,
-    ): List<RefreshRecord> =
-        jdbc.query(
+    ): List<RefreshRecord> {
+        require(!(principalUserId != null && principalKeyId != null)) {
+            "list() narrows to ONE principal: a user id or a key id, never both"
+        }
+        return jdbc.query(
             "$SELECT WHERE workspace_id = :workspaceId AND dashboard_id = :dashboardId" +
                 (if (principalUserId != null) " AND principal_user_id = :userId" else "") +
+                (if (principalKeyId != null) " AND principal_key_id = :keyId" else "") +
                 " ORDER BY started_at DESC, id LIMIT :limit OFFSET :offset",
             MapSqlParameterSource()
                 .addValue("workspaceId", workspaceId)
                 .addValue("dashboardId", dashboardId)
                 .addValue("userId", principalUserId)
+                .addValue("keyId", principalKeyId)
                 .addValue("limit", limit)
                 .addValue("offset", offset),
             ROW,
         )
+    }
 
+    /** The count twin of [list]'s own-filter. */
     fun count(
         workspaceId: UUID,
         dashboardId: UUID,
-        principalUserId: UUID?,
-    ): Long =
-        jdbc.queryForObject(
+        principalUserId: UUID? = null,
+        principalKeyId: String? = null,
+    ): Long {
+        require(!(principalUserId != null && principalKeyId != null)) {
+            "count() narrows to ONE principal: a user id or a key id, never both"
+        }
+        return jdbc.queryForObject(
             "SELECT COUNT(*) FROM dashboard_refreshes WHERE workspace_id = :workspaceId AND dashboard_id = :dashboardId" +
-                (if (principalUserId != null) " AND principal_user_id = :userId" else ""),
+                (if (principalUserId != null) " AND principal_user_id = :userId" else "") +
+                (if (principalKeyId != null) " AND principal_key_id = :keyId" else ""),
             MapSqlParameterSource()
                 .addValue("workspaceId", workspaceId)
                 .addValue("dashboardId", dashboardId)
-                .addValue("userId", principalUserId),
+                .addValue("userId", principalUserId)
+                .addValue("keyId", principalKeyId),
             Long::class.java,
         ) ?: 0L
+    }
 
     /** The person's own latest refresh of the dashboard, or null (`dashboards_get`'s `last_refresh`). */
     fun latestOf(

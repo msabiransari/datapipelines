@@ -47,7 +47,7 @@ until the first measured baseline, then baseline − 2; the allowed-dependency r
 The mould is `V39__parameter_sets.sql`, copied line for line with the names changed; every
 constraint it carries (`chk_*_status`, the one-draft unique index, the release/discard stamp
 checks, `chk_*_body` = `jsonb_typeof(body_json) = 'object' AND NOT (body_json ? 'name')`, the
-`via` check) is kept. `FlywayMigrationIntegrationTest`: the applied-migration list rows (`42|visualizations and dashboards|true`, `43|dashboard executions and keys|true`) plus a dedicated DDL test per migration in V39's shape (`:413`: the constraint list, the one-draft index's indexdef, the columns) and the table/index/constraint list entries (`:916-918`, `:1001-1005`, `:1137-1143` today).
+`via` check) is kept. `FlywayMigrationIntegrationTest`: the applied-migration list rows (`42|visualizations and dashboards|true`, `43|dashboard refreshes|true`) plus a dedicated DDL test per migration in V39's shape (`:413`: the constraint list, the one-draft index's indexdef, the columns) and the table/index/constraint list entries (`:916-918`, `:1001-1005`, `:1137-1143` today).
 
 ### 2.1 Artifacts (V42)
 
@@ -568,7 +568,7 @@ catalogue rows, `SECTION_13_ROW_COUNT` 307 → 371 (L1a: +64) in the same commit
 contract, the tests and gate, the key kind — registered in `DocsCatalog.GROUPING` (a packaged doc without a group fails the context at boot) and in docs-audit's check C alternation at `scripts/docs-audit.sh:216–217` (`visualization|dashboard`)), rest-api §22 (visualizations) and §23 (dashboards), auth
 §7.6 rows and §7.7's `dashboard` row, mcp-server §6.2.50–62 and §6.1's count, pipeline-contract
 §13.22–23, versioning §3.5's lifecycle table (the two families), module-structure rows, ui-screens §4.21
-(the page, the tree, the pane, `Home`), metadata-db (V42, V43), configuration §3.32 (the keys),
+(the page, the tree, the pane, `Home`), metadata-db (V42, V43), configuration (no key-kind key exists — the relevant keys are §3.6's SSE cap and §3.7's rate limit; corrected at L5: this line pointed at "§3.32 (the keys)", which today names Persistence batching),
 deployment (the Plotly bundle's provenance, the screenshot cap's filter exemption), the skill area
 `skill/dashboards.md` with its goldens and `SkillHasNoDemoContentTest`. Guards: every existing
 drift test moved with its row; `VendoredPlotlyAuditTest`; the browser CSP collector; the
@@ -620,7 +620,7 @@ The runtime sections (§2.2, §8, §9) were written before L1a/L1b landed and ag
 6. **Abort.** A refresh-level Redis flag (`dp:refresh-abort:{refresh_id}`) polled at every stage boundary plus the per-execution flags; the row carries the client `instance_id` only (no "executing node id"). No cross-refresh sharing exists, so "shared executions are released" is void; `execution.cancel_all` overrides ownership.
 7. **Retention.** `pipeline_executions` is never deleted, so "the executions' policy" was no policy: refresh rows follow the EVENT retention (a step on the hourly tick, the event-retention cutoff); the `dashboard_id` FK is `ON DELETE CASCADE`.
 8. **A stale-refresh sweep** (`DashboardRefreshSweeper`, the stale-execution sweeper's mould) marks RUNNING rows an instance crash left as TIMED_OUT.
-9. **V43 is L2's only:** the `chk_triggered_via` CHECK gains `DASHBOARD`, `dashboard_refreshes`, `dashboard_refresh_executions`; the pin reads `43|dashboard refreshes|true`. L5's key rows (`api_keys` kind/role, `executed_by_key_kind = 'dashboard'`, `dashboard_key_bindings`) are V44.
+9. **V43 is L2's only:** the `chk_triggered_via` CHECK gains `DASHBOARD`, `dashboard_refreshes`, `dashboard_refresh_executions`; the pin reads `43|dashboard refreshes|true`. L5's key rows (`api_keys` kind/role, `executed_by_key_kind = 'dashboard'`, `dashboard_key_bindings`) are V45 — corrected at L5 (2026-10-01): this row said V44, and 352's `visualization_test_capabilities` took V44 in integration first.
 10. **`configuration_id`** needs hashes the ports do not carry: read `PipelineRepository.findVersionDetail.bodyHash` and `ArtifactVersionDetail.bodyHash`, or grow the ports (L2 chooses and says why).
 11. **Save-vs-run:** the reader bounds `sources[]` at 400 while `max-executions-per-refresh` is 16 — one new validation code, `dashboard.validation.too_many_invocations` (§13.23 +1), refuses at save more distinct invocations than the cap.
 12. **No released dashboard can exist before L4** (`ReleaseEvidence.NOT_INSTALLED`): L2's E2Es seed RELEASED rows by SQL; the runtime serves the current RELEASED version only; the draft preview is L4's (§6.3).

@@ -188,10 +188,18 @@ object RoleMatrixDoc {
     /**
      * The key-role columns, in doc order, after the five member-role columns: the two transport
      * roles (#215 slice (b)) and — keys v2 (#233, A13/A14) — the three MEMBER roles an `mcp`
-     * key may carry, each judged by the member column of the same name.
+     * key may carry, each judged by the member column of the same name; L5 (#367) appends the
+     * `dashboard` key's transport role.
      */
     private val KEY_ROLE_COLUMNS =
-        listOf(KeyRole.API_CALLER, KeyRole.PROMOTION_RECEIVER, KeyRole.AUTHOR, KeyRole.PROMOTER, KeyRole.WORKSPACE_ADMIN)
+        listOf(
+            KeyRole.API_CALLER,
+            KeyRole.PROMOTION_RECEIVER,
+            KeyRole.AUTHOR,
+            KeyRole.PROMOTER,
+            KeyRole.WORKSPACE_ADMIN,
+            KeyRole.DASHBOARD_VIEWER,
+        )
 
     /** Permission | Surfaces | five roles | two key roles. */
     private val CATALOG_COLUMNS = 2 + ROLE_COLUMNS + KEY_ROLE_COLUMNS.size

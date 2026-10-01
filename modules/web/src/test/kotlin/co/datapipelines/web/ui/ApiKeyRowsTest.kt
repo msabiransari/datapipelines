@@ -1,5 +1,6 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.application.dashboards.DashboardKeyBindingRepository
 import co.datapipelines.application.endpoints.EndpointKeyBinding
 import co.datapipelines.application.endpoints.EndpointKeyBindingRepository
 import co.datapipelines.auth.ApiKey
@@ -24,7 +25,8 @@ import java.util.UUID
  */
 class ApiKeyRowsTest {
     private val bindings = mockk<EndpointKeyBindingRepository>()
-    private val rows = ApiKeyRows(bindings)
+    private val dashboardBindings = mockk<DashboardKeyBindingRepository>()
+    private val rows = ApiKeyRows(bindings, dashboardBindings)
     private val now = Instant.parse("2026-09-08T12:00:00Z")
     private val userId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()
@@ -137,6 +139,25 @@ class ApiKeyRowsTest {
         )
     }
 
+    @Test
+    fun `a dashboard key reads Dashboard key and its FOLDERS from its own table (L5)`() {
+        every { dashboardBindings.findByKey("dpk_DASHBOARD1") } returns
+            listOf(folder("finance/dashboards"), folder("/"))
+
+        val built =
+            rows.of(
+                listOf(key(id = "dpk_DASHBOARD1", kind = ApiKeyKind.DASHBOARD)),
+                now,
+            )
+
+        assertAll(
+            { built.single().kindLabel shouldBe "Dashboard key" },
+            { built.single().boundPaths shouldBe listOf("/", "finance/dashboards") },
+            { verify(exactly = 0) { bindings.findByKey(any()) } },
+            { verify(exactly = 1) { dashboardBindings.findByKey(any()) } },
+        )
+    }
+
     @Suppress("LongParameterList") // a row, spelled out
     private fun key(
         id: String = "dpk_RGAXQ7T2MKLP",
@@ -161,4 +182,8 @@ class ApiKeyRowsTest {
     )
 
     private fun binding(path: String) = EndpointKeyBinding(path, "dpk_ENDPOINT001", workspaceId, userId, now)
+
+    private fun folder(prefix: String) =
+        co.datapipelines.application.dashboards
+            .DashboardKeyBinding(prefix, "dpk_DASHBOARD1", workspaceId, userId, now)
 }

@@ -149,6 +149,8 @@ class FlywayMigrationIntegrationTest {
                 "42|visualizations and dashboards|true",
                 // #10 L2 — DASHBOARD in chk_triggered_via, dashboard_refreshes and its execution link.
                 "43|dashboard refreshes|true",
+                // #10 L5 (#367) — the `dashboard` key kind: the three CHECKs widen, dashboard_key_bindings lands.
+                "45|dashboard key kind|true",
             )
     }
 
@@ -773,8 +775,15 @@ class FlywayMigrationIntegrationTest {
     private fun roleFor(kind: String): String =
         when (kind) {
             "mcp" -> "'author'"
+
             "endpoint" -> "'api_caller'"
+
             "server" -> "'promotion_receiver'"
+
+            // L5 — the kind's role reaches chk_api_keys_kind first (Postgres checks CHECKs in
+            // name order), which is the constraint this probe exists to name.
+            "dashboard" -> "'dashboard_viewer'"
+
             else -> "NULL"
         }
 
@@ -855,6 +864,46 @@ class FlywayMigrationIntegrationTest {
         )
         // A18: a second LIVE key of the same name in one workspace is refused by the index.
         liveNameDuplicateRefused() shouldBe true
+    }
+
+    /**
+     * L5 (#367, V45) on the SHIPPED database: the fourth kind with its one fixed role, the
+     * executed-by attribution value, and the bindings table. The CHECK is asserted by
+     * INSERTING (the V17 rule); the `IS NOT NULL` arm is the V37 lesson — a NULL role must be
+     * refused on the new arm exactly as on the old ones.
+     */
+    @Test
+    fun `V45 admits the dashboard key kind with its fixed role and lands its bindings table`() {
+        assertAll(
+            { kindAccepted("dashboard") shouldBe true },
+            { roleAccepted("dashboard", "dashboard_viewer") shouldBe true },
+            { roleAccepted("dashboard", null) shouldBe false },
+            { roleAccepted("dashboard", "api_caller") shouldBe false },
+            { roleAccepted("dashboard", "promotion_receiver") shouldBe false },
+            { roleAccepted("dashboard", "author") shouldBe false },
+            { roleAccepted("dashboard", null, revoked = true) shouldBe false },
+        )
+        // The delegated execution attribution (D50, V37:116-122's CHECK widened). The constraint's
+        // EXISTENCE is the inventory test's (the pipeline_executions constraint list); this reads
+        // the shipped definition so the closed value list is asserted on the database that runs.
+        query("SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'chk_executions_executed_by_key_kind'") {
+            it.getString(1)
+        }.single().contains("'dashboard'") shouldBe true
+        // The bindings table: the twin's shape, present and keyed.
+        assertAll(
+            {
+                columnsOf(
+                    "dashboard_key_bindings",
+                ).containsAll(listOf("name_prefix", "api_key_id", "workspace_id", "created_by", "created_at")) shouldBe
+                    true
+            },
+            {
+                query(
+                    "SELECT indexdef FROM pg_indexes WHERE tablename = 'dashboard_key_bindings' " +
+                        "AND indexname = 'dashboard_key_bindings_pkey'",
+                ) { it.getString(1) }.single().contains("(name_prefix, api_key_id)") shouldBe true
+            },
+        )
     }
 
     /**
@@ -1033,7 +1082,7 @@ class FlywayMigrationIntegrationTest {
     }
 
     @Test
-    fun `creates exactly the thirty-three tables of metadata-db §4`() {
+    fun `creates exactly the thirty-four tables of metadata-db §4`() {
         val tables =
             query(
                 """
@@ -1052,6 +1101,8 @@ class FlywayMigrationIntegrationTest {
                 "datasources",
                 // 074 (V11) — the published-endpoint registry and its key bindings.
                 "endpoint_key_bindings",
+                // L5 (#367, V45) — the `dashboard` key's folder bindings (§4.36).
+                "dashboard_key_bindings",
                 "execution_events",
                 // 089 §A (V15) — the dp-lake catalog.
                 "lake_tables",
@@ -1139,6 +1190,8 @@ class FlywayMigrationIntegrationTest {
                 "datasource_workspaces.idx_datasource_workspaces_workspace",
                 "datasources.datasources_pkey",
                 "datasources.idx_datasources_active",
+                "dashboard_key_bindings.dashboard_key_bindings_pkey",
+                "dashboard_key_bindings.idx_dashboard_key_bindings_key",
                 "endpoint_key_bindings.endpoint_key_bindings_pkey",
                 "endpoint_key_bindings.idx_endpoint_key_bindings_key",
                 "execution_events.execution_events_pkey",

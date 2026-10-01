@@ -310,8 +310,12 @@ class ApiErrorCatalogSpecDriftTest {
          * 373 → 374 with #336: §13.4 gains `pipeline.node.commit_failed` (502 — the streamed read's
          * finalizing commit refused, an explicit catalog row beside its `query_execution_failed`
          * sibling), landed in the SAME commit as its constant. Re-derived from the document's own parse.
+         *
+         * 374 → 375 with L5 (#367): §13.23 gains `dashboard.binding.path_invalid` (400 — a dashboard
+         * binding's folder fails the grammar, or names no folder of the caller's own tree), landed in
+         * the SAME commit as its constants (pipeline-contract v1.49).
          */
-        const val SECTION_13_ROW_COUNT = 374
+        const val SECTION_13_ROW_COUNT = 375
 
         /**
          * §12's distinct validation codes.

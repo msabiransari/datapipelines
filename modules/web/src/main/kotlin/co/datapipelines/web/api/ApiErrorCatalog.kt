@@ -125,6 +125,9 @@ object ApiErrorCatalog {
             "dashboard.release." to HttpStatus.CONFLICT,
             "dashboard.import." to HttpStatus.BAD_REQUEST,
             "dashboard.authoring." to HttpStatus.FORBIDDEN,
+            // L5 §13.23 — the dashboard bindings' own validation row (a folder outside the caller's
+            // tree or off the grammar), the caller's request: 400 like its validation cousins.
+            "dashboard.binding." to HttpStatus.BAD_REQUEST,
             // #279 §13.21 — the request-body cap: one code, and it IS the 413 (the family has no
             // other status to default away from), wired explicitly so the code owns a row rather
             // than being absorbed by the catalog's unknown-code 500.

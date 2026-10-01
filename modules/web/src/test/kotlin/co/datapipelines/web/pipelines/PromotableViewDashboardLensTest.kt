@@ -131,7 +131,9 @@ class PromotableViewDashboardLensTest {
         every { dashboards.findVersion(workspace, ReadLens.Everything, hidden, 2) } returns
             released(hidden, "ops/dashboards/hidden", dashboard(listOf("ops/pipelines/elsewhere"), listOf("ops/visualizations/hidden")))
 
-        val view = PromotableViews(pipelines, templates, client, sets, dashboards, visualizations).viewFor(promoter(workspace))
+        val view =
+            PromotableViews(pipelines, templates, client, sets, dashboards, visualizations, mockk(relaxed = true))
+                .viewFor(promoter(workspace))
 
         assertAll(
             { view.dashboards shouldBe ReadLens.Only(setOf("ops/dashboards/shown")) },
@@ -147,7 +149,9 @@ class PromotableViewDashboardLensTest {
         every { client.cachedInventory("ops") } returns PromotionTargetClient.CachedInventory.Unreachable("connect_refused", "x")
         every { client.targetBaseUrl } returns "https://uat.example.test"
 
-        val view = PromotableViews(mockk(), mockk(), client, mockk(), dashboards, mockk()).viewFor(promoter(UUID.randomUUID()))
+        val view =
+            PromotableViews(mockk(), mockk(), client, mockk(), dashboards, mockk(), mockk(relaxed = true))
+                .viewFor(promoter(UUID.randomUUID()))
 
         assertAll(
             { view.dashboards shouldBe ReadLens.NOTHING },

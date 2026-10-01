@@ -1,6 +1,6 @@
 # Dashboards
 
-**Status:** v0.14 — the two documents and their lifecycle (#10, lane L1a); the REST routes, the MCP tools and the
+**Status:** v0.15 — the two documents and their lifecycle (#10, lane L1a); the REST routes, the MCP tools and the
 permissions (§4, lane L1b); the transfer routes and their limits' honest contract (§3.3, lanes L1c/L1c-b/L1c-c: the
 import's atomicity, the RELEASE rules on a landing, the aggregate count ceiling, the wire's per-family arms); the server
 runtime (§5, lane L2; #343's released pins and stream authority); the client runtime (§6, lanes L3a/L3a-b/L3a-c); the
@@ -291,7 +291,13 @@ The two transport key roles (`api_caller`, `promotion_receiver`) hold none of th
 RELEASED dashboard newer than the promotion target's whose EVERY source pipeline her pipeline lens admits — so her
 dashboards never outrun her pipelines — and the visualizations those dashboards pin; anything else answers as an absent
 id. The two import rows landed with the transfer routes (L1c — the workspace-admin verb, the ruling above), the execute
-row lands with the runtime (L2), and the key-binding row and the `dashboard_viewer` key column with the key kind (L5).
+row with the runtime (L2), and the key-binding row and the `dashboard_viewer` key column with the key kind (L5, #367):
+a `dashboard` key's ONE role is `dashboard_viewer`, holding exactly `dashboard.read` and `dashboard.execute` —
+`bound` in both cells, because the BINDINGS ARE THE LENS. The key's bindings are folders of the dashboard NAME space
+(`dashboard_key_bindings`, the `endpoint_key_bindings` twin): a folder prefix binds every dashboard beneath it, a
+deeper binding REPLACES an inherited one (R-EP2 verbatim), and an unbound key serves NOTHING — the family's ordinary
+404. The kind reaches the runtime and refreshes routes only; every other family refuses it centrally
+([Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings)).
 
 ### 4.2 Validate is an author verb
 
@@ -462,7 +468,10 @@ dashboard she can read but holds no `execution.read`, so her refresh names no ex
 
 ### 5.8 What is not here
 
-The draft preview and the visualization tests (L4) and the `dashboard` key kind and its confinement (L5): until L5, only signed-in sessions reach these routes and no MCP tool refreshes a dashboard. The first-party pages are §7 (L3b).
+The draft preview and the visualization tests (L4). The `dashboard` key kind IS here now (L5, #367): an external
+application's backend holds a `dashboard` key and proxies the runtime routes — §6.5 is the wire contract and
+[Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings) the kind's specification. No MCP tool refreshes a
+dashboard. The first-party pages are §7 (L3b).
 
 ## 6. The client runtime (L3a)
 
@@ -582,7 +591,7 @@ boost); the first-party pages apply that (L3b), and the runtime's two-bundle ref
 - **`"session"`** — the signed-in app: every request carries the session cookie (`credentials:
   "same-origin"`) and every POST carries the `DP-CSRF-Token` double-submit header read from the
   `dp_csrf` cookie, exactly like the app's own scripts.
-- **`{ proxyBaseUrl }`** — an external application's backend holds a `dashboard` key (L5) and proxies
+- **`{ proxyBaseUrl }`** — an external application's backend holds a `dashboard` key (L5, #367) and proxies
   the SAME FOUR runtime paths under its base. The runtime sends the same request bodies and Accept
   headers to `{proxyBaseUrl}/api/v1/dashboards/{id}/runtime/…` with `credentials: "omit"` and NO CSRF
   header — the key never reaches the browser, and the browser offers it nothing. THE PROXY WIRE
@@ -590,6 +599,19 @@ boost); the first-party pages apply that (L3b), and the runtime's two-bundle ref
   routes byte-for-byte — the SSE stream proxied as a STREAM (never buffered), the `DP-CSRF-Token`
   header absent, no cookie forwarded, and the §4 error envelopes passed through verbatim. The proxy
   authorizes its own application user; Datapipelines sees the key.
+- **The reference proxy is `examples/dashboard-proxy/proxy.mjs`** (dependency-free Node >= 18; `DP_BASE_URL` and
+  `DASHBOARD_KEY` from env; `node proxy.mjs` — the README beside it). Its conformance test is
+  `modules/web/src/test/js/dashboard-proxy.test.mjs` (a stub upstream proving the byte-for-byte relay, the header
+  stripping, the four-route fence, the streaming timing and the envelope pass-through — it FAILS on a buffered
+  proxy), and `tests/integration-tests/.../DashboardKeyE2eTest.kt` runs the script against the real application
+  with a real key. `/refreshes` is deliberately NOT relayed: the refreshes routes are owner-scoped by the key, so
+  a host relaying them would let one end user read (and abort) another's refresh of the shared key — the fence is
+  the proxy (a fifth path answers the proxy's own 404), and the host may build its own per-user history.
+- **One key = one budget.** The SSE stream cap (`datapipelines.sse.max-streams-per-user`,
+  [Configuration §3.6](configuration.md)) and the rate limit are keyed on the key's identity, so every end user
+  behind one proxy shares that key's budget. Size `max-streams-per-user` for the host's expected concurrency; the
+  refresh records of a key principal carry `principal_key_id` (never a person), and its executions are attributed
+  `executed_by_key_kind = 'dashboard'`.
 
 ### 6.6 The states, notifications and the CSP
 
@@ -701,6 +723,7 @@ full navigation).
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-01 | v0.15 | L5 (#367, #10) the `dashboard` key kind | **§4.1: the `dashboard_viewer` column and the binding row are HERE** — the key's one role holds `dashboard.read` + `dashboard.execute`, `bound` in both cells, the bindings ARE the lens (`dashboard_key_bindings`, R-EP2 verbatim: deeper replaces, unbound = the family 404). **§5.8:** the key kind is no longer "not here" — the runtime routes have a non-session caller. **§6.5:** the wire contract gained its implementation — the reference proxy is `examples/dashboard-proxy/proxy.mjs`, its conformance test `dashboard-proxy.test.mjs` (the streaming timing is the buffering detector) and the real-stack E2E; `/refreshes` is deliberately not relayed (owner-scoped by the key; one key = one budget, sized by `max-streams-per-user`); refresh rows carry `principal_key_id`, executions `executed_by_key_kind = 'dashboard'`. |
 | 2026-10-01 | v0.14 | #356 the abort before the row — renumbered at merge after L3b's v0.13 | **§5.6:** an abort arriving before `insertRunning` writes its row is honoured — the start registers a transient, per-principal-bounded marker, a matching caller is answered the same 202 and the refresh ends `ABORTED` before any source runs; the four no-cases (unknown, another person's, another instance's, finished) answer the identical `dashboard.refresh.not_found`. **§6.6:** the abort chip renders `abort.requested` until the server answers; a 202 sets `abortAcked`, a 404 re-renders `abort not confirmed` and the terminal frame decides — a delivered `ok` restores its state, and the stream stays open through the abort. Merge follow-up: the marker is written once (SET NX, before the bound set) — a replayed start of an id already in flight is the reused-id 400 and cannot delete the first start's marker or slot. |
 | 2026-10-01 | v0.13 | L3b (#10) the first-party pages — renumbered at merge after #343's v0.12 | **New §7 The first-party pages** — the tree page and the sidebar's Dashboards branch (D58; the landing item renamed Home, the route unchanged), the board page (the server-declared ONE bundle, the glue as a file, the refusal state for a board that cannot run, never a blank pane) and the events pane (the caller's refreshes, execution links by the reader's visibility, a bounded poll chosen over the runtime's notification hooks, with the why stated). The one-bundle rule's navigation half is stated as the brief's rule it is: every link to a board carries `hx-boost="false"`, which is also the §10.5 disposal answer — full navigation, no htmx history, no second instance. Permissions: the pages on `dashboard.read`, the pane fragment on `dashboard.execute` beside the refreshes route it mirrors (auth §7.6's Surfaces cells). `dashboards.css` and `plotly.css` load from the layout head (ui-screens §3.0 is normative). |
 | 2026-09-30 | v0.12 | #343 stream workspace authority | Recheck the opening workspace by immutable id for every event and heartbeat; a different membership cannot keep the stream alive, while the refresh continues. |

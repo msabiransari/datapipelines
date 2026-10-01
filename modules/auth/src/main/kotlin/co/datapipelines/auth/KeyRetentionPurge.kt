@@ -15,8 +15,8 @@ import org.springframework.transaction.annotation.Transactional
  *
  * ## The predicate, precisely
  *
- * - a KEY goes when it is revoked, no `endpoint_key_bindings` row names it, AND its identity is
- *   unreferenced — the two are one unit (`api_keys.user_id`/`created_by` are FKs to the
+ * - a KEY goes when it is revoked, no `endpoint_key_bindings` and no `dashboard_key_bindings`
+ *   row names it, AND its identity is unreferenced — the two are one unit (`api_keys.user_id`/`created_by` are FKs to the
  *   identity, so deleting a key whose identity must stay would be impossible anyway, and B5's
  *   falsification reads the pair: a revoked key with one live execution STAYS — the execution's
  *   `executed_by` names the identity — and one with none goes);
@@ -93,6 +93,11 @@ open class KeyRetentionPurge(
      * predicate is the FK list against [ApiKey.userId]; `created_by` names a person for every
      * v2 key, so it is deliberately not part of the key-side predicate — the identity-side
      * pass below still checks it.
+     *
+     * L5: a key an `endpoint_key_bindings` OR a `dashboard_key_bindings` row names stays — both
+     * tables are the key's reach statement, and a binding naming a purged key would be a
+     * dangling authority (the FKs would refuse the delete anyway; the predicate keeps the sweep
+     * from trying, and keeps the listed reasons in one place).
      */
     private fun purgeKeys(referencing: List<Pair<String, String>>): Int {
         // The `api_keys` FKs are the key row's OWN reference to its identity — it goes WITH the
@@ -109,6 +114,7 @@ open class KeyRetentionPurge(
             DELETE FROM api_keys k
              WHERE k.is_revoked = TRUE
                AND NOT EXISTS (SELECT 1 FROM endpoint_key_bindings b WHERE b.api_key_id = k.id)
+               AND NOT EXISTS (SELECT 1 FROM dashboard_key_bindings b WHERE b.api_key_id = k.id)
                AND $identityUnreferenced
             """.trimIndent()
         return jdbc.update(sql, emptyMap<String, Any?>())

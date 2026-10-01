@@ -1,11 +1,13 @@
 package co.datapipelines.mcp
 
+import co.datapipelines.auth.ApiKeyKind
 import co.datapipelines.auth.ApiKeyMissingException
 import co.datapipelines.auth.AuthAttributes
 import co.datapipelines.auth.AuthErrorWriter
 import co.datapipelines.auth.AuthException
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.ScopeInterceptor
 import co.datapipelines.pipeline.PipelineErrorCodes
 import jakarta.servlet.FilterChain
 import jakarta.servlet.http.HttpServletRequest
@@ -56,15 +58,19 @@ class McpAuthFilter(
             reject(request, response, principal)
             return
         }
-        // §7.7 — an identity-acting kind (endpoint, server) authorises a surface `/mcp` is not on: an
-        // endpoint key gets published endpoints and the cursor of executions it started, a server
-        // key gets the promotion route family. `/mcp` is a SERVLET, so `ScopeInterceptor`'s
-        // central confinement (which only sees MVC handlers) never runs here — the refusal has to
-        // be made again, at this filter. Without it such a key could reach `tools/list` and
-        // enumerate the surface: it could call nothing (its key role holds no tool's permission)
-        // but it could READ the tool catalogue, which is more than either kind authorises.
-        // Found by probing the live stack, not by any test (074); kept and widened in 091.
-        if (principal.isEndpointKey || principal.isServerKey) {
+        // §7.7 — every kind EXCEPT `mcp` authorises a surface `/mcp` is not on: an endpoint key
+        // gets published endpoints and the cursor of executions it started, a server key gets the
+        // promotion route family, a `dashboard` key (L5) gets the runtime routes of its bound
+        // folders. `/mcp` is a SERVLET, so `ScopeInterceptor`'s central confinement (which only
+        // sees MVC handlers) never runs here — the refusal has to be made again, at this filter.
+        // Stated as "every kind except MCP" (L5) rather than a list of the refused kinds, so the
+        // NEXT kind cannot repeat the dashboard key's near-miss: as a denylist, a new kind would
+        // have passed to `/mcp` untouched until someone remembered this line. Without the refusal
+        // such a key could reach `tools/list` and enumerate the surface: it could call nothing
+        // (its key role holds no tool's permission) but it could READ the tool catalogue, which
+        // is more than any confined kind authorises. Found by probing the live stack, not by any
+        // test (074); kept and widened in 091, re-stated as the allowlist in L5.
+        if (principal.keyKind != null && principal.keyKind != ApiKeyKind.MCP) {
             rejectConfinedKind(request, response, principal)
             return
         }
@@ -77,16 +83,22 @@ class McpAuthFilter(
         filterChain.doFilter(request, response)
     }
 
-    /** §7.7 — `/mcp` is on no confined kind's surface; refused with the catalogued code. */
+    /**
+     * §7.7 — `/mcp` is on no confined kind's surface; refused with the catalogued code. The
+     * reason and the message come from `ScopeInterceptor`'s ONE per-kind tables, so the servlet
+     * refusal and the interceptor's are word-for-word the same refusal (a second copy of the
+     * table here would be the second place for the two to drift).
+     */
     private fun rejectConfinedKind(
         request: HttpServletRequest,
         response: HttpServletResponse,
         principal: AuthenticatedPrincipal,
     ) {
-        val endpointKind = principal.isEndpointKey
+        val kind = requireNotNull(principal.keyKind)
+        val reason = ScopeInterceptor.OFF_SURFACE_REASON.getValue(kind)
         log.info(
             "Rejected a {}-kind key on /mcp (key={}): /mcp is not on its surface",
-            if (endpointKind) "endpoint" else "server",
+            kind.wire,
             principal.keyId,
         )
         errorWriter.write(
@@ -94,14 +106,9 @@ class McpAuthFilter(
             response = response,
             status = HTTP_FORBIDDEN,
             code = PipelineErrorCodes.Endpoint.KEY_KIND_REFUSED,
-            message =
-                if (endpointKind) {
-                    "An endpoint key may only call published endpoints and read the results of executions it started."
-                } else {
-                    "A server key may only be presented as DP-Promotion-Key on the promotion routes of a receiving deployment."
-                },
+            message = ScopeInterceptor.OFF_SURFACE_MESSAGE.getValue(kind),
             userMessage = "This kind of API key can't be used here.",
-            details = mapOf("reason" to if (endpointKind) "endpoint_key_off_surface" else "server_key_off_surface"),
+            details = mapOf("reason" to reason),
         )
     }
 
