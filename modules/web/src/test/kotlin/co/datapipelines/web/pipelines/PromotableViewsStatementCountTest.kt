@@ -5,12 +5,18 @@ import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.pipeline.AuthoringGuard
+import co.datapipelines.pipeline.CreateLifecycle
 import co.datapipelines.pipeline.CurrentPipelineVersion
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.ReadLens
+import co.datapipelines.pipeline.WriteSurface
 import co.datapipelines.templates.TemplateRepository
+import co.datapipelines.visualization.ArtifactRef
+import co.datapipelines.visualization.DashboardBody
+import co.datapipelines.visualization.DashboardLayout
 import co.datapipelines.visualization.DashboardRepository
 import co.datapipelines.visualization.DashboardService
+import co.datapipelines.visualization.DashboardSource
 import co.datapipelines.visualization.DashboardValidator
 import co.datapipelines.visualization.VisualizationService
 import co.datapipelines.web.SharedPostgres
@@ -18,6 +24,7 @@ import io.kotest.matchers.shouldBe
 import io.mockk.every
 import io.mockk.mockk
 import org.junit.jupiter.api.AfterEach
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.jdbc.datasource.DataSourceTransactionManager
@@ -32,9 +39,11 @@ import javax.sql.DataSource
  * #330's acceptance, at the JDBC boundary: a lensed principal's request that touches neither family issues ZERO
  * dashboard reads; one that does issues at most ONE statement for the pins — the pins-and-sources projection,
  * once for both arms. The dashboard reads are real statements against the module's migrated [SharedPostgres];
- * the other families are mocks, so every statement the counter sees is a dashboard read. Red if the view builds
- * the dashboard arms eagerly (the pre-#330 view read every current released dashboard's BODY per lensed
- * request) or runs the derivation once per arm.
+ * the other families are mocks, so every statement the counter sees is a dashboard read. The workspace holds
+ * [SEEDED_DASHBOARDS] current RELEASED dashboards sourcing the one admitted pipeline, so the bound is measured
+ * against rows that exist: red if the view builds the dashboard arms eagerly (the pre-#330 view read every
+ * current released dashboard's BODY per lensed request — `1 + N` here, not 1), if it runs the derivation once
+ * per arm, or if the projection stopped admitting the dashboards it read (the review of #330's merge, F3).
  */
 class PromotableViewsStatementCountTest {
     private val workspace = UUID.randomUUID()
@@ -49,6 +58,38 @@ class PromotableViewsStatementCountTest {
             authoring = AuthoringGuard(true),
             transactions = TransactionTemplate(DataSourceTransactionManager(SharedPostgres.dataSource())),
         )
+
+    @BeforeEach
+    fun seedReleasedDashboards() {
+        // Seeded on the UNCOUNTED data source: the counter measures the request, never the fixture.
+        val jdbc = NamedParameterJdbcTemplate(SharedPostgres.dataSource())
+        val author = UUID.randomUUID()
+        jdbc.update(
+            "INSERT INTO workspaces (id, name, display_name) VALUES (:id, :name, 'Ops')",
+            mapOf("id" to workspace, "name" to "ops-$workspace"),
+        )
+        jdbc.update(
+            "INSERT INTO users (id, email, display_name, provider, provider_subject) VALUES (:id, :email, 'P', 'google', :sub)",
+            mapOf("id" to author, "email" to "p$author@example.com", "sub" to "sub-$author"),
+        )
+        val repository = DashboardRepository(jdbc)
+        SEEDED_NAMES.forEach { name ->
+            repository.create(
+                workspace,
+                UUID.randomUUID(),
+                name,
+                DashboardBody(
+                    displayName = name.substringAfterLast('/'),
+                    sources = listOf(DashboardSource("a", ArtifactRef(ADMITTED_PIPELINE, 1))),
+                    visualizations = emptyList(),
+                    layout = DashboardLayout(),
+                ),
+                author,
+                CreateLifecycle.RELEASED,
+                WriteSurface.MCP,
+            )
+        }
+    }
 
     @AfterEach
     fun clearContext() = SecurityContextHolder.clearContext()
@@ -70,13 +111,15 @@ class PromotableViewsStatementCountTest {
     fun `a request that touches the families derives BOTH arms from ONE projection statement`() {
         val pipelines = mockk<PipelineRepository>()
         every { pipelines.findCurrentVersions(workspace) } returns
-            listOf(CurrentPipelineVersion(UUID.randomUUID(), "ops/pipelines/a", "A", 1, "h"))
+            listOf(CurrentPipelineVersion(UUID.randomUUID(), ADMITTED_PIPELINE, "A", 1, "h"))
 
         counting.statements = 0
         val view = views(pipelines = pipelines).viewFor(promoter())
 
+        // The seeded dashboards source the one admitted pipeline, so the arm admits every one of them
+        // (the seed is SEEN, not merely present) — and reading them cost the one projection statement.
+        view.dashboards shouldBe ReadLens.Only(SEEDED_NAMES.toSet())
         view.visualizations shouldBe ReadLens.Only(emptySet())
-        view.dashboards shouldBe ReadLens.Only(emptySet())
         counting.statements shouldBe 1
     }
 
@@ -96,6 +139,13 @@ class PromotableViewsStatementCountTest {
     }
 
     // ---- fixtures --------------------------------------------------------------------------------------
+
+    private companion object {
+        /** More than one, so a per-dashboard body read (`1 + N`) cannot pass as the one projection statement. */
+        const val SEEDED_DASHBOARDS = 3
+        const val ADMITTED_PIPELINE = "ops/pipelines/a"
+        val SEEDED_NAMES = (1..SEEDED_DASHBOARDS).map { "ops/dashboards/board_$it" }
+    }
 
     private fun views(
         pipelines: PipelineRepository =

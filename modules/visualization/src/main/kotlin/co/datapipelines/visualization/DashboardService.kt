@@ -231,13 +231,20 @@ class DashboardService(
      * The dashboards that pin visualization [visualizationName] at any version, as `name@version` (D30's `used_by`),
      * through [lens]: under the whole view every LIVE (DRAFT or RELEASED) version — the pin guard's own probe; under a
      * narrowing lens only the admitted dashboards' current RELEASED versions, so a promoter never learns of a draft
-     * or a hidden dashboard. One pin scan (whole view), or one body read per admitted dashboard (narrowing).
+     * or a hidden dashboard. Under the whole view ONE containment probe — [DashboardRepository.livePinsOf], the
+     * statement the V46 GIN index serves (the pin guards and `visualizations_get` read it per probe); under a
+     * narrowing lens the current-RELEASED pins read whole and filtered in memory, as [pinnedByAll] does.
      */
     fun pinnedBy(
         workspaceId: UUID,
         lens: ReadLens,
         visualizationName: String,
-    ): List<String> = pinnedByAll(workspaceId, lens, listOf(visualizationName))[visualizationName] ?: emptyList()
+    ): List<String> =
+        if (lens.isEverything) {
+            repository.livePinsOf(workspaceId, visualizationName, null)
+        } else {
+            pinnedByAll(workspaceId, lens, listOf(visualizationName))[visualizationName] ?: emptyList()
+        }
 
     /**
      * [pinnedBy] for a PAGE of names in ONE answer (#331): each queried visualization -> the dashboards pinning it

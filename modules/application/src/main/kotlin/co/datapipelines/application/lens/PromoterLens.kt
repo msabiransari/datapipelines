@@ -18,8 +18,10 @@ import co.datapipelines.pipeline.ReadLens
  * Not a data class since #330: the two dashboard arms can be derived LAZILY — [withLazyDashboardArms]
  * builds a view whose [visualizations]/[dashboards] run their derivation once, on the FIRST read of
  * either (one thunk, one computation shared by both arms). A view built the ordinary way holds both
- * lenses as the values it was given. [isLensed] reads all five arms, so on a lazy-armed view it
- * derives them — the question "does this view narrow anything?" costs what the arms cost.
+ * lenses as the values it was given. [isLensed] asks the three eager arms FIRST and short-circuits,
+ * so on a lazy-armed view whose pipeline, template or set arm narrows, the question "does this view
+ * narrow anything?" never derives the dashboard arms; only a view whose eager arms are all
+ * everything pays for the derivation (the review of #330's merge, F1).
  */
 open class LensedView(
     val pipelines: ReadLens,
@@ -43,10 +45,18 @@ open class LensedView(
      */
     open val dashboards: ReadLens = ReadLens.Everything,
 ) {
-    /** True when this view narrows anything — the surfaces that pay for a view ask this first. */
+    /**
+     * True when this view narrows anything — the surfaces that pay for a view ask this first. The eager
+     * arms are asked first and the `||` short-circuits: the lazy dashboard arms are read only when all
+     * three are everything (see the class KDoc).
+     */
     val isLensed: Boolean
         get() =
-            listOf(pipelines, templates, parameterSets, visualizations, dashboards).any { !it.isEverything }
+            !pipelines.isEverything ||
+                !templates.isEverything ||
+                !parameterSets.isEverything ||
+                !visualizations.isEverything ||
+                !dashboards.isEverything
 
     /**
      * Why a lensed view is empty: the target's base URL (never its key) and the transport or configuration

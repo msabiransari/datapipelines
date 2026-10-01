@@ -6,6 +6,7 @@ import co.datapipelines.visualization.VisualizationTestDb.AUTHOR
 import co.datapipelines.visualization.VisualizationTestDb.WORKSPACE
 import com.fasterxml.jackson.databind.node.ObjectNode
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
@@ -77,6 +78,27 @@ class PinnedByBatchedStatementsTest {
         lensed[names[1]] shouldBe emptyList()
     }
 
+    @Test
+    fun `one name under the whole view is ONE containment probe - the statement V46 indexes, not the page scan`() {
+        h.createVisualization("finance/visualizations/probed")
+        val document =
+            h.dashboardDocument(1, name = "finance/dashboards/probing") { tree ->
+                (tree.get("visualizations").get(0).get("visualization") as ObjectNode).put("name", "finance/visualizations/probed")
+            }
+        val board = h.dashboards.create(WORKSPACE, document, AUTHOR, WriteSurface.MCP)
+        h.dashboards.release(WORKSPACE, board.record.id, board.detail.bodyHash, AUTHOR, releasePinnedVisualizations = true)
+
+        // `visualizations_get`'s `used_by` and the pin guards read ONE name: the `@>` probe over
+        // `body_json -> 'visualizations'` — the expression `idx_dashboard_versions_pins` serves. The
+        // page answer reads the pins whole and does not use the index; one name must not take that path.
+        counting.statements = 0
+        counting.prepared.clear()
+        countedService.pinnedBy(WORKSPACE, ReadLens.Everything, "finance/visualizations/probed") shouldBe
+            listOf("finance/dashboards/probing@1")
+        counting.statements shouldBe 1
+        counting.prepared.single() shouldContain "-> 'visualizations' @> CAST("
+    }
+
     companion object {
         /** The page cap the tool answers (`ArtifactTools.MAX_LIMIT`); the bound is independent of it. */
         const val ROW_COUNT = 200
@@ -91,10 +113,14 @@ class PinnedByBatchedStatementsTest {
     ) : DelegatingDataSource(target) {
         var statements = 0
 
+        /** The SQL text of every statement prepared through this source, in order — the shape beside the count. */
+        val prepared = mutableListOf<String>()
+
         override fun getConnection(): java.sql.Connection = wrap(target.connection)
 
         private fun wrap(connection: java.sql.Connection): java.sql.Connection =
             Proxy.newProxyInstance(javaClass.classLoader, arrayOf(java.sql.Connection::class.java)) { _, method, args ->
+                if (method.name == "prepareStatement") prepared.add(args[0] as String)
                 val result = method.invoke(connection, *(args ?: emptyArray()))
                 if (result is java.sql.PreparedStatement) statement(result) else result
             } as java.sql.Connection

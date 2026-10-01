@@ -1,5 +1,6 @@
 package co.datapipelines.web.pipelines
 
+import co.datapipelines.application.lens.LensedView
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.WorkspaceContext
@@ -174,6 +175,33 @@ class PromotableViewDashboardLensTest {
         view.dashboards shouldBe ReadLens.Only(emptySet())
         view.visualizations shouldBe ReadLens.Only(emptySet())
         verify(exactly = 1) { dashboards.findCurrentPinsAndSources(workspace) }
+    }
+
+    @Test
+    fun `isLensed on a lazy-armed view asks the eager arms first - a narrowing pipeline arm never derives the dashboards`() {
+        var derivations = 0
+        val narrowed =
+            LensedView.withLazyDashboardArms(
+                pipelines = ReadLens.Only(setOf("ops/pipelines/a")),
+                templates = ReadLens.Everything,
+                parameterSets = ReadLens.Everything,
+            ) {
+                derivations++
+                ReadLens.Only(emptySet<String>()) to ReadLens.Only(emptySet<String>())
+            }
+
+        narrowed.isLensed shouldBe true
+        derivations shouldBe 0
+
+        // Only a view whose three eager arms are all everything pays for the derivation — once.
+        val wide =
+            LensedView.withLazyDashboardArms(ReadLens.Everything, ReadLens.Everything, ReadLens.Everything) {
+                derivations++
+                ReadLens.Only(setOf("ops/visualizations/one")) to ReadLens.Only(setOf("ops/dashboards/one"))
+            }
+        wide.isLensed shouldBe true
+        wide.isLensed shouldBe true
+        derivations shouldBe 1
     }
 
     @Test
