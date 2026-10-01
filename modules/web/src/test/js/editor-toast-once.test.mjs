@@ -1,23 +1,20 @@
-// 080 §B — THE exactly-once toast. The owner's report: "many success toasts on
-// completion". The cause (found in init.js's 076 boost lifecycle): a history
-// restore brings the editor's DOM back with the PREVIOUS component's Alpine state
-// (`_x_dataStack`) and its @click listeners still attached; the afterSettle
-// rescue then ran a bare `Alpine.initTree(root)`, and Alpine's x-data re-init
-// guard (`data-has-alpine-state`) is only ever set by Alpine.clone — never by a
-// history restore — so initTree STACKED a second component on the same root.
-// Every @click registered again: one Execute click fired executePipeline() once
-// per stacked component, N executions streamed N terminal events, and
-// sse.js's (correct, single) pipeline_completed toast fired N times. Another
-// restore stacked a third.
+// 080 §B — THE exactly-once toast, #358 revision. The owner's report: "many success
+// toasts on completion". The 080 cause was the afterSettle rescue stacking a second
+// Alpine component on a restored root (one Execute click fired once per stacked
+// component, N streams, N toasts). The #358 fix moved restore activation to the
+// runtime (pipeline-editor/runtime.js — x-ignore + ONE mutateDom init), and the
+// rescue that competed with replayed Alpine boots is GONE from init.js.
 //
-// The fix is at the source: destroy the stale tree BEFORE re-binding. This test
-// is the falsifier the brief asks for — simulate two lifecycle passes and one
-// stream, and assert exactly one toast. Pre-fix, the ops log reads
-// ["initTree", "initTree"] (two stacked components) and the destroyTree
-// assertion goes red.
-//
-// Same harness as editor-teardown.test.mjs: node --test, globals stubbed at
-// require time, hand-rolled doubles.
+// What stays testable here at the module level:
+//   1. init.js's boost wiring stays SINGULAR even when the file executes twice
+//      (the pre-#358 world replayed it on every restore — the guard is what kept
+//      the document-level pair singular, and it must keep holding);
+//   2. init.js wires NO afterSettle initializer (the ownership contract — the
+//      runtime is the only thing that may bind a restored root);
+//   3. one stream's terminal event is ONE toast (sse.js's side of the contract,
+//      unchanged).
+// The destroy-before-bind ordering of the runtime's activation is owned by
+// runtime-activation.test.mjs; the browser suite proves the counts on the real app.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -32,28 +29,18 @@ const ssePath = path.resolve(here, "../../main/resources/static/js/pipeline-edit
 
 function loadEditor() {
   const docListeners = {};
-  const bodyListeners = {};
-  const spies = { ops: [] };
-
-  const main = {
-    id: "app-main",
-    querySelector: (sel) => (sel === ".pe-root" ? spies.peRoot : null),
-  };
   const doc = {
     readyState: "complete",
     addEventListener: (t, fn) => (docListeners[t] ||= []).push(fn),
     removeEventListener: () => {},
-    body: {
-      addEventListener: (t, fn) => (bodyListeners[t] ||= []).push(fn),
-      removeEventListener: () => {},
-    },
+    body: { addEventListener: () => {}, removeEventListener: () => {} },
     getElementById: (id) => {
-      if (id === "app-main") return main;
       if (id === "pipeline-data") {
         return { textContent: JSON.stringify({ id: "p1", name: "demo", nodes: [] }) };
       }
       return null;
     },
+    querySelector: () => null,
     querySelectorAll: () => [],
   };
 
@@ -61,15 +48,11 @@ function loadEditor() {
   globalThis.document = doc;
   globalThis.window.PEDock = { createDock: () => ({}) };
   globalThis.window.PEEvents = { createEventsLog: () => ({}) };
-  globalThis.ResultPanel = class {
-    constructor() { this.cursorEndpoint = null; }
-  };
-  globalThis.SseHandler = class {
-    constructor() { this.abortController = { abort: () => {} }; }
-  };
+  globalThis.ResultPanel = class {};
+  globalThis.SseHandler = class {};
   globalThis.PipelineGraph = class {
     constructor() {
-      this.cy = { destroy: () => {}, on: () => {}, elements: () => ({ unselect: () => {} }), getElementById: () => ({ length: 0 }) };
+      this.cy = { destroy: () => {}, on: () => {} };
     }
     render() {}
   };
@@ -80,53 +63,31 @@ function loadEditor() {
 
   delete require.cache[require.resolve(initPath)];
   require(initPath);
-  return { spies, docListeners, bodyListeners };
+  return { docListeners };
 }
 
-function fire(listeners, type, event) {
-  (listeners[type] || []).forEach((fn) => fn(event));
-}
-
-test("two lifecycle passes and one stream produce EXACTLY ONE toast", () => {
-  const { spies, docListeners } = loadEditor();
-  const component = globalThis.window.pipelineEditor();
-  component.init();
-
-  // The Alpine double: initTree models a bind by leaving _x_dataStack on the
-  // root (what real Alpine does), destroyTree models its removal.
-  globalThis.window.Alpine = {
-    initTree(root) {
-      spies.ops.push("initTree");
-      root._x_dataStack = [{}];
-    },
-    destroyTree(root) {
-      spies.ops.push("destroyTree");
-      delete root._x_dataStack;
-    },
-  };
-
-  // Pass 1: navigate away (boosted) and back (history restore, scripts not
-  // re-executed) — the rescue binds the restored root.
-  fire(docListeners, "htmx:beforeSwap", { detail: { boosted: true } });
-  spies.peRoot = {};
-  fire(docListeners, "htmx:afterSettle", { detail: {} });
-  assert.equal(globalThis.window.__peInstance, null, "the rescue itself does not fake a live instance");
-
-  // Pass 2: away and back AGAIN. The restored root still carries pass 1's
-  // _x_dataStack — the stale tree must be destroyed BEFORE the re-bind, or the
-  // two components stack and one Execute click fires twice.
-  fire(docListeners, "htmx:beforeSwap", { detail: { boosted: true } });
-  fire(docListeners, "htmx:afterSettle", { detail: {} });
-
-  assert.deepEqual(
-    spies.ops,
-    ["initTree", "destroyTree", "initTree"],
-    "each re-bind first destroys the stale tree — pre-fix this reads [initTree, initTree] and components stack",
+test("the boost lifecycle wiring stays singular across a second execution of init.js", () => {
+  const first = loadEditor();
+  assert.equal((first.docListeners["htmx:beforeSwap"] || []).length, 1);
+  assert.equal(
+    (first.docListeners["htmx:afterSettle"] || []).length,
+    0,
+    "no afterSettle initializer — the runtime owns restore activation",
   );
 
-  // …and with exactly ONE live component, one stream's terminal event is ONE
-  // toast. (Pre-fix, N stacked components each handled the same click: N
-  // streams, N terminal events, N toasts.)
+  // A replayed/re-required init.js (what a script replay used to do per restore)
+  // must not stack a second document-level pair.
+  delete require.cache[require.resolve(initPath)];
+  require(initPath);
+  assert.equal(
+    (first.docListeners["htmx:beforeSwap"] || []).length,
+    1,
+    "the __peBoostWired guard keeps the pair singular",
+  );
+});
+
+test("one stream's terminal event is ONE toast", () => {
+  loadEditor();
   delete require.cache[require.resolve(ssePath)];
   require(ssePath);
   const RealSseHandler = globalThis.window.SseHandler;
@@ -144,15 +105,4 @@ test("two lifecycle passes and one stream produce EXACTLY ONE toast", () => {
   handler.dispatch("pipeline_completed", JSON.stringify({ execution_id: "e1" }));
   assert.equal(toasts.length, 1, "one stream, one terminal event, ONE toast");
   assert.deepEqual(toasts[0], ["success", "Pipeline completed"]);
-});
-
-test("a re-bind with NO stale tree binds directly — the first restore is not destroyed-then-bound", () => {
-  const { spies, docListeners } = loadEditor();
-  globalThis.window.Alpine = {
-    initTree() { spies.ops.push("initTree"); },
-    destroyTree() { spies.ops.push("destroyTree"); },
-  };
-  spies.peRoot = {}; // no _x_dataStack: nothing was ever bound here
-  fire(docListeners, "htmx:afterSettle", { detail: {} });
-  assert.deepEqual(spies.ops, ["initTree"], "destroyTree only runs when a stale tree exists");
 });

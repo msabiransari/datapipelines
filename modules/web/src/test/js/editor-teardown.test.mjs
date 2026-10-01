@@ -161,46 +161,24 @@ test("a swap whose target IS #app-main (history restore) tears down too", () => 
   assert.equal(globalThis.window.__peInstance, null);
 });
 
-test("#348-b - the afterSettle rescue re-reads the workspace context from the restored document", () => {
-  const { spies, docListeners } = loadEditor();
-  spies.peRoot = { id: "pe-root-fake", _x_dataStack: [{}] };
-  globalThis.window.Alpine = {
-    initTree: (el) => spies.initTree.push(el),
-    destroyTree: () => {},
-  };
-  // A valid component was live; the boosted departure tore it down and cleared the pin.
-  const component = globalThis.window.pipelineEditor();
-  component.init();
-  globalThis.window.__peInstance = component;
-  fire(docListeners, "htmx:beforeSwap", { detail: { boosted: true } });
-  assert.equal(globalThis.window.__peInstance, null);
-  assert.equal(globalThis.window.PEWorkspace, null, "departure cleared the pin");
-  spies.initTree.length = 0;
-
-  // The history restore brings the SAME document back (the stubs above are its DOM);
-  // the rescue re-reads the block through the module's own path before re-binding.
-  fire(docListeners, "htmx:afterSettle", { detail: {} });
-
-  assert.deepEqual(globalThis.window.PEWorkspace, {
-    pipelineId: "p1", viewedVersion: 2, hasBody: true, canExecute: true,
-  });
-  assert.equal(globalThis.window.PEWorkspaceInvalid, false, "no stale refusal survives a valid restore");
-  assert.deepEqual(spies.initTree, [spies.peRoot], "the component still re-binds exactly once");
-});
-
-test("afterSettle re-binds the editor root through Alpine when no component is live", () => {
-  const { spies, docListeners } = loadEditor();
-  spies.peRoot = { id: "pe-root-fake" };
-  globalThis.window.Alpine = { initTree: (el) => spies.initTree.push(el) };
-
-  // No component was ever initialised (the history-restore shape: cached DOM,
-  // scripts not re-executed) — the rescue binds one.
-  fire(docListeners, "htmx:afterSettle", { detail: {} });
-  assert.deepEqual(spies.initTree, [spies.peRoot]);
-
-  // With a live component the rescue is a no-op (fresh boosted visit).
-  const component = globalThis.window.pipelineEditor();
-  component.init();
-  fire(docListeners, "htmx:afterSettle", { detail: {} });
-  assert.equal(spies.initTree.length, 1, "no double bind when a component is live");
+test("#358 — init.js wires NO afterSettle initializer: the runtime owns restore activation", () => {
+  const { docListeners } = loadEditor();
+  // The rescue that used to live here (`destroyTree` + `PEWorkspaceRead` +
+  // `initTree` on the restored root) COMPETED with every replayed Alpine's own
+  // boot walk — the mechanism that stacked components on a restored page. Since
+  // #358 the fragment's scripts load through the runtime's inert catalog, the
+  // restored root keeps `x-ignore` until the runtime's ONE activation removes
+  // it, and this file's lifecycle pair is teardown-only. The absence is the
+  // contract: no second initializer may come back here (the ownership
+  // falsification plants it and demands the browser stack-depth red).
+  assert.equal(
+    (docListeners["htmx:afterSettle"] || []).length,
+    0,
+    "init.js must not initialize restored roots — the runtime does",
+  );
+  assert.equal(
+    (docListeners["htmx:beforeSwap"] || []).length,
+    1,
+    "the teardown half of the boost lifecycle stays",
+  );
 });

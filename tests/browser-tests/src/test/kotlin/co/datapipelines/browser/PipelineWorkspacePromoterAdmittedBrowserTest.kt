@@ -224,6 +224,48 @@ class PipelineWorkspacePromoterAdmittedBrowserTest : BrowserSuite() {
         promoter.close()
     }
 
+    @Test
+    fun `a RESTORED page keeps the promoter read-only - one component, no verbs, zero execution requests`() {
+        val workspaceName = "p348ws-" + generatedPassword("w").take(8).lowercase()
+        val id = seedThreeVersions("p348r" + generatedPassword("s").take(6).lowercase(), workspaceName)
+
+        val promoter = openPromoterSession(workspaceName)
+        val requests = mutableListOf<String>()
+        promoter.page.onRequest { request -> requests += request.url() }
+
+        // The admitted released page, left through the UI (the boosted swap saves it),
+        // then a genuine cache-hit restore: the restored page must carry NOTHING the
+        // first render didn't — no verbs, no drafts, no execution traffic (#358).
+        promoter.page.navigate("$baseUrl/pipelines/$id?version=2")
+        promoter.page.waitForSelector(".pe-root")
+        promoter.page.locator(".pe-back").click()
+        promoter.page.waitForURL("**/pipelines")
+        promoter.page.goBack()
+        promoter.page.waitForSelector(".pe-root")
+        promoter.page.waitForFunction(
+            "() => { const r = document.querySelector('#app-main .pe-root'); return !!(r && r._x_dataStack && r._x_dataStack.length >= 1); }",
+        )
+
+        val stack =
+            (promoter.page.evaluate(
+                "() => { const r = document.querySelector('#app-main .pe-root'); return r && r._x_dataStack ? r._x_dataStack.length : 0; }",
+            ) as Number).toInt()
+        stack shouldBe 1
+        promoter.page.locator(".pe-vchip").innerText() shouldBe "v2 · released"
+        promoter.page.locator("#pe-node-sql").count() shouldBe 0
+        promoter.page.locator("[data-verb='pipeline-execute']").count() shouldBe 0
+        promoter.page.locator("[data-verb='execution-cancel']").count() shouldBe 0
+        promoter.page.locator("[data-verb='pipeline-release']").count() shouldBe 0
+        promoter.page.locator("[data-verb='pipeline-purge']").count() shouldBe 0
+        val restoredJson =
+            promoter.page.evaluate("() => document.getElementById('pipeline-data').textContent").toString()
+        restoredJson shouldContain "n_v2"
+        restoredJson shouldNotContain "n_v3"
+
+        forbiddenRequests(requests).shouldBeEmpty()
+        promoter.close()
+    }
+
     private companion object {
         const val SERVER_KEY = "p348-browser-server-key"
 
