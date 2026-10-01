@@ -32,8 +32,16 @@ globalThis.setInterval = () => 0;
 require(main("dock.js"));
 require(main("events.js"));
 require(main("graph.js")); // PEGraphUtil (iconForType / typeToken / escapeHtml)
+require(main("workspace.js"));
+require(main("tabs.js"));
 require(main("init.js"));
 const editor = globalThis.window.pipelineEditor();
+// #349: these suites exercise the RUN-ATTACHED view — the run's version IS the viewed
+// one — so the fixture answers the version gate accordingly (the mismatch behavior is
+// its own suite: workspace-view.test.mjs).
+editor.runMatchesViewed = () => true;
+editor.viewedVersionOrNull = () => 1;
+editor.executionVersion = 1;
 globalThis.setInterval = realSetInterval;
 
 const DQL = {

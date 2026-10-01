@@ -303,11 +303,18 @@ class PipelineExplorerRenderTest {
     }
 
     @Test
-    fun `106 - the acting column renders version ROWS, never a table`() {
+    fun `the versions surface renders the house table (349 spec section 4_4) - not the old compact rows`() {
+        // 106's "rows, never a table" was the narrow-pane decision of its day; the owner's
+        // 2026-09-30 workspace ruling (spec §4.4, D4) supersedes it: every version surface
+        // composes the ACTUAL house table — frame, viewport, ds-table — and no second
+        // renderer. The row hooks (data-version-row, the ⋯ menus, "7 runs", the current
+        // mark) are the same facts in the new markup.
         val html = render("partials/pipeline-versions") { fillDetail() }
 
-        html shouldContain "class=\"tplx-vrow\""
-        html shouldNotContain "<table"
+        html shouldContain "dt-frame"
+        html shouldContain "<table class=\"ds-table\""
+        html shouldContain "data-version-row="
+        html shouldNotContain "class=\"tplx-vrow\""
         html shouldContain "7 runs"
         html shouldContain ">current<"
     }
@@ -415,8 +422,9 @@ class PipelineExplorerRenderTest {
             }
         viewer shouldNotContain "tplx-vmenu"
         viewer shouldNotContain "data-verb="
-        // The row itself is still there, with its Open link — a viewer reads versions.
-        viewer shouldContain "tplx-vacts"
+        // The row itself is still there, with its Open link — a viewer reads versions
+        // (#349 composes the rows as the house table; the Open anchor is the row hook).
+        viewer shouldContain "data-pe-version-link"
 
         // A promoter's menu is GONE with the release lever (D8): no verb survives the role.
         val promoter =
@@ -540,7 +548,7 @@ class PipelineExplorerRenderTest {
 
         html shouldContain "Dashboards pinning it"
         html shouldContain "acme/boards/revenue"
-        html shouldContain "source pins v2"
+        html shouldContain "pins v2"
         html shouldNotContain "Nothing depends on this pipeline"
     }
 
@@ -548,8 +556,10 @@ class PipelineExplorerRenderTest {
     fun `106 - the runs tab lists executions, newest first, each linking to its detail`() {
         val html = render("partials/pipeline-runs") { fillRuns() }
 
-        html shouldContain "class=\"tplx-runrow\""
-        html shouldContain "/executions/$RUN_ID"
+        // #349: the runs surface composes the house table (spec §4.4); the row keeps its
+        // execution link (data-href, the table's keyboard contract) and every fact column.
+        html shouldContain "dt-frame"
+        html shouldContain "data-href=\"/executions/$RUN_ID\""
         html shouldContain "data-status=\"SUCCESS\""
         html shouldContain "MCP"
         html shouldContain "4 minutes ago"

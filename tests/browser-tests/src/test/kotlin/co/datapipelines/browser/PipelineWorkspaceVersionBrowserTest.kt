@@ -272,8 +272,11 @@ class PipelineWorkspaceVersionBrowserTest : BrowserSuite() {
         page.navigate("$baseUrl/pipelines/$id")
         page.waitForSelector(".pe-versions")
         page.locator(".pe-versions a").first().waitFor()
+        // #349: a selector click applies the version IN PAGE — the URL (replaceState)
+        // and the body block update when the fetched body lands, with no document reload.
         page.locator(".pe-versions a[data-version='3']").click()
-        page.waitForSelector(".pe-root")
+        page.waitForURL("**/pipelines/*?*version=3*")
+        page.waitForFunction("() => (document.getElementById('pipeline-data')?.textContent ?? '').includes('n_v3')")
         page.url() shouldContain "version=3"
         dataBlock() shouldContain "n_v3"
         viewedChip() shouldBe "v3 · draft"

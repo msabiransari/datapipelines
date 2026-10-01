@@ -139,7 +139,7 @@ class LifecycleDialogBrowserTest : BrowserSuite() {
     }
 
     private fun rowMenu(versionBadge: String): Locator {
-        val row = page.locator(".tplx-vrow").filter(Locator.FilterOptions().setHasText(versionBadge)).first()
+        val row = page.locator("tr[data-version-row]").filter(Locator.FilterOptions().setHasText(versionBadge)).first()
         row.locator("details.tplx-vmenu summary").click()
         return row.locator(".tplx-vmenu-list")
     }

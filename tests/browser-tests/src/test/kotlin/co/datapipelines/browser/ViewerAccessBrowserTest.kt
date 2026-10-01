@@ -112,7 +112,7 @@ class ViewerAccessBrowserTest : BrowserSuite() {
             .locator("button.tpl-result")
             .first()
             .click()
-        val v1Open = viewer.page.locator(".tplx-vrow:has(.app-chip-mono:text-is('v1')) a:has-text('Open')")
+        val v1Open = viewer.page.locator("tr[data-version-row]:has(.app-chip-mono:text-is('v1')) a[data-pe-version-link]")
         v1Open.waitFor()
         v1Open.click()
         viewer.page.waitForURL("**/templates/editor**version=1**")

@@ -479,9 +479,11 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
      * this class passed — the row existed, the text was in the DOM, nothing overflowed — which
      * is exactly the shape a green suite hides.
      *
-     * So the READABLE WIDTH is asserted, not the presence: the meta column takes a real share
-     * of the row and sets on a small number of lines. It goes red on the layout that was in
-     * that screenshot.
+     * So the READABLE WIDTH is asserted, not the presence. #349 composes the versions
+     * surface as the house table (spec §4.4); the row is `tr[data-version-row]` now and the
+     * property under test is the row's FIRST cell — the version link and its marks — which
+     * must still take a real share of the row and set on a small number of lines. It goes
+     * red on the layout that was in that screenshot, in either markup.
      */
     @Test
     fun `a version row's meta column is readable, not one character per line`() {
@@ -493,15 +495,15 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
             page.setViewportSize(width, 900)
             page.navigate("$baseUrl/pipelines")
             selectLeaf()
-            page.locator("#pipeline-tab-versions .tplx-vrow").first().waitFor()
+            page.locator("#pipeline-tab-versions tr[data-version-row]").first().waitFor()
 
             @Suppress("UNCHECKED_CAST")
             val meta =
                 page.evaluate(
                     """
                     () => {
-                      const m = document.querySelector('#pipeline-tab-versions .tplx-vmeta');
-                      const row = m.closest('.tplx-vrow');
+                      const m = document.querySelector('#pipeline-tab-versions tr[data-version-row] td');
+                      const row = m.closest('tr[data-version-row]');
                       const line = parseFloat(getComputedStyle(m).lineHeight) || 16;
                       return { width: m.getBoundingClientRect().width,
                                rowWidth: row.getBoundingClientRect().width,
@@ -575,7 +577,7 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
         selectLeaf()
 
         // Versions is the FIRST PAINT — no request was needed for it.
-        page.locator("#pipeline-tab-versions .tplx-vrow").first().waitFor()
+        page.locator("#pipeline-tab-versions tr[data-version-row]").first().waitFor()
 
         var runsRequests = 0
         page.onRequest { if (it.url().contains("/runs")) runsRequests++ }
@@ -623,7 +625,7 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
         )
         // The acting column came with it — a stale Versions list beside a new header would be
         // the failure a header-only assertion misses.
-        page.locator("#pipeline-tab-versions .tplx-vrow").first().waitFor()
+        page.locator("#pipeline-tab-versions tr[data-version-row]").first().waitFor()
         page.locator("#pipeline-tab-runs").getAttribute("hidden").shouldBeHiddenAttribute()
     }
 
@@ -642,7 +644,7 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
         page.setViewportSize(1440, 900)
         page.navigate("$baseUrl/pipelines")
         selectLeaf()
-        page.locator("#pipeline-tab-versions .tplx-vrow").first().waitFor()
+        page.locator("#pipeline-tab-versions tr[data-version-row]").first().waitFor()
         page.waitForResponse({ it.url().contains("/usage") }) {
             page.locator("[data-tab-panel='pipeline-tab-usage']").click()
         }

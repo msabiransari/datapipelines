@@ -35,6 +35,15 @@ function loadEditor(workspaceBlock, dataBlock) {
       }
       if (id === "pe-node-sql") {
         return {
+          // #349: the request stamps its sink token on the pane (the beforeSwap guard
+          // compares it against the component's current one to cancel stale swaps).
+          attrs: {},
+          setAttribute(k, v) {
+            this.attrs[k] = v;
+          },
+          getAttribute(k) {
+            return this.attrs[k] ?? null;
+          },
           set textContent(v) {
             paneWrites.push(v);
           },

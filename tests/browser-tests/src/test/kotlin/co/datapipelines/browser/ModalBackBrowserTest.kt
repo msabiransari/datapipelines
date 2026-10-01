@@ -86,7 +86,7 @@ class ModalBackBrowserTest : BrowserSuite() {
         page.waitForResponse({ it.url().contains("/detail") || it.url().contains("/versions") }) {
             page.locator("button.tpl-leaf").first().click()
         }
-        page.locator("#pipeline-tab-versions .tplx-vrow").first().waitFor()
+        page.locator("#pipeline-tab-versions tr[data-version-row]").first().waitFor()
 
         // The ⋯ usually sits below the fold: scroll it into view OURSELVES, then wait for the
         // scroll to have SETTLED — the summary's rect inside the viewport and unchanged across
