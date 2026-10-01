@@ -1,9 +1,9 @@
 # Dashboards
 
-**Status:** v0.10 — the two documents and their lifecycle (#10, lane L1a); the REST routes, the MCP tools and the
+**Status:** v0.12 — the two documents and their lifecycle (#10, lane L1a); the REST routes, the MCP tools and the
 permissions (§4, lane L1b); the transfer routes and their limits' honest contract (§3.3, lanes L1c/L1c-b/L1c-c: the
 import's atomicity, the RELEASE rules on a landing, the aggregate count ceiling, the wire's per-family arms); the server
-runtime (§5, lane L2); the client runtime (§6, lanes L3a/L3a-b/L3a-c). The first-party page (L3b), the visualization
+runtime (§5, lane L2; #343's released pins and stream authority); the client runtime (§6, lanes L3a/L3a-b/L3a-c). The first-party page (L3b), the visualization
 tests and their release gate (L4) and the `dashboard` key kind (L5) add their sections as they land.
 **Owner:** datapipelines.co core
 **Depends on:** [Versioning](versioning.md) (§3.5 — the lifecycle table), [Pipeline Contract](pipeline-contract.md)
@@ -343,6 +343,10 @@ caller's `pipeline.execute`, the set is evaluated without `parameter_set.evaluat
 - **Sources are read-only.** Every source pins a RELEASED pipeline that passes the read-only rule (D38),
   transitively through its child pipelines. It is checked at save, at release, at every configuration read AND at
   every refresh; a pin that stops holding is `dashboard.runtime.dependency_missing` (409), never a run.
+- **Every runtime pin is released.** Configuration reads and refreshes require RELEASED visualization and parameter-set
+  versions, and RELEASED transform templates for every visualization that pins one. A missing or changed pin is
+  `dashboard.runtime.dependency_missing` (409); a transform that changes status after configuration resolution fails
+  that target in the already-open stream before evaluation.
 - **Isolation.** Every read is workspace-scoped; the dashboard is read through the caller's lens (a promoter refreshes
   a dashboard only if every source pipeline her lens admits — otherwise the family's 404); a refresh belongs to the
   person who started it.
@@ -378,8 +382,12 @@ deadline, and the budgets the client is held to.
 `POST /runtime/parameters` answers the parameter engine's evaluate response UNCHANGED plus `overrides_applied` (only the
 parameters whose hide/show or enable/disable the dashboard's `parameter_state` changed, with both effective values),
 `parents` (parameters that have dependents) and `parameter_revision`, assigned by the server per client instance and
-increasing — a hint the client compares, held in memory, that starts again after a restart. A dashboard with no set
-answers an empty evaluation.
+increasing — a hint the client compares, held in memory, that starts again after a restart. This is the D50 delegated
+act: `dashboard.execute` authorizes evaluation of the dashboard's pinned set without separately requiring
+`parameter_set.evaluate`. The unchanged response retains the evaluator's existing bounded selector diagnostics,
+including its safe echo for a failed or unreachable selector; the refresh stream's code-only rule applies to stream
+frames, not this response. No additional diagnostic redaction is applied here. A dashboard with no set answers an empty
+evaluation.
 
 ### 5.5 A refresh
 
@@ -412,7 +420,11 @@ disconnect grace of rest-api §6.8): `refresh_started`, `source_started` / `sour
 before it is announced, so a pane can open its execution the moment `source_started` arrives. `source_failed` names a
 code, never a driver's message; the execution's own events (visible to its owner) carry the detail. A subscriber is
 re-judged before every write (a revoked session, a removed member or a lost `dashboard.execute` cuts the STREAM at that
-write); the refresh itself runs to its end.
+write). Events and heartbeats resolve the workspace captured when the stream opened without session-navigation
+fallback, and require the resolved immutable workspace id to match; membership in another workspace does not preserve
+access to this stream. The refresh itself runs to its end. The three source frames include `execution_id` only when the subscriber's
+current principal also holds `execution.read`; a role change takes effect under the auth cache's membership window.
+The internal event and durable refresh-execution link retain the id either way.
 
 ### 5.6 Abort
 
@@ -606,6 +618,8 @@ the conformance suite proves the rules APPLY and is red when the stylesheet is r
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-30 | v0.12 | #343 stream workspace authority | Recheck the opening workspace by immutable id for every event and heartbeat; a different membership cannot keep the stream alive, while the refresh continues. |
+| 2026-09-30 | v0.11 | #343 dashboard runtime residue — renumbered at merge after L1c-c's v0.10 | Require RELEASED visualization, set and transform pins at runtime; clarify the unchanged bounded parameter response and current-authority execution-id projection on source frames. |
 | 2026-09-30 | v0.10 | L1c-c (#10) transfer limits and evidence | **§3.3:** the count ceiling is stated as AGGREGATE — `max-visualizations-per-dashboard` also caps each whole envelope array and each whole promotion batch arm, an additional ceiling on top of the per-document bound (two individually valid dashboards can together exceed it; the batch refuses whole, no partial writes, no split; a batch at exactly the ceiling lands whole — E2E-proven both ways). The promotion page's `body_invalid` flash renders its toast (it was unmapped, hence silent; the `missing_datasources` and `key_invalid` branches' `&#39;` entities inside fragment-expression literals were a latent render-500, fixed with typographic apostrophes). The transfer service now receives the operator's configured value (the bean factory passed nothing; the constructor default stood in silently). |
 | 2026-09-30 | v0.9 | L1c-b (#10) the transfer round's corrections | **§3.3:** the dashboard import is ONE transaction (a refused dashboard leaves nothing landed) and its audit carries one `visualization.imported` row per landed bundled visualization (F1); a landing's pins are judged by the RELEASE rules — a present-but-not-RELEASED pin refuses the family's `release.dependency_not_released` (O2); the envelope's bundle and the batch's family arms are count-bounded by `max-visualizations-per-dashboard` before any member binds (O7); a dashboard root's pins travel as entries of the batch's `visualizations` arm, the dashboard arm carrying dashboards alone (O1). |
 | 2026-09-29 | v0.8 | L1c (#10) the transfer — renumbered at merge after L3a-c's v0.7 | **§3.3** names the manifest's `evidence: null` (L4 fills it) and the import audit's `imported_with_evidence`; the import verb is the workspace-admin verb by the owner's ruling (the `api_key.bind` cells — the envelope lands RELEASED with no evidence re-run), and the promotion wire's receive order and reader binding are stated (the bounds hold on receive as on save; the import lens resolves inside the receive's transaction). §4.1's "the import rows land with the transfer routes" is past tense. |

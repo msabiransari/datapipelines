@@ -21,6 +21,7 @@ import co.datapipelines.parameters.ParameterSetRepository
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.pipeline.TemplateDryRenderer
+import co.datapipelines.templates.TemplateService
 import co.datapipelines.visualization.DashboardRefreshHistory
 import co.datapipelines.visualization.DashboardRefreshRepository
 import co.datapipelines.visualization.DashboardRuntimeConfig
@@ -117,7 +118,8 @@ class DashboardRuntimeConfiguration {
     fun dashboardTransformer(
         evaluate: TemplateEvaluateService,
         contracts: TemplateDryRenderer,
-    ): DashboardTransformer = WebDashboardTransformer(evaluate, contracts)
+        templates: TemplateService,
+    ): DashboardTransformer = WebDashboardTransformer(evaluate, contracts, templates)
 
     /** The engine runs its blocking work (transform, ledger, audit) on the executor's own dispatcher, never a request thread. */
     @Bean
@@ -136,7 +138,9 @@ class DashboardRuntimeConfiguration {
         releaseFacts: PipelineReleaseFacts,
         pipelineRepository: PipelineRepository,
         pipelines: PipelineService,
-    ): DashboardRuntimeResolver = DashboardRuntimeResolver(dashboards, visualizations, sets, releaseFacts, pipelineRepository, pipelines)
+        templates: TemplateService,
+    ): DashboardRuntimeResolver =
+        DashboardRuntimeResolver(dashboards, visualizations, sets, releaseFacts, pipelineRepository, pipelines, templates)
 
     @Bean
     fun dashboardRuntime(

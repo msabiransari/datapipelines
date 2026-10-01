@@ -5,6 +5,7 @@ import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.ints.shouldBeGreaterThanOrEqual
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import io.restassured.RestAssured.given
 import io.restassured.http.ContentType
 import io.restassured.specification.RequestSpecification
@@ -14,6 +15,7 @@ import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.web.server.LocalServerPort
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
+import java.util.UUID
 
 /**
  * **The IDOR sweep — the guard the whole RBAC design rests on** (design §3/§8.2, D-R5).
@@ -139,6 +141,7 @@ class WorkspaceIsolationSweepTest {
         // Non-vacuity. Without this, a scan that stopped matching would sweep zero routes and
         // report zero leaks — the strongest possible false green, and exactly the shape
         // MISTAKES.md's "a guard that cannot go red" entry describes.
+        runtimePostsReachTheirHandlers()
         val swept = sweepableRoutes()
 
         // Printed, not merely asserted: the handback and every future gate reader wants the
@@ -271,7 +274,7 @@ class WorkspaceIsolationSweepTest {
                 .cookie(CSRF_COOKIE, csrf)
                 .header(CSRF_HEADER, csrf)
                 .contentType(ContentType.JSON)
-                .body("{}")
+                .body(runtimeBody(route))
         val request = spec.`when`()
         val response =
             when (route.method) {
@@ -283,6 +286,92 @@ class WorkspaceIsolationSweepTest {
                 else -> request.get(route.path)
             }.then().extract()
         return Answer(response.statusCode(), fingerprint(response.asString(), route.path))
+    }
+
+    private fun runtimeBody(route: Route): String =
+        when {
+            "/runtime/parameters" in route.path -> {
+                val instanceId = UUID.randomUUID()
+                """{"configuration_id":"${"0".repeat(64)}","instance_id":"$instanceId","selections":{},"intent":"bootstrap"}"""
+            }
+
+            "/runtime/visualizations" in route.path -> {
+                val instanceId = UUID.randomUUID()
+                val refreshId = UUID.randomUUID()
+                val configurationId = "0".repeat(64)
+                """{"configuration_id":"$configurationId","instance_id":"$instanceId","refresh_id":"$refreshId",""" +
+                    """"parameter_revision":1,"selections":{},"scope":"all","targets":[]}"""
+            }
+
+            "/runtime/refreshes/" in route.path -> {
+                """{"instance_id":"${UUID.randomUUID()}"}"""
+            }
+
+            else -> {
+                "{}"
+            }
+        }
+
+    /** Prove the substituted runtime requests pass binding and reach each intended route on an admitted dashboard. */
+    private fun runtimePostsReachTheirHandlers() {
+        WorkspaceIsolationIntegrationTest.ensureSeeded()
+        val session = WorkspaceIsolationIntegrationTest.acmeSession()
+        val dashboard = WorkspaceIsolationIntegrationTest.DASH_ACME
+        val config = given().port(port).cookie(SESSION_COOKIE, session).get("/api/v1/dashboards/$dashboard/runtime/config")
+        config.statusCode() shouldBe 200
+        val configurationId = config.jsonPath().getString("data.configuration_id")
+        val csrf = "sweep-control-csrf"
+        val parameterInstance = UUID.randomUUID()
+        val parameters =
+            given()
+                .port(port)
+                .cookie(SESSION_COOKIE, session)
+                .cookie(CSRF_COOKIE, csrf)
+                .header(CSRF_HEADER, csrf)
+                .contentType(ContentType.JSON)
+                .body(
+                    """{"configuration_id":"$configurationId","instance_id":"$parameterInstance","selections":{},"intent":"bootstrap"}""",
+                ).post("/api/v1/dashboards/$dashboard/runtime/parameters")
+        withClue(parameters.asString()) { parameters.statusCode() shouldBe 200 }
+
+        val refreshRoute =
+            Route(
+                "POST",
+                "/api/v1/dashboards/$dashboard/runtime/visualizations",
+                "dashboard runtime visualization stream",
+            )
+        val refreshId = UUID.randomUUID()
+        val refreshInstance = UUID.randomUUID()
+        val refreshBody =
+            """{"configuration_id":"$configurationId","instance_id":"$refreshInstance",""" +
+                """"refresh_id":"$refreshId","parameter_revision":1,"selections":{},"scope":"all","targets":[]}"""
+        val refresh =
+            given()
+                .port(port)
+                .cookie(SESSION_COOKIE, session)
+                .cookie(CSRF_COOKIE, csrf)
+                .header(CSRF_HEADER, csrf)
+                .contentType(ContentType.JSON)
+                .body(refreshBody)
+                .post(refreshRoute.path)
+        withClue("same-workspace refresh request must be accepted, then complete without sources") {
+            refresh.statusCode() shouldBe 200
+            refresh.asString() shouldContain "refresh_completed"
+        }
+
+        val abort =
+            given()
+                .port(port)
+                .cookie(SESSION_COOKIE, session)
+                .cookie(CSRF_COOKIE, csrf)
+                .header(CSRF_HEADER, csrf)
+                .contentType(ContentType.JSON)
+                .body("""{"instance_id":"${UUID.randomUUID()}"}""")
+                .post("/api/v1/dashboards/$dashboard/runtime/refreshes/${UUID.randomUUID()}/abort")
+        withClue("valid abort body reaches the refresh lookup") {
+            abort.statusCode() shouldBe 404
+            abort.jsonPath().getString("error.code") shouldBe "dashboard.refresh.not_found"
+        }
     }
 
     /**

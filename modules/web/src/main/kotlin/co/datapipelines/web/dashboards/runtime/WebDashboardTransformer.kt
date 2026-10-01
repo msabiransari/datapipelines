@@ -4,12 +4,16 @@ import co.datapipelines.application.dashboards.DashboardTransformer
 import co.datapipelines.application.dashboards.TransformOutcome
 import co.datapipelines.application.templates.TemplateEvaluateService
 import co.datapipelines.pipeline.PipelineErrorCodes
+import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.pipeline.TemplateDryRenderer
 import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.pipeline.TransformContractView
+import co.datapipelines.templates.TemplateService
 import co.datapipelines.templates.TransformTestInput
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.visualization.ArtifactRef
+import co.datapipelines.visualization.DashboardErrorCodes
 import java.time.Instant
 import java.util.UUID
 
@@ -29,6 +33,7 @@ import java.util.UUID
 class WebDashboardTransformer(
     private val evaluate: TemplateEvaluateService,
     private val contracts: TemplateDryRenderer,
+    private val templates: TemplateService,
 ) : DashboardTransformer {
     override fun transform(
         workspaceId: UUID,
@@ -36,6 +41,11 @@ class WebDashboardTransformer(
         tables: Map<String, List<Map<String, Any?>>>,
         now: Instant,
     ): TransformOutcome {
+        if (templates.findVersionStatus(workspaceId, ReadLens.Everything, template.name, template.version) !=
+            PipelineVersionStatus.RELEASED
+        ) {
+            return TransformOutcome.Refused(DashboardErrorCodes.RUNTIME_DEPENDENCY_MISSING)
+        }
         val mode = contracts.transformContract(workspaceId, TemplateRef(template.name, template.version))?.mode
         val input =
             if (mode == TransformContractView.Mode.ROW) {

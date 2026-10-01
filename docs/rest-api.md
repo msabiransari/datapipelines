@@ -1,6 +1,6 @@
 # REST API + SSE Specification
 
-**Status:** v2.63 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
+**Status:** v2.65 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
 **Last updated:** 2026-09-30
@@ -2564,7 +2564,7 @@ field missing / of the wrong type, is `400 dashboard.validation.body_invalid` wi
 | Route | Request | Answer |
 |---|---|---|
 | `GET /{id}/runtime/config` | — | `200` `{configuration_id, renderer: {bundle}, dashboard: {id, name, version, status}, layout, parameter_set, visualizations: [{name, artifact: {id, name, version}, renderer: {kind, version}, config, bindings, presentation, timeout_seconds}], groups, actions, action_controls, parameter_scopes, parameter_state, timeouts: {refresh_seconds, parameter_lock_seconds, render_seconds}, budgets: {max_bytes_per_source, max_bytes_per_refresh}}` — `renderer.bundle` is `"2d"` or `"3d"`, derived from the pinned visualizations' trace types ([Dashboards §6.4](dashboards.md#64-the-two-bundles)): the page loads exactly one Plotly bundle, the one this field names. |
-| `POST /{id}/runtime/parameters` | `{configuration_id, instance_id, selections, intent}` (`intent`: `bootstrap` \| `parent_change` \| `retry`) | `200` the parameter engine's evaluate response ([§21.3](#213-evaluate)) plus `overrides_applied`, `parents`, `parameter_revision` |
+| `POST /{id}/runtime/parameters` | `{configuration_id, instance_id, selections, intent}` (`intent`: `bootstrap` \| `parent_change` \| `retry`) | `200` the parameter engine's evaluate response ([§21.3](#213-evaluate)) unchanged, plus `overrides_applied`, `parents`, `parameter_revision` |
 | `POST /{id}/runtime/visualizations` | `{configuration_id, instance_id, refresh_id, parameter_revision, selections, scope, targets}` — `refresh_id` a fresh v4 UUID the client mints; `scope` `all` \| `targets`; `selections` at most 64 KiB | `200` `text/event-stream` (below) |
 | `POST /{id}/runtime/refreshes/{refresh_id}/abort` | `{instance_id}` | `202` `{refresh_id, status: "abort_requested"}` — no wait |
 | `GET /{id}/refreshes?offset=&limit=` | — | `200` a page of the caller's refreshes, newest first (every refresh with `execution.read_all`) |
@@ -2579,8 +2579,20 @@ order they can occur: `refresh_started` `{refresh_id, targets, sources: [{name, 
 `transform`, `budget`, `timeout`, `abort`) and `visualization_data` `{refresh_id, name, type, bindings: {path: [values]}, rows, bytes}`;
 and `refresh_completed` `{refresh_id, status, targets: {name: {outcome, stage?, reason?}}}` — always last (`status`: `COMPLETED`,
 `PARTIAL`, `FAILED`, `ABORTED`, `TIMED_OUT`; `outcome`: `ok` — the data frame delivered — `no-data`, `error` (with `stage`/`reason`),
-or `abort`). A `source_failed` names a code and never a driver or datasource message. A
-dashboard execution has no stored result: `GET /api/v1/executions/{id}/result` on it is `404 execution.not_found`, and
+or `abort`). A `source_failed` names a code and never a driver or datasource message.
+
+For `POST /runtime/parameters`, `dashboard.execute` authorizes the pinned set evaluation under D50 without separately
+requiring `parameter_set.evaluate`. The response remains the evaluator's unchanged response, including its existing
+bounded selector diagnostics and safe echo for failed or unreachable selectors. The stream's code-only error rule
+applies only to stream frames.
+
+The `execution_id` member on each `source_started`, `source_completed` and `source_failed` frame is present only when
+the subscriber's current principal holds `execution.read`; `source_failed` omits the member even when its internal id
+is null. Before every event or heartbeat, stream admission and this projection use one current-authority decision. It
+strictly resolves the workspace captured when the stream opened and requires the same immutable workspace id; it never
+uses session-navigation fallback, and another membership does not preserve access to this stream. The internal event
+and durable refresh-execution link still retain the id. A role change is reflected under the auth cache's membership
+window. A dashboard execution has no stored result: `GET /api/v1/executions/{id}/result` on it is `404 execution.not_found`, and
 `DELETE /api/v1/executions/{id}` on it is `404` for everyone — it is cancelled only through its refresh's abort.
 
 | Error | HTTP | When |
@@ -2588,7 +2600,7 @@ dashboard execution has no stored result: `GET /api/v1/executions/{id}/result` o
 | `dashboard.validation.body_invalid` | 400 | The request body is unreadable or a field is missing, mistyped or a reused `refresh_id`; the selections are invalid (`details.reason: selections_invalid`, `details.parameters`) |
 | `dashboard.validation.empty_targets` / `.target_not_visualization` | 400 | `scope: targets` naming nothing, or a name that is no visualization occurrence |
 | `dashboard.runtime.configuration_stale` | 409 | `configuration_id` is not the current one (`details.configuration_id`); the client reloads |
-| `dashboard.runtime.dependency_missing` | 409 | A pinned visualization, set or source no longer holds — gone, not released, or no longer read-only (`details.dependency`, `.name`, `.reason`) |
+| `dashboard.runtime.dependency_missing` | 409 | A pinned visualization, set, transform template or source no longer holds — gone, not released, or no longer read-only (`details.dependency`, `.name`, `.reason`); a transform that changes status after resolution fails its target before evaluation |
 | `dashboard.refresh.saturated` | 429 | No room for the refresh within `max-wait-seconds`; carries `Retry-After`; **no row is written** |
 | `dashboard.refresh.result_too_large` | — | Inside the stream only: `source_failed` / a target's `reason` at stage `budget` |
 | `dashboard.refresh.not_found` | 404 | No such refresh for the caller on this dashboard, or it already finished (abort) |
@@ -2596,6 +2608,8 @@ dashboard execution has no stored result: `GET /api/v1/executions/{id}/result` o
 
 ## Appendix A: Change Log
 
+| 2026-09-30 | v2.65 | #343 stream workspace authority | Recheck dashboard refresh events and heartbeats only in the stream's opening workspace, matched by immutable id; other memberships do not preserve access, and the refresh remains running. |
+| 2026-09-30 | v2.64 | #343 dashboard runtime residue — renumbered at merge after L1c-c's v2.63 | Clarify unchanged bounded parameter-evaluation diagnostics and current `execution.read` projection of source-frame execution ids; include transform-template pins in runtime dependency refusals. |
 | 2026-09-30 | v2.63 | L1c-c (#10) transfer limits and evidence | Documentation and wiring honesty inside existing verbs (no new route, no §13 code, no key). **§18 (A2):** the count ceiling is stated as AGGREGATE — `max-visualizations-per-dashboard` caps each whole arm (and each whole envelope array on the import surfaces) on top of the per-document bound; two individually valid dashboards can together exceed it, the batch refuses whole (no partial writes, no split), a batch at exactly the ceiling lands whole — E2E-proven both ways. **§18 (A1):** the receive's refused-dashboard rollback is witnessed end to end (earlier batch members land, the dashboard refuses on landing, every preceding write is absent — the transfer E2E's case, the L1c-b round's open follow-up closed). **§18:** the sender re-raises the receiver's refusal verbatim (pinned by test), and the promotion page's `body_invalid` flash renders its toast (unmapped = silent before; the `missing_datasources`/`key_invalid` branches' `&#39;` entities inside fragment literals were a latent render-500, fixed). **C1:** the transfer bean receives the operator's configured ceiling (the constructor default stood in silently — an operator's override was ignored at the default).
 | 2026-09-30 | v2.62 | L1c-b (#10) the transfer round's corrections | Behavioural, inside existing verbs (no new route, no §13 code). **§18 (O1):** a dashboard's pinned visualizations travel as entries of the batch's `visualizations` arm — deduplicated by name + version + hash against the roots — and the `dashboards` arm carries dashboards alone (a visualization payload there refused `dashboard.validation.body_invalid` and rolled every such batch back). **§18 (O7):** each family arm is count-bounded (`max-visualizations-per-dashboard`, `reason: too_many`) before the transaction opens. **§18 (O2):** the receive judges a landing's pins by the RELEASE rules — a present-but-not-RELEASED pin refuses the family's `release.dependency_not_released`. **§22.2 (O2, O7):** the import's `templates` array count-bounded; a DRAFT transform pin refuses `visualization.release.dependency_not_released`. **§23 (F1, O2, O7):** the dashboard import is ONE transaction — a refused dashboard leaves nothing landed — the bundle count-bounded, the release rules judged, and the audit carries one `visualization.imported` row per landed bundled visualization. The two-deployment E2E's Orders 60–61 carry `@Test` and run (the L1c handback's 18/18 claim corrected: they never had one). |
 | 2026-09-29 | v2.61 | L1c (#10) the transfer — export/import routes and the promotion wire — renumbered at merge after L3a-c's v2.60 | Additive. **§22/§23: four routes** — `GET /{id}/export` on the `*.read` rows (lensed BEFORE the export; the envelope of [Dashboards §3.3](dashboards.md#33-export-and-import), its manifest carrying `evidence: null` until L4) and `POST …/import` on the NEW `*.import` rows (the owner's ruling, the `api_key.bind` cells: workspace admin + super admin only, never an author — the verb lands RELEASED with no evidence re-run). Import binds through the families' READERS, so the document bounds hold off the save path (a non-integer `version`, a non-array bundle: `body_invalid` naming the path); a malformed body is the family's `body_invalid`. The transfer audits `*.exported` / `*.imported` with `imported_with_evidence` verbatim (enums §15). **§18: the inventory and the batch carry `visualizations` and `dashboards`** — the inventory the same `(name, current_version, body_hash)` triples; the batch the versions' PAYLOADS (never the export envelopes), applied LAST in the receiver's order (§10.4, D61) inside its one transaction, the import lens resolving against the just-landed rows; the applied report counts both. **§23.1:** the dashboard lens's "newer than the target" arm is real — a target-held dashboard at the same version and hash is hidden. No §13 code added. |
