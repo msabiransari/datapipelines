@@ -378,10 +378,23 @@ class StableOriginForwarderTest {
             """.trimIndent(),
         )
         val started = System.currentTimeMillis()
-        val failure = runCatching { contenderTakes(javaBinary(), source, 0, timeoutSeconds = 3) }
+        // The harness runs on its own thread so a DELIVERED-SHAPE helper (which blocks on a
+        // read of a still-running child) reds here instead of hanging the whole suite.
+        val result = java.util.concurrent.atomic.AtomicReference<Result<Boolean>>()
+        val harness =
+            Thread({
+                result.set(runCatching { contenderTakes(javaBinary(), source, 0, timeoutSeconds = 3) })
+            }, "stalled-contender-harness").apply { isDaemon = true }
+        harness.start()
+        harness.join(30_000)
+        check(!harness.isAlive) {
+            "the contender harness blocked past its own 3 s timeout — a stalled child was " +
+                "not bounded (a blocking read of a running child's output)"
+        }
         val elapsedMs = System.currentTimeMillis() - started
-        val message = failure.exceptionOrNull()?.message ?: "no failure was produced"
-        check(failure.isFailure) { "a stalled contender did not fail the harness: $message" }
+        val failure = result.get()
+        val message = failure?.exceptionOrNull()?.message ?: "no failure was produced"
+        check(failure != null && failure.isFailure) { "a stalled contender did not fail the harness: $message" }
         check(elapsedMs < 30_000) { "the stalled contender took $elapsedMs ms to fail — not bounded" }
         check("did not finish" in message) { "the diagnostic does not name the stall: $message" }
         val pid = Regex("PID=(\\d+)").find(message)?.groupValues?.get(1)
