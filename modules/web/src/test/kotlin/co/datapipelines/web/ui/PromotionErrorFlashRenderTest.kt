@@ -18,6 +18,16 @@ import org.thymeleaf.web.servlet.JakartaServletWebApplication
  * (ui-screens §5.1's "safe direction"): a push that did not happen was silent on the very screen that
  * issued it. This is the proof it is not silent now, and that the closed set stays closed otherwise.
  *
+ * The `missing_datasources` case is the witness of the L1c-c entity repair, precisely scoped (the
+ * L1c-d correction): that branch was one of the two repaired for `&#39;` entities INSIDE the
+ * fragment-expression string literal — attoparser decodes the entity before the expression parses,
+ * the decoded apostrophe terminated the literal, and rendering the flash threw (a render-time 500 on
+ * the promotion screen, worse than silence). The delivered round's handback claimed the render test
+ * pinned BOTH repaired branches; in fact only `key_invalid` (and `missing_template`, the dynamic-code
+ * branch) was exercised — `missing_datasources` never rendered through the test until this case. It
+ * renders through the REAL template now, and the entity plant in this round's evidence shows the
+ * test red on the exact literal the branch used to carry.
+ *
  * Thymeleaf, no Spring context — the [PromotionSetsRenderTest] harness shape.
  */
 class PromotionErrorFlashRenderTest {
@@ -28,6 +38,15 @@ class PromotionErrorFlashRenderTest {
         rendered shouldContain "Nothing was promoted"
         rendered shouldContain "rolled all of it back"
         rendered shouldContain "count bound on the batch"
+    }
+
+    @Test
+    fun `the missing_datasources flash renders its toast through the real template`() {
+        val rendered = render(error = "missing_datasources")
+
+        rendered shouldContain "Nothing was promoted"
+        rendered shouldContain "no datasource by one of the names these pipelines reference"
+        rendered shouldContain "Register it there"
     }
 
     @Test
