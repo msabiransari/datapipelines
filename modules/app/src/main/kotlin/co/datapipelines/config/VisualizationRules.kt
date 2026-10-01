@@ -1,9 +1,10 @@
 package co.datapipelines.config
 
 /**
- * §7 / §3.33 (#10) — the dashboard documents' collection bounds: every `datapipelines.visualization.*` key an
- * integer within its bounds. A value arrives as a raw STRING, so a malformed one is a NAMED violation here
- * rather than a binder crash; an unset block is not a violation (application.yml always supplies all seven).
+ * §7 / §3.33 (#10) — the dashboard documents' collection bounds and the test sessions' TTL: every
+ * `datapipelines.visualization.*` key an integer within its bounds. A value arrives as a raw STRING, so a
+ * malformed one is a NAMED violation here rather than a binder crash; an unset block is not a violation
+ * (application.yml always supplies all eight).
  *
  * The bounds are the twins of `VisualizationKey` in `modules/visualization` (`app` compiles against `web`
  * only, so it cannot import them); `VisualizationConfigKeysSpecDriftTest` there parses THIS file and holds
@@ -26,6 +27,7 @@ internal object VisualizationRules {
             Bound(key = "datapipelines.visualization.max-bindings-per-visualization", min = 1, max = 1_024),
             Bound(key = "datapipelines.visualization.max-inputs-per-visualization", min = 1, max = 64),
             Bound(key = "datapipelines.visualization.max-columns-per-input", min = 1, max = 4_096),
+            Bound(key = "datapipelines.visualization.session-ttl-minutes", min = 1, max = 1_440),
         )
 
     /** Every key this rule reads — `ConfigValidator.snapshotFrom` reads exactly these off the environment. */

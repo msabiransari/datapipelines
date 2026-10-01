@@ -576,6 +576,7 @@ datapipelines:
     max-bindings-per-visualization: ${DATAPIPELINES_VISUALIZATION_MAX_BINDINGS_PER_VISUALIZATION:64}
     max-inputs-per-visualization: ${DATAPIPELINES_VISUALIZATION_MAX_INPUTS_PER_VISUALIZATION:8}
     max-columns-per-input: ${DATAPIPELINES_VISUALIZATION_MAX_COLUMNS_PER_INPUT:256}
+    session-ttl-minutes: ${DATAPIPELINES_VISUALIZATION_SESSION_TTL_MINUTES:60}
   # #10 L2 — the dashboard runtime's admission, byte and deadline numbers (configuration.md §3.34). Appended after
   # the visualization block, the last child of datapipelines: (the reparenting lesson);
   # DashboardRuntimeConfigKeysSpecDriftTest pins the neighbours. The admission counters are JVM-LOCAL.

@@ -30,8 +30,9 @@ import java.util.UUID
  *
  * A workspace admin creates a visualization (DRAFT, server-assigned id), reads it (the working version with its
  * draft pointer), writes it under `If-Match`, and asks to release it: refused `visualization.release.tests_missing`
- * with `reason: gate_not_installed` — the evidence gate refuses every release until L4 — and, for a body with NO
- * test case, with `reason: no_cases`. A malformed and a MISSING body are the family's own 400 (#291 and the
+ * with the evidence gate's own `no_runs` reason (#352 installed the gate; the test-session walk is the L4a suite
+ * beside this one) and, for a body with NO test case, with `reason: no_cases`. A malformed and a MISSING body are
+ * the family's own 400 (#291 and the
  * exception handler's row), never the pipeline family's code and never a 500. The flat listing's `total` and
  * `has_more` are truthful (#312), the tree browse separates folders from visualizations, and the human verbs purge
  * a draft (If-Match) and the entity. A VIEWER reads but cannot create (the interceptor's `auth.role_required`).
@@ -94,10 +95,12 @@ class VisualizationLifecycleE2eTest {
 
     @Test
     @Order(3)
-    fun `release is refused tests_missing until L4 installs the evidence gate - and no_cases for a body without a case`() {
+    fun `release is refused tests_missing with the gate's no_runs reason - and no_cases for a body without a case`() {
+        // #352 installed the evidence gate: a caseful draft with no test run is the gate's own
+        // `no_runs` refusal now (the sessions/evidence walk is the L4a suite beside this one).
         val gated = post("/api/v1/visualizations/$id/release", "", ADMIN_SESSION, ifMatch = hash)
         refused(gated, 409) shouldBe "visualization.release.tests_missing"
-        gated.jsonPath().getString("error.details.reason") shouldBe "gate_not_installed"
+        gated.jsonPath().getString("error.details.reason") shouldBe "no_runs"
 
         val caseless = post("/api/v1/visualizations", document("$ROOT/charts/caseless", cases = false), ADMIN_SESSION)
         caseless.statusCode shouldBe 201

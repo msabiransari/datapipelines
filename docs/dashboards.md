@@ -1,11 +1,12 @@
 # Dashboards
 
-**Status:** v0.14 — the two documents and their lifecycle (#10, lane L1a); the REST routes, the MCP tools and the
+**Status:** v0.15 — the two documents and their lifecycle (#10, lane L1a); the REST routes, the MCP tools and the
 permissions (§4, lane L1b); the transfer routes and their limits' honest contract (§3.3, lanes L1c/L1c-b/L1c-c: the
 import's atomicity, the RELEASE rules on a landing, the aggregate count ceiling, the wire's per-family arms); the server
 runtime (§5, lane L2; #343's released pins and stream authority); the client runtime (§6, lanes L3a/L3a-b/L3a-c); the
-first-party pages (§7, lane L3b). The visualization tests and their release gate (L4) and the `dashboard` key kind (L5)
-add their sections as they land.
+first-party pages (§7, lane L3b); the tests' backend — sessions, capabilities, the mechanical check and the release
+gate — is §3.4 (lane L4a, #352). The test sessions' HTTP/MCP surfaces (L4b, #353), the dashboard draft preview (#369) and
+the `dashboard` key kind (L5) add their sections as they land.
 **Owner:** datapipelines.co core
 **Depends on:** [Versioning](versioning.md) (§3.5 — the lifecycle table), [Pipeline Contract](pipeline-contract.md)
 (§13.22, §13.23 — the codes), [Metadata DB](metadata-db.md) (§4.28–§4.35 — the tables), [Enumerations](enums.md)
@@ -96,8 +97,11 @@ the author puts a placeholder there (`"x": "$.x"` above) — so the runtime's su
 - **`plotly`** — an object whose `data` is a non-empty array (at most 64) of trace objects, each with a `type` from
   the two vendored bundles: `scatter`, `bar`, `pie`, `histogram`, `box`, `heatmap` (the 2D bundle, the default) and
   `scatter3d`, `surface`, `mesh3d` (the 3D bundle, loaded only for a dashboard that uses one — D63); `layout` and
-  Plotly's own `config` are objects. Nothing else at the top level. Deeper Plotly attributes are judged by the
-  vendored plot-schema when the tests lane adds it.
+  Plotly's own `config` are objects. Nothing else at the top level. Deeper attributes are judged against the
+  vendored 4.1.1 plot-schema (reduced to the nine supported traces' attribute trees, plus layout and config —
+  §3.4): an unknown attribute, a wrong-typed value and an unsupported trace are refused
+  `visualization.validation.config_schema_invalid` naming the path. A binding placeholder (`$.x`, §2.1.1) is the
+  substitution grammar, not a value; the save-time walk accepts it where a leaf is expected.
 - **`table`** — `columns`: a non-empty array (at most 64) of `{label, values, format?, align?}` — `label` a
   non-blank string of at most 120 characters, `values` the placeholder a binding fills, `format` one of `text`,
   `number`, `integer`, `percent`, `date`, `datetime`, `align` one of `left`, `center`, `right`; `page_size` an
@@ -196,8 +200,11 @@ RELEASED — or a DRAFT released with the visualization when the caller consents
 cascade pipelines use for templates), otherwise `visualization.release.dependency_not_released` naming the pin; the
 release evidence passes — the agent's GREEN run for this exact content and the server's mechanical check (D56;
 `visualization.release.tests_stale`, `visualization.release.tests_red`, `visualization.release.mechanical_failed`).
-The evidence gate is installed by the tests lane (L4); until then every visualization release is refused
-`visualization.release.tests_missing` with `details.reason = gate_not_installed`.
+The gate is installed (#352, §3.4): in the release's one transaction it re-reads the exact DRAFT under a row
+lock (a candidate whose draft moved underneath it is `tests_stale`), judges THE LATEST run of the version — none
+`tests_missing`, EXPIRED or for another hash `tests_stale`, RED or INCOMPLETE `tests_red` — and re-runs the
+mechanical check against the current pins (`mechanical_failed`, whatever an earlier GREEN recorded). A refusal
+leaves no partial release: the version stays DRAFT and no template is cascaded.
 
 A version that a live (DRAFT or RELEASED) dashboard version pins is never discarded or purged, and a visualization
 with any pinned version is never purged whole — `visualization.version.pinned`, `details.pinned_by` naming the
@@ -264,6 +271,46 @@ explicit visualization roots — and the `dashboards` arm carries dashboards alo
 entries with that family's reader and lands the visualizations before the dashboards that pin them. An export is
 lensed BEFORE it is built — a visualization or dashboard the promoter lens hides is the same 404 an absent id gets.
 
+### 3.4 The test sessions and the evidence (#352, the spec's §11)
+
+A visualization's release needs evidence: an agent's run of the saved test cases against the exact draft content
+plus the server's own mechanical check. The backend behind it is live (this section); its HTTP and MCP transport —
+the session routes, the tools and the preview page — lands with L4b (#353); **until that lane, no route or tool
+serves sessions, results, screenshots or preview, and the manual's authoring loop cannot drive them.**
+
+- **A session** (`tests.cases`' run) pins workspace, artifact, version, body hash, the case inventory and the
+  actor; it opens over the artifact's WORKING version and lives for `datapipelines.visualization.session-ttl-minutes`
+  (60, [Configuration §3.33](configuration.md)). At start the server mints a **preview capability** — 32 random
+  bytes, base64url, stored hash-only — which is the future preview page's only credential (§11.2 of the spec); it
+  is revoked by the submit and by expiry.
+- **A submission** answers every case by name with `green` or `red` and bounded per-case notes (≤ 2,000
+  characters); the environment field set is CLOSED (`theme`, `viewport`, `browser`, `locale`, `renderer_version`,
+  each ≤ 120 characters) and is the agent's REPORT, never a server measurement. Unknown or duplicate case names
+  refuse; an omitted case lands the run `INCOMPLETE`; any `red` verdict — or a mechanical failure — lands `RED`;
+  GREEN requires every case green AND the mechanical check passing at submit.
+- **The mechanical check** (§11.3, D56 (b)) is server-run, no browser, sub-second (measured: one case, 1,000
+  fixture rows through the deep schema, ~60 ms): the renderer's schema (for Plotly the reduced vendored
+  4.1.1 plot-schema — unknown attributes, wrong types and unsupported traces refused with the path), every
+  binding's resolution and per-path type rules, every case's fixtures through the REAL bounded evaluator (a DRAFT
+  transform pin is valid here — authoring; the runtime keeps its RELEASED-only rule), every projected bound
+  column present in every row, and static assertion feasibility (`trace_count` against `config.data.length`,
+  `no_data` against zero produced rows, `text_visible`/`value_visible` strings present in the configuration or
+  the bound values). The rendered-state check records `not_available` today — a headless render check is a later
+  lane, and nothing here claims a browser saw anything. The report is stored on the run and RE-RUN at release.
+- **At a successful submission the server mints a SECOND, separate capability** for the screenshot upload —
+  random, hash-only, bound to the exact run and purpose, expiring no later than the session's original deadline,
+  its raw form shown exactly once. Submit revokes the preview and does NOT touch this one; atomic image storage
+  consumes it; a failed upload consumes nothing; two competing valid uploads have exactly one winner; a completed
+  run is never re-submitted, so no replacement capability exists.
+- **The screenshot** is one image per run: the DETECTED media type (a declared Content-Type, a filename or a
+  header is not type validation — the bytes are parsed), independently read positive dimensions, the computed
+  SHA-256, the depicted case (when given, it must be a case of that run), the actor and the stamps; ≤ 4 MiB and
+  PNG/WebP only. The server does not decode, and parses only the bytes it already holds.
+- **Retention** (D35): for a DRAFT version, the newest completed run keeps its screenshot and an older run's is
+  deleted; for a RELEASED version, the run whose GREEN result qualified the release — and its screenshot — is
+  kept for the version's life. Expiry touches RUNNING sessions only: a completed GREEN record is never
+  retrospectively erased, and a run whose version's hash moved on reads `EXPIRED` and can never qualify a release.
+
 ---
 
 ## 4. The surfaces
@@ -322,7 +369,8 @@ columns (L2) — a guess would refuse or admit on nothing.
 | `dashboards_validate` | `dashboard.update` | §4.2 |
 
 No tool releases or executes anything; the visualization test tools (`visualizations_test_start`,
-`visualizations_test_submit`) land with the test sessions (L4). The served manual's `dashboards` guide is the
+`visualizations_test_submit`) and the session/screenshot routes land with L4b (#353) — the backend contracts
+they will bind are §3.4's (§2.1 of the record). The served manual's `dashboards` guide is the
 authoring loop in the order an agent needs it.
 
 ---
@@ -462,7 +510,7 @@ dashboard she can read but holds no `execution.read`, so her refresh names no ex
 
 ### 5.8 What is not here
 
-The draft preview and the visualization tests (L4) and the `dashboard` key kind and its confinement (L5): until L5, only signed-in sessions reach these routes and no MCP tool refreshes a dashboard. The first-party pages are §7 (L3b).
+The dashboard draft preview (#369, unowned after the L4 split) and the test sessions' HTTP/MCP surfaces (L4b, #353 — the backend behind them is §3.4) and the `dashboard` key kind and its confinement (L5): until L5, only signed-in sessions reach these routes and no MCP tool refreshes a dashboard. The first-party pages are §7 (L3b).
 
 ## 6. The client runtime (L3a)
 
@@ -701,6 +749,7 @@ full navigation).
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-01 | v0.15 | L4a (#352) the test sessions and the release gate — renumbered at merge after #356's v0.14 | **New §3.4 The test sessions and the evidence** — the durable run per session over the exact draft hash, the two hash-only capabilities (preview; the single-use screenshot upload minted at submit), the mechanical check (the reduced vendored 4.1.1 plot-schema at save AND release, binding type rules, the real fixture evaluation, static assertion feasibility, `not_available` rendered state), the screenshot's detected-type validation and retention (D35), and the release gate's installed verdicts (§3.1). §2.1.2's Plotly schema is the deep one now; §4.4's test tools and §5.8's test surfaces are explicitly L4b's (#353), the dashboard draft preview is #369's and marked unavailable until then. No new route, tool or permission row. |
 | 2026-10-01 | v0.14 | #356 the abort before the row — renumbered at merge after L3b's v0.13 | **§5.6:** an abort arriving before `insertRunning` writes its row is honoured — the start registers a transient, per-principal-bounded marker, a matching caller is answered the same 202 and the refresh ends `ABORTED` before any source runs; the four no-cases (unknown, another person's, another instance's, finished) answer the identical `dashboard.refresh.not_found`. **§6.6:** the abort chip renders `abort.requested` until the server answers; a 202 sets `abortAcked`, a 404 re-renders `abort not confirmed` and the terminal frame decides — a delivered `ok` restores its state, and the stream stays open through the abort. Merge follow-up: the marker is written once (SET NX, before the bound set) — a replayed start of an id already in flight is the reused-id 400 and cannot delete the first start's marker or slot. |
 | 2026-10-01 | v0.13 | L3b (#10) the first-party pages — renumbered at merge after #343's v0.12 | **New §7 The first-party pages** — the tree page and the sidebar's Dashboards branch (D58; the landing item renamed Home, the route unchanged), the board page (the server-declared ONE bundle, the glue as a file, the refusal state for a board that cannot run, never a blank pane) and the events pane (the caller's refreshes, execution links by the reader's visibility, a bounded poll chosen over the runtime's notification hooks, with the why stated). The one-bundle rule's navigation half is stated as the brief's rule it is: every link to a board carries `hx-boost="false"`, which is also the §10.5 disposal answer — full navigation, no htmx history, no second instance. Permissions: the pages on `dashboard.read`, the pane fragment on `dashboard.execute` beside the refreshes route it mirrors (auth §7.6's Surfaces cells). `dashboards.css` and `plotly.css` load from the layout head (ui-screens §3.0 is normative). |
 | 2026-09-30 | v0.12 | #343 stream workspace authority | Recheck the opening workspace by immutable id for every event and heartbeat; a different membership cannot keep the stream alive, while the refresh continues. |

@@ -143,5 +143,13 @@ class VisualizationConfigurationWiringTest {
 
         @Bean
         fun transactionManager(): org.springframework.transaction.PlatformTransactionManager = io.mockk.mockk(relaxed = true)
+
+        /**
+         * The factory's evidence argument (L4a): this context pins `VisualizationConfiguration`'s own
+         * graph with the family's default; the REAL production gate is `VisualizationTestConfiguration`'s
+         * bean, wired and guarded by `VisualizationTestConfigurationWiringTest`.
+         */
+        @Bean
+        fun releaseEvidence(): co.datapipelines.visualization.ReleaseEvidence = co.datapipelines.visualization.ReleaseEvidence.NOT_INSTALLED
     }
 }

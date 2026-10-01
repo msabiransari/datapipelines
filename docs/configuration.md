@@ -1,6 +1,6 @@
 # Configuration Reference
 
-**Status:** v1.43 (single source of truth for every config key)
+**Status:** v1.44 (single source of truth for every config key)
 **Owner:** datapipelines.co core
 **Last updated:** 2026-09-29
 
@@ -555,7 +555,7 @@ What these keys never change: an audit row written inside the caller's transacti
 
 ### 3.33 Visualizations and dashboards (#10)
 
-The bounds of the two dashboard documents' strict readers ([Dashboards §2](dashboards.md), the [dashboard implementation spec](superpowers/specs/2026-09-28-dashboard-implementation-spec.md) §3). Each collection bound is checked BEFORE the collection's members are read, so a document cannot make the read work in proportion to its own size; a document over one is refused `visualization.validation.body_invalid` / `dashboard.validation.body_invalid` with `details.reason` `too_many` (or `too_large` for the configuration) and `details.config_key` naming the key. The seven defaults are **proposed** by lane L1a and confirmed at review (five from its brief; the input and column bounds from its security pass — the fixture check costs rows × columns). The runtime's keys (`datapipelines.dashboards.admission.*`, `results.*`, `timeouts.*`, the spec's §9.4–§9.6) and the test sessions' TTL (§11.2) arrive with the lanes that read them (L2, L4). Each bound below is enforced at boot (§7) and again when the keys bind (`VisualizationProperties` → `VisualizationConfig`), naming the key.
+The bounds of the two dashboard documents' strict readers ([Dashboards §2](dashboards.md), the [dashboard implementation spec](superpowers/specs/2026-09-28-dashboard-implementation-spec.md) §3). Each collection bound is checked BEFORE the collection's members are read, so a document cannot make the read work in proportion to its own size; a document over one is refused `visualization.validation.body_invalid` / `dashboard.validation.body_invalid` with `details.reason` `too_many` (or `too_large` for the configuration) and `details.config_key` naming the key. The seven defaults are **proposed** by lane L1a and confirmed at review (five from its brief; the input and column bounds from its security pass — the fixture check costs rows × columns). The runtime's keys (`datapipelines.dashboards.admission.*`, `results.*`, `timeouts.*`, the spec's §9.4–§9.6) arrived with L2; the test sessions' TTL arrived with L4a (#352) as the flat `session-ttl-minutes` — the shipped key grammar is exactly two levels (`datapipelines.visualization.<key>`), so the spec §11.2's informal `tests.session-ttl-minutes` spelling has no YAML form; §3.33's row is the one definition. Each bound below is enforced at boot (§7) and again when the keys bind (`VisualizationProperties` → `VisualizationConfig`), naming the key.
 
 | YAML path | Default | Description |
 |---|---|---|
@@ -566,6 +566,7 @@ The bounds of the two dashboard documents' strict readers ([Dashboards §2](dash
 | `datapipelines.visualization.max-bindings-per-visualization` | `64` | Entries in one visualization's `bindings` — refused before any binding is read. 1..1024 |
 | `datapipelines.visualization.max-inputs-per-visualization` | `8` | Named inputs of one visualization — refused before any input contract is read. 1..64 |
 | `datapipelines.visualization.max-columns-per-input` | `256` | Columns of one input contract — refused before any column is read; the fixture check is rows × this. 1..4096 |
+| `datapipelines.visualization.session-ttl-minutes` | `60` | A visualization test session's TTL in minutes (the spec's §11.2, owner-confirmed 2026-09-28): the run's `expires_at`, the preview capability's deadline, and the latest deadline the submit-minted upload capability may carry. 1..1440 |
 
 A renderer configuration also nests at most 32 levels and a literal parameter value at most 2 (a scalar, or a list of scalars) — constants, like the request mappers' Jackson constraints (§3.31), refused `too_deep` by a bounded walk that never uses the host stack.
 
@@ -899,6 +900,7 @@ datapipelines:
     max-bindings-per-visualization: ${DATAPIPELINES_VISUALIZATION_MAX_BINDINGS_PER_VISUALIZATION:64}
     max-inputs-per-visualization: ${DATAPIPELINES_VISUALIZATION_MAX_INPUTS_PER_VISUALIZATION:8}
     max-columns-per-input: ${DATAPIPELINES_VISUALIZATION_MAX_COLUMNS_PER_INPUT:256}
+    session-ttl-minutes: ${DATAPIPELINES_VISUALIZATION_SESSION_TTL_MINUTES:60}
 
   dashboards:                      # §3.34 — the dashboard runtime (#10 L2)
     admission:
@@ -1030,6 +1032,7 @@ Validation runs in `@PostConstruct` of a `ConfigValidator` bean. Failures stop s
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-01 | v1.44 | L4a (#352) the visualization test sessions — renumbered at merge after L1c-c's v1.43 | §3.33 gains **`datapipelines.visualization.session-ttl-minutes`** (`60`, 1..1440): a test session's TTL — the run's `expires_at`, the preview capability's deadline and the ceiling on the submit-minted upload capability (the spec's §11.2 `tests.session-ttl-minutes`, flattened to the shipped two-level key grammar). In the §5 template, `application.yml`, `deploy/compose.yml`, `deploy/env/defaults.env`, `deploy/secrets.env.example` and `ConfigValidator` (§7). |
 | 2026-09-30 | v1.43 | L1c-c (#10) transfer limits and evidence — renumbered at merge after 337's v1.42 | **§3.33's `max-visualizations-per-dashboard` row**: the value is documented as ALSO the transfer families' aggregate ceiling (L1c-c) — it caps each whole export/import envelope array (`visualizations` bundle, `templates` closure) and each whole promotion batch arm (`visualizations`, `dashboards`), refused whole before any member binds. An additional ceiling on top of the per-document bound, not a consequence of it: two individually valid dashboards can together exceed it, and such a batch refuses with no partial writes and no automatic split. No key, default or bound changed; the production transfer bean now receives the operator's configured value (L1c-c's C1 — an override was silently ignored at the default before). |
 | 2026-09-30 | v1.42 | 337 (#337) | §3.15's `logging.format` row is now TRUE instead of aspirational: the key is bound before logging initialises (environment post-processor), the value set is closed (`json` \| `console`), an unknown value refuses startup, and the row documents what each value produces and which deploy shape ships which. No new key, no YAML or deploy-mirror change — the declared key just works. |
 | 2026-09-29 | v1.41 | L2 (#10) the dashboard runtime | New **§3.34 The dashboard runtime**: `datapipelines.dashboards.*`, the ten admission / result / deadline numbers of the spec's §9.4–§9.6, each the owner-confirmed default (4 / 16 / 40 / 10 s; 4 MiB / 32 MiB; 600 / 900 / 30 / 20 s), with three boot-time relations, in the §5 template, `application.yml`, `deploy/compose.yml`, `deploy/env/defaults.env`, `deploy/secrets.env.example` and `ConfigValidator` (§7). The admission counters are stated JVM-LOCAL. §3.33 had already promised these keys. |

@@ -15,6 +15,9 @@ import co.datapipelines.visualization.DashboardService
 import co.datapipelines.visualization.DashboardValidator
 import co.datapipelines.visualization.ParameterSetFacts
 import co.datapipelines.visualization.PipelineReleaseFacts
+import co.datapipelines.visualization.ReleaseEvidence
+import co.datapipelines.visualization.RendererConfigValidator
+import co.datapipelines.visualization.RendererConfigValidators
 import co.datapipelines.visualization.TemplateContractFacts
 import co.datapipelines.visualization.VisualizationConfig
 import co.datapipelines.visualization.VisualizationProperties
@@ -48,8 +51,11 @@ import org.springframework.transaction.support.TransactionTemplate
  * - the release cascade releases a DRAFT transform pin through the template's OWN [TemplateReleaser], and both
  *   services run their atomic work in a [TransactionTemplate] over the metadata transaction manager.
  *
- * The visualization release gate (`ReleaseEvidence`) is NOT wired: its default refuses every release
- * (`visualization.release.tests_missing`, `reason: gate_not_installed`) until L4 installs the evidence tables.
+ * The release gate (#352): the factory consumes the `ReleaseEvidence` bean [VisualizationTestConfiguration]
+ * declares — [co.datapipelines.visualization.VisualizationReleaseEvidence], the production §11.4 gate. The
+ * renderer validator is the deep composition (`RendererConfigValidators.deep()`): Plotly through the reduced
+ * 4.1.1 plot-schema, `table`/`kpi` the house schemas — the same composition the mechanical test reads, so
+ * save, submit and release refuse the same configurations.
  */
 @Configuration
 @EnableConfigurationProperties(VisualizationProperties::class)
@@ -73,7 +79,12 @@ class VisualizationConfiguration {
     fun visualizationValidator(
         renderer: TemplateDryRenderer,
         statuses: TemplateVersionStatuses,
-    ): VisualizationValidator = VisualizationValidator(TemplateContractFacts.over(renderer, statuses))
+        renderers: RendererConfigValidator,
+    ): VisualizationValidator = VisualizationValidator(TemplateContractFacts.over(renderer, statuses), renderers)
+
+    /** The deep renderer schemas (L4a): the reduced Plotly plot-schema behind the same port the mechanical test reads. */
+    @Bean
+    fun rendererConfigValidator(): RendererConfigValidator = RendererConfigValidators.deep()
 
     /** The dashboard validator's pipeline port — [PipelineReleaseFactsReader], `application`'s implementation. */
     @Bean
@@ -117,6 +128,7 @@ class VisualizationConfiguration {
         authoring: AuthoringGuard,
         statuses: TemplateVersionStatuses,
         releaser: TemplateReleaser,
+        evidence: ReleaseEvidence,
         transactionManager: PlatformTransactionManager,
     ): VisualizationService =
         VisualizationService(
@@ -126,6 +138,7 @@ class VisualizationConfiguration {
             authoring,
             statuses,
             templateReleaser = releaser,
+            evidence = evidence,
             transactions = TransactionTemplate(transactionManager) as TransactionOperations,
         )
 

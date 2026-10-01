@@ -8,7 +8,7 @@ import org.junit.jupiter.api.Test
 /** [VisualizationConfig] enforces every key's bounds at construction, naming the key; the properties build it. */
 class VisualizationConfigTest {
     @Test
-    fun `the defaults are the enum's and in bounds - the seven proposed numbers`() {
+    fun `the defaults are the enum's and in bounds - the seven proposed numbers and the session TTL`() {
         VisualizationConfig().valuesByKey().mapKeys { it.key.key } shouldBe
             mapOf(
                 "max-visualizations-per-dashboard" to 50L,
@@ -18,6 +18,7 @@ class VisualizationConfigTest {
                 "max-bindings-per-visualization" to 64L,
                 "max-inputs-per-visualization" to 8L,
                 "max-columns-per-input" to 256L,
+                "session-ttl-minutes" to 60L,
             )
         VisualizationProperties().toConfig() shouldBe VisualizationConfig()
     }
