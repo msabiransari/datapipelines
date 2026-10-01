@@ -323,6 +323,70 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
         return name
     }
 
+    /**
+     * A CONTROLS board (L3a-c): the country set's mould extended with the two controls the
+     * typed-control round proves — an optional BOOLEAN `INPUT` (no default: its resolved value is
+     * `null`, the tri-state's third state) and a radio-presented SELECT. The source pipeline
+     * declares the radio parameter.
+     */
+    protected fun seedControlsBoard(root: String): String {
+        val datasource = registerSourceDatasource()
+        createTemplate("test/${root}_by_granularity.sql", "SELECT CAST(:granularity AS TEXT) AS g")
+        createPipeline(
+            "$root/pipelines/by_granularity",
+            "test/${root}_by_granularity.sql",
+            datasource,
+            parameters = """{"granularity":{"type":"STRING","required":true}}""",
+        )
+        releasePipelines(listOf("$root/pipelines/by_granularity"))
+        val setId = createAndReleaseControlsSet("$root/parameters/controls")
+        val chart =
+            seedVisualization("$root/visualizations/by_granularity", plotlyBody("""{"type":"bar","x":null,"y":null}""", "g", "g", "STRING"))
+        return seedDashboard(
+            "$root/boards/controls",
+            sources = listOf("s1" to "$root/pipelines/by_granularity"),
+            occurrences = listOf(Triple("granularitychart", chart, "s1")),
+            initial = true,
+            parameterSet = setId,
+            sourceParameters = mapOf("s1" to """{"granularity":{"parameter":"granularity"}}"""),
+        )
+    }
+
+    /** The controls set through its REAL routes (create + release with the If-Match hash). */
+    @Suppress("UNCHECKED_CAST")
+    private fun createAndReleaseControlsSet(name: String): String {
+        val result =
+            page.evaluate(
+                """async (args) => {
+                  const csrf = document.cookie.match(/(?:^|;\s*)dp_csrf=([^;]*)/);
+                  const headers = { 'Content-Type': 'application/json', 'DP-CSRF-Token': csrf ? decodeURIComponent(csrf[1]) : '' };
+                  const body = { name: args.name, display_name: 'Controls', description: 'L3a-c fixture',
+                    parameters: [
+                      { name: 'enabled', label: 'Enabled', type: 'BOOLEAN', kind: 'INPUT',
+                        cardinality: 'SINGLE', required: false },
+                      { name: 'granularity', label: 'Granularity', type: 'STRING', kind: 'SELECT',
+                        cardinality: 'SINGLE', required: true,
+                        source: { constants: [
+                          { value: 'DAY', display_value: 'Day', is_default: false },
+                          { value: 'WEEK', display_value: 'Week', is_default: true },
+                          { value: 'MONTH', display_value: 'Month', is_default: false } ] },
+                        presentation: { control: 'radio' } } ] };
+                  const created = await fetch('/api/v1/parameter-sets', { method: 'POST', credentials: 'same-origin',
+                    headers, body: JSON.stringify(body) });
+                  if (!created.ok) return { error: created.status + ' ' + (await created.text()).slice(0, 300) };
+                  const document_ = await created.json();
+                  const id = document_.data.id;
+                  const released = await fetch('/api/v1/parameter-sets/' + id + '/release', { method: 'POST',
+                    credentials: 'same-origin', headers: Object.assign({}, headers, { 'If-Match': document_.data.body_hash }), body: '' });
+                  if (!released.ok) return { error: 'release ' + released.status + ' ' + (await released.text()).slice(0, 300) };
+                  return { id: id };
+                }""",
+                mapOf("name" to name),
+            ) as Map<String, Any?>
+        check(result["error"] == null) { "the parameter set $name failed: ${result["error"]}" }
+        return name
+    }
+
     /** A board whose pinned visualization is a SURFACE trace — the server answers renderer.bundle "3d". */
     protected fun seedSurfaceBoard(root: String): String {
         val datasource = registerSourceDatasource()

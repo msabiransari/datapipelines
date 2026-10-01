@@ -382,15 +382,21 @@ async function boot(options) {
   if (!registered.plotly) runtime.registerRenderer({ kind: "plotly", version: "4", create: () => ({ renderData: () => Promise.resolve("rendered") }) });
   if (!registered.table) runtime.registerRenderer({ kind: "table", version: "1", create: () => ({ renderData: () => Promise.resolve("rendered") }) });
   const container = doc.createElement("div");
+  // `composite: true` boots with the FIRST-PARTY adapter (its controls, its readSelections) bound
+  // to the boot's own container — the real composite under the runtime's real state machine.
+  let instanceAdapter = adapter;
+  if (options && options.composite) {
+    instanceAdapter = runtime.adapters(container);
+  }
   const instance = runtime.init({
     server: { baseUrl: (options && options.baseUrl) || "", credentials: (options && options.credentials) || "session" },
     dashboard: { id: "d1", version: "released" },
     container,
-    adapter,
+    adapter: instanceAdapter,
     options: Object.assign({ renderTimeoutMs: 200 }, options && options.initOptions),
   });
   await instance.ready;
-  return { instance, adapter, fetch: fetchImpl, doc, container, runtime };
+  return { instance, adapter: instanceAdapter, fetch: fetchImpl, doc, container, runtime };
 }
 
 // ------------------------------------------------------------------------------------------------- tests
@@ -684,6 +690,164 @@ test("a deadline firing mid-render releases the gate; the late render installs n
   await assert.rejects(() => doomed, (error) => error.code === "parameters.superseded");
   assert.equal(instance._parameters.parameter_revision, 8, "the newer attempt's state stands");
   assert.equal(instance._lock, null, "the late render released nothing it did not own");
+});
+
+test("an overdue RESPONSE is refused by the absolute clock before its timer callback runs", async () => {
+  const fetchImpl = fakeFetch();
+  const { instance, adapter } = await boot({
+    fetch: fetchImpl,
+    config: configPayload({ parameter_set: { name: "dbr/sets/reporting", version: 1 } }),
+  });
+  // The injected clock jumps PAST the attempt's deadline (30 s lock, start 1000) inside the fetch,
+  // and the timer's callback NEVER fires (the stub registers it and drops it): only the admission
+  // check's absolute-clock reading can refuse this response. Timer-first acceptance is the defect.
+  let clock = 1000;
+  instance._env.now = () => clock;
+  instance._env.setTimeout = () => 1;
+  instance._env.clearTimeout = () => {};
+  fetchImpl.on("/runtime/parameters", () => {
+    clock = 1000 + 60 * 1000;
+    return fetchImpl.envelope(evaluatedState({ parameter_revision: 77 }));
+  });
+  try {
+    await assert.rejects(instance._evaluateParameters("retry"), (error) => error.code === "parameters.superseded");
+    assert.equal(instance._parameters.parameter_revision, 3, "the overdue response installed nothing");
+    assert.equal(instance._lock, null, "the overdue attempt released the gate");
+    assert.ok(adapter.log.includes("notify:parameters.lock_timeout"), adapter.log.join("|"));
+    assert.equal(
+      adapter.log.filter((line) => line === "notify:parameters.lock_timeout").length,
+      1,
+      "the expiry published exactly once (the timer firing later is a no-op)",
+    );
+    assert.equal(
+      adapter.log.filter((line) => line.startsWith("renderParameters:")).length,
+      1,
+      "only the bootstrap's render ran — the overdue response never reached the adapter",
+    );
+  } finally {
+    instance.dispose();
+  }
+});
+
+test("an overdue RENDER is refused by the absolute clock before it can commit, and a newer lock stands", async () => {
+  const fetchImpl = fakeFetch();
+  const { instance, adapter } = await boot({
+    fetch: fetchImpl,
+    config: configPayload({ parameter_set: { name: "dbr/sets/reporting", version: 1 } }),
+  });
+  let clock = 1000;
+  instance._env.now = () => clock;
+  instance._env.setTimeout = () => 1;
+  instance._env.clearTimeout = () => {};
+  fetchImpl.on("/runtime/parameters", () => fetchImpl.envelope(evaluatedState({ parameter_revision: 77 })));
+  // The response arrives IN TIME; the held render's resolution is what jumps the clock past the
+  // deadline. The commit must refuse before installing anything.
+  let releaseDoomed;
+  const originalRender = adapter.renderParameters;
+  adapter.renderParameters = (state) => {
+    adapter.log.push("renderParameters:" + (state ? state.parameters.length : "null"));
+    return new Promise((resolve) => {
+      releaseDoomed = () => {
+        clock = 1000 + 60 * 1000;
+        resolve();
+      };
+    });
+  };
+  const appliedBefore = adapter.log.filter((line) => line === "notify:parameters.applied").length;
+  try {
+    const doomed = instance._evaluateParameters("retry");
+    doomed.catch(() => {});
+    await new Promise((resolve) => setTimeout(resolve, 10)); // the response arrived; the render is held
+    assert.ok(instance._lock, "the render is pending under its lock");
+    releaseDoomed();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await assert.rejects(() => doomed, (error) => error.code === "parameters.superseded");
+    assert.equal(instance._parameters.parameter_revision, 3, "the overdue render installed nothing");
+    assert.equal(instance._lock, null, "the overdue attempt freed the gate");
+    assert.equal(adapter.log.filter((line) => line === "notify:parameters.lock_timeout").length, 1, "the expiry published exactly once");
+    assert.equal(
+      adapter.log.filter((line) => line === "notify:parameters.applied").length,
+      appliedBefore,
+      "no applied outcome for an overdue render",
+    );
+    // The freed gate serves a NEWER attempt; the old rejection changes nothing further — no newer
+    // lock is cleared, no newer state clobbered.
+    adapter.renderParameters = originalRender;
+    const newer = await instance._evaluateParameters("parent_change");
+    assert.equal(newer.parameter_revision, 77, "the newer attempt applied its state");
+    assert.equal(instance._lock, null);
+    await assert.rejects(() => doomed, (error) => error.code === "parameters.superseded", "the old rejection is stable");
+    assert.equal(instance._parameters.parameter_revision, 77, "the newer state stands");
+  } finally {
+    instance.dispose();
+  }
+});
+
+test("the deadline boundary is inclusive: arrivals exactly at and just before the deadline are admitted", async () => {
+  const fetchImpl = fakeFetch();
+  const { instance, adapter } = await boot({
+    fetch: fetchImpl,
+    config: configPayload({ parameter_set: { name: "dbr/sets/reporting", version: 1 } }),
+  });
+  let clock = 1000; // every attempt below starts here, so its deadline is 31000
+  let arrival = null; // the clock value the fetch answers at, offset from the attempt's start
+  instance._env.now = () => clock;
+  instance._env.setTimeout = () => 1;
+  instance._env.clearTimeout = () => {};
+  fetchImpl.on("/runtime/parameters", () => {
+    if (arrival !== null) clock = 1000 + arrival;
+    return fetchImpl.envelope(evaluatedState({ parameter_revision: 5 }));
+  });
+  try {
+    // JUST BEFORE the deadline: admitted, gate released.
+    arrival = 30 * 1000 - 1;
+    const before = await instance._evaluateParameters("parent_change");
+    assert.equal(before.parameter_revision, 5);
+    assert.equal(instance._lock, null);
+    // EXACTLY at the deadline: still admitted — the boundary is inclusive; strictly after is not.
+    clock = 1000;
+    arrival = 30 * 1000;
+    const exactly = await instance._evaluateParameters("parent_change");
+    assert.equal(exactly.parameter_revision, 5);
+    assert.equal(instance._lock, null);
+    // One millisecond after: refused by the absolute clock alone.
+    clock = 1000;
+    arrival = 30 * 1000 + 1;
+    await assert.rejects(instance._evaluateParameters("parent_change"), (error) => error.code === "parameters.superseded");
+    assert.equal(instance._lock, null);
+    assert.equal(instance._parameters.parameter_revision, 5, "the overdue attempt installed nothing");
+    assert.ok(adapter.log.includes("notify:parameters.lock_timeout"), adapter.log.join("|"));
+  } finally {
+    instance.dispose();
+  }
+});
+
+test("a render resolving exactly at the deadline still commits - the commit boundary is inclusive", async () => {
+  const fetchImpl = fakeFetch();
+  const { instance, adapter } = await boot({
+    fetch: fetchImpl,
+    config: configPayload({ parameter_set: { name: "dbr/sets/reporting", version: 1 } }),
+  });
+  let clock = 1000;
+  instance._env.now = () => clock;
+  instance._env.setTimeout = () => 1;
+  instance._env.clearTimeout = () => {};
+  const originalRender = adapter.renderParameters;
+  adapter.renderParameters = (state) => {
+    adapter.log.push("renderParameters:" + (state ? state.parameters.length : "null"));
+    clock = 1000 + 30 * 1000; // exactly the attempt's deadline at the moment of resolution
+    return Promise.resolve();
+  };
+  try {
+    const applied = await instance._evaluateParameters("parent_change");
+    assert.equal(applied.parameter_revision, 3, "the exactly-at-deadline render was admitted");
+    assert.equal(instance._parameters.parameter_revision, 3);
+    assert.equal(instance._lock, null);
+    assert.ok(adapter.log.includes("notify:parameters.applied"), adapter.log.join("|"));
+  } finally {
+    adapter.renderParameters = originalRender;
+    instance.dispose();
+  }
 });
 
 test("a rejected render releases the gate and publishes a recoverable host-render failure", async () => {
@@ -1029,6 +1193,68 @@ test("reset restores the applied baseline without executing anything", async () 
   assert.equal(fetchImpl.calls.length, callsBefore, "reset executed nothing");
   assert.ok(adapter.log.some((line) => line.startsWith("renderParameters")), "the baseline was re-rendered");
   assert.equal(instance._parameters.parameter_revision, 3, "the revision is the applied one");
+});
+
+test("a BOOLEAN control on the composite: the null baseline survives an uncommitted edit's reset, and a commit travels as a wire boolean", async () => {
+  const booleanState = evaluatedState({
+    values: { enabled: null },
+    parents: ["enabled"],
+    parameter_revision: 7,
+  });
+  booleanState.parameters = [
+    {
+      name: "enabled",
+      label: "Enabled",
+      type: "BOOLEAN",
+      kind: "INPUT",
+      cardinality: "SINGLE",
+      required: false,
+      depends_on: [],
+      presentation: null,
+      dependents: [],
+      state: {
+        value: null,
+        origin: "none",
+        computed_default: null,
+        reset: false,
+        hidden: false,
+        disabled: false,
+        options: null,
+        errors: [],
+      },
+    },
+  ];
+  const fetchImpl = fakeFetch();
+  let lastEvaluateBody = null;
+  fetchImpl.on("/runtime/parameters", (url, init) => {
+    lastEvaluateBody = JSON.parse(init.body);
+    return fetchImpl.envelope(booleanState);
+  });
+  const { container, instance, adapter } = await boot({
+    fetch: fetchImpl,
+    composite: true,
+    config: configPayload({ parameter_set: { name: "dbr/sets/reporting", version: 1 } }),
+  });
+  const control = () => container.querySelectorAll("[data-dp-parameter]")[0].children[1];
+  assert.equal(control().tagName, "SELECT", "the composite rendered the house tri-state select");
+  assert.equal(control().value, "", "the null baseline displays the unset option");
+  assert.equal(adapter.readSelections().enabled, null, "the unresolved baseline reads null — never false");
+  assert.equal(instance._baseline.selections.enabled, null, "the baseline itself is null");
+  // An uncommitted visible edit reads its boolean; reset restores the null baseline.
+  control().value = "true";
+  assert.equal(adapter.readSelections().enabled, true);
+  await instance.reset();
+  assert.equal(adapter.readSelections().enabled, null, "reset restored the unresolved null, not false");
+  assert.equal(control().value, "", "the control displays the unset option again");
+  // A committed change travels as a WIRE BOOLEAN on the evaluate POST (true/false, never "true").
+  lastEvaluateBody = null; // the bootstrap's evaluate is history for this assertion
+  control().value = "false";
+  control().fire("change");
+  await new Promise((resolve) => setTimeout(resolve, 20)); // the commit's re-evaluation round trip
+  assert.ok(lastEvaluateBody, "the commit re-evaluated the set");
+  assert.equal(lastEvaluateBody.intent, "parent_change", "the commit's re-evaluation, not the bootstrap");
+  assert.equal(lastEvaluateBody.selections.enabled, false, "the committed selection is the boolean false");
+  assert.equal(typeof lastEvaluateBody.selections.enabled, "boolean", "the wire value is a JSON boolean");
 });
 
 test("selections snapshot and submissions carry the WIRE's typed values, nulls and MULTI arrays", async () => {

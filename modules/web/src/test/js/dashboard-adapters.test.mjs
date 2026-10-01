@@ -458,8 +458,127 @@ test("control types follow the definition: MULTI checkboxes read an array, INPUT
   }
 });
 
-test("hidden and disabled parameters still render and still read (D23); overrides_applied wins; errors are text", async () => {
+/** The composite state with its one parameter reshaped as a BOOLEAN INPUT at [value]. */
+function booleanInputState(value) {
+  const state = compositeState();
+  Object.assign(state.parameters[0], {
+    name: "enabled",
+    label: "Enabled",
+    type: "BOOLEAN",
+    kind: "INPUT",
+    cardinality: "SINGLE",
+    presentation: null,
+  });
+  state.parameters[0].state.value = value;
+  state.parameters[0].state.options = null;
+  state.values = { enabled: value };
+  return state;
+}
+
+/** The composite state with its one parameter presented as a radio group. */
+function radioState() {
+  const state = compositeState();
+  state.parameters[0].presentation = { control: "radio" };
+  return state;
+}
+
+test("a BOOLEAN INPUT renders the house tri-state select and preserves unresolved null", async () => {
   installDom();
+  try {
+    const runtime = require(resolveStatic("datapipelines-dashboard.js"));
+    const container = fakeElement("div");
+    const adapter = runtime.adapters(container);
+    await adapter.mountLayout({ columns: 12, grid: [] });
+    await adapter.renderParameters(booleanInputState(null));
+    const select = container.querySelectorAll("[data-dp-parameter]")[0].children[1];
+    assert.equal(select.tagName, "SELECT", "the house tri-state control, not a text input");
+    const optionValues = select.children.map((option) => option.getAttribute("value"));
+    assert.deepEqual(optionValues, ["", "true", "false"], "exactly the three wire states: " + optionValues.join("|"));
+    assert.equal(select.value, "", "an unresolved null displays as the unset option");
+    assert.equal(adapter.readSelections().enabled, null, "the unresolved null reads null — never false");
+    // Every one of the three displayed states reads back as its wire value.
+    select.value = "true";
+    const committed = adapter.readSelections().enabled;
+    assert.equal(committed, true, "the visible true reads the wire boolean true");
+    assert.equal(typeof committed, "boolean", "a JSON boolean, not the string \"true\"");
+    select.value = "false";
+    assert.equal(adapter.readSelections().enabled, false, "the visible false reads the wire boolean false");
+    select.value = "";
+    assert.equal(adapter.readSelections().enabled, null, "unset reads null again");
+    // A re-render from a false state displays false (the control follows the server's state).
+    await adapter.renderParameters(booleanInputState(false));
+    const rebuilt = container.querySelectorAll("[data-dp-parameter]")[0].children[1];
+    assert.equal(rebuilt.value, "false");
+    assert.equal(adapter.readSelections().enabled, false);
+  } finally {
+    uninstallDom();
+  }
+});
+
+test("a BOOLEAN INPUT keeps its disabled and hidden state semantics (D23)", async () => {
+  installDom();
+  try {
+    const runtime = require(resolveStatic("datapipelines-dashboard.js"));
+    const container = fakeElement("div");
+    const adapter = runtime.adapters(container);
+    await adapter.mountLayout({ columns: 12, grid: [] });
+    // Disabled: the control is disabled and STILL reads (D23).
+    const disabled = booleanInputState(true);
+    disabled.parameters[0].state.disabled = true;
+    await adapter.renderParameters(disabled);
+    let row = container.querySelectorAll("[data-dp-parameter]")[0];
+    assert.equal(row.children[1].disabled, true, "the tri-state select is disabled");
+    assert.equal(adapter.readSelections().enabled, true, "the disabled value still reads");
+    // Hidden: the row is display:none and STILL reads.
+    const hidden = booleanInputState(false);
+    hidden.parameters[0].state.hidden = true;
+    await adapter.renderParameters(hidden);
+    row = container.querySelectorAll("[data-dp-parameter]")[0];
+    assert.equal(row.style.display, "none", "the hidden row is not displayed");
+    assert.equal(adapter.readSelections().enabled, false, "the hidden value still reads");
+  } finally {
+    uninstallDom();
+  }
+});
+
+test("radio groups are instance-owned: one group per adapter and parameter, never across adapters", async () => {
+  installDom();
+  try {
+    const runtime = require(resolveStatic("datapipelines-dashboard.js"));
+    const groupNames = (host) =>
+      host
+        .querySelectorAll("[data-dp-parameter]")[0]
+        .children.filter((child) => child.tagName === "INPUT")
+        .map((radio) => radio.getAttribute("name"));
+    const hostA = fakeElement("div");
+    const a = runtime.adapters(hostA);
+    await a.mountLayout({ columns: 12, grid: [] });
+    await a.renderParameters(radioState());
+    const groupA = groupNames(hostA);
+    assert.ok(groupA.length >= 2, "the radio group rendered its options");
+    assert.ok(groupA.every((name) => name === groupA[0]), "one parameter's radios share ONE name within the instance: " + groupA.join("|"));
+    // A SECOND adapter in the same document: a DIFFERENT group name for the same parameter.
+    const hostB = fakeElement("div");
+    const b = runtime.adapters(hostB);
+    await b.mountLayout({ columns: 12, grid: [] });
+    await b.renderParameters(radioState());
+    const groupB = groupNames(hostB);
+    assert.notEqual(groupA[0], groupB[0], "two adapters never publish the same radio group name");
+    // A re-render rebuilds the group under the SAME instance-owned name (grouping survives).
+    await a.renderParameters(radioState());
+    assert.deepEqual(groupNames(hostA), groupA, "the re-rendered group kept its name");
+    // Dispose and re-mount: a fresh adapter owns a fresh name.
+    a.dispose();
+    const a2 = runtime.adapters(hostA);
+    await a2.mountLayout({ columns: 12, grid: [] });
+    await a2.renderParameters(radioState());
+    assert.notEqual(groupNames(hostA)[0], groupA[0], "the re-mounted adapter publishes a fresh group name");
+  } finally {
+    uninstallDom();
+  }
+});
+
+test("hidden and disabled parameters still render and still read (D23); overrides_applied wins; errors are text", async () => {  installDom();
   try {
     const runtime = require(resolveStatic("datapipelines-dashboard.js"));
     const container = fakeElement("div");

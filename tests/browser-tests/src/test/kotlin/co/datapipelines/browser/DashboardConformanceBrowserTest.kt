@@ -453,6 +453,168 @@ class DashboardConformanceBrowserTest : DashboardBrowserSuite() {
         )
     }
 
+    /** The selections map of the LAST intercepted stream body, parsed where a parser lives — the page. */
+    private fun lastSelections(bodies: MutableList<String>): Map<*, *> =
+        page.evaluate(
+            "(body) => JSON.parse(body).selections",
+            bodies.last(),
+        ) as Map<*, *>
+
+    @Test
+    @Order(13)
+    fun `a boolean input keeps null null, commits the visible boolean as a wire boolean and reset restores the baseline`() {
+        val root = ready("dpbool")
+        installHostPage()
+        val board = seedControlsBoard(root)
+        // Pass-through interception: the stream bodies are read for the wire assertions while the
+        // real routes flow untouched (case 11's mould — the transport is the oracle).
+        val refreshBodies = java.util.Collections.synchronizedList(mutableListOf<String>())
+        page.route("**/runtime/visualizations") { route ->
+            route.request().postData()?.let(refreshBodies::add)
+            route.resume()
+        }
+        openHost(board)
+        page.waitForFunction(
+            "() => document.querySelectorAll('#board [data-dp-parameter=\"enabled\"] select').length === 1",
+        )
+        // The unresolved null: displayed as the unset option, read as null — never as false — and
+        // the control offers exactly the three wire states.
+        val initial =
+            page.evaluate(
+                "() => { const s = document.querySelector('#board [data-dp-parameter=\"enabled\"] select');" +
+                    " return { displayed: s.value, options: Array.from(s.options).map(function (o) { return o.value; })," +
+                    " read: window.__dp.instance._adapter.readSelections().enabled }; }",
+            ) as Map<*, *>
+        initial["displayed"] shouldBe ""
+        initial["read"] shouldBe null
+        @Suppress("UNCHECKED_CAST")
+        val options = initial["options"] as List<*>
+        options shouldBe listOf("", "true", "false")
+        // The visible edit travels as the WIRE BOOLEAN true on the real stream POST (not "true").
+        page.selectOption("#board [data-dp-parameter=\"enabled\"] select", "true")
+        page.evaluate("() => window.__dp.instance.refresh({ scope: 'all' })")
+        page.waitForFunction("() => window.__dp.renders.length >= 2")
+        lastSelections(refreshBodies)["enabled"] shouldBe true
+        // Unset again: the wire carries null, not false.
+        page.selectOption("#board [data-dp-parameter=\"enabled\"] select", "")
+        page.evaluate("() => window.__dp.instance.refresh({ scope: 'all' })")
+        page.waitForFunction("() => window.__dp.renders.length >= 3")
+        lastSelections(refreshBodies)["enabled"] shouldBe null
+        // Reset restores the APPLIED baseline: the control is unset and reads null again.
+        page.evaluate("() => window.__dp.instance.reset()")
+        page.waitForFunction(
+            "() => window.__dp.instance._adapter.readSelections().enabled === null &&" +
+                " document.querySelector('#board [data-dp-parameter=\"enabled\"] select').value === ''",
+        )
+    }
+
+    @Test
+    @Order(14)
+    fun `two instances keep independent radio groups in one real document`() {
+        val root = ready("dpradio")
+        installHostPage()
+        val board = seedControlsBoard(root)
+        openHost(board)
+        page.waitForFunction("() => window.__dp.ready")
+        // A second instance of the SAME board in the SAME document (case 8's mould): two adapters,
+        // one parameter name, the collision the delivered group names had.
+        page.evaluate(
+            """
+            () => {
+              const second = document.createElement('div');
+              second.id = 'board-2';
+              document.body.appendChild(second);
+              window.__dp2 = { ready: false, instance: null };
+              const instance = window.DatapipelinesDashboard.init({
+                server: { baseUrl: '', credentials: 'session' },
+                dashboard: { id: '$board', version: 'released' },
+                container: second,
+                adapter: window.DatapipelinesDashboard.adapters(second),
+              });
+              window.__dp2.instance = instance;
+              instance.ready.then(function () { window.__dp2.ready = true; }, function () {});
+            }
+            """.trimIndent(),
+        )
+        page.waitForFunction("() => window.__dp2.ready")
+        page.waitForFunction(
+            "() => document.querySelectorAll('#board [data-dp-parameter=\"granularity\"] input[type=radio]').length === 3" +
+                " && document.querySelectorAll('#board-2 [data-dp-parameter=\"granularity\"] input[type=radio]').length === 3",
+        )
+        // The two instances' groups carry DIFFERENT name attributes in the real DOM.
+        val names =
+            page.evaluate(
+                "() => ({ a: document.querySelector('#board [data-dp-parameter=\"granularity\"] input').name," +
+                    " b: document.querySelector('#board-2 [data-dp-parameter=\"granularity\"] input').name })",
+            ) as Map<*, *>
+        (names["a"] as String).isNotEmpty() shouldBe true
+        org.junit.jupiter.api.Assertions
+            .assertNotEquals(names["a"], names["b"], "the group names differ across instances")
+        // Real clicks: instance 1 picks MONTH (third radio), instance 2 picks DAY (first).
+        page.click("#board [data-dp-parameter=\"granularity\"] input[type=radio] >> nth=2")
+        page.click("#board-2 [data-dp-parameter=\"granularity\"] input[type=radio] >> nth=0")
+        val reads =
+            page.evaluate(
+                "() => ({ a: window.__dp.instance._adapter.readSelections().granularity," +
+                    " b: window.__dp2.instance._adapter.readSelections().granularity })",
+            ) as Map<*, *>
+        reads["a"] shouldBe "MONTH"
+        reads["b"] shouldBe "DAY"
+        // Native grouping WITHIN one instance: exactly one radio checked per group, and instance 1's
+        // group never moved instance 2's.
+        val checked =
+            page.evaluate(
+                "() => ({ a: document.querySelectorAll('#board [data-dp-parameter=\"granularity\"] input:checked').length," +
+                    " b: document.querySelectorAll('#board-2 [data-dp-parameter=\"granularity\"] input:checked').length })",
+            ) as Map<*, *>
+        (checked["a"] as Number).toInt() shouldBe 1
+        (checked["b"] as Number).toInt() shouldBe 1
+        // A re-render of one instance (its re-evaluation) keeps its group and its committed
+        // selection; the other instance's selection stands untouched.
+        page.evaluate("() => window.__dp2.instance._evaluateParameters('parent_change')")
+        page.waitForFunction(
+            "() => document.querySelectorAll('#board-2 [data-dp-parameter=\"granularity\"] input').length === 3" +
+                " && window.__dp2.instance._adapter.readSelections().granularity === 'DAY'",
+        )
+        page.evaluate("() => window.__dp.instance._adapter.readSelections().granularity") shouldBe "MONTH"
+        // Disposal of the first leaves the second's group fully functional.
+        page.evaluate("() => window.__dp.instance.dispose()")
+        page.waitForFunction("() => document.querySelectorAll('#board .dp-dashboard').length === 0")
+        page.click("#board-2 [data-dp-parameter=\"granularity\"] input[type=radio] >> nth=2")
+        page.waitForFunction("() => window.__dp2.instance._adapter.readSelections().granularity === 'MONTH'")
+    }
+
+    @Test
+    @Order(15)
+    fun `light and dark - the handback screenshots of the controls board`() {
+        val root = ready("dpctrlshot")
+        installHostPage(theme = "light")
+        val board = seedControlsBoard(root)
+        openHost(board)
+        page.waitForFunction("() => window.__dp.renders.length >= 1")
+        page.waitForTimeout(500.0) // Plotly's own draw settle before the shutter
+        page.screenshot(
+            com.microsoft.playwright.Page
+                .ScreenshotOptions()
+                .setPath(
+                    java.nio.file.Paths
+                        .get("build", "reports", "dashboards-controls-light.png"),
+                ),
+        )
+        installHostPage(theme = "dark")
+        page.navigate("$baseUrl/test/dashboards/host?id=$board")
+        page.waitForFunction("() => window.__dp && window.__dp.renders && window.__dp.renders.length >= 1")
+        page.waitForTimeout(500.0)
+        page.screenshot(
+            com.microsoft.playwright.Page
+                .ScreenshotOptions()
+                .setPath(
+                    java.nio.file.Paths
+                        .get("build", "reports", "dashboards-controls-dark.png"),
+                ),
+        )
+    }
+
     /** The falsification host: the same page WITHOUT the plotly.css link. */
     private fun installHostPageWithoutPlotlyCss() {
         val cspHeader = fetchLiveCsp()
