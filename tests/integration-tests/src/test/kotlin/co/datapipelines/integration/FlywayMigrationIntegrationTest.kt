@@ -657,12 +657,13 @@ class FlywayMigrationIntegrationTest {
         dataSource.connection.use { c ->
             c.createStatement().use { s ->
                 s.execute(
-                    "INSERT INTO workspaces (id, name, display_name, is_personal, created_by) VALUES ('$ws', 'flyway44', 'Flyway44', FALSE, NULL)" +
-                        " ON CONFLICT (id) DO NOTHING",
+                    "INSERT INTO workspaces (id, name, display_name, is_personal, created_by)" +
+                        " VALUES ('$ws', 'flyway44', 'Flyway44', FALSE, NULL) ON CONFLICT (id) DO NOTHING",
                 )
                 s.execute(
                     "INSERT INTO users (id, email, display_name, provider, provider_subject, kind) VALUES " +
-                        "('$user', 'flyway44@migration.test', 'Flyway44', 'local', 'flyway44@migration.test', 'human') ON CONFLICT (id) DO NOTHING",
+                        "('$user', 'flyway44@migration.test', 'Flyway44', 'local', 'flyway44@migration.test', 'human')" +
+                        " ON CONFLICT (id) DO NOTHING",
                 )
                 val viz = UUID.randomUUID()
                 s.execute(
@@ -670,12 +671,13 @@ class FlywayMigrationIntegrationTest {
                         "('$viz', '$ws', 'finance/flyway44/viz', 'Viz', 1, '$user')",
                 )
                 s.execute(
-                    "INSERT INTO visualization_versions (visualization_id, version, body_json, status, body_hash, created_by, updated_by, " +
-                        "created_via, updated_via) VALUES " +
+                    "INSERT INTO visualization_versions (visualization_id, version, body_json, status, body_hash, " +
+                        "created_by, updated_by, created_via, updated_via) VALUES " +
                         "('$viz', 1, '{}', 'DRAFT', '${"a".repeat(64)}', '$user', '$user', 'mcp', 'mcp')",
                 )
                 s.execute(
-                    "INSERT INTO visualization_test_runs (id, visualization_id, version, body_hash, session_id, expires_at, started_by) VALUES " +
+                    "INSERT INTO visualization_test_runs (id, visualization_id, version, body_hash, session_id, " +
+                        "expires_at, started_by) VALUES " +
                         "('$run', '$viz', 1, '${"a".repeat(64)}', '${UUID.randomUUID()}', NOW() + INTERVAL '1 hour', '$user')",
                 )
             }

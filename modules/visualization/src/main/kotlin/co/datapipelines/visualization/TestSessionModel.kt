@@ -11,9 +11,9 @@ import java.util.UUID
  * The test-session wire and row shapes (the spec's §2.1, §11.2–§11.3; the owner's 2026-09-30 ruling).
  * Every DTO that leaves the service is REDACTED: a capability's presence is a boolean, never a hash,
  * never material — the raw form exists only in the minting call's answer.
+ *
+ * One case's verdict as the agent submits it. A case the submission omits has NO verdict (INCOMPLETE).
  */
-
-/** One case's verdict as the agent submits it. A case the submission omits has NO verdict (INCOMPLETE). */
 enum class CaseVerdict(
     @JsonValue val wire: String,
 ) {
