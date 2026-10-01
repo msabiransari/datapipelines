@@ -206,9 +206,12 @@ class PipelineExplorerRenderTest {
         // `x-data="pipelineEditor()"`, the pre-195 standard build's call form.)
         val html = render("partials/pipeline-detail") { fillDetail() }
 
-        val editorLinks = Regex("""<a [^>]*href="/pipelines/[^"]+/editor"[^>]*>""").findAll(html).map { it.value }.toList()
-        editorLinks.size shouldBeGreaterThan 0
-        editorLinks.forEach { it shouldContain "hx-boost=\"false\"" }
+        // #348-b: the entry link is the CANONICAL read workspace now (the old /editor URL
+        // is the redirect behind it) — the guard's subject is unchanged: every link into
+        // the workspace page is a full document load, never a boosted swap.
+        val workspaceLinks = Regex("""<a [^>]*href="/pipelines/[^"]*"[^>]*>""").findAll(html).map { it.value }.toList()
+        workspaceLinks.size shouldBeGreaterThan 0
+        workspaceLinks.forEach { it shouldContain "hx-boost=\"false\"" }
     }
 
     @Test
@@ -226,8 +229,11 @@ class PipelineExplorerRenderTest {
         html shouldContain "class=\"tplx-detail-path\""
         html shouldContain DEEP_PATH
         html shouldContain "title=\"$DEEP_PATH\""
-        html shouldContain "Open in editor"
-        html shouldContain "/pipelines/$LEAF_ID/editor"
+        // #348-b: the detail header's Open enters the canonical read workspace; the tree
+        // and search rows keep their /editor URLs, which the redirect covers.
+        html shouldContain ">Open</a>"
+        html shouldContain "href=\"/pipelines/$LEAF_ID\""
+        html shouldNotContain "/pipelines/$LEAF_ID/editor"
         // 106: the path is the eyebrow and the LEAF is the title.
         html shouldContain "nyc/mobility/</p>"
         html shouldContain "revenue_by_borough</h2>"
@@ -389,7 +395,7 @@ class PipelineExplorerRenderTest {
             }
         viewer shouldNotContain "data-verb="
         // …and still the thing a viewer came for.
-        viewer shouldContain "Open in editor"
+        viewer shouldContain ">Open</a>"
     }
 
     /**
@@ -647,7 +653,7 @@ class PipelineExplorerRenderTest {
         html shouldContain "Pipeline not found"
         html shouldContain "it may have been deleted"
         html shouldNotContain "tplx-detail-path"
-        html shouldNotContain "Open in editor"
+        html shouldNotContain ">Open</a>"
         html shouldNotContain "tpl-tree"
     }
 

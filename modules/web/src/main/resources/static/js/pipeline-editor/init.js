@@ -412,18 +412,26 @@
           var type = (self.parameters[k] && self.parameters[k].type) || "STRING";
           wire[k] = window.coerceValue(raw, type);
         });
-        // #348: the panel shows the SQL of the body the page is VIEWING — the version
-        // travels with every request the workspace makes (workspace spec §3.3). The
-        // legacy omission (an agent or old caller without the parameter) keeps the
-        // resolver's working-version default on the server.
+        // #348-b: the panel shows the SQL of the body the page is VIEWING — the version
+        // travels with every request the workspace makes (workspace spec §3.3). A page that
+        // cannot produce a VALID pin refuses VISIBLY and sends NOTHING: the workspace never
+        // asks for the legacy working-version default (that contract stays with the callers
+        // that omit the parameter — agents, old links — not with the page that displays a
+        // body it cannot name).
         var versionPin = window.PEWorkspaceLogic ? window.PEWorkspaceLogic.executeVersion(window.PEWorkspace) : null;
+        if (versionPin == null) {
+          var pane = document.getElementById("pe-node-sql");
+          if (pane) {
+            pane.textContent =
+              "The page could not read the pipeline's version state, so it cannot show this node's SQL for the version you are viewing. Reload the page; if it persists, re-open the pipeline.";
+          }
+          return;
+        }
         var url =
           "/partials/pipelines/" + encodeURIComponent(self.pipeline.id) +
           "/nodes/" + encodeURIComponent(self.selectedNode.id) + "/sql" +
-          "?parameters=" + encodeURIComponent(JSON.stringify(wire));
-        if (versionPin != null) {
-          url += "&version=" + encodeURIComponent(versionPin);
-        }
+          "?parameters=" + encodeURIComponent(JSON.stringify(wire)) +
+          "&version=" + encodeURIComponent(versionPin);
         // #pe-node-sql lives inside <template x-if="selectedNode">, which Alpine
         // renders on the NEXT tick — issuing htmx.ajax synchronously off a
         // selection change hits htmx:targetError and the section never loads.
@@ -1404,6 +1412,13 @@
       if (root._x_dataStack && window.Alpine.destroyTree) {
         window.Alpine.destroyTree(root);
       }
+      // #348-b: a cached history restore brings the DOM back WITHOUT re-running the page's
+      // scripts, so the workspace context this page published is gone from `window`. Re-read
+      // it from the restored document through the module's own initialization path — which
+      // also clears any stale refusal flag — before the component re-binds and anything can
+      // ask for a pin. The history-lifecycle browser test holds this (its plant removes the
+      // call and demands the stale-refusal red).
+      if (typeof window.PEWorkspaceRead === "function") window.PEWorkspaceRead();
       window.Alpine.initTree(root);
     });
   }

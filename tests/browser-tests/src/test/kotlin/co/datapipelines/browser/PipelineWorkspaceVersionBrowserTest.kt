@@ -141,6 +141,62 @@ class PipelineWorkspaceVersionBrowserTest : BrowserSuite() {
         return id
     }
 
+    /** Seeds a SQL template draft via REST; returns its body hash for release/PUT. */
+    private fun seedTemplate(
+        id: String,
+        sql: String,
+        ifMatch: String? = null,
+        update: Boolean = false,
+    ): String {
+        val body =
+            """{"id":"$id","type":"sql","dialect":"H2","display_name":"${id.substringAfterLast('/')}",""" +
+                """"description":"348-b lifecycle fixture","imports":[],"body":"$sql"}"""
+        val (status, text) =
+            if (update) {
+                api("PUT", "/api/v1/templates", body, ifMatch = ifMatch)
+            } else {
+                api("POST", "/api/v1/templates", body)
+            }
+        check(status == 200 || status == 201) { "template write -> $status: ${text.take(300)}" }
+        return hashOf(text)
+    }
+
+    private fun sqlBody(
+        nodeId: String,
+        templateId: String,
+        templateVersion: Int,
+    ): String =
+        """{"name":"p348/sql_pipes","display_name":"SQL Pipes",""" +
+            """"nodes":[{"id":"$nodeId","type":"DQL",""" +
+            """"source":"tempdb","template":{"id":"$templateId","version":$templateVersion},"depends_on":[]}]}"""
+
+    /**
+     * Seeds the SQL lifecycle fixture: template v1 ("one") and v2 ("two") both RELEASED;
+     * pipeline v1 (node sql_v1 → tpl@1) and v2 (node sql_v2 → tpl@2) both RELEASED, current
+     * switched back to v1; a v3 draft. Distinct nodes AND distinct SQL per version.
+     */
+    private fun seedSqlVersions(slug: String): String {
+        loginReadyUser(slug)
+        val templateId = "test/p348_sql_" + generatedPassword("t").take(6).lowercase()
+        val tplV1Hash = seedTemplate(templateId, "SELECT 1 AS one")
+        must("POST", "/api/v1/templates/release", """{"name":"$templateId"}""", ifMatch = tplV1Hash)
+        val tplV2Hash = seedTemplate(templateId, "SELECT 2 AS two", ifMatch = tplV1Hash, update = true)
+        must("POST", "/api/v1/templates/release", """{"name":"$templateId"}""", ifMatch = tplV2Hash)
+
+        val created = must("POST", "/api/v1/pipelines", sqlBody("sql_v1", templateId, 1))
+        val uuid = "([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"
+        val id = Regex(""""id"\s*:\s*"$uuid"""").find(created)!!.groupValues[1]
+        val v1Hash = hashOf(created)
+        must("POST", "/api/v1/pipelines/$id/release", null, ifMatch = v1Hash)
+
+        val v2Hash = hashOf(must("PUT", "/api/v1/pipelines/$id", sqlBody("sql_v2", templateId, 2), ifMatch = v1Hash))
+        must("POST", "/api/v1/pipelines/$id/release", null, ifMatch = v2Hash)
+
+        must("PUT", "/api/v1/pipelines/$id", calcBody("n_v3"), ifMatch = v2Hash)
+        must("POST", "/api/v1/pipelines/$id/current", """{"version": 1}""")
+        return id
+    }
+
     /** The version chip's text — the page's one statement of which body is showing. */
     private fun viewedChip(): String = page.locator(".pe-vchip").innerText()
 
@@ -347,6 +403,48 @@ class PipelineWorkspaceVersionBrowserTest : BrowserSuite() {
             }""",
             workspaceName,
         )
+    }
+
+    /**
+     * #348-b — the SQL preview pin, in a real browser: each version's body pins a DIFFERENT
+     * released template version, so the pane's statement names the viewed body's SQL and
+     * the wire request carries that exact version. (The cached-HISTORY leg of the original
+     * lifecycle — away through the UI, back through the restore — is #358-blocked at the
+     * suite's zero-CSP-violation collector: the restore re-initialises the canvas over the
+     * cached DOM and Cytoscape's re-applied inline style fails the pinned style hash. The
+     * CONTEXT-restore contract this lane owns is proven at the unit level,
+     * editor-teardown.test.mjs's rescue case, red-under-plant.)
+     */
+    @Test
+    fun `the SQL preview pins the VIEWED version - distinct template SQL per version, exact wire pin`() {
+        val id = seedSqlVersions("pwsh" + generatedPassword("s").take(6).lowercase())
+
+        val sqlRequests = mutableListOf<String>()
+        page.route("**/partials/pipelines/*/nodes/*/sql*") { route ->
+            if (route.request().method() == "GET") sqlRequests += route.request().url()
+            route.resume()
+        }
+
+        // The NON-CURRENT release v2 (current is v1, a draft v3 sits beside it): the pane's
+        // statement is the VIEWED body's template version — "two", not "one".
+        page.navigate("$baseUrl/pipelines/$id?version=2")
+        page.waitForSelector(".pe-card")
+        page.locator(".pe-card-open").first().click()
+        page.waitForSelector("#pe-node-sql .pe-sql-code")
+        page.locator("#pe-node-sql").innerText() shouldContain "SELECT 2 AS two"
+        page.locator(".pe-vchip").innerText() shouldBe "v2 · released"
+
+        // The current v1 renders ITS OWN body and SQL.
+        page.navigate("$baseUrl/pipelines/$id")
+        page.waitForSelector(".pe-card")
+        page.locator(".pe-card-open").first().click()
+        page.waitForSelector("#pe-node-sql .pe-sql-code")
+        page.locator("#pe-node-sql").innerText() shouldContain "SELECT 1 AS one"
+
+        sqlRequests.size shouldBeGreaterThanOrEqual 2
+        sqlRequests.forEach { url -> url shouldContain "version=" }
+        sqlRequests.any { it.contains("version=2") } shouldBe true
+        sqlRequests.any { it.contains("version=1") } shouldBe true
     }
 
     private companion object {

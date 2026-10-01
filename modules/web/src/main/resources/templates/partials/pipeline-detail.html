@@ -89,7 +89,12 @@
              executed — and the page has no Execute, no dock, no inspector (found live
              2026-09-05, first walk after 076; the facts link joined this rule in #149). -->
         <a class="ds-button ds-button-primary ds-button-sm tplx-detail-open" hx-boost="false"
-           th:href="@{'/pipelines/' + ${pipeline.id} + '/editor'}" th:title="${pipeline.name}">Open in editor</a>
+           th:href="@{/pipelines/{id}(id=${pipeline.id})}" th:title="${pipeline.name}">Open</a>
+        <!-- #348-b: the catalog's Open action enters the CANONICAL read workspace
+             (`/pipelines/{id}`, full document), not the old editor URL — which survives as
+             a redirect, but a link should name its destination. The unqualified URL is
+             correct here: the catalog row carries no version, so the page's current-first
+             default resolves it. -->
       </div>
     </header>
 

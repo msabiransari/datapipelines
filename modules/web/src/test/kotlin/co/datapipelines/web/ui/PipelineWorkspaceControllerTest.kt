@@ -342,6 +342,61 @@ class PipelineWorkspaceControllerTest {
         promoter["canReadExecutions"] shouldBe false
     }
 
+    /**
+     * #348-b finding 1 — the page's WHOLE serialized projection honours the lens, not only
+     * the fields the model names. Development posture lets the current pointer name a DRAFT
+     * (D60); with an admitted older RELEASED row viewed explicitly, the raw serializer would
+     * write that hidden draft number into `current_version` of the page's script JSON.
+     * Positive control: the author's same page DOES carry the pointer (visible current).
+     */
+    @Test
+    fun `a promoter's page json carries no hidden current-draft pointer or status`() {
+        authenticate()
+        seedDevelopmentPostureDraftCurrent()
+        becomePromoter()
+        val m = open(version = "1")
+        val tree =
+            co.datapipelines.pipeline.PipelineJson
+                .objectMapper()
+                .readTree(m["pipelineJson"] as String)
+
+        tree.get("current_version").isNull shouldBe true
+        tree.has("draft") shouldBe false
+        (m["pipelineJson"] as String).contains("\"DRAFT\"") shouldBe false
+        tree.get("version").asInt() shouldBe 1
+        (m["pipelineJson"] as String) shouldContain "extract_v1"
+    }
+
+    @Test
+    fun `an author's page json keeps the visible current pointer and draft - the positive control`() {
+        authenticate()
+        seedDevelopmentPostureDraftCurrent()
+        val m = open(version = "1")
+        val tree =
+            co.datapipelines.pipeline.PipelineJson
+                .objectMapper()
+                .readTree(m["pipelineJson"] as String)
+
+        tree.get("current_version").asInt() shouldBe 3
+        tree.get("draft").get("version").asInt() shouldBe 3
+        tree.get("version").asInt() shouldBe 1
+    }
+
+    /** v1 and v2 RELEASED (v1 current on the INDEX? no — current names the DRAFT v3, D60's development fallback), v3 draft. */
+    private fun seedDevelopmentPostureDraftCurrent() {
+        every { repository.findById(any(), pipelineId) } returns record.copy(currentVersion = 3)
+        every { repository.findVersionBody(any(), pipelineId, 1) } returns bodyJson("extract_v1")
+        every { repository.findVersionBody(any(), pipelineId, 2) } returns bodyJson("extract_v2")
+        every { repository.findVersionBody(any(), pipelineId, 3) } returns bodyJson("extract_v3")
+        every { repository.findVersionDetail(any(), pipelineId, 1) } returns detail(1, PipelineVersionStatus.RELEASED)
+        every { repository.findVersionDetail(any(), pipelineId, 2) } returns detail(2, PipelineVersionStatus.RELEASED)
+        every { repository.findVersionDetail(any(), pipelineId, 3) } returns detail(3, PipelineVersionStatus.DRAFT)
+        every { repository.findDraftDetail(any(), pipelineId) } returns detail(3, PipelineVersionStatus.DRAFT)
+        every { repository.findCurrentVersionDetail(any(), pipelineId) } returns detail(3, PipelineVersionStatus.DRAFT)
+        every { repository.listVersions(any(), pipelineId) } returns
+            listOf(row(3, PipelineVersionStatus.DRAFT), row(2, PipelineVersionStatus.RELEASED), row(1, PipelineVersionStatus.RELEASED))
+    }
+
     @Test
     fun `the workspace json names the viewed version - one source for displayed and submitted`() {
         authenticate()

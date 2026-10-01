@@ -18,6 +18,7 @@ import path from "node:path";
 const require = createRequire(import.meta.url);
 const here = path.dirname(fileURLToPath(import.meta.url));
 const initPath = path.resolve(here, "../../main/resources/static/js/pipeline-editor/init.js");
+const workspacePath = path.resolve(here, "../../main/resources/static/js/pipeline-editor/workspace.js");
 
 /**
  * Load init.js fresh with the browser surfaces it touches at module scope:
@@ -48,6 +49,10 @@ function loadEditor() {
       if (id === "pipeline-data") {
         return { textContent: JSON.stringify({ id: "p1", name: "demo", nodes: [] }) };
       }
+      // #348-b: the workspace block is part of the cached DOM a history restore brings back.
+      if (id === "pipeline-workspace") {
+        return { textContent: JSON.stringify({ pipelineId: "p1", viewedVersion: 2, hasBody: true, canExecute: true }) };
+      }
       return null;
     },
     querySelector: () => null,
@@ -57,8 +62,7 @@ function loadEditor() {
   globalThis.document = doc;
   globalThis.PEDockShim = true;
   globalThis.window.PEDock = { createDock: () => ({}) };
-  globalThis.window.PEEvents = { createEventsLog: () => ({}) };
-  globalThis.ResultPanel = class {
+  globalThis.window.PEEvents = { createEventsLog: () => ({}) };  globalThis.ResultPanel = class {
     constructor() {
       this.cursorEndpoint = null;
     }
@@ -85,6 +89,8 @@ function loadEditor() {
   globalThis.announceStatus = () => {};
 
   delete require.cache[require.resolve(initPath)];
+  delete require.cache[require.resolve(workspacePath)];
+  require(workspacePath); // the ACTUAL module: its read path is what the rescue must call
   require(initPath);
 
   return { spies, docListeners, bodyListeners, removed, main };
@@ -153,6 +159,33 @@ test("a swap whose target IS #app-main (history restore) tears down too", () => 
 
   assert.equal(spies.destroy, 1);
   assert.equal(globalThis.window.__peInstance, null);
+});
+
+test("#348-b - the afterSettle rescue re-reads the workspace context from the restored document", () => {
+  const { spies, docListeners } = loadEditor();
+  spies.peRoot = { id: "pe-root-fake", _x_dataStack: [{}] };
+  globalThis.window.Alpine = {
+    initTree: (el) => spies.initTree.push(el),
+    destroyTree: () => {},
+  };
+  // A valid component was live; the boosted departure tore it down and cleared the pin.
+  const component = globalThis.window.pipelineEditor();
+  component.init();
+  globalThis.window.__peInstance = component;
+  fire(docListeners, "htmx:beforeSwap", { detail: { boosted: true } });
+  assert.equal(globalThis.window.__peInstance, null);
+  assert.equal(globalThis.window.PEWorkspace, null, "departure cleared the pin");
+  spies.initTree.length = 0;
+
+  // The history restore brings the SAME document back (the stubs above are its DOM);
+  // the rescue re-reads the block through the module's own path before re-binding.
+  fire(docListeners, "htmx:afterSettle", { detail: {} });
+
+  assert.deepEqual(globalThis.window.PEWorkspace, {
+    pipelineId: "p1", viewedVersion: 2, hasBody: true, canExecute: true,
+  });
+  assert.equal(globalThis.window.PEWorkspaceInvalid, false, "no stale refusal survives a valid restore");
+  assert.deepEqual(spies.initTree, [spies.peRoot], "the component still re-binds exactly once");
 });
 
 test("afterSettle re-binds the editor root through Alpine when no component is live", () => {

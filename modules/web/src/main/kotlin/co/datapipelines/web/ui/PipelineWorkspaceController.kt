@@ -75,13 +75,23 @@ class PipelineWorkspaceController(
         model.addAttribute("canReadExecutions", roles.canReadExecutions)
         model.addAttribute("activeTab", PipelineWorkspaceTab.fromWire(tab, roles.canReadExecutions).wire)
 
-        // A body selected: the graph's data block. The version field names the VIEWED row —
-        // `PipelineResponses.full` falls back to the current pointer when the detail row is
-        // absent, which would silently misname a narrow-read version (spec: fields describing
-        // the viewed version come from that same row/body).
+        // A body selected: the graph's data block. Two fields are the PAGE's, not the REST
+        // serializer's: `version` names the VIEWED row (`PipelineResponses.full` falls back
+        // to the current pointer when the detail row is absent, which would silently misname
+        // a narrow-read version), and `current_version` names the current the CALLER MAY SEE
+        // (#348-b: development posture lets the pointer name a DRAFT — writing the raw index
+        // value handed a promoter the hidden draft's number in the page's script JSON; the
+        // model's lens-visible pointer is the only current this surface states). The draft
+        // pointer rides [PipelineResponses.full] only through the lens-filtered
+        // [PipelineWorkspaceModel.Resolved.draft], so a hidden draft has no pointer here
+        // either. PipelineResponses' REST shape is untouched — this override is on the page's
+        // own copy of the tree.
         if (resolved.hasSelectedBody) {
-            val tree = PipelineResponses.full(resolved.record, resolved.selected.bodyJson!!, resolved.selected.detail, resolved.draft)
-            resolved.viewedVersion?.let { (tree as ObjectNode).put("version", it) }
+            val tree =
+                PipelineResponses
+                    .full(resolved.record, resolved.selected.bodyJson!!, resolved.selected.detail, resolved.draft) as ObjectNode
+            resolved.viewedVersion?.let { tree.put("version", it) }
+            resolved.currentVisible?.let { tree.put("current_version", it) } ?: tree.putNull("current_version")
             model.addAttribute("pipelineJson", ScriptSafeJson.forScriptBlock(mapper.writeValueAsString(tree)))
         }
         // The workspace state the client pins reads and runs from — ONE source for the
