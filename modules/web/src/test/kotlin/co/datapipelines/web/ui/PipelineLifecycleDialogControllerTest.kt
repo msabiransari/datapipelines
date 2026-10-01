@@ -201,7 +201,7 @@ class PipelineLifecycleDialogControllerTest {
                     .contentType(MediaType.APPLICATION_FORM_URLENCODED)
                     .param("from", "editor")
                     .header("HX-Request", "true"),
-            ).andExpect(header().string("HX-Redirect", "/pipelines/$PIPELINE/editor?ok=released"))
+            ).andExpect(header().string("HX-Redirect", "/pipelines/$PIPELINE?ok=released"))
     }
 
     @Test
@@ -256,7 +256,7 @@ class PipelineLifecycleDialogControllerTest {
                     .param("from", "editor")
                     .param("releasePinnedTemplates", "true")
                     .header("HX-Request", "true"),
-            ).andExpect(header().string("HX-Redirect", "/pipelines/$PIPELINE/editor?ok=released_with_templates"))
+            ).andExpect(header().string("HX-Redirect", "/pipelines/$PIPELINE?ok=released_with_templates"))
     }
 
     @Test
@@ -307,6 +307,24 @@ class PipelineLifecycleDialogControllerTest {
         // The recording check the MISTAKES entry demands: the guard ran BEFORE the service,
         // so a mismatch must leave the service untouched.
         verify(exactly = 0) { pipelines.purgeVersion(any(), any(), any()) }
+    }
+
+    @Test
+    fun `purge from the editor - the draft outcome redirects to the canonical workspace with its flash`() {
+        // #348 merge follow-up: `/pipelines/{id}/editor` is a compatibility redirect that forwards only
+        // `version` and `tab`, so an `ok` sent there was dropped and the toast never rendered.
+        every { pipelines.purgeVersion(WORKSPACE, PIPELINE, 4) } returns
+            PipelineReleaseService.Purged.Version(executionsDeleted = 0, record = record(currentVersion = 3))
+
+        mvc
+            .perform(
+                post("/partials/pipelines/$PIPELINE/lifecycle/purge")
+                    .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                    .param("version", "4")
+                    .param("confirm", "v4")
+                    .param("from", "editor")
+                    .header("HX-Request", "true"),
+            ).andExpect(header().string("HX-Redirect", "/pipelines/$PIPELINE?ok=draft_purged"))
     }
 
     @Test

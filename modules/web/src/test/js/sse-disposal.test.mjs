@@ -142,6 +142,29 @@ test("a live recovery still reports its terminal outcome (positive control)", as
   assert.equal(f.writes.filter((w) => w[0] === "settled").length, 1, "the live path settles");
 });
 
+test("a recovery poll that finds the run FINISHED clears the live-run record — no re-attach, no second toast later", async () => {
+  // The streamed terminal clears window.__peLiveExecution (dispatch); the polled terminal
+  // must too, or a boosted leave + restore re-attaches to a finished run and replays its
+  // terminal event. Red with the clearing removed from the poll's terminal branch.
+  for (const status of ["SUCCESS", "FAILED", "ABORTED"]) {
+    const f = fixture();
+    f.win.__peLiveExecution = { executionId: "execution-a" };
+    f.handler.executionId = "execution-a";
+    f.handler.pollExecution();
+    f.respond(f.json({ status }));
+    await tick();
+    assert.equal(f.win.__peLiveExecution, null, `${status} found by the poll clears the record`);
+    assert.equal(f.writes.filter((w) => w[0] === "settled").length, 1, `${status} still settles`);
+  }
+  const running = fixture();
+  running.win.__peLiveExecution = { executionId: "execution-a" };
+  running.handler.executionId = "execution-a";
+  running.handler.pollExecution();
+  running.respond(running.json({ status: "RUNNING" }));
+  await tick();
+  assert.deepEqual(running.win.__peLiveExecution, { executionId: "execution-a" }, "a RUNNING answer keeps the record");
+});
+
 test("a disposed handler drops a stream chunk that was already in flight", async () => {
   const f = fixture();
   f.handler.reattach("execution-live");

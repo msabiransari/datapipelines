@@ -13,7 +13,13 @@ import org.springframework.security.oauth2.client.registration.ClientRegistratio
  * collaborators explicitly (015, module-structure.md §8.4).
  * Thymeleaf is auto-configured by Spring Boot; the `error/` templates
  * in `templates/error/` are picked up by [org.springframework.boot.autoconfigure.web.servlet.error.ErrorMvcAutoConfiguration].
+ *
+ * One bean per UI collaborator, the DomainConfiguration shape (015 / module-structure §8.4): the
+ * count grows with the screens, not with any complexity here — hence the function-count
+ * suppression. The 20th arrived at the 348 merge: L3b's dashboards model and #348's workspace
+ * model each added one.
  */
+@Suppress("TooManyFunctions")
 @Configuration
 @EnableConfigurationProperties(UiProperties::class)
 class UiConfig {

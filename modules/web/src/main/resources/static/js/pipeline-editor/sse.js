@@ -712,6 +712,12 @@
         // the editor compared them case-sensitively against lowercase words, so
         // even a successful recovery poll fell through to "Connection lost" (027).
         var status = (data.status || (data.data && data.data.status) || "").toLowerCase();
+        // #358 (merge follow-up): a run the recovery poll finds FINISHED is as terminal as a
+        // streamed terminal event — the live-run record clears here too, or a later restore
+        // would re-attach to the finished run and replay its terminal (one more toast).
+        if (status === "completed" || status === "success" || status === "failed" || status === "aborted") {
+          if (typeof window !== "undefined") window.__peLiveExecution = null;
+        }
         if (status === "completed" || status === "success") {
           self.editor.isExecuting = false;
           if (self.editor.stopRunClock) self.editor.stopRunClock("done");

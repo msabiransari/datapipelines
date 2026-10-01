@@ -97,7 +97,10 @@ class PipelineLifecycleDialogController(
         // it — one event per cascaded template first, then the pipeline's (142).
         LifecycleVerbs.auditRelease(audit, principal, workspaceId, id, released)
         return if (from == FROM_EDITOR) {
-            redirect("/pipelines/$id/editor?ok=" + if (released.templatesReleased.isEmpty()) "released" else "released_with_templates")
+            // #348 merge: the canonical workspace route — `/pipelines/{id}/editor` is a compatibility
+            // redirect now and forwards only `version` and `tab`, so an `ok` sent there was dropped and
+            // the release toast never rendered (PipelineLifecycleDialogControllerTest pins the target).
+            redirect("/pipelines/$id?ok=" + if (released.templatesReleased.isEmpty()) "released" else "released_with_templates")
         } else {
             applied(
                 model,
@@ -170,7 +173,7 @@ class PipelineLifecycleDialogController(
             }
 
             from == FROM_EDITOR -> {
-                redirect("/pipelines/$id/editor?ok=draft_purged")
+                redirect("/pipelines/$id?ok=draft_purged")
             }
 
             else -> {
