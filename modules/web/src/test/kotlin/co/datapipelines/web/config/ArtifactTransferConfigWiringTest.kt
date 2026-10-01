@@ -18,6 +18,8 @@ import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.assertions.withClue
+import io.kotest.matchers.collections.shouldBeEmpty
+import io.kotest.matchers.ints.shouldBeGreaterThanOrEqual
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -27,6 +29,7 @@ import org.springframework.context.annotation.Configuration
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.jdbc.datasource.DataSourceTransactionManager
 import org.springframework.transaction.PlatformTransactionManager
+import java.io.File
 import java.util.UUID
 
 /**
@@ -41,6 +44,13 @@ import java.util.UUID
  * asserted against the database — never a reflective assertion on a field. The override is proven BOTH ways:
  * a ceiling BELOW the default refuses a bundle the default admits, and a ceiling ABOVE the default admits a
  * closure the default refuses — so a test cannot pass because the override was ignored.
+ *
+ * The residue claims say exactly what they mean: a refusal ADDS NO RESIDUE. Every count is extracted into a
+ * LOCAL value and asserted unconditionally — an infix matcher bound to an Elvis fallback is part of that
+ * fallback and executes only when the left side is null, and a SQL COUNT is never null, so the delivered
+ * residue checks executed ZERO assertions (the L1c-d defect; the root reviewer's compiled witness holds the
+ * runtime proof). Where a case INTENDS a prior success, the captured before-state is pinned explicitly and
+ * the refusal is asserted unchanged against it — never against an empty database the method no longer has.
  *
  * Releases are stamped by SQL (the L2/E2E precedent): the production evidence gate refuses every release
  * until L4, and this wiring is not that gate's subject.
@@ -125,6 +135,11 @@ class ArtifactTransferConfigWiringTest {
             VisualizationRepository(jdbc).deleteEntity(WS_A, UUID.fromString(payload.path("id").asText()))
 
             val closure = visualizationEnvelope(payload, templates = List(51) { templateNode(it) })
+            // The mocked seam, named precisely: the closure's 51 template ENTRIES import through the
+            // RELAXED template-import fake (`RealCollaborators.templateImportService`) — no template
+            // row persists anywhere. What this case proves is the envelope's count bound (the
+            // operator's 75 admits what the default refuses) and the ARTIFACT's real landing; it is
+            // not proof of 51 persisted real templates.
             transfer(ctx).importVisualization(WS_B, closure, AUTHOR)
 
             withClue("51 entries are under the operator's 75: the closure passes the bound and the artifact lands") {
@@ -137,6 +152,17 @@ class ArtifactTransferConfigWiringTest {
         context().run { ctx ->
             val payload = releasedPlainPayload(ctx.getBean(VisualizationService::class.java))
             VisualizationRepository(jdbc).deleteEntity(WS_A, UUID.fromString(payload.path("id").asText()))
+
+            // The intended prior success, pinned: the override block above landed EXACTLY one
+            // visualization into WS_B, and that success is PRESERVED — the refusal below is asserted
+            // against the captured before-state, never against an empty database this method no
+            // longer has (the L1c-d fixture defect: the global residue check sat beside a landing
+            // it denied existed).
+            val before = residue()
+            withClue("the one visualization is the override block's intended success — nothing unexplained may sit beside it") {
+                before shouldBe Residue(visualizations = 1, dashboards = 0)
+            }
+
             val refusal =
                 shouldThrow<DatapipelinesException> {
                     val entry = visualizationEnvelope(payload, templates = List(51) { templateNode(it) })
@@ -149,7 +175,7 @@ class ArtifactTransferConfigWiringTest {
                 refusal.details["count"] shouldBe 51
                 refusal.details["max"] shouldBe 50
             }
-            nothingLanded()
+            assertResidueUnchanged(before)
         }
     }
 
@@ -164,6 +190,14 @@ class ArtifactTransferConfigWiringTest {
             transfer.importVisualization(WS_B, atCap, AUTHOR)
             countVisualizations(WS_B) shouldBe 1
 
+            // The at-cap landing is the intended prior success — pinned, and the one-over refusal
+            // below is asserted to add NOTHING to it (captured before/after; the delivered suite had
+            // no residue check after this refusal at all).
+            val before = residue()
+            withClue("the one visualization is the at-cap landing, the intended prior success") {
+                before shouldBe Residue(visualizations = 1, dashboards = 0)
+            }
+
             val over =
                 shouldThrow<DatapipelinesException> {
                     val overCap = visualizationEnvelope(payload, templates = List(AT_CAP + 1) { templateNode(it) })
@@ -174,6 +208,7 @@ class ArtifactTransferConfigWiringTest {
                 over.details["count"] shouldBe AT_CAP + 1
                 over.details["max"] shouldBe AT_CAP
             }
+            assertResidueUnchanged(before)
         }
     }
 
@@ -199,6 +234,97 @@ class ArtifactTransferConfigWiringTest {
             imported.detail.status shouldBe PipelineVersionStatus.RELEASED
             imported.detail.bodyHash shouldBe exportedHash
         }
+    }
+
+    // ---- the guard -----------------------------------------------------------------------------------------
+
+    /**
+     * The residue assertions are UNCONDITIONAL — no infix matcher dangles off an Elvis fallback in this
+     * file's source. An Elvis's right operand binds tighter than an infix function: a statement of the
+     * shape "query, Elvis-zero, matcher" parses as "query, Elvis (zero, matcher)" — the matcher is part
+     * of the FALLBACK and executes only when the left side is null. A non-null SQL COUNT therefore
+     * returns from such a statement having asserted nothing. The delivered L1c-d suite shipped both
+     * residue checks in that shape, reported green with zero executed assertions, and the root
+     * reviewer's compiled witness (count 7 in, assertions 0 out) is the independent proof.
+     *
+     * Deliberately a text scan of THIS file in the OrderedTestAnnotationGuardTest style, not a helper
+     * test that mirrors the faulty expression — a helper would stay green beside the bypass it copies.
+     * The paren depth decides: a matcher reached while still at or inside the Elvis's own depth is part
+     * of its fallback (the defect, explicitly parenthesized or not — grouping the matcher does not
+     * change which operand it belongs to); only a matcher first reached AFTER the Elvis's enclosing
+     * group has closed asserts the Elvis expression itself. Comment lines are skipped, so this KDoc
+     * names the shape in prose, and the floor below keeps the scan from passing vacuously.
+     */
+    @Test
+    fun `residue assertions execute - no matcher is bound to an Elvis fallback in this source`() {
+        val lines = sourceFile().readLines()
+        var matcherLines = 0
+        val offenders =
+            lines
+                .withIndex()
+                .mapNotNull { (index, line) ->
+                    val trimmed = line.trim()
+                    if (trimmed.isEmpty() || trimmed.startsWith("//") || trimmed.startsWith("*") || trimmed.startsWith("/*")) {
+                        return@mapNotNull null
+                    }
+                    if (MATCHER.containsMatchIn(line)) matcherLines++
+                    elvisBoundMatcher(line)?.let { "${index + 1}: $it" }
+                }
+
+        withClue(
+            "An Elvis's fallback swallows the infix matcher: the assertion runs only when the left " +
+                "side is null, and a SQL COUNT is never null — extract the query into a local value " +
+                "and assert on it (the L1c-d defect, which executed zero residue assertions).",
+        ) {
+            offenders.shouldBeEmpty()
+        }
+        withClue("the scan must see matcher-bearing code lines — vacuous is not clean") {
+            matcherLines shouldBeGreaterThanOrEqual MATCHER_FLOOR
+        }
+    }
+
+    /** The offending line when an infix matcher sits inside an Elvis's fallback on [line], else null. */
+    private fun elvisBoundMatcher(line: String): String? {
+        val matcherStarts = MATCHER.findAll(line).map { it.range.first }.toSet()
+        if (matcherStarts.isEmpty()) return null
+        var from = 0
+        while (true) {
+            val elvis = line.indexOf("?:", from)
+            if (elvis < 0) return null
+            from = elvis + "?:".length
+            val elvisDepth = depthAt(line, elvis)
+            var depth = elvisDepth
+            var at = elvis + "?:".length
+            while (at < line.length) {
+                if (depth < elvisDepth) break // the Elvis's enclosing group closed — a later matcher is outside it
+                if (at in matcherStarts) return line.trim()
+                when (line[at]) {
+                    '(' -> depth++
+                    ')' -> depth--
+                }
+                at++
+            }
+        }
+    }
+
+    private fun depthAt(line: String, index: Int): Int {
+        var depth = 0
+        for (i in 0 until index) {
+            when (line[i]) {
+                '(' -> depth++
+                ')' -> depth--
+            }
+        }
+        return depth
+    }
+
+    /** This suite's own source, resolved by walking up to the repository root (the house guard pattern). */
+    private fun sourceFile(): File {
+        var dir: File? = File("").absoluteFile
+        while (dir != null && !File(dir, "modules/pipeline-contract").isDirectory) dir = dir.parentFile
+        val root = checkNotNull(dir) { "repository root not found walking up from ${File("").absolutePath}" }
+        return File(root, "modules/web/src/test/kotlin/co/datapipelines/web/config/ArtifactTransferConfigWiringTest.kt")
+            .also { found -> check(found.isFile) { "guard source not found at ${found.path}" } }
     }
 
     // ---- fixtures ------------------------------------------------------------------------------------------
@@ -280,10 +406,38 @@ class ArtifactTransferConfigWiringTest {
     private fun countVisualizations(workspace: UUID): Int =
         jdbc.queryForObject("SELECT count(*) FROM visualizations WHERE workspace_id = :ws", mapOf("ws" to workspace), Int::class.java) ?: 0
 
+    /**
+     * The attempt's residue: this suite truncates the artifact tables before EVERY test, so the GLOBAL
+     * counts are exactly this test method's attempt — no other case's rows can sit inside them. The
+     * queries are extracted into LOCAL values so that the assertions in [nothingLanded] are
+     * unconditional: an infix matcher bound to an Elvis fallback executes only when the left side is
+     * null, and a SQL COUNT is never null — the delivered suite's residue checks were of that shape
+     * and executed zero assertions (L1c-d).
+     */
+    private fun residue(): Residue =
+        Residue(
+            jdbc.jdbcTemplate.queryForObject("SELECT count(*) FROM visualizations", Int::class.java) ?: 0,
+            jdbc.jdbcTemplate.queryForObject("SELECT count(*) FROM dashboards", Int::class.java) ?: 0,
+        )
+
+    private data class Residue(val visualizations: Int, val dashboards: Int)
+
     private fun nothingLanded() {
-        withClue("nothing may land when the bound refuses") {
-            jdbc.jdbcTemplate.queryForObject("SELECT count(*) FROM visualizations", Int::class.java) ?: 0 shouldBe 0
-            jdbc.jdbcTemplate.queryForObject("SELECT count(*) FROM dashboards", Int::class.java) ?: 0 shouldBe 0
+        val after = residue()
+        withClue("nothing may land when the bound refuses — the counts are unconditional assertions on local values") {
+            after.visualizations shouldBe 0
+            after.dashboards shouldBe 0
+        }
+    }
+
+    /**
+     * The honest residue claim where the method INTENDS a prior success: the refusal adds NOTHING —
+     * the counts after the refused attempt are exactly the captured before-state, whatever that
+     * state was.
+     */
+    private fun assertResidueUnchanged(before: Residue) {
+        withClue("a refused import adds no residue — the counts must be exactly the captured $before") {
+            residue() shouldBe before
         }
     }
 
@@ -293,6 +447,12 @@ class ArtifactTransferConfigWiringTest {
         val AUTHOR: UUID = UUID.fromString("c0a90000-0000-0000-0000-000000000003")
         val RUN: String = UUID.randomUUID().toString().substring(0, 8)
         const val AT_CAP = 75
+
+        /** A Kotest infix matcher: the bare word, or the word followed by a capital continuation. */
+        val MATCHER = Regex("""\bshould(?:[A-Z]\w*)?\b""")
+
+        /** Matcher-bearing CODE lines this file held at the guard's birth (the non-vacuity floor). */
+        const val MATCHER_FLOOR = 25
 
         /** The reader-valid minimal documents (the module fixtures' shapes, reader-bound before use). */
         object DocumentFixturesJson {
@@ -324,12 +484,25 @@ class ArtifactTransferConfigWiringTest {
          * The collaborators the production factory needs, over the REAL database — real repositories,
          * services and transaction manager; relaxed fakes only where the exercised path reads no row
          * (the transfer's pinless artifacts consult no template or pipeline fact).
+         *
+         * The ONE [DataSource] bean is load-bearing (the L1c-d finding): a transaction manager binds
+         * its transaction resource PER DATASOURCE INSTANCE, and `SharedPostgres.dataSource()` hands
+         * out a NEW instance on every call — wiring the repositories and the manager to two different
+         * instances left every repository statement auto-committing OUTSIDE the transfer's
+         * transactions, and the F1 "rollback" of the default-context control silently rolled back
+         * nothing. The repaired residue assertion caught it on its first honest run (expected 0, the
+         * first bundled member had landed). Production shares THE one DataSource bean
+         * (`TransactionConfiguration.metadataTransactionManager(dataSource: DataSource)`), and the
+         * three-deployment E2E witnesses the real rollback against that wiring.
          */
         @Configuration
         @Suppress("unused")
         class RealCollaborators {
             @Bean
-            fun jdbcTemplate(): NamedParameterJdbcTemplate = NamedParameterJdbcTemplate(SharedPostgres.dataSource())
+            fun dataSource(): javax.sql.DataSource = SharedPostgres.dataSource()
+
+            @Bean
+            fun jdbcTemplate(dataSource: javax.sql.DataSource): NamedParameterJdbcTemplate = NamedParameterJdbcTemplate(dataSource)
 
             @Bean
             fun templateRepository(): co.datapipelines.templates.TemplateRepository = io.mockk.mockk(relaxed = true)
@@ -367,7 +540,8 @@ class ArtifactTransferConfigWiringTest {
             fun authoringGuard(): co.datapipelines.pipeline.AuthoringGuard = co.datapipelines.pipeline.AuthoringGuard(true)
 
             @Bean
-            fun transactionManager(): PlatformTransactionManager = DataSourceTransactionManager(SharedPostgres.dataSource())
+            fun transactionManager(dataSource: javax.sql.DataSource): PlatformTransactionManager =
+                DataSourceTransactionManager(dataSource)
         }
     }
 }
