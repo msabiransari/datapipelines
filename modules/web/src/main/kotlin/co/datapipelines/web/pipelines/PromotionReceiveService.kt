@@ -43,7 +43,12 @@ import org.springframework.transaction.support.TransactionTemplate
  * a deployment that authors must not receive promoted content (D7). Everything after that is
  * §9.2's preserved-version import table, unchanged — conflict, idempotency, hash recompute —
  * because those semantics are right and promotion calls them rather than restating them.
+ *
+ * The constructor's arity is the container's business (@Suppress LongParameterList): every
+ * parameter is a bean this service genuinely needs — the PromotionConfiguration bean method's
+ * own suppression states the same for its factory.
  */
+@Suppress("LongParameterList")
 class PromotionReceiveService(
     private val inventory: PromotionInventoryService,
     private val pipelineImportService: PipelineImportService,
@@ -57,6 +62,11 @@ class PromotionReceiveService(
     private val checkRunner: co.datapipelines.application.checks.PipelineCheckRunner,
     /** #194 lane D — the parameter-set half of promotion (§8.3). Required: a set entry is never silently dropped (#300). */
     private val parameterSetPromotion: co.datapipelines.web.parameters.ParameterSetPromotion,
+    /** #10 L1c — the transfer families' halves (§12, D61): bind and land INSIDE the transaction, after the four families. */
+    private val visualizationPromotion: co.datapipelines.web.visualizations.VisualizationPromotion,
+    private val dashboardPromotion: co.datapipelines.web.visualizations.DashboardPromotion,
+    /** O7 — the batch's two family lists are count-bounded BEFORE any member binds; the config carries the key's name. */
+    private val visualizationConfig: co.datapipelines.visualization.VisualizationConfig,
 ) {
     private val log = LoggerFactory.getLogger(PromotionReceiveService::class.java)
 
@@ -120,6 +130,15 @@ class PromotionReceiveService(
                 parameterSetPromotion.validate(batch.parameterSets, batch.templates, workspace.id)
             }
 
+        // O7 (the L1c pass) — the batch's two family lists are count-bounded BEFORE the transaction opens
+        // and before any member binds. Honest aggregate wording (the L1c-c round): the key is
+        // `max-visualizations-per-dashboard`, whose own document bound caps a dashboard's OCCURRENCES — the
+        // arm bound is an ADDITIONAL ceiling this design puts on each WHOLE batch arm, not a consequence of
+        // the document bound: two individually valid dashboards of 30 pins each can carry 60 distinct
+        // entries, and THIS bound refuses such a batch whole (no partial writes, no automatic split —
+        // [boundTransferArms] states it).
+        boundTransferArms(batch)
+
         transactionTemplate.executeWithoutResult {
             if (batch.templates.isNotEmpty()) {
                 templateImportService.import(templatesPayload(batch), workspace.id, actor)
@@ -139,11 +158,22 @@ class PromotionReceiveService(
             // must find it already stored. Republishing an unchanged endpoint is a no-op
             // rather than a conflict, so a re-push is idempotent like every other entry.
             batch.endpoints.forEach { entry -> endpointPromotion.apply(entry, promoter) }
+            // #10 L1c — the two transfer families LAST (D61's order), bound AND landed inside the
+            // transaction: [landTransferFamilies] states the rule and its reasons.
+            landTransferFamilies(batch, workspace.id, actor)
         }
 
         // C4: the promoted rows are stamped with the peer's identity (the System actor for the
-        // config value), and WHERE they came from is recorded here — the source deployment's name and a fingerprint of the key that
-        // authorised the push. Never the key.
+        // config value), and WHERE they came from is recorded here — the source deployment's name and a
+        // fingerprint of the key that authorised the push. Never the key.
+        return reportApplied(batch, actor)
+    }
+
+    /** The applied report, the audit row and the log line — one spelling of the counts, per kind. */
+    private fun reportApplied(
+        batch: PromotionWire.Batch,
+        actor: java.util.UUID,
+    ): PromotionWire.Applied {
         auditLogger.log(
             event = AUDIT_ACCEPTED,
             userId = actor,
@@ -156,15 +186,19 @@ class PromotionReceiveService(
                     "parameter_sets" to batch.parameterSets.size,
                     "pipelines" to batch.pipelines.size,
                     "endpoints" to batch.endpoints.size,
+                    "visualizations" to batch.visualizations.size,
+                    "dashboards" to batch.dashboards.size,
                 ),
         )
         log.info(
-            "event=$AUDIT_ACCEPTED source_env={} workspace={} templates={} sets={} pipelines={} actor={}",
+            "event=$AUDIT_ACCEPTED source_env={} workspace={} templates={} sets={} pipelines={} visualizations={} dashboards={} actor={}",
             batch.sourceEnv,
             batch.workspace,
             batch.templates.size,
             batch.parameterSets.size,
             batch.pipelines.size,
+            batch.visualizations.size,
+            batch.dashboards.size,
             actor,
         )
         return PromotionWire.Applied(
@@ -174,7 +208,77 @@ class PromotionReceiveService(
             pipelines = batch.pipelines.size,
             endpoints = batch.endpoints.size,
             parameterSets = batch.parameterSets.size,
+            visualizations = batch.visualizations.size,
+            dashboards = batch.dashboards.size,
         )
+    }
+
+    /**
+     * #10 L1c — the two transfer families LAST (D61's order: templates → sets → pipelines →
+     * endpoints → visualizations → dashboards), and — unlike the sets — bound AND landed
+     * INSIDE the transaction: neither validator opens a customer datasource (the template
+     * facts render dry, the pipeline facts take only a resolver), so there is no lease wall,
+     * and validating here means the just-landed templates and pipelines ARE what the
+     * import lens resolves against. A shape refusal (the family's body_invalid, bound
+     * through the READER) or a dependency refusal rolls the WHOLE batch back — the C36
+     * property. **Correction (L1c-c):** an earlier revision of this KDoc claimed that case
+     * was proven at E2E level for a refused dashboard; it was not — no receive case refused
+     * a dashboard at all until VisualizationTransferE2eTest's
+     * `a batch that lands a template and a visualization then refuses its dashboard leaves
+     * nothing - the whole rollback witnessed`, which witnesses it now (earlier members land,
+     * the dashboard refuses on landing, every preceding write is absent).
+     */
+    private fun landTransferFamilies(
+        batch: PromotionWire.Batch,
+        workspaceId: java.util.UUID,
+        actor: java.util.UUID,
+    ) {
+        batch.visualizations.forEach { entry ->
+            visualizationPromotion.land(visualizationPromotion.bind(entry), workspaceId, actor)
+        }
+        batch.dashboards.forEach { entry ->
+            dashboardPromotion.land(dashboardPromotion.bind(entry), workspaceId, actor)
+        }
+    }
+
+    /**
+     * O7 — the batch's two family lists, count-bounded before any member binds. A member's own shape is
+     * the reader's business (the ONE entry bind); the LIST's size is the receiver's availability, judged
+     * here before the transaction opens so a pathological batch costs one size comparison, not N binds.
+     *
+     * **The ceiling is AGGREGATE (the L1c-c correction):** `max-visualizations-per-dashboard` is re-used
+     * here as the transfer families' one ceiling, so it caps each WHOLE arm (and, on the import surfaces,
+     * each whole envelope array) on TOP of the per-document bound its name describes. Two dashboards that
+     * are each individually valid — 30 distinct pins apiece under a 50 ceiling — can together present 60
+     * entries, and this bound refuses that batch WHOLE: one refusal naming the configured key, nothing
+     * landed, no automatic split. A separate aggregate knob was considered and NOT added (the bounded
+     * correction keeps one key; a follow-up may propose one with tradeoffs).
+     */
+    private fun boundTransferArms(batch: PromotionWire.Batch) {
+        val max = visualizationConfig.maxVisualizationsPerDashboard
+        listOf(
+            "visualizations" to batch.visualizations,
+            "dashboards" to batch.dashboards,
+        ).forEach { (arm, entries) ->
+            if (entries.size > max) {
+                throw ApiException(
+                    if (arm == "visualizations") {
+                        co.datapipelines.visualization.VisualizationErrorCodes.BODY_INVALID
+                    } else {
+                        co.datapipelines.visualization.DashboardErrorCodes.BODY_INVALID
+                    },
+                    "The batch's $arm arm carries ${entries.size} entries; at most $max " +
+                        "(datapipelines.visualization.max-visualizations-per-dashboard).",
+                    mapOf(
+                        "reason" to "too_many",
+                        "path" to arm,
+                        "count" to entries.size,
+                        "max" to max,
+                        "config_key" to co.datapipelines.visualization.VisualizationKey.MAX_VISUALIZATIONS_PER_DASHBOARD.path,
+                    ),
+                )
+            }
+        }
     }
 
     /**

@@ -583,6 +583,10 @@ class PermissionSeamE2eTest : EntryAssuranceE2eBase() {
                 // #10 L2 — the runtime row (D50): every role that reads a dashboard also executes it, so no role walk
                 // can separate the six runtime routes from `dashboard.read`'s GETs — only a grant can.
                 "dashboard.execute",
+                // #10 L1c — the two transfer rows: workspace-admin rows beside author-held families, so no role
+                // walk can separate the import route from the lifecycle writes — only a grant can.
+                "visualization.import",
+                "dashboard.import",
             )
 
         /** `workspace id -> the one permission granted there`, read by the synthetic grant. */

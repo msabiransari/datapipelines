@@ -6,6 +6,8 @@ import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.templates.TemplateRepository
+import co.datapipelines.visualization.DashboardService
+import co.datapipelines.visualization.VisualizationService
 import java.util.UUID
 
 /**
@@ -21,9 +23,13 @@ import java.util.UUID
  *
  * ## Cost
  * A non-lensed principal: zero queries, zero target calls — [LensedView.EVERYTHING] is a
- * constant. A lensed principal: the two current-version reads (one join each) plus the
- * cached inventory, per request that asks. Promoters are ops people; the read surfaces they
- * reach are the listing screens, not the execution hot path.
+ * constant. A lensed principal: the current-version reads (one join each) plus the cached
+ * inventory, per request that asks. Promoters are ops people; the read surfaces they
+ * reach are the listing screens, not the execution hot path. The dashboard derivation reads
+ * each current released dashboard's BODY once per lensed request (#330, filed LOW): the pins
+ * and the source names live inside the version body, and a pins-only projection would be a new
+ * repository statement outside the L1c fence — left for a follow-up with the number that
+ * justifies it.
  */
 class PromotableViews(
     private val pipelines: PipelineRepository,
@@ -32,7 +38,9 @@ class PromotableViews(
     /** #194 lane D — the set arm of §10.2. Required: the lens's set arm is never silently empty (#300). */
     private val parameterSets: co.datapipelines.parameters.ParameterSetRepository,
     /** #10 L1b — the dashboards the dashboard and visualization lenses derive from. Required, the #300 rule. */
-    private val dashboards: co.datapipelines.visualization.DashboardService,
+    private val dashboards: DashboardService,
+    /** #10 L1c — the visualizations the lens's pins filter against (and the page's visualization rows). */
+    private val visualizations: VisualizationService,
 ) : PromoterLens {
     override fun viewFor(principal: AuthenticatedPrincipal): LensedView {
         if (!principal.isLensed) return LensedView.EVERYTHING
@@ -41,13 +49,12 @@ class PromotableViews(
         val workspace = principal.workspace ?: return unavailable("no_workspace")
         return when (val computed = compute(workspace.id, workspace.name)) {
             is Computed.Ready -> {
-                val derived = dashboardLenses(workspace.id, computed.view.pipelineLens)
                 LensedView(
                     computed.view.pipelineLens,
                     computed.view.templateLens,
                     parameterSets = computed.view.parameterSetLens,
-                    visualizations = derived.visualizations,
-                    dashboards = derived.dashboards,
+                    visualizations = computed.view.visualizationsLens,
+                    dashboards = computed.view.dashboardsLens,
                 )
             }
 
@@ -75,28 +82,25 @@ class PromotableViews(
     fun compute(
         workspaceId: UUID,
         inventory: PromotionWire.Inventory,
-    ): PromotableView =
-        PromotableView.of(
+    ): PromotableView {
+        val currentDashboards = dashboards.currentVersions(workspaceId)
+        val bodiesByName =
+            currentDashboards
+                .mapNotNull { current ->
+                    dashboards
+                        .findVersion(workspaceId, ReadLens.Everything, current.id, current.version)
+                        ?.let { current.name to it.body }
+                }.toMap()
+        return PromotableView.of(
             pipelines.findCurrentVersions(workspaceId),
             templates.findCurrentVersions(workspaceId),
             inventory,
             parameterSets.findCurrentVersions(workspaceId),
+            visualizations.currentVersions(workspaceId),
+            currentDashboards,
+            bodiesByName,
         )
-
-    /**
-     * #10 L1b — the workspace's current RELEASED dashboards (one lensless read each: the derivation needs the pins),
-     * judged against the pipeline lens by [PromotableView.dashboardLenses]. Only a lensed principal pays for it.
-     */
-    private fun dashboardLenses(
-        workspaceId: UUID,
-        pipelineLens: ReadLens,
-    ): PromotableView.DashboardLenses =
-        PromotableView.dashboardLenses(
-            dashboards.currentVersions(workspaceId).mapNotNull { current ->
-                dashboards.findVersion(workspaceId, ReadLens.Everything, current.id, current.version)?.let { current.name to it.body }
-            },
-            pipelineLens,
-        )
+    }
 
     /** Fail closed: every lens — the dashboard and visualization arms included — admits NOTHING. */
     private fun unavailable(reason: String): LensedView =

@@ -59,14 +59,19 @@ enum class Permission(
     PARAMETER_SET_EVALUATE("parameter_set.evaluate"),
 
     // #10 dashboards (the implementation spec's §5; L1b) — the two artifact families' lifecycle rows, the
-    // parameter-set rows' shape. `*_IMPORT` lands with L1c's import routes (between DELETE and RELEASE),
-    // `DASHBOARD_KEY_BIND` with L5 (`DASHBOARD_EXECUTE` landed with L2's runtime) — a row nothing claims fails
+    // parameter-set rows' shape. `*_IMPORT` landed with L1c's import routes (between DELETE and RELEASE),
+    // `DASHBOARD_EXECUTE` landed with L2's runtime, `DASHBOARD_KEY_BIND` with L5 — a row nothing claims fails
     // MatrixRowReachabilityTest, so none is declared ahead of its surface.
     VISUALIZATION_READ("visualization.read"),
     VISUALIZATION_CREATE("visualization.create"),
     VISUALIZATION_UPDATE("visualization.update"),
     VISUALIZATION_VERSION_MANAGE("visualization.version.manage"),
     VISUALIZATION_DELETE("visualization.delete"),
+
+    // #10 L1c — the transfer (rest-api §22). Workspace admin and super admin ONLY (the owner's ruling, the
+    // `api_key.bind` cells): the import verb lands RELEASED content with no evidence run, so an author never
+    // holds it on an authoring deployment — the promotion receiver lands promoted artifacts through the WIRE.
+    VISUALIZATION_IMPORT("visualization.import"),
     VISUALIZATION_RELEASE("visualization.release"),
     VISUALIZATION_SWITCH_VERSION("visualization.switch_version"),
     DASHBOARD_READ("dashboard.read"),
@@ -74,6 +79,7 @@ enum class Permission(
     DASHBOARD_UPDATE("dashboard.update"),
     DASHBOARD_VERSION_MANAGE("dashboard.version.manage"),
     DASHBOARD_DELETE("dashboard.delete"),
+    DASHBOARD_IMPORT("dashboard.import"),
     DASHBOARD_RELEASE("dashboard.release"),
     DASHBOARD_SWITCH_VERSION("dashboard.switch_version"),
 

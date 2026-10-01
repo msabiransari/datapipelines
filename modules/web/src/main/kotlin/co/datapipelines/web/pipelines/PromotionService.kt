@@ -66,6 +66,9 @@ class PromotionService(
     private val endpointPromotion: EndpointPromotion? = null,
     /** #194 lane D — the parameter-set half of promotion (§8.3). Required: set roots are never silently dropped (#300). */
     private val parameterSetPromotion: co.datapipelines.web.parameters.ParameterSetPromotion,
+    /** #10 L1c — the transfer families' half of promotion (§12, D61). Required: their roots are never silently dropped. */
+    private val visualizationPromotion: co.datapipelines.web.visualizations.VisualizationPromotion,
+    private val dashboardPromotion: co.datapipelines.web.visualizations.DashboardPromotion,
     private val deserializer: PipelineDeserializer = PipelineDeserializer(),
 ) {
     private val log = LoggerFactory.getLogger(PromotionService::class.java)
@@ -89,6 +92,10 @@ class PromotionService(
         val promotable: List<Candidate>,
         /** #194 lane D — the same set for parameter sets (§8.3), the page's rows through the model. */
         val promotableParameterSets: List<Candidate>,
+        /** #10 L1c — the admitted dashboards' pins newer than the target: the page's visualization rows. */
+        val promotableVisualizations: List<Candidate>,
+        /** #10 L1c — the admitted dashboards (pipeline-lens-true AND newer): the page's dashboard rows. */
+        val promotableDashboards: List<Candidate>,
         /** How many live pipelines were examined — so an empty listing reads as "in sync", not "broken". */
         val examined: Int,
     )
@@ -130,6 +137,9 @@ class PromotionService(
             promotable = view.pipelines.map { Candidate(it.name, it.displayName, it.localVersion, it.targetVersion) },
             promotableParameterSets =
                 view.parameterSets.map { Candidate(it.name, it.displayName, it.localVersion, it.targetVersion) },
+            promotableVisualizations =
+                view.visualizations.map { Candidate(it.name, it.displayName, it.localVersion, it.targetVersion) },
+            promotableDashboards = view.dashboards.map { Candidate(it.name, it.displayName, it.localVersion, it.targetVersion) },
             examined = view.examinedPipelines,
         )
     }
@@ -158,14 +168,37 @@ class PromotionService(
          * default would silently remove it.
          */
         parameterSetNames: List<String>,
+    ): PromotionWire.Applied = promote(workspaceId, workspaceName, names, parameterSetNames, emptyList(), emptyList())
+
+    /**
+     * #10 L1c — the full form: the two transfer families' roots ride the batch after the sets and
+     * pipelines (D61's order), each dashboard root bringing its pinned visualizations as dependency
+     * ENTRIES of the visualization arm (deduplicated against the roots, O1) and its own payload alone
+     * into the dashboard arm, so the receiver's reader binds each entry as what it is and lands the
+     * visualizations before the dashboards that pin them. Another DELIBERATE overload, for the same
+     * reason its siblings are: the promotion E2Es invoke `promote` reflectively BY SIGNATURE, and a
+     * defaulted parameter would silently erase the shape the callers reflect on.
+     */
+    fun promote(
+        workspaceId: UUID,
+        workspaceName: String,
+        names: List<String>,
+        parameterSetNames: List<String>,
+        /** The visualization roots — the page's visualization table (lens-true: hidden names REFUSE, never drop). */
+        visualizationNames: List<String>,
+        /** The dashboard roots — each brings its pinned visualizations as dependency entries (§10.4's skip rule). */
+        dashboardNames: List<String>,
     ): PromotionWire.Applied {
-        require(names.isNotEmpty() || parameterSetNames.isNotEmpty()) { "promote() needs at least one root" }
+        require(names.isNotEmpty() || parameterSetNames.isNotEmpty() || visualizationNames.isNotEmpty() || dashboardNames.isNotEmpty()) {
+            "promote() needs at least one root"
+        }
         // FRESH, never the lens's cached copy: §10.3's guards run against the target as it is
         // now, and the same view the page computes is rebuilt over that fresh answer.
         val inventory = client.inventory(workspaceName)
         refuseAuthoringTarget(inventory)
 
-        val closure = Closure(workspaceId, views.compute(workspaceId, inventory))
+        val view = views.compute(workspaceId, inventory)
+        val closure = Closure(workspaceId, view)
         names.distinct().forEach { name -> closure.addRoot(name, inventory) }
         // #194 lane D — the set roots AFTER the templates: their pins merge into the batch's
         // template closure, the payloads ride the set slot (§8.3's order). #300: the collaborator
@@ -185,6 +218,10 @@ class PromotionService(
         setEntries
             .flatMap { parameterSetPromotion.templatePins(it) }
             .forEach(closure::addTemplate)
+        // #10 L1c — the transfer roots' entries and their template pins, merged into the batch's
+        // closure: [addTransferRoots] states the guards and the refuse-not-drop rule.
+        val (visualizationEntries, dashboardEntries) =
+            addTransferRoots(workspaceId, view, inventory, closure, visualizationNames, dashboardNames)
         verifyDatasources(closure, inventory)
 
         val batch =
@@ -196,18 +233,76 @@ class PromotionService(
                 parameterSets = setEntries,
                 pipelines = closure.pipelinePayloads(inventory),
                 endpoints = endpointPromotion?.entriesFor(workspaceId, closure.pipelineNames()).orEmpty(),
+                visualizations = visualizationEntries,
+                dashboards = dashboardEntries,
             )
         log.info(
-            "event=pipeline.promotion.pushing target={} workspace={} roots={} templates={} sets={} pipelines={} endpoints={}",
+            "event=pipeline.promotion.pushing target={} workspace={} roots={} templates={} sets={} pipelines={}" +
+                " endpoints={} visualizations={} dashboards={}",
             client.targetBaseUrl,
             workspaceName,
-            names.size + batch.parameterSets.size,
+            names.size + batch.parameterSets.size + batch.visualizations.size + batch.dashboards.size,
             batch.templates.size,
             batch.parameterSets.size,
             batch.pipelines.size,
             batch.endpoints.size,
+            batch.visualizations.size,
+            batch.dashboards.size,
         )
         return client.push(batch).also { client.invalidate(workspaceName) }
+    }
+
+    /**
+     * #10 L1c — the transfer roots' entries and their template pins, merged into the batch's closure.
+     * A root the view hides or that has no promotable release REFUSES with the family's 404 naming
+     * the submitted name (76e8af98's refuse-not-drop, the families' spelling); a dashboard's missing
+     * pin dependency refuses too — the batch must be able to keep the dashboard's promise.
+     *
+     * O1's arms: a dashboard's pinned visualizations are ENTRIES OF THE VISUALIZATION arm — the
+     * receiver binds each `dashboards` entry with the DASHBOARD reader, which refuses a visualization
+     * body — deduplicated by wire identity (name + version + body hash) against the explicit
+     * visualization roots and against each other; the dashboard's own payload alone fills the
+     * dashboard arm.
+     */
+    private fun addTransferRoots(
+        workspaceId: UUID,
+        view: PromotableView,
+        inventory: PromotionWire.Inventory,
+        closure: Closure,
+        visualizationNames: List<String>,
+        dashboardNames: List<String>,
+    ): Pair<List<JsonNode>, List<JsonNode>> {
+        val visualizationTargets = inventory.visualizationByName()
+        val visualizationEntries =
+            visualizationNames
+                .distinct()
+                .map { name ->
+                    visualizationPromotion.entryFor(workspaceId, name, visualizationTargets[name], view)
+                        ?: throw ApiErrors.visualizationNotFound(name)
+                }
+        val dashboardTargets = inventory.dashboardByName()
+        val dashboardRoots =
+            dashboardNames
+                .distinct()
+                .map { name ->
+                    dashboardPromotion
+                        .entriesForRoot(workspaceId, name, dashboardTargets[name], view, visualizationTargets, visualizationPromotion)
+                        ?: throw ApiErrors.dashboardNotFound(name)
+                }
+        val transferEntries =
+            distinctByWireIdentity(visualizationEntries + dashboardRoots.flatMap { it.dependencies })
+        transferEntries.forEach { entry ->
+            visualizationPromotion.templatePins(entry).forEach(closure::addTemplate)
+        }
+        return transferEntries to dashboardRoots.map { it.dashboard }
+    }
+
+    /** The transfer entries distinct by the identity a receiver lands them under — name + version + body hash. */
+    private fun distinctByWireIdentity(entries: List<JsonNode>): List<JsonNode> {
+        val seen = mutableSetOf<Triple<String, Int, String>>()
+        return entries.filter { entry ->
+            seen.add(Triple(entry.path("name").asText(), entry.path("version").asInt(), entry.path("body_hash").asText()))
+        }
     }
 
     /**

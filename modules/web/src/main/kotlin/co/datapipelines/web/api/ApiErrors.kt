@@ -205,6 +205,36 @@ object ApiErrors {
             if (version == null) mapOf("id" to id) else mapOf("id" to id, "version" to version),
         )
 
+    /** The transfer families' not-found: absent, foreign, lens-hidden and not-promotable answer alike (#10 L1c). */
+    fun visualizationNotFound(
+        id: String,
+        version: Int? = null,
+    ): ApiException =
+        ApiException(
+            co.datapipelines.visualization.VisualizationErrorCodes.NOT_FOUND,
+            if (version == null) {
+                "Visualization '$id' not found."
+            } else {
+                "The visualization '$id' has no version $version."
+            },
+            if (version == null) mapOf("id" to id) else mapOf("id" to id, "version" to version),
+        )
+
+    /** The dashboard twin of [visualizationNotFound]. */
+    fun dashboardNotFound(
+        id: String,
+        version: Int? = null,
+    ): ApiException =
+        ApiException(
+            co.datapipelines.visualization.DashboardErrorCodes.NOT_FOUND,
+            if (version == null) {
+                "Dashboard '$id' not found."
+            } else {
+                "The dashboard '$id' has no version $version."
+            },
+            if (version == null) mapOf("id" to id) else mapOf("id" to id, "version" to version),
+        )
+
     /**
      * A parameter-set import envelope of the wrong SHAPE (a readable body whose root, or whose
      * `parameter_set`, is not the export envelope's) — the `parameter.validation.body_invalid`

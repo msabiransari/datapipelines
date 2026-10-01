@@ -87,10 +87,12 @@ class PromotionUiController(
     }
 
     /**
-     * The Promote action. [names] is the pipeline selection and [parameterSetNames] the
-     * parameter-set selection the human ticked (#313 — the record's §8.3 order: templates →
-     * sets → pipelines); every one of them is re-guarded server-side (§10.3, the sender's
-     * four-argument `promote`) and the dependency closure is recomputed from scratch.
+     * The Promote action. [names] is the pipeline selection, [parameterSetNames] the parameter-set
+     * selection and [visualizationNames]/[dashboardNames] the two transfer families' selections the
+     * human ticked (#313, #10 L1c — D61's order: templates → sets → pipelines → visualizations →
+     * dashboards; a dashboard brings its pinned visualizations with it). Every one of them is
+     * re-guarded server-side (§10.3, the sender's six-argument `promote`) and the dependency closure
+     * is recomputed from scratch.
      *
      * Outcomes bounce back to the screen as `?ok=` / `?error=` flashes — the layout's toast
      * contract (ui-screens §5.1) — so a refusal lands on the listing the operator can act on
@@ -101,16 +103,23 @@ class PromotionUiController(
     fun promote(
         @RequestParam(name = "name", required = false) names: List<String>?,
         @RequestParam(name = "parameter_set", required = false) parameterSetNames: List<String>?,
+        @RequestParam(name = "visualization", required = false) visualizationNames: List<String>?,
+        @RequestParam(name = "dashboard", required = false) dashboardNames: List<String>?,
     ): String {
-        val selected = names?.map { it.trim() }?.filter { it.isNotEmpty() }.orEmpty()
-        val selectedSets = parameterSetNames?.map { it.trim() }?.filter { it.isNotEmpty() }.orEmpty()
-        if (selected.isEmpty() && selectedSets.isEmpty()) return "redirect:/promotion?error=nothing_selected"
+        val selected = names.selection()
+        val selectedSets = parameterSetNames.selection()
+        val selectedVisualizations = visualizationNames.selection()
+        val selectedDashboards = dashboardNames.selection()
+        if (listOf(selected, selectedSets, selectedVisualizations, selectedDashboards).all { it.isEmpty() }) {
+            return "redirect:/promotion?error=nothing_selected"
+        }
         return try {
             val principal = requireSessionPrincipal()
             val workspace = principal.requireWorkspace()
-            val applied = promotionService.promote(workspace.id, workspace.name, selected, selectedSets)
+            val applied =
+                promotionService.promote(workspace.id, workspace.name, selected, selectedSets, selectedVisualizations, selectedDashboards)
             "redirect:/promotion?ok=promoted&pipelines=${applied.pipelines}&templates=${applied.templates}" +
-                "&parameter_sets=${applied.parameterSets}"
+                "&parameter_sets=${applied.parameterSets}&visualizations=${applied.visualizations}&dashboards=${applied.dashboards}"
         } catch (e: DatapipelinesException) {
             // The code's LAST segment is the flash key the template renders — the same idiom
             // the workspaces screen uses. The full code and message are already logged and,
@@ -119,6 +128,9 @@ class PromotionUiController(
             "redirect:/promotion?error=${e.code.substringAfterLast('.')}"
         }
     }
+
+    /** The form's selection: trimmed, empty entries dropped, null-safe to an empty list (the 313 mould). */
+    private fun List<String>?.selection(): List<String> = orEmpty().map { it.trim() }.filter { it.isNotEmpty() }
 
     private fun requirePrincipal(): AuthenticatedPrincipal =
         SecurityContextHolder.getContext().authentication?.principal as? AuthenticatedPrincipal

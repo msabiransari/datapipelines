@@ -106,6 +106,13 @@ class VisualizationConfigurationWiringTest {
         fun dashboardRuntimeConfig(): co.datapipelines.visualization.DashboardRuntimeConfig =
             co.datapipelines.visualization.DashboardRuntimeConfig()
 
+        // #10 L1c — the transfer's template half: the bundle composes the repository and the web import service.
+        @Bean
+        fun templateRepository(): co.datapipelines.templates.TemplateRepository = io.mockk.mockk(relaxed = true)
+
+        @Bean
+        fun templateImportService(): co.datapipelines.web.templates.TemplateImportService = io.mockk.mockk(relaxed = true)
+
         @Bean
         fun templateDryRenderer(): co.datapipelines.pipeline.TemplateDryRenderer = io.mockk.mockk(relaxed = true)
 

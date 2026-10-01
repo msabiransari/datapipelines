@@ -96,6 +96,18 @@ class VisualizationConfiguration {
         // L2: the validator's two runtime limits — the refresh deadline cap and the most distinct executions a refresh runs.
         DashboardValidator(pipelines, sets, visualizations.pins, runtime.maxRefreshSeconds, runtime.maxExecutionsPerRefresh)
 
+    /**
+     * O2 of the L1c pass — an import that lands RELEASED judges its pins by the RELEASE rules: the same
+     * status read, set facts and pin facts the validators and the release paths use, one judge beside them.
+     */
+    @Bean
+    fun artifactImportReleaseRules(
+        statuses: TemplateVersionStatuses,
+        sets: ParameterSetFacts,
+        visualizations: VisualizationRepository,
+    ): co.datapipelines.visualization.ArtifactImportReleaseRules =
+        co.datapipelines.visualization.ArtifactImportReleaseRules(statuses, sets, visualizations.pins)
+
     @Bean
     @Suppress("LongParameterList") // the aggregate's ports ARE the wiring
     fun visualizationService(
@@ -135,4 +147,50 @@ class VisualizationConfiguration {
             authoring,
             transactions = TransactionTemplate(transactionManager) as TransactionOperations,
         )
+
+    /**
+     * The transfer's template half (#10 L1c) — the port's web composition over [TemplateImportService], the
+     * parameter-set transfer's composition. The transfer SERVICE lives in `modules/visualization`; only this
+     * adapter needs the `web`-owned template import.
+     */
+    @Bean
+    fun templateBundle(
+        templates: co.datapipelines.templates.TemplateRepository,
+        templateImport: co.datapipelines.web.templates.TemplateImportService,
+    ): co.datapipelines.visualization.TemplateBundle =
+        co.datapipelines.web.visualizations
+            .TemplateBundleAdapter(templates, templateImport)
+
+    /**
+     * The export/import acts of both families (rest-api §22/§23) — the import and the promotion receive bind
+     * through BOTH readers, so the document bounds hold off the save path too (the L1c HIGH item). The
+     * dashboard import runs in ONE transaction over the metadata manager (F1 of the L1c pass). The envelope
+     * arrays' count ceiling is the operator's configured [VisualizationConfig] (C1 of the L1c-c round: the
+     * constructor's default would silently stand in for the operator's value — the bean passes it explicitly,
+     * and [co.datapipelines.web.config.ArtifactTransferConfigWiringTest] proves the override both ways
+     * through this factory).
+     */
+    @Bean
+    @Suppress("LongParameterList") // the aggregate's ports ARE the wiring
+    fun artifactTransferService(
+        visualizations: VisualizationService,
+        dashboards: DashboardService,
+        bundle: co.datapipelines.visualization.TemplateBundle,
+        visualizationReader: VisualizationReader,
+        dashboardReader: DashboardReader,
+        transactionManager: PlatformTransactionManager,
+        releaseRules: co.datapipelines.visualization.ArtifactImportReleaseRules,
+        config: VisualizationConfig,
+    ): co.datapipelines.visualization.ArtifactTransferService =
+        co.datapipelines.visualization
+            .ArtifactTransferService(
+                visualizations,
+                dashboards,
+                bundle,
+                visualizationReader,
+                dashboardReader,
+                transactions = TransactionTemplate(transactionManager) as TransactionOperations,
+                releaseRules = releaseRules,
+                config = config,
+            )
 }

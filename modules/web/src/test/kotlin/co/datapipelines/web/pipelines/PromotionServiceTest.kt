@@ -27,6 +27,7 @@ import io.mockk.mockk
 import io.mockk.slot
 import io.mockk.verify
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertAll
 import java.time.Instant
 import java.util.UUID
 
@@ -62,10 +63,29 @@ class PromotionServiceTest {
     // page's set arm and the sender's set payloads can no longer be silently absent.
     private val parameterSets = mockk<co.datapipelines.parameters.ParameterSetRepository>(relaxed = true)
     private val views =
-        PromotableViews(pipelines, templates, client, parameterSets, mockk<co.datapipelines.visualization.DashboardService>(relaxed = true))
+        PromotableViews(
+            pipelines,
+            templates,
+            client,
+            parameterSets,
+            mockk<co.datapipelines.visualization.DashboardService>(relaxed = true),
+            mockk<co.datapipelines.visualization.VisualizationService>(relaxed = true),
+        )
     private val parameterSetPromotion = mockk<co.datapipelines.web.parameters.ParameterSetPromotion>()
+    private val visualizationPromotion = mockk<co.datapipelines.web.visualizations.VisualizationPromotion>()
+    private val dashboardPromotion = mockk<co.datapipelines.web.visualizations.DashboardPromotion>()
     private val service =
-        PromotionService(pipelines, templates, client, properties, "dev", views = views, parameterSetPromotion = parameterSetPromotion)
+        PromotionService(
+            pipelines,
+            templates,
+            client,
+            properties,
+            "dev",
+            views = views,
+            parameterSetPromotion = parameterSetPromotion,
+            visualizationPromotion = visualizationPromotion,
+            dashboardPromotion = dashboardPromotion,
+        )
 
     init {
         every { client.targetBaseUrl } returns TARGET_URL
@@ -202,6 +222,45 @@ class PromotionServiceTest {
         thrown.code shouldBe co.datapipelines.parameters.ParameterErrorCodes.NOT_FOUND
         thrown.details["id"] shouldBe "finance/hidden"
         verify(exactly = 0) { client.push(any()) }
+    }
+
+    @Test
+    fun `promote refuses a visualization root the view hides or that does not exist - never a silent drop`() {
+        // #10 L1c — the families' spelling of the same rule: VisualizationPromotion.entryFor answers
+        // null for a hidden or unknown name, and the sender refuses with the family's catalogued 404
+        // naming the NAME the caller submitted.
+        every { client.inventory(workspace) } returns inventory()
+        every { visualizationPromotion.entryFor(workspaceId, "finance/hidden", any(), any()) } returns null
+
+        val thrown =
+            shouldThrow<ApiException> {
+                service.promote(workspaceId, workspace, emptyList(), emptyList(), listOf("finance/hidden"), emptyList())
+            }
+
+        assertAll(
+            { thrown.code shouldBe co.datapipelines.visualization.VisualizationErrorCodes.NOT_FOUND },
+            { thrown.details["id"] shouldBe "finance/hidden" },
+            { verify(exactly = 0) { client.push(any()) } },
+        )
+    }
+
+    @Test
+    fun `promote refuses a dashboard root the view hides or that does not exist - never a silent drop`() {
+        every { client.inventory(workspace) } returns inventory()
+        every {
+            dashboardPromotion.entriesForRoot(workspaceId, "finance/hidden", any(), any(), any(), any())
+        } returns null
+
+        val thrown =
+            shouldThrow<ApiException> {
+                service.promote(workspaceId, workspace, emptyList(), emptyList(), emptyList(), listOf("finance/hidden"))
+            }
+
+        assertAll(
+            { thrown.code shouldBe co.datapipelines.visualization.DashboardErrorCodes.NOT_FOUND },
+            { thrown.details["id"] shouldBe "finance/hidden" },
+            { verify(exactly = 0) { client.push(any()) } },
+        )
     }
 
     @Test

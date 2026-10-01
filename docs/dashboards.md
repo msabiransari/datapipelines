@@ -1,9 +1,10 @@
 # Dashboards
 
-**Status:** v0.4 — the two documents and their lifecycle (#10, lane L1a); the REST routes, the MCP tools and the
-permissions (§4, lane L1b); the server runtime (§5, lane L2). The transfer routes (L1c), the client runtime and the
-first-party page (L3), the visualization tests and their release gate (L4) and the `dashboard` key kind (L5) add
-their sections as they land.
+**Status:** v0.10 — the two documents and their lifecycle (#10, lane L1a); the REST routes, the MCP tools and the
+permissions (§4, lane L1b); the transfer routes and their limits' honest contract (§3.3, lanes L1c/L1c-b/L1c-c: the
+import's atomicity, the RELEASE rules on a landing, the aggregate count ceiling, the wire's per-family arms); the server
+runtime (§5, lane L2); the client runtime (§6, lanes L3a/L3a-b/L3a-c). The first-party page (L3b), the visualization
+tests and their release gate (L4) and the `dashboard` key kind (L5) add their sections as they land.
 **Owner:** datapipelines.co core
 **Depends on:** [Versioning](versioning.md) (§3.5 — the lifecycle table), [Pipeline Contract](pipeline-contract.md)
 (§13.22, §13.23 — the codes), [Metadata DB](metadata-db.md) (§4.28–§4.35 — the tables), [Enumerations](enums.md)
@@ -11,7 +12,7 @@ their sections as they land.
 [MCP Server](mcp-server.md) (§6.2.50–§6.2.60 — the tools), [Auth](auth.md) (§7.6 — the permissions)
 **Design:** the [dashboard implementation spec](superpowers/specs/2026-09-28-dashboard-implementation-spec.md) and
 the [design record](superpowers/specs/2026-09-25-dashboard-authoring-design-draft.md) (decisions D1–D63)
-**Last updated:** 2026-09-29
+**Last updated:** 2026-09-30
 
 A dashboard presents released pipeline results. It is built from two versioned artifacts: **visualizations** —
 a chart, table or KPI bound to named inputs, reusable across dashboards — and **dashboards**, which pin released
@@ -223,12 +224,44 @@ reach a visualization's own draft transform pin, which needs that visualization'
 An export is the CURRENT release's envelope: `{"visualization": …, "templates": […], "manifest": {…}}` — the transform
 pin's templates travel with it — and `{"dashboard": …, "visualizations": [each pinned visualization's envelope],
 "manifest": {…}}`, whose manifest names the pinned pipelines and set by reference: a dashboard assumes they were
-promoted first (D61's order: templates, parameter sets, pipelines, visualizations, dashboards). An import lands the
+promoted first (D61's order: templates, parameter sets, pipelines, visualizations, dashboards). The manifest carries
+`evidence: null` until the test sessions land (L4) — the exported release's evidence summary rides it from then on,
+and an importing deployment records `imported_with_evidence` on its audit row verbatim. An import lands the
 templates, then the visualizations, then the dashboard, each at its exported version with its exported id; the
 envelope's shape is judged before anything lands, the lifecycle fields beside a body are ignored by name and any
 other unknown key refuses; the same version with the same hash is a no-op; a pin the target lacks is
 `visualization.import.missing_template` or `dashboard.import.missing_dependency`; an id another artifact on the
 server holds is `*.import.id_taken` — never re-issued (C29).
+
+**The import is ONE transaction for a dashboard** (the L1c-b round, F1): templates → bundled visualizations → the
+dashboard inside one transaction, so a refused dashboard leaves NOTHING landed — the visualization import keeps the
+parameter-set mould's accepted shape (templates then the artifact, each idempotent). The dashboard import's audit
+carries one `visualization.imported` row per LANDED bundled visualization, each naming its id, its version and its
+own envelope manifest's evidence flag — nothing landed is unaudited. **A landing is judged by the RELEASE rules**
+(O2): an import lands RELEASED, so a pin that exists here but is not RELEASED — a draft, or a discarded version —
+refuses with the family's release code (`visualization.release.dependency_not_released` /
+`dashboard.release.dependency_not_released`); a pin this deployment lacks stays the import lens' precise code.
+**The envelope's arrays are count-bounded** (O7): at most `datapipelines.visualization.max-visualizations-per-dashboard`
+entries in a dashboard's bundle or a template closure, refused `body_invalid` with `reason: too_many` before any
+member is parsed. **The ceiling is AGGREGATE (the L1c-c round):** the same value also caps each whole promotion
+batch arm (`visualizations`, `dashboards`) and each whole envelope array — an ADDITIONAL ceiling on top of the
+per-document bound the key's name describes, not a consequence of it. Two dashboards that are each individually
+valid — 30 distinct pins apiece under a 50 ceiling — can together present 60 entries, and such a batch refuses
+WHOLE: one refusal naming the configured key and the count, nothing landed, no automatic split. A genuine batch at
+exactly the configured ceiling lands whole. A separately scoped aggregate bound may be proposed as a follow-up;
+until one is ratified, this documented behaviour is the shipped behaviour.
+
+**The verb is a workspace-admin's, by the owner's ruling (2026-09-29, the `api_key.bind` cells):** the import lands
+RELEASED with no evidence re-run — the D56 promise traveled WITH the exported release, and an authoring deployment
+never re-runs it — so an author never holds `visualization.import` / `dashboard.import`. The promotion receiver
+lands promoted artifacts through the WIRE, never through the import verb: a batch's entries are the versions'
+payloads (never the envelopes), bound through the same strict readers (the bounds hold on receive as on save, the
+arms count-bounded before any member binds), and landed INSIDE the receive's one transaction after the batch's
+templates, sets, pipelines and endpoints, where the just-landed rows are what the import lens resolves against.
+**A dashboard root's pins travel as entries of the batch's `visualizations` arm** (O1) — deduplicated against the
+explicit visualization roots — and the `dashboards` arm carries dashboards alone; the receiver binds each arm's
+entries with that family's reader and lands the visualizations before the dashboards that pin them. An export is
+lensed BEFORE it is built — a visualization or dashboard the promoter lens hides is the same 404 an absent id gets.
 
 ---
 
@@ -256,8 +289,8 @@ parameter sets' shape:
 The two transport key roles (`api_caller`, `promotion_receiver`) hold none of them. **The promoter's lens:** a
 RELEASED dashboard newer than the promotion target's whose EVERY source pipeline her pipeline lens admits — so her
 dashboards never outrun her pipelines — and the visualizations those dashboards pin; anything else answers as an absent
-id. The two import rows land with the transfer routes (L1c), the execute row with the runtime (L2), and the key-binding
-row and the `dashboard_viewer` key column with the key kind (L5).
+id. The two import rows landed with the transfer routes (L1c — the workspace-admin verb, the ruling above), the execute
+row lands with the runtime (L2), and the key-binding row and the `dashboard_viewer` key column with the key kind (L5).
 
 ### 4.2 Validate is an author verb
 
@@ -573,6 +606,9 @@ the conformance suite proves the rules APPLY and is red when the stylesheet is r
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-30 | v0.10 | L1c-c (#10) transfer limits and evidence | **§3.3:** the count ceiling is stated as AGGREGATE — `max-visualizations-per-dashboard` also caps each whole envelope array and each whole promotion batch arm, an additional ceiling on top of the per-document bound (two individually valid dashboards can together exceed it; the batch refuses whole, no partial writes, no split; a batch at exactly the ceiling lands whole — E2E-proven both ways). The promotion page's `body_invalid` flash renders its toast (it was unmapped, hence silent; the `missing_datasources` and `key_invalid` branches' `&#39;` entities inside fragment-expression literals were a latent render-500, fixed with typographic apostrophes). The transfer service now receives the operator's configured value (the bean factory passed nothing; the constructor default stood in silently). |
+| 2026-09-30 | v0.9 | L1c-b (#10) the transfer round's corrections | **§3.3:** the dashboard import is ONE transaction (a refused dashboard leaves nothing landed) and its audit carries one `visualization.imported` row per landed bundled visualization (F1); a landing's pins are judged by the RELEASE rules — a present-but-not-RELEASED pin refuses the family's `release.dependency_not_released` (O2); the envelope's bundle and the batch's family arms are count-bounded by `max-visualizations-per-dashboard` before any member binds (O7); a dashboard root's pins travel as entries of the batch's `visualizations` arm, the dashboard arm carrying dashboards alone (O1). |
+| 2026-09-29 | v0.8 | L1c (#10) the transfer — renumbered at merge after L3a-c's v0.7 | **§3.3** names the manifest's `evidence: null` (L4 fills it) and the import audit's `imported_with_evidence`; the import verb is the workspace-admin verb by the owner's ruling (the `api_key.bind` cells — the envelope lands RELEASED with no evidence re-run), and the promotion wire's receive order and reader binding are stated (the bounds hold on receive as on save; the import lens resolves inside the receive's transaction). §4.1's "the import rows land with the transfer routes" is past tense. |
 | 2026-09-30 | v0.7 | L3a-c (#10) typed controls and the absolute deadline | The composite's BOOLEAN `INPUT` renders the house tri-state select (`— not given —` / `true` / `false`) so an unresolved null is read as null and a visible edit travels as a wire boolean (§6.2); radio groups are named per adapter instance, so two boards in one document never share a native group (§6.2). The lock's absolute deadline is enforced by the clock at both admission points — before the adapter is invoked with a response and again before a resolved render commits — with the inclusive boundary stated (§6.6). The completed target's REAL wire outcome (`ok`, rest-api §23.3) no longer errors a delivered target: completion never clobbers the state the data frame set. |
 | 2026-09-30 | v0.6 | L3a-b (#10) the client runtime corrections | The client consumed the WIRE now (corrections on the delivered tip, the server wire authoritative): §6.2 states the parameter state's real writer shape (flat definition + `state`, typed values, `overrides_applied`, `valid`), the composite's per-definition controls and typed selections, the row-replacing renders and dispose's DOM removal; §6.6 states the lock's corrected coverage — held through the host's asynchronous render, deadline live through it, late renders and reset installs yield to a newer attempt. The abort route is the controller's one-`runtime`-segment path (§5's route table unchanged). |
 | 2026-09-30 | v0.5 | L3a (#10) the client runtime | **New §6 The client runtime** — the vendored artifact and what it owns (§6.1's API), the twelve-function adapter contract (§6.2), the three renderers and the data-is-text rule (§6.3), the two Plotly bundles and the one-bundle rule (§6.4), both credential modes' wire contract including the proxy contract L5's reference proxy implements (§6.5), and the states, notifications and the CSP design-around (§6.6). §5.8's "not here" loses the client runtime; the pages remain L3b's. |

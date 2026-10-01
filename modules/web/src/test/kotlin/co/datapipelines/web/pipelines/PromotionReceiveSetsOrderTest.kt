@@ -9,9 +9,12 @@ import co.datapipelines.auth.KeyRole
 import co.datapipelines.web.parameters.ParameterSetPromotion
 import co.datapipelines.web.templates.TemplateImportService
 import com.fasterxml.jackson.databind.JsonNode
+import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
 import org.junit.jupiter.api.Test
 import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.TransactionDefinition
@@ -27,7 +30,10 @@ import org.springframework.transaction.support.TransactionTemplate
  * and a set import that ran before the templates would refuse `parameter.import.missing_template`
  * on a pin the SAME batch brings. Since #302 (C36) the sets' §4 VALIDATION also has a place in
  * the order: BEFORE the transaction opens (the selector probe leases a customer connection),
- * with the landing inside it. The order is the guard; this test is its falsification lever.
+ * with the landing inside it. #10 L1c extends the landing order by the two transfer families —
+ * templates → sets → pipelines → endpoints → visualizations → dashboards (D61), the families'
+ * bind AND land inside the transaction (no customer datasource is opened, so there is no wall).
+ * The order is the guard; this test is its falsification lever.
  */
 class PromotionReceiveSetsOrderTest {
     private val calls = mutableListOf<String>()
@@ -35,6 +41,8 @@ class PromotionReceiveSetsOrderTest {
     private val pipelineImportService = mockk<PipelineImportService>()
     private val templateImportService = mockk<TemplateImportService>()
     private val parameterSetPromotion = mockk<ParameterSetPromotion>()
+    private val visualizationPromotion = mockk<co.datapipelines.web.visualizations.VisualizationPromotion>()
+    private val dashboardPromotion = mockk<co.datapipelines.web.visualizations.DashboardPromotion>()
     private val peer =
         AuthenticatedPrincipal(
             userId = UUID,
@@ -58,10 +66,13 @@ class PromotionReceiveSetsOrderTest {
             endpointPromotion = mockk<EndpointPromotion>(relaxed = true),
             checkRunner = mockk<PipelineCheckRunner>(relaxed = true),
             parameterSetPromotion,
+            visualizationPromotion,
+            dashboardPromotion,
+            visualizationConfig = co.datapipelines.visualization.VisualizationConfig(),
         )
 
     @Test
-    fun `a batch validates its sets, then applies templates, parameter sets, pipelines in one transaction`() {
+    fun `a batch validates its sets, then lands templates, sets, pipelines and the transfer families in one transaction`() {
         every { inventory.contextFor("acme") } returns
             co.datapipelines.auth.WorkspaceContext(UUID, "acme")
         every { parameterSetPromotion.validate(any(), any(), UUID) } answers {
@@ -80,6 +91,16 @@ class PromotionReceiveSetsOrderTest {
             calls += "pipelines"
             mockk()
         }
+        every { visualizationPromotion.bind(any()) } returns mockk()
+        every { visualizationPromotion.land(any(), UUID, UUID) } answers {
+            calls += "visualizations"
+            mockk()
+        }
+        every { dashboardPromotion.bind(any()) } returns mockk()
+        every { dashboardPromotion.land(any(), UUID, UUID) } answers {
+            calls += "dashboards"
+            mockk()
+        }
 
         val batch =
             PromotionWire.Batch(
@@ -89,13 +110,47 @@ class PromotionReceiveSetsOrderTest {
                 templates = listOf(NODE),
                 parameterSets = listOf(NODE),
                 pipelines = listOf(NODE),
+                visualizations = listOf(NODE),
+                dashboards = listOf(NODE),
             )
         service.apply(batch, peer)
 
         // `validate` (the probe — a customer connection) BEFORE the transaction opens; the
-        // landing inside it, in the §8.3 order. With the validation moved back inside the
-        // transaction (#302's wall) the first entry is "transaction" — this pin is red.
-        calls shouldBe listOf("validate", "transaction", "templates", "sets", "pipelines")
+        // landing inside it, in the §8.3 + D61 order. With the validation moved back inside the
+        // transaction (#302's wall) the first entry is "transaction" — this pin is red; with a
+        // family landing moved outside it (or before the rows its validation reads) the tail is red.
+        calls shouldBe listOf("validate", "transaction", "templates", "sets", "pipelines", "visualizations", "dashboards")
+    }
+
+    /**
+     * O7 of the L1c pass: the batch's two family arms are count-bounded BEFORE the transaction opens and
+     * before any member binds — `max-visualizations-per-dashboard`, the families' one envelope ceiling.
+     * The refusal is the arm family's `body_invalid` with the reader's `too_many` shape, and it costs one
+     * size comparison, not 51 binds.
+     */
+    @Test
+    fun `a batch whose visualization arm exceeds the count bound refuses BEFORE the transaction opens`() {
+        every { inventory.contextFor("acme") } returns co.datapipelines.auth.WorkspaceContext(UUID, "acme")
+
+        val batch =
+            PromotionWire.Batch(
+                sourceEnv = "dev",
+                keyFingerprint = "fp",
+                workspace = "acme",
+                visualizations = List(51) { NODE },
+            )
+
+        val refused = shouldThrow<co.datapipelines.web.api.ApiException> { service.apply(batch, peer) }
+
+        withClue("the refusal must be the count bound: ${refused.details}") {
+            refused.code shouldBe co.datapipelines.visualization.VisualizationErrorCodes.BODY_INVALID
+            refused.details["reason"] shouldBe "too_many"
+            refused.details["count"] shouldBe 51
+            refused.details["max"] shouldBe 50
+        }
+        // Nothing opened, nothing bound: one size comparison refused the batch.
+        calls shouldBe emptyList()
+        verify(exactly = 0) { visualizationPromotion.bind(any()) }
     }
 
     private companion object {

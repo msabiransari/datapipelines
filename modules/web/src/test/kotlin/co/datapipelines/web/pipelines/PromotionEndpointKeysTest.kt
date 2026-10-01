@@ -75,6 +75,10 @@ class PromotionEndpointKeysTest {
             mockk(relaxed = true),
             // #300: required — a strict double is right here: a batch carrying sets would hit it.
             mockk<co.datapipelines.web.parameters.ParameterSetPromotion>(),
+            // #10 L1c: strict doubles — a batch carrying visualizations or dashboards would hit them.
+            mockk<co.datapipelines.web.visualizations.VisualizationPromotion>(),
+            mockk<co.datapipelines.web.visualizations.DashboardPromotion>(),
+            co.datapipelines.visualization.VisualizationConfig(),
         )
 
     @Test

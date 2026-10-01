@@ -12,6 +12,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
+import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.util.UUID
@@ -59,7 +60,16 @@ class VisualizationTransferServiceTest {
         VisualizationTestDb.reset()
         h = LifecycleHarness()
         bundle = RecordingBundle()
-        transfer = ArtifactTransferService(h.visualizations, h.dashboards, bundle)
+        transfer =
+            ArtifactTransferService(
+                h.visualizations,
+                h.dashboards,
+                bundle,
+                VisualizationReader(),
+                DashboardReader(),
+                transactions = h.transactions,
+                releaseRules = h.importReleaseRules,
+            )
     }
 
     private fun releasedVisualization(): ArtifactVersion<VisualizationBody> {
@@ -99,16 +109,23 @@ class VisualizationTransferServiceTest {
     }
 
     @Test
-    fun `a typo in the payload refuses, and a lifecycle key smuggled into a nested object never binds`() {
+    fun `a typo in the payload refuses at the reader, and a lifecycle key smuggled into a nested object never binds`() {
         val envelope = transfer.exportVisualization(WORKSPACE, releasedVisualization().record.id)
         val typo = envelope.deepCopy()
         (typo.get("visualization") as ObjectNode).put("displayname", "x")
-        shouldThrow<DatapipelinesException> { transfer.importVisualization(OTHER_WORKSPACE, typo, AUTHOR) }.code shouldBe
-            VisualizationErrorCodes.BODY_INVALID
+        val typoRefusal =
+            shouldThrow<DatapipelinesException> { transfer.importVisualization(OTHER_WORKSPACE, typo, AUTHOR) }
+        // The READER refuses the typo now (the L1c HIGH item): the family's body_invalid, the key named in the
+        // failure list — the mapper's silent null-bind is gone.
+        typoRefusal.code shouldBe VisualizationErrorCodes.BODY_INVALID
+        typoRefusal.details["failures"].toString() shouldContain "displayname"
         val smuggled = envelope.deepCopy()
         ((smuggled.get("visualization") as ObjectNode).get("renderer") as ObjectNode).put("id", "x")
-        shouldThrow<DatapipelinesException> { transfer.importVisualization(OTHER_WORKSPACE, smuggled, AUTHOR) }.details["reason"] shouldBe
-            "malformed_envelope"
+        val smuggledRefusal =
+            shouldThrow<DatapipelinesException> { transfer.importVisualization(OTHER_WORKSPACE, smuggled, AUTHOR) }
+        smuggledRefusal.code shouldBe VisualizationErrorCodes.BODY_INVALID
+        // The bare-mapper half of the strip is unchanged: a nested lifecycle key is not a top-level one,
+        // so it survives the strip and refuses the strict mapper — the same payload the reader also refuses.
         ArtifactTransferService.bodyOf(smuggled.get("visualization") as ObjectNode, VisualizationBody::class.java) shouldBe null
         bundle.imported shouldBe emptyList()
     }
