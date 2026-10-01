@@ -3,6 +3,7 @@ package co.datapipelines.executor
 import org.slf4j.LoggerFactory
 import org.springframework.dao.DataAccessException
 import org.springframework.data.redis.core.StringRedisTemplate
+import org.springframework.data.redis.core.script.RedisScript
 import java.time.Duration
 import java.util.UUID
 
@@ -145,7 +146,15 @@ interface RefreshStartMarkers {
 
 /**
  * Redis-backed [RefreshStartMarkers]: the marker at `dp:refresh-start:{workspace}:{refresh}`, the per-principal bound
- * in a set beside it (`dp:refresh-starts:{workspace}:{principal}` — the count of starts still in flight).
+ * in a sorted set beside it (`dp:refresh-starts:{workspace}:{principal}` — the count of starts still in flight).
+ *
+ * #365: the members carry their OWN expiry — each is scored by its start's expiry instant, and every count first
+ * prunes the members whose expiry has passed, so a start whose `clear` never ran stops consuming a bound slot the
+ * moment its TTL dies (the set's own TTL is garbage collection, never the accounting). The write is ONE Lua step
+ * (ZADD with the score, then PEXPIRE on the same key), so no command sequence can leave the bound key TTL-less —
+ * a later command throwing happens after a key that already carries its TTL. The key changed type SET→ZSET with
+ * the fix; an overlapping pre-restart instance's SET writes fail WRONGTYPE and land in the same fail-open catch
+ * every other store fault takes (the start proceeds un-marked, self-healing once the old instance exits).
  */
 class RedisRefreshStartMarkers(
     private val redis: StringRedisTemplate,
@@ -166,12 +175,22 @@ class RedisRefreshStartMarkers(
                 StartMarkerRegistration.ALREADY_IN_FLIGHT
             } else {
                 val set = principalSetKey(marker.workspaceId, marker.principalUserId)
-                redis.opsForSet().add(set, marker.refreshId.toString())
-                redis.expire(set, ttl)
-                if ((redis.opsForSet().size(set) ?: 0L) > perPrincipalLimit) {
+                // ONE atomic step: the member lands WITH its own expiry as the score and the key with its TTL —
+                // the #365 rule that no key this store writes can exist TTL-less, whatever fails after.
+                redis.execute(
+                    REGISTER_SCRIPT,
+                    listOf(set),
+                    (System.currentTimeMillis() + ttl.toMillis()).toString(),
+                    marker.refreshId.toString(),
+                    ttl.toMillis().toString(),
+                )
+                // The bound counts only starts that can still be in flight: the members whose expiry
+                // passed (a `clear` that never ran) are pruned before the count, never after it.
+                redis.opsForZSet().removeRangeByScore(set, Double.NEGATIVE_INFINITY, System.currentTimeMillis().toDouble())
+                if ((redis.opsForZSet().size(set) ?: 0L) > perPrincipalLimit) {
                     // The bound is the point: the NEWEST start is the refused one, so an older start never loses
                     // its abort authorization. The set entry AND the marker of a refused start go with it.
-                    redis.opsForSet().remove(set, marker.refreshId.toString())
+                    redis.opsForZSet().remove(set, marker.refreshId.toString())
                     redis.delete(key)
                     StartMarkerRegistration.AT_BOUND
                 } else {
@@ -206,7 +225,7 @@ class RedisRefreshStartMarkers(
     ) {
         try {
             redis.delete(markerKey(workspaceId, refreshId))
-            redis.opsForSet().remove(principalSetKey(workspaceId, principalUserId), refreshId.toString())
+            redis.opsForZSet().remove(principalSetKey(workspaceId, principalUserId), refreshId.toString())
         } catch (e: DataAccessException) {
             // Both keys carry a TTL, so a failed cleanup expires on its own.
             LOG.warn("event=dashboard.refresh_start_marker_not_cleared refresh_id={} error={}", refreshId, e.javaClass.simpleName)
@@ -249,5 +268,20 @@ class RedisRefreshStartMarkers(
         const val SET_PREFIX = "dp:refresh-starts:"
         const val VALUE_PARTS = 3
         val LOG = LoggerFactory.getLogger(RedisRefreshStartMarkers::class.java)
+
+        /**
+         * #365 — the bound member's write as ONE step (ZADD the member scored by its expiry instant,
+         * PEXPIRE the key): either both land or neither, so the TTL-less window a thrown EXPIRE used
+         * to leave behind cannot exist. Scores are epoch millis; the prune reads the same clock domain.
+         */
+        val REGISTER_SCRIPT: RedisScript<Long> =
+            RedisScript.of(
+                """
+                redis.call('ZADD', KEYS[1], ARGV[1], ARGV[2])
+                redis.call('PEXPIRE', KEYS[1], ARGV[3])
+                return 1
+                """.trimIndent(),
+                Long::class.java,
+            )
     }
 }

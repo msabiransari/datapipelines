@@ -90,13 +90,13 @@ class RedisRefreshStartMarkersIntegrationTest {
 
         // A same-principal replay: refused, the owner's one slot still counted once.
         markers.register(marker(), ttlSeconds = 60, perPrincipalLimit = 4) shouldBe StartMarkerRegistration.ALREADY_IN_FLIGHT
-        redis.opsForSet().size("dp:refresh-starts:$workspace:$user") shouldBe 1L
+        redis.opsForZSet().size("dp:refresh-starts:$workspace:$user") shouldBe 1L
 
         // Another principal naming the same id: refused, nothing of theirs recorded, the owner unchanged.
         val other = UUID.randomUUID()
         markers.register(marker(userId = other), ttlSeconds = 60, perPrincipalLimit = 4) shouldBe
             StartMarkerRegistration.ALREADY_IN_FLIGHT
-        redis.opsForSet().size("dp:refresh-starts:$workspace:$other") shouldBe 0L
+        redis.opsForZSet().size("dp:refresh-starts:$workspace:$other") shouldBe 0L
         val found = markers.find(workspace, refresh)
         found.shouldBeTypeOf<RefreshStartMarker>()
         found.principalUserId shouldBe user
@@ -116,5 +116,32 @@ class RedisRefreshStartMarkersIntegrationTest {
         markers.register(marker(), ttlSeconds = 60, perPrincipalLimit = 4) shouldBe StartMarkerRegistration.REGISTERED
 
         redis.hasKey("dp:refresh-abort:$refresh") shouldBe false
+    }
+
+    @Test
+    fun `a member whose clear never ran stops counting toward the bound once its own ttl expires`() {
+        // #365's acceptance case, the issue's own scenario: the first start never reaches its clear
+        // (the crash the bound survives) and a LATER start of the same principal renews the KEY's TTL,
+        // so the stale member must stop counting at its OWN expiry, never at the key's. The third
+        // start is the question — it is not in flight, and it must REGISTER. Red on the pre-#365
+        // SET, whose stale member counted while the key lived.
+        val first = UUID.randomUUID()
+        markers.register(marker(refreshId = first), ttlSeconds = 1, perPrincipalLimit = 2) shouldBe StartMarkerRegistration.REGISTERED
+        markers.register(marker(), ttlSeconds = 60, perPrincipalLimit = 2) shouldBe StartMarkerRegistration.REGISTERED
+        Thread.sleep(1_200)
+        markers.find(workspace, first) shouldBe null // the first start's marker died with its own TTL
+
+        markers.register(marker(refreshId = UUID.randomUUID()), ttlSeconds = 60, perPrincipalLimit = 2) shouldBe
+            StartMarkerRegistration.REGISTERED
+    }
+
+    @Test
+    fun `every key the store writes carries a ttl - the bound key included, before anything can throw`() {
+        // #365's second bullet, the observable half: the bound key is written in ONE Lua step with
+        // its PEXPIRE, so a key of this store exists TTL-less for no window. The step boundary itself
+        // (a throw between ZADD and PEXPIRE) is unconstructible from outside by design — that is the fix.
+        markers.register(marker(), ttlSeconds = 30, perPrincipalLimit = 4) shouldBe StartMarkerRegistration.REGISTERED
+
+        redis.getExpire("dp:refresh-starts:$workspace:$user") shouldBeInRange 1L..30L
     }
 }
