@@ -4,7 +4,7 @@ import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.ints.shouldBeGreaterThan
 import io.kotest.matchers.shouldBe
-import io.kotest.matchers.string.shouldEndWith
+import io.kotest.matchers.string.shouldMatch
 import org.junit.jupiter.api.Test
 
 /**
@@ -56,7 +56,8 @@ class DatasourceFactsLinkBrowserTest : BrowserSuite() {
 
         val nav = page.evaluate("() => performance.getEntriesByType('navigation')[0].name") as String
         withClue("the editor arrived as a FULL document load (navigation entry: $nav; page errors: $pageErrors)") {
-            nav shouldEndWith "/editor"
+            // The fact's link is the compatibility URL; the entry names the canonical page it landed on (#348).
+            nav shouldMatch PipelineWorkspaceUrl.DOCUMENT
         }
         withClue("the editor initialised — the canvas mounted (page errors: $pageErrors)") {
             page.locator("#cy-canvas").count() shouldBeGreaterThan 0

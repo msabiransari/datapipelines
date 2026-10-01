@@ -98,8 +98,8 @@ class PipelineEditorEdgesBrowserTest : BrowserSuite() {
     private fun openEditorFor(name: String) {
         page.navigate("$baseUrl/pipelines?q=$name")
         page.locator("button.tpl-result, button.tpl-leaf").first().click()
-        page.locator("a:has-text('Open in editor')").first().click()
-        page.waitForURL("**/pipelines/*/editor")
+        page.locator("a.tplx-detail-open").first().click()
+        page.waitForURL(PipelineWorkspaceUrl.PATTERN)
         page.locator(".pe-card").first().waitFor()
         // Fit first: the drag test needs every card on-screen, and the layout's second
         // height pass can re-fit a frame later — wait it out before measuring.

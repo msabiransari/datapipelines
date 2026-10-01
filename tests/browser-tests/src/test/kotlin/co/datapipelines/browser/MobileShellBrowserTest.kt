@@ -10,6 +10,7 @@ import io.kotest.matchers.booleans.shouldBeTrue
 import io.kotest.matchers.doubles.shouldBeLessThanOrEqual
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldMatch
 import org.junit.jupiter.api.Test
 import java.nio.file.Path
 import java.nio.file.Paths
@@ -253,10 +254,11 @@ class MobileShellBrowserTest : BrowserSuite() {
             "() => document.querySelector('#app-search-drawer-results [role=option][aria-selected=true]') !== null",
         )
         page.keyboard().press("Enter")
-        page.waitForURL("**/editor")
+        // The row carries the compatibility URL; the redirect lands the canonical workspace (#348).
+        page.waitForURL(PipelineWorkspaceUrl.PATTERN)
         // The boosted settle closed the drawer (and the palette) behind the navigation.
         waitForDrawerClosed()
-        page.url() shouldContain "/editor"
+        page.url() shouldMatch PipelineWorkspaceUrl.DOCUMENT
     }
 
     /** Seeds ONE pipeline through the page's own session (the 106 fixture pattern) and returns its name. */

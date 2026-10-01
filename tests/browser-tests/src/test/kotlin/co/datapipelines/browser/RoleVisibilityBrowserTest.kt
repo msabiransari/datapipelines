@@ -104,7 +104,7 @@ class RoleVisibilityBrowserTest : BrowserSuite() {
 
     /**
      * 122 — D-R3's execute right, through the DOOR the screen actually has: the explorer's
-     * "Open in editor" link. The record said a viewer's editor loads and executes (D-R3,
+     * "Open" link (the detail's door into the canonical workspace, #348). The record said a viewer's editor loads and executes (D-R3,
      * ui-screens §4.3e's pipeline-editor row, RoleVisibilityRenderTest §A) while the route
      * floored the GET at MUTATE_PIPELINES_TEMPLATES, so the click landed on a 403 and the
      * verbs 114 rendered were unreachable — a render test cannot see that, because it never
@@ -136,7 +136,7 @@ class RoleVisibilityBrowserTest : BrowserSuite() {
             if (response.status() >= 400) {
                 badResponses += "${response.status()} ${response.request().method()} ${response.url()}"
             }
-            if (response.request().isNavigationRequest() && response.url().contains("/editor")) {
+            if (response.request().isNavigationRequest() && PipelineWorkspaceUrl.matches(response.url())) {
                 editorDocumentStatus = response.status()
             }
         }
@@ -149,12 +149,12 @@ class RoleVisibilityBrowserTest : BrowserSuite() {
             .locator("button.tpl-result, button.tpl-leaf")
             .first()
             .click()
-        val open = viewer.page.locator("a:has-text('Open in editor')").first()
+        val open = viewer.page.locator("a.tplx-detail-open").first()
         open.waitFor()
         badResponses shouldBe emptyList()
 
         open.click()
-        viewer.page.waitForURL("**/pipelines/*/editor")
+        viewer.page.waitForURL(PipelineWorkspaceUrl.PATTERN)
         // LOAD, not the cards: at base the route answers 403 and no card ever comes, so the
         // red must be the listener's, naming the refused request — not a 30 s card timeout.
         viewer.page.waitForLoadState(com.microsoft.playwright.options.LoadState.LOAD)

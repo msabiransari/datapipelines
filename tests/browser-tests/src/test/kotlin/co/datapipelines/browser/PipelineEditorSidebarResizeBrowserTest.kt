@@ -82,8 +82,8 @@ class PipelineEditorSidebarResizeBrowserTest : BrowserSuite() {
     private fun openEditorFor(name: String) {
         page.navigate("$baseUrl/pipelines?q=$name")
         page.locator("button.tpl-result, button.tpl-leaf").first().click()
-        page.locator("a:has-text('Open in editor')").first().click()
-        page.waitForURL("**/pipelines/*/editor")
+        page.locator("a.tplx-detail-open").first().click()
+        page.waitForURL(PipelineWorkspaceUrl.PATTERN)
         page.locator(".pe-card").first().waitFor()
         editorUrl = page.url()
     }

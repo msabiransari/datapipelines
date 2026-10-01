@@ -68,8 +68,8 @@ class TransformImplementsBrowserTest : BrowserSuite() {
 
         // 3 — the pipeline editor: the card's kind line and the Details row, off the pin's read.
         openPipelineDetail(slug)
-        page.locator("a:has-text('Open in editor')").first().click()
-        page.waitForURL("**/pipelines/*/editor")
+        page.locator("a.tplx-detail-open").first().click()
+        page.waitForURL(PipelineWorkspaceUrl.PATTERN)
         page.waitForFunction(
             "() => (document.querySelector(\".pe-card[data-node-id='active_orders']\") || {}).innerText?.includes('needs review')",
         )

@@ -7,7 +7,7 @@ import org.junit.jupiter.api.Test
 /**
  * 121 — a multi-output CALCULATOR node in the editor, reached the way a user reaches it:
  * seeded through the REST surface (the same in-page fetch PipelineEditorDetailsBrowserTest
- * uses), opened EXPLORER → detail → "Open in editor" (never by URL — the owner's 2026-09-05
+ * uses), opened EXPLORER → detail → "Open" (never by URL — the owner's 2026-09-05
  * rule), and the card read for what the node writes.
  *
  * The card's fact is Part B's shape: `trailing_periods → window_end, window_start` — one
@@ -69,8 +69,8 @@ class PipelineEditorMultiOutputBrowserTest : BrowserSuite() {
         // Explorer → detail → editor, the app's own links the whole way.
         page.navigate("$baseUrl/pipelines?q=$name")
         page.locator("button.tpl-result, button.tpl-leaf").first().click()
-        page.locator("a:has-text('Open in editor')").first().click()
-        page.waitForURL("**/pipelines/*/editor")
+        page.locator("a.tplx-detail-open").first().click()
+        page.waitForURL(PipelineWorkspaceUrl.PATTERN)
         val card = page.locator(".pe-card").first()
         card.waitFor()
 
