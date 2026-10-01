@@ -390,9 +390,7 @@
         busyEls[k].removeAttribute("aria-busy");
       }
       return removed;
-    }
-
-    return {
+    }    return {
       begin: begin,
       end: end,
       snapshotClean: snapshotClean,
@@ -536,9 +534,50 @@
       return true;
     }
 
+    /* #358 — before htmx snapshots the page: the pended control's transient chrome
+       (the class, its scope, the aria-disabled WE set) comes off the LIVE page, so
+       the snapshot carries no mid-navigation state. The entries stay — the
+       navigation's ending still runs and finds nothing left to remove, exactly the
+       busy tracker's snapshotClean contract (header note 9: the snapshot carries no
+       transient chrome). A snapshot that keeps `is-pending` restores a link that
+       looks clicked and answers `aria-disabled` — dead chrome on the restored page. */
+    function snapshotClean() {
+      for (var i = 0; i < marked.length; i++) {
+        var entry = marked[i];
+        entry.el.classList.remove(entry.cls);
+        if (entry.aria) entry.el.removeAttribute("aria-disabled");
+      }
+      return true;
+    }
+
+    /* After a history restore: a restored element carrying the pending or busy
+       chrome is by definition an orphan — the tracker's own entries reference the
+       DETACHED previous DOM, so nothing live can be legitimately pended the
+       instant a restore lands. (Pre-#358 caches carry this state; new snapshots
+       are clean because of snapshotClean above.) `aria-disabled` comes off only
+       beside one of the tracker's classes, so a server-rendered disabled control
+       is never touched. */
+    function purgeOrphans(doc) {
+      if (!doc || !doc.querySelectorAll) return 0;
+      var removed = 0;
+      var stray = doc.querySelectorAll("." + PENDING_CLASS + ", ." + PENDING_SCOPE_CLASS + ", ." + BUSY_CLASS);
+      for (var i = 0; i < stray.length; i++) {
+        stray[i].classList.remove(PENDING_CLASS);
+        stray[i].classList.remove(PENDING_SCOPE_CLASS);
+        stray[i].classList.remove(BUSY_CLASS);
+        if (stray[i].getAttribute("aria-disabled") === "true") {
+          stray[i].removeAttribute("aria-disabled");
+        }
+        removed += 1;
+      }
+      return removed;
+    }
+
     return {
       begin: begin,
       clear: clear,
+      snapshotClean: snapshotClean,
+      purgeOrphans: purgeOrphans,
       pendingCount: function () {
         return marked.length;
       },
@@ -1069,6 +1108,7 @@
        replaces it (the clone happens after the event — 301 #301). */
     doc.body.addEventListener("htmx:beforeHistorySave", function (evt) {
       busy.snapshotClean();
+      pending.snapshotClean();
       var cleanups = window.__dpHistoryStyleCleanups;
       if (!cleanups) return;
       var root = evt && evt.detail && evt.detail.historyElt;
@@ -1078,7 +1118,59 @@
     });
     doc.body.addEventListener("htmx:historyRestore", function () {
       busy.purgeOrphans(doc);
+      pending.purgeOrphans(doc);
     });
+
+    /* #358 — the history SHAPE guard (the named history-scoping hook this file owns).
+       The layout's `hx-history-elt` on #app-main scopes the cache to the workspace
+       region from now on, but a session that straddles the change still holds entries
+       saved by the previous build: they snapshot the whole <body>, footer scripts and
+       all, and htmx stores no marker of WHICH element an entry holds. The one honest
+       tell is the content itself — a body-shaped entry serialises `<main id="app-main">`
+       as a CHILD; a main-shaped one cannot contain it. Two defences, one rule:
+
+         - at shell init, a ONE-TIME purge drops every body-shaped entry from
+           sessionStorage (self-healing without a navigation);
+         - a body-shaped entry that still gets HIT at restore time (seeded into the
+           session between the purge and the restore, or written by a straggler) is
+           DROPPED from the cache and the restore takes a full fetch — htmx's own
+           `refreshOnHistoryMiss` policy. (Vetoing the hit event alone is not an
+           option: in htmx 2.0.10 a cancelled `htmx:historyCacheHit` skips the swap
+           AND never falls through to the server fetch — the restore would just die.)
+           The reload cannot loop: after it the purge above has already removed every
+           body-shaped entry, and a session without storage never reaches this event
+           (htmx's own cache reads fail first). */
+    (function () {
+      var OLD_BODY_SHAPE = 'id="app-main"';
+      var isBodyShaped = function (item) {
+        return !!item && typeof item.content === "string" && item.content.indexOf(OLD_BODY_SHAPE) !== -1;
+      };
+      var dropBodyShaped = function () {
+        var cache = JSON.parse(sessionStorage.getItem("htmx-history-cache") || "[]");
+        var kept = cache.filter(function (item) {
+          return !isBodyShaped(item);
+        });
+        if (kept.length !== cache.length) {
+          sessionStorage.setItem("htmx-history-cache", JSON.stringify(kept));
+        }
+        return kept.length !== cache.length;
+      };
+      try {
+        dropBodyShaped();
+      } catch (e) {
+        /* Unreadable storage: htmx's own cache reads fail first, so no stale hit. */
+      }
+      doc.body.addEventListener("htmx:historyCacheHit", function (evt) {
+        if (!isBodyShaped(evt && evt.detail && evt.detail.item)) return;
+        try {
+          dropBodyShaped();
+        } catch (e) {
+          /* Keep the veto: a dead restore beats a stale body when storage refuses. */
+        }
+        evt.preventDefault();
+        window.location.reload();
+      });
+    })();
 
     /* 103 §A — the click's own acknowledgement. The pend is on the CLICK, not on
        htmx:beforeRequest: the whole point is that it lands before any request

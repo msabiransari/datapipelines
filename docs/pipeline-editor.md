@@ -1,9 +1,9 @@
 # Pipeline Editor UI Specification
 
-**Status:** v1.19 (revised — see Change Log)
+**Status:** v1.22 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Contract](pipeline-contract.md), [REST API + SSE](rest-api.md), [Type System](type-system.md), [Enums](enums.md), [Auth](auth.md), [Configuration](configuration.md), [@acme/design-tokens Design System](https://github.com/msabir/design-system-starter)
-**Last updated:** 2026-09-27
+**Last updated:** 2026-10-01
 
 ---
 
@@ -46,7 +46,7 @@ Graph **authoring** is out of scope: v1 pipelines are authored by LLMs via MCP o
 | Technology | Role |
 |---|---|
 | **Thymeleaf** | Renders the page shell, pipeline metadata, settings/parameters forms, error fragments. |
-| **Spring MVC** | Controller serving `GET /pipelines/{id}/editor`. |
+| **Spring MVC** | Controller serving `GET /pipelines/{id}` (the read workspace, `PipelineWorkspaceController`); `GET /pipelines/{id}/editor` is `PipelineEditorController`'s compatibility redirect. |
 
 ### 3.2 Client-side
 
@@ -58,6 +58,16 @@ Graph **authoring** is out of scope: v1 pipelines are authored by LLMs via MCP o
 | **Native fetch API + `ReadableStream`** | browser-built-in | REST calls (execute, fetch details, result cursor) **and** SSE consumption — the execute endpoint is a POST, which `EventSource` cannot issue, so the stream is parsed manually from the response body. See §7.3. |
 
 > `EventSource` is deliberately **not** in this stack. Every SSE consumer in the editor is `fetch` + `ReadableStream` (§7.3).
+
+`pipeline-editor/runtime.js` (since #358) is the page's ONE loader and initializer: the
+vendors and modules ride in an inert `<template id="pe-runtime-scripts">` catalog —
+loaded in order, Alpine LAST so the modules own the `alpine:init` registration — the
+`.pe-root` is served, and cached, with `x-ignore`, and the runtime removes it inside its
+single `mutateDom` activation (destroy-before-bind, the context read first). A cached
+history restore replays only this guarded bootstrap: the layout's `hx-history-elt`
+scopes the history cache to the workspace region, so no other script ever re-executes
+on a Back ([UI Screens §3.2](ui-screens.md#32-boosted-navigation-the-app-shell-076)).
+`runtime-activation.test.mjs` owns the discipline.
 
 ### 3.3 What we explicitly do NOT use
 
@@ -140,11 +150,22 @@ When the theme changes at runtime, the graph re-reads tokens and re-applies the 
 ### 4.1 URL
 
 ```
-GET /pipelines/{id}/editor
-GET /pipelines/{id}/versions/{version}/editor    (specific version)
+GET /pipelines/{id}?version=N&tab=flow|overview|parameters|runs|usage|versions   (canonical, #348)
+GET /pipelines/{id}/editor                                       (compatibility redirect)
 ```
 
-Authentication: session cookie carrying the internal JWT (browser flow). See [Auth §6](auth.md#6-session-tokens-internal-jwt). Required scope per the authoritative matrix in [Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative): `read` to view, `execute` to run, `execute` to cancel.
+The canonical page is the version-explicit READ workspace: `version` is optional and, when
+supplied, must be a positive integer — the named version's body renders exactly, or the house
+404 (an absent, foreign or lens-hidden version is one answer); invalid syntax is the house 400.
+With no `version`, the page resolves the ACTUAL current pointer first (a development-posture
+current draft shows as the draft it is), then an accessible draft, then a choose-a-version
+state over the admitted history — never "latest release". `tab` is the closed set above;
+anything else resolves to `flow`, and `runs` resolves to `flow` for a caller without the
+execution read. Selecting a version is read navigation (D5): it never moves the current
+pointer. The old `/editor` URL redirects here — preserving a valid explicit `version` and a
+supported `tab` — so every historical link keeps working; its floor is `read` (see below).
+
+Authentication: session cookie carrying the internal JWT (browser flow). See [Auth §6](auth.md#6-session-tokens-internal-jwt). Required scope per the authoritative matrix in [Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative): `read` to view (`pipeline.read` — every admitted role, the promoter through the lens), `execute` to run, `execute` to cancel.
 
 ### 4.2 Server-rendered HTML structure
 
@@ -868,10 +889,11 @@ resetAllNodes() {
 1. User fills in parameter form (if pipeline has parameters).
 2. Clicks **Execute**.
 3. Execute button becomes disabled (`aria-busy="true"`), label changes to "Executing..."; the **Cancel** button appears (§15.2).
-4. Values are coerced to their declared wire types (§7.2) and posted as typed JSON. Page opens the SSE stream via `fetch` (POST to `/api/v1/pipelines/{id}/execute` with `Accept: text/event-stream`).
+4. Values are coerced to their declared wire types (§7.2) and posted as typed JSON, WITH the viewed version pinned (`{"parameters": …, "version": N}` — the version the page resolved, released or draft, always sent; #348). Page opens the SSE stream via `fetch` (POST to `/api/v1/pipelines/{id}/execute` with `Accept: text/event-stream`).
 5. SSE events flow in → graph, node list and live region update in real-time.
 6. On a terminal event: button re-enables, Cancel disappears, and — result panel (`data_ready`, §10), success banner (`pipeline_completed` with no caller node), error modal (`pipeline_failed`, §9), or aborted banner (`execution_aborted`, §15).
 7. If the stream ends **without** a terminal event, that is connection loss, not completion (§15.1).
+8. **Navigation during a run never cancels it (#358).** Leaving the page (a boosted swap) DETACHES the stream — `dispose()` aborts the reader and disarms every timer without sending a cancellation (cancel is a verb with its own permission; navigation is not it) — and records the run on `window.__peLiveExecution`. A restored or re-entered page whose component binds while that record is still armed RE-ATTACHES through the replay stream (`GET /api/v1/executions/{id}/events`, the §10.3 log): each replay rebuilds the run's timeline, and once the terminal event is IN the log it is delivered — and toasted — exactly once. A replay that ends before the terminal re-arms within a budget; a spent budget says what a lost connection says. The record clears at the terminal, so a finished run is never re-announced and a fresh document never re-attaches. `sse-disposal.test.mjs` owns disposal and the re-attach loop.
 
 ### 7.2 Implementation
 
@@ -896,7 +918,12 @@ async function executePipeline() {
                 'DP-CSRF-Token': readCookie('dp_csrf'),
             },
             credentials: 'same-origin',
-            body: JSON.stringify({ parameters }),   // typed JSON, never FormData — see collectParameters()
+            // #348: the VIEWED version rides every execute POST — released included.
+            // A page whose version context (#pipeline-workspace) is missing or malformed
+            // refuses locally with a visible error and sends NOTHING (zero POSTs): it
+            // never falls back to the server's execute-default, which can be a different
+            // body than the one the person is looking at.
+            body: JSON.stringify({ parameters, version: workspace.viewedVersion }),   // typed JSON — see collectParameters()
         });
 
         if (!response.ok) {
@@ -1094,8 +1121,22 @@ The statement column's "Open template →" navigates to `/templates/editor?name=
 SQL does not live in pipeline nodes — [Pipeline Contract §2](pipeline-contract.md) principle 3: *"SQL/FTL lives in template entities, not inline in the Pipeline."* So "show the SQL for a node" is a resolution problem: the server resolves the node's **pinned** `template: {id, version}` (never the latest), assembles the pipeline's own parameter context, and renders.
 
 ```
-GET /partials/pipelines/{id}/nodes/{nodeId}/sql?parameters=<url-encoded JSON>
+GET /partials/pipelines/{id}/nodes/{nodeId}/sql?parameters=<url-encoded JSON>[&version=N]
 ```
+
+The optional `version` (#348) names the pipeline version whose body resolves the node — the
+workspace always sends the version it is viewing, so the panel's SQL is the viewed body's even
+when the current pointer names another one. Omitted (a legacy caller), it keeps the resolver's
+working-version default (the draft when one exists, else the current release) — the agent
+node-run default, unchanged. An explicit version that is absent, or hidden under a narrowing
+lens, is the same 404 an unknown pipeline id is.
+
+The WORKSPACE page (#348-b) is not a legacy caller: when its validated version context cannot
+produce a pin — the block missing, unparsable, or failing the identity/body/positive-bounded-
+integer validation — the panel refuses visibly and sends NOTHING, never a working-version
+preview. The page's context has ONE validated initialization path (`workspace.js`) shared by
+the full document load, a boosted swap and a cached history restoration (the restore re-reads
+the restored block and clears stale refusal flags).
 
 - **Scope:** `READ_RESOURCES`, matching every other read partial. The existing `POST /partials/templates/{id}/versions/{version}/render` is deliberately NOT reused: it requires `MUTATE_PIPELINES_TEMPLATES` (an author scope, so a read-only viewer would be refused) and takes a free-form context that bypasses the pipeline's own parameter declarations.
 - **Wire format:** the `parameters` query value is a JSON document in [contract §6.3](pipeline-contract.md) wire form, built client-side by the page's own `coerceValue` — the same function the execute path uses (§7.2). One coercion path for both surfaces; `ParameterCoercion` is strict, so raw form strings would be rejected by design. GET, not POST: it is a read, needs no CSRF token, and matches the `/partials/**` GET idiom.
@@ -1334,9 +1375,15 @@ afterSettle rescue ran a bare `Alpine.initTree(root)`, which Alpine does not gua
 against (its re-init marker is only set by `Alpine.clone`). Each restore **stacked
 another component** on the same root; one Execute click then fired `executePipeline()`
 once per stacked component, and N executions produced N terminal events and N toasts.
-The fix is at the source: the rescue destroys the stale tree (`Alpine.destroyTree`)
-before re-binding. `editor-toast-once.test.mjs` is the falsifier — two lifecycle passes
-and one stream produce exactly one toast.
+080's fix (the rescue destroying the stale tree before re-binding) is itself superseded:
+since #358 the editor's scripts ride in the runtime's inert catalog (`runtime.js`,
+§3.2), the restored root keeps `x-ignore` until the runtime's single `mutateDom`
+activation removes it, and init.js wires NO `afterSettle` initializer at all — one
+Alpine instance per document, one activation per root. `editor-toast-once.test.mjs`
+pins the wiring shape (the boost pair stays teardown-only, singular across a second
+execution of the file) and one-stream-one-toast; `runtime-activation.test.mjs` owns the
+activation discipline; `PipelineWorkspaceHistoryBrowserTest` reads the counts (panes,
+`_x_dataStack`, POSTs) on the real app after real cache-hit restores.
 
 ---
 
@@ -1735,7 +1782,8 @@ The result table renders one page at a time (`datapipelines.result.page-size-row
 
 ### 18.1 Frozen in v1
 
-- The page URL structure (`/pipelines/{id}/editor`).
+- The page URL structure (`/pipelines/{id}`, version-and-tab query contract, §4.1 — the
+  `/editor` URL remains a redirect into it; #348).
 - The three-panel layout (sidebar + graph + details).
 - The Cytoscape.js + dagre LR rendering.
 - The 5 node states (idle/running/success/failed/aborted) and their class names.
@@ -1899,6 +1947,9 @@ Themes shipped by the design system — `saas` (modern indigo, devtool-oriented)
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-01 | v1.22 | #358 the restore lifecycle, by lane 348-c | **§3.2**: the editor's vendors and modules load through `pipeline-editor/runtime.js` — an inert `<template id="pe-runtime-scripts">` catalog, Alpine LAST — and the `.pe-root` is served and cached with `x-ignore`; the runtime's single `mutateDom` activation (destroy-before-bind, context read first) is the ONE initializer a restored or swapped-in root can get, so a cached history restore cannot stack Alpine components (the 080 afterSettle rescue is GONE — init.js wires no afterSettle initializer; §10.6's exactly-once toast contract unchanged, its mechanism superseded). **§7.1 step 8**: navigating during a run DETACHES the stream without cancelling (`dispose()` — no DELETE; the run continues server-side) and a restored page re-attaches through the §10.3 replay stream — the terminal event is delivered, and toasted, exactly once; the live-run record clears at the terminal. Layout-scoped history (`hx-history-elt` on `#app-main`) and the old-cache shape guard are UI Screens v1.94's. Tests: `runtime-activation.test.mjs`, `sse-disposal.test.mjs`, `PipelineWorkspaceHistoryBrowserTest` (real cache-hit restores: one component, one pane, one version-pinned POST, zero CSP violations), `editor-teardown`/`editor-toast-once` rewritten to the ownership shape. |
+| 2026-09-30 | v1.21 | 348-b (#348) the workspace's version-context corrections | **§8.3**: the workspace page is not a legacy caller — a page whose validated version context cannot produce a pin refuses the preview visibly with ZERO requests (the working-version default stays with callers that omit the parameter). The page's context has ONE validated initialization path (`workspace.js`: positive bounded integer, body presence, pipeline identity) shared by full load, boost and cached history restoration — the restore re-reads the restored block and clears stale refusal flags. **§4.1's projection**: the page's script JSON states only the LENS-VISIBLE current pointer (a development-posture current draft's number cannot leak into `current_version` for a promoter); PipelineResponses' REST shape untouched. |
+| 2026-09-30 | v1.20 | 348 (#348) the version-explicit workspace | **§4.1** is the canonical read page `GET /pipelines/{id}?version=N&tab=…` at the `pipeline.read` floor — explicit version or 404, never clamped; current-pointer-first default; choose-a-version/empty states; `/editor` is a compatibility redirect (§4.1's `/versions/{version}/editor` line named a route that never shipped; both are superseded). **§7.1/§7.2**: every execute POST pins the VIEWED version (`body.version`, released included); a missing or malformed version context refuses with a visible error and ZERO POSTs (the `#pipeline-workspace` block and `workspace.js` replace the lifecycle draft pin and `draft.js`). **§8.3**: the node-SQL GET takes an optional `version` — the workspace always sends it; the omission keeps the resolver's working-version default. Layout, dock and table behavior are #349's. |
 | 2026-09-30 | v1.19 | lane 336 (#336 D8) | §15.2: the cancel DELETE's outcome is stated — accepted arms the 5 s fallback, 409 stays the quiet case, any other refusal or a network failure toasts the catalogued message and leaves the stream open (the run is never presented as cancelled); the malformed-lifecycle refusal (§7.1's draft pin: an unreadable `pipeline-lifecycle` block stops Execute at the error modal instead of silently running the RELEASED version). |
 | 2026-09-27 | v1.18 | 282 (#282) the data table | §3.4's load order: `data-table.css` loads right after `app.css` (it folds app.css's old `.ds-table` block) and before the page sheets; the result dock's grid (§10) is the house data table — [UI Screens §3.7](ui-screens.md#37-the-data-table-282-normative). |
 | 2026-09-18 | v1.17 | 159 addendum / #151 cards re-measure when they grow mid-run | §5.3: `measureCard` per height-changing write (state, stats, the port lines, the markers' elapsed line, the reset), deferred behind the html-label's re-render, no relayout in flight except on overlap; `settleCardHeights` re-runs a stale layout once at End's terminal state; the oscillation bound never reaches this path. |

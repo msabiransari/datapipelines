@@ -901,6 +901,70 @@ test("pending never unsets an aria-disabled it did not set, and never double-mar
   assert.equal(link.attr("aria-disabled"), "true", "restored to what it was, not stripped");
 });
 
+
+test("#358 — the snapshot carries no pending chrome: it comes off the live page at beforeHistorySave", () => {
+  const shell = loadShell();
+  const clock = mkClock();
+  const pill = mkPill();
+  const doc = mkFeelDoc(pill);
+  const tracker = shell.createPendingTracker(clock, shell.PENDING_DELAY_MS);
+  const nav = mkFeelEl("NAV", { "hx-boost": "true" });
+  const link = mkFeelEl("A", { href: "/pipelines" }, [[".app-nav", nav], ["[hx-boost]", nav]]);
+
+  tracker.begin(doc, link, nav);
+  assert.equal(link.has(shell.PENDING_CLASS), true);
+
+  // The save fires mid-navigation (before the settle): the transient chrome comes
+  // off NOW, or the cached markup restores a link that looks clicked and answers
+  // aria-disabled — dead chrome on the restored page.
+  tracker.snapshotClean();
+  assert.equal(link.has(shell.PENDING_CLASS), false, "the snapshot carries no is-pending");
+  assert.equal(nav.has(shell.PENDING_SCOPE_CLASS), false, "the snapshot carries no pending scope");
+  assert.equal(link.attr("aria-disabled"), undefined, "the aria-disabled WE set comes off");
+  // The entries survive (the navigation's ending still runs and finds nothing to do).
+  assert.equal(tracker.pendingCount(), 2, "the link and its scope are still tracked");
+  tracker.clear(doc);
+  assert.equal(tracker.pendingCount(), 0, "the ending finds nothing left to remove and clears");
+});
+
+test("#358 — a restored element with pending or busy chrome is an orphan and is stripped", () => {
+  const shell = loadShell();
+  const clock = mkClock();
+  const doc = mkFeelDoc(mkPill());
+  const tracker = shell.createPendingTracker(clock, shell.PENDING_DELAY_MS);
+
+  const classes = new Set();
+  const restored = {
+    tagName: "A",
+    classList: { add: (c) => classes.add(c), remove: (c) => classes.delete(c), contains: (c) => classes.has(c) },
+    attrs: { "aria-disabled": "true" },
+    getAttribute: (k) => (k in restored.attrs ? restored.attrs[k] : null),
+    removeAttribute: (k) => { delete restored.attrs[k]; },
+  };
+  const clean = {
+    tagName: "BUTTON",
+    classList: { add: () => {}, remove: () => {}, contains: () => false },
+    attrs: { "aria-disabled": "true" },
+    getAttribute: (k) => (k in clean.attrs ? clean.attrs[k] : null),
+    removeAttribute: (k) => { delete clean.attrs[k]; },
+  };
+  // The selector matches ONLY class-carrying strays — a control without the
+  // tracker's classes is never in the purge's reach, so its own aria-disabled
+  // (a server-rendered disabled action) is untouched by construction.
+  const doc2 = {
+    getElementById: () => null,
+    querySelectorAll: (sel) => (sel.includes("is-pending") ? [restored] : []),
+  };
+
+  classes.add(shell.PENDING_CLASS);
+  assert.equal(tracker.purgeOrphans(doc2), 1, "every stray is counted");
+  assert.equal(classes.has(shell.PENDING_CLASS), false, "the restored link's orphan class is gone");
+  assert.equal(restored.getAttribute("aria-disabled"), null, "the orphan's aria-disabled goes with it");
+  assert.equal(clean.getAttribute("aria-disabled"), "true", "a control WITHOUT the tracker's classes keeps its own aria-disabled");
+  // No querySelectorAll (node --test's bare docs): a counted no-op, not a throw.
+  assert.equal(tracker.purgeOrphans({}), 0);
+});
+
 test("boostedNavScope refuses everything htmx itself would not boost", () => {
   const shell = loadShell();
   const nav = mkFeelEl("NAV", { "hx-boost": "true" });

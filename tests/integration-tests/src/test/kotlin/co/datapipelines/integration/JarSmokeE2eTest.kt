@@ -61,13 +61,13 @@ class JarSmokeE2eTest {
     private var appLog: File? = null
 
     /**
-     * The sessions the screens are fetched with. Every screen but the editors is fetched as
-     * the workspace admin who owns the seeded rows. The two editor screens have floors: the
-     * PIPELINE editor's is `pipeline.execute` (122 — viewers execute, D-R3; a promoter does
-     * not), the TEMPLATE editor's is `template.read` since 143 (T315 — the page renders read
-     * state for a reader, and its writes are their own routes). The smoke test's question is
-     * "does this screen render out of the jar", not "who may see it", so the renders use the
-     * author's session; the boundary test below is what says who may.
+     * The sessions the screens are fetched with. Every screen but the template editor is
+     * fetched as the workspace admin who owns the seeded rows. The two screens' floors: the
+     * PIPELINE workspace's is `pipeline.read` (#348 — every admitted reader, the promoter
+     * through the lens), the TEMPLATE editor's is `template.read` since 143 (T315 — the page
+     * renders read state for a reader, and its writes are their own routes). The smoke test's
+     * question is "does this screen render out of the jar", not "who may see it", so the
+     * renders use the author's session; the boundary test below is what says who may.
      */
     private var adminSession: String = ""
     private var authorSession: String = ""
@@ -187,14 +187,36 @@ class JarSmokeE2eTest {
     }
 
     @Test
-    fun `the pipeline editor renders from the jar - the asset-heaviest screen`() {
-        val (body, status) = request("/pipelines/$PIPELINE/editor", authorSession)
+    fun `the pipeline workspace renders from the jar - the asset-heaviest screen`() {
+        val (body, status) = request("/pipelines/$PIPELINE", authorSession)
         status shouldBe 200
         // The seeded pipeline's JSON is embedded for the client-side graph — real content,
-        // not an editor shell over a missing record.
+        // not a shell over a missing record.
         body shouldContain "smoke_pipe"
         body shouldContain "pipeline-editor"
-        noneCarriesErrorMarkersAs(authorSession, "/pipelines/$PIPELINE/editor")
+        noneCarriesErrorMarkersAs(authorSession, "/pipelines/$PIPELINE")
+    }
+
+    @Test
+    fun `the old editor route redirects every reader - promoter included - to the canonical read page`() {
+        // #348: the route's floor is the READ it is now (`pipeline.read`), so the old 122
+        // boundary (a promoter's 403) is gone with the page it guarded — the lens narrows
+        // what the target page shows, not who walks through the redirect.
+        val viewer = rawGet("/pipelines/$PIPELINE/editor", viewerSession)
+        viewer.second shouldBe 302
+        viewer.third shouldBe "/pipelines/$PIPELINE"
+
+        // An explicit version survives; a supported tab would too.
+        val promoter = rawGet("/pipelines/$PIPELINE/editor?version=1", promoterSession)
+        promoter.second shouldBe 302
+        promoter.third shouldBe "/pipelines/$PIPELINE?version=1"
+
+        // ...and the target answers: the VIEWER renders (everything lens), the PROMOTER gets
+        // the house 404 — this smoke deployment configures no promotion target, and the
+        // lens is FAIL-CLOSED for a lensed principal (an unreachable target admits nothing,
+        // roles design §3.1), the same answer a foreign id gets.
+        request("/pipelines/$PIPELINE", viewerSession).second shouldBe 200
+        request("/pipelines/$PIPELINE", promoterSession).second shouldBe 404
     }
 
     @Test
@@ -206,17 +228,14 @@ class JarSmokeE2eTest {
     }
 
     /**
-     * The editors' boundary, live against the jar: a viewer renders the pipeline editor (its
-     * floor is `pipeline.execute` — 122, viewers execute) and a promoter is refused there; the
-     * viewer RENDERS the template editor read-only (`template.read`-floored since 143 — the page
-     * a reader's Open link leads to). Asserted here rather than only at the auth boundary,
-     * because this is the deployment artifact people actually run.
+     * The editors' boundary, live against the jar: a viewer renders the template editor
+     * read-only (`template.read`-floored since 143 — the page a reader's Open link leads to).
+     * Asserted here rather than only at the auth boundary, because this is the deployment
+     * artifact people actually run. (The pipeline page's boundary moved with #348: the test
+     * above walks the redirect for every role.)
      */
     @Test
-    fun `a promoter is refused at the pipeline editor, a viewer renders it, the template editor read-only and the lists`() {
-        // the boundary: the viewer reaches the pipeline editor, the promoter does not.
-        request("/pipelines/$PIPELINE/editor", viewerSession).second shouldBe 200
-        request("/pipelines/$PIPELINE/editor", promoterSession).second shouldBe 403
+    fun `a viewer renders the template editor read-only and the lists`() {
         val (templateEditor, templateEditorStatus) = request("/templates/editor?name=$SEEDED_TEMPLATE", viewerSession)
         templateEditorStatus shouldBe 200
         // ...and what a viewer gets is the READER's page: the read-only pane, no textarea.
@@ -529,6 +548,17 @@ class JarSmokeE2eTest {
         session?.let { builder.header("Cookie", "dp_session=$it") }
         val response = http.send(builder.build(), HttpResponse.BodyHandlers.ofString())
         return response.body() to response.statusCode()
+    }
+
+    /** A redirect probe: body, status and the raw `Location` (the client follows nothing). */
+    private fun rawGet(
+        path: String,
+        session: String?,
+    ): Triple<String, Int, String?> {
+        val builder = HttpRequest.newBuilder(URI.create("$base$path")).header("Accept", "text/html")
+        session?.let { builder.header("Cookie", "dp_session=$it") }
+        val response = http.send(builder.build(), HttpResponse.BodyHandlers.ofString())
+        return Triple(response.body(), response.statusCode(), response.headers().firstValue("Location").orElse(null))
     }
 
     /** The T34 error markers — none of the screens may carry any of them. */

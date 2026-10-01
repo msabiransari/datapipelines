@@ -704,8 +704,9 @@
    * the window.__dpHistoryStyleCleanups registry — this write set is registered there instead
    * of this file listening on its own, so the snapshot has ONE seam and every script strips
    * only its own write set. The cleanup takes the history element (shell.js resolves
-   * `evt.detail.historyElt`, which is `document.body` — no `hx-history-elt` in the
-   * layout), so the walk covers every table on the page.
+   * `evt.detail.historyElt`, which since #358 is `#app-main` — the layout's
+   * `hx-history-elt` scopes the cache to the workspace region), so the walk covers every
+   * table on the page.
    */
   function beforeHistorySave(root) {
     tablesIn(root).forEach(function (table) {

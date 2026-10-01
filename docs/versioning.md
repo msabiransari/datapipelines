@@ -1,9 +1,9 @@
 # Versioning: Draft, Release, Promotion
 
-**Status:** v1.21 — #10 L1c-c: the count ceiling stated as aggregate; the receive's refused-dashboard rollback witnessed (§10.4); #320: the reverse arrows into other families (§3.5.3); #10: visualizations and dashboards join the lifecycle table (§3.5)
+**Status:** v1.22 — #348: §7.2's table disambiguates the REST `GET /api/v1/pipelines/{id}` from the UI read workspace `GET /pipelines/{id}`; #10 L1c-c: the count ceiling stated as aggregate; the receive's refused-dashboard rollback witnessed (§10.4); #320: the reverse arrows into other families (§3.5.3); #10: visualizations and dashboards join the lifecycle table (§3.5)
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Contract](pipeline-contract.md) (§13 error catalog, §17 persistence), [Templates](templates.md), [Metadata DB](metadata-db.md) (§4.4/§4.5/§4.8/§4.9 — DDL authority), [REST API](rest-api.md), [Pipeline Editor UI](pipeline-editor.md)
-**Last updated:** 2026-09-30
+**Last updated:** 2026-10-01
 
 ---
 
@@ -485,7 +485,9 @@ rows describing released content, some describing unreleased edits, with nothing
 schema marking which — and every consumer of the row (search, list, name lookup) would
 silently inherit that ambiguity.
 
-The editor shows draft metadata with a "pending release" affordance; the list shows the
+The workspace header shows a draft's pending-release affordance when the caller's view admits
+one (the Release / Purge-draft verbs are the lifecycle dialogs', role-gated); the read page's
+version chip names the version it RESOLVED — draft or release — and the list shows the
 released name until lock.
 
 **What surface the write arrived on (102, owner ruling 2026-09-09).** Every version row on
@@ -927,7 +929,8 @@ well, and it is what "we always run the LAST version" means:
 | `POST /api/v1/pipelines/{id}/execute` | working version |
 | `pipelines_execute` (MCP) | working version |
 | `datapipelines://pipelines/{id}` (MCP resource, no `/versions/{n}`) | working version |
-| `pipelines_get`, `GET /pipelines/{id}`, the editor | working version (§7.1, unchanged) |
+| `pipelines_get`, `GET /api/v1/pipelines/{id}` | working version (§7.1, unchanged) |
+| The UI read workspace (`GET /pipelines/{id}`, #348) | the **ACTUAL current pointer** when its body is admitted (a development-posture current draft shows as the draft it is, never rewritten as a release), then an accessible draft, then a choose-a-version state — never "latest release"; an explicit `?version=N` renders exactly or 404. The workspace's own execute POST always carries its viewed version, so this default never decides a run. |
 | A published endpoint (`GET` on the published tree) | **whatever the pointer names** — in development that may be a draft (D63, §3.4 "A draft pointer"); outside development no draft exists, so released only by construction |
 | Promotion candidates and the promotion push | **released only** (D6); unchanged |
 
@@ -1445,6 +1448,7 @@ re-opening it.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-30 | v1.22 | 348 (#348) the version-explicit workspace — renumbered at merge after L1c-c's v1.21 | **§7.2's table** disambiguates the REST `GET /api/v1/pipelines/{id}` (working version, unchanged) from the UI read workspace `GET /pipelines/{id}`, whose default is the ACTUAL current pointer (a permitted current draft shows as the draft it is), then an accessible draft, then choose-a-version — never "latest release" (§3.4's sticky pointer stated in the UI's own contract); an explicit `?version=N` renders exactly or 404. The workspace's execute POSTs always pin their viewed version, so no UI default decides a run. §3.5's draft-affordance sentence now describes the header's role-gated lifecycle verbs and the viewed-version chip. Service/REST/MCP defaults are untouched. |
 | 2026-09-30 | v1.21 | L1c-c (#10) transfer limits and evidence | **§10.4:** the count ceiling stated as AGGREGATE — `max-visualizations-per-dashboard` also caps each whole batch arm on top of the per-document bound (two individually valid dashboards can together exceed it; the batch refuses whole, no partial writes, no split; a batch at exactly the ceiling lands whole — E2E-proven both ways). The receive's refused-dashboard rollback witnessed end to end: earlier batch members land, the dashboard refuses on landing, every preceding write (template, visualization, version, current pointer, accepted-audit row) absent. |
 | 2026-09-30 | v1.20 | L1c-b (#10) the transfer round's corrections | **§10.4:** the batch's `visualizations` arm carries the dashboards' pinned visualizations too (deduplicated against the roots, O1) and the `dashboards` arm carries dashboards alone; both arms count-bounded by `max-visualizations-per-dashboard` before the transaction opens (O7); a landing's pins judged by the RELEASE rules — a present-but-not-RELEASED pin refuses the family's `release.dependency_not_released` (O2). |
 | 2026-09-29 | v1.19 | L1c (#10 L1c) the transfer on the wire — renumbered at merge after 320's v1.18 | **§10.4:** the closure includes the pushed visualizations' transform pins; the receiver's one-transaction order is stated through to the two transfer families — templates → sets → pipelines → endpoints → visualizations → dashboards (D61) — landed inside the transaction, bound through the families' strict readers, the just-landed rows visible to the import lens, a refusal at any entry rolling the batch back whole. |

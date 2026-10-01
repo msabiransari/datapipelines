@@ -421,9 +421,9 @@ No `output` block: an omitted `output` on a DQL node defaults to `target: caller
 
 ### 8.4 Execute the pipeline
 
-Open the pipeline editor in the browser: `http://localhost:8080/pipelines/{id}/editor`
+Open the pipeline's workspace in the browser: `http://localhost:8080/pipelines/{id}` (the old `/editor` URL redirects there)
 
-Click **Execute**. Watch the graph node turn blue → green. Result appears in the preview panel.
+Click **Execute** — it pins the version the page is viewing. Watch the graph node turn blue → green. Result appears in the preview panel.
 
 ### 8.5 Connect an Agent (MCP)
 

@@ -13,11 +13,14 @@
   // the middle rung (the dock has no close; Esc is a NO-OP on it), and 080 §B removed
   // the inspector overlay altogether — Details is a dock tab now, and a tab has
   // nothing to close. Attached once: setupA11y re-runs would otherwise stack
-  // duplicate listeners.
-  var escapeInstalled = false;
+  // duplicate listeners. #358: the once-flag lives on the DOCUMENT, not in this
+  // module's closure — a closure flag is invisible to the next execution of this
+  // file (a replayed script re-installed the handler because its fresh closure
+  // started at false), and the document is the thing that persists across the
+  // restores a boosted shell performs.
   function installEscapeHandler() {
-    if (escapeInstalled || typeof document.addEventListener !== "function") return;
-    escapeInstalled = true;
+    if (document.__peEscapeInstalled || typeof document.addEventListener !== "function") return;
+    document.__peEscapeInstalled = true;
     document.addEventListener("keydown", function (e) {
       if (e.key !== "Escape" || !editor) return;
       if (editor.errorModal && editor.errorModal.visible) {

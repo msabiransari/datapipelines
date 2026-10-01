@@ -49,7 +49,9 @@ class ShellRenderTest {
         // what this pins — same element class, same hx-boost, same swap target, same
         // progress bar and flash bin.
         html shouldContain "<nav class=\"app-nav\" hx-boost=\"true\""
-        html shouldContain "<main id=\"app-main\" class=\"app-container app-main\" hx-boost=\"true\">"
+        // #358: the history cache is scoped to the main region — hx-history-elt rides
+        // the boost contract (the snapshot carries the workspace region, never the body).
+        html shouldContain "<main id=\"app-main\" class=\"app-container app-main\" hx-boost=\"true\" hx-history-elt>"
         html shouldContain "id=\"app-progress\""
         // 079 §F: the bin gained [data-toast-flash] — toast.js now drains EVERY marked bin,
         // so a screen with its own refusal vocabulary (promotion) can render its own.
@@ -377,12 +379,21 @@ class ShellRenderTest {
     private fun WebContext.fillEditor() {
         fillLayoutChrome()
         setVariable("pipelineJson", "{\"id\":\"p1\",\"name\":\"demo\",\"nodes\":[]}")
-        setVariable("lifecycleJson", "{\"hasDraft\":false}")
+        setVariable("workspaceJson", "{\"viewedVersion\":1,\"hasBody\":true}")
         setVariable("pipelineId", "11111111-1111-1111-1111-111111111111")
+        setVariable("pipelineName", "demo")
+        setVariable("hasSelectedBody", true)
+        setVariable("viewedVersion", 1)
+        setVariable("viewedLabel", "v1 · released · current")
+        setVariable("viewedIsDraft", false)
+        setVariable("viewedIsCurrent", true)
+        setVariable("viewedStatusLabel", "released")
+        setVariable("currentVersion", 1)
         setVariable("hasDraft", false)
         setVariable("draftVersion", null)
-        setVariable("draftHash", null)
-        setVariable("releasedVersion", 1)
+        setVariable("versions", emptyList<Any>())
+        setVariable("activeTab", "flow")
+        setVariable("canReadExecutions", true)
     }
 
     private fun WebContext.fillLayoutChrome() {

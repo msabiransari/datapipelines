@@ -18,6 +18,7 @@ import path from "node:path";
 const require = createRequire(import.meta.url);
 const here = path.dirname(fileURLToPath(import.meta.url));
 const initPath = path.resolve(here, "../../main/resources/static/js/pipeline-editor/init.js");
+const workspacePath = path.resolve(here, "../../main/resources/static/js/pipeline-editor/workspace.js");
 
 /**
  * Load init.js fresh with the browser surfaces it touches at module scope:
@@ -48,6 +49,10 @@ function loadEditor() {
       if (id === "pipeline-data") {
         return { textContent: JSON.stringify({ id: "p1", name: "demo", nodes: [] }) };
       }
+      // #348-b: the workspace block is part of the cached DOM a history restore brings back.
+      if (id === "pipeline-workspace") {
+        return { textContent: JSON.stringify({ pipelineId: "p1", viewedVersion: 2, hasBody: true, canExecute: true }) };
+      }
       return null;
     },
     querySelector: () => null,
@@ -57,8 +62,7 @@ function loadEditor() {
   globalThis.document = doc;
   globalThis.PEDockShim = true;
   globalThis.window.PEDock = { createDock: () => ({}) };
-  globalThis.window.PEEvents = { createEventsLog: () => ({}) };
-  globalThis.ResultPanel = class {
+  globalThis.window.PEEvents = { createEventsLog: () => ({}) };  globalThis.ResultPanel = class {
     constructor() {
       this.cursorEndpoint = null;
     }
@@ -85,6 +89,8 @@ function loadEditor() {
   globalThis.announceStatus = () => {};
 
   delete require.cache[require.resolve(initPath)];
+  delete require.cache[require.resolve(workspacePath)];
+  require(workspacePath); // the ACTUAL module: its read path is what the rescue must call
   require(initPath);
 
   return { spies, docListeners, bodyListeners, removed, main };
@@ -117,13 +123,16 @@ test("a BOOSTED beforeSwap tears the live component down and clears the handles"
   const { spies, docListeners } = loadEditor();
   const component = globalThis.window.pipelineEditor();
   component.init();
-  globalThis.window.PEDraft = { version: 4, bodyHash: "h" };
+  globalThis.window.PEWorkspace = { pipelineId: "p1", viewedVersion: 4, hasBody: true, canExecute: true };
 
   fire(docListeners, "htmx:beforeSwap", { detail: { boosted: true } });
 
   assert.equal(spies.abort + spies.destroy, 2, "teardown ran");
   assert.equal(globalThis.window.__peInstance, null);
-  assert.equal(globalThis.window.PEDraft, null);
+  // #348: the workspace version state dies with the page — the restored root re-reads
+  // the new document's own block (workspace.js runs per load).
+  assert.equal(globalThis.window.PEWorkspace, null);
+  assert.equal(globalThis.window.PEWorkspaceInvalid, false);
 });
 
 test("a PARTIAL swap inside the editor never tears the component down", () => {
@@ -152,19 +161,24 @@ test("a swap whose target IS #app-main (history restore) tears down too", () => 
   assert.equal(globalThis.window.__peInstance, null);
 });
 
-test("afterSettle re-binds the editor root through Alpine when no component is live", () => {
-  const { spies, docListeners } = loadEditor();
-  spies.peRoot = { id: "pe-root-fake" };
-  globalThis.window.Alpine = { initTree: (el) => spies.initTree.push(el) };
-
-  // No component was ever initialised (the history-restore shape: cached DOM,
-  // scripts not re-executed) — the rescue binds one.
-  fire(docListeners, "htmx:afterSettle", { detail: {} });
-  assert.deepEqual(spies.initTree, [spies.peRoot]);
-
-  // With a live component the rescue is a no-op (fresh boosted visit).
-  const component = globalThis.window.pipelineEditor();
-  component.init();
-  fire(docListeners, "htmx:afterSettle", { detail: {} });
-  assert.equal(spies.initTree.length, 1, "no double bind when a component is live");
+test("#358 — init.js wires NO afterSettle initializer: the runtime owns restore activation", () => {
+  const { docListeners } = loadEditor();
+  // The rescue that used to live here (`destroyTree` + `PEWorkspaceRead` +
+  // `initTree` on the restored root) COMPETED with every replayed Alpine's own
+  // boot walk — the mechanism that stacked components on a restored page. Since
+  // #358 the fragment's scripts load through the runtime's inert catalog, the
+  // restored root keeps `x-ignore` until the runtime's ONE activation removes
+  // it, and this file's lifecycle pair is teardown-only. The absence is the
+  // contract: no second initializer may come back here (the ownership
+  // falsification plants it and demands the browser stack-depth red).
+  assert.equal(
+    (docListeners["htmx:afterSettle"] || []).length,
+    0,
+    "init.js must not initialize restored roots — the runtime does",
+  );
+  assert.equal(
+    (docListeners["htmx:beforeSwap"] || []).length,
+    1,
+    "the teardown half of the boost lifecycle stays",
+  );
 });

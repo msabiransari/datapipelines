@@ -91,6 +91,7 @@ class ReadFloorTest {
         familyOf("/promotion") shouldBeFamily Family.PROMOTION
         familyOf("/admin/users") shouldBeFamily Family.USER_ADMINISTRATION
         familyOf("/api/v1/pipelines") shouldBeFamily Family.RESOURCES
+        familyOf("/pipelines/{id}") shouldBeFamily Family.RESOURCES
         familyOf("/pipelines/{id}/editor") shouldBeFamily Family.PIPELINE_EDITOR
         familyOf("/api-keys") shouldBeFamily Family.API_KEYS
         familyOf("/partials/mcp-key/secret") shouldBeFamily Family.SELF
@@ -187,10 +188,17 @@ class ReadFloorTest {
             matches = { path -> path.contains("/lifecycle/") },
         ),
 
-        /** 122: the pipeline editor floors at the operation the screen exists to perform for its lowest role. */
+        /**
+         * #348 — the OLD editor route's floor is the read it is now: a compatibility REDIRECT
+         * into the canonical `/pipelines/{id}` read page (workspace spec §3.2), so the family
+         * admits [Permission.PIPELINE_READ] and nothing higher — the promoter walks through it
+         * to the released content exactly as the canonical route admits. 122's execute floor
+         * described the page the route USED to serve; that page is gone, and auth.md §7.6's
+         * rows moved with this family in the same commit.
+         */
         PIPELINE_EDITOR(
             floor = 1,
-            permissions = setOf(Permission.PIPELINE_EXECUTE),
+            permissions = setOf(Permission.PIPELINE_READ),
             matches = { path -> path == "/pipelines/{id}/editor" },
         ),
 

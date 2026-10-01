@@ -9,20 +9,53 @@
        300×150 replaced-element default — "the icons are the size of the canvas". -->
   <link th:href="@{/vendor/design-system/icons.css}" rel="stylesheet">
 
-  <script th:src="@{/vendor/alpinejs/alpine.min.js}" defer></script>
-  <script th:src="@{/vendor/dagre/dagre.min.js}"></script>
-  <script th:src="@{/vendor/cytoscape/cytoscape.min.js}"></script>
-  <script th:src="@{/vendor/cytoscape/cytoscape-dagre.js}"></script>
-  <!-- 059 §reference route 1: HTML cards overlaid on the Cytoscape nodes. Its label
-       container is pointer-events:none and carries the pan/zoom transform, so the
-       cards scale WITH the canvas and the canvas keeps every interaction (031's
-       selection/state/a11y machinery is untouched). -->
-  <script th:src="@{/vendor/cytoscape/cytoscape-node-html-label.js}"></script>
+  <!-- #358 — the vendors and modules load through the runtime (pipeline-editor/runtime.js),
+       not as bare tags: htmx re-executes every <script> it restores from the history cache,
+       so a bare tag here would boot a SECOND Alpine on every Back (the stacked-bindings
+       defect). This catalog is INERT — <template> content neither parses nor restores as
+       executable script — and the runtime loads it in order, Alpine LAST, exactly once per
+       document. Nothing in here may carry inline script bodies (InlineScriptAuditTest). -->
+  <template id="pe-runtime-scripts">
+    <script th:src="@{/vendor/dagre/dagre.min.js}"></script>
+    <script th:src="@{/vendor/cytoscape/cytoscape.min.js}"></script>
+    <script th:src="@{/vendor/cytoscape/cytoscape-dagre.js}"></script>
+    <!-- 059 §reference route 1: HTML cards overlaid on the Cytoscape nodes. Its label
+         container is pointer-events:none and carries the pan/zoom transform, so the
+         cards scale WITH the canvas and the canvas keeps every interaction (031's
+         selection/state/a11y machinery is untouched). -->
+    <script th:src="@{/vendor/cytoscape/cytoscape-node-html-label.js}"></script>
+    <script th:src="@{/js/pipeline-editor/dock.js}"></script>
+    <script th:src="@{/js/pipeline-editor/events.js}"></script>
+    <script th:src="@{/js/pipeline-editor/node-ops.js}"></script>
+    <!-- 195: the Parameters sidebar's field view models — pure, node-tested, read
+         by init.js and the template's paths. -->
+    <script th:src="@{/js/pipeline-editor/param-fields.js}"></script>
+    <!-- #348: the workspace version context (pure, node-tested) — every execute POST and
+         node-SQL request reads the viewed version from it. Loaded before init.js. -->
+    <script th:src="@{/js/pipeline-editor/workspace.js}"></script>
+    <script th:src="@{/js/pipeline-editor/init.js}"></script>
+    <script th:src="@{/js/pipeline-editor/sql-highlight.js}"></script>
+    <script th:src="@{/js/pipeline-editor/graph.js}"></script>
+    <script th:src="@{/js/pipeline-editor/sse.js}"></script>
+    <script th:src="@{/js/pipeline-editor/execute.js}"></script>
+    <script th:src="@{/js/pipeline-editor/details.js}"></script>
+    <script th:src="@{/js/pipeline-editor/error.js}"></script>
+    <script th:src="@{/js/pipeline-editor/result.js}"></script>
+    <script th:src="@{/js/pipeline-editor/a11y.js}"></script>
+    <!-- 102: the lifecycle dialogs' client half — document-level wiring that must run ONCE
+           per document, so it loads through the runtime like the rest (a bare tag here
+           would replay its listeners on every cached restore). -->
+    <script th:src="@{/js/lifecycle-dialog.js}"></script>
+    <!-- Alpine boots LAST: the modules above own the alpine:init registration by then. -->
+    <script th:src="@{/vendor/alpinejs/alpine.min.js}"></script>
+  </template>
 
-  <script type="application/json" id="pipeline-data" th:utext="${pipelineJson}"></script>
-  <!-- The draft lifecycle state the editor is showing (versioning §3.5/§7): draft.js reads
-       it to render the pending-release affordances and to pin Execute to the draft version. -->
-  <script type="application/json" id="pipeline-lifecycle" th:utext="${lifecycleJson}"></script>
+  <script type="application/json" id="pipeline-data" th:if="${hasSelectedBody}" th:utext="${pipelineJson}"></script>
+  <!-- #348 — the workspace's ONE version-state source (spec §3.4): the viewed version the
+       page resolved, read by workspace.js and pinned into every SQL request and every
+       execute POST. The old #pipeline-lifecycle draft-pin block is gone — the draft-first
+       execute rule with it; a run always targets the version the page is showing. -->
+  <script type="application/json" id="pipeline-workspace" th:utext="${workspaceJson}"></script>
 
   <!-- 080 §B: the dock's four-tab state machine and the Events tab's log, both pure
        (no DOM) so node --test owns their transition tables; init.js keeps the DOM
@@ -32,22 +65,9 @@
        is the only way to size a pane without a layout shift now that no inline script is
        allowed on the page (090's stylesheet lesson, one layer up). -->
   <script th:src="@{/js/splitter.js}"></script>
-  <script th:src="@{/js/pipeline-editor/dock.js}"></script>
-  <script th:src="@{/js/pipeline-editor/events.js}"></script>
-  <script th:src="@{/js/pipeline-editor/node-ops.js}"></script>
-  <!-- 195: the Parameters sidebar's field view models — pure, node-tested, read
-       by init.js and the template's paths. -->
-  <script th:src="@{/js/pipeline-editor/param-fields.js}"></script>
-  <script th:src="@{/js/pipeline-editor/init.js}"></script>
-  <script th:src="@{/js/pipeline-editor/sql-highlight.js}"></script>
-  <script th:src="@{/js/pipeline-editor/graph.js}"></script>
-  <script th:src="@{/js/pipeline-editor/sse.js}"></script>
-  <script th:src="@{/js/pipeline-editor/execute.js}"></script>
-  <script th:src="@{/js/pipeline-editor/draft.js}"></script>
-  <script th:src="@{/js/pipeline-editor/details.js}"></script>
-  <script th:src="@{/js/pipeline-editor/error.js}"></script>
-  <script th:src="@{/js/pipeline-editor/result.js}"></script>
-  <script th:src="@{/js/pipeline-editor/a11y.js}"></script>
+  <!-- #358: the module tags that followed the splitter here moved into the runtime catalog
+       above — bare tags in the fragment replay on every cached history restore, and the
+       restored page's scripts must be the runtime's alone (see the catalog's comment). -->
 
   <!--/* 090 §B — this root is DELIBERATELY not cloaked, and `AlpineCloakAuditTest` records
          it as the audit's one named exception rather than letting it look like an
@@ -59,22 +79,38 @@
          ARE cloaked, which is where the unbound content actually is; the root itself is a
          flex container whose children are server-rendered chrome. */-->
   <!--/* 110 §C — the phone band. This screen is desktop-first BY DECISION, not by
-         omission: below 768px the band renders above the editor (which stays on the
-         page, rendered and scrollable underneath) and says so, with the entity's name,
-         its lifecycle badge — the same hasDraft / draftVersion / releasedVersion
-         attributes the topbar's vchip reads — and the explorer search for it. The
-         explorers take ?q= today; a ?open= deep link onto the leaf would be the better
-         seam for a later round. Hidden at every width by app.css except < 768px. */-->
+         omission: below 768px the band renders above the workspace (which stays on the
+         page, rendered and scrollable underneath) and says so, with the entity's name
+         and the viewed-version chip — the same viewedLabel the topbar reads. Hidden at
+         every width by app.css except < 768px. */-->
   <div class="ds-empty app-wide-screen-note">
-    <p class="ds-empty-title">Open on a wider screen to edit</p>
+    <p class="ds-empty-title">Open on a wider screen to inspect the graph</p>
     <p class="ds-empty-description">
       <span th:text="${pipelineName}">Pipeline</span>
-      <span class="ds-badge" th:classappend="${hasDraft} ? 'ds-badge-warning' : 'ds-badge-default'"
-            th:text="${hasDraft} ? 'v' + ${draftVersion} + ' · draft pending release' : 'v' + ${releasedVersion} + ' · released'">v1 · released</span>
-      — the pipeline editor needs a canvas this screen does not have.
+      <span class="ds-badge" th:classappend="${viewedIsDraft} ? 'ds-badge-warning' : 'ds-badge-default'"
+            th:text="${viewedLabel}">v1 · released · current</span>
+      — the pipeline graph needs a canvas this screen does not have.
     </p>
     <p class="ds-empty-actions">
       <a class="ds-button ds-button-secondary" th:href="@{/pipelines(q=${pipelineName})}">Open in Pipelines</a>
+    </p>
+  </div>
+
+  <!--/* #348 — the choose-a-version state (workspace spec §3.1, resolution rule 4): no body
+          resolved for this caller, so there is nothing to render a graph OF. The admitted
+          history is the affordance — each link selects its exact version; the empty state
+          says so when nothing is admitted. No Execute, no node SQL, no invented pointer. */-->
+  <div class="ds-empty app-center u-modal-tall" th:if="${!hasSelectedBody}">
+    <p class="ds-empty-title" th:text="${#lists.isEmpty(versions)} ? 'No viewable version' : 'Choose a version'">Choose a version</p>
+    <p class="ds-empty-description">
+      <span th:text="${pipelineName}">Pipeline</span>
+      <span th:if="${#lists.isEmpty(versions)}">has no version your role can view yet — ask an author to release one.</span>
+      <span th:unless="${#lists.isEmpty(versions)}">has several versions — pick one to view its graph, parameters and checks.</span>
+    </p>
+    <p class="ds-empty-actions">
+      <a th:each="v : ${versions}" class="ds-button ds-button-secondary" hx-boost="false"
+         th:href="@{/pipelines/{id}(id=${pipelineId}, version=${v.version})}"
+         th:text="'v' + ${v.version} + ' — ' + ${v.status.name().toLowerCase()} + (${v.isCurrent} ? ' · current' : '')">v1 — released · current</a>
     </p>
   </div>
 
@@ -88,18 +124,42 @@
        init() runs automatically. Where a value needed computing, the name below
        names a getter or no-arg method on the component (init.js), or on a pure
        module it delegates to (dock.js, result.js, param-fields.js). -->
-  <div x-data="pipelineEditor" class="pe-root" th:attr="data-can-execute=${canExecute == true}">
+  <!-- #358: `x-ignore` keeps EVERY Alpine instance — the boot walk of the one real one,
+       or a stray one a future replay would create — from initializing this root. The
+       runtime owns activation exclusively: it removes the attribute inside its one
+       `mutateDom` init and re-arms it before every history save (the cached snapshot
+       carries it back). -->
+  <div x-data="pipelineEditor" x-ignore class="pe-root" th:if="${hasSelectedBody}" th:attr="data-can-execute=${canExecute == true}">
 
     <!-- Top bar (080 §D — the mock's 52px bar): back, crumb (folder muted + name
-         bold), version chip, run status, Execute. -->
+         bold), viewed-version chip, version selector, run status, Execute. -->
     <div class="pe-topbar">
       <a th:href="@{/pipelines}" class="pe-back"><svg class="ds-icon ds-icon-xs" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#arrow-left"></use></svg> Pipelines</a>
       <div class="pe-crumb">
         <span class="pe-crumb-path" x-show="crumbPath" x-text="crumbPath"></span>
         <span class="pe-crumb-name" x-text="crumbName"></span>
-        <span class="pe-vchip" th:classappend="${hasDraft} ? 'pe-vchip-draft'"
-              th:text="${hasDraft} ? 'v' + ${draftVersion} + ' · draft pending release' : 'v' + ${releasedVersion} + ' · released'">v1 · released</span>
+        <!-- #348: the chip names the VIEWED version and its own status — never the
+             working version, never "latest release" (versioning §3.4: the current
+             pointer is sticky and event-driven, and this page displays the row it
+             resolved, which the selector below chose). -->
+        <span class="pe-vchip" th:classappend="${viewedIsDraft} ? 'pe-vchip-draft'"
+              th:text="${viewedLabel}">v1 · released · current</span>
       </div>
+      <!-- #348 — the version selector: READ navigation over the admitted history (D5).
+           Each link enters this page with its exact version; the viewed row is marked,
+           not hidden, and the current row is labelled. Full document loads — the same
+           entry rule every link into this page follows (ui-screens §4.4). -->
+      <nav class="pe-versions" aria-label="View another version" th:if="${!#lists.isEmpty(versions)}">
+        <a th:each="v : ${versions}" class="ds-button ds-button-ghost ds-button-sm" hx-boost="false"
+           th:href="@{/pipelines/{id}(id=${pipelineId}, version=${v.version})}"
+           th:attr="data-version=${v.version}"
+           th:aria-current="${v.isViewed} ? 'page' : null"
+           th:title="${v.status.name().toLowerCase()} + (${v.isCurrent} ? ' · current' : '')">
+          <span th:text="'v' + ${v.version}">v1</span>
+          <span th:if="${v.isCurrent}" class="u-muted">· current</span>
+          <span th:if="${v.status.name() == 'DRAFT'}" class="u-muted">· draft</span>
+        </a>
+      </nav>
       <!-- 114 §A — a viewer's editor is READ-ONLY: it loads (canRead), the mutating verbs
            are absent, and the line below says so once, quietly. No toast: nothing failed. -->
       <div th:if="${canAuthor != true}" class="app-note" data-role-note="read-only">
@@ -343,7 +403,7 @@
           <div class="pe-value"
                x-text="checksCountText"></div>
           <div id="pe-checks-latest"
-               th:attr="data-checks-url=@{'/partials/pipelines/{id}/versions/{version}/checks'(id=${pipelineId}, version=${hasDraft ? draftVersion : releasedVersion})}"></div>
+               th:attr="data-checks-url=@{'/partials/pipelines/{id}/versions/{version}/checks'(id=${pipelineId}, version=${viewedVersion})}"></div>
         </div>
         <div class="pe-empty" x-show="noSelection">Select a node to see its source, template, output and last run.</div>
         <template x-if="selectedNode">
@@ -534,8 +594,14 @@
   </div>
 
 
-  <!-- 102: the lifecycle dialogs' single per-screen container (§4.3d). -->
+  <!-- 102: the lifecycle dialogs' single per-screen container (§4.3d); its script loads
+       through the runtime catalog (once per document, never replayed on restore). -->
   <div id="pe-dialog"></div>
-  <script th:src="@{/js/lifecycle-dialog.js}" defer></script>
+  <!-- #358 — the workspace runtime: the ONE executable script the cached history carries.
+       It loads the catalog above in order (Alpine last), then activates the `.pe-root`
+       exactly once; a cached restore replays only this guarded bootstrap, which re-enters
+       on the restored root. It sits at the fragment's END so the root exists when it runs,
+       and its cached replay therefore finds the restored markup already in place. -->
+  <script th:src="@{/js/pipeline-editor/runtime.js}"></script>
 </th:block>
 </html>

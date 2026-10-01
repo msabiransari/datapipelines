@@ -294,6 +294,19 @@
           // 076 §B: the boosted-swap teardown reaches the live component through
           // this handle (wireBoostLifecycle below).
           window.__peInstance = self;
+
+          // #358 — a run this document started that is STILL RUNNING follows the
+          // viewer across a boosted navigation: the old handler was disposed at
+          // teardown (detached, never cancelled — see sse.js), and the component
+          // this restore/arrival just bound re-attaches to the same execution's
+          // event stream. The record is window-level (it survives the restore,
+          // dies with the document) and clears at the run's terminal event, so a
+          // fresh full load (a new window) never re-attaches and a finished run
+          // never re-announces.
+          var live = window.__peLiveExecution;
+          if (live && live.executionId && !self.executionId && self.sseHandler && self.sseHandler.reattach) {
+            self.sseHandler.reattach(live.executionId);
+          }
         } catch (e) {
           console.error("Pipeline Editor init failed:", e);
         }
@@ -310,8 +323,16 @@
        */
       teardown: function () {
         var self = this;
-        if (self.sseHandler && self.sseHandler.abortController) {
-          self.sseHandler.abortController.abort();
+        // #358: disposal detaches the stream AND disarms its timers/polls without
+        // sending a cancellation — the run continues server-side (it is on
+        // /executions); only our view of it goes away. The bare-abort fallback is
+        // the pre-#358 contract, kept for a handler that predates dispose().
+        if (self.sseHandler) {
+          if (self.sseHandler.dispose) {
+            self.sseHandler.dispose();
+          } else if (self.sseHandler.abortController) {
+            self.sseHandler.abortController.abort();
+          }
         }
         if (self.sqlReloadTimer) {
           clearTimeout(self.sqlReloadTimer);
@@ -412,10 +433,29 @@
           var type = (self.parameters[k] && self.parameters[k].type) || "STRING";
           wire[k] = window.coerceValue(raw, type);
         });
+        // #348-b: the panel shows the SQL of the body the page is VIEWING — the version
+        // travels with every request the workspace makes (workspace spec §3.3). A page that
+        // cannot produce a VALID pin refuses VISIBLY and sends NOTHING: the workspace never
+        // asks for the legacy working-version default (that contract stays with the callers
+        // that omit the parameter — agents, old links — not with the page that displays a
+        // body it cannot name).
+        var versionPin = window.PEWorkspaceLogic ? window.PEWorkspaceLogic.executeVersion(window.PEWorkspace) : null;
+        if (versionPin == null) {
+          // The refusal needs the same x-if render tick as the successful request.
+          self.$nextTick(function () {
+            var pane = document.getElementById("pe-node-sql");
+            if (pane) {
+              pane.textContent =
+                "The page could not read the pipeline's version state, so it cannot show this node's SQL for the version you are viewing. Reload the page; if it persists, re-open the pipeline.";
+            }
+          });
+          return;
+        }
         var url =
           "/partials/pipelines/" + encodeURIComponent(self.pipeline.id) +
           "/nodes/" + encodeURIComponent(self.selectedNode.id) + "/sql" +
-          "?parameters=" + encodeURIComponent(JSON.stringify(wire));
+          "?parameters=" + encodeURIComponent(JSON.stringify(wire)) +
+          "&version=" + encodeURIComponent(versionPin);
         // #pe-node-sql lives inside <template x-if="selectedNode">, which Alpine
         // renders on the NEXT tick — issuing htmx.ajax synchronously off a
         // selection change hits htmx:targetError and the section never loads.
@@ -1337,8 +1377,8 @@
 
   /*
    * 076 §B — the editor's boost lifecycle, one document-level pair installed ONCE
-   * per session (this script re-executes on every boosted visit to the editor;
-   * the flag keeps the wiring singular).
+   * per session (this script loads once per document through the runtime catalog;
+   * the flag keeps the wiring singular even if that ever changes).
    *
    * htmx:beforeSwap — the outgoing swap replaces the editor's host region:
    * teardown the live component. Boosted swaps qualify outright (shell.js
@@ -1347,20 +1387,17 @@
    * WITHOUT a boosted flag. Partial swaps inside the editor (node SQL, result
    * pages) target inner nodes and never match.
    *
-   * htmx:afterSettle — the rescue half: a history restore brings the editor's
-   * DOM back WITHOUT re-executing its scripts, so no component is bound.
-   *
-   * 080 §B — THE EXACTLY-ONCE TOAST FIX. The cached DOM comes back with the
-   * PREVIOUS component's Alpine state (`_x_dataStack`) and its @click listeners
-   * still attached (teardown kills the stream and the canvas; it cannot unbind
-   * Alpine). The old rescue ran a bare `Alpine.initTree(root)`, and Alpine's
-   * x-data guard (`data-has-alpine-state`) is only set by Alpine.clone — not by
-   * a history restore — so initTree stacked a SECOND component on the same root:
-   * every @click registered twice, one Execute click fired executePipeline()
-   * once per stacked component, and N executions meant N success toasts on
-   * completion — the owner's report. Another restore stacked a third. The fix
-   * destroys the stale tree before re-binding: one root, one component, one
-   * stream, one toast. The falsifying test is editor-toast-once.test.mjs.
+   * 080 §B — THE EXACTLY-ONCE TOAST FIX, superseded by the #358 runtime. The old
+   * afterSettle rescue (`destroyTree` + `initTree` on the restored root) was the
+   * restore path's initializer when the fragment's scripts replayed on every
+   * restore — and it COMPETED with each replayed Alpine's own boot walk, which is
+   * how one restore stacked components (two panes, two POSTs per click). Since
+   * #358 the fragment's scripts live in the runtime's inert catalog: nothing
+   * replays on a cached restore except the guarded runtime, whose `x-ignore`
+   * discipline makes its activation the ONLY initializer a restored root can
+   * get. This listener therefore owns TEARDOWN only; there is no rescue here to
+   * compete with. (editor-restore-ownership.test.mjs plants the old rescue back
+   * and demands the stacked-stack red — the ownership guard.)
    */
   function wireBoostLifecycle() {
     if (window.__peBoostWired) return;
@@ -1381,19 +1418,11 @@
       if (!replacesMain) return;
       inst.teardown();
       window.__peInstance = null;
-      window.PEDraft = null;
-    });
-
-    document.addEventListener("htmx:afterSettle", function () {
-      var main = document.getElementById("app-main");
-      var root = main && main.querySelector ? main.querySelector(".pe-root") : null;
-      if (!root || window.__peInstance || !window.Alpine || !window.Alpine.initTree) return;
-      // See the block comment above: destroy the stale tree BEFORE re-binding, or
-      // the restored root stacks components and one click runs N executions.
-      if (root._x_dataStack && window.Alpine.destroyTree) {
-        window.Alpine.destroyTree(root);
-      }
-      window.Alpine.initTree(root);
+      // #348: the workspace version state dies with the page — the restored root's
+      // component re-reads the new document's own block (the runtime re-runs
+      // PEWorkspaceRead during its activation, before the component binds).
+      window.PEWorkspace = null;
+      window.PEWorkspaceInvalid = false;
     });
   }
 
@@ -1408,6 +1437,11 @@
     document.addEventListener("alpine:init", function () {
       if (typeof window !== "undefined" && window.Alpine && window.Alpine.data) {
         window.Alpine.data("pipelineEditor", pipelineEditor);
+        // #358: the runtime's activation registers the component DIRECTLY when
+        // Alpine booted without this listener (the singleton gate's planted
+        // second Alpine boots before the catalog reaches init.js); the flag
+        // keeps exactly one registration either way.
+        window.__peComponentRegistered = true;
       }
     });
   }
