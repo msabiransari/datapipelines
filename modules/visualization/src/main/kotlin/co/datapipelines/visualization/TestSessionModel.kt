@@ -194,6 +194,12 @@ data class ScreenshotView(
     val uploadedAt: Instant,
 )
 
+/** A stored screenshot's bytes and the media type detected at upload — the evidence read's payload (#353). */
+class ScreenshotBytes(
+    val mediaType: String,
+    val bytes: ByteArray,
+)
+
 /** A run row plus its screenshot, for the retention and evidence reads. */
 data class RunEvidence(
     val run: TestRunRow,

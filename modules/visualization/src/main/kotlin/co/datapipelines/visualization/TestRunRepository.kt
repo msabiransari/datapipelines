@@ -246,6 +246,46 @@ class TestRunRepository(
                 )
             }.singleOrNull()
 
+    // ---- the capability-routed reads (#353) ---------------------------------------------------------
+
+    /**
+     * The run a PREVIEW capability names, by its stored hash — NOT workspace-scoped: a token-bearing request
+     * carries no principal, so the token is the only key, and the row's own `workspace_id` (the join) is what
+     * every later check scopes by. A revoked capability (submit, sweep) has a NULL hash and matches nothing.
+     */
+    fun findByPreviewTokenHash(previewTokenHash: String): TestRunRow? =
+        jdbc
+            .query(
+                "$SELECT WHERE r.preview_token_hash = :hash",
+                mapOf("hash" to previewTokenHash),
+                MAPPER,
+            ).singleOrNull()
+
+    /**
+     * The run of [sessionId] under [visualizationId], in whichever workspace holds it — the screenshot route's
+     * read: the upload capability, verified afterwards against THIS row's hash, is the credential, and the
+     * workspace is the row's. A session id of another visualization answers null.
+     */
+    fun findBySessionUnscoped(
+        visualizationId: UUID,
+        sessionId: UUID,
+    ): TestRunRow? =
+        jdbc
+            .query(
+                "$SELECT WHERE r.visualization_id = :visualizationId AND r.session_id = :sessionId",
+                mapOf("visualizationId" to visualizationId, "sessionId" to sessionId),
+                MAPPER,
+            ).singleOrNull()
+
+    /** The run's stored image bytes and their media type — bounded by V42's 4 MiB CHECK — or null. */
+    fun screenshotBytes(runId: UUID): ScreenshotBytes? =
+        jdbc
+            .query(
+                "SELECT media_type, bytes FROM visualization_test_screenshots WHERE run_id = :runId",
+                mapOf("runId" to runId),
+            ) { rs, _ -> ScreenshotBytes(rs.getString("media_type"), rs.getBytes("bytes")) }
+            .singleOrNull()
+
     private fun params(
         workspaceId: UUID,
         visualizationId: UUID,
