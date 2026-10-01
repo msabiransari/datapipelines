@@ -4,8 +4,11 @@ import com.microsoft.playwright.Page
 import com.microsoft.playwright.Route
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.assertions.withClue
+import io.kotest.matchers.ints.shouldBeGreaterThanOrEqual
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
 
 /**
@@ -88,6 +91,83 @@ class PipelineWorkspaceRunOwnershipBrowserTest : BrowserSuite() {
         page.navigate("$baseUrl/pipelines/$id?version=1")
         page.locator(".pe-root").waitFor()
         page.locator(".pe-card").first().waitFor()
+    }
+
+
+    @Test
+    fun `a held stale SQL response never paints - select A, move on, release A (A8)`() {
+        loginReadyUser()
+        val name = "wsrun/stale/" + generatedPassword("p").take(8).lowercase()
+        val id = seedTwoVersions(name)
+        openWorkspace(id)
+        page.evaluate("() => { window.__peErrors = []; }")
+
+        // Hold ONLY A's node-SQL response: select A (its answer stays in flight),
+        // then select B — B's request supersedes A's in the component's book and
+        // completes normally — then release A's late answer (A8's literal shape).
+        var heldAny = false
+        var heldRoute: Route? = null
+        page.route("**/partials/pipelines/*/nodes/*/sql**") { route ->
+            synchronized(this) {
+                if (!heldAny) {
+                    heldAny = true
+                    heldRoute = route
+                    return@route
+                }
+            }
+            route.resume()
+        }
+
+        // locator.evaluate dispatches the row's own click handler without Playwright's
+        // actionability wait — the clipped list is focus-revealed, not pointer-visible.
+        page.locator("#pe-node-list li[data-node-id='stage_calendar']").evaluate("el => el.click()")
+        page.waitForFunction("() => window.__peInstance && window.__peInstance.sqlToken !== null")
+        page.waitForTimeout(300.0)
+
+        val sqlResponses = mutableListOf<String>()
+        page.onResponse { response ->
+            if (response.url().contains("/nodes/") && response.url().contains("/sql")) {
+                sqlResponses.add(response.status().toString() + " " + response.url().takeLastWhile { it != '/' })
+            }
+        }
+        page.locator("#pe-node-list li[data-node-id='pairs_a']").evaluate("el => el.click()")
+        try {
+            page.waitForFunction(
+                "() => window.__peInstance && window.__peInstance.sqlToken !== null && document.querySelectorAll('#pe-node-sql .pe-sql-block, #pe-node-sql .ds-empty').length > 0",
+                12000.0,
+            )
+        } catch (e: Throwable) {
+            val diag =
+                page.evaluate(
+                    """() => ({ token: window.__peInstance && window.__peInstance.sqlToken,
+                       paneLen: (document.getElementById('pe-node-sql') || { innerHTML: '' }).innerHTML.length,
+                       selected: window.__peInstance && window.__peInstance.selectedNode && window.__peInstance.selectedNode.id })""",
+                ).toString()
+            throw AssertionError("B's pane never rendered; sqlResponses=$sqlResponses diag=$diag", e)
+        }
+        val beforeRelease =
+            page.evaluate("() => (document.getElementById('pe-node-sql').textContent || '').includes('stale_cal.sql')")
+        beforeRelease shouldBe false
+
+        // Selecting B ABORTS A's in-flight request (the hx-sync="this:abort" requester):
+        // A's response can never land. Resume the held route defensively — for an aborted
+        // request it is a no-op — and prove the pane still shows B afterwards.
+        val held = synchronized(this) { heldRoute }
+        withClue("the witness needs A's response actually held") { held shouldNotBe null }
+        runCatching { held!!.resume() }
+        page.waitForTimeout(2000.0)
+
+        // The pane still shows B — A's late body (its template ref) never painted.
+        val paneText = page.evaluate("() => (document.getElementById('pe-node-sql') || { textContent: '' }).textContent").toString()
+        withClue("pane after releasing the stale response: ${paneText.take(160)}") {
+            paneText shouldNotContain "stale_cal.sql"
+        }
+        page.evaluate("() => (window.__peInstance.selectedNode || {}).id") shouldBe "pairs_a"
+
+        // Positive control: the guard saw two issued reads (A then B) — the witness is not vacuous.
+        val gen = page.evaluate("() => window.__peInstance.viewGeneration") as Number
+        gen.toInt() shouldBeGreaterThanOrEqual 2
+        drainCspViolations().shouldBeEmpty()
     }
 
     @Test

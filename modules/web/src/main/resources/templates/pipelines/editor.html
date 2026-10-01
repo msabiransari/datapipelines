@@ -326,6 +326,14 @@
       </section>
     </div>
 
+      <!-- #349 — the sink reads' one requester (A8): the node SQL and checks reads are
+           issued FROM this element, whose `hx-sync="this:replace"` makes a new read
+           ABORT the in-flight one and issue in its place (htmx's default drops the new
+           request while one is in flight, and this build's "abort" mode aborts without
+           issuing — only "replace" aborts AND issues). Select B while A's SQL is still
+           loading: B's request fires, A's never lands. -->
+      <span id="pe-sql-requester" hx-sync="this:replace" class="sr-only" aria-hidden="true"></span>
+
         <!-- 080 §B — the dock: Node Details | Results | Errors | Events (#349, spec
              §4.2: Node Details stays IN the bottom dock, beside Results, Errors and
              Events; there is no right inspector). Always present — Node Details is its

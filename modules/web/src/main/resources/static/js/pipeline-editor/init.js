@@ -779,7 +779,12 @@
           self.usageLoadFailed = false;
         }
         container.setAttribute("data-pe-token", token);
-        window.htmx.ajax("GET", url, container)
+        window.htmx.ajax("GET", url, {
+          source: document.getElementById("pe-sql-requester") || undefined,
+          target: container,
+          swap: "innerHTML",
+          headers: { "DP-PE-Sink-Token": token },
+        })
           .then(function () {
             if (tab === "runs") {
               self.runsLoading = false;
@@ -967,9 +972,14 @@
           if (!pane) return;
           pane.setAttribute("data-pe-token", self.sqlToken);
           htmx.ajax("GET", url, {
+            // The reads issue from the ONE hx-sync="abort" requester: selecting B while
+            // A's SQL is still loading ABORTS A's request (htmx's default would DROP
+            // B's outright while A is in flight — the pane then never renders B).
+            source: document.getElementById("pe-sql-requester") || undefined,
             target: "#pe-node-sql",
             swap: "innerHTML",
             indicator: "#pe-node-sql-spinner",
+            headers: { "DP-PE-Sink-Token": self.sqlToken },
           });
         });
       },
@@ -2233,7 +2243,13 @@
       var target = evt.detail && evt.detail.target;
       var key = target && target.id ? SINKS[target.id] : null;
       if (!key || !inst) return;
-      var recorded = target.getAttribute("data-pe-token");
+      // The token rides the REQUEST (htmx echoes requestConfig back to beforeSwap):
+      // a newer request re-stamps the sink's data attribute, so a sink-carried token
+      // could never catch the older response still in flight — the request-carried
+      // one is the only record of who issued THIS response.
+      var config = evt.detail.requestConfig || {};
+      var headers = config.headers || {};
+      var recorded = headers["DP-PE-Sink-Token"] || target.getAttribute("data-pe-token");
       var current = inst[key];
       if (window.PEWorkspaceLogic && !window.PEWorkspaceLogic.tokenMatches(recorded, current)) {
         // A newer request superseded this one: do not swap, and do not let the

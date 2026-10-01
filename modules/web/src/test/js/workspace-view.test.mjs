@@ -170,3 +170,23 @@ test("the live-run record the page adopts at ANOTHER version paints nothing but 
   assert.equal(editor.runMatchesViewed(), false);
   assert.equal(editor.runVersionDiffers, true);
 });
+
+/* The sink-token guard's WIRING (the pure half is tokenMatches, above): the served
+ * init.js's beforeSwap handler must cancel a stale response at the swap — the guard
+ * goes red the moment the cancellation is removed (the 348-c wiring-guard precedent). */
+test("#349 wiring: the served beforeSwap guard cancels a stale sink response", async () => {
+  freshDoc();
+  const src = (await (await import("node:fs/promises")).readFile(main("init.js"), "utf8")).toString();
+  const i = src.indexOf('SINKS[target.id]');
+  assert.notEqual(i, -1, "the guard reads the sink map");
+  const window_ = src.slice(i, i + 1400);
+  // The EXACT condition, not a fragment: disabling the guard (a planted `if (false && …)`,
+  // an early return ahead of it) changes this text and fails the guard.
+  assert.match(
+    window_,
+    /if \(window\.PEWorkspaceLogic && !window\.PEWorkspaceLogic\.tokenMatches\(recorded, current\)\) \{/,
+    "the guard's condition stands intact",
+  );
+  assert.match(window_, /evt\.detail\.shouldSwap = false;/, "a stale response is cancelled before it can paint");
+  assert.match(window_, /DP-PE-Sink-Token/, "the token rides the request (a sink-carried token cannot catch an in-flight response)");
+});
