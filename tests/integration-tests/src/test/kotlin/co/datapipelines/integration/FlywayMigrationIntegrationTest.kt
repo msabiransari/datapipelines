@@ -149,6 +149,9 @@ class FlywayMigrationIntegrationTest {
                 "42|visualizations and dashboards|true",
                 // #10 L2 — DASHBOARD in chk_triggered_via, dashboard_refreshes and its execution link.
                 "43|dashboard refreshes|true",
+                // #331 (V46) — the pins path the containment probe reads; the up-and-down rehearsal
+                // on a demo-shaped copy is the lane's evidence.
+                "46|dashboard pins gin|true",
             )
     }
 
@@ -278,6 +281,20 @@ class FlywayMigrationIntegrationTest {
                 " 'idx_datasource_workspaces_workspace') ORDER BY 1",
         ) { it.getString(1) } shouldContainExactly
             listOf("idx_datasource_workspaces_workspace", "idx_workspace_members_admins", "idx_workspaces_active")
+    }
+
+    @Test
+    fun `V46 indexes the dashboard pins path - the expression the containment probe reads (#331)`() {
+        // The GIN index must be on the EXACT expression `livePinsOf` probes (`body_json ->
+        // 'visualizations'`); an index on `body_json` alone would not serve it. Named, because it
+        // backs the pin guards' and `visualizations_get`'s per-probe read rather than a query that
+        // happens to exist.
+        val expected =
+            "CREATE INDEX idx_dashboard_versions_pins ON public.dashboard_versions" +
+                " USING gin (((body_json -> 'visualizations'::text)))"
+        query(
+            "SELECT indexdef FROM pg_indexes WHERE schemaname = 'public' AND indexname = 'idx_dashboard_versions_pins'",
+        ) { it.getString(1) } shouldContainExactly listOf(expected)
     }
 
     /** Every column of [table] in the shipped database, name order. */
@@ -1163,6 +1180,7 @@ class FlywayMigrationIntegrationTest {
                 // is also its per-version lookup; a screenshot's PK is its run.
                 // #10 L2 (V43) — a refresh's list (newest first), the sweeper's RUNNING scan, the retention cutoff, and the
                 // execution link's PK (refresh, source) with its reverse lookup.
+                "dashboard_versions.idx_dashboard_versions_pins",
                 "dashboard_refresh_executions.idx_dashboard_refresh_executions_execution",
                 "dashboard_refresh_executions.pk_dashboard_refresh_executions",
                 "dashboard_refreshes.dashboard_refreshes_pkey",
