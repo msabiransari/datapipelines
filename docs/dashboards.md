@@ -436,6 +436,18 @@ cancels each execution the refresh has started through the executor's own path. 
 not-yet-started source is skipped and `refresh_completed` is last. A client that disconnects and stays away past the grace
 aborts its refresh the same way.
 
+**An abort before the row (#356).** The refresh id is the CLIENT's mint, so an abort can outrun `insertRunning` — the
+row exists only after the selections are evaluated and admission granted. The start therefore registers a transient,
+TTL'd marker (the abort flag's twin in the same Redis keyspace) as soon as the dashboard is resolved, and removes it on
+EVERY exit; the bound is the caller's own stream cap, and a principal at the bound is refused the saturated 429 rather
+than let a newer start steal an older start's authorization. An abort with no row consults the marker: a match (same
+workspace and dashboard, the caller's own principal AND instance, or `execution.cancel_all`) records the abort intent
+under the id exactly like any abort and answers the same 202 — and the engine's check at job start ends the refresh
+`ABORTED` with `refresh_completed` last before any source runs, the row closed and audited like every other ending.
+No marker, a marker for another dashboard, or a marker for someone else is the same `dashboard.refresh.not_found` as
+every other no — an unknown id, another person's running id, another instance's id and a finished id all answer the
+identical body.
+
 ### 5.7 The record
 
 `dashboard_refreshes` and `dashboard_refresh_executions` ([Metadata DB §4.34–§4.35](metadata-db.md)) hold every refresh that
@@ -586,7 +598,14 @@ per instance, per occurrence: the newest refresh owns the target, an event touch
 through its owner, and a finished run cannot overwrite a newer view — an old run's late completion
 detaches silently. A stream that ends without `refresh_completed` is a transport failure: content is
 RETAINED, the pending occurrences go stale, and one notification with `recover: "retry"` offers the
-new refresh; nothing replays itself.
+new refresh; nothing replays itself. An abort click renders the `abort` state at once, with the reason
+naming it `abort.requested` — a REQUEST, not an outcome. The server's answer is the honesty boundary
+(#356): a `202` sets `abortAcked` (explicit cancellation was recorded) and the terminal frame closes
+the refresh; a `404` — the finished-refresh idempotence, or an abort that was never the caller's to
+make — sets nothing, the chips re-render `abort not confirmed`, and the terminal frame (or the
+stream's end) decides what really happened: a target whose real outcome was `ok` has its delivered
+state restored, because a server-aborted target never reports `ok`. The stream stays open through the
+abort either way — the server's own terminal frame, never the click, ends the refresh client-side.
 
 Notifications are structured — `{instanceId, scope, severity, code, message, retryable, recover}` —
 deduplicated per outcome, delivered to the adapter and `options.onNotification`, and recovered ONLY
@@ -618,6 +637,7 @@ the conformance suite proves the rules APPLY and is red when the stylesheet is r
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-01 | v0.13 | #356 the abort before the row | **§5.6:** an abort arriving before `insertRunning` writes its row is honoured — the start registers a transient, per-principal-bounded marker, a matching caller is answered the same 202 and the refresh ends `ABORTED` before any source runs; the four no-cases (unknown, another person's, another instance's, finished) answer the identical `dashboard.refresh.not_found`. **§6.6:** the abort chip renders `abort.requested` until the server answers; a 202 sets `abortAcked`, a 404 re-renders `abort not confirmed` and the terminal frame decides — a delivered `ok` restores its state, and the stream stays open through the abort. |
 | 2026-09-30 | v0.12 | #343 stream workspace authority | Recheck the opening workspace by immutable id for every event and heartbeat; a different membership cannot keep the stream alive, while the refresh continues. |
 | 2026-09-30 | v0.11 | #343 dashboard runtime residue — renumbered at merge after L1c-c's v0.10 | Require RELEASED visualization, set and transform pins at runtime; clarify the unchanged bounded parameter response and current-authority execution-id projection on source frames. |
 | 2026-09-30 | v0.10 | L1c-c (#10) transfer limits and evidence | **§3.3:** the count ceiling is stated as AGGREGATE — `max-visualizations-per-dashboard` also caps each whole envelope array and each whole promotion batch arm, an additional ceiling on top of the per-document bound (two individually valid dashboards can together exceed it; the batch refuses whole, no partial writes, no split; a batch at exactly the ceiling lands whole — E2E-proven both ways). The promotion page's `body_invalid` flash renders its toast (it was unmapped, hence silent; the `missing_datasources` and `key_invalid` branches' `&#39;` entities inside fragment-expression literals were a latent render-500, fixed with typographic apostrophes). The transfer service now receives the operator's configured value (the bean factory passed nothing; the constructor default stood in silently). |
