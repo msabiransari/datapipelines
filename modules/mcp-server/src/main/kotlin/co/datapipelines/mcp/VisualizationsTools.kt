@@ -145,12 +145,15 @@ class VisualizationsListTool(
         val prefix = args.string("prefix")
         val folders = visualizations.listChildFolders(workspaceId, view.visualizations, prefix)
         val loaded = visualizations.listChildren(workspaceId, view.visualizations, prefix, 0, limit)
+        // #331 — used_by for the WHOLE page in ONE call: the batched pins answer, never a containment
+        // scan per row. The map lookup answers absent names with the empty list the per-row read gave.
+        val usedBy = dashboards.pinnedByAll(workspaceId, view.dashboards, loaded.map { it.record.name })
         return mapOf(
             "prefix" to (prefix ?: ""),
             "folders" to folders.map { ArtifactTools.folder(it, "visualization_count") },
             "visualizations" to
                 loaded.map {
-                    ArtifactTools.row(it) + ("used_by" to dashboards.pinnedBy(workspaceId, view.dashboards, it.record.name))
+                    ArtifactTools.row(it) + ("used_by" to usedBy.getOrDefault(it.record.name, emptyList()))
                 },
             "returned" to (folders.size + loaded.size),
         )
