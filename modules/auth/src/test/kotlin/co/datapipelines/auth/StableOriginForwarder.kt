@@ -99,7 +99,9 @@ class StableOriginForwarder private constructor(
     }
 
     /** One accepted connection: the origin-side socket and, once connected, the target-side twin. */
-    private class Session(val client: Socket) {
+    private class Session(
+        val client: Socket,
+    ) {
         @Volatile
         var app: Socket? = null
 
@@ -112,31 +114,41 @@ class StableOriginForwarder private constructor(
     }
 
     private fun acceptLoop() {
-        while (!closed.get()) {
-            val client =
-                try {
-                    listener.accept()
-                } catch (_: IOException) {
-                    break // close() closed the listener; any other listener death ends forwarding too
-                }
-            val session = Session(client)
-            connections.add(session)
-            if (closed.get()) {
-                // close() won the race between accept and registration — its sweep may have
-                // already passed; close here so the client cannot leak.
-                session.closeBoth()
-                connections.remove(session)
-                break
-            }
+        while (!closed.get() && acceptOnce()) {
+            // keep accepting until close() or a failed handoff ends the loop
+        }
+    }
+
+    /**
+     * Accepts and hands off ONE connection. Returns false when the accept loop must end:
+     * the listener died (close() closed it), close() won a race against the registration,
+     * or the executor rejected the submission.
+     */
+    private fun acceptOnce(): Boolean {
+        val client =
             try {
-                executor.submit { serve(session) }
-            } catch (_: RejectedExecutionException) {
-                // The executor was shut down between the check and the submit: close() owns
-                // the teardown, and the accepted client must not outlive it.
-                session.closeBoth()
-                connections.remove(session)
-                break
+                listener.accept()
+            } catch (_: IOException) {
+                return false // close() closed the listener; any other listener death ends forwarding too
             }
+        val session = Session(client)
+        connections.add(session)
+        if (closed.get()) {
+            // close() won the race between accept and registration — its sweep may have
+            // already passed; close here so the client cannot leak.
+            session.closeBoth()
+            connections.remove(session)
+            return false
+        }
+        return try {
+            executor.submit { serve(session) }
+            true
+        } catch (_: RejectedExecutionException) {
+            // The executor was shut down between the check and the submit: close() owns
+            // the teardown, and the accepted client must not outlive it.
+            session.closeBoth()
+            connections.remove(session)
+            false
         }
     }
 

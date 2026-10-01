@@ -15,6 +15,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.io.path.readText
 import kotlin.io.path.writeText
 
@@ -120,17 +121,7 @@ class StableOriginForwarderTest {
 
                 origin.close()
 
-                val clientClosed = CountDownLatch(1)
-                Thread({
-                    try {
-                        client.getInputStream().read()
-                    } catch (_: IOException) {
-                    }
-                    runCatching { client.close() }
-                    clientClosed.countDown()
-                }, "client-eof-probe").apply { isDaemon = true }.start()
-
-                check(clientClosed.await(PEER_CLOSE_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                probePeerCloses(client, "client-eof-probe") {
                     "the client peer stayed OPEN across close() — no EOF within " +
                         "$PEER_CLOSE_TIMEOUT_SECONDS s; surviving forwarder workers: " +
                         forwarderWorkerNames(origin.originPort)
@@ -155,12 +146,12 @@ class StableOriginForwarderTest {
      */
     @Test
     fun `close during a blocked target connect terminates the connecting session`() {
-        StableOriginForwarder.open().use { origin ->
-            val target = ServerSocket()
+        val target = ServerSocket()
+        val backlogFiller = Socket()
+        try {
             target.bind(InetSocketAddress(InetAddress.getByName("127.0.0.1"), 0), 1)
-            val backlogFiller = Socket()
-            try {
-                backlogFiller.connect(InetSocketAddress(InetAddress.getByName("127.0.0.1"), target.localPort))
+            backlogFiller.connect(InetSocketAddress(InetAddress.getByName("127.0.0.1"), target.localPort))
+            StableOriginForwarder.open().use { origin ->
                 origin.forwardTo(target.localPort)
 
                 val client = Socket(InetAddress.getByName("localhost"), origin.originPort)
@@ -169,16 +160,7 @@ class StableOriginForwarderTest {
                     // in — or a moment from entering — a connect that cannot complete.
                     origin.close()
 
-                    val clientClosed = CountDownLatch(1)
-                    Thread({
-                        try {
-                            client.getInputStream().read()
-                        } catch (_: IOException) {
-                        }
-                        runCatching { client.close() }
-                        clientClosed.countDown()
-                    }, "connecting-client-probe").apply { isDaemon = true }.start()
-                    check(clientClosed.await(PEER_CLOSE_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                    probePeerCloses(client, "connecting-client-probe") {
                         "a session blocked in the target connect stayed OPEN across close() " +
                             "(no EOF within $PEER_CLOSE_TIMEOUT_SECONDS s); surviving workers: " +
                             forwarderWorkerNames(origin.originPort)
@@ -187,10 +169,10 @@ class StableOriginForwarderTest {
                 } finally {
                     runCatching { client.close() }
                 }
-            } finally {
-                runCatching { backlogFiller.close() }
-                target.close()
             }
+        } finally {
+            runCatching { backlogFiller.close() }
+            target.close()
         }
     }
 
@@ -211,16 +193,7 @@ class StableOriginForwarderTest {
 
             val client = Socket(InetAddress.getByName("localhost"), origin.originPort)
             try {
-                val clientClosed = CountDownLatch(1)
-                Thread({
-                    try {
-                        client.getInputStream().read()
-                    } catch (_: IOException) {
-                    }
-                    runCatching { client.close() }
-                    clientClosed.countDown()
-                }, "refused-connect-probe").apply { isDaemon = true }.start()
-                check(clientClosed.await(PEER_CLOSE_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                probePeerCloses(client, "refused-connect-probe") {
                     "a refused target connect left the client open (no EOF within " +
                         "$PEER_CLOSE_TIMEOUT_SECONDS s); surviving workers: " +
                         forwarderWorkerNames(origin.originPort)
@@ -309,16 +282,7 @@ class StableOriginForwarderTest {
         val (outcome, socket) = connectOutcome(port)
         origin.close()
         if (outcome == "connected" && socket != null) {
-            val closed = CountDownLatch(1)
-            Thread({
-                try {
-                    socket.getInputStream().read()
-                } catch (_: IOException) {
-                }
-                runCatching { socket.close() }
-                closed.countDown()
-            }, "race-client-probe").apply { isDaemon = true }.start()
-            check(closed.await(PEER_CLOSE_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+            probePeerCloses(socket, "race-client-probe") {
                 "a client accepted beside close() was left open (no EOF within " +
                     "$PEER_CLOSE_TIMEOUT_SECONDS s); surviving workers: ${forwarderWorkerNames(port)}"
             }
@@ -380,7 +344,7 @@ class StableOriginForwarderTest {
         val started = System.currentTimeMillis()
         // The harness runs on its own thread so a DELIVERED-SHAPE helper (which blocks on a
         // read of a still-running child) reds here instead of hanging the whole suite.
-        val result = java.util.concurrent.atomic.AtomicReference<Result<Boolean>>()
+        val result = AtomicReference<Result<Boolean>>()
         val harness =
             Thread({
                 result.set(runCatching { contenderTakes(javaBinary(), source, 0, timeoutSeconds = 3) })
@@ -397,8 +361,9 @@ class StableOriginForwarderTest {
         check(failure != null && failure.isFailure) { "a stalled contender did not fail the harness: $message" }
         check(elapsedMs < 30_000) { "the stalled contender took $elapsedMs ms to fail — not bounded" }
         check("did not finish" in message) { "the diagnostic does not name the stall: $message" }
-        val pid = Regex("PID=(\\d+)").find(message)?.groupValues?.get(1)
-            ?: error("the diagnostic did not drain the stalled child's output: $message")
+        val pid =
+            Regex("PID=(\\d+)").find(message)?.groupValues?.get(1)
+                ?: error("the diagnostic did not drain the stalled child's output: $message")
         // The harness killed and reaped its child: no stalled JVM may survive the test.
         val deadline = System.currentTimeMillis() + 5_000
         while (ProcessHandle.of(pid.toLong()).isPresent) {
@@ -415,6 +380,28 @@ class StableOriginForwarderTest {
     fun `the bare pre-pick shape does not hold the port - the race #334 closed`() {
         val port = ServerSocket(0).use { it.localPort } // released immediately
         secondBinderTakes(port) shouldBe true // any JVM on the box can take it before Tomcat binds
+    }
+
+    /**
+     * Reads [socket] until its session ends (EOF or the reset) on a probe thread, failing
+     * with [failureMessage] if it has not ended within the bounded peer-close window —
+     * never an unbounded read on this thread.
+     */
+    private fun probePeerCloses(
+        socket: Socket,
+        threadName: String,
+        failureMessage: () -> String,
+    ) {
+        val closed = CountDownLatch(1)
+        Thread({
+            try {
+                socket.getInputStream().read()
+            } catch (_: IOException) {
+            }
+            runCatching { socket.close() }
+            closed.countDown()
+        }, threadName).apply { isDaemon = true }.start()
+        check(closed.await(PEER_CLOSE_TIMEOUT_SECONDS, TimeUnit.SECONDS)) { failureMessage() }
     }
 
     /** A loopback echo target that answers one 4-byte payload and then reads until the session ends. */
@@ -442,7 +429,11 @@ class StableOriginForwarderTest {
 
     /** Every worker thread this forwarder instance started, by name. */
     private fun forwarderWorkerNames(originPort: Int): List<String> =
-        Thread.getAllStackTraces().keys.filter { it.name.startsWith("stable-origin-$originPort-") }.map { it.name }
+        Thread
+            .getAllStackTraces()
+            .keys
+            .filter { it.name.startsWith("stable-origin-$originPort-") }
+            .map { it.name }
 
     /** The workers must all be gone within a bounded wait — never an unbounded sleep. */
     private fun awaitWorkersGone(originPort: Int) {
@@ -480,7 +471,12 @@ class StableOriginForwarderTest {
         return outcome to socket
     }
 
-    private fun javaBinary(): String = ProcessHandle.current().info().command().orElse("java")
+    private fun javaBinary(): String =
+        ProcessHandle
+            .current()
+            .info()
+            .command()
+            .orElse("java")
 
     /**
      * Spawns the contender JVM and reports whether it could bind the port. The wait is
