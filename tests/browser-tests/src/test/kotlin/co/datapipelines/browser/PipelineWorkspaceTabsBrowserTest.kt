@@ -2,13 +2,13 @@ package co.datapipelines.browser
 
 import com.microsoft.playwright.Page
 import com.microsoft.playwright.Route
+import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.doubles.shouldBeGreaterThanOrEqual
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
-import io.kotest.assertions.withClue
 import org.junit.jupiter.api.Test
 
 /**
@@ -75,8 +75,7 @@ class PipelineWorkspaceTabsBrowserTest : BrowserSuite() {
     private fun param(
         key: String,
         required: Boolean = false,
-    ): String =
-        """"$key":{"type":"STRING"${if (required) ""","required":true""" else ""}}"""
+    ): String = """"$key":{"type":"STRING"${if (required) ""","required":true""" else ""}}"""
 
     private fun createPipeline(
         name: String,
@@ -176,7 +175,9 @@ class PipelineWorkspaceTabsBrowserTest : BrowserSuite() {
         page.locator(".pe-card").first().waitFor()
         // The selector renders from the workspace block's admitted history — wait for the
         // CLIENT render (Alpine's x-for), not just the root's markup.
-        page.waitForFunction("() => (document.querySelectorAll('.pe-versions a').length === (JSON.parse(document.getElementById('pipeline-workspace').textContent).versionRows || []).length)")
+        page.waitForFunction(
+            "() => (document.querySelectorAll('.pe-versions a').length === (JSON.parse(document.getElementById('pipeline-workspace').textContent).versionRows || []).length)",
+        )
     }
 
     /** The seeded history, read back — a seed bug fails HERE, not at a click. */
@@ -207,7 +208,10 @@ class PipelineWorkspaceTabsBrowserTest : BrowserSuite() {
 
         // Flow default: the graph pane is the visible one, the URL has no tab.
         page.evaluate("() => document.querySelector('#pe-pane-flow').hidden") shouldBe false
-        page.evaluate("() => [...document.querySelectorAll('.pe-tab')].filter(b => b.getAttribute('aria-selected') === 'true').map(b => b.id).join()") shouldBe "pe-tab-flow"
+        page.evaluate(
+            "() => [...document.querySelectorAll('.pe-tab')].filter(b => b.getAttribute('aria-selected') === 'true').map(b => b.id).join()",
+        ) shouldBe
+            "pe-tab-flow"
         page.url() shouldNotContain "tab="
 
         val runsFetches = mutableListOf<String>()
@@ -217,7 +221,10 @@ class PipelineWorkspaceTabsBrowserTest : BrowserSuite() {
 
         // Runs: first open fetches once; leaving and returning does not re-fetch.
         page.locator("#pe-tab-runs").click()
-        page.waitForSelector("#pe-runs-body table[data-dt-ready], #pe-runs-body .ds-empty-description", Page.WaitForSelectorOptions().setState(com.microsoft.playwright.options.WaitForSelectorState.ATTACHED))
+        page.waitForSelector(
+            "#pe-runs-body table[data-dt-ready], #pe-runs-body .ds-empty-description",
+            Page.WaitForSelectorOptions().setState(com.microsoft.playwright.options.WaitForSelectorState.ATTACHED),
+        )
         val afterFirst = runsFetches.size
         afterFirst shouldBe 1
         page.locator("#pe-tab-flow").click()
@@ -227,7 +234,10 @@ class PipelineWorkspaceTabsBrowserTest : BrowserSuite() {
 
         // Usage: the same lazy-once rule.
         page.locator("#pe-tab-usage").click()
-        page.waitForSelector("#pe-usage-body table[data-dt-ready], #pe-usage-body .ds-empty-description", Page.WaitForSelectorOptions().setState(com.microsoft.playwright.options.WaitForSelectorState.ATTACHED))
+        page.waitForSelector(
+            "#pe-usage-body table[data-dt-ready], #pe-usage-body .ds-empty-description",
+            Page.WaitForSelectorOptions().setState(com.microsoft.playwright.options.WaitForSelectorState.ATTACHED),
+        )
         usageFetches.size shouldBe 1
 
         // The URL carries the tab; Overview and the flow pane swap by the hidden attribute.
@@ -255,7 +265,10 @@ class PipelineWorkspaceTabsBrowserTest : BrowserSuite() {
         // The declaration is the house table, read-only: the viewed version's schema —
         // and the ACTUAL component upgraded it (the marker, not a class name).
         page.waitForFunction("() => !!document.querySelector('#pe-pane-parameters table[data-dt-ready]')")
-        val rows = page.evaluate("() => [...document.querySelectorAll('#pe-pane-parameters tbody tr td:first-child')].map(td => td.textContent.trim())") as List<String>
+        val rows =
+            page.evaluate(
+                "() => [...document.querySelectorAll('#pe-pane-parameters tbody tr td:first-child')].map(td => td.textContent.trim())",
+            ) as List<String>
         // The name cell also carries the required badge; the row names the key.
         rows.any { it.startsWith("year") } shouldBe true
 
@@ -289,15 +302,19 @@ class PipelineWorkspaceTabsBrowserTest : BrowserSuite() {
         // switches IN PAGE (no navigation).
         page.locator("#pe-tab-versions").click()
         page.waitForSelector("#pe-pane-versions table[data-dt-ready]")
-        page.waitForFunction("() => !!document.querySelector('#pe-pane-versions tr[data-version-row=\\\"1\\\"] [data-pe-viewed-mark]') === false")
-        page.evaluate("() => !!document.querySelector('#pe-pane-versions tr[data-version-row=\\\"3\\\"] [data-pe-viewed-mark]')") shouldBe true
+        page.waitForFunction(
+            "() => !!document.querySelector('#pe-pane-versions tr[data-version-row=\\\"1\\\"] [data-pe-viewed-mark]') === false",
+        )
+        page.evaluate("() => !!document.querySelector('#pe-pane-versions tr[data-version-row=\\\"3\\\"] [data-pe-viewed-mark]')") shouldBe
+            true
 
         page.locator("#pe-pane-versions tr[data-version-row='1'] a[data-pe-version-link]").click()
         page.waitForURL("**/pipelines/*?*version=1*")
         page.waitForFunction("() => window.PEWorkspace && window.PEWorkspace.viewedVersion === 1")
         page.evaluate("() => JSON.parse(document.getElementById('pipeline-data').textContent).version") shouldBe 1
         // The tab mark re-rendered without a reload.
-        page.evaluate("() => !!document.querySelector('#pe-pane-versions tr[data-version-row=\\\"1\\\"] [data-pe-viewed-mark]')") shouldBe true
+        page.evaluate("() => !!document.querySelector('#pe-pane-versions tr[data-version-row=\\\"1\\\"] [data-pe-viewed-mark]')") shouldBe
+            true
 
         // An absent version is the visible refusal, and the view does not move.
         page.evaluate("() => window.__peInstance.applyVersion(99)")
@@ -327,7 +344,9 @@ class PipelineWorkspaceTabsBrowserTest : BrowserSuite() {
         page.waitForFunction("() => document.querySelector('#pe-pane-parameters .pe-input[data-key=\\\"year\\\"]')?.value === ''")
         page.waitForTimeout(300.0)
         val v2Inputs =
-            page.evaluate("() => [...document.querySelectorAll('#pe-pane-parameters .pe-input')].map(i => i.getAttribute('data-key') + '=' + i.value)") as List<String>
+            page.evaluate(
+                "() => [...document.querySelectorAll('#pe-pane-parameters .pe-input')].map(i => i.getAttribute('data-key') + '=' + i.value)",
+            ) as List<String>
         withClue("v2's own bag after the switch: $v2Inputs") {
             v2Inputs.any { it.startsWith("region=") } shouldBe true
         }
@@ -351,7 +370,10 @@ class PipelineWorkspaceTabsBrowserTest : BrowserSuite() {
         // Node Details is the dock's landing tab and the strip names all four.
         page.evaluate("() => document.querySelector('#pe-dock-tab-details').getAttribute('aria-selected')") shouldBe "true"
         page.evaluate("() => document.querySelector('#pe-dock-tab-details').textContent.trim()") shouldBe "Node Details"
-        page.evaluate("() => !!document.querySelector('#pe-dock-tab-results') && !!document.querySelector('#pe-dock-tab-errors') && !!document.querySelector('#pe-dock-tab-events')") shouldBe true
+        page.evaluate(
+            "() => !!document.querySelector('#pe-dock-tab-results') && !!document.querySelector('#pe-dock-tab-errors') && !!document.querySelector('#pe-dock-tab-events')",
+        ) shouldBe
+            true
 
         // Selecting a node opens Node Details and the graph keeps its width (no right
         // inspector ever appears).
@@ -361,17 +383,18 @@ class PipelineWorkspaceTabsBrowserTest : BrowserSuite() {
         page.evaluate("() => document.querySelector('#pe-node-list li[data-node-id]').click()")
         page.waitForSelector("#pe-pane-details .pe-details")
         @Suppress("UNCHECKED_CAST")
-        val geometry = page.evaluate(
-            """
-            () => ({
-              dockH: document.querySelector('.pe-dock').getBoundingClientRect().height,
-              stageW: document.querySelector('.pe-stage').getBoundingClientRect().width,
-              rootW: document.querySelector('.pe-root').getBoundingClientRect().width,
-              inspector: !!document.querySelector('.pe-inspector, [class*=inspector]'),
-              emptyPromptShown: getComputedStyle(document.querySelector('#pe-pane-details .pe-empty')).display !== 'none',
-            })
-            """.trimIndent(),
-        ) as Map<String, Any?>
+        val geometry =
+            page.evaluate(
+                """
+                () => ({
+                  dockH: document.querySelector('.pe-dock').getBoundingClientRect().height,
+                  stageW: document.querySelector('.pe-stage').getBoundingClientRect().width,
+                  rootW: document.querySelector('.pe-root').getBoundingClientRect().width,
+                  inspector: !!document.querySelector('.pe-inspector, [class*=inspector]'),
+                  emptyPromptShown: getComputedStyle(document.querySelector('#pe-pane-details .pe-empty')).display !== 'none',
+                })
+                """.trimIndent(),
+            ) as Map<String, Any?>
         (geometry["dockH"] as Number).toDouble() shouldBeGreaterThanOrEqual 120.0
         (geometry["stageW"] as Number).toDouble() shouldBeGreaterThanOrEqual (geometry["rootW"] as Number).toDouble() * 0.9
         geometry["inspector"] shouldBe false

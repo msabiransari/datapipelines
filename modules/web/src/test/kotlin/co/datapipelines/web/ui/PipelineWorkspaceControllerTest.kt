@@ -40,6 +40,7 @@ class PipelineWorkspaceControllerTest {
     private val repository = mockk<PipelineRepository>(relaxed = true)
     private val themeResolver = mockk<ThemeResolver>()
     private val lens = mockk<PromoterLens>()
+
     // #349: the composition facts are the browse model's REAL code over relaxed
     // collaborators — the version rows the model asserts come from the actual mapper,
     // never from a stand-in's answer.

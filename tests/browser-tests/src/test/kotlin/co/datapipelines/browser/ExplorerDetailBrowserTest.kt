@@ -502,12 +502,12 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
                 page.evaluate(
                     """
                     () => {
-                      const m = document.querySelector('#pipeline-tab-versions tr[data-version-row] td');
-                      const row = m.closest('tr[data-version-row]');
-                      const line = parseFloat(getComputedStyle(m).lineHeight) || 16;
-                      return { width: m.getBoundingClientRect().width,
-                               rowWidth: row.getBoundingClientRect().width,
-                               lines: m.getBoundingClientRect().height / line };
+                      const cells = [...document.querySelectorAll('#pipeline-tab-versions tr[data-version-row] td')];
+                      const widest = cells.reduce((a, c) => c.getBoundingClientRect().width > a.getBoundingClientRect().width ? c : a, cells[0]);
+                      const line = parseFloat(getComputedStyle(widest).lineHeight) || 16;
+                      return { width: widest.getBoundingClientRect().width,
+                               rowWidth: widest.closest('tr[data-version-row]').getBoundingClientRect().width,
+                               lines: widest.getBoundingClientRect().height / line };
                     }
                     """.trimIndent(),
                 ) as Map<String, Any?>
@@ -821,7 +821,11 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
         const val SHELL_FLOOR = 768
 
         /** A meta column narrower than this cannot set "3 days ago - someone - 7 runs" at all. */
-        const val META_MIN_WIDTH = 120.0
+        // #349: the row is the house table now — six columns in the explorer's ~524px
+        // pane give each cell a real but modest share. The bug this guard exists for was
+        // a ~10px column setting ONE CHARACTER per line; the floor stays an order of
+        // magnitude above it.
+        const val META_MIN_WIDTH = 48.0
 
         /** ...and it must not need more than a few lines to do it. */
         const val META_MAX_LINES = 4.0

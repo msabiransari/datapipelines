@@ -91,16 +91,17 @@ class PipelineWorkspaceLayoutBrowserTest : BrowserSuite() {
         page.evaluate("() => !!document.querySelector('[data-splitter=\\\"editor-sidebar\\\"]')") shouldBe false
         // The graph owns the width: the stage spans the workspace's content box.
         @Suppress("UNCHECKED_CAST")
-        val widths = page.evaluate(
-            """
-            () => {
-              const root = document.querySelector('.pe-root').getBoundingClientRect();
-              const stage = document.querySelector('.pe-stage').getBoundingClientRect();
-              const pane = document.querySelector('#pe-pane-flow').getBoundingClientRect();
-              return { rootW: root.width, stageW: stage.width, paneW: pane.width };
-            }
-            """.trimIndent(),
-        ) as Map<String, Any?>
+        val widths =
+            page.evaluate(
+                """
+                () => {
+                  const root = document.querySelector('.pe-root').getBoundingClientRect();
+                  const stage = document.querySelector('.pe-stage').getBoundingClientRect();
+                  const pane = document.querySelector('#pe-pane-flow').getBoundingClientRect();
+                  return { rootW: root.width, stageW: stage.width, paneW: pane.width };
+                }
+                """.trimIndent(),
+            ) as Map<String, Any?>
         (widths["stageW"] as Number).toDouble() shouldBeGreaterThan (widths["paneW"] as Number).toDouble() * 0.95
         shot("flow-no-sidebar")
     }
@@ -158,8 +159,13 @@ class PipelineWorkspaceLayoutBrowserTest : BrowserSuite() {
         loginReadyUser()
         val name = "wslay/phone/" + generatedPassword("p").take(8).lowercase()
         seedPipeline(name) shouldBe 201
-        page.setViewportSize(390, 844)
+        // Reach the workspace at desktop first (below 1100 the explorer's tree is a
+        // drawer), then resize and reload — the band is the <768px arrival surface.
+        page.setViewportSize(1440, 900)
         openWorkspaceFor(name)
+        val workspaceUrl = page.url()
+        page.setViewportSize(390, 844)
+        page.navigate(workspaceUrl)
 
         // The 110 band: the workspace is desktop-first BY DECISION, and the band says so
         // with the pipeline's name and the viewed-version chip — wording without "edit".
@@ -170,11 +176,12 @@ class PipelineWorkspaceLayoutBrowserTest : BrowserSuite() {
         band shouldNotContain "edit"
 
         @Suppress("UNCHECKED_CAST")
-        val overflow = page.evaluate(
-            """
-            () => ({ doc: document.documentElement.scrollWidth - document.documentElement.clientWidth })
-            """.trimIndent(),
-        ) as Map<String, Any?>
+        val overflow =
+            page.evaluate(
+                """
+                () => ({ doc: document.documentElement.scrollWidth - document.documentElement.clientWidth })
+                """.trimIndent(),
+            ) as Map<String, Any?>
         (overflow["doc"] as Number).toInt() shouldBe 0
         shot("phone-band")
     }

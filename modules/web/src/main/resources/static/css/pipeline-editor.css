@@ -1510,7 +1510,10 @@
  * 2026-09-05), so the dock is always present — there is no hidden state. */
 .pe-dock {
   display: grid;
-  grid-template-rows: var(--pe-dock-tabs-h) var(--pe-dock-pane-h);
+  /* #349: the run strip is the dock's FIRST grid child when the caller has the
+     execution read — `auto` collapses to nothing without it (a promoter's dock),
+     and the tabs + pane keep their own rows either way. */
+  grid-template-rows: auto var(--pe-dock-tabs-h) var(--pe-dock-pane-h);
   flex: 0 0 auto;
   min-height: 0;
   background: var(--surface-default, #fff);

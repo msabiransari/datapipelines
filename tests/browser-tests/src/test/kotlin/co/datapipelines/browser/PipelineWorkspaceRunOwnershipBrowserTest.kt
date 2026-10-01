@@ -2,8 +2,8 @@ package co.datapipelines.browser
 
 import com.microsoft.playwright.Page
 import com.microsoft.playwright.Route
-import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.assertions.withClue
+import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.ints.shouldBeGreaterThanOrEqual
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
@@ -97,7 +97,6 @@ class PipelineWorkspaceRunOwnershipBrowserTest : BrowserSuite() {
         page.locator(".pe-card").first().waitFor()
     }
 
-
     @Test
     fun `a held stale SQL response never paints - select A, move on, release A (A8)`() {
         loginReadyUser()
@@ -142,11 +141,12 @@ class PipelineWorkspaceRunOwnershipBrowserTest : BrowserSuite() {
             )
         } catch (e: Throwable) {
             val diag =
-                page.evaluate(
-                    """() => ({ token: window.__peInstance && window.__peInstance.sqlToken,
+                page
+                    .evaluate(
+                        """() => ({ token: window.__peInstance && window.__peInstance.sqlToken,
                        paneLen: (document.getElementById('pe-node-sql') || { innerHTML: '' }).innerHTML.length,
                        selected: window.__peInstance && window.__peInstance.selectedNode && window.__peInstance.selectedNode.id })""",
-                ).toString()
+                    ).toString()
             throw AssertionError("B's pane never rendered; sqlResponses=$sqlResponses diag=$diag", e)
         }
         val beforeRelease =
@@ -190,7 +190,10 @@ class PipelineWorkspaceRunOwnershipBrowserTest : BrowserSuite() {
 
         // Start the v1 run from the toolbar.
         page.locator(".pe-run").click()
-        page.waitForSelector(".pe-status.pe-status-running", Page.WaitForSelectorOptions().setState(com.microsoft.playwright.options.WaitForSelectorState.ATTACHED))
+        page.waitForSelector(
+            ".pe-status.pe-status-running",
+            Page.WaitForSelectorOptions().setState(com.microsoft.playwright.options.WaitForSelectorState.ATTACHED),
+        )
 
         // Browse v2 mid-run — IN PAGE, the stream untouched.
         page.locator(".pe-versions a[data-version='2']").click()
@@ -212,11 +215,15 @@ class PipelineWorkspaceRunOwnershipBrowserTest : BrowserSuite() {
         // the captured run): open Results, and it names the RUN's version while the page
         // views v2, with the way back beside it.
         page.locator("#pe-dock-tab-results").click()
-        page.waitForFunction("() => { const s = document.querySelector('.pe-run-strip'); return s && getComputedStyle(s).display !== 'none' && s.textContent.includes('v1'); }")
+        page.waitForFunction(
+            "() => { const s = document.querySelector('.pe-run-strip'); return s && getComputedStyle(s).display !== 'none' && s.textContent.includes('v1'); }",
+        )
         val stripText = page.locator(".pe-run-strip").innerText()
         stripText shouldContain "v1"
         val viewBtnShown =
-            page.evaluate("() => { const b = document.querySelector('.pe-run-strip button'); return b && getComputedStyle(b).display !== 'none'; }")
+            page.evaluate(
+                "() => { const b = document.querySelector('.pe-run-strip button'); return b && getComputedStyle(b).display !== 'none'; }",
+            )
         viewBtnShown shouldBe true
 
         // The v2 graph wears NO v1 run state: the one v2 node (v2_calc) is idle, and no
@@ -227,9 +234,14 @@ class PipelineWorkspaceRunOwnershipBrowserTest : BrowserSuite() {
         // The run's states keep arriving for v1's nodes — one of which (stage_calendar)
         // EXISTS on the v2 body with a different meaning. The v2 graph's card must stay
         // IDLE: the run paints only its own version's view (spec §4.2).
-        page.waitForFunction("() => Object.keys(window.__peInstance.nodeStates).some(id => window.__peInstance.nodeStates[id] !== 'idle')", 30000.0)
+        page.waitForFunction(
+            "() => Object.keys(window.__peInstance.nodeStates).some(id => window.__peInstance.nodeStates[id] !== 'idle')",
+            30000.0,
+        )
         val v2CardState =
-            page.evaluate("() => { const i = window.__peInstance; const n = i.cy && i.cy.getElementById('stage_calendar'); return n && n.length ? n.data('state') || 'idle' : 'absent'; }")
+            page.evaluate(
+                "() => { const i = window.__peInstance; const n = i.cy && i.cy.getElementById('stage_calendar'); return n && n.length ? n.data('state') || 'idle' : 'absent'; }",
+            )
         withClue("the v2 graph's shared-id card while the v1 run runs: $v2CardState") {
             v2CardState shouldBe "idle"
         }
@@ -241,7 +253,10 @@ class PipelineWorkspaceRunOwnershipBrowserTest : BrowserSuite() {
         page.evaluate("() => { const i = window.__peInstance; return i.runMatchesViewed(); }") shouldBe true
 
         // The run finishes server-side; the wire holds ZERO cancels.
-        page.waitForFunction("() => { const i = window.__peInstance; return i.runIdentity && i.runIdentity.status !== 'running'; }", 120000.0)
+        page.waitForFunction(
+            "() => { const i = window.__peInstance; return i.runIdentity && i.runIdentity.status !== 'running'; }",
+            120000.0,
+        )
         deletes.shouldBeEmpty()
         // The strip stays truthful to the end.
         page.locator(".pe-run-strip").innerText() shouldContain "v1"

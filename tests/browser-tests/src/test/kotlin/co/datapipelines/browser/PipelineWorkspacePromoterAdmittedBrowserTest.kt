@@ -224,7 +224,6 @@ class PipelineWorkspacePromoterAdmittedBrowserTest : BrowserSuite() {
         promoter.close()
     }
 
-
     @Test
     fun `the promoter's workspace omits the Runs tab and the execution dock tabs - and no tab interaction fetches`() {
         // #349 (spec §4.2, A3): a promoter retains Node Details WITHOUT the execution

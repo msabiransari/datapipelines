@@ -415,8 +415,7 @@ class PipelineBrowseModel(
                     (NodeSource.from(node.source) as? NodeSource.Datasource)?.name,
                     (node.output as? NodeOutput.Datasource)?.datasource,
                 )
-            }
-            .distinct()
+            }.distinct()
             .sorted()
 
     /**
@@ -647,7 +646,9 @@ class PipelineBrowseModel(
         const val RUNS_LIMIT = 20
 
         /** The last-run line's exact stamp — the explorer's own `yyyy-MM-dd HH:mm` reading. */
-        private val LAST_RUN_FORMAT = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
+        private val LAST_RUN_FORMAT =
+            java.time.format.DateTimeFormatter
+                .ofPattern("yyyy-MM-dd HH:mm")
 
         /** Hex characters of a nested level's id digest — 64 bits, over one screen's folders. */
         private const val LEVEL_ID_HEX_LENGTH = 16

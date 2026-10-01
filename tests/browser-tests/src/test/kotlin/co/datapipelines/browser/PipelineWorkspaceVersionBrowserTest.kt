@@ -246,8 +246,9 @@ class PipelineWorkspaceVersionBrowserTest : BrowserSuite() {
         page.waitForSelector(".pe-root")
         dataBlock() shouldContain "n_v3"
         viewedChip() shouldBe "v3 · draft"
-        // An author sees the draft's pending-release affordance beside the viewed draft.
-        page.locator("[data-verb='pipeline-release']").waitFor()
+        // An author sees the draft's pending-release affordance beside the viewed draft
+        // (the TOPBAR's; the Versions tab's per-row menus carry the same verb — #349).
+        page.locator(".pe-topbar [data-verb='pipeline-release']").waitFor()
     }
 
     @Test
