@@ -67,6 +67,10 @@ class PipelineNodeSqlPartialController(
         @PathVariable id: UUID,
         @PathVariable nodeId: String,
         @RequestParam(required = false) parameters: String?,
+        // #348 — the workspace's version pin. The workspace ALWAYS sends it, so the panel
+        // shows the SQL of the body the page displays; the legacy omission keeps the resolver's
+        // E5 default (draft-if-exists, else current) — the agent node-run default is untouched.
+        @RequestParam(required = false) version: String?,
         model: Model,
     ): String {
         val principal = currentPrincipal()
@@ -77,10 +81,13 @@ class PipelineNodeSqlPartialController(
         // through the façade with the template lens. Every absence is the house 404 (#184).
         val view = lens.viewFor(principal)
         pipelineService.findRecord(workspaceId, view.pipelines, id) ?: throw notFound(id)
+        val requestedVersion = PipelineWorkspaceModel.parseRequestedVersion(version)
 
         // The E5 version default (draft-if-exists) applies here exactly as it does for the
-        // node-run tool, so the two surfaces cannot disagree about which body the panel and
-        // the agent are each looking at.
+        // node-run tool when NO version was sent, so the two surfaces cannot disagree about
+        // which body the panel and the agent are each looking at; an explicit version resolves
+        // through the same admission the resolver applies (absent, or hidden under a narrowing
+        // lens, is the same NoSuchElementException → house 404).
         when (val inputs = parseOverrides(parameters)) {
             is Overrides.Malformed -> {
                 rejectParameters(model, "parameters", "The parameters document is not valid §6.3 wire JSON: ${inputs.reason}")
@@ -94,7 +101,7 @@ class PipelineNodeSqlPartialController(
                             workspaceId,
                             id,
                             nodeId,
-                            requestedVersion = null,
+                            requestedVersion = requestedVersion,
                             parameterInputs = inputs.inputs,
                             pipelineLens = view.pipelines,
                             templateLens = view.templates,

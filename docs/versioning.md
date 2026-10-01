@@ -485,7 +485,9 @@ rows describing released content, some describing unreleased edits, with nothing
 schema marking which — and every consumer of the row (search, list, name lookup) would
 silently inherit that ambiguity.
 
-The editor shows draft metadata with a "pending release" affordance; the list shows the
+The workspace header shows a draft's pending-release affordance when the caller's view admits
+one (the Release / Purge-draft verbs are the lifecycle dialogs', role-gated); the read page's
+version chip names the version it RESOLVED — draft or release — and the list shows the
 released name until lock.
 
 **What surface the write arrived on (102, owner ruling 2026-09-09).** Every version row on
@@ -927,7 +929,8 @@ well, and it is what "we always run the LAST version" means:
 | `POST /api/v1/pipelines/{id}/execute` | working version |
 | `pipelines_execute` (MCP) | working version |
 | `datapipelines://pipelines/{id}` (MCP resource, no `/versions/{n}`) | working version |
-| `pipelines_get`, `GET /pipelines/{id}`, the editor | working version (§7.1, unchanged) |
+| `pipelines_get`, `GET /api/v1/pipelines/{id}` | working version (§7.1, unchanged) |
+| The UI read workspace (`GET /pipelines/{id}`, #348) | the **ACTUAL current pointer** when its body is admitted (a development-posture current draft shows as the draft it is, never rewritten as a release), then an accessible draft, then a choose-a-version state — never "latest release"; an explicit `?version=N` renders exactly or 404. The workspace's own execute POST always carries its viewed version, so this default never decides a run. |
 | A published endpoint (`GET` on the published tree) | **whatever the pointer names** — in development that may be a draft (D63, §3.4 "A draft pointer"); outside development no draft exists, so released only by construction |
 | Promotion candidates and the promotion push | **released only** (D6); unchanged |
 
@@ -1418,6 +1421,7 @@ re-opening it.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-30 | v1.19 | 348 (#348) the version-explicit workspace | **§7.2's table** disambiguates the REST `GET /api/v1/pipelines/{id}` (working version, unchanged) from the UI read workspace `GET /pipelines/{id}`, whose default is the ACTUAL current pointer (a permitted current draft shows as the draft it is), then an accessible draft, then choose-a-version — never "latest release" (§3.4's sticky pointer stated in the UI's own contract); an explicit `?version=N` renders exactly or 404. The workspace's execute POSTs always pin their viewed version, so no UI default decides a run. §3.5's draft-affordance sentence now describes the header's role-gated lifecycle verbs and the viewed-version chip. Service/REST/MCP defaults are untouched. |
 | 2026-09-30 | v1.18 | 320 (#320) dependency guards | **§3.5: the reverse arrows into other families.** Graph rule 1 names every arrow and its code; new §3.5.3 tabulates them: a visualization's `transform.template` → `template.in_use` (`referencing_visualizations`), a dashboard source → `pipeline.version.pinned` (`referencing_dashboards`), a dashboard's `parameter_set` → the new `parameter.in_use`. Rule 3: a draft purge that takes the entity is an entity purge; the template and parameter-set DRAFT purges — which ran no pin check — are guarded (the `{R,D}` purge row was right, the code did not do it). The pipeline purge's exclusive-draft offer skips a draft template a parameter set or a visualization also pins and reports it as `kept_draft_templates` (it deleted a set's template before). Restore of a DISCARDED dashboard or visualization re-judges its dependencies (D7). The any-version rule's reachability and the residual window are stated. |
 | 2026-09-29 | v1.17 | L1a (#10) visualizations and dashboards | **§3.5: the tree gains its fourth and fifth families** — visualizations and dashboards (V42; the parameter-set shape twice, one generic lifecycle): their rows read with `visualization.*` / `dashboard.*` codes; a visualization's release needs a test case, a released (or consented-cascade) transform pin and the D56 evidence gate (refusing until the tests lane installs it); a pinned visualization version is never purged or discarded while a live dashboard version pins it (`visualization.version.pinned`, graph rule 1); a dashboard's release cascades its DRAFT visualization pins under `release_pinned_visualizations` in one transaction (D61). |
 | 2026-09-28 | v1.16 | 194d (#194) parameter sets — renumbered at merge after 286's v1.15 | **§3.5: the tree gains its third family — parameter sets** (the record's §8.1: the templates' table shape, the pipelines' hash and index semantics, addressed by id, the `parameter.*` codes reading every lifecycle row). Release carries the pinned-template precondition plus the record's §4 source re-validation; the C14 boot rule adds parameter-set drafts to the authoring-disabled refusal. §5.5's refusal names all three draft families. |

@@ -5,13 +5,16 @@
     var pipelineId = editor.pipeline.id;
     if (!pipelineId) return;
 
-    // #336 D8: a lifecycle block that could not be read leaves the version pin
-    // unknown — running would target the server's execute-default (latest
-    // RELEASED) while the person may be editing a draft. Refuse, visibly.
-    if (window.PEDraftInvalid) {
+    // #348: the version pin is the workspace state (workspace.js) — the version the
+    // page is VIEWING, released or draft. A page whose block is missing or malformed,
+    // or one that resolved no body, cannot choose which version to run: refuse
+    // visibly and send NOTHING — never the server's execute-default, which can be a
+    // different body than the one the person is looking at.
+    var pin = window.PEWorkspaceLogic ? window.PEWorkspaceLogic.executeVersion(window.PEWorkspace) : null;
+    if (pin == null) {
       editor.isExecuting = false;
       editor.showError(
-        "The editor could not read the pipeline's lifecycle state, so it cannot choose which version to run. Reload the page; if it persists, re-open the pipeline."
+        "The page could not read the pipeline's version state, so it cannot choose which version to run. Reload the page; if it persists, re-open the pipeline."
       );
       return;
     }

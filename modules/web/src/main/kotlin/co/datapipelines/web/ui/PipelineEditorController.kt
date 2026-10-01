@@ -2,105 +2,49 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
-import co.datapipelines.pipeline.PipelineJson
-import co.datapipelines.pipeline.PipelineService
-import co.datapipelines.pipeline.ReadLens
-import co.datapipelines.web.api.currentPrincipal
-import co.datapipelines.web.pipelines.PipelineResponses
-import co.datapipelines.web.ui.site.ScriptSafeJson
-import com.fasterxml.jackson.databind.ObjectMapper
-import jakarta.servlet.http.HttpServletRequest
 import org.springframework.stereotype.Controller
-import org.springframework.ui.Model
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
+import org.springframework.web.bind.annotation.RequestParam
+import org.springframework.web.servlet.view.RedirectView
+import org.springframework.web.util.UriComponentsBuilder
 import java.util.UUID
 
+/**
+ * The OLD editor route, kept as a **compatibility redirect** (workspace spec §3.2, #348): the
+ * canonical read page is `/pipelines/{id}` ([PipelineWorkspaceController]) since the read
+ * workspace made version selection explicit, and every historical link into
+ * `/pipelines/{id}/editor` — the explorers' Open actions, the version rows before their
+ * repoint, datasource facts, the global search — enters the same page through this 302.
+ *
+ * The floor dropped from `PIPELINE_EXECUTE` to [Permission.PIPELINE_READ] **in the same
+ * commit** as the auth.md §7.6 rows and the [co.datapipelines.web.api.ReadFloorTest] family:
+ * the redirect is a read of the route table, and the page it names is a read page — the
+ * promoter walks through it to the released content exactly as the canonical route admits
+ * (122's execute floor described the page the route USED to serve; that page is gone).
+ *
+ * An explicit valid `version` and a supported `tab` survive the redirect; a malformed version
+ * is the same house 400 the canonical route answers — a compatibility shim is not a licence
+ * to clamp a caller's input to a different version. No-version links follow the canonical
+ * current-first default on purpose: that is the intended UI change (spec §3.2).
+ */
 @Controller
-class PipelineEditorController(
-    private val pipelines: PipelineService,
-    private val themeResolver: ThemeResolver,
-) {
-    // NOT a constructor parameter: Spring injects the app's servlet ObjectMapper into an
-    // ObjectMapper-typed parameter even when it has a default, and that mapper lacks the
-    // contract modules (see PipelineNodeSqlPartialController, 032). Guarded by
-    // ObjectMapperDefaultParameterKonsistTest.
-    private val mapper: ObjectMapper = PipelineJson.objectMapper()
-
-    // Three 404s, three distinct absences: no pipeline, no version to edit (D55/§3.4), no body for
-    // the version we resolved. The editor's own tolerance for a missing DETAIL row is what keeps
-    // them separate — see the narrow-reads comment below.
-    @Suppress("ThrowsCount")
+class PipelineEditorController {
     @GetMapping("/pipelines/{id}/editor")
-    // The floor is the operation this screen exists to perform for its LOWEST role —
-    // EXECUTE (D-R3: viewers execute what they can read) — not the read that paints it
-    // and not authoring: an execute key and a viewer session both reach the page, a
-    // `read` key stays refused (read < execute, §7.5). 096 §C's concern is answered by
-    // 114 §A, not by the route: the AUTHORING state rendered here is read, never
-    // written — every authoring verb on the page is role-hidden (RoleVisibilityRenderTest)
-    // and every mutating call it can make is verb-guarded or viewer-level (122 §A.2).
-    // The template editor keeps the author floor: nothing a viewer may DO lives there.
-    @RequiredScope(Permission.PIPELINE_EXECUTE)
+    @RequiredScope(Permission.PIPELINE_READ)
     fun editor(
         @PathVariable id: UUID,
-        model: Model,
-        request: HttpServletRequest,
-    ): String {
-        val workspaceId = currentPrincipal().requireWorkspace().id
-        // 178: no lens here by design — the editor is EXECUTE_PIPELINE (auth.md §7.6), which the
-        // interceptor refuses a promoter before this handler runs; the reads below are an author's.
-        val record =
-            pipelines.findRecord(workspaceId, ReadLens.Everything, id)
-                ?: throw NoSuchElementException("Pipeline $id not found")
-        // versioning §3.5/§7: the editor shows the DRAFT when one exists (that is the
-        // working copy a human reviews), with its pending-release affordance; the list
-        // keeps showing the released name until lock. The default body of the REST GET
-        // stays the released version — this is the editor's load, not the API's.
-        val draft = pipelines.findDraft(workspaceId, ReadLens.Everything, record.id)
-        // The working version ([PipelineService.workingVersion]'s rule, with the draft already in
-        // hand). Null only when the pipeline's sole draft was discarded (§5.4) and nothing was
-        // ever released — there is no body to edit, which is the same 404 an unknown id gets.
-        val shownVersion =
-            draft?.version
-                ?: record.currentVersion
-                ?: throw NoSuchElementException("Pipeline $id has no version to edit")
-        val body =
-            pipelines.findVersionBody(workspaceId, ReadLens.Everything, record.id, shownVersion)
-                ?: throw NoSuchElementException("Pipeline $id version $shownVersion body not found")
-        // Deliberately the NARROW reads, not `findVersion`: the editor renders a body whose detail
-        // row is absent (no lifecycle badge) where an API read would call that a 404. Same calls
-        // this controller made before 056, now through the service.
-        val versionDetail = draft ?: pipelines.findCurrentVersion(workspaceId, ReadLens.Everything, record.id)
-        val fullTree = PipelineResponses.full(record, body, versionDetail, draft)
-        // Both blobs are inserted with `th:utext` into <script> blocks; the free text they
-        // carry (display name, description, node labels, template names) has no charset
-        // rule, so a `</script>` inside a value must not be able to close the block (185).
-        val pipelineJson = ScriptSafeJson.forScriptBlock(mapper.writeValueAsString(fullTree))
-
-        model.addAttribute("pipelineJson", pipelineJson)
-        model.addAttribute("pipelineId", id)
-        // 110 §C: the phone band above the editor names the entity (the JSON blob is
-        // data for the scripts, not something a template can render a name out of).
-        model.addAttribute("pipelineName", record.displayName)
-        model.addAttribute("hasDraft", draft != null)
-        model.addAttribute("draftVersion", draft?.version)
-        model.addAttribute("draftHash", draft?.bodyHash)
-        model.addAttribute("releasedVersion", record.currentVersion)
-        model.addAttribute(
-            "lifecycleJson",
-            ScriptSafeJson.forScriptBlock(
-                mapper.writeValueAsString(
-                    buildMap<String, Any?> {
-                        put("hasDraft", draft != null)
-                        put("draftVersion", draft?.version)
-                        put("draftHash", draft?.bodyHash)
-                        put("releasedVersion", record.currentVersion)
-                    },
-                ),
-            ),
-        )
-        model.addAttribute("activeTheme", themeResolver.resolve(request))
-        RoleModel.stamp(model)
-        return "pipelines/editor"
+        @RequestParam(required = false) version: String?,
+        @RequestParam(required = false) tab: String?,
+    ): RedirectView {
+        // Validated, not forwarded blind: the same parse the canonical page runs, and only a
+        // tab of the closed set survives. A UUID path variable needs no escaping; the parsed
+        // version is digits and the tab a wire word, so the built URI carries no free input.
+        val parsedVersion = PipelineWorkspaceModel.parseRequestedVersion(version)
+        val supportedTab = PipelineWorkspaceController.PipelineWorkspaceTab.entries.firstOrNull { it.wire == tab }
+        val builder = UriComponentsBuilder.fromPath("/pipelines/$id")
+        if (parsedVersion != null) builder.queryParam("version", parsedVersion)
+        if (supportedTab != null) builder.queryParam("tab", supportedTab.wire)
+        return RedirectView(builder.build().toUriString())
     }
 }

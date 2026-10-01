@@ -412,10 +412,18 @@
           var type = (self.parameters[k] && self.parameters[k].type) || "STRING";
           wire[k] = window.coerceValue(raw, type);
         });
+        // #348: the panel shows the SQL of the body the page is VIEWING — the version
+        // travels with every request the workspace makes (workspace spec §3.3). The
+        // legacy omission (an agent or old caller without the parameter) keeps the
+        // resolver's working-version default on the server.
+        var versionPin = window.PEWorkspaceLogic ? window.PEWorkspaceLogic.executeVersion(window.PEWorkspace) : null;
         var url =
           "/partials/pipelines/" + encodeURIComponent(self.pipeline.id) +
           "/nodes/" + encodeURIComponent(self.selectedNode.id) + "/sql" +
           "?parameters=" + encodeURIComponent(JSON.stringify(wire));
+        if (versionPin != null) {
+          url += "&version=" + encodeURIComponent(versionPin);
+        }
         // #pe-node-sql lives inside <template x-if="selectedNode">, which Alpine
         // renders on the NEXT tick — issuing htmx.ajax synchronously off a
         // selection change hits htmx:targetError and the section never loads.
@@ -1381,7 +1389,10 @@
       if (!replacesMain) return;
       inst.teardown();
       window.__peInstance = null;
-      window.PEDraft = null;
+      // #348: the workspace version state dies with the page — the restored root's
+      // component re-reads the new document's own block (workspace.js runs per load).
+      window.PEWorkspace = null;
+      window.PEWorkspaceInvalid = false;
     });
 
     document.addEventListener("htmx:afterSettle", function () {

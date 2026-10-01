@@ -137,9 +137,12 @@ class AuthHttpBoundaryTest {
             fun brandNew() = "ok"
 
             /**
-             * The two authoring screens 096 §C put on the mutation floor, mapped here at
-             * their real paths so the 401/403 boundary is asserted at the WIRE. They render
-             * draft bodies and unreleased versions; a `read` key has no business in either.
+             * Two MUTATION-floor probes mapped at screen paths, so the 401/403 boundary is
+             * asserted at the WIRE (096 §C). The pipeline editor route itself left the
+             * mutation floor in #348 (its real handler is a read-floor redirect now); this
+             * fixture stays a synthetic `PIPELINE_UPDATE` probe at the same path — what it
+             * tests is the gate's behaviour for an annotated route, not the product's floor.
+             * The template editor keeps its authoring writes; the probe pair is unchanged.
              */
             @GetMapping("/pipelines/{id}/editor")
             @ResponseBody

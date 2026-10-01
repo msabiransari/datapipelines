@@ -47,12 +47,21 @@
       ? window.collectParameters(self.editor)
       : self.editor.parameterOverrides;
     var body = { parameters: parameters };
-    // versioning §8: the editor pins a run to the DRAFT it is showing (PEDraft,
-    // draft.js) — running a draft is the expected review loop; without a draft no
-    // version is sent and the server's execute-default (latest RELEASED) applies.
-    if (window.PEDraft && window.PEDraft.version) {
-      body.version = window.PEDraft.version;
+    // #348 (workspace spec §3.4): the run pins the version the page is VIEWING —
+    // released or draft, ALWAYS sent. workspace.js read it from #pipeline-workspace;
+    // a page whose block is missing or malformed never reaches this line (execute.js
+    // refuses before connecting), and this second gate keeps a versionless POST —
+    // which would let the server pick a body the person is not looking at — from
+    // ever firing. There is no fallback to a default.
+    var pin = window.PEWorkspaceLogic ? window.PEWorkspaceLogic.executeVersion(window.PEWorkspace) : null;
+    if (pin == null) {
+      self.editor.isExecuting = false;
+      self.editor.showError(
+        "The page could not read the pipeline's version state, so it cannot choose which version to run. Reload the page; if it persists, re-open the pipeline."
+      );
+      return;
     }
+    body.version = pin;
 
     fetch(url, {
       method: "POST",

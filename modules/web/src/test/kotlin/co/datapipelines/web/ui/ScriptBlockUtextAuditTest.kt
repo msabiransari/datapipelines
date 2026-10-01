@@ -61,26 +61,27 @@ class ScriptBlockUtextAuditTest {
     }
 
     @Test
-    fun `the editor controller writes both json blobs through ScriptSafeJson`() {
+    fun `the workspace controller writes both json blobs through ScriptSafeJson`() {
         val source = controllerSource().readText()
-        // Both shapes, pinned: the pipeline blob escapes at its serialisation, the
-        // lifecycle blob at its model attribute. A slot that stops matching its shape
-        // fails here loudly instead of drifting back to a raw writeValueAsString.
+        // Both shapes, pinned: the pipeline blob escapes at its serialisation, the workspace
+        // blob at its model attribute. A slot that stops matching its shape fails here loudly
+        // instead of drifting back to a raw writeValueAsString. (#348 moved the page's writer
+        // from PipelineEditorController — now the compatibility redirect — to this one.)
         val pipelineBlob =
-            Regex("""val pipelineJson = ScriptSafeJson\.forScriptBlock\(mapper\.writeValueAsString\(fullTree\)\)""")
-        val lifecycleBlob =
-            Regex("""model\.addAttribute\(\s*"lifecycleJson",\s*ScriptSafeJson\.forScriptBlock\(""")
+            Regex("""ScriptSafeJson\.forScriptBlock\(mapper\.writeValueAsString\(tree\)\)""")
+        val workspaceBlob =
+            Regex("""model\.addAttribute\(\s*"workspaceJson",\s*ScriptSafeJson\.forScriptBlock\(""")
         source shouldContainAssignment pipelineBlob
-        source shouldContainAssignment lifecycleBlob
+        source shouldContainAssignment workspaceBlob
     }
 
     private fun controllerSource(): File =
-        File("src/main/kotlin/co/datapipelines/web/ui/PipelineEditorController.kt")
-            .also { require(it.isFile) { "PipelineEditorController.kt not found from ${File(".").absolutePath}" } }
+        File("src/main/kotlin/co/datapipelines/web/ui/PipelineWorkspaceController.kt")
+            .also { require(it.isFile) { "PipelineWorkspaceController.kt not found from ${File(".").absolutePath}" } }
 
     private infix fun String.shouldContainAssignment(regex: Regex) {
         require(regex.containsMatchIn(this)) {
-            "the editor's JSON escaping is not wired as the audit pins it — expected /$regex/ in PipelineEditorController.kt"
+            "the workspace's JSON escaping is not wired as the audit pins it — expected /$regex/ in PipelineWorkspaceController.kt"
         }
     }
 
