@@ -243,13 +243,17 @@ class PipelineWorkspacePromoterAdmittedBrowserTest : BrowserSuite() {
         promoter.page.goBack()
         promoter.page.waitForSelector(".pe-root")
         promoter.page.waitForFunction(
-            "() => { const r = document.querySelector('#app-main .pe-root'); return !!(r && r._x_dataStack && r._x_dataStack.length >= 1); }",
+            "() => { const r = document.querySelector('#app-main .pe-root'); " +
+                "return !!(r && r._x_dataStack && r._x_dataStack.length >= 1); }",
         )
 
         val stack =
-            (promoter.page.evaluate(
-                "() => { const r = document.querySelector('#app-main .pe-root'); return r && r._x_dataStack ? r._x_dataStack.length : 0; }",
-            ) as Number).toInt()
+            (
+                promoter.page.evaluate(
+                    "() => { const r = document.querySelector('#app-main .pe-root'); " +
+                        "return r && r._x_dataStack ? r._x_dataStack.length : 0; }",
+                ) as Number
+            ).toInt()
         stack shouldBe 1
         promoter.page.locator(".pe-vchip").innerText() shouldBe "v2 · released"
         promoter.page.locator("#pe-node-sql").count() shouldBe 0

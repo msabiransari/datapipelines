@@ -94,7 +94,8 @@ class PipelineWorkspaceHistoryBrowserTest : BrowserSuite() {
         templateId: String,
         sql: String,
     ): String =
-        """{"id":"$templateId","type":"sql","dialect":"H2","display_name":"tpl","description":"348-c lifecycle","imports":[],"body":"$sql"}"""
+        """{"id":"$templateId","type":"sql","dialect":"H2","display_name":"tpl",""" +
+            """"description":"348-c lifecycle","imports":[],"body":"$sql"}"""
 
     private fun sqlBody(
         nodeId: String,
@@ -165,21 +166,15 @@ class PipelineWorkspaceHistoryBrowserTest : BrowserSuite() {
         )
     }
 
-    private fun counter(key: String): Int =
-        page.evaluate("k => (window.__peHistoryShape || {})[k] || 0", key) as Int
+    private fun counter(key: String): Int = page.evaluate("k => (window.__peHistoryShape || {})[k] || 0", key) as Int
 
     /** The restored root's stacked-component count — 1 is the contract, more is the defect. */
-    private fun stackDepth(): Int =
-        (page.evaluate(
-            "() => { const r = document.querySelector('#app-main .pe-root'); return r && r._x_dataStack ? r._x_dataStack.length : 0; }",
-        ) as Number).toInt()
+    private fun stackDepth(): Int = (page.evaluate(STACK_DEPTH_JS) as Number).toInt()
 
     /** The runtime's ONE activation completes when the root carries a bound component —
      *  the sync point every restore assertion reads after. */
     private fun waitActivated() {
-        page.waitForFunction(
-            "() => { const r = document.querySelector('#app-main .pe-root'); return !!(r && r._x_dataStack && r._x_dataStack.length >= 1); }",
-        )
+        page.waitForFunction(ACTIVATED_JS)
     }
 
     /** Live `#pe-node-sql` elements — the x-if pane renders one per LIVE component. */
@@ -219,6 +214,24 @@ class PipelineWorkspaceHistoryBrowserTest : BrowserSuite() {
         page.unroute(EXECUTE_PATTERN)
         posts.size shouldBe 1
         versionOf(posts.single()) shouldBe version
+    }
+
+    /** The slow-run fixture: a workspace, a Postgres source and the #151 stage chain. */
+    private fun seedSlowRunPipeline(): String {
+        val user =
+            seedLocalUser(
+                uniqueEmail("pwsc" + generatedPassword("u").take(8)),
+                generatedPassword("pw"),
+                mustChange = false,
+            )
+        login(user.email, user.oneTimePassword)
+        page.waitForURL("**/dashboard")
+        createWorkspace("pwsc" + generatedPassword("w").take(8).lowercase())
+
+        val datasource = "pwc-src-" + generatedPassword("d").take(6).lowercase()
+        EditorRunFixtures.registerSourceDatasource(page, baseUrl, datasource) shouldBe emptyList<String>()
+        val name = "test/p348c_" + generatedPassword("p").take(8).lowercase()
+        return EditorRunFixtures.createStageChainPipeline(page, name, datasource, ROWS)
     }
 
     private fun leaveThroughTheUi() {
@@ -268,8 +281,9 @@ class PipelineWorkspaceHistoryBrowserTest : BrowserSuite() {
             val identityAfter = runtimeIdentity()
             identityAfter["alpineMark"] shouldBe identityBefore["alpineMark"]
             identityAfter["epoch"] shouldBe identityBefore["epoch"]
-            (identityAfter["activations"] as? Number)?.toInt()
-                ?.shouldBeGreaterThanOrEqual(((identityBefore["activations"] as? Number)?.toInt() ?: 0) + 1)
+            val before = (identityBefore["activations"] as? Number)?.toInt() ?: 0
+            val after = (identityAfter["activations"] as? Number)?.toInt() ?: 0
+            after.shouldBeGreaterThanOrEqual(before + 1)
 
             // The restored page works like the first load: the SAME body, ONE pane, ONE POST.
             openFirstCardSql("SELECT 2 AS two")
@@ -492,21 +506,8 @@ class PipelineWorkspaceHistoryBrowserTest : BrowserSuite() {
     }
 
     @Test
-    fun `navigation detaches the stream without cancelling - the restored page follows the run to ONE toast`() {
-        val user =
-            seedLocalUser(
-                uniqueEmail("pwsc" + generatedPassword("u").take(8)),
-                generatedPassword("pw"),
-                mustChange = false,
-            )
-        login(user.email, user.oneTimePassword)
-        page.waitForURL("**/dashboard")
-        createWorkspace("pwsc" + generatedPassword("w").take(8).lowercase())
-
-        val datasource = "pwc-src-" + generatedPassword("d").take(6).lowercase()
-        EditorRunFixtures.registerSourceDatasource(page, baseUrl, datasource) shouldBe emptyList<String>()
-        val name = "test/p348c_" + generatedPassword("p").take(8).lowercase()
-        val id = EditorRunFixtures.createStageChainPipeline(page, name, datasource, ROWS)
+    fun `navigation detaches the stream without cancelling`() {
+        val id = seedSlowRunPipeline()
         page.navigate("$baseUrl/pipelines/$id")
         page.waitForSelector(".pe-root")
         seedHistoryCounters()
@@ -567,6 +568,16 @@ class PipelineWorkspaceHistoryBrowserTest : BrowserSuite() {
 
     private companion object {
         const val EXECUTE_PATTERN = "**/api/v1/pipelines/*/execute"
+
+        /** The restored root's stacked-component count, read in one probe. */
+        const val STACK_DEPTH_JS =
+            "() => { const r = document.querySelector('#app-main .pe-root'); " +
+                "return r && r._x_dataStack ? r._x_dataStack.length : 0; }"
+
+        /** The runtime's ONE activation completed: the root carries a bound component. */
+        const val ACTIVATED_JS =
+            "() => { const r = document.querySelector('#app-main .pe-root'); " +
+                "return !!(r && r._x_dataStack && r._x_dataStack.length >= 1); }"
 
         /** A run long enough to outlive a navigation, short enough to keep the suite honest. */
         const val ROWS = 400_000

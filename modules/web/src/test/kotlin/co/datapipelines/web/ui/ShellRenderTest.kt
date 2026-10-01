@@ -49,7 +49,9 @@ class ShellRenderTest {
         // what this pins — same element class, same hx-boost, same swap target, same
         // progress bar and flash bin.
         html shouldContain "<nav class=\"app-nav\" hx-boost=\"true\""
-        html shouldContain "<main id=\"app-main\" class=\"app-container app-main\" hx-boost=\"true\">"
+        // #358: the history cache is scoped to the main region — hx-history-elt rides
+        // the boost contract (the snapshot carries the workspace region, never the body).
+        html shouldContain "<main id=\"app-main\" class=\"app-container app-main\" hx-boost=\"true\" hx-history-elt>"
         html shouldContain "id=\"app-progress\""
         // 079 §F: the bin gained [data-toast-flash] — toast.js now drains EVERY marked bin,
         // so a screen with its own refusal vocabulary (promotion) can render its own.
