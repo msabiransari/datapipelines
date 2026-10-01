@@ -1,6 +1,6 @@
 # Configuration Reference
 
-**Status:** v1.42 (single source of truth for every config key)
+**Status:** v1.43 (single source of truth for every config key)
 **Owner:** datapipelines.co core
 **Last updated:** 2026-09-29
 
