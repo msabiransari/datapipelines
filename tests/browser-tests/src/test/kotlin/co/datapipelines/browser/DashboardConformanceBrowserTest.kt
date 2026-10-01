@@ -525,24 +525,7 @@ class DashboardConformanceBrowserTest : DashboardBrowserSuite() {
         page.waitForFunction("() => window.__dp.ready")
         // A second instance of the SAME board in the SAME document (case 8's mould): two adapters,
         // one parameter name, the collision the delivered group names had.
-        page.evaluate(
-            """
-            () => {
-              const second = document.createElement('div');
-              second.id = 'board-2';
-              document.body.appendChild(second);
-              window.__dp2 = { ready: false, instance: null };
-              const instance = window.DatapipelinesDashboard.init({
-                server: { baseUrl: '', credentials: 'session' },
-                dashboard: { id: '$board', version: 'released' },
-                container: second,
-                adapter: window.DatapipelinesDashboard.adapters(second),
-              });
-              window.__dp2.instance = instance;
-              instance.ready.then(function () { window.__dp2.ready = true; }, function () {});
-            }
-            """.trimIndent(),
-        )
+        mountSecondBoard(board)
         page.waitForFunction("() => window.__dp2.ready")
         page.waitForFunction(
             "() => document.querySelectorAll('#board [data-dp-parameter=\"granularity\"] input[type=radio]').length === 3" +
@@ -589,6 +572,28 @@ class DashboardConformanceBrowserTest : DashboardBrowserSuite() {
         page.waitForFunction("() => document.querySelectorAll('#board .dp-dashboard').length === 0")
         page.click("#board-2 [data-dp-parameter=\"granularity\"] input[type=radio] >> nth=2")
         page.waitForFunction("() => window.__dp2.instance._adapter.readSelections().granularity === 'MONTH'")
+    }
+
+    /** Case 8's mould: a second instance of [board] on a fresh container, signalled at `window.__dp2`. */
+    private fun mountSecondBoard(board: String) {
+        page.evaluate(
+            """
+            () => {
+              const second = document.createElement('div');
+              second.id = 'board-2';
+              document.body.appendChild(second);
+              window.__dp2 = { ready: false, instance: null };
+              const instance = window.DatapipelinesDashboard.init({
+                server: { baseUrl: '', credentials: 'session' },
+                dashboard: { id: '$board', version: 'released' },
+                container: second,
+                adapter: window.DatapipelinesDashboard.adapters(second),
+              });
+              window.__dp2.instance = instance;
+              instance.ready.then(function () { window.__dp2.ready = true; }, function () {});
+            }
+            """.trimIndent(),
+        )
     }
 
     @Test
