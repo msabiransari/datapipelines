@@ -155,6 +155,25 @@ class VisualizationMechanicalCheckTest {
     }
 
     @Test
+    fun `the report keeps the first 100 failures and COUNTS the rest - a per-row explosion is bounded, never built`() {
+        Fakes.evaluatorReturnsRows.clear()
+        repeat(150) { Fakes.evaluatorReturnsRows += mapOf("month_labels" to "Jan") } // amounts missing in EVERY row
+        val report = check.run(WORKSPACE, body())
+        report.ok shouldBe false
+        report.failures.size shouldBe VisualizationMechanicalCheck.MAX_FAILURES
+        report.dropped shouldBe 50
+        report.toJson()["failures_dropped"].intValue() shouldBe 50
+        report.toJson()["failures"].size() shouldBe VisualizationMechanicalCheck.MAX_FAILURES
+        report.cases.getValue("twelve months").ok shouldBe false
+        Fakes.reset()
+        check.run(WORKSPACE, body()).let {
+            it.ok shouldBe true
+            it.dropped shouldBe 0
+            it.toJson()["failures_dropped"].intValue() shouldBe 0
+        }
+    }
+
+    @Test
     fun `a DRAFT transform pin is valid here - the authoring path, not the runtime's RELEASED-only rule`() {
         val draftFacts =
             TemplateContractFacts { _, ref ->

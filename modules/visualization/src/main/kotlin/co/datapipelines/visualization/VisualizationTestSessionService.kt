@@ -152,6 +152,7 @@ class VisualizationTestSessionService(
         environment: TestEnvironment? = null,
     ): TestSessionSubmitted {
         validateSubmission(verdicts, environment)
+        sweepIfDue(workspaceId, id, sessionId)
         val submitted =
             transactions.execute {
                 val row = swept(runs.findBySession(workspaceId, id, sessionId) ?: throw sessionNotFound())
@@ -289,6 +290,19 @@ class VisualizationTestSessionService(
             if (depictedCase !in names) throw screenshotInvalid("case_unknown")
         }
         return hash
+    }
+
+    /**
+     * The expiry sweep in its OWN transaction, before a submit's (the 352 merge's F6): inside the submit's
+     * transaction the sweep's write rolled back WITH the `not_running` refusal it caused, so a due session stayed
+     * RUNNING until some non-throwing read swept it — and the release gate judged an open session meanwhile.
+     */
+    private fun sweepIfDue(
+        workspaceId: UUID,
+        id: UUID,
+        sessionId: UUID,
+    ) {
+        transactions.execute { runs.findBySession(workspaceId, id, sessionId)?.let { swept(it) } }
     }
 
     /** Sweeps a due RUNNING row and re-reads it; a completed row is returned untouched. */

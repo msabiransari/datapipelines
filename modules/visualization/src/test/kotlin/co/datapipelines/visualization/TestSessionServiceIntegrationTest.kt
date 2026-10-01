@@ -11,6 +11,7 @@ import io.kotest.matchers.shouldNotBe
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import java.time.temporal.ChronoUnit
 import java.util.UUID
 
 /**
@@ -272,6 +273,43 @@ class TestSessionServiceIntegrationTest {
         h.runRepository
             .findBySession(TestEvidenceHarness.WORKSPACE, greenSession.visualizationId, greenSession.sessionId)!!
             .status shouldBe TestRunStatus.GREEN
+    }
+
+    @Test
+    fun `a submit on a due session PERSISTS the sweep - the refusal it causes does not roll the EXPIRED write back`() {
+        val session = start()
+        h.jdbc.jdbcTemplate.update(
+            "UPDATE visualization_test_runs SET expires_at = NOW() - INTERVAL '1 minute' WHERE session_id = '${session.sessionId}'",
+        )
+        shouldThrow<DatapipelinesException> { submit(session) }.let {
+            it.code shouldBe VisualizationErrorCodes.TEST_SESSION_EXPIRED
+            it.details["reason"] shouldBe "not_running"
+        }
+        // Before the 352 merge's F6 the sweep ran inside the submit's transaction and rolled back with the refusal,
+        // so the row stayed RUNNING in the database until some non-throwing read swept it.
+        h.jdbc
+            .query(
+                "SELECT status FROM visualization_test_runs WHERE session_id = :sid",
+                mapOf("sid" to session.sessionId),
+            ) { rs, _ -> rs.getString(1) }
+            .single() shouldBe "EXPIRED"
+    }
+
+    @Test
+    fun `the upload consume stamps the APP clock - the same clock its guard and the CHECK's expiry are stamped with`() {
+        val session = start()
+        val submitted = submit(session)
+        val hash = TestCapability.hashEncoded(TestCapability.UPLOAD_PURPOSE, submitted.uploadToken!!)
+        val at = submitted.completedAt.plusSeconds(1).truncatedTo(ChronoUnit.MILLIS)
+        h.runRepository.consumeUploadCapability(submitted.runId, hash, at) shouldBe true
+        // A DB NOW() here (the 352 merge's F3) could land on the wrong side of the app-stamped expiry near the deadline
+        // and trip V44's CHECK as a 500 where the guard would have refused cleanly.
+        h.jdbc
+            .query(
+                "SELECT upload_consumed_at FROM visualization_test_runs WHERE id = :id",
+                mapOf("id" to submitted.runId),
+            ) { rs, _ -> rs.getTimestamp(1).toInstant() }
+            .single() shouldBe at
     }
 
     @Test

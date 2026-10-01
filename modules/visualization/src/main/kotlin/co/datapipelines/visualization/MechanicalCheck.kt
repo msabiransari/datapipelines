@@ -51,6 +51,38 @@ class VisualizationMechanicalCheck(
             }
     }
 
+    /**
+     * The failures a run records, BOUNDED (the 352 merge's F2): one failure per row per binding over the fixture
+     * caps (200 cases × 100,000 rows × 64 bindings) would otherwise build millions of entries, store them on the
+     * run, return them from submit, re-read them with every run list and rebuild them inside the release
+     * transaction — an author-reachable heap and storage bloat. The first [limit] are kept; the rest are COUNTED
+     * in [dropped], and a sink with dropped failures is never empty, so the report is never `ok`.
+     */
+    class FailureSink(
+        private val limit: Int,
+    ) {
+        private val kept = ArrayList<Failure>()
+
+        /** Failures beyond [limit] — counted, not kept. */
+        var dropped: Int = 0
+            private set
+
+        val size: Int get() = kept.size
+
+        fun isEmpty(): Boolean = kept.isEmpty() && dropped == 0
+
+        fun toList(): List<Failure> = kept.toList()
+
+        operator fun plusAssign(failure: Failure) {
+            if (kept.size < limit) kept += failure else dropped++
+        }
+
+        operator fun plusAssign(other: FailureSink) {
+            other.kept.forEach { this += it }
+            dropped += other.dropped
+        }
+    }
+
     /** The §11.3 outcome — the run's `mechanical_json`, verbatim. */
     data class Report(
         val ranAt: Instant,
@@ -58,6 +90,8 @@ class VisualizationMechanicalCheck(
         val failures: List<Failure>,
         /** Per case: the produced row count, the rendered-state claim and whether the case found nothing. */
         val cases: Map<String, CaseReport>,
+        /** Failures beyond [MAX_FAILURES], counted (`failures_dropped`); non-zero means the list is a prefix. */
+        val dropped: Int = 0,
     ) {
         data class CaseReport(
             val rows: Int,
@@ -69,6 +103,7 @@ class VisualizationMechanicalCheck(
             ArtifactJson.mapper.createObjectNode().apply {
                 put("ran_at", ranAt.toString())
                 put("ok", ok)
+                put("failures_dropped", dropped)
                 set<JsonNode>(
                     "failures",
                     ArtifactJson.mapper.createArrayNode().addAll(failures.map { it.toJson() }),
@@ -97,7 +132,7 @@ class VisualizationMechanicalCheck(
         body: VisualizationBody,
         now: Instant = Instant.now(),
     ): Report {
-        val failures = mutableListOf<Failure>()
+        val failures = FailureSink(MAX_FAILURES)
         schema(body, failures)
         val output = outputColumns(workspaceId, body)
         bindings(body, output, failures)
@@ -107,14 +142,14 @@ class VisualizationMechanicalCheck(
             cases.entries.associate { (name, outcome) ->
                 name to Report.CaseReport(outcome.rows, outcome.failures.isEmpty(), rendered.state(workspaceId, body, name))
             }
-        return Report(now, failures.isEmpty(), failures, caseReports)
+        return Report(now, failures.isEmpty(), failures.toList(), caseReports, failures.dropped)
     }
 
     // ---- step 1: schema -------------------------------------------------------------------------------
 
     private fun schema(
         body: VisualizationBody,
-        failures: MutableList<Failure>,
+        failures: FailureSink,
     ) {
         if (!body.renderer.kind.renderable) return // reserved kinds are refused at save, never reach a session
         renderers.validate(body.renderer.kind, body.config).forEach {
@@ -149,7 +184,7 @@ class VisualizationMechanicalCheck(
     private fun bindings(
         body: VisualizationBody,
         output: Map<String, LogicalType>,
-        failures: MutableList<Failure>,
+        failures: FailureSink,
     ) {
         body.bindings.forEach { (path, column) ->
             val at = "bindings.$path"
@@ -188,13 +223,13 @@ class VisualizationMechanicalCheck(
         val name: String,
         var rows: Int = 0,
         var boundValues: List<String> = emptyList(),
-        val failures: MutableList<Failure> = mutableListOf(),
+        val failures: FailureSink = FailureSink(MAX_FAILURES),
     )
 
     private fun fixtureRun(
         workspaceId: UUID,
         body: VisualizationBody,
-        global: MutableList<Failure>,
+        global: FailureSink,
     ): Map<String, CaseOutcome> {
         val cases = body.tests?.cases ?: return emptyMap()
         val outcomes = cases.mapIndexed { index, case -> runCase(workspaceId, body, case, index) }
@@ -265,7 +300,7 @@ class VisualizationMechanicalCheck(
     private fun assertions(
         body: VisualizationBody,
         cases: Map<String, CaseOutcome>,
-        failures: MutableList<Failure>,
+        failures: FailureSink,
     ) {
         val bodyCases = body.tests?.cases ?: return
         val configStrings = stringsOf(body.config)
@@ -300,7 +335,7 @@ class VisualizationMechanicalCheck(
         assertion: Assertion,
         at: String,
         case: String,
-        failures: MutableList<Failure>,
+        failures: FailureSink,
     ) {
         if (body.renderer.kind != RendererKind.PLOTLY || !body.config.path("data").isArray) {
             failures +=
@@ -335,7 +370,7 @@ class VisualizationMechanicalCheck(
         outcome: CaseOutcome,
         at: String,
         case: String,
-        failures: MutableList<Failure>,
+        failures: FailureSink,
     ) {
         if (outcome.rows != 0) {
             failures +=
@@ -355,7 +390,7 @@ class VisualizationMechanicalCheck(
         assertion: Assertion,
         at: String,
         case: String,
-        failures: MutableList<Failure>,
+        failures: FailureSink,
     ) {
         val text = assertion.text
         if (text != null && configStrings.none { it.contains(text) } && outcome.boundValues.none { it.contains(text) }) {
@@ -385,9 +420,12 @@ class VisualizationMechanicalCheck(
         return collect
     }
 
-    private companion object {
+    companion object {
         /** The static text scan's node bound. */
-        const val MAX_TEXT_SCAN = 10_000
+        private const val MAX_TEXT_SCAN = 10_000
+
+        /** The failures a report KEEPS; beyond it they are counted (`failures_dropped`), never built. */
+        const val MAX_FAILURES = 100
     }
 }
 
@@ -402,7 +440,7 @@ private object FixtureValues {
         case: TestCase,
         caseIndex: Int,
         rows: List<ObjectNode>,
-        failures: MutableList<VisualizationMechanicalCheck.Failure>,
+        failures: VisualizationMechanicalCheck.FailureSink,
     ) {
         val input = body.inputs.values.singleOrNull() ?: return
         rows.forEachIndexed { rowIndex, row ->

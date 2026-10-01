@@ -35,7 +35,11 @@ object TestCapability {
      */
     fun encode(material: ByteArray): String = Base64.getUrlEncoder().withoutPadding().encodeToString(material)
 
-    /** SHA-256 over the purpose prefix and the wire form — the ONLY form ever stored. */
+    /**
+     * SHA-256 over the purpose prefix, `:` and the DECODED material bytes — never the base64url wire text, so no
+     * encoding variant of one token hashes differently — the ONLY form ever stored. A presented token is decoded
+     * first ([hashEncoded]); one that does not decode is `capability_malformed`.
+     */
     fun hash(
         purpose: String,
         material: ByteArray,

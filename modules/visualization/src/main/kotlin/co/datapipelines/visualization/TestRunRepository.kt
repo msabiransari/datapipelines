@@ -97,7 +97,7 @@ class TestRunRepository(
         jdbc.update(
             """
             UPDATE visualization_test_runs
-               SET upload_consumed_at = NOW()
+               SET upload_consumed_at = :now
              WHERE id = :id AND upload_token_hash = :hash AND upload_consumed_at IS NULL AND upload_expires_at > :now
             """.trimIndent(),
             mapOf("id" to id, "hash" to uploadTokenHash, "now" to Timestamp.from(now)),
@@ -147,7 +147,14 @@ class TestRunRepository(
             mapOf("visualizationId" to visualizationId, "version" to version, "keepRunId" to keepRunId),
         )
 
-    /** The gate's candidate lock: the draft version's row, held FOR SHARE until the transaction ends. */
+    /**
+     * The gate's candidate lock: the draft version's row, held `FOR NO KEY UPDATE` until the transaction ends — a
+     * concurrent draft write AND a concurrent second release of the same draft both wait here (`FOR SHARE` admitted
+     * two releases at once, which then deadlocked on the flip's UPDATE and surfaced 40P01 as a 500: the 352 merge's F5).
+     * The consume stamp above is the APP clock for the same reason its guard is: V44's CHECK compares it with the
+     * app-stamped expiry, and a DB `NOW()` trailing or leading the app's clock near the deadline tripped the CHECK
+     * instead of the guard (F3).
+     */
     fun lockCandidateDraft(
         visualizationId: UUID,
         version: Int,
@@ -155,7 +162,7 @@ class TestRunRepository(
         jdbc
             .query(
                 "SELECT body_hash FROM visualization_versions WHERE visualization_id = :id AND version = :version" +
-                    " AND status = 'DRAFT' FOR SHARE",
+                    " AND status = 'DRAFT' FOR NO KEY UPDATE",
                 mapOf("id" to visualizationId, "version" to version),
             ) { rs, _ -> rs.getString("body_hash") }
             .singleOrNull()

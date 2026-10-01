@@ -8,12 +8,17 @@ import java.util.UUID
  * release, REPLACING `NOT_INSTALLED`. It runs INSIDE the release's one transaction, before the cascade
  * and the flip, and judges:
  *
- * 1. **The exact DRAFT, locked** — the candidate's version row is read `FOR SHARE`, so a concurrent draft
- *    write blocks until this transaction ends and a candidate whose hash no longer matches the live draft
- *    is refused `tests_stale` before anything cascades. The service forms its candidate before entering
+ * 1. **The exact DRAFT, locked** — the candidate's version row is read `FOR NO KEY UPDATE`, so a concurrent
+ *    draft write — or a SECOND release of the same draft — blocks until this transaction ends, and a candidate
+ *    whose hash no longer matches the live draft (or whose draft the first release already flipped) is refused
+ *    `tests_stale` before anything cascades (`FOR SHARE` let two releases both hold the row and deadlock on the
+ *    flip's UPDATE — the 352 merge's F5). The service forms its candidate before entering
  *    the transaction; THIS re-read is what makes that safe.
  * 2. **The latest run for that version** (the spec's §11.4 judges THE LATEST run): none → `tests_missing`;
- *    EXPIRED or a hash that is not the candidate's → `tests_stale`; RED or INCOMPLETE → `tests_red`.
+ *    EXPIRED — written, or a RUNNING row past its deadline that no read swept — or a hash that is not the
+ *    candidate's → `tests_stale`; RUNNING (an open session is not evidence) → `tests_missing` with reason
+ *    `run_open`; RED or INCOMPLETE → `tests_red`. The `when` is exhaustive over `TestRunStatus` with no `else`,
+ *    so a new status cannot fall through to PASS (the 352 merge's F1 did exactly that for RUNNING).
  * 3. **The mechanical test, re-run now** against the current pins — a check that stopped passing since
  *    the GREEN submission refuses the release `mechanical_failed`.
  *
@@ -53,31 +58,52 @@ class VisualizationReleaseEvidence(
                         "the agent's GREEN run for this exact content.",
                     mapOf("reason" to "no_runs", "version" to candidate.version),
                 )
-        when {
-            latest.status == TestRunStatus.EXPIRED -> {
-                return refused(
-                    VisualizationErrorCodes.RELEASE_TESTS_STALE,
-                    "The latest test run expired; start a fresh session for this exact content.",
-                    mapOf("reason" to "run_expired", "session_id" to latest.sessionId.toString()),
-                )
-            }
+        val refusal =
+            when (val status = latest.statusAt(now())) {
+                TestRunStatus.EXPIRED -> {
+                    refused(
+                        VisualizationErrorCodes.RELEASE_TESTS_STALE,
+                        "The latest test run expired; start a fresh session for this exact content.",
+                        mapOf("reason" to "run_expired", "session_id" to latest.sessionId.toString()),
+                    )
+                }
 
-            latest.bodyHash != candidate.bodyHash -> {
-                return refused(
-                    VisualizationErrorCodes.RELEASE_TESTS_STALE,
-                    "The latest test run is for other content; a release qualifies only for the exact body hash it tested.",
-                    mapOf("reason" to "run_hash_mismatch", "session_id" to latest.sessionId.toString()),
-                )
-            }
+                TestRunStatus.RUNNING, TestRunStatus.GREEN, TestRunStatus.RED, TestRunStatus.INCOMPLETE -> {
+                    when {
+                        latest.bodyHash != candidate.bodyHash -> {
+                            refused(
+                                VisualizationErrorCodes.RELEASE_TESTS_STALE,
+                                "The latest test run is for other content; a release qualifies only for the exact body hash it tested.",
+                                mapOf("reason" to "run_hash_mismatch", "session_id" to latest.sessionId.toString()),
+                            )
+                        }
 
-            latest.status == TestRunStatus.RED || latest.status == TestRunStatus.INCOMPLETE -> {
-                return refused(
-                    VisualizationErrorCodes.RELEASE_TESTS_RED,
-                    "The latest test run is ${latest.status.name}; a release needs its run GREEN.",
-                    mapOf("reason" to latest.status.name.lowercase(), "session_id" to latest.sessionId.toString()),
-                )
+                        // An OPEN session is not evidence (the 352 merge's F1): without this arm a start that was
+                        // never submitted — or a second session opened after a GREEN run — fell through to PASS.
+                        status == TestRunStatus.RUNNING -> {
+                            refused(
+                                VisualizationErrorCodes.RELEASE_TESTS_MISSING,
+                                "The latest test run is still open — a session without a verdict is not evidence; submit it, " +
+                                    "or let it expire, then release.",
+                                mapOf("reason" to "run_open", "session_id" to latest.sessionId.toString()),
+                            )
+                        }
+
+                        status != TestRunStatus.GREEN -> {
+                            refused(
+                                VisualizationErrorCodes.RELEASE_TESTS_RED,
+                                "The latest test run is ${status.name}; a release needs its run GREEN.",
+                                mapOf("reason" to status.name.lowercase(), "session_id" to latest.sessionId.toString()),
+                            )
+                        }
+
+                        else -> {
+                            null
+                        }
+                    }
+                }
             }
-        }
+        if (refusal != null) return refusal
         val report = mechanical.run(workspaceId, candidate.body, now())
         if (!report.ok) {
             return refused(

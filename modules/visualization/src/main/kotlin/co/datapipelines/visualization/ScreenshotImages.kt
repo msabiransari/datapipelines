@@ -61,6 +61,17 @@ object ScreenshotImages {
 
     private const val WEBP_HEADER = 12
 
+    /** The four-byte chunk tag that follows the RIFF/WEBP header. */
+    private const val CHUNK_TAG = 4
+
+    /** The bytes the RIFF size does NOT count (`RIFF` + the size itself). */
+    private const val RIFF_PREFIX = 8L
+
+    /** The smallest honest RIFF size: the `WEBP` form tag. */
+    private const val WEBP_TAG = 4L
+
+    private const val UNSIGNED_INT = 0xFFFF_FFFFL
+
     private fun ByteArray.isWebp(): Boolean = hasAt(RIFF, 0) && hasAt(WEBP, 8)
 
     private fun ByteArray.startsWith(prefix: ByteArray): Boolean = hasAt(prefix, 0)
@@ -72,9 +83,12 @@ object ScreenshotImages {
 
     @Suppress("ThrowsCount") // each malformed WebP form is its own named refusal
     private fun parseWebp(bytes: ByteArray): Image {
-        // The RIFF size counts everything after byte 8; a file shorter than its own declaration is truncated.
-        val riffSize = bytes.intAtLe(4)
-        if (riffSize.toLong() + 8 > bytes.size) throw invalid("truncated")
+        // The RIFF size is UNSIGNED and counts everything after byte 8: a file shorter than its own declaration is
+        // truncated, as is one too short to carry the chunk tag read below, and a declaration with the top bit set
+        // is not a negative number that skips the check (the 352 merge's F4 — a 12-byte header read past its end).
+        if (bytes.size < WEBP_HEADER + CHUNK_TAG) throw invalid("truncated")
+        val riffSize = bytes.intAtLe(4).toLong() and UNSIGNED_INT
+        if (riffSize < WEBP_TAG || riffSize + RIFF_PREFIX > bytes.size) throw invalid("truncated")
         return when (bytes.chunk()) {
             "VP8 " -> {
                 // The lossy keyframe's start code (0x9D 0x01 0x2A), then two little-endian 14-bit dimensions.

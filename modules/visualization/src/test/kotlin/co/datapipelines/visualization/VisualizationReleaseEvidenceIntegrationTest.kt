@@ -128,6 +128,67 @@ class VisualizationReleaseEvidenceIntegrationTest {
     }
 
     @Test
+    fun `an OPEN latest run is tests_missing with reason run_open - a start without a verdict is not evidence`() {
+        val created = h.createVisualization()
+        val candidate = candidateOf(created.detail)
+        h.sessions.start(TestEvidenceHarness.WORKSPACE, created.detail.artifactId, TestEvidenceHarness.AUTHOR)
+        // Before the 352 merge's F1 this fell through the ladder to PASS: the hash matched and nothing judged RUNNING.
+        evidenceFor(candidate).shouldBeRefused(VisualizationErrorCodes.RELEASE_TESTS_MISSING, "run_open")
+    }
+
+    @Test
+    fun `a session opened AFTER a GREEN run is the latest run - it holds the release the GREEN would have passed`() {
+        val created = h.createVisualization()
+        val candidate = candidateOf(created.detail)
+        greenRun(candidate)
+        evidenceFor(candidate) shouldBe EvidenceVerdict.Pass
+        h.sessions.start(TestEvidenceHarness.WORKSPACE, created.detail.artifactId, TestEvidenceHarness.AUTHOR)
+        evidenceFor(candidate).shouldBeRefused(VisualizationErrorCodes.RELEASE_TESTS_MISSING, "run_open")
+    }
+
+    @Test
+    fun `a RUNNING run past its deadline that no read swept is tests_stale run_expired - the gate needs no sweep`() {
+        val created = h.createVisualization()
+        val candidate = candidateOf(created.detail)
+        val session = h.sessions.start(TestEvidenceHarness.WORKSPACE, created.detail.artifactId, TestEvidenceHarness.AUTHOR)
+        h.jdbc.jdbcTemplate.update(
+            "UPDATE visualization_test_runs SET expires_at = NOW() - INTERVAL '1 minute' WHERE session_id = '${session.sessionId}'",
+        )
+        // The row still says RUNNING (no read swept it); the gate judges the deadline itself (F1/F6).
+        evidenceFor(candidate).shouldBeRefused(VisualizationErrorCodes.RELEASE_TESTS_STALE, "run_expired")
+    }
+
+    @Test
+    fun `the gate's lock excludes a concurrent SHARE holder - two releases serialize instead of deadlocking on the flip`() {
+        val created = h.createVisualization()
+        val candidate = candidateOf(created.detail)
+        greenRun(candidate)
+
+        // A concurrent reader holds the draft row FOR SHARE, uncommitted — what the gate itself took before the 352
+        // merge's F5, so two releases could both hold the row and then deadlock on the flip's UPDATE (40P01 → 500).
+        // The gate now reads FOR NO KEY UPDATE, which a SHARE holder blocks: the helper's bounded wait is the proof
+        // (with the old FOR SHARE read the gate never blocks and the bounded wait is a failure, never a pass).
+        val outcome =
+            ForcedRace.holdingThenCommitting(
+                hold = { connection ->
+                    connection
+                        .prepareStatement(
+                            "SELECT body_hash FROM visualization_versions WHERE visualization_id = ? AND version = 1" +
+                                " AND status = 'DRAFT' FOR SHARE",
+                        ).use { statement ->
+                            statement.setObject(1, created.detail.artifactId)
+                            statement.executeQuery().use { it.next() shouldBe true }
+                        }
+                },
+                // The GATE ALONE is the contender — a whole release would block on the holder at its flip's UPDATE
+                // whatever the gate read, and the race would prove nothing about the gate's lock.
+                contender = { evidenceFor(candidate) },
+            )
+        // The holder changed nothing, so once it commits the waiting gate passes — serialized, not killed.
+        outcome.getOrThrow() shouldBe EvidenceVerdict.Pass
+    }
+
+    @Test
     fun `a GREEN run for the exact hash passes - and a mechanical refusal after it fails the release now`() {
         val created = h.createVisualization()
         val candidate = candidateOf(created.detail)
@@ -194,7 +255,7 @@ class VisualizationReleaseEvidenceIntegrationTest {
                     "released"
                 },
             )
-        // The gate's FOR SHARE re-read sees the COMMITTED new hash: the candidate is stale.
+        // The gate's FOR NO KEY UPDATE re-read sees the COMMITTED new hash: the candidate is stale.
         outcome.shouldBeFailure<DatapipelinesException>().let {
             it.code shouldBe VisualizationErrorCodes.RELEASE_TESTS_STALE
             it.details["reason"] shouldBe "draft_changed"

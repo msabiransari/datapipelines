@@ -163,6 +163,22 @@ class ScreenshotImagesTest {
     }
 
     @Test
+    fun `a WebP too short for a chunk tag, or declaring an unsigned RIFF size past its end, is truncated - never a 500`() {
+        // Exactly the 12-byte RIFF/WEBP header: before the 352 merge's F4 the chunk-tag read ran past the array.
+        val header = "RIFF".toByteArray(Charsets.US_ASCII) + intLe(4) + "WEBP".toByteArray(Charsets.US_ASCII)
+        header.size shouldBe 12
+        shouldThrow<DatapipelinesException> { ScreenshotImages.parse(null, header) }
+            .let { it.details["reason"] shouldBe "truncated" }
+        // A RIFF size with the top bit set read as a NEGATIVE number and skipped the truncation check.
+        val good = webpVp8(4, 4)
+        val overflow = good.copyOfRange(0, 4) + intLe(Int.MIN_VALUE) + good.copyOfRange(8, good.size)
+        shouldThrow<DatapipelinesException> { ScreenshotImages.parse(null, overflow) }
+            .let { it.details["reason"] shouldBe "truncated" }
+        // The control: the same bytes with their honest size parse.
+        ScreenshotImages.parse(null, good).width shouldBe 4
+    }
+
+    @Test
     fun `non-positive or absurd declared dimensions are refused - a spoofed header is not an image`() {
         shouldThrow<DatapipelinesException> { ScreenshotImages.parse(null, png(width = 0, height = 2)) }
             .let { it.details["reason"] shouldBe "dimensions" }

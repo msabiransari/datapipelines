@@ -104,6 +104,14 @@ data class TestRunRow(
             }
 
     val completed: Boolean get() = status != TestRunStatus.RUNNING && status != TestRunStatus.EXPIRED
+
+    /**
+     * The status the RELEASE GATE acts on at [now] (the 352 merge's F1/F6): a RUNNING row whose deadline passed and
+     * that no read has swept yet IS expired — the sweep is a write the gate must not depend on (a submit's own
+     * sweep rolled back with the refusal it caused, so an unswept due row was the common case).
+     */
+    fun statusAt(now: Instant): TestRunStatus =
+        if (status == TestRunStatus.RUNNING && !expiresAt.isAfter(now)) TestRunStatus.EXPIRED else status
 }
 
 /** What a session start answers. [previewToken] is the raw capability — shown once, never stored. */
