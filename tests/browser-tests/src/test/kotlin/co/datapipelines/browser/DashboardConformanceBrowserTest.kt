@@ -477,6 +477,13 @@ class DashboardConformanceBrowserTest : DashboardBrowserSuite() {
         page.waitForFunction(
             "() => document.querySelectorAll('#board [data-dp-parameter=\"enabled\"] select').length === 1",
         )
+        // The initial action's refresh SETTLES before the first gesture: the bootstrap's parameter
+        // round trip can delay it until after this case's own refresh, and the freshness rule —
+        // the newest claim owns the occurrence — would then (correctly) drop this case's data
+        // frame. Synchronise on the event, never on the interleaving.
+        page.waitForFunction(
+            "() => window.__dp.notifications.some(function (n) { return n.code === 'refresh.completed'; })",
+        )
         // The unresolved null: displayed as the unset option, read as null — never as false — and
         // the control offers exactly the three wire states.
         val initial =
