@@ -752,7 +752,11 @@ failed two gates on floors no pregate had run, #297); (2b) for the two `tests/*`
 changed test classes, focused — where the changed file is not itself a runnable test class (an
 abstract base, an interface, an object, a helper), its real runnable consumers run, found through
 intermediate bases; when consumers cannot be established — an orphan helper, a deleted or renamed
-file, a changed test resource or build file — the WHOLE module runs. The selection is never a
+file, a changed test resource or build file — the WHOLE module runs. The selection reads the
+file's DECLARED class, never its file name: a runnable file schedules the one concrete class it
+declares, and a file whose identity is not derivable — zero or several concrete declarations in
+one file, or an unparseable declaration line — runs the whole module rather than focusing on a
+guess, so no declaration can silently disappear behind a partial parse (342-c). The selection is never a
 no-op while test sources changed: an earlier version skipped abstract/sealed files, and a lane
 editing the browser suite's shared base passed stage 2b without any browser test executing
 (#342's round review, 2026-09-30). `./scripts/pregate.sh --self-test` drives that selector over
