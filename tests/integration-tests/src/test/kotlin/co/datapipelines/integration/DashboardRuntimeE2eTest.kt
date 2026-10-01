@@ -1598,7 +1598,17 @@ class DashboardRuntimeE2eTest {
 
         private val postgres get() = SharedE2e.postgres
         private val redis get() = SharedE2e.redis
-        private val source get() = SharedE2e.scratchDatabase("dbrun_source")
+
+        /**
+         * The runtime's SOURCE database: created ONCE, when the companion initialises. This was a `get()`
+         * accessor until 2026-10-01 — every read ran `scratchDatabase`, which DROPS the database `WITH (FORCE)`
+         * and recreates it, terminating every live connection to it (the app's pooled source connections
+         * among them: `FATAL: terminating connection due to administrator command`, SQLSTATE 57P01). The
+         * membership-revocation case reads it three times in one line; whether the pool then handed the
+         * refresh a dead connection depended on Hikari's 500 ms alive-bypass window — green here, red on
+         * CI run 36872021211. `ScratchDatabaseOnceGuardTest` refuses the accessor shape tree-wide.
+         */
+        private val source = SharedE2e.scratchDatabase("dbrun_source")
         private val oidc = OidcDiscoveryStub()
 
         /** The hash the stub higher environment holds for the HIDDEN pipeline: the promoter's lens admits only what is newer. */

@@ -349,7 +349,7 @@ class ExecutionStartedRowOrderE2eTest {
         private val postgres get() = SharedE2e.postgres
 
         /** The pipeline's SOURCE database: a scratch database on the shared container. */
-        private val source get() = SharedE2e.scratchDatabase("order306_source")
+        private val source = SharedE2e.scratchDatabase("order306_source")
 
         private val redis get() = SharedE2e.redis
 
