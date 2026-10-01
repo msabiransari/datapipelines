@@ -266,6 +266,8 @@ The same sixteen lifecycle routes under `/api/v1/dashboards`, plus:
 
 **Landing note (orchestrator, 2026-09-29):** L1b ships eleven of the thirteen (`McpToolCatalog.NAMES` 48 → 59, pinned at eight places); `visualizations_test_start` and `visualizations_test_submit` land with L4's sessions. L4 needs a ruling on the screenshot: an MCP key reaches NO MVC route (`ScopeInterceptor.reachableBy`: `ApiKeyKind.MCP` → `/mcp` only), so "the screenshot goes through REST — the tool answers with the upload URL" cannot work for an agent as written.
 
+**Landing note (L4a, 2026-10-01):** the screenshot ruling landed (the owner, 2026-09-30): a session-scoped, single-use upload token (option b) — the backend capability lifecycle is #352's (§11, live); the two session TOOLS and their §6.1 routes remain #353's, which must also prove the token's confinement on real HTTP.
+
 Thirteen entries in `McpToolCatalog.ENTRIES` (48 → 61; every pinned count moves with its test:
 `MatrixRowReachabilityTest.TOOL_COUNT`, `DatasourcesCreateRemovedTest`'s `NAMES.size shouldBe 48`, `RoleWalkE2eTest`/`PermissionSeamE2eTest` floors,
 `WebsiteFactsGuardTest`'s heading, §6.1's count), `mcp-server.md` §6.2.50–62, the manual's
@@ -470,6 +472,18 @@ lazy tree (`/partials/dashboards/tree`). Light/dark screens of both are handback
 
 ## 11. Visualization tests and the release gate (D34, D35, D56)
 
+**Landing note (L4a, #352, 2026-10-01):** this section's backend is LIVE — the durable sessions, the two
+purpose-bound hash-only capabilities (preview; the single-use screenshot upload minted at submit), the
+mechanical check (the reduced vendored 4.1.1 plot-schema, `modules/visualization/schema/plotly/` + its
+provenance; binding type rules; the real fixture evaluation through a `web` adapter over
+`TemplateEvaluateService`, DRAFT pins admitted), the screenshot's detected-type validation and retention, and
+the production release gate (§11.4's verdicts, the draft locked `FOR SHARE` inside the release transaction).
+The session TTL is the flat key `datapipelines.visualization.session-ttl-minutes` (60) — the shipped key
+grammar is two levels, so §11.2's `tests.session-ttl-minutes` spelling has no YAML form (configuration.md §3.33
+is the one definition). What is NOT here: the HTTP/MCP surfaces, the preview page and the wire/browser
+acceptance — #353 (L4b) binds them and proves the token confinement on real HTTP. The mechanical test is
+sub-second by measurement (one case, 1,000 fixture rows, deep schema: ~60 ms).
+
 ### 11.1 Cases live in the body
 
 `tests.cases[]` (§3.1) are versioned with the visualization; editing them changes `body_hash`,
@@ -582,7 +596,7 @@ conformance suite; `RenderedStateCheck`'s no-op pinned by a test that expects `n
 | **L1 visualization module** (split 2026-09-29: L1a the module — LANDED fd18fc76; L1b the lifecycle surfaces + eleven tools + fourteen permissions + docs + walk; L1c export/import routes + `TemplateBundle` + the promotion wire + the two `IMPORT` rows, on L1b's merge) | `modules/visualization` (documents, readers, grammars, repositories, lifecycle, transfer), V42, §14 codes, §5 permission rows (all eighteen + the key role, no routes yet for execute), REST §6.1 + §6.2's lifecycle routes, the thirteen tools, promotion/import/export (§12), docs | on L0 | save/refuse cases per §3 (every code reachable once), release cascade, C29, promotion order on three deployments (the 194e shape), koverVerify on every touched module |
 | **L2 server runtime** | `DashboardRuntime`, V43 (`DASHBOARD` trigger, refresh tables), the four runtime routes + refreshes routes, admission, caps, timeouts, abort, the events-pane data | on L1 | scenarios 2–4, 7, 15, 18 of the record; a fan-out over three sources with one shared; result-cap and saturation refusals; abort across two instances; PARTIAL outcomes; the `NonCancellable` finish; `ReadOnlyPipelineRule` refusal at config time |
 | **L3 client runtime + adapters + first-party page** | the JS artifact, Plotly/table/kpi adapters, the two bundles (§10.4) + CSP measurement, `/dashboards` pages, `Home` rename, the sidebar tree, the events pane, conformance suite | on L2 | §10.5's scenarios; zero CSP violations; two instances; light/dark screens |
-| **L4 tests + gate** | sessions, preview token page, evidence tables, screenshot route + cap, the mechanical test with the reduced plot-schema, release atomicity, `RenderedStateCheck` interface | on L1 (parallel with L2) | red/green on each refusal; a stale run cannot release; a screenshot over the cap refused; the token's confinement (no other route, expiry) proven on the wire |
+| **L4 tests + gate** | sessions, preview token page, evidence tables, screenshot route + cap, the mechanical test with the reduced plot-schema, release atomicity, `RenderedStateCheck` interface — **split 2026-09-30: L4a (#352) the backend (sessions, capabilities, mechanical validation, screenshot storage, the production gate) LANDED 2026-10-01; L4b (#353) the preview page, the REST/MCP surfaces, the §7.6 rows and the wire/browser acceptance** | on L1 (parallel with L2) | red/green on each refusal; a stale run cannot release; a screenshot over the cap refused; the token's confinement (no other route, expiry) proven on the wire |
 | **L5 `dashboard` key kind** | `ApiKeyKind.DASHBOARD`, `KeyRole.DASHBOARD_VIEWER`, bindings table + routes, `ScopeInterceptor`/`McpAuthFilter` confinement, the reference proxy example with its streaming conformance test | on L2 | the key reaches only the runtime routes; unbound = unservable; deeper binding replaces; two users of one key with independent refreshes; the proxy streams (not buffers) |
 | **L6 (later)** | headless render check + screenshot capture by the server (D56 step 5); the derived timeout defaults; HTML/SVG renderers | after L4 | — |
 
@@ -620,7 +634,7 @@ The runtime sections (§2.2, §8, §9) were written before L1a/L1b landed and ag
 6. **Abort.** A refresh-level Redis flag (`dp:refresh-abort:{refresh_id}`) polled at every stage boundary plus the per-execution flags; the row carries the client `instance_id` only (no "executing node id"). No cross-refresh sharing exists, so "shared executions are released" is void; `execution.cancel_all` overrides ownership.
 7. **Retention.** `pipeline_executions` is never deleted, so "the executions' policy" was no policy: refresh rows follow the EVENT retention (a step on the hourly tick, the event-retention cutoff); the `dashboard_id` FK is `ON DELETE CASCADE`.
 8. **A stale-refresh sweep** (`DashboardRefreshSweeper`, the stale-execution sweeper's mould) marks RUNNING rows an instance crash left as TIMED_OUT.
-9. **V43 is L2's only:** the `chk_triggered_via` CHECK gains `DASHBOARD`, `dashboard_refreshes`, `dashboard_refresh_executions`; the pin reads `43|dashboard refreshes|true`. L5's key rows (`api_keys` kind/role, `executed_by_key_kind = 'dashboard'`, `dashboard_key_bindings`) are V44.
+9. **V43 is L2's only:** the `chk_triggered_via` CHECK gains `DASHBOARD`, `dashboard_refreshes`, `dashboard_refresh_executions`; the pin reads `43|dashboard refreshes|true`. L5's key rows (`api_keys` kind/role, `executed_by_key_kind = 'dashboard'`, `dashboard_key_bindings`) were reserved V44 — **#352 consumed V44 (2026-10-01, the test capabilities on `visualization_test_runs`); L5's eventual brief uses the next free number, verified at dispatch.**
 10. **`configuration_id`** needs hashes the ports do not carry: read `PipelineRepository.findVersionDetail.bodyHash` and `ArtifactVersionDetail.bodyHash`, or grow the ports (L2 chooses and says why).
 11. **Save-vs-run:** the reader bounds `sources[]` at 400 while `max-executions-per-refresh` is 16 — one new validation code, `dashboard.validation.too_many_invocations` (§13.23 +1), refuses at save more distinct invocations than the cap.
 12. **No released dashboard can exist before L4** (`ReleaseEvidence.NOT_INSTALLED`): L2's E2Es seed RELEASED rows by SQL; the runtime serves the current RELEASED version only; the draft preview is L4's (§6.3).

@@ -1,9 +1,10 @@
 # Dashboards
 
-**Status:** v0.4 — the two documents and their lifecycle (#10, lane L1a); the REST routes, the MCP tools and the
-permissions (§4, lane L1b); the server runtime (§5, lane L2). The transfer routes (L1c), the client runtime and the
-first-party page (L3), the visualization tests and their release gate (L4) and the `dashboard` key kind (L5) add
-their sections as they land.
+**Status:** v0.8 — the two documents and their lifecycle (#10, lane L1a); the REST routes, the MCP tools and the
+permissions (§4, lane L1b); the server runtime (§5, lane L2); the client runtime (§6, lane L3a). The transfer routes
+(L1c), the first-party page (L3b), the test sessions' HTTP/MCP surfaces (L4b, #353) and the `dashboard` key kind (L5)
+add their sections as they land; the tests' backend — sessions, capabilities, the mechanical check and the release
+gate — is §3.4 (lane L4a, #352).
 **Owner:** datapipelines.co core
 **Depends on:** [Versioning](versioning.md) (§3.5 — the lifecycle table), [Pipeline Contract](pipeline-contract.md)
 (§13.22, §13.23 — the codes), [Metadata DB](metadata-db.md) (§4.28–§4.35 — the tables), [Enumerations](enums.md)
@@ -11,7 +12,7 @@ their sections as they land.
 [MCP Server](mcp-server.md) (§6.2.50–§6.2.60 — the tools), [Auth](auth.md) (§7.6 — the permissions)
 **Design:** the [dashboard implementation spec](superpowers/specs/2026-09-28-dashboard-implementation-spec.md) and
 the [design record](superpowers/specs/2026-09-25-dashboard-authoring-design-draft.md) (decisions D1–D63)
-**Last updated:** 2026-09-29
+**Last updated:** 2026-10-01
 
 A dashboard presents released pipeline results. It is built from two versioned artifacts: **visualizations** —
 a chart, table or KPI bound to named inputs, reusable across dashboards — and **dashboards**, which pin released
@@ -94,8 +95,11 @@ the author puts a placeholder there (`"x": "$.x"` above) — so the runtime's su
 - **`plotly`** — an object whose `data` is a non-empty array (at most 64) of trace objects, each with a `type` from
   the two vendored bundles: `scatter`, `bar`, `pie`, `histogram`, `box`, `heatmap` (the 2D bundle, the default) and
   `scatter3d`, `surface`, `mesh3d` (the 3D bundle, loaded only for a dashboard that uses one — D63); `layout` and
-  Plotly's own `config` are objects. Nothing else at the top level. Deeper Plotly attributes are judged by the
-  vendored plot-schema when the tests lane adds it.
+  Plotly's own `config` are objects. Nothing else at the top level. Deeper attributes are judged against the
+  vendored 4.1.1 plot-schema (reduced to the nine supported traces' attribute trees, plus layout and config —
+  §3.4): an unknown attribute, a wrong-typed value and an unsupported trace are refused
+  `visualization.validation.config_schema_invalid` naming the path. A binding placeholder (`$.x`, §2.1.1) is the
+  substitution grammar, not a value; the save-time walk accepts it where a leaf is expected.
 - **`table`** — `columns`: a non-empty array (at most 64) of `{label, values, format?, align?}` — `label` a
   non-blank string of at most 120 characters, `values` the placeholder a binding fills, `format` one of `text`,
   `number`, `integer`, `percent`, `date`, `datetime`, `align` one of `left`, `center`, `right`; `page_size` an
@@ -194,8 +198,11 @@ RELEASED — or a DRAFT released with the visualization when the caller consents
 cascade pipelines use for templates), otherwise `visualization.release.dependency_not_released` naming the pin; the
 release evidence passes — the agent's GREEN run for this exact content and the server's mechanical check (D56;
 `visualization.release.tests_stale`, `visualization.release.tests_red`, `visualization.release.mechanical_failed`).
-The evidence gate is installed by the tests lane (L4); until then every visualization release is refused
-`visualization.release.tests_missing` with `details.reason = gate_not_installed`.
+The gate is installed (#352, §3.4): in the release's one transaction it re-reads the exact DRAFT under a row
+lock (a candidate whose draft moved underneath it is `tests_stale`), judges THE LATEST run of the version — none
+`tests_missing`, EXPIRED or for another hash `tests_stale`, RED or INCOMPLETE `tests_red` — and re-runs the
+mechanical check against the current pins (`mechanical_failed`, whatever an earlier GREEN recorded). A refusal
+leaves no partial release: the version stays DRAFT and no template is cascaded.
 
 A version that a live (DRAFT or RELEASED) dashboard version pins is never discarded or purged, and a visualization
 with any pinned version is never purged whole — `visualization.version.pinned`, `details.pinned_by` naming the
@@ -229,6 +236,46 @@ envelope's shape is judged before anything lands, the lifecycle fields beside a 
 other unknown key refuses; the same version with the same hash is a no-op; a pin the target lacks is
 `visualization.import.missing_template` or `dashboard.import.missing_dependency`; an id another artifact on the
 server holds is `*.import.id_taken` — never re-issued (C29).
+
+### 3.4 The test sessions and the evidence (#352, the spec's §11)
+
+A visualization's release needs evidence: an agent's run of the saved test cases against the exact draft content
+plus the server's own mechanical check. The backend behind it is live (this section); its HTTP and MCP transport —
+the session routes, the tools and the preview page — lands with L4b (#353); **until that lane, no route or tool
+serves sessions, results, screenshots or preview, and the manual's authoring loop cannot drive them.**
+
+- **A session** (`tests.cases`' run) pins workspace, artifact, version, body hash, the case inventory and the
+  actor; it opens over the artifact's WORKING version and lives for `datapipelines.visualization.session-ttl-minutes`
+  (60, [Configuration §3.33](configuration.md)). At start the server mints a **preview capability** — 32 random
+  bytes, base64url, stored hash-only — which is the future preview page's only credential (§11.2 of the spec); it
+  is revoked by the submit and by expiry.
+- **A submission** answers every case by name with `green` or `red` and bounded per-case notes (≤ 2,000
+  characters); the environment field set is CLOSED (`theme`, `viewport`, `browser`, `locale`, `renderer_version`,
+  each ≤ 120 characters) and is the agent's REPORT, never a server measurement. Unknown or duplicate case names
+  refuse; an omitted case lands the run `INCOMPLETE`; any `red` verdict — or a mechanical failure — lands `RED`;
+  GREEN requires every case green AND the mechanical check passing at submit.
+- **The mechanical check** (§11.3, D56 (b)) is server-run, no browser, sub-second (measured: one case, 1,000
+  fixture rows through the deep schema, ~60 ms): the renderer's schema (for Plotly the reduced vendored
+  4.1.1 plot-schema — unknown attributes, wrong types and unsupported traces refused with the path), every
+  binding's resolution and per-path type rules, every case's fixtures through the REAL bounded evaluator (a DRAFT
+  transform pin is valid here — authoring; the runtime keeps its RELEASED-only rule), every projected bound
+  column present in every row, and static assertion feasibility (`trace_count` against `config.data.length`,
+  `no_data` against zero produced rows, `text_visible`/`value_visible` strings present in the configuration or
+  the bound values). The rendered-state check records `not_available` today — a headless render check is a later
+  lane, and nothing here claims a browser saw anything. The report is stored on the run and RE-RUN at release.
+- **At a successful submission the server mints a SECOND, separate capability** for the screenshot upload —
+  random, hash-only, bound to the exact run and purpose, expiring no later than the session's original deadline,
+  its raw form shown exactly once. Submit revokes the preview and does NOT touch this one; atomic image storage
+  consumes it; a failed upload consumes nothing; two competing valid uploads have exactly one winner; a completed
+  run is never re-submitted, so no replacement capability exists.
+- **The screenshot** is one image per run: the DETECTED media type (a declared Content-Type, a filename or a
+  header is not type validation — the bytes are parsed), independently read positive dimensions, the computed
+  SHA-256, the depicted case (when given, it must be a case of that run), the actor and the stamps; ≤ 4 MiB and
+  PNG/WebP only. The server does not decode, and parses only the bytes it already holds.
+- **Retention** (D35): for a DRAFT version, the newest completed run keeps its screenshot and an older run's is
+  deleted; for a RELEASED version, the run whose GREEN result qualified the release — and its screenshot — is
+  kept for the version's life. Expiry touches RUNNING sessions only: a completed GREEN record is never
+  retrospectively erased, and a run whose version's hash moved on reads `EXPIRED` and can never qualify a release.
 
 ---
 
@@ -288,7 +335,8 @@ columns (L2) — a guess would refuse or admit on nothing.
 | `dashboards_validate` | `dashboard.update` | §4.2 |
 
 No tool releases or executes anything; the visualization test tools (`visualizations_test_start`,
-`visualizations_test_submit`) land with the test sessions (L4). The served manual's `dashboards` guide is the
+`visualizations_test_submit`) and the session/screenshot routes land with L4b (#353) — the backend contracts
+they will bind are §3.4's (§2.1 of the record). The served manual's `dashboards` guide is the
 authoring loop in the order an agent needs it.
 
 ---
@@ -404,7 +452,7 @@ dashboard she can read but holds no `execution.read`, so her refresh names no ex
 
 ### 5.8 What is not here
 
-The draft preview and the visualization tests (L4), the first-party PAGES — `/dashboards`, the sidebar tree, the events pane (L3b) — and the `dashboard` key kind and its confinement (L5): until L5, only signed-in sessions reach these routes and no MCP tool refreshes a dashboard.
+The draft preview and the test sessions' HTTP/MCP surfaces (L4b, #353 — the backend behind them is §3.4), the first-party PAGES — `/dashboards`, the sidebar tree, the events pane (L3b) — and the `dashboard` key kind and its confinement (L5): until L5, only signed-in sessions reach these routes and no MCP tool refreshes a dashboard.
 
 ## 6. The client runtime (L3a)
 
@@ -573,6 +621,7 @@ the conformance suite proves the rules APPLY and is red when the stylesheet is r
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-01 | v0.8 | L4a (#352) the test sessions and the release gate | **New §3.4 The test sessions and the evidence** — the durable run per session over the exact draft hash, the two hash-only capabilities (preview; the single-use screenshot upload minted at submit), the mechanical check (the reduced vendored 4.1.1 plot-schema at save AND release, binding type rules, the real fixture evaluation, static assertion feasibility, `not_available` rendered state), the screenshot's detected-type validation and retention (D35), and the release gate's installed verdicts (§3.1). §2.1.2's Plotly schema is the deep one now; §4.4's test tools and §5.8's preview/surfaces are explicitly L4b's (#353) and marked unavailable until then. No new route, tool or permission row. |
 | 2026-09-30 | v0.7 | L3a-c (#10) typed controls and the absolute deadline | The composite's BOOLEAN `INPUT` renders the house tri-state select (`— not given —` / `true` / `false`) so an unresolved null is read as null and a visible edit travels as a wire boolean (§6.2); radio groups are named per adapter instance, so two boards in one document never share a native group (§6.2). The lock's absolute deadline is enforced by the clock at both admission points — before the adapter is invoked with a response and again before a resolved render commits — with the inclusive boundary stated (§6.6). The completed target's REAL wire outcome (`ok`, rest-api §23.3) no longer errors a delivered target: completion never clobbers the state the data frame set. |
 | 2026-09-30 | v0.6 | L3a-b (#10) the client runtime corrections | The client consumed the WIRE now (corrections on the delivered tip, the server wire authoritative): §6.2 states the parameter state's real writer shape (flat definition + `state`, typed values, `overrides_applied`, `valid`), the composite's per-definition controls and typed selections, the row-replacing renders and dispose's DOM removal; §6.6 states the lock's corrected coverage — held through the host's asynchronous render, deadline live through it, late renders and reset installs yield to a newer attempt. The abort route is the controller's one-`runtime`-segment path (§5's route table unchanged). |
 | 2026-09-30 | v0.5 | L3a (#10) the client runtime | **New §6 The client runtime** — the vendored artifact and what it owns (§6.1's API), the twelve-function adapter contract (§6.2), the three renderers and the data-is-text rule (§6.3), the two Plotly bundles and the one-bundle rule (§6.4), both credential modes' wire contract including the proxy contract L5's reference proxy implements (§6.5), and the states, notifications and the CSP design-around (§6.6). §5.8's "not here" loses the client runtime; the pages remain L3b's. |
