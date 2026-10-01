@@ -32,15 +32,17 @@ class DashboardPartialControllerTest {
     private val executions = mockk<ExecutionRepository>()
     private val pipelines = mockk<PipelineRepository>()
     private val pipelineNames = mockk<PipelineNames>().also { every { it.lookup(any(), any()) } returns emptyMap() }
+
+    // #10 L3b — the dashboards fragments' model: relaxed, because these cases pin WHAT the
+    // controller asks of it (the tree partial's parameters), not what it renders.
+    private val browse = mockk<DashboardBrowseModel>(relaxed = true)
     private val controller =
         DashboardPartialController(
             executions,
             co.datapipelines.web.pipelineServiceOver(pipelines),
             pipelineNames,
             co.datapipelines.web.EVERYTHING_LENS,
-            // #10 L3b — the collaborator the dashboards fragments added; unused by the
-            // landing-page cases below, so a relaxed mock stands in for the wiring.
-            io.mockk.mockk<DashboardBrowseModel>(relaxed = true),
+            browse,
         )
 
     private val userId = UUID.randomUUID()
@@ -177,5 +179,36 @@ class DashboardPartialControllerTest {
         verify(exactly = 0) { executions.findAll(any(), any(), any(), any(), any(), any(), any()) }
         model["executionsToday"] shouldBe 2
         model["successRate"] shouldBe 50
+    }
+
+    // ------------------------------------------------------------ #10 L3b: the tree partial
+
+    @Test
+    fun `the tree partial threads the pager's offset and the instance scope to the level`() {
+        authenticate()
+
+        controller.dashboardTree(model, prefix = "finance/dashboards", scope = "nav", offset = 25)
+
+        verify(exactly = 1) {
+            browse.fillLevel(
+                model,
+                workspaceId,
+                any(),
+                prefix = "finance/dashboards",
+                offset = 25,
+                scope = DashboardBrowseModel.SCOPE_NAV,
+            )
+        }
+    }
+
+    @Test
+    fun `the tree partial without an offset is page one, and an unknown scope is the page instance`() {
+        authenticate()
+
+        controller.dashboardTree(model, prefix = null, scope = "bogus", offset = null)
+
+        verify(exactly = 1) {
+            browse.fillLevel(model, workspaceId, any(), prefix = null, offset = 0, scope = DashboardBrowseModel.SCOPE_PAGE)
+        }
     }
 }

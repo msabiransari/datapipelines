@@ -88,6 +88,10 @@ class DashboardPartialController(
         model: Model,
         @RequestParam(required = false) prefix: String?,
         @RequestParam(required = false) scope: String?,
+        // The pager's offset (the level template's prev/next links); page one when absent —
+        // PipelinePartialController's shape. Dropped at delivery, so every pager link re-rendered
+        // page one (the L3b merge's security pass found it); DashboardPartialControllerTest pins it.
+        @RequestParam(required = false) offset: Int?,
     ): String {
         val principal = currentPrincipal()
         return dashboards.fillLevel(
@@ -95,7 +99,7 @@ class DashboardPartialController(
             principal.requireWorkspace().id,
             lens.viewFor(principal),
             prefix,
-            offset = 0,
+            offset = offset ?: 0,
             scope = if (scope == DashboardBrowseModel.SCOPE_NAV) DashboardBrowseModel.SCOPE_NAV else DashboardBrowseModel.SCOPE_PAGE,
         )
     }
