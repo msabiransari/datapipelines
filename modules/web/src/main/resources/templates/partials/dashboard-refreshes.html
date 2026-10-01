@@ -1,0 +1,54 @@
+<!-- The board page's EVENTS pane (#10 L3b, ui-screens.md §4.x) — the caller's refreshes of the
+     open dashboard, newest first, beside the board (the implementation spec's §10.5; the design
+     record's D52: a dashboard's runs are ordinary executions, LINKED from this pane, never
+     duplicated).
+
+     The rows are the runtime's own read (`GET /api/v1/dashboards/{id}/refreshes` route-shaped:
+     through DashboardRuntime, so the lens and the own/execution.read_all visibility are the
+     route's, never a second copy). A refresh's execution links are shown only to a principal
+     who reads executions — a promoter's refresh names none (rest-api §23.3, dashboards.md
+     §5.7). An execution link is an ORDINAL app link (boosting is fine here: an execution page
+     carries no Plotly bundle).
+
+     UPDATES are a BOUNDED POLL, deliberately, and not the runtime's notification hooks: the
+     pane's source of truth is the DURABLE refresh record (the caller's history, including the
+     execution.read_all reader's wider view), not one live instance's in-memory notifications;
+     the hooks fire only for refreshes THIS browser started and would need a second, client-side
+     row renderer duplicating the server's markup; and the poll keeps working when the runtime
+     instance failed to boot (a refusal state above the pane). The first poll is DELAYED — the
+     server just rendered the rows; `every 15s` bounds the cost after that — and the poll dies
+     with the page: the board route opts out of boosting, so leaving the page is a full
+     navigation and the element (and its timer) leaves the DOM with it. -->
+<div xmlns:th="http://www.thymeleaf.org" th:fragment="pane"
+     class="dp-refreshes"
+     th:attr="hx-get=@{/partials/dashboards/{id}/refreshes(id=${dashboardId})}, hx-trigger='load delay:15s, every 15s', hx-swap='outerHTML'">
+
+  <h2 class="dp-refreshes-title">Refreshes</h2>
+
+  <th:block th:if="${#lists.isEmpty(refreshes)}">
+    <p class="ds-empty-title">No refreshes yet</p>
+    <p class="ds-empty-description">
+      This dashboard has not been refreshed from this account. The initial render starts one;
+      every refresh of yours lands here, newest first.
+    </p>
+  </th:block>
+
+  <ul class="dp-refreshes-list" th:unless="${#lists.isEmpty(refreshes)}">
+    <li class="dp-refreshes-row" th:each="r : ${refreshes}">
+      <div class="dp-refreshes-row-head">
+        <span class="dp-refreshes-status" th:text="${r.status}">COMPLETED</span>
+        <span class="dp-refreshes-scope" th:text="${r.scope}">all</span>
+        <span class="dp-refreshes-ago" th:text="${r.ago}">just now</span>
+      </div>
+      <ul class="dp-refreshes-executions" th:if="${!#lists.isEmpty(r.executions)}">
+        <li th:each="e : ${r.executions}">
+          <!-- The execution page is an ordinary app route; boosting is welcome here. -->
+          <a th:href="@{'/executions/' + ${e.executionId}}">
+            <span th:text="${e.source}">revenue_source</span>
+            <span class="dp-refreshes-shared" th:if="${e.shared}">shared</span>
+          </a>
+        </li>
+      </ul>
+    </li>
+  </ul>
+</div>

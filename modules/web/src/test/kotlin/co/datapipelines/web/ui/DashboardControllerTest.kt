@@ -33,6 +33,9 @@ class DashboardControllerTest {
             co.datapipelines.web.pipelineServiceOver(pipelines),
             pipelineNames,
             co.datapipelines.web.EVERYTHING_LENS,
+            // #10 L3b — the collaborator the dashboards fragments added; unused by the
+            // landing-page cases below, so a relaxed mock stands in for the wiring.
+            io.mockk.mockk<DashboardBrowseModel>(relaxed = true),
         )
 
     private val userId = UUID.randomUUID()

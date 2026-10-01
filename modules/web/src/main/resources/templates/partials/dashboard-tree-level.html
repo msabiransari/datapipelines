@@ -1,0 +1,120 @@
+<!-- ONE level of the dashboard tree (#10 L3b), rendered in BOTH instances that show it: the
+     tree page's pane and the sidebar's lazy branch. Deliberately the same shape as
+     partials/pipeline-tree-level.html, down to the class names: one stylesheet
+     (template-tree.css) dresses all three trees, and a reader who knows one tree knows
+     the others.
+
+     The tree is backed by server-side prefix queries: this fragment renders the direct
+     sub-folders and the direct dashboard children of one prefix, and expanding a folder issues
+     ONE more request for ONE more level. Nothing here ships the flat list to the browser and
+     nothing assembles a tree in JS — at any size (the template-hierarchy design's §9.1).
+
+     Folders are virtual: a folder is a name prefix with no table, no column, no id and no CRUD.
+     There is deliberately no New folder / rename / move / delete control anywhere in this file.
+
+     A leaf NAVIGATES: it opens /dashboards/{id}, the board page, as a FULL navigation —
+     hx-boost="false" (dashboards.md §6.4: the two Plotly bundles must never travel between
+     pages, so a dashboard link opts out of boosting; the layout's logout/members precedent).
+     Because a leaf navigates rather than selects, the shared explorer keyboard layer
+     (template-explorer.js, keyed on [data-explorer-pane]) is deliberately NOT wired to the
+     dashboards tree: arrow-key "selection" would trigger navigation. The tree keeps its ARIA
+     roles, and a link row keeps the browser's own Enter/Tab semantics.
+
+     Folder expansion is <details>/<summary>: the browser owns open/closed state and the
+     keyboard and screen-reader semantics, and htmx loads the level on the summary's FIRST
+     click only (hx-trigger="click once"). No JS of our own is involved in expansion.
+
+     Root ids are PER INSTANCE (page / nav — DashboardBrowseModel.levelId): the sidebar's tree
+     and the page's tree can coexist in one document, so their containers can never share an id.
+
+     ARIA: the ROOT level's list is role=tree; a NESTED level's container is role=group under
+     its folder's treeitem. -->
+<div xmlns:th="http://www.thymeleaf.org" th:fragment="level"
+     th:id="${levelId}" class="tpl-level"
+     th:attr="role=${#strings.isEmpty(prefix)} ? null : 'group'">
+
+  <!-- The empty state belongs to the ROOT level only: a nested level always has at least one
+       child, because its folder was derived from that child. R10: dashboards are authored
+       through MCP/agents, so this says how to get one rather than offering a button that does
+       not exist. A lensed principal whose list is empty BECAUSE the higher environment could
+       not be read gets the promotion page's own sentence instead (178's rule, the pipelines
+       tree's shape) — "no dashboards yet" would be a lie about WHY the tree is empty. -->
+  <th:block th:if="${lensUnavailable != null and #lists.isEmpty(folders) and #lists.isEmpty(dashboards)}">
+    <div th:replace="~{partials/lens-unavailable :: notice(${lensUnavailable})}"></div>
+  </th:block>
+  <th:block th:if="${lensUnavailable == null and #lists.isEmpty(folders) and #lists.isEmpty(dashboards)}">
+    <div class="ds-empty">
+      <p class="ds-empty-title">No dashboards yet</p>
+      <p class="ds-empty-description">
+        Dashboards are authored through the MCP server — ask your agent to create one. Give it a
+        folder path like <code>finance/dashboards/revenue_overview</code> — a folder is required,
+        and the folders appear here on their own.
+      </p>
+    </div>
+  </th:block>
+
+  <ul class="tpl-tree"
+      th:unless="${#lists.isEmpty(folders) and #lists.isEmpty(dashboards)}"
+      th:attr="role=${#strings.isEmpty(prefix)} ? 'tree' : null,
+               aria-label=${#strings.isEmpty(prefix)} ? 'Dashboards' : null">
+
+    <!-- FOLDERS. The count is over live dashboards in the whole subtree, so a folder with
+         nothing beneath it is absent rather than empty. -->
+    <li class="tpl-node" role="none" th:each="f : ${folders}">
+      <details class="tpl-folder">
+        <!-- The request rides on the SUMMARY, triggered by its own `click`, and targets the
+             placeholder below with `next`. `once`: the level is fetched on first open and then
+             simply shown and hidden. -->
+        <summary class="tpl-summary" role="treeitem" aria-expanded="false"
+                 th:attr="hx-get=@{/partials/dashboards/tree(prefix=${f.path}, scope=${scope})}"
+                 hx-trigger="click once"
+                 hx-target="next .tpl-level" hx-swap="outerHTML">
+          <svg class="ds-icon ds-icon-xs tpl-chevron" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#chevron-right"></use></svg>
+          <svg class="ds-icon ds-icon-sm tpl-row-icon tpl-icon-folder" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#folder"></use></svg>
+          <svg class="ds-icon ds-icon-sm tpl-row-icon tpl-icon-folder-open" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#folder-open"></use></svg>
+          <!-- The label is the folder's own segment; the FULL prefix always rides on `title`,
+               which is also what a browser test selects on. -->
+          <span class="tpl-label" th:text="${f.segment}" th:title="${f.path}">dashboards</span>
+          <span class="ds-badge ds-badge-default tpl-count" th:text="${f.count}">6</span>
+        </summary>
+        <!-- Replaced whole by the child level, which carries this same derived id. -->
+        <div class="tpl-level tpl-level-pending" th:id="${f.levelId}">
+          <span class="ds-spinner htmx-indicator" aria-hidden="true"></span>
+        </div>
+      </details>
+    </li>
+
+    <!-- LEAVES. A leaf NAVIGATES to the board page — a FULL navigation (hx-boost="false",
+         §6.4's one-bundle rule; the layout's members-link precedent). The label is the leaf's
+         own segment; the full path always rides on `title` (§9.4's rule for every surface that
+         shows a path-shaped name). The version badge names the WORKING version; a dashboard
+         with no release carries the draft badge — opening one is the board page's refusal
+         state, not an error, and versioning §7 keeps unreleased edits visible in the list. -->
+    <li class="tpl-node" role="none" th:each="d : ${dashboards}">
+      <a th:href="@{'/dashboards/' + ${d.id}}" class="tpl-leaf" role="treeitem" aria-selected="false"
+         hx-boost="false"
+         th:attr="data-leaf-id=${d.id}">
+        <svg class="ds-icon ds-icon-sm tpl-row-icon" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#boxes"></use></svg>
+        <span class="tpl-label" th:text="${d.segment}" th:title="${d.name}">revenue_overview</span>
+        <span class="ds-badge ds-badge-default tpl-leaf-version"
+              th:text="${'v' + d.version}">v1</span>
+        <span th:if="${!d.released}" class="ds-badge ds-badge-warning tpl-leaf-draft"
+              th:title="'v' + ${d.version} + ' is not released yet — release it to view the board.'">draft</span>
+      </a>
+    </li>
+  </ul>
+
+  <!-- Honest overflow rather than a silent cut: sub-folders are a GROUP BY over one path
+       segment and are not paged. -->
+  <p class="tpl-overflow" th:if="${folders.size() > 200}">
+    Only the first 200 sub-folders of this level are shown.
+  </p>
+
+  <!-- The shared pager, rendered only when it can DO something: a tree renders many levels at
+       once and most hold a handful of rows. -->
+  <th:block th:if="${!#lists.isEmpty(dashboards) and (offset > 0 or hasMore)}"
+            th:with="prevUrl=@{/partials/dashboards/tree(prefix=${prefix}, scope=${scope}, offset=${offset - 25})},
+                     nextUrl=@{/partials/dashboards/tree(prefix=${prefix}, scope=${scope}, offset=${offset + 25})}">
+    <div th:replace="~{partials/pager :: pager('#' + ${levelId}, ${prevUrl}, ${nextUrl}, ${offset}, ${hasMore}, ${dashboards.size()}, ${total})}"></div>
+  </th:block>
+</div>

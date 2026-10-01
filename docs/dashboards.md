@@ -1,9 +1,9 @@
 # Dashboards
 
-**Status:** v0.4 — the two documents and their lifecycle (#10, lane L1a); the REST routes, the MCP tools and the
-permissions (§4, lane L1b); the server runtime (§5, lane L2). The transfer routes (L1c), the client runtime and the
-first-party page (L3), the visualization tests and their release gate (L4) and the `dashboard` key kind (L5) add
-their sections as they land.
+**Status:** v0.8 — the two documents and their lifecycle (#10, lane L1a); the REST routes, the MCP tools and the
+permissions (§4, lane L1b); the server runtime (§5, lane L2); the client runtime (§6, lane L3a) and the first-party
+pages (§7, lane L3b). The transfer routes (L1c), the visualization tests and their release gate (L4) and the
+`dashboard` key kind (L5) add their sections as they land.
 **Owner:** datapipelines.co core
 **Depends on:** [Versioning](versioning.md) (§3.5 — the lifecycle table), [Pipeline Contract](pipeline-contract.md)
 (§13.22, §13.23 — the codes), [Metadata DB](metadata-db.md) (§4.28–§4.35 — the tables), [Enumerations](enums.md)
@@ -404,7 +404,7 @@ dashboard she can read but holds no `execution.read`, so her refresh names no ex
 
 ### 5.8 What is not here
 
-The draft preview and the visualization tests (L4), the first-party PAGES — `/dashboards`, the sidebar tree, the events pane (L3b) — and the `dashboard` key kind and its confinement (L5): until L5, only signed-in sessions reach these routes and no MCP tool refreshes a dashboard.
+The draft preview and the visualization tests (L4) and the `dashboard` key kind and its confinement (L5): until L5, only signed-in sessions reach these routes and no MCP tool refreshes a dashboard. The first-party pages are §7 (L3b).
 
 ## 6. The client runtime (L3a)
 
@@ -569,10 +569,74 @@ it with `insertRule` at load. The runtime pre-places that element with the class
 real stylesheet under `style-src 'self'`. The bundle injects nothing; no policy directive is widened;
 the conformance suite proves the rules APPLY and is red when the stylesheet is removed.
 
+## 7. The first-party pages (L3b)
+
+The app's own surfaces over the runtime: the tree page (`GET /dashboards`), the board page
+(`GET /dashboards/{id}`), the sidebar's Dashboards branch and the events pane. Every handler is
+a session-authenticated GET declaring `dashboard.read` — D50 makes every reader an executor, and
+the pages must not declare `dashboard.execute` to "simplify" — except the events pane's
+fragment, which floors at `dashboard.execute` with the refreshes route it mirrors (auth §7.6's
+Surfaces cells carry the routes).
+
+**The tree page and the sidebar branch (D58).** The landing item is RENAMED Home — the route
+`/dashboard` and its exact-match nav section are unchanged. Build's last rail item is
+**Dashboards**: the link to the tree page, and beside it a chevron disclosure that expands IN
+PLACE into the hierarchy — lazy (the summary's first click fetches ONE level), collapsible,
+hidden with the collapsed rail. Both the page's tree and the branch render the SAME
+one-level-per-request fragment (`GET /partials/dashboards/tree?prefix=&scope=`), the pipelines
+explorer's shape: virtual folders, server-side prefix queries through the dashboards service's
+LENSED reads (a hidden dashboard is absent from the tree and its counts; nothing is filtered in
+a template), the root level listing folders only. Level ids are derived per scope (`page`,
+`nav`) because the two instances can coexist in one document. A leaf opens the board page as a
+FULL navigation — `hx-boost="false"`, §6.4's rule: the two bundles must never travel between
+pages, and the layout's logout/members links are the precedent.
+
+**The board page.** The server resolves the runtime configuration ONCE at render to learn the
+ONE bundle (`renderer.bundle`, §6.4) and writes the script tag with its
+`data-dp-plotly-bundle` declaration — the same read the client's bootstrap performs, so the
+declaration and the judged pair cannot disagree; the runtime's two-bundle refusal is the
+backstop. The glue (`static/js/dashboards-page.js`, a file — the CSP allows no inline script)
+reads exactly two data attributes (the dashboard id on the container; the bundle name on the
+script tag), inits the runtime with `credentials: "session"` and `version: "released"`, and
+owns the notification/refusal regions. A dashboard the caller cannot see is the family's 404; a
+dashboard that exists for the caller but cannot run (no release yet, a purged pin, a source no
+longer read-only) renders the page's REFUSAL state — the code and sentence the runtime's read
+refused with, and the `onNotification` sink's region for a later boot failure — never a blank
+pane, and a refusal page loads no bundle at all. `dashboards.css` and the vendored
+`plotly.css` (§6.6's design-around) load from the LAYOUT head: ui-screens §3.0 is normative —
+no page template carries its own stylesheet link, and a page-scoped sheet on any route paints
+an unstyled first frame.
+
+**Navigation onto the route is never boosted; disposal is the `htmx:beforeHistorySave` hook.**
+Every link TO a board carries `hx-boost="false"` — §6.4's rule: the two bundles must never
+travel between pages, and a boosted board-to-board swap would run one page's bundle under the
+other's document. But LEAVING the board can still be boosted (the layout's nav links are), and
+htmx saves a history snapshot of the current document when it goes — a snapshot that would
+carry the container WITH its mounted marker, making the restored page's fresh `init` refuse
+`DashboardAlreadyMounted` (found by the pages' browser suite on its first run: the Back button
+showed the refusal state where the board was). So the glue disposes on
+`htmx:beforeHistorySave` — the instance is torn down and the container unmarked BEFORE the
+snapshot is taken (dispose also removes the mounted DOM, so the cached markup is the page's
+shell). The pages' browser suite proves exactly one mount across a back/forward pass.
+
+**The events pane.** The caller's refreshes of the open dashboard, newest first
+(`GET /partials/dashboards/{id}/refreshes` — the REST refreshes route's own read through the
+runtime, so the lens and the own/`execution.read_all` visibility are the route's), beside the
+board. Each row shows status, scope and age and links its executions to `/executions/{id}` —
+shown only to a reader of executions; a promoter's refresh names none (§5.7, rest-api §23.3).
+Updates are a BOUNDED POLL (`load delay:15s`, then `every 15s`; the pane re-fetches itself),
+deliberately not §6's notification hooks: the pane's source of truth is the DURABLE record
+(including the `execution.read_all` reader's wider view), the hooks fire only for refreshes
+this browser started and would need a second client-side row renderer duplicating the server's
+markup, and the poll keeps working when the instance failed to boot. The first re-fetch is
+delayed because the server just rendered the rows; the poll dies with the page (leaving is a
+full navigation).
+
 ## Appendix A: Change Log
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-01 | v0.8 | L3b (#10) the first-party pages | **New §7 The first-party pages** — the tree page and the sidebar's Dashboards branch (D58; the landing item renamed Home, the route unchanged), the board page (the server-declared ONE bundle, the glue as a file, the refusal state for a board that cannot run, never a blank pane) and the events pane (the caller's refreshes, execution links by the reader's visibility, a bounded poll chosen over the runtime's notification hooks, with the why stated). The one-bundle rule's navigation half is stated as the brief's rule it is: every link to a board carries `hx-boost="false"`, which is also the §10.5 disposal answer — full navigation, no htmx history, no second instance. Permissions: the pages on `dashboard.read`, the pane fragment on `dashboard.execute` beside the refreshes route it mirrors (auth §7.6's Surfaces cells). `dashboards.css` and `plotly.css` load from the layout head (ui-screens §3.0 is normative). |
 | 2026-09-30 | v0.7 | L3a-c (#10) typed controls and the absolute deadline | The composite's BOOLEAN `INPUT` renders the house tri-state select (`— not given —` / `true` / `false`) so an unresolved null is read as null and a visible edit travels as a wire boolean (§6.2); radio groups are named per adapter instance, so two boards in one document never share a native group (§6.2). The lock's absolute deadline is enforced by the clock at both admission points — before the adapter is invoked with a response and again before a resolved render commits — with the inclusive boundary stated (§6.6). The completed target's REAL wire outcome (`ok`, rest-api §23.3) no longer errors a delivered target: completion never clobbers the state the data frame set. |
 | 2026-09-30 | v0.6 | L3a-b (#10) the client runtime corrections | The client consumed the WIRE now (corrections on the delivered tip, the server wire authoritative): §6.2 states the parameter state's real writer shape (flat definition + `state`, typed values, `overrides_applied`, `valid`), the composite's per-definition controls and typed selections, the row-replacing renders and dispose's DOM removal; §6.6 states the lock's corrected coverage — held through the host's asynchronous render, deadline live through it, late renders and reset installs yield to a newer attempt. The abort route is the controller's one-`runtime`-segment path (§5's route table unchanged). |
 | 2026-09-30 | v0.5 | L3a (#10) the client runtime | **New §6 The client runtime** — the vendored artifact and what it owns (§6.1's API), the twelve-function adapter contract (§6.2), the three renderers and the data-is-text rule (§6.3), the two Plotly bundles and the one-bundle rule (§6.4), both credential modes' wire contract including the proxy contract L5's reference proxy implements (§6.5), and the states, notifications and the CSP design-around (§6.6). §5.8's "not here" loses the client runtime; the pages remain L3b's. |

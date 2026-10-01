@@ -10,9 +10,12 @@ import co.datapipelines.web.api.currentPrincipal
 import org.springframework.stereotype.Controller
 import org.springframework.ui.Model
 import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.RequestParam
 import java.time.LocalDate
 import java.time.ZoneOffset
+import java.util.UUID
 
 @Controller
 @RequestMapping("/partials")
@@ -22,6 +25,8 @@ class DashboardPartialController(
     private val pipelineNames: PipelineNames,
     /** 178 — the promoter lens: the pipelines tile counts the caller's view. */
     private val lens: PromoterLens,
+    // #10 L3b — the dashboards screens' model: the tree level and the events pane.
+    private val dashboards: DashboardBrowseModel,
 ) {
     @GetMapping("/dashboard-stats")
     @RequiredScope(Permission.PIPELINE_READ)
@@ -68,6 +73,49 @@ class DashboardPartialController(
         model.addAttribute("executions", executions)
         model.addAttribute("pipelineNames", pipelineNames.lookup(workspaceId, executions.map { it.pipelineId }))
         return "partials/recent-executions"
+    }
+
+    /**
+     * #10 L3b — ONE level of the dashboard tree, for the folder expansion in EITHER instance
+     * that renders it: the tree page's pane or the sidebar's lazy branch, named by [scope]
+     * (the two coexist in one document, so their level ids are per-scope). The read is
+     * [DashboardBrowseModel.fillLevel]'s, through the dashboards service's lensed reads —
+     * `dashboard.read`, the same row the tree page declares (the brief's roles table).
+     */
+    @GetMapping("/dashboards/tree")
+    @RequiredScope(Permission.DASHBOARD_READ)
+    fun dashboardTree(
+        model: Model,
+        @RequestParam(required = false) prefix: String?,
+        @RequestParam(required = false) scope: String?,
+    ): String {
+        val principal = currentPrincipal()
+        return dashboards.fillLevel(
+            model,
+            principal.requireWorkspace().id,
+            lens.viewFor(principal),
+            prefix,
+            offset = 0,
+            scope = if (scope == DashboardBrowseModel.SCOPE_NAV) DashboardBrowseModel.SCOPE_NAV else DashboardBrowseModel.SCOPE_PAGE,
+        )
+    }
+
+    /**
+     * #10 L3b — the board page's events pane, newest first, for the pane's bounded poll. Its
+     * data is the caller's refreshes — the REST `GET /api/v1/dashboards/{id}/refreshes`
+     * route's own rows — so it floors at the SAME permission that route declares
+     * (`dashboard.execute`, D50's delegated act; the page that embeds it stays on
+     * `dashboard.read`), and the read goes through [DashboardRuntime], so the lens and the
+     * own/`execution.read_all` visibility are the route's, never a second copy.
+     */
+    @GetMapping("/dashboards/{id}/refreshes")
+    @RequiredScope(Permission.DASHBOARD_EXECUTE)
+    fun dashboardRefreshes(
+        model: Model,
+        @PathVariable id: UUID,
+    ): String {
+        val principal = currentPrincipal()
+        return dashboards.fillRefreshes(model, principal, id)
     }
 
     private companion object {

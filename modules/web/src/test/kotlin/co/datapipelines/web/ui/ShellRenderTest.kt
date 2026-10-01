@@ -397,6 +397,28 @@ class ShellRenderTest {
         setVariable("reportProblemUrl", REPORT_PROBLEM_URL)
     }
 
+    /**
+     * D58 (#10 L3b): the landing item is RENAMED Home — the route (/dashboard) and its
+     * exact-match section are unchanged, so the pin is on the label pair, and the new
+     * Dashboards item sits in Build with its lazy branch beside it (the branch is not a link:
+     * the rail's link count stays the table's count — the agreement test above holds it).
+     */
+    @Test
+    fun `the landing item is Home and the Dashboards item sits in Build with its lazy branch`() {
+        val html = engine.process("pipelines/list", webContext().apply { fillList() })
+
+        html shouldContain "data-nav-section=\"/dashboard\""
+        html shouldContain "data-nav-group=\"\" data-nav-label=\"Home\""
+        html shouldContain "data-nav-section=\"/dashboards\""
+        html shouldContain "data-nav-group=\"Build\" data-nav-label=\"Dashboards\""
+        // The lazy branch: the disclosure rides the summary (one level per request, scope=nav),
+        // and the placeholder's id is the NAV instance's root — never the page tree's.
+        html shouldContain "aria-label=\"Expand dashboards tree\""
+        html shouldContain "/partials/dashboards/tree?scope=nav"
+        html shouldContain "id=\"dash-tree-nav\""
+        html shouldNotContain "data-nav-label=\"Dashboard\""
+    }
+
     private fun webContext(): WebContext =
         WebContext(
             JakartaServletWebApplication
