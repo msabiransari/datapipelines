@@ -624,11 +624,21 @@ class RoleVisibilityRenderTest {
         setVariable("currentPath", "/pipelines")
         setVariable("pipelineId", "00000000-0000-0000-0000-000000000001")
         setVariable("pipelineName", "revenue_by_borough")
+        setVariable("hasSelectedBody", true)
+        setVariable("viewedVersion", 2)
+        setVariable("viewedLabel", "v2 · draft")
+        setVariable("viewedIsDraft", true)
+        setVariable("viewedIsCurrent", false)
+        setVariable("viewedStatusLabel", "draft")
+        setVariable("currentVersion", 1)
         setVariable("hasDraft", true)
         setVariable("draftVersion", 2)
-        setVariable("releasedVersion", 1)
+        setVariable("versions", emptyList<Any>())
+        setVariable("activeTab", "flow")
+        setVariable("canReadExecutions", true)
         setVariable("stagingEngine", "H2")
         setVariable("pipelineJson", "{}")
+        setVariable("workspaceJson", "{}")
     }
 
     private fun WebContext.promotionModel(sets: List<PromotionService.Candidate> = PROMOTION_SETS) {

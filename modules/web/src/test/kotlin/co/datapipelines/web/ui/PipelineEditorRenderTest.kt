@@ -1,5 +1,6 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.pipeline.PipelineVersionStatus
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
@@ -214,7 +215,71 @@ class PipelineEditorRenderTest {
         html shouldContain "hx-boost=\"false\""
     }
 
-    private fun render(): String =
+    /**
+     * #348 — the version selector is READ navigation (D5): the admitted history renders as
+     * full-document links into the canonical page, the viewed row is aria-current, the current
+     * row is labelled. No link may be boosted — a boosted swap would initialise the graph
+     * against a stale document (ui-screens §4.4).
+     */
+    @Test
+    fun `the version selector renders admitted history as full-document links`() {
+        val html = render(versions = listOf(vr(1, "RELEASED", isCurrent = true, isViewed = true), vr(2, "RELEASED"), vr(3, "DRAFT")))
+
+        html shouldContain "aria-label=\"View another version\""
+        html shouldContain "href=\"/pipelines/$LEAF_ID?version=1\""
+        html shouldContain "href=\"/pipelines/$LEAF_ID?version=2\""
+        html shouldContain "href=\"/pipelines/$LEAF_ID?version=3\""
+        html shouldContain "hx-boost=\"false\""
+        html shouldContain "aria-current=\"page\""
+        html shouldContain "· current"
+        html shouldContain "· draft"
+    }
+
+    /**
+     * #348 — resolution rule 4: no body selected renders the choose-a-version state (or the
+     * empty state with no admitted versions) INSTEAD of the graph root — no Execute, no dock,
+     * no data blocks, nothing to run.
+     */
+    @Test
+    fun `no selected body is the choose-a-version state and renders no graph root`() {
+        val html = render(hasSelectedBody = false, versions = listOf(vr(1, "RELEASED", isCurrent = true), vr(2, "DRAFT")))
+
+        html shouldNotContain "class=\"pe-root\""
+        html shouldNotContain "id=\"pipeline-data\""
+        html shouldContain "Choose a version"
+        html shouldContain "href=\"/pipelines/$LEAF_ID?version=1\""
+        html shouldContain "href=\"/pipelines/$LEAF_ID?version=2\""
+        html shouldContain "— released"
+        html shouldContain "— draft"
+    }
+
+    @Test
+    fun `no admitted versions at all is the honest empty state`() {
+        val html = render(hasSelectedBody = false, versions = emptyList())
+
+        html shouldNotContain "class=\"pe-root\""
+        html shouldContain "No viewable version"
+        html shouldContain "has no version your role can view yet"
+    }
+
+    /** One selector/history row, as the controller's [PipelineWorkspaceModel.VersionChoice] renders. */
+    private fun vr(
+        version: Int,
+        status: String,
+        isCurrent: Boolean = false,
+        isViewed: Boolean = false,
+    ): Map<String, Any> =
+        mapOf(
+            "version" to version,
+            "status" to PipelineVersionStatus.valueOf(status),
+            "isCurrent" to isCurrent,
+            "isViewed" to isViewed,
+        )
+
+    private fun render(
+        hasSelectedBody: Boolean = true,
+        versions: List<Map<String, Any>> = emptyList(),
+    ): String =
         engine.process(
             "pipelines/editor",
             webContext().apply {
@@ -226,15 +291,25 @@ class PipelineEditorRenderTest {
                 setVariable("authenticated", true)
                 setVariable("currentPath", "/pipelines")
                 setVariable("pipelineId", LEAF_ID)
+                setVariable("pipelineName", "p")
+                setVariable("hasSelectedBody", hasSelectedBody)
+                setVariable("viewedVersion", if (hasSelectedBody) 1 else null)
+                setVariable("viewedLabel", if (hasSelectedBody) "v1 · released · current" else "no version selected")
+                setVariable("viewedIsDraft", false)
+                setVariable("viewedIsCurrent", hasSelectedBody)
+                setVariable("viewedStatusLabel", if (hasSelectedBody) "released" else null)
+                setVariable("currentVersion", 1)
                 setVariable("hasDraft", false)
                 setVariable("draftVersion", null)
-                setVariable("draftHash", null)
-                setVariable("releasedVersion", 1)
+                setVariable("versions", versions)
+                setVariable("activeTab", "flow")
+                setVariable("canReadExecutions", true)
                 setVariable(
                     "pipelineJson",
                     """{"id":"00000000-0000-0000-0000-000000000001","name":"p",""" +
                         """"display_name":"P","version":1,"parameters":{},"nodes":[]}""",
                 )
+                setVariable("workspaceJson", """{"viewedVersion":1,"hasBody":true,"canExecute":true}""")
             },
         )
 

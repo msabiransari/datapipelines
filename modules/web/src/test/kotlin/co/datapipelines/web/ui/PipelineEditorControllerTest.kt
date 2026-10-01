@@ -1,127 +1,53 @@
 package co.datapipelines.web.ui
 
-import co.datapipelines.auth.AuthMethod
-import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.WorkspaceContext
-import co.datapipelines.pipeline.PipelineRecord
-import co.datapipelines.pipeline.PipelineRepository
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
-import io.kotest.matchers.string.shouldContain
-import io.mockk.every
-import io.mockk.mockk
-import jakarta.servlet.http.HttpServletRequest
-import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
-import org.springframework.security.core.context.SecurityContextHolder
-import org.springframework.ui.ExtendedModelMap
-import java.time.Instant
+import org.springframework.http.HttpStatus
+import org.springframework.web.server.ResponseStatusException
 import java.util.UUID
 
+/**
+ * #348 — the OLD editor route is a compatibility redirect into the canonical read page
+ * (workspace spec §3.2): an explicit valid version and a supported tab survive, a malformed
+ * version is the same house 400 the canonical route answers, and no-version links follow the
+ * canonical current-first default on purpose. The redirect carries NO permission of its own
+ * beyond the read floor it now declares (`PIPELINE_READ` — the doc row and the walk moved with
+ * it in the same commit).
+ */
 class PipelineEditorControllerTest {
-    private val repository = mockk<PipelineRepository>()
-    private val themeResolver = mockk<ThemeResolver>()
-    private val controller = PipelineEditorController(co.datapipelines.web.pipelineServiceOver(repository), themeResolver)
-
+    private val controller = PipelineEditorController()
     private val pipelineId = UUID.randomUUID()
-    private val workspaceId = UUID.randomUUID()
-
-    @AfterEach
-    fun clearContext() = SecurityContextHolder.clearContext()
-
-    private fun authenticate() {
-        val principal =
-            AuthenticatedPrincipal(
-                UUID.randomUUID(),
-                "a@b.c",
-                "A",
-                AuthMethod.OIDC,
-                workspace = WorkspaceContext(workspaceId, "acme"),
-            )
-        SecurityContextHolder.getContext().authentication =
-            UsernamePasswordAuthenticationToken(principal, null, emptyList())
-    }
-
-    private val record =
-        PipelineRecord(
-            id = pipelineId,
-            name = "sample_pipeline",
-            displayName = "Sample Pipeline",
-            description = "A sample pipeline for testing",
-            ownerId = UUID.randomUUID(),
-            currentVersion = 1,
-            createdAt = Instant.parse("2026-08-01T00:00:00Z"),
-            updatedAt = Instant.parse("2026-08-01T00:00:00Z"),
-        )
-
-    private val bodyJson =
-        """
-        {
-          "schema_version": 1,
-          "name": "sample_pipeline",
-          "display_name": "Sample Pipeline",
-          "description": "A sample pipeline for testing",
-          "settings": {"tempdb": {"engine": "H2"}},
-          "parameters": {},
-          "nodes": [
-            {
-              "id": "extract_users",
-              "type": "DQL",
-              "source": "prod_db",
-              "template": {"id": "test/select_all", "version": 1},
-              "depends_on": []
-            },
-            {
-              "id": "transform_users",
-              "type": "DQL",
-              "source": "tempdb",
-              "template": {"id": "test/transform", "version": 1},
-              "depends_on": ["extract_users"]
-            }
-          ]
-        }
-        """.trimIndent()
 
     @Test
-    fun `editor returns editor view with pipeline json and theme`() {
-        authenticate()
-        every { repository.findById(any(), pipelineId) } returns record
-        every { repository.findVersionBody(any(), pipelineId, 1) } returns bodyJson
-        every { repository.findDraftDetail(any(), pipelineId) } returns null
-        every { repository.findCurrentVersionDetail(any(), pipelineId) } returns null
-        every { themeResolver.resolve(any()) } returns "saas"
-
-        val model = ExtendedModelMap()
-        val request = mockk<HttpServletRequest>()
-        val viewName = controller.editor(pipelineId, model, request)
-
-        viewName shouldBe "pipelines/editor"
-        model["activeTheme"] shouldBe "saas"
-        val json = model["pipelineJson"] as String
-        json shouldContain "sample_pipeline"
-        json shouldContain "extract_users"
-        json shouldContain "transform_users"
-        json shouldContain pipelineId.toString()
+    fun `the old editor URL redirects to the canonical read page`() {
+        val view = controller.editor(pipelineId, version = null, tab = null)
+        view.url shouldBe "/pipelines/$pipelineId"
     }
 
     @Test
-    fun `editor includes server-assigned fields in pipeline json`() {
-        authenticate()
-        every { repository.findById(any(), pipelineId) } returns record
-        every { repository.findVersionBody(any(), pipelineId, 1) } returns bodyJson
-        every { repository.findDraftDetail(any(), pipelineId) } returns null
-        every { repository.findCurrentVersionDetail(any(), pipelineId) } returns null
-        every { themeResolver.resolve(any()) } returns "dark"
+    fun `an explicit valid version and a supported tab survive the redirect`() {
+        val view = controller.editor(pipelineId, version = "3", tab = "overview")
+        view.url shouldBe "/pipelines/$pipelineId?version=3&tab=overview"
+    }
 
-        val model = ExtendedModelMap()
-        val request = mockk<HttpServletRequest>()
-        controller.editor(pipelineId, model, request)
+    @Test
+    fun `a version without a tab redirects with the version alone - the canonical default resolves the tab`() {
+        val view = controller.editor(pipelineId, version = "2", tab = null)
+        view.url shouldBe "/pipelines/$pipelineId?version=2"
+    }
 
-        val json = model["pipelineJson"] as String
-        json shouldContain "\"id\""
-        json shouldContain "\"version\""
-        json shouldContain "\"owner\""
-        json shouldContain "\"created_at\""
-        json shouldContain "\"updated_at\""
+    @Test
+    fun `an unsupported tab is dropped, not forwarded`() {
+        val view = controller.editor(pipelineId, version = null, tab = "banana")
+        view.url shouldBe "/pipelines/$pipelineId"
+    }
+
+    @Test
+    fun `a malformed version is the house 400 - the shim never clamps to a different version`() {
+        shouldThrow<ResponseStatusException> { controller.editor(pipelineId, version = "abc", tab = null) }
+            .statusCode shouldBe HttpStatus.BAD_REQUEST
+        shouldThrow<ResponseStatusException> { controller.editor(pipelineId, version = "0", tab = null) }
+            .statusCode shouldBe HttpStatus.BAD_REQUEST
     }
 }

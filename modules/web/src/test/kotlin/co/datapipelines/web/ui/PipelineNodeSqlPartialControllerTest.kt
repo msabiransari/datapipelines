@@ -130,7 +130,7 @@ class PipelineNodeSqlPartialControllerTest {
         every { engine.render(TemplateRef("test/trips_by_day.sql", 1), any(), any()) } returns "SELECT 1"
         val model = ExtendedModelMap()
 
-        controller.nodeSql(pipelineId, "trips_by_day", """{"start_date":"2023-01-01"}""", model)
+        controller.nodeSql(pipelineId, "trips_by_day", """{"start_date":"2023-01-01"}""", null, model)
 
         model.getAttribute("state") shouldBe "rendered"
         model.getAttribute("sql") shouldBe "SELECT 1"
@@ -147,7 +147,7 @@ class PipelineNodeSqlPartialControllerTest {
         every { templates.lookupVersion(workspaceId, "test/trips_by_day.sql", 2) } returns version("test/trips_by_day.sql", 2)
         val model = ExtendedModelMap()
 
-        controller.nodeSql(pipelineId, "trips_by_day", null, model)
+        controller.nodeSql(pipelineId, "trips_by_day", null, null, model)
 
         verify { engine.render(TemplateRef("test/trips_by_day.sql", 1), any(), any()) }
         verify(exactly = 0) { engine.render(TemplateRef("test/trips_by_day.sql", 2), any(), any()) }
@@ -158,7 +158,7 @@ class PipelineNodeSqlPartialControllerTest {
         // §6.3: INTEGER is a NUMBER on the wire; a string is rejected, never converted.
         val model = ExtendedModelMap()
 
-        controller.nodeSql(pipelineId, "top_days", """{"limit":"5"}""", model)
+        controller.nodeSql(pipelineId, "top_days", """{"limit":"5"}""", null, model)
 
         model.getAttribute("state") shouldBe "parameter-rejected"
         (model.getAttribute("failures") as List<*>).toString() shouldContain "limit"
@@ -169,7 +169,7 @@ class PipelineNodeSqlPartialControllerTest {
     fun `an unparseable parameters document is rejected, never a 500`() {
         val model = ExtendedModelMap()
 
-        controller.nodeSql(pipelineId, "top_days", "not-json", model)
+        controller.nodeSql(pipelineId, "top_days", "not-json", null, model)
 
         model.getAttribute("state") shouldBe "parameter-rejected"
         verify(exactly = 0) { engine.render(any(), any(), any()) }
@@ -181,7 +181,7 @@ class PipelineNodeSqlPartialControllerTest {
         every { engine.render(TemplateRef("test/trips_by_day.sql", 1), any(), any()) } returns "SELECT sampled"
         val model = ExtendedModelMap()
 
-        controller.nodeSql(pipelineId, "trips_by_day", null, model)
+        controller.nodeSql(pipelineId, "trips_by_day", null, null, model)
 
         model.getAttribute("state") shouldBe "rendered"
         model.getAttribute("sampledParameters") shouldBe listOf("start_date")
@@ -192,7 +192,7 @@ class PipelineNodeSqlPartialControllerTest {
         // Node.fromJson gives a PIPELINE node TemplateRef("", 0) — NOT null.
         val model = ExtendedModelMap()
 
-        controller.nodeSql(pipelineId, "run_child", null, model)
+        controller.nodeSql(pipelineId, "run_child", null, null, model)
 
         model.getAttribute("state") shouldBe "child-pipeline"
         model.getAttribute("childName") shouldBe "child_pipe"
@@ -205,7 +205,7 @@ class PipelineNodeSqlPartialControllerTest {
         every { templates.lookupVersion(workspaceId, "test/trips_by_day.sql", 1) } returns null
         val model = ExtendedModelMap()
 
-        controller.nodeSql(pipelineId, "trips_by_day", null, model)
+        controller.nodeSql(pipelineId, "trips_by_day", null, null, model)
 
         model.getAttribute("state") shouldBe "template-missing"
         model.getAttribute("templateId") shouldBe "test/trips_by_day.sql"
@@ -220,7 +220,7 @@ class PipelineNodeSqlPartialControllerTest {
         } throws TemplateRenderException("undefined variable: nope", TemplateRef("test/trips_by_day.sql", 1))
         val model = ExtendedModelMap()
 
-        controller.nodeSql(pipelineId, "trips_by_day", null, model)
+        controller.nodeSql(pipelineId, "trips_by_day", null, null, model)
 
         model.getAttribute("state") shouldBe "render-failed"
         (model.getAttribute("message") as String) shouldContain "undefined variable"
@@ -230,7 +230,7 @@ class PipelineNodeSqlPartialControllerTest {
     fun `an unknown node id renders the node-missing state`() {
         val model = ExtendedModelMap()
 
-        controller.nodeSql(pipelineId, "no_such_node", null, model)
+        controller.nodeSql(pipelineId, "no_such_node", null, null, model)
 
         model.getAttribute("state") shouldBe "node-missing"
         model.getAttribute("nodeId") shouldBe "no_such_node"
@@ -327,12 +327,44 @@ class PipelineNodeSqlPartialControllerTest {
         every { pipelines.findVersionBody(any(), pipelineId, 2) } returns draftBody
         val model = ExtendedModelMap()
 
-        controller.nodeSql(pipelineId, "trips_by_day", null, model)
+        controller.nodeSql(pipelineId, "trips_by_day", null, null, model)
 
         // v2's body has no trips_by_day node — the draft was read, hence node-missing (not a
         // v1 render), and a version-1 body lookup never happened.
         model.getAttribute("state") shouldBe "node-missing"
         io.mockk.verify(exactly = 0) { pipelines.findVersionBody(any(), pipelineId, 1) }
+    }
+
+    @Test
+    fun `an explicit version renders THAT version's body - the workspace pin (348)`() {
+        // v2's body renames the node; asking for version=2 must read v2, never the current v1.
+        // The workspace always sends the version it is viewing, so the panel's SQL is the
+        // viewed body's even when the current pointer names another one.
+        val v2Body = bodyJson.replace("\"id\": \"trips_by_day\"", "\"id\": \"trips_v2\"")
+        every { pipelines.findVersionDetail(any(), pipelineId, 2) } returns versionDetail(2)
+        every { pipelines.findVersionBody(any(), pipelineId, 2) } returns v2Body
+        val model = ExtendedModelMap()
+
+        controller.nodeSql(pipelineId, "trips_by_day", null, "2", model)
+
+        model.getAttribute("state") shouldBe "node-missing"
+        io.mockk.verify(exactly = 0) { pipelines.findVersionBody(any(), pipelineId, 1) }
+    }
+
+    @Test
+    fun `an explicit version absent from the pipeline is the house 404 - never a fallback`() {
+        every { pipelines.findVersionDetail(any(), pipelineId, 9) } returns null
+
+        mvcFor(controller)
+            .perform(get("/partials/pipelines/$pipelineId/nodes/trips_by_day/sql?version=9").header("HX-Request", "true"))
+            .andExpect(status().isNotFound)
+    }
+
+    @Test
+    fun `a malformed version parameter is the house 400`() {
+        mvcFor(controller)
+            .perform(get("/partials/pipelines/$pipelineId/nodes/trips_by_day/sql?version=abc").header("HX-Request", "true"))
+            .andExpect(status().isBadRequest)
     }
 
     /** The HTTP-level harness, [PipelineChecksPartialsControllerTest]'s shape: the advice is the mapping under test. */

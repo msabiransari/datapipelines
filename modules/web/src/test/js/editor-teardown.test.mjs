@@ -117,13 +117,16 @@ test("a BOOSTED beforeSwap tears the live component down and clears the handles"
   const { spies, docListeners } = loadEditor();
   const component = globalThis.window.pipelineEditor();
   component.init();
-  globalThis.window.PEDraft = { version: 4, bodyHash: "h" };
+  globalThis.window.PEWorkspace = { pipelineId: "p1", viewedVersion: 4, hasBody: true, canExecute: true };
 
   fire(docListeners, "htmx:beforeSwap", { detail: { boosted: true } });
 
   assert.equal(spies.abort + spies.destroy, 2, "teardown ran");
   assert.equal(globalThis.window.__peInstance, null);
-  assert.equal(globalThis.window.PEDraft, null);
+  // #348: the workspace version state dies with the page — the restored root re-reads
+  // the new document's own block (workspace.js runs per load).
+  assert.equal(globalThis.window.PEWorkspace, null);
+  assert.equal(globalThis.window.PEWorkspaceInvalid, false);
 });
 
 test("a PARTIAL swap inside the editor never tears the component down", () => {

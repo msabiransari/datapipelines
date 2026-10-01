@@ -442,11 +442,21 @@ class TemplateTreeRenderTest {
         setVariable("pipelineName", "p1")
         setVariable("datasources", emptyList<Any>())
         setVariable("scopes", setOf("ADMIN"))
-        // PipelineEditorController always stamps the lifecycle triple + the body JSON; the
+        // PipelineWorkspaceController always stamps the version state + the body JSON; the
         // Details pane's checks line reads them (140).
+        setVariable("hasSelectedBody", true)
+        setVariable("viewedVersion", 1)
+        setVariable("viewedLabel", "v1 · released · current")
+        setVariable("viewedIsDraft", false)
+        setVariable("viewedIsCurrent", true)
+        setVariable("viewedStatusLabel", "released")
+        setVariable("currentVersion", 1)
         setVariable("hasDraft", false)
         setVariable("draftVersion", null)
-        setVariable("releasedVersion", 1)
+        setVariable("versions", emptyList<Any>())
+        setVariable("activeTab", "flow")
+        setVariable("canReadExecutions", true)
+        setVariable("workspaceJson", """{"viewedVersion":1,"hasBody":true}""")
         setVariable("pipelineJson", """{"id":"p1","name":"p1","display_name":"P1","version":1,"parameters":{},"nodes":[]}""")
     }
 

@@ -88,16 +88,25 @@ class EditorLayoutRenderTest {
         afterStack shouldBeGreaterThan legend
     }
 
-    /** The editor controller's model, plus the layout chrome the shell needs. */
+    /** The workspace controller's model, plus the layout chrome the shell needs. */
     private fun WebContext.fillEditor() {
         fillLayoutChrome()
         setVariable("pipelineJson", "{\"id\":\"p1\",\"name\":\"demo\",\"nodes\":[]}")
-        setVariable("lifecycleJson", "{\"hasDraft\":false}")
+        setVariable("workspaceJson", "{\"viewedVersion\":1}")
         setVariable("pipelineId", "11111111-1111-1111-1111-111111111111")
+        setVariable("pipelineName", "demo")
+        setVariable("hasSelectedBody", true)
+        setVariable("viewedVersion", 1)
+        setVariable("viewedLabel", "v1 · released · current")
+        setVariable("viewedIsDraft", false)
+        setVariable("viewedIsCurrent", true)
+        setVariable("viewedStatusLabel", "released")
+        setVariable("currentVersion", 1)
         setVariable("hasDraft", false)
         setVariable("draftVersion", null)
-        setVariable("draftHash", null)
-        setVariable("releasedVersion", 1)
+        setVariable("versions", emptyList<Any>())
+        setVariable("activeTab", "flow")
+        setVariable("canReadExecutions", true)
     }
 
     /** PipelineUiController's model. */
