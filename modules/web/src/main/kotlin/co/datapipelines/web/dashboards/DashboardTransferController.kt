@@ -10,10 +10,12 @@ import co.datapipelines.visualization.DashboardImport
 import co.datapipelines.visualization.DashboardService
 import co.datapipelines.web.api.ApiResponse
 import co.datapipelines.web.api.currentPrincipal
+import co.datapipelines.web.dashboards.runtime.DashboardAuditEvents
 import co.datapipelines.web.pipelines.LifecycleVerbs
 import co.datapipelines.web.visualizations.ArtifactFamily
 import co.datapipelines.web.visualizations.ArtifactHttp
 import co.datapipelines.web.visualizations.ArtifactResponses
+import co.datapipelines.web.visualizations.VisualizationAuditEvents
 import co.datapipelines.web.visualizations.VisualizationTransferController
 import com.fasterxml.jackson.databind.JsonNode
 import org.springframework.web.bind.annotation.GetMapping
@@ -54,7 +56,7 @@ class DashboardTransferController(
         val envelope = transfer.exportDashboard(workspaceId, id)
         LifecycleVerbs.audit(
             audit,
-            AUDIT_EXPORTED,
+            DashboardAuditEvents.EXPORTED,
             principal,
             workspaceId,
             mapOf(
@@ -78,7 +80,7 @@ class DashboardTransferController(
         val dashboardDetail = imported.dashboard.detail
         LifecycleVerbs.audit(
             audit,
-            AUDIT_IMPORTED,
+            DashboardAuditEvents.IMPORTED,
             principal,
             workspaceId,
             mapOf(
@@ -96,7 +98,7 @@ class DashboardTransferController(
         imported.visualizations.forEachIndexed { index, visualization ->
             LifecycleVerbs.audit(
                 audit,
-                VisualizationTransferController.AUDIT_IMPORTED,
+                VisualizationAuditEvents.IMPORTED,
                 principal,
                 workspaceId,
                 mapOf(
@@ -120,7 +122,7 @@ class DashboardTransferController(
         workspaceId: UUID,
         id: UUID,
     ) {
-        // ONE view per request (the derivation reads every released dashboard's body, #330); the working read
+        // ONE view per request (the lens reads the pins-and-sources projection once, #330); the working read
         // names the record, a hidden or draft-only dashboard is the family's 404.
         val view = lens.viewFor(principal).dashboards
         val loaded =
@@ -131,10 +133,6 @@ class DashboardTransferController(
 
     companion object {
         private val FAMILY = ArtifactFamily.DASHBOARD
-
-        /** enums.md §15 — the transfer's audit events (the pipelines' lifecycle shape). */
-        const val AUDIT_EXPORTED = "dashboard.exported"
-        const val AUDIT_IMPORTED = "dashboard.imported"
 
         private fun DashboardImport.asResponse(): Map<String, Any?> =
             mapOf(

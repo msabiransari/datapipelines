@@ -262,12 +262,14 @@ catalog |= {c for c in re.findall(CODE_RE, texts.get("docs/datasources.md", ""))
 # `visualization`/`dashboard` join at #10 L1c: the transfer's four audit events
 # (`visualization.exported` / `.imported` and the dashboard twins) live in §15's
 # lifecycle table the same way.
+# `parameter_set` joins at 332 (#332): the family's five human-verb events and its released twin
+# live in §15's version-lifecycle table the same way, the template twins' notation.
 enums_txt = texts.get("docs/enums.md", "")
 sec15 = re.search(r"^## 15\..*?(?=^## 16\.)", enums_txt, re.M | re.S)
 # `workspace` joined the audit namespaces in RBAC round 1 (member_added, member_removed,
 # member_flags_changed, deactivated, reactivated) — enums.md §15 remains the authority that
 # has to DEFINE one before any doc may cite it.
-events = set(re.findall(r"(?:auth|datasource|mcp|endpoint|pipeline|template|workspace|mail|schedule|visualization|dashboard)\.[a-z_]+(?:\.[a-z_]+)*",
+events = set(re.findall(r"(?:auth|datasource|mcp|endpoint|pipeline|template|workspace|mail|schedule|visualization|dashboard|parameter_set)\.[a-z_]+(?:\.[a-z_]+)*",
                         sec15.group(0) if sec15 else enums_txt))
 # auth.* events are also cited outside §15 (auth.md §10.1 etc.)
 events |= set(re.findall(r"auth\.[a-z_]+(?:\.[a-z_]+)*", enums_txt))

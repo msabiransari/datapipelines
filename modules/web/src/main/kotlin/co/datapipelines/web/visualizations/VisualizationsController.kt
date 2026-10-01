@@ -1,6 +1,8 @@
 package co.datapipelines.web.visualizations
 
 import co.datapipelines.application.lens.PromoterLens
+import co.datapipelines.auth.AuditEventSink
+import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.visualization.VisualizationReader
@@ -56,6 +58,8 @@ class VisualizationsController(
     private val reader: VisualizationReader,
     /** The promoter lens: every read below passes the caller's view, never `Everything`. */
     private val lens: PromoterLens,
+    /** #332 — every lifecycle verb and the release audit, the pipelines mould (enums.md §15). */
+    private val audit: AuditEventSink,
 ) {
     /** §22 — create; the server assigns the id (P24) and lands version 1 DRAFT (D55). */
     @PostMapping
@@ -146,14 +150,45 @@ class VisualizationsController(
         @RequestParam(value = "release_pinned_templates", required = false, defaultValue = "false") releasePinnedTemplates: Boolean = false,
     ): ApiResponse<JsonNode> {
         val principal = currentPrincipal()
+        val workspaceId = principal.requireWorkspace().id
         val released =
             visualizations.release(
-                principal.requireWorkspace().id,
+                workspaceId,
                 id,
                 IfMatchHeader.required(ifMatch),
                 principal.userId,
                 releasePinnedTemplates = releasePinnedTemplates,
             )
+        // #332 — the release audit, the auditRelease twin: each cascaded template's event first, then
+        // the visualization's own naming them — after the one transaction committed, never on a refusal.
+        val cascade = LifecycleVerbs.FamilyCascade("visualization_id", id, released.version.detail.version)
+        released.templatesReleased.forEach { template ->
+            LifecycleVerbs.audit(
+                audit,
+                LifecycleVerbs.TEMPLATE_AUDIT_VERSION_RELEASED,
+                principal,
+                workspaceId,
+                LifecycleVerbs.cascadedReleaseDetails(principal, "template_id", template.id, template.version, cascade),
+            )
+        }
+        LifecycleVerbs.audit(
+            audit,
+            LifecycleVerbs.VISUALIZATION_EVENTS.versionReleased,
+            principal,
+            workspaceId,
+            LifecycleVerbs.familyReleaseDetails(
+                principal,
+                LifecycleVerbs.FamilyIdentity(
+                    "visualization_id",
+                    "visualization_name",
+                    id,
+                    released.version.record.name,
+                    released.version.detail.version,
+                ),
+                "templates_released",
+                released.templatesReleased.map { mapOf("template_id" to it.id, "version" to it.version) },
+            ),
+        )
         val data = ArtifactResponses.full(released.version) as com.fasterxml.jackson.databind.node.ObjectNode
         data.putArray("templates_released").also { array ->
             released.templatesReleased.forEach { array.addObject().put("template_id", it.id).put("version", it.version) }
@@ -169,8 +204,19 @@ class VisualizationsController(
         @PathVariable id: UUID,
         @RequestHeader(value = IfMatchHeader.NAME, required = false) ifMatch: String?,
     ) {
-        LifecycleVerbs.requireSession()
-        visualizations.purgeDraft(currentPrincipal().requireWorkspace().id, id, IfMatchHeader.required(ifMatch))
+        val principal = LifecycleVerbs.requireSession()
+        val workspaceId = principal.requireWorkspace().id
+        // The name and version for the audit row, read through the caller's lens BEFORE the purge —
+        // a sole-draft purge takes the visualization, so afterwards there is nothing to read (#332).
+        val audited = workingForAudit(principal, workspaceId, id)
+        visualizations.purgeDraft(workspaceId, id, IfMatchHeader.required(ifMatch))
+        LifecycleVerbs.audit(
+            audit,
+            LifecycleVerbs.VISUALIZATION_EVENTS.versionPurged,
+            principal,
+            workspaceId,
+            auditedDetails(id, audited),
+        )
     }
 
     /** §22 — discard RELEASED version v (reversible via restore); never a version a live dashboard pins. Session-only. */
@@ -181,7 +227,16 @@ class VisualizationsController(
         @PathVariable version: Int,
     ): ApiResponse<Map<String, Any?>> {
         val principal = LifecycleVerbs.requireSession()
-        val detail = visualizations.discardVersion(principal.requireWorkspace().id, id, version, principal.userId)
+        val workspaceId = principal.requireWorkspace().id
+        val audited = versionForAudit(principal, workspaceId, id, version)
+        val detail = visualizations.discardVersion(workspaceId, id, version, principal.userId)
+        LifecycleVerbs.audit(
+            audit,
+            LifecycleVerbs.VISUALIZATION_EVENTS.versionDiscarded,
+            principal,
+            workspaceId,
+            auditedDetails(id, audited, version),
+        )
         return ApiResponse.of(ArtifactResponses.lifecycleSummary(detail))
     }
 
@@ -193,7 +248,16 @@ class VisualizationsController(
         @PathVariable version: Int,
     ): ApiResponse<Map<String, Any?>> {
         val principal = LifecycleVerbs.requireSession()
-        val detail = visualizations.restoreVersion(principal.requireWorkspace().id, id, version)
+        val workspaceId = principal.requireWorkspace().id
+        val audited = versionForAudit(principal, workspaceId, id, version)
+        val detail = visualizations.restoreVersion(workspaceId, id, version)
+        LifecycleVerbs.audit(
+            audit,
+            LifecycleVerbs.VISUALIZATION_EVENTS.versionRestored,
+            principal,
+            workspaceId,
+            auditedDetails(id, audited, version),
+        )
         return ApiResponse.of(ArtifactResponses.lifecycleSummary(detail))
     }
 
@@ -205,8 +269,17 @@ class VisualizationsController(
         @PathVariable id: UUID,
         @PathVariable version: Int,
     ) {
-        LifecycleVerbs.requireSession()
-        visualizations.purgeVersion(currentPrincipal().requireWorkspace().id, id, version)
+        val principal = LifecycleVerbs.requireSession()
+        val workspaceId = principal.requireWorkspace().id
+        val audited = versionForAudit(principal, workspaceId, id, version)
+        visualizations.purgeVersion(workspaceId, id, version)
+        LifecycleVerbs.audit(
+            audit,
+            LifecycleVerbs.VISUALIZATION_EVENTS.versionPurged,
+            principal,
+            workspaceId,
+            auditedDetails(id, audited, version),
+        )
     }
 
     /** §22 — the manual switch (D60, the receiver's lever); the body's shape is judged before the lookup. Session-only. */
@@ -217,8 +290,24 @@ class VisualizationsController(
         @RequestBody body: String,
     ): ApiResponse<Map<String, Any?>> {
         val principal = LifecycleVerbs.requireSession()
+        val workspaceId = principal.requireWorkspace().id
         val target = ArtifactHttp.switchTarget(FAMILY, body)
-        val current = visualizations.switchCurrent(principal.requireWorkspace().id, id, target)
+        val current = visualizations.switchCurrent(workspaceId, id, target)
+        LifecycleVerbs.audit(
+            audit,
+            LifecycleVerbs.VISUALIZATION_EVENTS.currentSwitched,
+            principal,
+            workspaceId,
+            mapOf(
+                "visualization_id" to id.toString(),
+                "visualization_name" to
+                    visualizations
+                        .findVersion(workspaceId, lens.viewFor(principal).visualizations, id, current)
+                        ?.record
+                        ?.name,
+                "to" to current,
+            ),
+        )
         return ApiResponse.of(mapOf("id" to id.toString(), "current_version" to current))
     }
 
@@ -229,8 +318,17 @@ class VisualizationsController(
     fun delete(
         @PathVariable id: UUID,
     ) {
-        LifecycleVerbs.requireSession()
-        visualizations.purgeEntity(currentPrincipal().requireWorkspace().id, id)
+        val principal = LifecycleVerbs.requireSession()
+        val workspaceId = principal.requireWorkspace().id
+        val audited = workingForAudit(principal, workspaceId, id)
+        visualizations.purgeEntity(workspaceId, id)
+        LifecycleVerbs.audit(
+            audit,
+            LifecycleVerbs.VISUALIZATION_EVENTS.entityPurged,
+            principal,
+            workspaceId,
+            auditedDetails(id, audited),
+        )
     }
 
     /** §22 — ONE level of the tree, the `?prefix=` browse (a multi-segment name never travels in a path — P24). */
@@ -277,6 +375,39 @@ class VisualizationsController(
         val total = visualizations.countAll(workspaceId, view)
         return ApiResponse.of(PagedData(items, Pagination.of(page, size, total.toLong(), items.size)))
     }
+
+    // ---- the audit rows' pre-reads (#332) ----------------------------------------------------------
+
+    /** The working version's (name, number) for an audit row — read through the caller's lens, before the verb. */
+    private fun workingForAudit(
+        principal: AuthenticatedPrincipal,
+        workspaceId: UUID,
+        id: UUID,
+    ): Pair<String, Int>? =
+        visualizations.findWorking(workspaceId, lens.viewFor(principal).visualizations, id)?.let { it.record.name to it.detail.version }
+
+    /** A named version's (name, number) — the same lens rule. */
+    private fun versionForAudit(
+        principal: AuthenticatedPrincipal,
+        workspaceId: UUID,
+        id: UUID,
+        version: Int,
+    ): Pair<String, Int>? =
+        visualizations
+            .findVersion(workspaceId, lens.viewFor(principal).visualizations, id, version)
+            ?.let { it.record.name to it.detail.version }
+
+    /** The purge row's details: the id, plus the pre-read name and version when the artifact still existed. */
+    private fun auditedDetails(
+        id: UUID,
+        audited: Pair<String, Int>?,
+        version: Int? = null,
+    ): Map<String, Any?> =
+        buildMap {
+            put("visualization_id", id.toString())
+            put("visualization_name", audited?.first)
+            put("version", version ?: audited?.second)
+        }
 
     private companion object {
         val FAMILY = ArtifactFamily.VISUALIZATION

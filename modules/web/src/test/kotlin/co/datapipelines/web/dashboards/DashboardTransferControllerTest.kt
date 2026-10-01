@@ -19,6 +19,8 @@ import co.datapipelines.visualization.DashboardService
 import co.datapipelines.web.api.ApiErrorCatalog
 import co.datapipelines.web.api.ApiErrors
 import co.datapipelines.web.api.ApiException
+import co.datapipelines.web.dashboards.runtime.DashboardAuditEvents
+import co.datapipelines.web.visualizations.VisualizationAuditEvents
 import co.datapipelines.web.visualizations.VisualizationTransferController
 import com.fasterxml.jackson.databind.JsonNode
 import io.kotest.assertions.throwables.shouldThrow
@@ -178,7 +180,7 @@ class DashboardTransferControllerTest {
                 // `visualization.imported` row per bundled visualization, each carrying its id, its
                 // version and ITS OWN envelope manifest's evidence flag (verbatim, false until L4).
                 recorder.events.map { it.first } shouldBe
-                    listOf(AUDIT_IMPORTED, VisualizationTransferController.AUDIT_IMPORTED, VisualizationTransferController.AUDIT_IMPORTED)
+                    listOf(AUDIT_IMPORTED, VisualizationAuditEvents.IMPORTED, VisualizationAuditEvents.IMPORTED)
                 recorder.events[0].second.let {
                     it["dashboard_id"] shouldBe id.toString()
                     it["version"] shouldBe 1
@@ -254,8 +256,8 @@ class DashboardTransferControllerTest {
         val VIEW = co.datapipelines.pipeline.ReadLens.Everything
         const val NAME = "finance/dashboards/revenue_overview"
         val CREATED: Instant = Instant.parse("2026-09-29T00:00:00Z")
-        val AUDIT_EXPORTED = DashboardTransferController.AUDIT_EXPORTED
-        val AUDIT_IMPORTED = DashboardTransferController.AUDIT_IMPORTED
+        val AUDIT_EXPORTED = DashboardAuditEvents.EXPORTED
+        val AUDIT_IMPORTED = DashboardAuditEvents.IMPORTED
 
         /** The implementation spec's §3.2 worked dashboard — the name added, the pin left as the fixture holds it. */
         val DASHBOARD_DOCUMENT =

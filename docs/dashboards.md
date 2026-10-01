@@ -1,6 +1,6 @@
 # Dashboards
 
-**Status:** v0.14 — the two documents and their lifecycle (#10, lane L1a); the REST routes, the MCP tools and the
+**Status:** v0.15 — the two documents and their lifecycle (#10, lane L1a); the REST routes, the MCP tools and the
 permissions (§4, lane L1b); the transfer routes and their limits' honest contract (§3.3, lanes L1c/L1c-b/L1c-c: the
 import's atomicity, the RELEASE rules on a landing, the aggregate count ceiling, the wire's per-family arms); the server
 runtime (§5, lane L2; #343's released pins and stream authority); the client runtime (§6, lanes L3a/L3a-b/L3a-c); the
@@ -186,7 +186,10 @@ version 1 as a DRAFT with no current version; the first change after a release o
 and moves the pointer; a RELEASED version is discarded, never purged, and can be restored; the pointer can be
 switched to any live version this deployment's posture admits. The hash is computed by the database over the
 stored JSON, so key order and whitespace never change it. A promotion receiver refuses every authoring write
-(`*.authoring.disabled`) and still imports and switches.
+(`*.authoring.disabled`) and still imports and switches. **The lifecycle verbs audit** (#332): the five human
+verbs and the release each write their `dashboard.*` (and cascaded `visualization.*`) event — enums.md §15's
+rows — beside the transfer pair's, the pipelines mould's audit with nothing riding the row but ids, names,
+versions and counts.
 
 ### 3.1 Releasing a visualization
 
@@ -701,6 +704,7 @@ full navigation).
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-01 | v0.15 | 332 (#332, #330, #331) the lifecycle audit + the pins projection | **§3:** the five human verbs and the release audit (the `dashboard.*` events, the cascaded visualization releases named with `cascade_from_dashboard_id`) — the pipelines mould, ids/names/versions/counts only. |
 | 2026-10-01 | v0.14 | #356 the abort before the row — renumbered at merge after L3b's v0.13 | **§5.6:** an abort arriving before `insertRunning` writes its row is honoured — the start registers a transient, per-principal-bounded marker, a matching caller is answered the same 202 and the refresh ends `ABORTED` before any source runs; the four no-cases (unknown, another person's, another instance's, finished) answer the identical `dashboard.refresh.not_found`. **§6.6:** the abort chip renders `abort.requested` until the server answers; a 202 sets `abortAcked`, a 404 re-renders `abort not confirmed` and the terminal frame decides — a delivered `ok` restores its state, and the stream stays open through the abort. Merge follow-up: the marker is written once (SET NX, before the bound set) — a replayed start of an id already in flight is the reused-id 400 and cannot delete the first start's marker or slot. |
 | 2026-10-01 | v0.13 | L3b (#10) the first-party pages — renumbered at merge after #343's v0.12 | **New §7 The first-party pages** — the tree page and the sidebar's Dashboards branch (D58; the landing item renamed Home, the route unchanged), the board page (the server-declared ONE bundle, the glue as a file, the refusal state for a board that cannot run, never a blank pane) and the events pane (the caller's refreshes, execution links by the reader's visibility, a bounded poll chosen over the runtime's notification hooks, with the why stated). The one-bundle rule's navigation half is stated as the brief's rule it is: every link to a board carries `hx-boost="false"`, which is also the §10.5 disposal answer — full navigation, no htmx history, no second instance. Permissions: the pages on `dashboard.read`, the pane fragment on `dashboard.execute` beside the refreshes route it mirrors (auth §7.6's Surfaces cells). `dashboards.css` and `plotly.css` load from the layout head (ui-screens §3.0 is normative). |
 | 2026-09-30 | v0.12 | #343 stream workspace authority | Recheck the opening workspace by immutable id for every event and heartbeat; a different membership cannot keep the stream alive, while the refresh continues. |

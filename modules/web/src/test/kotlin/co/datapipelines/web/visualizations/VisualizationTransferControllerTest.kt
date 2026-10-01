@@ -245,8 +245,8 @@ class VisualizationTransferControllerTest {
     private companion object {
         const val NAME = "finance/visualizations/monthly_revenue"
         val CREATED: Instant = Instant.parse("2026-09-29T00:00:00Z")
-        val AUDIT_EXPORTED = VisualizationTransferController.AUDIT_EXPORTED
-        val AUDIT_IMPORTED = VisualizationTransferController.AUDIT_IMPORTED
+        val AUDIT_EXPORTED = VisualizationAuditEvents.EXPORTED
+        val AUDIT_IMPORTED = VisualizationAuditEvents.IMPORTED
 
         /** The §3.1 worked document — the same fixture the lifecycle controller test binds. */
         val DOCUMENT =
