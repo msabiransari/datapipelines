@@ -338,7 +338,7 @@ class PipelineCompositionE2eTest {
     /**
      * The fixture family for the mapping legs: a child whose DQL node filters a SECOND H2
      * datasource by `:run_fiscal_quarter` — a value its own CALCULATOR node computes from
-     * `$current_date` with a `01-01` fiscal start, unless a caller (here: the parent's mapping)
+     * a fixed September date with a `01-01` fiscal start, unless a caller (here: the parent's mapping)
      * supplies the key.
      */
     private fun seedQuarterFamily(): String {
@@ -375,10 +375,10 @@ class PipelineCompositionE2eTest {
     ): Map<String, Any?> =
         mapOf(
             "id" to id,
-            "description" to "Fiscal quarter of the run date, $fiscalStart start",
+            "description" to "Fiscal quarter of the fixture date, $fiscalStart start",
             "type" to "CALCULATOR",
             "kind" to "fiscal_quarter",
-            "inputs" to mapOf("date" to "\$current_date", "fiscal_start" to fiscalStart),
+            "inputs" to mapOf("date" to QUARTER_AS_OF, "fiscal_start" to fiscalStart),
             "context_key" to contextKey,
             "depends_on" to emptyList<String>(),
         )
@@ -972,6 +972,9 @@ class PipelineCompositionE2eTest {
     companion object {
         private const val SECRET_BYTES = 32
         private const val SSE_BUDGET_MINUTES = 2L
+
+        /** Composition mapping is independent of the wall clock: January/July starts yield Q3/Q1. */
+        private const val QUARTER_AS_OF = "2026-09-15"
 
         /**
          * 086 A3's budget. Below the context's 15-second execution deadline, so a run that reaches
