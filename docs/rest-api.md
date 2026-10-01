@@ -2568,7 +2568,8 @@ order they can occur: `refresh_started` `{refresh_id, targets, sources: [{name, 
 `{refresh_id, name, type, state, stage?, reason?}` (`state`: `in-progress`, `error`, `abort`, `no-data`; `stage`: `source`,
 `transform`, `budget`, `timeout`, `abort`) and `visualization_data` `{refresh_id, name, type, bindings: {path: [values]}, rows, bytes}`;
 and `refresh_completed` `{refresh_id, status, targets: {name: {outcome, stage?, reason?}}}` — always last (`status`: `COMPLETED`,
-`PARTIAL`, `FAILED`, `ABORTED`, `TIMED_OUT`). A `source_failed` names a code and never a driver or datasource message. A
+`PARTIAL`, `FAILED`, `ABORTED`, `TIMED_OUT`; `outcome`: `ok` — the data frame delivered — `no-data`, `error` (with `stage`/`reason`),
+or `abort`). A `source_failed` names a code and never a driver or datasource message. A
 dashboard execution has no stored result: `GET /api/v1/executions/{id}/result` on it is `404 execution.not_found`, and
 `DELETE /api/v1/executions/{id}` on it is `404` for everyone — it is cancelled only through its refresh's abort.
 

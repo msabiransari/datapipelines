@@ -511,12 +511,12 @@ test("freshness: an old refresh finishing after a newer one owns only the target
       fetchImpl.frame("refresh_completed", {
         refresh_id: r1,
         status: "COMPLETED",
-        targets: { chart: { outcome: "rendered" }, cells: { outcome: "rendered" } },
+        targets: { chart: { outcome: "ok" }, cells: { outcome: "ok" } },
       }),
   );
   await new Promise((resolve) => setTimeout(resolve, 40));
   holders[1][0](
-    fetchImpl.frame("refresh_completed", { refresh_id: r2, status: "COMPLETED", targets: { cells: { outcome: "rendered" } } }),
+    fetchImpl.frame("refresh_completed", { refresh_id: r2, status: "COMPLETED", targets: { cells: { outcome: "ok" } } }),
   );
   await new Promise((resolve) => setTimeout(resolve, 40));
 
@@ -524,6 +524,36 @@ test("freshness: an old refresh finishing after a newer one owns only the target
   assert.deepEqual(renders, ["renderData:chart"], "R1's data for cells (owned by R2) must not render: " + adapter.log.join("|"));
   assert.ok(adapter.log.includes("status:chart:success"), adapter.log.join("|"));
   assert.ok(!adapter.log.includes("status:cells:success"), "R1's completion must not publish cells: " + adapter.log.join("|"));
+});
+
+test("a completed target's REAL wire outcome 'ok' never errors a rendered target; outcome 'error' still does", async () => {
+  const fetchImpl = fakeFetch();
+  let nextOutcome = { outcome: "ok", rows: 1, bytes: 4 };
+  let withData = true;
+  fetchImpl.on("/runtime/visualizations", (url, init) => {
+    const refreshId = JSON.parse(init.body).refresh_id;
+    const frames = withData
+      ? [
+          fetchImpl.frame("visualization_data", { refresh_id: refreshId, name: "chart", type: "visualization", bindings: { x: [1] }, rows: 1, bytes: 4 }),
+          fetchImpl.frame("refresh_completed", { refresh_id: refreshId, status: "COMPLETED", targets: { chart: nextOutcome } }),
+        ]
+      : [fetchImpl.frame("refresh_completed", { refresh_id: refreshId, status: "PARTIAL", targets: { chart: nextOutcome } })];
+    return fetchImpl.stream(frames);
+  });
+  const { instance, adapter } = await boot({ fetch: fetchImpl });
+  // The data frame rendered; completion's "ok" — the REAL wire's delivered-data outcome
+  // (RefreshJob's TargetOutcome) — must leave the success standing, never error the target.
+  await instance.refresh({ scope: "targets", targets: ["chart"] });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.ok(adapter.log.includes("status:chart:success"), adapter.log.join("|"));
+  assert.ok(!adapter.log.includes("status:chart:error"), "outcome 'ok' must not error the target: " + adapter.log.join("|"));
+  // The negative control: an outcome 'error' completion DOES set the error state (the reason code's
+  // ride-along is pinned by the hung-render test's own renderStatus override).
+  withData = false;
+  nextOutcome = { outcome: "error", stage: "transform", reason: { code: "transform.failed" } };
+  await instance.refresh({ scope: "targets", targets: ["chart"] });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.ok(adapter.log.includes("status:chart:error"), adapter.log.join("|"));
 });
 
 test("a no-data status frame sets no-data and sends no renderData", async () => {

@@ -1021,7 +1021,11 @@
       var name = refresh.targets[i];
       if (!this._owns(name, refresh.id)) continue; // a newer run owns it — completion cannot clear it
       var outcome = targets[name] || {};
-      if (outcome.outcome === "rendered") continue; // the data frame already set the state
+      // The REAL wire's target outcomes (RefreshJob's TargetOutcome): "ok" | "no-data" | "error" |
+      // "abort". "ok" — the server delivered the data — behaves like a data frame already applied:
+      // completion must not clobber the state the data frame set (or is about to set, the render
+      // being asynchronous). A delivered "rendered" is tolerated for older fixtures, never sent.
+      if (outcome.outcome === "ok" || outcome.outcome === "rendered") continue;
       if (outcome.outcome === "no-data") {
         this._renderOccurrenceStatus(name, { state: "no-data", stale: false, reason: null, refreshId: refresh.id });
       } else if (outcome.outcome === "abort") {
