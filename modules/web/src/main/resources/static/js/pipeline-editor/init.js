@@ -303,8 +303,11 @@
           // dies with the document) and clears at the run's terminal event, so a
           // fresh full load (a new window) never re-attaches and a finished run
           // never re-announces.
+          // Keyed by PIPELINE as well as execution: a boosted entry into another pipeline's
+          // workspace (the explorer's Open links are boosted) must not adopt this run.
           var live = window.__peLiveExecution;
-          if (live && live.executionId && !self.executionId && self.sseHandler && self.sseHandler.reattach) {
+          var ownRun = !!(live && live.executionId && live.pipelineId && self.pipeline && live.pipelineId === self.pipeline.id);
+          if (ownRun && !self.executionId && self.sseHandler && self.sseHandler.reattach) {
             self.sseHandler.reattach(live.executionId);
           }
         } catch (e) {

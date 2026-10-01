@@ -30,7 +30,7 @@ function loadEditor() {
   const docListeners = {};
   const bodyListeners = {};
   const removed = [];
-  const spies = { abort: 0, destroy: 0, initTree: [] };
+  const spies = { abort: 0, destroy: 0, initTree: [], reattached: [] };
 
   const main = {
     id: "app-main",
@@ -70,6 +70,10 @@ function loadEditor() {
   globalThis.SseHandler = class {
     constructor() {
       this.abortController = { abort: () => spies.abort++ };
+    }
+
+    reattach(executionId) {
+      spies.reattached.push(executionId);
     }
   };
   globalThis.PipelineGraph = class {
@@ -159,6 +163,25 @@ test("a swap whose target IS #app-main (history restore) tears down too", () => 
 
   assert.equal(spies.destroy, 1);
   assert.equal(globalThis.window.__peInstance, null);
+});
+
+test("#358 — a bound component re-attaches ONLY to its own pipeline's live run", () => {
+  // The record is window-level and the explorer's Open links are boosted: pipeline A's run must
+  // not follow the viewer into pipeline B's workspace. Red with the pipeline comparison removed.
+  const foreign = loadEditor();
+  globalThis.window.__peLiveExecution = { executionId: "e-other", pipelineId: "p-other" };
+  globalThis.window.pipelineEditor().init();
+  assert.deepEqual(foreign.spies.reattached, [], "another pipeline's run is not adopted");
+
+  const own = loadEditor();
+  globalThis.window.__peLiveExecution = { executionId: "e-mine", pipelineId: "p1" };
+  globalThis.window.pipelineEditor().init();
+  assert.deepEqual(own.spies.reattached, ["e-mine"], "this pipeline's run is followed");
+
+  const unkeyed = loadEditor();
+  globalThis.window.__peLiveExecution = { executionId: "e-unkeyed" };
+  globalThis.window.pipelineEditor().init();
+  assert.deepEqual(unkeyed.spies.reattached, [], "a record without a pipeline is not trusted");
 });
 
 test("#358 — init.js wires NO afterSettle initializer: the runtime owns restore activation", () => {

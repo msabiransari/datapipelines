@@ -302,7 +302,10 @@
     if (typeof window !== "undefined") {
       if (eventType === "execution_started") {
         var runId = (payload && payload.execution_id) || self.executionId;
-        if (runId) window.__peLiveExecution = { executionId: runId };
+        // The record names its PIPELINE too: a boosted entry into ANOTHER pipeline's workspace
+        // (the explorer's Open links are boosted) must not adopt this run (merge follow-up).
+        var runPipeline = (self.editor.pipeline && self.editor.pipeline.id) || null;
+        if (runId) window.__peLiveExecution = { executionId: runId, pipelineId: runPipeline };
       } else if (
         eventType === "pipeline_completed" ||
         eventType === "pipeline_failed" ||

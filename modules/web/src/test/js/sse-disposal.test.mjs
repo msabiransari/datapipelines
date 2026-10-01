@@ -142,6 +142,17 @@ test("a live recovery still reports its terminal outcome (positive control)", as
   assert.equal(f.writes.filter((w) => w[0] === "settled").length, 1, "the live path settles");
 });
 
+test("the live-run record names the pipeline the run belongs to", async () => {
+  const f = fixture();
+  f.editor.pipeline = { id: "p-live" };
+  f.handler.executionId = "e9";
+  f.handler.dispatch("execution_started", JSON.stringify({ execution_id: "e9", parameters: {} }));
+  // Field assertions: the record is built inside the vm context, so deepEqual's prototype check
+  // would compare two Object realms, not the fields.
+  assert.equal(f.win.__peLiveExecution.executionId, "e9");
+  assert.equal(f.win.__peLiveExecution.pipelineId, "p-live");
+});
+
 test("a recovery poll that finds the run FINISHED clears the live-run record — no re-attach, no second toast later", async () => {
   // The streamed terminal clears window.__peLiveExecution (dispatch); the polled terminal
   // must too, or a boosted leave + restore re-attaches to a finished run and replays its
