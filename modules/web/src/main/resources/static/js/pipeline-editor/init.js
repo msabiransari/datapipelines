@@ -1396,8 +1396,10 @@
    * replays on a cached restore except the guarded runtime, whose `x-ignore`
    * discipline makes its activation the ONLY initializer a restored root can
    * get. This listener therefore owns TEARDOWN only; there is no rescue here to
-   * compete with. (editor-restore-ownership.test.mjs plants the old rescue back
-   * and demands the stacked-stack red — the ownership guard.)
+   * compete with. (editor-teardown.test.mjs asserts that this file wires NO
+   * afterSettle initializer — the ownership guard that goes red the moment a
+   * rescue is re-added; a rescue planted into the served file could no longer
+   * stack the restored root, the runtime's destroy-before-bind absorbs it.)
    */
   function wireBoostLifecycle() {
     if (window.__peBoostWired) return;

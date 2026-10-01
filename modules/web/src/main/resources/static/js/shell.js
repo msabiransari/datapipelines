@@ -390,7 +390,9 @@
         busyEls[k].removeAttribute("aria-busy");
       }
       return removed;
-    }    return {
+    }
+
+    return {
       begin: begin,
       end: end,
       snapshotClean: snapshotClean,
