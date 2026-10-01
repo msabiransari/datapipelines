@@ -47,8 +47,10 @@ import java.util.UUID
  * walks a member; the platform's 2 MiB request cap stands ahead of both.
  *
  * ## Not here
- * Export/import (L1c), the test sessions and runs (L4). A release is refused `release.tests_missing` until L4
- * installs the evidence gate — by design.
+ * Export/import (L1c), the test sessions and runs (L4: `VisualizationTestsController`, 352/353). A release is
+ * judged by the installed evidence gate (`VisualizationReleaseEvidence`, the spec's §11.4): no run for the
+ * candidate → `release.tests_missing`, a stale or moved-on run → `tests_stale`, a RED or INCOMPLETE run →
+ * `tests_red`, a mechanical check that stopped passing → `mechanical_failed` — by design.
  */
 @RestController
 @RequestMapping("/api/v1/visualizations")
@@ -139,8 +141,9 @@ class VisualizationsController(
 
     /**
      * §22 — release the draft at `If-Match` (D56, D61): a test case, the pin as it is NOW, the transform pin RELEASED
-     * or — with `release_pinned_templates=true` — released WITH it, then the evidence gate (refusing
-     * `visualization.release.tests_missing` until L4), all in one transaction.
+     * or — with `release_pinned_templates=true` — released WITH it, then the evidence gate (the spec's §11.4 —
+     * `VisualizationReleaseEvidence` judges the latest run for THIS draft: `tests_missing`, `tests_stale`,
+     * `tests_red` or `mechanical_failed`, else PASS), all in one transaction.
      */
     @PostMapping("/{id}/release")
     @RequiredScope(Permission.VISUALIZATION_RELEASE)

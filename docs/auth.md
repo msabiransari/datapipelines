@@ -1209,7 +1209,7 @@ Two things are deliberately **not** rows in this table:
 | `/favicon.ico` | The site icon, requested by the browser on the login page before any credential exists. | P3d |
 | `/error` | Boot's default error page with no stack trace or message; an anonymous error must not loop through login. | P8 |
 | `/visualizations/*/preview` | The visualization test preview: its ONLY credential is the ?session= preview token, checked by VisualizationTestCapabilities.preview; no session cookie, no other route. | 353 |
-| `/api/v1/visualizations/*/tests/sessions/*/screenshot` | The test screenshot upload: its ONLY credential is the single-use DP-Upload-Token, checked by VisualizationTestCapabilities.storeScreenshot; no cookie is read. | 353 |
+| `/api/v1/visualizations/*/tests/sessions/*/screenshot` | The test screenshot upload: its ONLY credential is the single-use DP-Upload-Token, checked by VisualizationTestCapabilities.authorizeUpload; no cookie is read. | 353 |
 
 
 ### 8.4 API endpoints (auth via API key OR JWT)
@@ -1354,7 +1354,7 @@ Handler methods are not listed here: §7.6 is their reviewed table (B3 — one t
 | `/favicon.ico` | The site icon, requested by the browser on the login page before any credential exists. | `resources` | `/favicon.ico` | 200 | no principal · no write · static asset | refused |
 | `/error` | Boot's default error page with no stack trace or message; an anonymous error must not loop through login. | `GET /error BasicErrorController#errorHtml` `GET /error BasicErrorController#error` | `/error` | 500 | no principal · no write · Boot's error page, no stack or message | same answer: 500 |
 | `/visualizations/*/preview` | The visualization test preview: its ONLY credential is the ?session= preview token, checked by VisualizationTestCapabilities.preview; no session cookie, no other route. | `GET /visualizations/{id}/preview VisualizationPreviewController#preview` | `/visualizations/00000000-0000-4000-8000-000000000000/preview` | 404 | no principal · no write · one run's saved fixtures, served only for its live preview capability — every refusal is the one 404 page | refused |
-| `/api/v1/visualizations/*/tests/sessions/*/screenshot` | The test screenshot upload: its ONLY credential is the single-use DP-Upload-Token, checked by VisualizationTestCapabilities.storeScreenshot; no cookie is read. | `POST /api/v1/visualizations/{id}/tests/sessions/{sessionId}/screenshot VisualizationTestsController#screenshot` | `/api/v1/visualizations/00000000-0000-4000-8000-000000000000/tests/sessions/00000000-0000-4000-8000-000000000000/screenshot` | 405 | POST: no principal · one screenshot row and the capability's consumption, in one transaction, for a valid capability only | own E2E: VisualizationTestSurfacesE2eTest |
+| `/api/v1/visualizations/*/tests/sessions/*/screenshot` | The test screenshot upload: its ONLY credential is the single-use DP-Upload-Token, checked by VisualizationTestCapabilities.authorizeUpload; no cookie is read. | `POST /api/v1/visualizations/{id}/tests/sessions/{sessionId}/screenshot VisualizationTestsController#screenshot` | `/api/v1/visualizations/00000000-0000-4000-8000-000000000000/tests/sessions/00000000-0000-4000-8000-000000000000/screenshot` | 405 | POST: no principal · one screenshot row and the capability's consumption, in one transaction, for a valid capability only | own E2E: VisualizationTestSurfacesE2eTest |
 
 ---
 

@@ -327,7 +327,7 @@ object PublicPaths {
             PublicPath(
                 "/api/v1/visualizations/*/tests/sessions/*/screenshot",
                 "The test screenshot upload: its ONLY credential is the single-use DP-Upload-Token, checked by " +
-                    "VisualizationTestCapabilities.storeScreenshot; no cookie is read.",
+                    "VisualizationTestCapabilities.authorizeUpload; no cookie is read.",
                 "353",
             ),
         )
