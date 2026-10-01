@@ -526,6 +526,15 @@ class ArtifactTransferConfigWiringTest {
             @Bean
             fun templateImportService(): co.datapipelines.web.templates.TemplateImportService = io.mockk.mockk(relaxed = true)
 
+            /**
+             * The release gate the visualization service factory consumes since #352. An import lands RELEASED with
+             * no evidence re-run (dashboards.md §3.3), so the transfer wiring installs none — the twin of
+             * VisualizationConfigurationWiringTest's collaborator.
+             */
+            @Bean
+            fun releaseEvidence(): co.datapipelines.visualization.ReleaseEvidence =
+                co.datapipelines.visualization.ReleaseEvidence.NOT_INSTALLED
+
             @Bean
             fun templateDryRenderer(): co.datapipelines.pipeline.TemplateDryRenderer = io.mockk.mockk(relaxed = true)
 
