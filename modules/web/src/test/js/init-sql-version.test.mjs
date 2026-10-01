@@ -142,3 +142,20 @@ test("a fractional pin cannot come from the page - the validator refuses before 
   assert.equal(sqlRequests.length, 0);
   assert.equal(paneWrites.length, 1);
 });
+
+test("first selection displays the refusal after Alpine creates the SQL pane", () => {
+  const { component, sqlRequests, paneWrites } = loadEditor(null, DATA);
+  component.init();
+  component.selectedNode = SQL_NODE;
+  const ticks = [];
+  component.$nextTick = (callback) => ticks.push(callback);
+  const find = document.getElementById;
+  let rendered = false;
+  document.getElementById = (id) => id === "pe-node-sql" && !rendered ? null : find(id);
+  component.loadNodeSql();
+  rendered = true;
+  ticks.forEach((callback) => callback());
+  assert.equal(sqlRequests.length, 0);
+  assert.equal(paneWrites.length, 1, "the first-selection refusal must reach the newly rendered pane");
+  assert.match(paneWrites[0], /version state/);
+});

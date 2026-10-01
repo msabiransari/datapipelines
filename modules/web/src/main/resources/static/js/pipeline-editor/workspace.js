@@ -44,17 +44,18 @@
    */
   function executeVersion(state) {
     if (!state || typeof state.pipelineId !== "string" || state.pipelineId === "") return null;
-    if (state.hasBody === false) return null;
+    if (state.hasBody !== true) return null;
     var v = state.viewedVersion;
     if (typeof v !== "number" || !isFinite(v) || Math.floor(v) !== v) return null;
-    if (v <= 0 || v > Number.MAX_SAFE_INTEGER) return null;
+    // Pipeline versions are Kotlin Int values on the server.
+    if (v <= 0 || v > 2147483647) return null;
     return v;
   }
 
   /** The one read+validate+publish path; idempotent, so a re-read after restore is safe. */
   function read() {
     var state = readBlock();
-    if (state === undefined) {
+    if (!state || typeof state !== "object" || Array.isArray(state)) {
       // The pin is unknown: running would target whatever the server defaults to while the
       // page may be showing another body. Record the refusal; execute.js and the SQL
       // loader stop with a visible error before any request is made.

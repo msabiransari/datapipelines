@@ -420,11 +420,14 @@
         // body it cannot name).
         var versionPin = window.PEWorkspaceLogic ? window.PEWorkspaceLogic.executeVersion(window.PEWorkspace) : null;
         if (versionPin == null) {
-          var pane = document.getElementById("pe-node-sql");
-          if (pane) {
-            pane.textContent =
-              "The page could not read the pipeline's version state, so it cannot show this node's SQL for the version you are viewing. Reload the page; if it persists, re-open the pipeline.";
-          }
+          // The refusal needs the same x-if render tick as the successful request.
+          self.$nextTick(function () {
+            var pane = document.getElementById("pe-node-sql");
+            if (pane) {
+              pane.textContent =
+                "The page could not read the pipeline's version state, so it cannot show this node's SQL for the version you are viewing. Reload the page; if it persists, re-open the pipeline.";
+            }
+          });
           return;
         }
         var url =

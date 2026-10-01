@@ -115,8 +115,8 @@ test("only a POSITIVE BOUNDED INTEGER is a pin: fractional, overflow and non-num
   assert.equal(rule({ pipelineId: "p1", viewedVersion: 2.5, hasBody: true }), null, "fractional");
   assert.equal(rule({ pipelineId: "p1", viewedVersion: Infinity, hasBody: true }), null, "Infinity (1e400)");
   assert.equal(rule({ pipelineId: "p1", viewedVersion: NaN, hasBody: true }), null);
-  assert.equal(rule({ pipelineId: "p1", viewedVersion: Number.MAX_SAFE_INTEGER, hasBody: true }), Number.MAX_SAFE_INTEGER, "the boundary is admitted");
-  assert.equal(rule({ pipelineId: "p1", viewedVersion: Number.MAX_SAFE_INTEGER + 1, hasBody: true }), null, "past the boundary");
+  assert.equal(rule({ pipelineId: "p1", viewedVersion: 2147483647, hasBody: true }), 2147483647, "the boundary is admitted");
+  assert.equal(rule({ pipelineId: "p1", viewedVersion: 2147483648, hasBody: true }), null, "past the boundary");
   assert.equal(rule({ pipelineId: "p1", viewedVersion: "2", hasBody: true }), null, "a string is not a number");
   assert.equal(rule({ pipelineId: "p1", viewedVersion: 0, hasBody: true }), null);
   assert.equal(rule({ pipelineId: "p1", viewedVersion: -1, hasBody: true }), null);
@@ -147,4 +147,20 @@ test("a restored INVALID context records the refusal again - no stale pin surviv
   assert.equal(globalThis.window.PEWorkspaceInvalid, true);
   assert.equal(globalThis.window.PEWorkspace, null);
   globalThis.window = restored;
+});
+
+for (const hasBody of [undefined, null, "true"]) {
+  test(`a non-boolean body flag refuses (${String(hasBody)})`, () => {
+    freshWindow();
+    const page = loadWith('{"pipelineId":"p1","viewedVersion":2,"hasBody":true}', DATA);
+    assert.equal(page.PEWorkspaceLogic.executeVersion({ pipelineId: "p1", viewedVersion: 2, hasBody }), null);
+  });
+}
+
+test("JSON null on reread clears the old pin without throwing", () => {
+  freshWindow();
+  const page = loadWith('{"pipelineId":"p1","viewedVersion":2,"hasBody":true}', DATA);
+  assert.doesNotThrow(() => readAgain("null", DATA));
+  assert.equal(page.PEWorkspace, null);
+  assert.equal(page.PEWorkspaceInvalid, true);
 });
