@@ -983,6 +983,104 @@ test("abort invalidates locally at once, posts the COMPLETE controller path in s
   assert.equal(adapter.log.filter((line) => line.startsWith("notify:")).length, notificationsBefore, "a 404 abort is the finished-refresh idempotence");
 });
 
+test("a 202 abort acks with the requested reason and the ABORTED terminal frame closes the refresh honestly", async () => {
+  const fetchImpl = fakeFetch();
+  const holders = [];
+  fetchImpl.on("/runtime/visualizations", () => {
+    const holder = [];
+    holders.push(holder);
+    return fetchImpl.heldStream(null, holder);
+  });
+  const statusLog = [];
+  const { instance, adapter } = await boot({
+    fetch: fetchImpl,
+    adapter: scriptedAdapter({
+      renderStatus: (occurrence, status) => {
+        statusLog.push("status:" + occurrence.name + ":" + status.state + ":reason:" + (status.reason && status.reason.code ? status.reason.code : "null"));
+      },
+    }),
+  });
+  const refreshId = await instance.refresh({ scope: "all" });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+
+  const outcome = await instance.abort(refreshId);
+  assert.deepEqual(outcome, { abort_requested: true });
+  assert.equal(instance._refreshes[refreshId].abortAcked, true, "a 202 means explicit cancellation was recorded");
+  assert.equal(instance._refreshes[refreshId].ended, false, "the click does not declare the refresh ended - the server's terminal frame does");
+  // The optimistic chips carry the honest reason: REQUESTED, not confirmed-yet, never presented as done.
+  assert.ok(statusLog.includes("status:chart:abort:reason:abort.requested"), statusLog.join("|"));
+
+  // The server's own terminal frame decides: ABORTED, with the abort outcome per target.
+  holders[0][0](
+    fetchImpl.frame("refresh_completed", {
+      refresh_id: refreshId,
+      status: "ABORTED",
+      targets: { chart: { outcome: "abort" }, cells: { outcome: "abort" } },
+    }),
+  );
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.ok(adapter.log.find((line) => line.startsWith("notify:refresh.aborted")), adapter.log.join("|"));
+  assert.equal(instance._refreshes[refreshId].ended, true, "the terminal frame ended the refresh");
+});
+
+test("a 404 abort is not an ack: the chips say not-confirmed, nothing publishes, and the intent may be asked again", async () => {
+  const fetchImpl = fakeFetch();
+  const holders = [];
+  fetchImpl.on("/runtime/visualizations", () => {
+    const holder = [];
+    holders.push(holder);
+    return fetchImpl.heldStream(null, holder);
+  });
+  fetchImpl.on("/abort", () => fetchImpl.error("dashboard.refresh.not_found", 404));
+  const statusLog = [];
+  const { instance, adapter } = await boot({
+    fetch: fetchImpl,
+    adapter: scriptedAdapter({
+      renderStatus: (occurrence, status) => {
+        statusLog.push("status:" + occurrence.name + ":" + status.state + ":reason:" + (status.reason && status.reason.code ? status.reason.code : "null"));
+      },
+    }),
+  });
+  const refreshId = await instance.refresh({ scope: "all" });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  const notificationsBefore = adapter.log.filter((line) => line.startsWith("notify:")).length;
+
+  const outcome = await instance.abort(refreshId);
+  assert.deepEqual(outcome, { abort_requested: false });
+  assert.equal(instance._refreshes[refreshId].abortAcked, false, "a 404 recorded NO cancellation");
+  assert.equal(instance._refreshes[refreshId].ended, false);
+  assert.ok(statusLog.includes("status:chart:abort:reason:abort.not_confirmed"), statusLog.join("|"));
+  assert.equal(
+    adapter.log.filter((line) => line.startsWith("notify:")).length,
+    notificationsBefore,
+    "the finished-refresh idempotence still publishes nothing",
+  );
+
+  // And because nothing was recorded, the abort can be asked again while the refresh is still live:
+  // a second call POSTs once more (the first click rendered, the 404 un-rendered, nothing locked).
+  const callsBefore = fetchImpl.calls.length;
+  await instance.abort(refreshId);
+  assert.equal(fetchImpl.calls.length, callsBefore + 1, "an unconfirmed abort does not lock the intent away");
+
+  // The refresh went on server-side and its real outcome was delivered: the unconfirmed abort chip
+  // yields to the terminal frame's truth — a target the server reported ok was never server-aborted.
+  holders[0][0](
+    fetchImpl.frame("visualization_data", { refresh_id: refreshId, name: "chart", type: "visualization", bindings: { x: [1] }, rows: 1, bytes: 4 }) +
+      fetchImpl.frame("refresh_completed", {
+        refresh_id: refreshId,
+        status: "COMPLETED",
+        targets: { chart: { outcome: "ok" }, cells: { outcome: "error", stage: "source", reason: { code: "source.failed" } } },
+      }),
+  );
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.ok(statusLog.includes("status:chart:success:reason:null"), "the ok outcome restores the delivered state: " + statusLog.join("|"));
+  assert.ok(statusLog.includes("status:cells:error:reason:source.failed"), statusLog.join("|"));
+  // The terminal frame ended the refresh: an abort of an ended refresh is the local no-op it always was.
+  const after = fetchImpl.calls.length;
+  await instance.abort(refreshId);
+  assert.equal(fetchImpl.calls.length, after, "an ended refresh sends nothing");
+});
+
 test("proxy mode aborts under the proxy base ONCE, without cookie or csrf header", async () => {
   const fetchImpl = fakeFetch();
   fetchImpl.on("/runtime/visualizations", () => fetchImpl.stream([]));

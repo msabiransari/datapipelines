@@ -83,25 +83,33 @@ class RefreshEngine(
         val run = Run(job, ports)
         run.announce()
         var interrupted: CancellationException? = null
+        // The abort check at job start (#356): a flag recorded while the refresh was still starting — before the row
+        // existed, answered 202 by the runtime — ends the refresh here, before any source is launched, through the
+        // one terminal path below. The same read the watcher would make a poll later, made before the fan-out.
+        val preAborted = ports.abort.requested(job.refreshId)
         val ending =
-            try {
-                withTimeout(Duration.ofSeconds(job.deadlineSeconds.toLong()).toMillis()) { run.work() }
-                if (run.abortRequested.get()) Ending.ABORTED else Ending.DONE
-            } catch (e: TimeoutCancellationException) {
-                // A deadline that fired BELOW this line is mine. One that fired above it reaches here as the same class.
-                if (currentCoroutineContext().isActive) {
-                    Ending.TIMED_OUT
-                } else {
+            if (preAborted) {
+                Ending.ABORTED
+            } else {
+                try {
+                    withTimeout(Duration.ofSeconds(job.deadlineSeconds.toLong()).toMillis()) { run.work() }
+                    if (run.abortRequested.get()) Ending.ABORTED else Ending.DONE
+                } catch (e: TimeoutCancellationException) {
+                    // A deadline that fired BELOW this line is mine. One that fired above it reaches here as the same class.
+                    if (currentCoroutineContext().isActive) {
+                        Ending.TIMED_OUT
+                    } else {
+                        interrupted = e
+                        Ending.ABORTED
+                    }
+                } catch (e: CancellationException) {
                     interrupted = e
                     Ending.ABORTED
+                } catch (e: RuntimeException) {
+                    // A bug in the work must still END the refresh: the row is closed FAILED, the class (never the message) is logged.
+                    LOG.error("event=dashboard.refresh_work_failed refresh_id={} error={}", job.refreshId, e.javaClass.simpleName)
+                    Ending.FAILED
                 }
-            } catch (e: CancellationException) {
-                interrupted = e
-                Ending.ABORTED
-            } catch (e: RuntimeException) {
-                // A bug in the work must still END the refresh: the row is closed FAILED, the class (never the message) is logged.
-                LOG.error("event=dashboard.refresh_work_failed refresh_id={} error={}", job.refreshId, e.javaClass.simpleName)
-                Ending.FAILED
             }
         val result = withContext(NonCancellable) { run.finish(ending) }
         interrupted?.let { throw it }

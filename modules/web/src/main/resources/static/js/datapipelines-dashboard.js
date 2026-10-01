@@ -817,7 +817,7 @@
     }
     var names = scope === "all" ? Object.keys(known) : targets;
     var refreshId = this._env.uuid();
-    this._refreshes[refreshId] = { id: refreshId, targets: names, ended: false, abortAcked: false };
+    this._refreshes[refreshId] = { id: refreshId, targets: names, ended: false, abortAcked: false, abortRequested: false };
     this._claimOccurrences(refreshId, names);
 
     var body = {
@@ -1025,7 +1025,18 @@
       // "abort". "ok" — the server delivered the data — behaves like a data frame already applied:
       // completion must not clobber the state the data frame set (or is about to set, the render
       // being asynchronous). A delivered "rendered" is tolerated for older fixtures, never sent.
-      if (outcome.outcome === "ok" || outcome.outcome === "rendered") continue;
+      if (outcome.outcome === "ok" || outcome.outcome === "rendered") {
+        // A target the server reports ok was never server-aborted (an aborted target's outcome is
+        // "abort"): an abort chip still standing at completion is this client's own optimistic render
+        // from an abort whose confirmation never decided it (#356) — the terminal frame's truth
+        // restores the delivered state.
+        var occurrence = this._occurrences[name];
+        if (occurrence && occurrence.status === "abort") {
+          this._renderOccurrenceStatus(name, { state: "success", stale: false, reason: null, refreshId: refresh.id });
+          this._scheduleSuccessSettle(name, refresh.id);
+        }
+        continue;
+      }
       if (outcome.outcome === "no-data") {
         this._renderOccurrenceStatus(name, { state: "no-data", stale: false, reason: null, refreshId: refresh.id });
       } else if (outcome.outcome === "abort") {
@@ -1123,19 +1134,25 @@
   // ------------------------------------------------------------------------------------------- abort
 
   /**
-   * §8.4: an authenticated intent keyed by the refresh id. Local ownership is invalidated IMMEDIATELY;
-   * the POST is asynchronous and its acknowledgment means cancellation was requested, not that work
-   * stopped. A 404 (already finished) is idempotent — no state change.
+   * §8.4: an authenticated intent keyed by the refresh id. The POST is asynchronous and its answer is
+   * the honesty boundary (#356): a 202 means explicit cancellation was recorded (`abortAcked`), a 404
+   * means it was NOT — the chips say so ("abort not confirmed") and the terminal frame, or the
+   * stream's end, decides what really happened. The stream stays open either way: the server's own
+   * terminal frame is the truth this runtime renders, never its own click.
    */
   DashboardInstance.prototype.abort = function (refreshId) {
     var refresh = this._refreshes[refreshId];
-    if (!refresh || refresh.ended) return Promise.resolve({ abort_requested: false });
-    refresh.ended = true;
-    this._closeStream(refreshId);
+    if (!refresh || refresh.ended || refresh.abortRequested) return Promise.resolve({ abort_requested: false });
+    refresh.abortRequested = true;
     for (var i = 0; i < refresh.targets.length; i++) {
       var name = refresh.targets[i];
       if (this._owns(name, refreshId)) {
-        this._renderOccurrenceStatus(name, { state: "abort", stale: false, reason: null, refreshId: refreshId });
+        this._renderOccurrenceStatus(name, {
+          state: "abort",
+          stale: false,
+          reason: { code: "abort.requested" },
+          refreshId: refreshId,
+        });
       }
     }
     var self = this;
@@ -1145,7 +1162,9 @@
         return { abort_requested: true };
       },
       function (error) {
-        // Transport failure is recorded separately; a 404 is the finished-refresh idempotence.
+        // Not recorded: the chips carry the honest reason and the intent may be asked again. A 404
+        // (another person's or a finished refresh) publishes nothing — the finished-refresh idempotence;
+        // any other failure is reported as the unconfirmed abort it is.
         if (!error || !error.details || error.details.status !== 404) {
           self._publishNotification({
             scope: "refresh",
@@ -1156,6 +1175,20 @@
             recover: null,
             refreshId: refreshId,
           });
+        }
+        if (!refresh.ended) {
+          refresh.abortRequested = false;
+          for (var j = 0; j < refresh.targets.length; j++) {
+            var target = refresh.targets[j];
+            if (self._owns(target, refreshId)) {
+              self._renderOccurrenceStatus(target, {
+                state: "abort",
+                stale: false,
+                reason: { code: "abort.not_confirmed" },
+                refreshId: refreshId,
+              });
+            }
+          }
         }
         return { abort_requested: false };
       },

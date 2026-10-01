@@ -161,6 +161,48 @@ class DashboardConformanceBrowserTest : DashboardBrowserSuite() {
 
     @Test
     @Order(5)
+    fun `an abort before the row is a 202 and the released start ends ABORTED on the page`() {
+        val root = ready("dpwindow")
+        installHostPage()
+        val board = seedHungBoard(root)
+        openHost(board)
+
+        // The workspace's refresh places (the deployment default is four) are HELD by four hung
+        // refreshes started as raw stream POSTs, so the instance's own refresh blocks INSIDE
+        // admission — after its start marker, before the row: the #356 window, forced, not raced.
+        val holders = startHolderStreams(board)
+        awaitHolderRows(board, holders, "RUNNING")
+
+        // The instance's own refresh: minted, claimed, and blocked inside admission with no row.
+        val refreshId = page.evaluate("() => window.__dp.instance.refresh({ scope: 'all' })") as String
+        awaitStartMarker(board, refreshId)
+
+        // The immediate abort: a 202 with the requested reason on the chip — the click does not
+        // claim the refresh ended.
+        val acked = page.evaluate("() => window.__dp.instance.abort('$refreshId')") as Map<*, *>
+        acked["abort_requested"] shouldBe true
+        chipStateIs("hungcells", "abort")
+
+        // Release: one holder's abort frees its place; the held start admits, its row is inserted
+        // and its recorded intent ends it ABORTED before any source ran.
+        abortHolder(board, holders.first())
+        awaitRefreshStatus(board, refreshId, "ABORTED")
+        chipStateIs("hungcells", "abort")
+        page.waitForFunction(
+            "() => window.__dp.notifications.some(function (n) { return n.code === 'refresh.aborted'; })",
+        )
+        val row = readRow(board, refreshId)
+        (row["finished"] as String) shouldBe "true"
+        drainCspViolations().filter { !it.contains("'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='") } shouldBe emptyList()
+
+        // Cleanup: every holder aborted, so no place outlives this case for the others.
+        val remaining = holders.drop(1)
+        remaining.forEach { abortHolder(board, it) }
+        awaitHolderRows(board, remaining, "ABORTED")
+    }
+
+    @Test
+    @Order(6)
     fun `connection loss retains the content and offers retry`() {
         val root = ready("dploss")
         installHostPage()
