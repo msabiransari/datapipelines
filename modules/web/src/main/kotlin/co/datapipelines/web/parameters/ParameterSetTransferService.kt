@@ -57,7 +57,11 @@ class ParameterSetTransferService(
     private val templates: co.datapipelines.templates.TemplateRepository,
     private val templateImport: TemplateImportService,
 ) {
-    /** The export bundle for [id]'s CURRENT release (a set with no release has nothing to export). */
+    /**
+     * The export bundle for [id]'s CURRENT release (a set with no release has nothing to export). The bundle's
+     * templates are the set's PINNED dependencies and ride with it whatever the template lens says (#344, the
+     * owner's ruling of 2026-10-02) — so only the root is lensed, by `ParameterSetsController.export`.
+     */
     fun export(
         workspaceId: UUID,
         id: UUID,
@@ -247,7 +251,10 @@ class ParameterSetTransferService(
         field: String,
     ): String? = payload.get(field)?.takeIf(JsonNode::isTextual)?.asText()
 
-    /** Direct pins plus the transitive `imports` closure, deduplicated — the pipeline bundle's walk. */
+    /**
+     * Direct pins plus the transitive `imports` closure, deduplicated — the pipeline bundle's walk. No lens: a
+     * dependency is what the set runs, not a listing (#344).
+     */
     private fun pinnedClosure(
         workspaceId: UUID,
         refs: List<TemplateRef>,
