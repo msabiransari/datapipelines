@@ -29,7 +29,13 @@ class ParameterEvaluateGoldenTest {
     private val selectors =
         ScriptedSelectors().apply {
             this["acme/sales/state.sql"] = { request ->
-                if (request.binds["country"] == "USA") ScriptedSelectors.options("NY", "NJ", default = "NY") else ScriptedSelectors.options()
+                if (request.binds["country"] ==
+                    "USA"
+                ) {
+                    ScriptedSelectors.options("NY", "NJ", default = "NY")
+                } else {
+                    ScriptedSelectors.options()
+                }
             }
             this["acme/sales/city.sql"] = { request ->
                 if (request.binds["state"] == "NY") ScriptedSelectors.options("NYC", "BUF") else ScriptedSelectors.options("NWK")

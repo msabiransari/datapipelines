@@ -265,38 +265,21 @@ class ArchitectureGuardTest {
     ): Int = text.substring(0, offset).count { it == '\n' } + 1
 
     /**
-     * The top-level arguments of the call whose `(` ends at [start] — the commas at depth zero up to the
-     * matching `)`, string literals skipped. A trailing comma does not count as an argument.
+     * The top-level arguments of the call whose `(` ends at [start]: string literals blanked, the text at bracket
+     * depth zero up to the matching `)` split on its commas — a trailing comma names no argument.
      */
     private fun argumentCount(
         text: String,
         start: Int,
     ): Int {
+        val code = STRING_LITERAL.replace(text.substring(start), "\"\"")
+        val topLevel = StringBuilder()
         var depth = 0
-        var commas = 0
-        var sawArgument = false
-        var sinceComma = false
-        var i = start
-        var inString = false
-        while (i < text.length) {
-            val c = text[i]
-            when {
-                inString && c == '\\' -> i++
-                c == '"' -> inString = !inString
-                inString -> Unit
-                c == '(' || c == '[' || c == '{' -> depth++
-                c == ')' && depth == 0 -> return if (!sawArgument) 0 else commas + if (sinceComma) 1 else 0
-                c == ')' || c == ']' || c == '}' -> depth--
-                c == ',' && depth == 0 -> {
-                    commas++
-                    sinceComma = false
-                }
-            }
-            if (!inString && !c.isWhitespace() && c != ',' && !(c == ')' && depth == 0)) {
-                sawArgument = true
-                sinceComma = true
-            }
-            i++
+        for (c in code) {
+            if (depth == 0 && c in CLOSERS) return topLevel.split(',').count { it.isNotBlank() }
+            if (c in OPENERS) depth++
+            if (c in CLOSERS) depth--
+            if (depth == 0 && c !in CLOSERS) topLevel.append(c)
         }
         error("unterminated evaluateBlocking( call")
     }
@@ -526,6 +509,12 @@ class ArchitectureGuardTest {
 
         /** A call of the blocking evaluate — never its declaration. */
         val EVALUATE_BLOCKING_CALL = Regex("(?<!fun )\\bevaluateBlocking\\(")
+
+        /** A double-quoted string literal, escapes included — blanked before counting a call's arguments. */
+        val STRING_LITERAL = Regex("\"(?:\\\\.|[^\"\\\\])*\"")
+
+        const val OPENERS = "([{"
+        const val CLOSERS = ")]}"
 
         /** `workspaceId, set, selections` — S3 (#376) makes it four when `attempt` lands. */
         const val ORDINARY_EVALUATE_ARGUMENTS = 3
