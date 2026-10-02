@@ -68,10 +68,11 @@ reader checks (`rendered`, `trace_count`, `no_console_errors`, `text_visible`, `
    looked in (`theme`, `viewport`, `browser`, `locale`, `renderer_version`). The server re-runs its
    own mechanical test and answers the status: GREEN only when every verdict is green and that
    test passes; a missing verdict is INCOMPLETE. The preview link stops working.
-4. **Upload one screenshot** when the answer is GREEN: `upload` names the `url`, the `header` and
-   the single-use `token`. POST the PNG or WebP bytes (raw body, `Content-Type: image/png` or
-   `image/webp`, at most 4 MiB) to `url` with the token in that header — from your browser or any
-   HTTP client; your MCP key is not used there. The token works once; a second upload is refused.
+4. **Upload one screenshot** when the answer is GREEN: `upload` names the `url`, the `header`
+   (`DP-Upload-Token`) and the single-use `token`. POST the PNG or WebP bytes (raw body, `Content-Type:
+   image/png` or `image/webp`, at most 4 MiB) to `url` with the token in that header — from your
+   browser or any HTTP client; your MCP key is not used there. This is the ONE REST call an agent
+   makes, and the server audits it. The token works once; a second upload is refused.
    The screenshot is review evidence for the person, not a server check.
 5. **Hand over.** Tell the person the run is GREEN and the visualization awaits their release in
    the UI. A RED or INCOMPLETE run: fix the visualization (or the case), then start a new session.

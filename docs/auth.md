@@ -1,9 +1,9 @@
 # Auth & Security Specification
 
-**Status:** v3.30 (revised — see Change Log)
+**Status:** v3.31 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System](type-system.md)
-**Last updated:** 2026-10-01
+**Last updated:** 2026-10-02
 
 ---
 
@@ -1434,6 +1434,7 @@ Workspace resolution failures (§5.6) use the `workspace.*` codes — catalogued
 | `auth.user.admin_revoked` | Admin revoked admin scope from user |
 | `auth.workspace.created` | Workspace created through the service path |
 | `auth.workspace.header_rejected` | `DP-Workspace` presented on an API-key request (§5.6) |
+| `visualization.test.screenshot_uploaded` | A visualization test run's screenshot was stored (#353, audited by #164). The upload route is a public path whose ONLY credential is the single-use upload capability, so there is no principal: `user_id` is the run's starter (`started_by`), `key_id` is null, the source IP is on the row. The one write an agent makes over REST. `details`: workspace, visualization, run, media type, size in bytes, the case named — never the token, its hash or the bytes ([Enums §15](enums.md#15-authauditevent--auth-audit-log-events)) |
 
 The same `audit_log` table also carries the **promotion events** — `auth.promotion.rejected` when the peer-credential gate refuses a request, `auth.promotion.accepted` when a batch is applied ([Versioning §10](versioning.md#10-promotion-ui-driven-separate-use-case)) — the **datasource decryption events** ([Datasources §7.4](datasources.md#74-decryption-points-and-audit-log)), the **MCP tool events** — `mcp.tool.called` for every tool call, `mcp.tool.write` for every mutating one — emitted by the MCP dispatcher through the same sink ([MCP §14](mcp-server.md#14-audit)), and the **mail events** — `mail.sent` / `mail.failed` for every notice §5A.8 sends, kind and recipients in `details` and never a body (all registered in [Enums §15](enums.md#15-authauditevent--auth-audit-log-events)).
 
@@ -1794,6 +1795,7 @@ All auth tables accessed via `JdbcTemplate` + `RowMapper`. No JPA. See [Metadata
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-02 | v3.31 | 235 (#164) the screenshot upload is audited | **§10.1 gains one event row, `visualization.test.screenshot_uploaded`** (defined in enums.md §15): the upload route reads no principal, so the row's actor is the run's starter, `key_id` null, the source IP from the request, ids/size/type in `details` — never the token. No permission, no §7.6 row, no route and no scope changes; the refusal path (the capability judged before a byte is read) writes nothing, as before. |
 | 2026-10-01 | v3.30 | L4b (#353) the visualization test workflow on the wire | **§7.6: no new row, no new permission** — `visualization.read` gains the evidence reads and the on-demand check (`GET …/tests/runs`, `…/runs/{runId}`, `…/runs/{runId}/screenshot`, `POST …/versions/{version}/check`; a run visible only when its version is), `visualization.update` the session start and the results (`POST …/tests/sessions`, `…/sessions/{sessionId}/results`) and the tools `visualizations_test_start` / `visualizations_test_submit` (the catalog 59 → 61). **§8.3: two capability-authenticated entries** (43 → 45) — the preview page `/visualizations/*/preview` and the screenshot upload `/api/v1/visualizations/*/tests/sessions/*/screenshot`, each authenticated by ONE capability its handler checks against the run and the starter's CURRENT authority, neither carrying `@RequiredScope`. **§8.4:** the upload joins the promotion route's credential-not-cookie CSRF exemption (`UploadCapabilityRouteMatcher`). **§8.6:** the request-body cap's ONE route exemption (the upload's own 4 MiB, refused `413 visualization.test.screenshot_too_large`), the CSRF row, and two public-contract rows. |
 | 2026-10-01 | v3.29 | L4a (#352) the evidence gate — row added at merge after 348's v3.28 | **§7.6: no new row, no cell change** — `visualization.release`'s description names the installed evidence gate (the exact draft under a row lock, THE LATEST run of the version GREEN for the exact body hash, the mechanical check re-run now; refusals `tests_missing / tests_stale / tests_red / mechanical_failed`) instead of the pre-#352 "refuses `tests_missing` until the test sessions land". |
 | 2026-09-30 | v3.28 | 348 (#348) the pipeline workspace's version-explicit reads — renumbered at merge after L3b's v3.27 | **§7.6: `GET /pipelines/{id}` (the canonical read workspace) and `GET /pipelines/{id}/editor` move to the `pipeline.read` row; `GET /pipelines/{id}/editor` LEAVES `pipeline.execute`.** The old editor route is a compatibility redirect into the canonical read page, whose floor is the READ it is (122's execute floor described the page the route used to serve — that page is gone), so the promoter now walks it to the released content and the lens narrows what the page shows, exactly as §10.2's rule says. No cell changed on any row: `pipeline.read` was already ✓ ✓ lens ✓ ✓, and execute keeps its row on its POST alone. `ReadFloorTest`'s `PIPELINE_EDITOR` family re-keys to `pipeline.read` in the same commit; §7.6's page-floor paragraph is rewritten — no PAGE route floors above `read` anymore. Execute, run-checks and every lifecycle verb are untouched routes with their own rows and CSRF. |

@@ -1,10 +1,13 @@
 package co.datapipelines.web.visualizations
 
 import co.datapipelines.application.lens.PromoterLens
+import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.ClientAddressResolver
 import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.typesystem.DatapipelinesException
+import co.datapipelines.visualization.ScreenshotView
 import co.datapipelines.visualization.TestRunView
 import co.datapipelines.visualization.TestSessionLinks
 import co.datapipelines.visualization.TestSessionWire
@@ -47,6 +50,14 @@ import java.util.UUID
  * capability names decides the workspace. Its body is raw `image/png` / `image/webp` under its own 4 MiB cap
  * (`RequestBodyCapFilter`'s one route exemption), never the platform's 2 MiB.
  *
+ * ## The upload is audited (#164)
+ * The route reads no principal, so the row [AUDIT_SCREENSHOT_UPLOADED] names the run's STARTER (`started_by`, which
+ * the stored screenshot already carries as `uploadedBy`) with no key, and the source IP the platform's one resolver
+ * reads. It is written once the store has returned — a refused upload (the capability judged before a byte is
+ * read, or the service's refusals) stores nothing and writes no row — and its details are ids, size, type and the
+ * case named: never the capability, its hash or the image bytes. "Everything an agent did is in the audit log" is
+ * the MCP tool rows plus this one: it is the one write an agent makes over REST.
+ *
  * ## Lensed reads
  * The evidence reads sit on `visualization.read` and pass the caller's lens: the visualization must be visible
  * (absent, foreign and lens-hidden are the family's 404), and a run is visible only when its VERSION is — a
@@ -61,6 +72,10 @@ class VisualizationTestsController(
     private val links: TestSessionLinks,
     /** The promoter lens: every read below passes the caller's view, never `Everything`. */
     private val lens: PromoterLens,
+    /** The sink behind the one audit row this controller writes: the screenshot upload (#164). */
+    private val audit: AuditEventSink,
+    /** The client address of the upload — resolved as every auth-side row resolves it, never `remoteAddr` raw. */
+    private val clientAddresses: ClientAddressResolver,
 ) {
     /** §22.2 — open a session on the WORKING version; the answer is the only place the preview capability appears. */
     @PostMapping("/{id}/tests/sessions")
@@ -105,9 +120,10 @@ class VisualizationTestsController(
         request: HttpServletRequest,
     ): ApiResponse<Map<String, Any?>> {
         // The capability is judged BEFORE a byte is read: an unauthorised caller never makes the server buffer the body.
-        capabilities.authorizeUpload(id, sessionId, capability)
+        val grant = capabilities.authorizeUpload(id, sessionId, capability)
         val bytes = readImage(request)
         val stored = capabilities.storeScreenshot(id, sessionId, capability, declaredType(request), bytes, depictedCase)
+        auditUpload(grant.workspaceId, id, stored, bytes.size, request)
         return ApiResponse.of(TestSessionWire.screenshot(stored))
     }
 
@@ -173,6 +189,34 @@ class VisualizationTestsController(
         return ApiResponse.of(sessions.check(workspaceId, loaded.body))
     }
 
+    /**
+     * The upload's audit row (#164): actor = the run's starter, `key_id` null (the route has none), details redaction-bound —
+     * ids, the stored size and type, the case when one was named.
+     */
+    private fun auditUpload(
+        workspaceId: UUID,
+        id: UUID,
+        stored: ScreenshotView,
+        sizeBytes: Int,
+        request: HttpServletRequest,
+    ) {
+        audit.log(
+            event = AUDIT_SCREENSHOT_UPLOADED,
+            userId = stored.uploadedBy,
+            keyId = null,
+            sourceIp = clientAddresses.clientAddressOf(request),
+            details =
+                buildMap {
+                    put("workspace_id", workspaceId.toString())
+                    put("visualization_id", id.toString())
+                    put("run_id", stored.runId.toString())
+                    put("media_type", stored.mediaType)
+                    put("size_bytes", sizeBytes)
+                    stored.depictedCase?.let { put("case", it) }
+                },
+        )
+    }
+
     /** The versions the caller's lens admits — none is the family's 404 (absent, foreign, lens-hidden alike). */
     private fun visibleVersions(
         principal: AuthenticatedPrincipal,
@@ -200,14 +244,17 @@ class VisualizationTestsController(
             ?.lowercase()
             ?.takeIf { it.isNotEmpty() }
 
-    private companion object {
-        val FAMILY = ArtifactFamily.VISUALIZATION
+    companion object {
+        /** enums.md §15 and auth.md §10.1 — the screenshot upload's audit event (#164). */
+        const val AUDIT_SCREENSHOT_UPLOADED = "visualization.test.screenshot_uploaded"
+
+        private val FAMILY = ArtifactFamily.VISUALIZATION
 
         /** The runs list's bound: the repository's newest-first read (rest-api §22.2 documents it). */
-        const val RUNS_CAP = 100
+        private const val RUNS_CAP = 100
 
         /** The service's own refusal for an unknown run — a lens-hidden run answers identically. */
-        fun runNotFound() =
+        private fun runNotFound() =
             DatapipelinesException(
                 code = VisualizationErrorCodes.TEST_SESSION_NOT_FOUND,
                 message = "No such test session for this visualization; its capabilities verify nothing.",
@@ -215,7 +262,7 @@ class VisualizationTestsController(
             )
 
         /** The route cap's refusal, spelt as the service and the request filter spell it. */
-        fun screenshotTooLarge() =
+        private fun screenshotTooLarge() =
             DatapipelinesException(
                 code = VisualizationErrorCodes.TEST_SCREENSHOT_TOO_LARGE,
                 message = "The screenshot exceeds the 4 MiB cap.",
