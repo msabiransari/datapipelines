@@ -97,7 +97,8 @@ class DashboardGridRowUnitBrowserTest : DashboardBrowserSuite() {
         }
         val boardHeight = (measured["board"] as Number).toDouble()
         val expectedBoard = gridRows * unit + (gridRows - 1) * gap
-        withClue("the board is $gridRows rows tall ($expectedBoard) - no trailing row for the empty default slot: $report board=$boardHeight") {
+        val boardClue = "the board is $gridRows rows tall ($expectedBoard), no trailing row for the empty default slot"
+        withClue("$boardClue: $report board=$boardHeight") {
             (Math.abs(boardHeight - expectedBoard) <= TOLERANCE_PX) shouldBe true
         }
         val figures = measured["slots"] as Map<*, *>
