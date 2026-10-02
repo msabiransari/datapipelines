@@ -1,6 +1,6 @@
 # MCP Server Specification
 
-**Status:** v1.66 (frozen contract — additive-only changes after this point)
+**Status:** v1.67 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [REST API spec](rest-api.md), [Auth spec](auth.md), [Templates spec](templates.md)
 **Last updated:** 2026-09-29
@@ -167,7 +167,7 @@ For self-hosted, internal-users-only deployment, API keys are simpler and suffic
 
 - `instructions` (workspaces design §9) states the workspace context every agent reads first: content in other workspaces is absent (not hidden) — it resolves as not-found — and the key sees exactly the datasources granted to its workspace (D-R7). What follows is ranked for a client that truncates it (#241): where the manual lives, then the draft rule, the name grammar, "humans register datasources" and the three recoveries — all inside 1,843 characters, 10 % under the 2,048-character cap Claude Code applies by default. The full text is §15's Delivery 1 block and ships as `McpServerFactory.SERVER_INSTRUCTIONS`.
 
-- `tools.listChanged: false` — the tool surface is **static**: the same 59 tools (§6.1) for every caller, for the lifetime of the server. Advertising `true` would promise `notifications/tools/list_changed` messages the v1 server never sends. Dynamic per-pipeline tools (`pipeline_execute_{name}`, which would make the list genuinely mutable) are a v2 item — [ROADMAP §3.7](ROADMAP.md#37-mcp-server). When they land, this flips to `true` together with the notification implementation.
+- `tools.listChanged: false` — the tool surface is **static**: the same 61 tools (§6.1) for every caller, for the lifetime of the server. Advertising `true` would promise `notifications/tools/list_changed` messages the v1 server never sends. Dynamic per-pipeline tools (`pipeline_execute_{name}`, which would make the list genuinely mutable) are a v2 item — [ROADMAP §3.7](ROADMAP.md#37-mcp-server). When they land, this flips to `true` together with the notification implementation.
 - `resources.listChanged: false` — the *set of resource URIs* does change as pipelines and executions are created, but the v1 server sends no change notifications; clients re-fetch `resources/list` (§7.3) when they need a current view.
 - `resources.subscribe: false` — no live subscriptions in v1. Clients re-fetch resources as needed.
 - `prompts.listChanged: false` — the prompt surface (§8) is static in v1.
@@ -236,6 +236,8 @@ Tools are named `{domain}_{action}`:
 - `visualizations_create`
 - `visualizations_update`
 - `visualizations_purge_draft`
+- `visualizations_test_start`
+- `visualizations_test_submit`
 - `dashboards_list`
 - `dashboards_get`
 - `dashboards_create`
@@ -2455,6 +2457,117 @@ Hard-delete a dashboard's DRAFT by id (versioning §5.4); the sole draft takes t
 
 **Permission:** `dashboard.update` — an AUTHOR verb (owner ruling 2026-09-29; the implementation spec's §7 said `dashboard.read`): the validator reads the pinned pipelines', set's and visualizations' statuses unlensed (the L1a security pass's O5), so a promoter's key is refused by the dispatcher. **Not mutating** (nothing is written). **Returns:** `{id, name, version, body_hash, valid, failures: [{code, path, message, details}]}`. **Errors:** `dashboard.not_found`.
 
+#### 6.2.61 `visualizations_test_start`
+
+Open a test session on a visualization's WORKING version (the draft when one exists) — the REST `POST /api/v1/visualizations/{id}/tests/sessions` twin (#353; the implementation spec §11.2). The answer carries `preview_url`: the page that serves the version's saved test fixtures through the real dashboard runtime — no pipeline, no datasource, no login. The preview capability rides inside that URL as `?session=`; it is shown ONCE, it is the agent's browser's only credential, and it dies when the session's results are submitted or at `expires_at` (`datapipelines.visualization.session-ttl-minutes`, 60). An edit to the visualization voids the session. The SAME key must submit it — a session is its starter's.
+
+```json
+{
+  "name": "visualizations_test_start",
+  "inputSchema": {
+    "type": "object",
+    "required": [
+      "id"
+    ],
+    "properties": {
+      "id": {
+        "type": "string",
+        "format": "uuid",
+        "description": "The visualization's id (visualizations_list returns it). It needs at least one test case."
+      }
+    },
+    "additionalProperties": false
+  }
+}
+```
+
+**Permission:** `visualization.update`. **Mutating** — a run row is written. **Returns:** `{session_id, run_id, visualization_id, version, body_hash, preview_url, expires_at, cases: [names]}` — `preview_url` is absolute when the deployment sets `datapipelines.auth.base-url`, else root-relative (resolve it against the origin you reach the app on). **Errors:** `visualization.not_found`, `visualization.validation.test_case_invalid` (`details.reason: no_cases` — the version declares no case), `visualization.version.conflict`.
+
+#### 6.2.62 `visualizations_test_submit`
+
+Complete a session with per-case verdicts — the REST `POST /api/v1/visualizations/{id}/tests/sessions/{sessionId}/results` twin, through the same reader. The server runs the §11.3 mechanical test at this moment and derives the status: `GREEN` when every case's verdict is `green` AND the mechanical test passes; `RED` when any verdict is `red` or the mechanical test fails; `INCOMPLETE` when a case has no verdict. The preview capability is revoked. On a GREEN run only, the answer carries the single-use screenshot upload — the agent POSTs one PNG or WebP (≤ 4 MiB, raw body) to `upload.url` with `upload.token` in the `upload.header` header ([REST API §22.2](rest-api.md#222-routes)); an `mcp` key reaches no REST route, so the upload is authenticated by that token alone. No tool releases: a person releases the visualization in the UI after review.
+
+```json
+{
+  "name": "visualizations_test_submit",
+  "inputSchema": {
+    "type": "object",
+    "required": [
+      "id",
+      "session_id",
+      "cases"
+    ],
+    "properties": {
+      "id": {
+        "type": "string",
+        "format": "uuid",
+        "description": "The visualization's id."
+      },
+      "session_id": {
+        "type": "string",
+        "format": "uuid",
+        "description": "The session_id visualizations_test_start returned."
+      },
+      "cases": {
+        "type": "array",
+        "description": "One verdict per case name visualizations_test_start listed; an unknown or repeated name is refused.",
+        "items": {
+          "type": "object",
+          "required": [
+            "name",
+            "verdict"
+          ],
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "The case name, exactly as listed."
+            },
+            "verdict": {
+              "type": "string",
+              "enum": [
+                "green",
+                "red"
+              ],
+              "description": "green when every assertion of the case held in the preview, else red."
+            },
+            "notes": {
+              "type": "string",
+              "description": "What you saw; 2000 characters max."
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "environment": {
+        "type": "object",
+        "description": "Optional claims about where you looked — a closed set of short strings (120 characters max each).",
+        "properties": {
+          "theme": {
+            "type": "string"
+          },
+          "viewport": {
+            "type": "string"
+          },
+          "browser": {
+            "type": "string"
+          },
+          "locale": {
+            "type": "string"
+          },
+          "renderer_version": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "additionalProperties": false
+  }
+}
+```
+
+**Permission:** `visualization.update`. **Mutating** — the run is completed. **Returns:** `{session_id, run_id, status, completed_at, mechanical, upload: {url, header, token, expires_at} | null}` — `mechanical` is the §11.3 report (`ok`, `failures` — the first 100 — and `failures_dropped`, the count beyond them). **Errors:** `visualization.validation.body_invalid` (`details.reason`: `unknown_case`, `duplicate_case`, `notes_too_long`, `verdict_invalid`, `environment_unknown`, `environment_field_invalid`, …, `details.path` names it), `visualization.test.session_not_found` (unknown, another key's, or a session of another visualization — never told apart), `visualization.test.session_expired` (`details.reason`: `not_running` — already submitted or swept, `content_moved_on`, `version_gone`).
+
 ### 6.3 Tool result schema
 
 All tool results follow this envelope:
@@ -2976,6 +3089,7 @@ the audit green over the exported set.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-01 | v1.67 | L4b (#353) the visualization test tools | **§6.1: 59 → 61 tools** — `visualizations_test_start` and `visualizations_test_submit` on `visualization.update` (both mutating): the start answers `preview_url` (the preview capability inside it, shown once), the cases and the deadline; the submit takes per-case verdicts, notes and the closed environment set through the one reader REST uses and answers the status, the mechanical report and — GREEN only — the single-use screenshot upload (url, header, token), which the agent POSTs over HTTP: an `mcp` key reaches no REST route. New §6.2.61–62; §5.1's static count 59 → 61. The manual's `dashboards` guide gains the test loop. |
 | 2026-09-29 | v1.66 | L2 (#10) the dashboard runtime — renumbered at merge after 320's v1.64 and 264's v1.65 | §6.2.56 `dashboards_get`: `last_refresh` is live — the CALLER's own latest refresh of the dashboard, `{refresh_id, dashboard_version, status, started_at, finished_at}`, or `null` when they have none (it was always `null` until the runtime shipped). Read through `DashboardRefreshHistory`, which asks by the caller's user id and no other: nobody else's refresh appears, whatever their role, and no selection is returned. No tool refreshes a dashboard — `dashboard.execute` has no MCP placement until the `dashboard` key kind (L5). The served manual's dashboards page gains one sentence. |
 | 2026-09-29 | v1.65 | 265 (#265) the probe's parameters judged by the shared coercion — renumbered at merge after 320's v1.64 | **§6.2.34 `sql_probe`: the `parameters` values are judged by the shared strict coercion** (typesystem's `ParameterCoercion` through `ParameterLift`) instead of the datasources-local copy that still trimmed — the tool's `parameters` description states the forms exactly: plain decimal text for the BIG numerics, exact ISO temporals (TIMESTAMP with an explicit offset or `Z`), padded standard base64, nothing trimmed, booleans exactly `true`/`false`, the 1024-digit cap before any parse. A padded or truthy-looking value that bound before is now a `-32602` argument fault naming the parameter, never the value. No tool, argument, count or permission changed ([Datasources §7D](datasources.md#7d-the-sql-probe)). |
 | 2026-09-30 | v1.64 | 320 (#320) dependency guards | §6.2.21 `templates_used_by` gains `visualization_references` (a visualization's `transform.template` pin, working-version scan, under the visualization lens); §6.2.32 `templates_purge_draft`'s guard gains its third arm — a visualization version that pins ANY version of the draft refuses it (`template.in_use`, `details.referencing_visualizations`, the echo narrowed by the caller's view with `pins_hidden`, the #300 shape). No tool added, no permission added. |

@@ -60,7 +60,10 @@ import javax.crypto.spec.SecretKeySpec
  * 3. **exactness**: every list, level, count and MCP read tool answers EXACTLY the newer set;
  * 4. **the viewer control**: the same walk as a viewer sees everything, and the stub's request
  *    log did not grow — a non-lensed principal never triggers the target call;
- * 5. **fail closed**: with the target stopped, the promoter's lists are empty, the gets are
+ * 5. **the bundle is the artifact's pins (#344)**: the export of a VISIBLE pipeline carries the
+ *    HIDDEN template it pins, while that template's direct read stays the absent 404 — the owner's
+ *    ruling of 2026-10-02 (auth §11A.1's lens clause): the lens governs direct reads, never a bundle;
+ * 6. **fail closed**: with the target stopped, the promoter's lists are empty, the gets are
  *    not-found, `pipeline.promotion.lens_unavailable` is logged ONCE for the whole walk (once per
  *    cache window, by construction) and the counter's `unreachable` outcome moved.
  *
@@ -374,8 +377,41 @@ class PromoterLensSweepTest {
         withClue("and the promoter's walk DID reach the stub, so the log can tell the two apart") { before shouldBeGreaterThanOrEqual 1 }
     }
 
+    /**
+     * #344, the owner's ruling of 2026-10-02: an export carries what the artifact PINS, read without the template
+     * lens. `lp/pins_hidden` is VISIBLE (released, absent on the target) and pins `lt/behind.sql@1`, which the lens
+     * HIDES (the target serves it at v5). The export carries the hidden pin, and the direct read of that template
+     * stays the absent 404 — both answers in ONE case, so neither passes by a lens that is simply off. The walk in
+     * test 1 never exports a visible id (it pairs HIDDEN ids with absent ones), so this case is the bundle rule's
+     * end-to-end witness. The promoter's key is an MCP key, refused on REST by KIND before any lens, and no MCP tool
+     * exports: its half is that refusal and the lensed `templates_get`.
+     */
     @Test
     @Order(5)
+    fun `as the promoter the export of a visible pipeline carries the hidden template it pins, and its direct read stays absent`() {
+        ensureSeeded()
+        val auth = sessionFor(PROMOTER)
+        val export = getJson("/api/v1/pipelines/$PIPE_PINS_HIDDEN/export", auth).path("data")
+        withClue("the bundle is exactly the pinned closure — the hidden pin rides") {
+            names(export.path("templates"), "id") shouldContainExactly listOf("$T/behind.sql")
+            export.path("manifest").path("template_count").asInt() shouldBe 1
+        }
+        withClue("the direct read of the hidden pin is the absent 404, identical to a name that exists nowhere") {
+            val hidden = call("/api/v1/templates?name=$T/behind.sql", auth)
+            val absent = call("/api/v1/templates?name=$ABSENT_NAME", auth)
+            hidden.status shouldBe HTTP_NOT_FOUND
+            hidden.fingerprint shouldBe absent.fingerprint
+        }
+        withClue("the key: the export route refuses it by kind before any lens; its direct read is lensed") {
+            val keyExport = call("/api/v1/pipelines/$PIPE_PINS_HIDDEN/export", keyHeaderFor(PROMOTER))
+            keyExport.status shouldBe HTTP_FORBIDDEN
+            keyExport.body.contains("mcp_key_off_surface") shouldBe true
+            refused(tool("templates_get", """{"id":"$T/behind.sql"}""", keyFor(PROMOTER))) shouldBe true
+        }
+    }
+
+    @Test
+    @Order(6)
     fun `with the target unreachable the promoter sees nothing, is told once per window, and the counter moved`() {
         ensureSeeded()
         val warnings = ListAppender<ILoggingEvent>().also { it.start() }
@@ -696,9 +732,12 @@ class PromoterLensSweepTest {
         private val PIPE_BEHIND: UUID = UUID.fromString("1c000000-0000-0000-0000-000000000178")
         private val PIPE_NEWER: UUID = UUID.fromString("1d000000-0000-0000-0000-000000000178")
         private val PIPE_ABSENT: UUID = UUID.fromString("1e000000-0000-0000-0000-000000000178")
+
+        /** #344 — VISIBLE (released, absent on the target), pinning the HIDDEN `lt/behind.sql@1`. */
+        private val PIPE_PINS_HIDDEN: UUID = UUID.fromString("1f000000-0000-0000-0000-000000000178")
         private val HIDDEN_PIPELINE_IDS = listOf(PIPE_DRAFT_ONLY, PIPE_ON_TARGET, PIPE_BEHIND)
         private val HIDDEN_PIPELINES = listOf("$P/draft_only", "$P/on_target_same", "$P/behind")
-        private val VISIBLE_PIPELINES = listOf("$P/absent_there", "$P/newer")
+        private val VISIBLE_PIPELINES = listOf("$P/absent_there", "$P/newer", "$P/pins_hidden")
         private val HIDDEN_TEMPLATES = listOf("$T/draft_only.sql", "$T/on_target_same.sql", "$T/behind.sql")
         private val VISIBLE_TEMPLATES = listOf("$T/absent_there.sql", "$T/newer.sql")
         private const val HIDDEN_ENDPOINT = "/lens/v1/hidden_behind"
@@ -765,6 +804,11 @@ class PromoterLensSweepTest {
         private const val PIPELINE_BODY =
             """{"schema_version":1,"name":"lens","display_name":"Lens","description":"",""" +
                 """"nodes":[{"id":"n1","type":"DQL","source":"tempdb","template":{"id":"lt/newer.sql","version":3}}]}"""
+
+        /** #344 — the visible `lp/pins_hidden`'s release: its one node pins the HIDDEN `lt/behind.sql@1`. */
+        private const val PINS_HIDDEN_BODY =
+            """{"schema_version":1,"name":"lens","display_name":"Lens","description":"",""" +
+                """"nodes":[{"id":"n1","type":"DQL","source":"tempdb","template":{"id":"lt/behind.sql","version":1}}]}"""
 
         /** A visible object's pending DRAFT: its body carries this marker, which no promoter answer may contain. */
         private const val DRAFT_MARKER = "draft_marker_178_never_shown"
@@ -845,7 +889,8 @@ class PromoterLensSweepTest {
                     ('$PIPE_ON_TARGET', '$P/on_target_same', 'On target', '', '$owner', '$WS_ID', 2),
                     ('$PIPE_BEHIND', '$P/behind', 'Behind', '', '$owner', '$WS_ID', 1),
                     ('$PIPE_NEWER', '$P/newer', 'Newer', '', '$owner', '$WS_ID', 3),
-                    ('$PIPE_ABSENT', '$P/absent_there', 'Absent there', '', '$owner', '$WS_ID', 1)
+                    ('$PIPE_ABSENT', '$P/absent_there', 'Absent there', '', '$owner', '$WS_ID', 1),
+                    ('$PIPE_PINS_HIDDEN', '$P/pins_hidden', 'Pins hidden', '', '$owner', '$WS_ID', 1)
                 """.trimIndent(),
             )
             statement.execute(
@@ -857,7 +902,8 @@ class PromoterLensSweepTest {
                     ('$PIPE_BEHIND', 1, '$PIPELINE_BODY'::jsonb, 'hash-ours', 'RELEASED', '$owner', '$owner', NOW()),
                     ('$PIPE_NEWER', 3, '$PIPELINE_BODY'::jsonb, 'hash-new', 'RELEASED', '$owner', '$owner', NOW()),
                     ('$PIPE_ABSENT', 1, '$PIPELINE_BODY'::jsonb, 'hash-absent', 'RELEASED', '$owner', '$owner', NOW()),
-                    ('$PIPE_NEWER', 4, '$DRAFT_BODY'::jsonb, 'hash-new-draft', 'DRAFT', '$owner', NULL, NULL)
+                    ('$PIPE_NEWER', 4, '$DRAFT_BODY'::jsonb, 'hash-new-draft', 'DRAFT', '$owner', NULL, NULL),
+                    ('$PIPE_PINS_HIDDEN', 1, '$PINS_HIDDEN_BODY'::jsonb, 'hash-pins-hidden', 'RELEASED', '$owner', '$owner', NOW())
                 """.trimIndent(),
             )
         }

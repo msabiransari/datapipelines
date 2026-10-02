@@ -16,6 +16,7 @@ import co.datapipelines.parameters.ParameterSetVersionDetail
 import co.datapipelines.parameters.ParametersConfig
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.ReadLens
+import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.web.api.ApiErrorCatalog
 import io.kotest.assertions.throwables.shouldThrow
@@ -47,8 +48,10 @@ class ParameterSetsControllerTest {
     private val transfer = mockk<ParameterSetTransferService>()
     private val config = ParametersConfig()
 
+    private val audit = RecordingAudit()
+
     private val controller =
-        ParameterSetsController(sets, repository, evaluator, transfer, config, co.datapipelines.web.EVERYTHING_LENS)
+        ParameterSetsController(sets, repository, evaluator, transfer, config, co.datapipelines.web.EVERYTHING_LENS, audit)
 
     private val userId = UUID.randomUUID()
     private val setId = UUID.randomUUID()
@@ -134,6 +137,7 @@ class ParameterSetsControllerTest {
             transfer,
             config,
             PromoterLens { LensedView(ReadLens.Everything, ReadLens.Everything, parameterSets = ReadLens.Only(admitted.toSet())) },
+            audit,
         )
 
     @Test
@@ -181,11 +185,19 @@ class ParameterSetsControllerTest {
         authenticate()
         val released = mockk<co.datapipelines.parameters.ParameterSetReleased>()
         every { released.version } returns loaded
+        every { released.templatesReleased } returns listOf(TemplateRef("acme/templates/t", 2))
         every { sets.release(workspaceId, setId, "hash-v1", userId, true) } returns released
 
         controller.release(setId, "hash-v1", releasePinnedTemplates = true)
 
         verify(exactly = 1) { sets.release(workspaceId, setId, "hash-v1", userId, true) }
+        // #332 — the release audit, the auditRelease twin: the cascaded template's event first,
+        // then the set's own naming it.
+        audit.events shouldBe
+            listOf("template.version.released", "parameter_set.version.released")
+        audit.details.first()["cascade_from_parameter_set_id"] shouldBe setId.toString()
+        audit.details.last()["templates_released"] shouldBe listOf(mapOf("template_id" to "acme/templates/t", "version" to 2))
+        audit.details.last()["parameter_set_name"] shouldBe record.name
     }
 
     @Test
@@ -405,6 +417,24 @@ class ParameterSetsControllerTest {
             { page.pagination.total shouldBe 2L },
             { page.pagination.hasMore shouldBe false },
         )
+    }
+
+    /** The recording fake the #332 assertions read: the events in order, and the details beside each. */
+    private class RecordingAudit : co.datapipelines.auth.AuditEventSink {
+        val events = mutableListOf<String>()
+        val details = mutableListOf<Map<String, Any?>>()
+
+        override fun log(
+            event: String,
+            userId: UUID?,
+            keyId: String?,
+            sourceIp: String?,
+            userAgent: String?,
+            details: Map<String, Any?>,
+        ) {
+            events.add(event)
+            this.details.add(details)
+        }
     }
 
     private companion object {

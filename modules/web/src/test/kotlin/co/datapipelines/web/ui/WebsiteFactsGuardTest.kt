@@ -243,6 +243,9 @@ class WebsiteFactsGuardTest {
                 dashboardReader = co.datapipelines.visualization.DashboardReader(),
                 pipelineReleaseFacts = co.datapipelines.visualization.PipelineReleaseFacts { _, _ -> null },
                 dashboardRefreshHistory = mockk<co.datapipelines.visualization.DashboardRefreshHistory>(),
+                // #353 — the two test-session tools' collaborators; never reached by these callers.
+                visualizationTestSessions = mockk<co.datapipelines.visualization.VisualizationTestSessionService>(),
+                visualizationTestLinks = co.datapipelines.visualization.TestSessionLinks(null),
             ).size
     }
 

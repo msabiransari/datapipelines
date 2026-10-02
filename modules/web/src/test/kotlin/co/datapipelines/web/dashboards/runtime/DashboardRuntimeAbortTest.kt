@@ -91,6 +91,8 @@ class DashboardRuntimeAbortTest {
     private fun principal(role: WorkspaceRole = WorkspaceRole.VIEWER): AuthenticatedPrincipal {
         val principal = mockk<AuthenticatedPrincipal>()
         every { principal.userId } returns userId
+        // A session principal (no key): the L5 ownership split asks the key id first.
+        every { principal.keyId } returns null
         every { principal.requireWorkspace() } returns WorkspaceContext(workspaceId, "acme", role)
         every { principal.holds(Permission.EXECUTION_CANCEL_ALL) } returns false
         return principal

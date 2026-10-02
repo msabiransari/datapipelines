@@ -125,6 +125,9 @@ object ApiErrorCatalog {
             "dashboard.release." to HttpStatus.CONFLICT,
             "dashboard.import." to HttpStatus.BAD_REQUEST,
             "dashboard.authoring." to HttpStatus.FORBIDDEN,
+            // L5 §13.23 — the dashboard bindings' own validation row (a folder outside the caller's
+            // tree or off the grammar), the caller's request: 400 like its validation cousins.
+            "dashboard.binding." to HttpStatus.BAD_REQUEST,
             // #279 §13.21 — the request-body cap: one code, and it IS the 413 (the family has no
             // other status to default away from), wired explicitly so the code owns a row rather
             // than being absorbed by the catalog's unknown-code 500.
@@ -521,6 +524,12 @@ object ApiErrorCatalog {
 
     private val USER_MESSAGE_OVERRIDES: Map<String, String> =
         mapOf(
+            // #353 — the two screenshot refusals are about the IMAGE, not the session: the `visualization.test.`
+            // family line ("start a new session") would send an agent to restart a run its upload can still finish.
+            PipelineErrorCodes.Visualization.TEST_SCREENSHOT_TOO_LARGE to
+                "That screenshot is larger than 4 MiB. Upload a smaller PNG or WebP image.",
+            PipelineErrorCodes.Visualization.TEST_SCREENSHOT_INVALID to
+                "That screenshot isn't a PNG or WebP image this test run can store. The details say why.",
             PipelineErrorCodes.Endpoint.PATH_CONFLICT to
                 "Another endpoint could already answer this URL. Pick a path that can't collide with it.",
             PipelineErrorCodes.Endpoint.PIPELINE_NOT_READONLY to

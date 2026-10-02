@@ -214,7 +214,9 @@ class PromotionConfiguration {
         dashboards: co.datapipelines.visualization.DashboardService,
         // #10 L1c — the visualization arm reads the pins against (and the page's visualization rows from).
         visualizations: co.datapipelines.visualization.VisualizationService,
-    ): PromotableViews = PromotableViews(pipelines, templates, client, parameterSets, dashboards, visualizations)
+        // L5 — the `dashboard` key's bindings: the walk's only read behind the lens.
+        dashboardKeyBindings: co.datapipelines.application.dashboards.DashboardKeyBindingRepository,
+    ): PromotableViews = PromotableViews(pipelines, templates, client, parameterSets, dashboards, visualizations, dashboardKeyBindings)
 
     @Bean
     @Suppress("LongParameterList")

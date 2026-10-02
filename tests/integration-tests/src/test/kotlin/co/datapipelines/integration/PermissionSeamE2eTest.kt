@@ -587,6 +587,12 @@ class PermissionSeamE2eTest : EntryAssuranceE2eBase() {
                 // walk can separate the import route from the lifecycle writes — only a grant can.
                 "visualization.import",
                 "dashboard.import",
+                // L5 (#367) — the two binding rows: the SAME cells on the two tables' routes, so neither a role
+                // walk nor the member columns can separate `dashboard.key.bind`'s routes from `api_key.bind`'s —
+                // only a grant can. (`api_key.bind` was never witnessed before this lane; it moved onto the
+                // REST routes' row the same commit the dashboard twin landed.)
+                "api_key.bind",
+                "dashboard.key.bind",
             )
 
         /** `workspace id -> the one permission granted there`, read by the synthetic grant. */
@@ -641,7 +647,7 @@ class PermissionSeamE2eTest : EntryAssuranceE2eBase() {
         private val PATH_NAMED_ARGUMENTS = setOf("name", "datasource", "path", "id", "pipeline")
         private val MCP_UNKNOWN_TOOL = listOf("Unknown tool", "tool_not_found", "Tool not found")
         private const val API_KEY_HEADER = "DP-API-Key"
-        private const val MINIMUM_TOOLS = 59
+        private const val MINIMUM_TOOLS = 61
         private const val TOOL_REFUSED_FLOOR = 20
         private val MAPPER = ObjectMapper()
     }

@@ -1,8 +1,11 @@
 package co.datapipelines.web.requestlimits
 
 import co.datapipelines.auth.AuthErrorWriter
+import co.datapipelines.auth.appPath
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.RequestLimits
+import co.datapipelines.visualization.VisualizationErrorCodes
+import co.datapipelines.visualization.VisualizationTestSessionService
 import co.datapipelines.web.api.ApiErrorCatalog
 import co.datapipelines.web.config.RequestLimitsProperties
 import jakarta.servlet.FilterChain
@@ -62,10 +65,11 @@ class RequestBodyCapFilter(
         response: HttpServletResponse,
         filterChain: FilterChain,
     ) {
-        val cap = limits.maxRequestBytes
+        val screenshot = ScreenshotUploadRoute.matches(request)
+        val cap = if (screenshot) ScreenshotUploadRoute.CAP_BYTES else limits.maxRequestBytes
         val declared = request.contentLengthLong
         if (declared > cap) {
-            refuse(request, response, cap)
+            if (screenshot) refuseScreenshot(request, response) else refuse(request, response, cap)
             return
         }
         try {
@@ -73,8 +77,29 @@ class RequestBodyCapFilter(
         } catch (e: RequestBodyTooLargeException) {
             // Surfaces whose servlet does not intercept the marker reach here; where an advice
             // (REST) or the SDK (MCP) answered first, the writer's committed check makes this a no-op.
-            refuse(request, response, e.limitBytes)
+            if (screenshot) refuseScreenshot(request, response) else refuse(request, response, e.limitBytes)
         }
+    }
+
+    /**
+     * The screenshot route's own refusal (#353): `413 visualization.test.screenshot_too_large`, the code, message and
+     * details the session service answers for the same bytes — never the platform's `request.body_too_large`, whose
+     * cap is not this route's.
+     */
+    private fun refuseScreenshot(
+        request: HttpServletRequest,
+        response: HttpServletResponse,
+    ) {
+        val code = VisualizationErrorCodes.TEST_SCREENSHOT_TOO_LARGE
+        errorWriter.write(
+            request = request,
+            response = response,
+            status = ApiErrorCatalog.statusFor(code).value(),
+            code = code,
+            message = "The screenshot exceeds the 4 MiB cap.",
+            userMessage = ApiErrorCatalog.userMessageFor(code),
+            details = mapOf("cap_bytes" to VisualizationTestSessionService.MAX_SCREENSHOT_BYTES),
+        )
     }
 
     /** The §4.2 envelope for `request.body_too_large`, written through `auth`'s writer. */
@@ -197,6 +222,23 @@ class RequestBodyCapFilter(
         override fun isReady(): Boolean = delegate.isReady
 
         override fun setReadListener(listener: ReadListener?) = delegate.setReadListener(listener)
+    }
+
+    /**
+     * The ONE route exemption from the platform cap (#353; the implementation spec's §6.1, auth.md §8.6's inventory
+     * row): `POST /api/v1/visualizations/{id}/tests/sessions/{sid}/screenshot` carries a raw PNG/WebP body up to the
+     * spec's 4 MiB, so on that route — and only there — the filter enforces [CAP_BYTES] instead of
+     * `datapipelines.web.max-request-bytes`, by the same two paths: the declared `Content-Length` first (no byte
+     * read), the counting stream second (never pulled past the cap). The cap is the session service's own
+     * constant, so the transport and the typed check cannot disagree. Matched by method AND the exact segment
+     * shape; any other spelling falls to the platform cap (the conservative side).
+     */
+    internal object ScreenshotUploadRoute {
+        val CAP_BYTES: Long = VisualizationTestSessionService.MAX_SCREENSHOT_BYTES.toLong()
+
+        private val PATH = Regex("^/api/v1/visualizations/[^/]+/tests/sessions/[^/]+/screenshot$")
+
+        fun matches(request: HttpServletRequest): Boolean = request.method == "POST" && PATH.matches(request.appPath())
     }
 
     companion object {

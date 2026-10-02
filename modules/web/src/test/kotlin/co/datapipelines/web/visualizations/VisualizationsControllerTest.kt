@@ -50,7 +50,8 @@ import java.util.UUID
 class VisualizationsControllerTest {
     private val service = mockk<VisualizationService>()
     private val reader = VisualizationReader()
-    private val controller = VisualizationsController(service, reader, co.datapipelines.web.EVERYTHING_LENS)
+    private val audit = RecordingAudit()
+    private val controller = VisualizationsController(service, reader, co.datapipelines.web.EVERYTHING_LENS, audit)
 
     private val userId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()
@@ -242,6 +243,18 @@ class VisualizationsControllerTest {
             .single()
             .get("template_id")
             .asText() shouldBe "finance/transforms/revenue_bars"
+        // #332 — the release audit, the auditRelease twin: the cascaded template's event first,
+        // naming the visualization release it rode on, then the visualization's own naming it.
+        audit.events shouldBe listOf("template.version.released", "visualization.version.released")
+        audit.details.first()["template_id"] shouldBe "finance/transforms/revenue_bars"
+        audit.details.first()["version"] shouldBe 2
+        audit.details.first()["cascade_from_visualization_id"] shouldBe id.toString()
+        audit.details.first()["cascade_from_version"] shouldBe 1
+        audit.details.last()["visualization_id"] shouldBe id.toString()
+        audit.details.last()["visualization_name"] shouldBe NAME
+        audit.details.last()["version"] shouldBe 1
+        audit.details.last()["templates_released"] shouldBe
+            listOf(mapOf("template_id" to "finance/transforms/revenue_bars", "version" to 2))
     }
 
     @Test
@@ -277,6 +290,10 @@ class VisualizationsControllerTest {
     @Test
     fun `a session reaches every human verb through the service`() {
         authenticate()
+        // #332 — the audit rows' pre-reads ride the caller's lens (Everything for this principal).
+        every { service.findWorking(workspaceId, ReadLens.Everything, id) } returns draft()
+        every { service.findVersion(workspaceId, ReadLens.Everything, id, 1) } returns released()
+        every { service.findVersion(workspaceId, ReadLens.Everything, id, 2) } returns draft()
         every { service.purgeDraft(workspaceId, id, "hash-v1") } returns Unit
         every { service.discardVersion(workspaceId, id, 1, userId) } returns detail(1, PipelineVersionStatus.DISCARDED)
         every { service.restoreVersion(workspaceId, id, 1) } returns detail(1, PipelineVersionStatus.RELEASED)
@@ -292,6 +309,18 @@ class VisualizationsControllerTest {
         controller.switchCurrent(id, """{"version": 1}""").data["current_version"] shouldBe 1
 
         verify(exactly = 1) { service.purgeEntity(workspaceId, id) }
+        // #332 — every verb audited, in the order they ran, the pipelines mould's event per verb.
+        audit.events shouldBe
+            listOf(
+                "visualization.version.purged",
+                "visualization.version.discarded",
+                "visualization.version.restored",
+                "visualization.version.purged",
+                "visualization.purged",
+                "visualization.current_switched",
+            )
+        audit.details.map { it["visualization_name"] } shouldBe listOf(NAME, NAME, NAME, NAME, NAME, NAME)
+        audit.details.map { it["version"] } shouldBe listOf(1, 1, 1, 2, 1, null)
     }
 
     @Test
@@ -315,6 +344,7 @@ class VisualizationsControllerTest {
             service,
             reader,
             PromoterLens { LensedView(ReadLens.NOTHING, ReadLens.NOTHING, visualizations = lens) },
+            audit,
         )
 
     private fun authenticate(method: AuthMethod = AuthMethod.OIDC) {
@@ -342,6 +372,24 @@ class VisualizationsControllerTest {
     private fun draft() = ArtifactVersion(record(null), detail(1, PipelineVersionStatus.DRAFT), body())
 
     private fun released() = ArtifactVersion(record(1), detail(1, PipelineVersionStatus.RELEASED), body())
+
+    /** The recording fake the #332 assertions read: the events in order, and the details beside each. */
+    private class RecordingAudit : co.datapipelines.auth.AuditEventSink {
+        val events = mutableListOf<String>()
+        val details = mutableListOf<Map<String, Any?>>()
+
+        override fun log(
+            event: String,
+            userId: UUID?,
+            keyId: String?,
+            sourceIp: String?,
+            userAgent: String?,
+            details: Map<String, Any?>,
+        ) {
+            events.add(event)
+            this.details.add(details)
+        }
+    }
 
     private companion object {
         const val NAME = "finance/visualizations/monthly_revenue"

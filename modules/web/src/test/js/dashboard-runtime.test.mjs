@@ -1508,3 +1508,92 @@ test("reset's install yields to a NEWER applied state accepted during its render
   await reset;
   assert.equal(instance._parameters.parameter_revision, 9, "the reset did not clobber the newer revision");
 });
+
+// ------------------------------------------------------------------- fixture mode (the test preview, #353)
+
+/** The preview page's init: fixtures in place of a server — no baseUrl, no credentials. */
+function fixtureInit(runtime, container, adapter, results, overrides) {
+  return runtime.init({
+    server: { fixtures: { config: configPayload(Object.assign({ actions: [{ name: "preview", type: "refresh", scope: "all", targets: [], initial: true }] }, overrides)), results } },
+    dashboard: { id: "v1", version: 1 },
+    container,
+    adapter,
+    options: { renderTimeoutMs: 200 },
+  });
+}
+
+test("fixture mode refuses a server beside it and a missing config", () => {
+  installDom();
+  try {
+    const runtime = require(runtimePath);
+    const base = () => ({ dashboard: { id: "v", version: 1 }, container: fakeElement("div"), adapter: scriptedAdapter() });
+    const config = configPayload();
+    assert.throws(() => runtime.init({ ...base(), server: { fixtures: { config }, baseUrl: "" } }), (e) => e.code === "init.invalid");
+    assert.throws(() => runtime.init({ ...base(), server: { fixtures: { config }, credentials: "session" } }), (e) => e.code === "init.invalid");
+    assert.throws(() => runtime.init({ ...base(), server: { fixtures: {} } }), (e) => e.code === "init.invalid");
+    // A numeric version is a label in fixture mode — nothing is fetched for it.
+    assert.doesNotThrow(() => runtime.init({ ...base(), server: { fixtures: { config } } }));
+  } finally {
+    uninstallDom();
+  }
+});
+
+test("fixture mode renders each target from the page's results through the real lifecycle - and issues no fetch", async () => {
+  const doc = installDom();
+  const calls = [];
+  globalThis.fetch = (url) => {
+    calls.push(url);
+    return Promise.reject(new Error("fixture mode must not fetch " + url));
+  };
+  try {
+    const runtime = require(runtimePath);
+    const registered = runtime._internal.renderers();
+    if (!registered.plotly) runtime.registerRenderer({ kind: "plotly", version: "4", create: () => ({ renderData: () => Promise.resolve("rendered") }) });
+    if (!registered.table) runtime.registerRenderer({ kind: "table", version: "1", create: () => ({ renderData: () => Promise.resolve("rendered") }) });
+    const adapter = scriptedAdapter();
+    const instance = fixtureInit(runtime, doc.createElement("div"), adapter, {
+      chart: { bindings: { "data[0].x": ["Jan"], "data[0].y": [10.5] }, rows: 1 },
+      cells: { rows: 0 },
+    });
+    await instance.ready;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.ok(adapter.log.includes("renderData:chart"), "the data target rendered: " + adapter.log.join("|"));
+    assert.ok(adapter.log.includes("status:cells:no-data"), "the empty target shows no-data: " + adapter.log.join("|"));
+    assert.ok(!adapter.log.includes("renderData:cells"), "no rows, no render");
+
+    // A second refresh mints a NEW id and the frames carry it — the freshness gate admits them.
+    adapter.log.length = 0;
+    await instance.refresh({ scope: "targets", targets: ["chart"] });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.ok(adapter.log.includes("renderData:chart"), "a later refresh renders again: " + adapter.log.join("|"));
+    instance.dispose();
+    assert.deepEqual(calls, [], "fixture mode issued a fetch");
+  } finally {
+    uninstallDom();
+  }
+});
+
+test("a fixture the evaluator refused shows the error state with its code, never a spinner", async () => {
+  const doc = installDom();
+  globalThis.fetch = () => Promise.reject(new Error("fixture mode must not fetch"));
+  try {
+    const runtime = require(runtimePath);
+    const statuses = [];
+    const adapter = scriptedAdapter({
+      renderStatus: (occurrence, status) => statuses.push([occurrence.name, status.state, status.reason && status.reason.code]),
+    });
+    const instance = fixtureInit(runtime, doc.createElement("div"), adapter, {
+      chart: { error: { code: "template.evaluate.input_invalid", message: "the fixture does not fit" } },
+      cells: { rows: 0 },
+    });
+    await instance.ready;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.ok(
+      statuses.some(([name, state, code]) => name === "chart" && state === "error" && code === "template.evaluate.input_invalid"),
+      JSON.stringify(statuses),
+    );
+    instance.dispose();
+  } finally {
+    uninstallDom();
+  }
+});

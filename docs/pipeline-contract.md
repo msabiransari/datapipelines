@@ -1,6 +1,6 @@
 # Pipeline Contract Specification
 
-**Status:** v1.47 (revised — see Change Log)
+**Status:** v1.49 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
 **Last updated:** 2026-09-29
@@ -1536,7 +1536,7 @@ The visualization artifact's refusals (#10; the [dashboard implementation spec](
 | `visualization.version.last_release` | 409 | purge of a released version, or of an entity holding one |
 | `visualization.version.not_eligible` | 409 | switch to a version that is not live and posture-eligible |
 | `visualization.version.pinned` | 409 | discard or purge of a version a LIVE dashboard version pins (graph rule 1 of [Versioning §3.5](versioning.md)); `details.pinned_by` names the dashboards |
-| `visualization.release.tests_missing` | 409 | release without evidence: no test case, no completed run for the candidate — or, until the tests lane installs the gate (L4), every release (the default gate refuses) |
+| `visualization.release.tests_missing` | 409 | release without evidence: no test case (`details.reason: no_cases`), no run of the candidate version (`no_runs`), or its latest run still open (`run_open`) — the evidence gate's ladder is [REST API §22.2](rest-api.md#222-routes) |
 | `visualization.release.tests_stale` | 409 | release whose latest run's `body_hash` is not the candidate's — the content changed after the run |
 | `visualization.release.tests_red` | 409 | release whose latest run for the candidate is not GREEN; `details` name the case |
 | `visualization.release.mechanical_failed` | 409 | release whose server-run mechanical test (the spec's §11.3) fails now; `details` name the step, case and path |
@@ -1545,7 +1545,7 @@ The visualization artifact's refusals (#10; the [dashboard implementation spec](
 | `visualization.import.missing_template` | 400 | an import whose pinned template version is absent on the target — promotion order is templates first |
 | `visualization.authoring.disabled` | 403 | `datapipelines.deployment.authoring-enabled=false` refuses every authoring write ([Versioning §5.5](versioning.md#55-drafts-are-a-deployment-capability-039)) |
 | `visualization.test.session_not_found` | 404 | no such test session for the visualization, or its token does not match |
-| `visualization.test.session_expired` | 410 | the session's preview token outlived `tests.session-ttl-minutes`, or was revoked by its submit |
+| `visualization.test.session_expired` | 410 | the session outlived `datapipelines.visualization.session-ttl-minutes`, was already submitted, or its content moved on (`details.reason`) |
 | `visualization.test.screenshot_too_large` | 413 | a screenshot over 4 MiB — the upload route's own cap, independent of the platform's 2 MiB request-body cap |
 | `visualization.test.screenshot_invalid` | 400 | a screenshot that is not a PNG or WebP image the server can read (media type, magic bytes, dimensions) |
 
@@ -1590,6 +1590,7 @@ The dashboard artifact's refusals (#10; the implementation spec §3.2, §8, §9,
 | `dashboard.refresh.result_too_large` | 422 | a source's result exceeded `results.max-bytes-per-source` (or the refresh's budget); inside the stream it is a `visualization_status` reason (D54) |
 | `dashboard.refresh.not_found` | 404 | an abort or read of a refresh that does not exist, is not the caller's, or already finished |
 | `dashboard.key.kind_refused` | 403 | a `dashboard` API key presented outside the runtime and refresh routes, or on `/mcp` |
+| `dashboard.binding.path_invalid` | 400 | a dashboard binding's `name_prefix` is not a legal folder of the name grammar (1–9 segments, or the root `/`), or names no folder at or above a dashboard the CALLER's workspace has — the #191 rule: whether another workspace has dashboards at the prefix is exactly what the refusal must not reveal; `details.name_prefix`. Asked on the binding routes and the Keys page's binding editor (L5) |
 
 
 ---
@@ -1831,6 +1832,8 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-01 | v1.49 | L5 (#367, #10) the `dashboard` key kind | New **§13.23 row `dashboard.binding.path_invalid`** (400): a dashboard binding's `name_prefix` is not a legal folder of the name grammar (1–9 segments, or the root `/`), or names no folder at or above a dashboard the CALLER's workspace has (the #191 non-disclosure rule). The refusal the binding routes and the Keys page's dashboard binding editor answer; the reserved `dashboard.key.kind_refused` stays unused (the surfaces answer the one catalogued `endpoint.key_kind_refused`, whose `details.reason` names the kind). §13.23 is 36 rows. |
+| 2026-10-01 | v1.48 | L4b (#353) stale text after the gate landed | **§13.22, no new code:** `visualization.release.tests_missing` no longer says the default gate refuses every release (#352 installed the gate — it names `no_runs` / `run_open` / `no_cases`), and `visualization.test.session_expired` names the shipped key `datapipelines.visualization.session-ttl-minutes`, not the spec's unshippable `tests.session-ttl-minutes`. |
 | 2026-09-29 | v1.47 | L2 (#10) the dashboard runtime — renumbered at merge after 320's v1.45 and 264's v1.46 | New **§13.23 row `dashboard.validation.too_many_invocations`** (400): the validator counts a dashboard's DISTINCT invocations — the refresh's own sharing identity: a pinned pipeline release plus its resolved bindings, outgoing overrides applied — and refuses more than `max-executions-per-refresh` at save and at release. The reader bounded `sources[]` at 400 (50 × 8) while a refresh admits 16 executions, so a document valid at save could be permanently `dashboard.refresh.saturated` (429 says "retry"); the runtime's saturated answer stays for a genuinely full instance. §13.23 is 35 rows. |
 | 2026-09-29 | v1.46 | 264 (#264) parameter values at every entry — renumbered at merge after 320's v1.45 | **§12.9's save answers tighten (#264)** — REST API v2.58. A `PIPELINE` node's parameter literal is judged by the child parameter's WHOLE declaration (the shared validator, §12.7's `checkDefault` mould): a value that coerces but breaks the child's `constraints`, length, pattern or declared precision/scale is refused at save — and at release and import, which run the same composition rules — with the new `pipeline.validation.pipeline_parameter_invalid` (§12.9; `details.reason`, never the value text), the composition twin of `default_invalid` and of the run-time `parameter_constraint_violation`. A same-type `${ref}` is accepted only when the parent PARAMETER's descriptor widens losslessly into the child's (parameter-engine record §6.4; `reason: narrowing`); tiers without a descriptor (calculator `context_key`s, org/platform keys) stay type-only, and a cross-type pair stays `pipeline_parameter_type_mismatch` — widening across types is NOT adopted (the run's wire encoder re-encodes by the child's type). A child declaration today's own rules refuse falls back to the type-only check. Existing stored bodies keep running; a next save re-judges (the shipped demos and every §16 example replayed: 12 bodies, 3 composition mappings, 0 refused — `CompositionRulesReplayTest` pins the corpus). |
 | 2026-09-30 | v1.45 | 320 (#320) dependency guards | **§13.20 gains `parameter.in_use`** (409 — the consumer binding the record reserved): a dashboard that pins a set version refuses its purge and discard. `pipeline.version.pinned` names the dashboards whose sources pin the release (`details.referencing_dashboards`, beside `pinned_by`). `template.in_use`'s row is rewritten — it named `referencing_pipelines` and `references`, stale since C32 — to what the code answers: `pinned_by`, `referencing_parameter_sets` and, new, `referencing_visualizations`, on every verb that removes a version. |

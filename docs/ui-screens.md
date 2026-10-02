@@ -1,9 +1,9 @@
 # UI Screens Inventory
 
-**Status:** v1.97
+**Status:** v1.98
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
-**Last updated:** 2026-10-01 (348-c, #358; L3b, #10)
+**Last updated:** 2026-10-01 (L4b, #353; 348-c, #358; L3b, #10)
 
 ---
 
@@ -826,7 +826,7 @@ Each boolean narrows for an API-key principal by the key's SCOPE as well as its 
 | Datasources (§4.5) | Register, Edit, Delete | `canAdminWorkspace` | `datasource.manage` |
 | Datasources | **Test** | `canExecute` — the connection test **follows execute** (ratified 2026-09-20) | `datasource.test` |
 | Datasource grants (§4.5a) | Grants, Grant, Revoke | `isSuperAdmin` | `datasource.grant` |
-| API keys (§4.19) | New API key / Delete / Edit associations — a `server` key's Delete: `isSuperAdmin` only (#215) | `canAdminWorkspace` or `isSuperAdmin` | `api_key.create` / `api_key.revoke` (+ `server_key.revoke` for a server key) / `api_key.bind` (179, D17) |
+| API keys (§4.19) | New API key / Delete / Edit associations / Edit dashboard folders (L5) — a `server` key's Delete: `isSuperAdmin` only (#215) | `canAdminWorkspace` or `isSuperAdmin` | `api_key.create` / `api_key.revoke` (+ `server_key.revoke` for a server key) / `api_key.bind` (179, D17) / `dashboard.key.bind` (L5) |
 | Top bar (§4.3e) | MCP key copy / delete-to-rotate | every role, own key (`mcpKey != null`) | `mcp_key.own` (179, D16) |
 | Promotion (§4.17) | the page itself | `canReadPromotion` — author, promoter, admins (owner rule 13) | `promotion.read` |
 | Promotion (§4.17) | Promote — and, since 143, the whole submission form (Send column, selection boxes) | `canPromote` in the SOURCE workspace; an author gets the plan as a plain table | `promotion.promote` |
@@ -1635,17 +1635,17 @@ Two cards.
 |---|---|
 | URL | `GET /api-keys` |
 | Auth required | Yes — any authenticated principal; the page lists keys the caller CREATED (`mcp_key.own`), and its verbs are `mcp_key.create` (create), `mcp_key.revoke_own` (a creator's delete — the service checks `created_by`) / `api_key.revoke` + `server_key.revoke` (any key of the workspace), `api_key.bind` (associations) |
-| Purpose | Create, delete and associate keys of every kind — the `mcp` key an agent presents at `/mcp`, the `endpoint` keys programs call published endpoints with, the promotion peer's `server` key |
+| Purpose | Create, delete and associate keys of every kind — the `mcp` key an agent presents at `/mcp`, the `endpoint` keys programs call published endpoints with, the promotion peer's `server` key, and (L5, #367) the `dashboard` keys an external application's backend presents at the runtime routes |
 | Design primitives | `.ds-card`, the data table (§3.7), `.app-chip`, `.app-picker`, `.app-modal` |
 | JS | The create modal, the kind-conditional role/associations fields, and the select-the-secret reveal |
-| htmx | `hx-post="/partials/api-keys"` (create, into `#keyCreated`); `hx-delete="/partials/api-keys/{id}"` (delete, into `#keys-table-body`); `hx-post="/partials/api-keys/{id}/bindings"` (save an association SET) — each with a §5.1 Shape A out-of-band piece |
+| htmx | `hx-post="/partials/api-keys"` (create, into `#keyCreated`); `hx-delete="/partials/api-keys/{id}"` (delete, into `#keys-table-body`); `hx-post="/partials/api-keys/{id}/bindings"` (save an association SET); `hx-post="/partials/api-keys/{id}/dashboard-bindings"` (L5 — save a dashboard key's FOLDER set) — each with a §5.1 Shape A out-of-band piece |
 
 The table lists the keys the signed-in person CREATED in this workspace: name + `dpk_…` prefix
 (12 characters, D16's length), kind, **role** (the role CHOSEN at creation — keys v2 A13/A14: a
 member role on an `mcp` key, `api caller` on an `endpoint` key, `promotion receiver` on a `server`
-key), **acts as** (the key's own identity, rendered "<key name> (API key)" — what its runs and
+key, `dashboard viewer` on a `dashboard` key), **acts as** (the key's own identity, rendered "<key name> (API key)" — what its runs and
 received versions are attributed to, [Auth §4.7](auth.md#47-key-identities)), **created by** (the
-person, `api_keys.created_by`), associated endpoints (`/nyc/**` form; the root reads as the
+person, `api_keys.created_by`), associated endpoints (`/nyc/**` form; a `dashboard` key's FOLDERS, `finance/dashboards/**` form; the root reads as the
 whole-tree wildcard), created, expires, last used — relative in the cell, absolute (UTC) on
 hover, like every table here. Deleted and expired keys keep their row and lose their verbs.
 
@@ -1659,7 +1659,10 @@ hover, like every table here. Deleted and expired keys keep their row and lose t
   `super_admin` — B1); **API key** (`endpoint`, the api caller role — "the paths you bind it to
   are its whole reach"; `api_key.create`, workspace admins and super admins) and, to a super
   admin only, **Server key** (`server`, the promotion receiver role, no bindings;
-  `server_key.create`). The service re-checks both the per-kind permission and the subset rule
+  `server_key.create`), and — to the same holders as the API key — **Dashboard key** (`dashboard`,
+  the `dashboard_viewer` role, L5 #367: "the folders you bind it to are the dashboards it may
+  render and refresh; an unbound key serves nothing"; `api_key.create`). It takes NO bindings at
+  create — they are the card's own editor. The service re-checks both the per-kind permission and the subset rule
   (`WorkspaceService.requireIssuancePermission`, `RolePermissions.offerable`), so a forged
   request meets the same refusals the dialog never offers.
   Expiry is the same server-resolved select §4.18 used to host (a custom date expires at the
@@ -1679,7 +1682,10 @@ hover, like every table here. Deleted and expired keys keep their row and lose t
   row then reads "created by <name> (removed)".
 - **Edit associations** — a per-row disclosure with the picker pre-checked to the key's
   current bindings; Save posts the whole SET and the service writes the delta (add/remove),
-  so a checkbox never maps to "add" or "remove" by itself.
+  so a checkbox never maps to "add" or "remove" by itself. A `dashboard` key's row (L5) has
+  its OWN disclosure — **Edit dashboard folders** — posting to its own route with the FOLDER
+  picker (the workspace's dashboard-name folders, root first), never a branch inside the
+  endpoint form; the route is `dashboard.key.bind`.
 
 **One fragment, three renders.** The page, the post-create refresh and the rows a delete or
 association save swaps in all render `api/keys :: keysTable` / `:: keyRows` from one row model
@@ -1780,6 +1786,33 @@ of one dashboard on one page; zero CSP violations on both pages; the promoter le
 a viewer executing; light/dark screens of both pages).
 
 ---
+
+### 4.22 Visualization test preview (session-less — #353)
+
+| Attribute | Value |
+|---|---|
+| URL | `GET /visualizations/{id}/preview?session=<preview capability>` (`&theme=light\|dark` optional) |
+| Auth required | **No session** — the FIRST capability-authenticated page: its ONLY credential is the preview capability in `?session=` (a `PublicPaths` entry, auth.md §8.3), minted by a test session's start and valid for THAT visualization version until the session's results are submitted or its deadline passes; the starter's current `visualization.update` is re-checked on every load. No cookie is read and none is set. Every refusal — wrong, expired, revoked, another visualization's, a malformed id — renders the one **unavailable** state with HTTP 404, byte-identical whatever the cause |
+| Purpose | An agent's browser (Playwright) checks each saved test case against the real renderer before it submits its verdicts ([Dashboards §3.4.1](dashboards.md)); a person may open the same link |
+| Design primitives | A standalone page with NO layout (no rail, no top bar, no htmx, no CSRF token — rendering one would set a cookie): the design-system sheets, `app.css`, `dashboards.css` (`dp-preview*`, the runtime's status chips) and the vendored `plotly.css` in its own head — the one page outside §3.0's head-loading rule, because it has no layout to load them; `.ds-card` per case, `.ds-empty` for the unavailable state |
+| JS | L3a's vendored runtime + the three renderers (the ONE Plotly bundle the server chose, declared on its tag) and `static/js/visualization-preview.js` — the glue, a FILE: it reads the page's one `<script type="application/json" id="dp-preview-data">` block (written through `ScriptSafeJson`) and mounts one runtime instance per case in the runtime's **fixture mode** — no request leaves the page |
+| htmx | None |
+
+Content: the visualization's display name, folder-path name and version, the deadline, and one card
+per test case in the body's order — the case name and its assertions as text, then the board the
+runtime mounts. Each case section is `section[data-dp-case="<name>"]` and gains `data-dp-ready="true"`
+when its instance's bootstrap held (or `data-dp-error="<code>"`); the chart's status chip is the
+composite adapter's `.dp-dashboard-status[data-dp-state]` (`success`/`ready`, `no-data`, `error` with
+the evaluator's code). The page never echoes its capability, carries `<meta name="referrer"
+content="no-referrer">`, and renders case names and assertion labels through `th:text` only; the
+agent's notes and environment never appear here.
+
+Guards: `VisualizationPreviewControllerTest` (the one 404 state, the per-case configuration and
+results, the script-safe block, the closed theme set), `VisualizationTestSurfacesE2eTest` (no cookie
+in or out, the 404 body-equal across causes, confinement), `VisualizationPreviewBrowserTest` (both
+themes under the live CSP with zero violations, the rendered trace count per case, the whole
+start → preview → screenshot → submit → upload → release flow), `PublicPathsTest`,
+`PublicRouteWalkerTest`, `PublicContractE2eTest`.
 
 ## 5. htmx Usage Pattern
 
@@ -1944,6 +1977,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-01 | v1.98 | L4b (#353) the visualization test preview | **New §4.22** — the first session-less, capability-authenticated page: `GET /visualizations/{id}/preview?session=`, its standalone head (no layout, no CSRF token, no cookie), the per-case cards mounted by the vendored runtime in its fixture mode, the one byte-identical 404 state for every refusal, and its guards. |
 | 2026-10-01 | v1.97 | #358 the history cache is region-scoped, and its restores are single-init (lane 348-c) — renumbered at merge after L3b's v1.94 | **§3.2**: `#app-main` carries `hx-history-elt` — the cache snapshots the workspace region, never the body, so footer scripts are never cached and never re-executed on a Back; a one-time purge plus a restore-time shape guard (drop + full fetch — htmx's own `refreshOnHistoryMiss`, since a cancelled `htmx:historyCacheHit` in 2.0.10 simply dies) refuse any body-shaped entry saved by a pre-scoped build, keyed on the one honest tell (`id="app-main"` as a CHILD). **§3.2's scripts bullet rewritten:** the pipeline editor's restore is single-init through its runtime (inert catalog, `x-ignore`, one `mutateDom` activation — the 080 rescue is gone); a run outliving a navigation is detached, never cancelled, and the restored page re-attaches through the replay stream (terminal event exactly once). **The shell's transient chrome** (`is-pending`/`app-busy`/their `aria-disabled`) comes off before every snapshot and is purged from restored pages — a restored link no longer looks clicked (the #358 browser suite caught it as a dead `.pe-back` on the restored page). **§3.7's data-table paragraph**: "the history element is `document.body`" corrected to `#app-main`. Routes, permissions, roles: none changed. |
 | 2026-09-30 | v1.96 | 348-b (#348) the workspace's version-context corrections — renumbered at merge after L3b's v1.94 | **Correction of the record first:** v1.92's sentence "the version rows' Open links carry their row's version" described the intended end state — the code still targeted the unqualified `/editor` URL at that tip, so every row opened the default. **§4.3:** the version rows' Open now really enters `/pipelines/{id}?version=<row>` (full document), and the detail header's Open is the canonical `GET /pipelines/{id}` with the old "in editor" wording gone (tree/search rows keep the redirect-covered URLs). **§4.4:** the page's serialized projection carries only the LENS-VISIBLE current pointer — a development-posture current draft's number can no longer leak into `current_version` of the script JSON for a promoter (the model's `currentVisible`, not the raw index value; PipelineResponses' REST shape untouched). The client's version context has ONE validated initialization path (`workspace.js`: bounded positive integer, body presence, pipeline identity) shared by full load, boost and cached-history restore — the restore re-reads the block through it (clearing stale refusal flags) — and the workspace's node-SQL preview REFUSES visibly with zero requests when no valid pin exists (the legacy working-version default stays with callers that omit the parameter). The cached-restore leg's own residual defects (duplicated subtrees, stacked bindings, Cytoscape CSP re-init) are shell-owned: #358. |
 | 2026-09-30 | v1.95 | 348 (#348) the version-explicit pipeline workspace — renumbered at merge after L3b's v1.94 | **§2.1**: `/pipelines/{id}` is a UI page route. **§4.3**: the explorer's Open action (detail header) and every historical `/pipelines/{id}/editor` link enter the canonical read workspace; the version rows' Open links carry their row's version (they targeted the editor with none — every row's link was the same URL, the design record's second migration trap). **§4.4**: the route statement — `GET /pipelines/{id}?version=N&tab=…` at the `pipeline.read` floor, explicit-version-or-404, current-pointer-first default, choose-a-version/empty states, the header's read-only version selector, and the old editor URL as a compatibility redirect (preserving a valid version/tab; the execute floor of 122 is gone with the page it guarded). Execute pins the VIEWED version on the wire (released included); the node-SQL GET carries an optional `version` the workspace always sends; the page's JSON blocks are `#pipeline-data` + `#pipeline-workspace` (the lifecycle draft-pin block and `draft.js` are gone). Floor/auth wording lives in auth.md v3.26; the page's layout itself is #349's. |

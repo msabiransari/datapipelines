@@ -9,6 +9,7 @@ import co.datapipelines.auth.Permission.DASHBOARD_CREATE
 import co.datapipelines.auth.Permission.DASHBOARD_DELETE
 import co.datapipelines.auth.Permission.DASHBOARD_EXECUTE
 import co.datapipelines.auth.Permission.DASHBOARD_IMPORT
+import co.datapipelines.auth.Permission.DASHBOARD_KEY_BIND
 import co.datapipelines.auth.Permission.DASHBOARD_READ
 import co.datapipelines.auth.Permission.DASHBOARD_RELEASE
 import co.datapipelines.auth.Permission.DASHBOARD_SWITCH_VERSION
@@ -272,6 +273,10 @@ object RolePermissions {
                 API_KEY_CREATE,
                 API_KEY_REVOKE,
                 API_KEY_BIND,
+                // #10 L5 — the `api_key.bind` twin: bind a `dashboard` key to dashboard folders. The same cells
+                // as `api_key.bind` (the owner's ruling, the transfer rows' shape): never an author, never an
+                // MCP author — the binding decides which dashboards a CREDENTIAL may serve.
+                DASHBOARD_KEY_BIND,
                 WORKSPACE_READ,
                 WORKSPACE_UPDATE,
                 WORKSPACE_MEMBERS_MANAGE,
@@ -294,6 +299,14 @@ object RolePermissions {
      * workspace the batch names — and nothing else.
      */
     private val PROMOTION_RECEIVER: Set<Permission> = setOf(PROMOTION_INVENTORY_READ, PROMOTION_PUSH)
+
+    /**
+     * A `dashboard` key (L5, the dashboards spec §5): exactly the two dashboard rows — `dashboard.read`
+     * (the LENS is its `dashboard_key_bindings` folders; unbound = unservable, R-EP2 verbatim) and
+     * `dashboard.execute` — and nothing else. A transport role: the kind's confinement
+     * (`ScopeInterceptor.reachableBy`) keeps both rows on the runtime routes only.
+     */
+    private val DASHBOARD_VIEWER: Set<Permission> = setOf(DASHBOARD_READ, DASHBOARD_EXECUTE)
 
     /**
      * The promotion RECEIVING rows: no MEMBER role holds them, a super admin included. Their one
@@ -348,6 +361,7 @@ object RolePermissions {
         when (role) {
             KeyRole.API_CALLER -> API_CALLER
             KeyRole.PROMOTION_RECEIVER -> PROMOTION_RECEIVER
+            KeyRole.DASHBOARD_VIEWER -> DASHBOARD_VIEWER
             KeyRole.AUTHOR -> AUTHOR
             KeyRole.PROMOTER -> PROMOTER
             KeyRole.WORKSPACE_ADMIN -> WORKSPACE_ADMIN

@@ -74,6 +74,57 @@ object LifecycleVerbs {
     const val TEMPLATE_AUDIT_CURRENT_SWITCHED = "template.current_switched"
     const val TEMPLATE_AUDIT_VERSION_RELEASED = "template.version.released"
 
+    /**
+     * enums.md §15 — the five human verbs' audit events for one FAMILY, generalised by prefix
+     * (#332) rather than duplicated as a constants block per family: the parameter-set,
+     * visualization and dashboard families emit the pipelines' five by name substitution, plus
+     * the family's own `version.released` (the [releaseDetails]/[auditRelease] twin, §A of the
+     * lane brief — the T187 gap would otherwise be recreated per family). Held to the doc by the
+     * family spec-drift guards, each with the five-event non-vacuity floor.
+     */
+    data class FamilyAuditEvents(
+        private val prefix: String,
+    ) {
+        val versionDiscarded: String get() = "$prefix.version.discarded"
+        val versionRestored: String get() = "$prefix.version.restored"
+        val versionPurged: String get() = "$prefix.version.purged"
+        val entityPurged: String get() = "$prefix.purged"
+        val currentSwitched: String get() = "$prefix.current_switched"
+        val versionReleased: String get() = "$prefix.version.released"
+
+        /** Every event name the family's surfaces can emit — the drift guards' code side. */
+        val all: Set<String>
+            get() =
+                setOf(
+                    versionDiscarded,
+                    versionRestored,
+                    versionPurged,
+                    entityPurged,
+                    currentSwitched,
+                    versionReleased,
+                )
+    }
+
+    /** The three families' event sets (#332); the wire values are enums.md §15's rows. */
+    val PARAMETER_SET_EVENTS = FamilyAuditEvents("parameter_set")
+    val VISUALIZATION_EVENTS = FamilyAuditEvents("visualization")
+    val DASHBOARD_EVENTS = FamilyAuditEvents("dashboard")
+
+    /**
+     * The release a family verb's cascade rode on (#332): which family release ordered a cascaded
+     * template or visualization release — the [CascadeSource] question with the source key spelled
+     * per family (`cascade_from_parameter_set_id`, `cascade_from_visualization_id`,
+     * `cascade_from_dashboard_id`).
+     */
+    data class FamilyCascade(
+        val idKey: String,
+        val id: UUID,
+        val version: Int,
+    ) {
+        /** The `details` keys the cascaded row carries. */
+        val provenance: Pair<String, String> get() = "cascade_from_$idKey" to id.toString()
+    }
+
     /** The `via` detail every release event carries — the D4 question is "was it a person". */
     fun via(principal: AuthenticatedPrincipal): String = if (principal.keyId != null) "api_key" else "session"
 
@@ -129,6 +180,61 @@ object LifecycleVerbs {
         val pipelineId: UUID,
         val version: Int,
     )
+
+    /**
+     * The shared `<family>.version.released` details (#332): the artifact's id and name, the
+     * released version, `via`, and the cascade the release carried — `templates_released`
+     * (`{template_id, version}`) for the set and visualization families, `visualizations_released`
+     * (`{name, version}`) for the dashboard family — an empty list when nothing cascaded. One
+     * constructor so the three controllers cannot drift on what an audited family release records.
+     */
+    fun familyReleaseDetails(
+        principal: AuthenticatedPrincipal,
+        identity: FamilyIdentity,
+        cascadeKey: String,
+        cascade: List<Map<String, Any?>>,
+    ): Map<String, Any?> =
+        buildMap {
+            put(identity.idKey, identity.id.toString())
+            put(identity.nameKey, identity.name)
+            put("version", identity.version)
+            put("via", via(principal))
+            put(cascadeKey, cascade)
+        }
+
+    /**
+     * The audited artifact's identity as the released event names it (#332): the `details` keys
+     * (`parameter_set_id`/`parameter_set_name`, the visualization and dashboard twins) beside the
+     * values, so the three controllers cannot drift on the row's shape.
+     */
+    data class FamilyIdentity(
+        val idKey: String,
+        val nameKey: String,
+        val id: UUID,
+        val name: String,
+        val version: Int,
+    )
+
+    /**
+     * The shared cascaded-release details (#332): the released member's own id (where the member
+     * carries one — templates do, dashboard-cascaded visualizations are ArtifactRef-shaped and
+     * name only), version and `via`, plus the [FamilyCascade] provenance — "who released X v2 and
+     * why" reads off the member's own row, the 142 rule for every family.
+     */
+    fun cascadedReleaseDetails(
+        principal: AuthenticatedPrincipal,
+        idKey: String?,
+        id: String?,
+        version: Int,
+        cascade: FamilyCascade,
+    ): Map<String, Any?> =
+        buildMap {
+            if (idKey != null && id != null) put(idKey, id)
+            put("version", version)
+            put("via", via(principal))
+            put(cascade.provenance.first, cascade.provenance.second)
+            put("cascade_from_version", cascade.version)
+        }
 
     /**
      * Audits a pipeline release on any surface (142): one `template.version.released` per

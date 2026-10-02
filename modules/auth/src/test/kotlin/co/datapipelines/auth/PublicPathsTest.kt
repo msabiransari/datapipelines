@@ -74,6 +74,9 @@ class PublicPathsTest {
                 "/js/**",
                 "/favicon.ico",
                 "/error",
+                // 353: the two capability-authenticated routes (the preview page, the screenshot upload).
+                "/visualizations/*/preview",
+                "/api/v1/visualizations/*/tests/sessions/*/screenshot",
             )
     }
 
@@ -149,9 +152,10 @@ class PublicPathsTest {
          * seven intent-page rows (27 -> 34); batch 2 (111) added the `for` glob (34 -> 35);
          * 115 added the engineering page (35 -> 36); 116 added the demo-data page (36 -> 37);
          * 119 added the pricing page (37 -> 38) and the semantic-layer page (38 -> 39);
-         * 145 the two hub pages (39 -> 41); 173 the llms.txt pair (41 -> 43).
+         * 145 the two hub pages (39 -> 41); 173 the llms.txt pair (41 -> 43); 353 the visualization test
+         * preview page and the screenshot upload, the first capability-authenticated routes (43 -> 45).
          * (Kotlin block comments nest, so the glob's spelling is written without its star.)
          */
-        const val DOCUMENTED_ROWS = 43
+        const val DOCUMENTED_ROWS = 45
     }
 }

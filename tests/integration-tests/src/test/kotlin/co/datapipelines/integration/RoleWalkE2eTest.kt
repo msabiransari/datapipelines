@@ -167,6 +167,7 @@ class RoleWalkE2eTest {
                 mapOf(
                     "api_caller" to (API_CALLER_KEY.plaintext to ENDPOINT_KEY_OFF_SURFACE),
                     "promotion_receiver" to (RECEIVER_KEY.plaintext to SERVER_KEY_OFF_SURFACE),
+                    "dashboard_viewer" to (DASHBOARD_KEY.plaintext to DASHBOARD_KEY_OFF_SURFACE),
                 )
         walked.forEach { (name, keyAndReason) ->
             refusedByKind[name] = walkKeyOverRest(name, keyAndReason.first, keyAndReason.second, routes, mismatches)
@@ -178,6 +179,8 @@ class RoleWalkE2eTest {
         MCP_KEY_ROLES.forEach { refusedByKind.getValue("mcp:$it") shouldBe routes.size }
         refusedByKind.getValue("promotion_receiver") shouldBe routes.size
         (routes.size - refusedByKind.getValue("api_caller")) shouldBeGreaterThanOrEqual API_CALLER_REACHED_FLOOR
+        // L5: the dashboard key reaches exactly the runtime controller's routes.
+        (routes.size - refusedByKind.getValue("dashboard_viewer")) shouldBeGreaterThanOrEqual DASHBOARD_VIEWER_REACHED_FLOOR
     }
 
     /** One key over every route: how many refused it by KIND; an answer that disagrees with the key's surface is a mismatch. */
@@ -194,7 +197,12 @@ class RoleWalkE2eTest {
             // which would measure content negotiation, not the key's kind.
             val answer = call(route, accept = "*/*") { spec -> spec.header(API_KEY_HEADER, key) }
             val kindRefused = answer.status == HTTP_FORBIDDEN && answer.code == KEY_KIND_REFUSED && answer.reason == reason
-            val onSurface = name == "api_caller" && apiCallerSurface(route)
+            val onSurface =
+                when (name) {
+                    "api_caller" -> apiCallerSurface(route)
+                    "dashboard_viewer" -> dashboardViewerSurface(route)
+                    else -> false
+                }
             if (kindRefused == onSurface) {
                 mismatches += "$name ${route.method} ${route.pattern} -> ${answer.status} ${answer.code ?: ""} " +
                     "but the key is ${if (onSurface) "ON" else "OFF"} its surface"
@@ -208,6 +216,9 @@ class RoleWalkE2eTest {
      * `/api/v1/executions/…` reads are off the surface entirely.
      */
     private fun apiCallerSurface(route: Route): Boolean = route.handler.startsWith("PublishedEndpointController#")
+
+    /** L5 — the `dashboard` key's whole MVC surface: the runtime controller's six routes (§7.7). */
+    private fun dashboardViewerSurface(route: Route): Boolean = route.handler.startsWith("DashboardRuntimeController#")
 
     /** One role's walk: how many answers were allowed / refused, and every answer the doc did not predict. */
     private class Tally {
@@ -488,6 +499,7 @@ class RoleWalkE2eTest {
         private const val MCP_KEY_OFF_SURFACE = "mcp_key_off_surface"
         private const val ENDPOINT_KEY_OFF_SURFACE = "endpoint_key_off_surface"
         private const val SERVER_KEY_OFF_SURFACE = "server_key_off_surface"
+        private const val DASHBOARD_KEY_OFF_SURFACE = "dashboard_key_off_surface"
 
         /** Keys v2 A13/A14: the MEMBER roles an `mcp` key may carry — the walk seeds one of each. */
         private val MCP_KEY_ROLES = listOf("author", "promoter", "workspace_admin")
@@ -525,7 +537,7 @@ class RoleWalkE2eTest {
          */
         private const val MINIMUM_ROUTES = 60
         private const val MINIMUM_HANDLERS = 100
-        private const val MINIMUM_TOOLS = 59
+        private const val MINIMUM_TOOLS = 61
         private const val ALLOWED_FLOOR = 20
         private const val VIEWER_REFUSED_FLOOR = 40
         private const val AUTHOR_REFUSED_FLOOR = 15
@@ -539,6 +551,12 @@ class RoleWalkE2eTest {
          * route carries all of it.
          */
         private const val API_CALLER_REACHED_FLOOR = 1
+
+        /**
+         * L5 — the dashboard key's walked surface: the runtime controller's six routes
+         * (config, parameters, refresh, abort, the refreshes list and read).
+         */
+        private const val DASHBOARD_VIEWER_REACHED_FLOOR = 6
 
         private val CODE = Regex("\"code\"\\s*:\\s*\"([a-z_.]+)\"")
         private val REASON = Regex("\"reason\"\\s*:\\s*\"([a-z_]+)\"")
@@ -578,6 +596,10 @@ class RoleWalkE2eTest {
         private const val RECEIVER_IDENTITY = "5e000000-0000-0000-0000-000000000178"
         private val API_CALLER_KEY = E2eAuth.generateKey("rolewalk-caller", ownerId = API_CALLER_IDENTITY)
         private val RECEIVER_KEY = E2eAuth.generateKey("rolewalk-receiver", ownerId = RECEIVER_IDENTITY)
+
+        /** L5 — the `dashboard` kind's key: its own identity, its one transport role. */
+        private const val DASHBOARD_IDENTITY = "5e000000-0000-0000-0000-000000000179"
+        private val DASHBOARD_KEY = E2eAuth.generateKey("rolewalk-dashboard", ownerId = DASHBOARD_IDENTITY)
 
         private val random = SecureRandom()
         private val jwtSecret: String = Base64.getEncoder().encodeToString(ByteArray(SECRET_BYTES).also { random.nextBytes(it) })
@@ -620,7 +642,7 @@ class RoleWalkE2eTest {
                 connection.createStatement().use { statement ->
                     statement.execute(
                         "UPDATE api_keys SET is_revoked = FALSE WHERE id IN " +
-                            (MCP_KEYS.values + API_CALLER_KEY + RECEIVER_KEY).joinToString(", ", "(", ")") { "'${it.id}'" },
+                            (MCP_KEYS.values + API_CALLER_KEY + RECEIVER_KEY + DASHBOARD_KEY).joinToString(", ", "(", ")") { "'${it.id}'" },
                     )
                 }
             }
@@ -645,7 +667,7 @@ class RoleWalkE2eTest {
                     }
                     // The key identities, built as V34 and ApiKeyService build one (record §3.3):
                     // every key acts as its own `service` row (keys v2 A13).
-                    (MCP_KEYS.values + listOf(API_CALLER_KEY, RECEIVER_KEY)).forEach { key ->
+                    (MCP_KEYS.values + listOf(API_CALLER_KEY, RECEIVER_KEY, DASHBOARD_KEY)).forEach { key ->
                         statement.execute(
                             "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin, kind) VALUES " +
                                 "('${key.ownerId}', '${key.id.lowercase()}@keys.invalid', '${key.name}', 'key', " +
@@ -653,44 +675,49 @@ class RoleWalkE2eTest {
                         )
                     }
                 }
-                connection
-                    .prepareStatement(
-                        "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id, kind, role)" +
-                            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                    ).use { ps ->
-                        val creator = USERS.getValue("workspace_admin")
-
-                        // Keys v2 (A13): EVERY key acts as its own identity (seeded above, one per
-                        // key), holds its own role — the member role chosen for the mcp keys, the
-                        // transport role for the other two — and names its creator.
-                        data class KeyRow(
-                            val key: E2eAuth.SeededKey,
-                            val kind: String,
-                            val role: String,
-                        )
-                        val rows =
-                            MCP_KEYS.map { (roleName, key) -> KeyRow(key, "mcp", roleName) } +
-                                listOf(
-                                    KeyRow(API_CALLER_KEY, "endpoint", "api_caller"),
-                                    KeyRow(RECEIVER_KEY, "server", "promotion_receiver"),
-                                )
-                        rows.forEach { row ->
-                            val key = row.key
-                            val kind = row.kind
-                            val role = row.role
-                            ps.setString(1, key.id)
-                            ps.setObject(2, UUID.fromString(key.ownerId))
-                            ps.setObject(3, UUID.fromString(creator))
-                            ps.setString(4, key.name)
-                            ps.setString(5, key.hash)
-                            ps.setObject(6, UUID.fromString(WS_ID))
-                            ps.setString(7, kind)
-                            ps.setString(8, role)
-                            ps.addBatch()
-                        }
-                        ps.executeBatch()
-                    }
+                insertKeys(connection)
             }
+        }
+
+        /**
+         * The `api_keys` rows — keys v2 (A13): EVERY key acts as its own identity (seeded above,
+         * one per key) and holds its own role: the member role chosen for the `mcp` keys, the
+         * transport role for the other three (L5 added the `dashboard` kind's row).
+         */
+        private fun insertKeys(connection: java.sql.Connection) {
+            connection
+                .prepareStatement(
+                    "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id, kind, role)" +
+                        " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                ).use { ps ->
+                    val creator = USERS.getValue("workspace_admin")
+
+                    data class KeyRow(
+                        val key: E2eAuth.SeededKey,
+                        val kind: String,
+                        val role: String,
+                    )
+
+                    val rows =
+                        MCP_KEYS.map { (roleName, key) -> KeyRow(key, "mcp", roleName) } +
+                            listOf(
+                                KeyRow(API_CALLER_KEY, "endpoint", "api_caller"),
+                                KeyRow(RECEIVER_KEY, "server", "promotion_receiver"),
+                                KeyRow(DASHBOARD_KEY, "dashboard", "dashboard_viewer"),
+                            )
+                    rows.forEach { row ->
+                        ps.setString(1, row.key.id)
+                        ps.setObject(2, UUID.fromString(row.key.ownerId))
+                        ps.setObject(3, UUID.fromString(creator))
+                        ps.setString(4, row.key.name)
+                        ps.setString(5, row.key.hash)
+                        ps.setObject(6, UUID.fromString(WS_ID))
+                        ps.setString(7, row.kind)
+                        ps.setString(8, row.role)
+                        ps.addBatch()
+                    }
+                    ps.executeBatch()
+                }
         }
 
         private val postgres get() = SharedE2e.postgres

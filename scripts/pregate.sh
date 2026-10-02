@@ -167,7 +167,11 @@ GUARDS[":modules:web"]="co.datapipelines.web.api.ApiErrorCatalogSpecDriftTest co
 # and 242a's merge gate went red on them for a doc-row wording its pregate never executed.
 # They boot the shared containers, so they are the expensive end of this stage — still cheaper
 # than a full gate cycle.
-GUARDS[":tests:integration-tests"]="co.datapipelines.integration.ArchitectureGuardTest co.datapipelines.integration.EntryInventoryE2eTest co.datapipelines.integration.PublicContractE2eTest"
+# 2026-10-02: the two product-tree sweeps the merge gates of 332 (DependencyGuardsE2eTest, a
+# fixture the lane never ran) and 353 (RequestNestingDepthE2eTest, a new @RequestBody String
+# route absent from its per-file inventory) went red on — each a guard that existed and that no
+# lane pregate executed.
+GUARDS[":tests:integration-tests"]="co.datapipelines.integration.ArchitectureGuardTest co.datapipelines.integration.EntryInventoryE2eTest co.datapipelines.integration.PublicContractE2eTest co.datapipelines.integration.RequestNestingDepthE2eTest co.datapipelines.integration.DependencyGuardsE2eTest"
 args=()
 for m in "${!GUARDS[@]}"; do
   args+=("$m:test")

@@ -16,12 +16,19 @@ import co.datapipelines.visualization.DashboardErrorCodes
 import co.datapipelines.visualization.DashboardImport
 import co.datapipelines.visualization.DashboardReader
 import co.datapipelines.visualization.DashboardService
+import co.datapipelines.visualization.VisualizationBody
+import co.datapipelines.visualization.VisualizationReader
 import co.datapipelines.web.api.ApiErrorCatalog
 import co.datapipelines.web.api.ApiErrors
 import co.datapipelines.web.api.ApiException
+import co.datapipelines.web.dashboards.runtime.DashboardAuditEvents
+import co.datapipelines.web.visualizations.RealExportPath
+import co.datapipelines.web.visualizations.VISUALIZATION_DOCUMENT
+import co.datapipelines.web.visualizations.VisualizationAuditEvents
 import co.datapipelines.web.visualizations.VisualizationTransferController
 import com.fasterxml.jackson.databind.JsonNode
 import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import io.mockk.every
 import io.mockk.mockk
@@ -54,6 +61,27 @@ class DashboardTransferControllerTest {
             dashboards,
             {
                 LensedView(ReadLens.Everything, ReadLens.Everything, dashboards = narrowingLens)
+            },
+            recorder,
+        )
+
+    /**
+     * #344's controller: the REAL export path under a view whose DASHBOARD arm admits the board, whose VISUALIZATION
+     * arm admits another name — never the board's pin — and whose TEMPLATE arm admits only [RealExportPath.UNPINNED].
+     */
+    private val exportPath = RealExportPath()
+    private val admitsBoard = ReadLens.Only(setOf(NAME))
+    private val hidingPins =
+        DashboardTransferController(
+            exportPath.transfer,
+            dashboards,
+            {
+                LensedView(
+                    ReadLens.Everything,
+                    ReadLens.Only(setOf(RealExportPath.UNPINNED)),
+                    visualizations = ReadLens.Only(setOf("finance/visualizations/something_else")),
+                    dashboards = admitsBoard,
+                )
             },
             recorder,
         )
@@ -122,6 +150,45 @@ class DashboardTransferControllerTest {
         )
     }
 
+    /**
+     * #344, the owner's ruling of 2026-10-02: what the dashboard PINS is part of the dashboard — each pinned
+     * visualization's own envelope, and inside it that visualization's transform pin and `imports` closure, read
+     * without the visualization lens and without the template lens; only the board is lensed. Driven through the
+     * REAL transfer and adapter: a lens planted in the pin loop or the closure, or a pin dropped, is red here.
+     */
+    @Test
+    fun `export still bundles the pinned visualization the visualization lens hides, and the templates it pins (#344)`() {
+        authenticate()
+        every { dashboards.findWorking(workspaceId, admitsBoard, id) } returns released()
+        every { exportPath.dashboardRepository.findRecord(workspaceId, id) } returns released().record
+        every { exportPath.dashboardRepository.findVersion(workspaceId, id, 1) } returns released()
+        exportPath.stubRelease(pinnedVisualization())
+        exportPath.stubTransformClosure()
+
+        val bundled = hidingPins.export(id).data.path("visualizations")
+
+        assertAll(
+            {
+                val pins = bundled.map { it.path("visualization") }
+                pins.map { it.path("name").asText() to it.path("version").asInt() } shouldContainExactly listOf(PIN to 3)
+            },
+            {
+                val templates = bundled.flatMap { it.path("templates") }
+                templates.map { it.path("id").asText() to it.path("version").asInt() } shouldContainExactly RealExportPath.PINNED_CLOSURE
+            },
+        )
+    }
+
+    /** The board's one pin — [PIN] at version 3 — as a RELEASED visualization version. */
+    private fun pinnedVisualization(): ArtifactVersion<VisualizationBody> {
+        val pinId = UUID.randomUUID()
+        return ArtifactVersion(
+            ArtifactRecord(pinId, workspaceId, PIN, "Monthly revenue", "", 3, CREATED, CREATED, userId),
+            ArtifactVersionDetail(pinId, 3, PipelineVersionStatus.RELEASED, "hash-pin-v3", CREATED, userId),
+            VisualizationReader().readOrThrow(ArtifactJson.mapper.readTree(VISUALIZATION_DOCUMENT)).body,
+        )
+    }
+
     @Test
     fun `import reads the envelope through the request mapper - a malformed body is the family's 400, the transfer never asked`() {
         authenticate()
@@ -178,7 +245,7 @@ class DashboardTransferControllerTest {
                 // `visualization.imported` row per bundled visualization, each carrying its id, its
                 // version and ITS OWN envelope manifest's evidence flag (verbatim, false until L4).
                 recorder.events.map { it.first } shouldBe
-                    listOf(AUDIT_IMPORTED, VisualizationTransferController.AUDIT_IMPORTED, VisualizationTransferController.AUDIT_IMPORTED)
+                    listOf(AUDIT_IMPORTED, VisualizationAuditEvents.IMPORTED, VisualizationAuditEvents.IMPORTED)
                 recorder.events[0].second.let {
                     it["dashboard_id"] shouldBe id.toString()
                     it["version"] shouldBe 1
@@ -253,9 +320,12 @@ class DashboardTransferControllerTest {
     private companion object {
         val VIEW = co.datapipelines.pipeline.ReadLens.Everything
         const val NAME = "finance/dashboards/revenue_overview"
+
+        /** The visualization [DASHBOARD_DOCUMENT] pins (at version 3) — [VISUALIZATION_DOCUMENT]'s name. */
+        const val PIN = "finance/visualizations/monthly_revenue"
         val CREATED: Instant = Instant.parse("2026-09-29T00:00:00Z")
-        val AUDIT_EXPORTED = DashboardTransferController.AUDIT_EXPORTED
-        val AUDIT_IMPORTED = DashboardTransferController.AUDIT_IMPORTED
+        val AUDIT_EXPORTED = DashboardAuditEvents.EXPORTED
+        val AUDIT_IMPORTED = DashboardAuditEvents.IMPORTED
 
         /** The implementation spec's §3.2 worked dashboard — the name added, the pin left as the fixture holds it. */
         val DASHBOARD_DOCUMENT =

@@ -53,9 +53,10 @@ class DatasourcesCreateRemovedTest {
             // probe/cancel/purge tools), 34 → 35 (117's `templates_update`), 35 → 38 (118's three semantics_* tools),
             // 38 → 40 (120's two docs_* tools), 40 → 41 (140's `pipelines_run_checks`), 41 → 42 (7b's `templates_evaluate`),
             // 42 → 48 (#194 lane D's six parameter_sets_* tools), 48 → 59 (#10 L1b's five visualizations_* and six
-            // dashboards_* tools). The site renders NAMES.size, so this is also what the marketing page says.
-            { McpToolCatalog.NAMES.size shouldBe 59 },
-            { McpToolCatalog.ENTRIES.map { it.permission }.size shouldBe 59 },
+            // dashboards_* tools), 59 → 61 (#353's visualizations_test_start / _submit). The site renders NAMES.size, so this
+            // is also what the marketing page says.
+            { McpToolCatalog.NAMES.size shouldBe 61 },
+            { McpToolCatalog.ENTRIES.map { it.permission }.size shouldBe 61 },
         )
     }
 
@@ -183,7 +184,7 @@ class DatasourcesCreateRemovedTest {
                 .result() as McpSchema.ListToolsResult
 
         result.tools().map { it.name() } shouldNotContain TOOL
-        result.tools().size shouldBe 59
+        result.tools().size shouldBe 61
     }
 
     private val pipelines = mockk<PipelineRepository>()

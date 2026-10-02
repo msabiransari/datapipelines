@@ -82,7 +82,10 @@ class SecurityConfig(
                 // credential is a request header a hostile browser context cannot forge, and
                 // no cookie authenticates there — PromotionServerKeyFilter refuses the route
                 // outright without a valid server key, session or no session.
-                csrf.ignoringRequestMatchers(ApiKeyCredentialMatcher(), PromotionRouteMatcher())
+                // 353: the visualization test screenshot upload joins on the same grounds — its one
+                // credential is the `DP-Upload-Token` header and no cookie authenticates there
+                // (UploadCapabilityRouteMatcher's KDoc; the route's PublicPaths entry).
+                csrf.ignoringRequestMatchers(ApiKeyCredentialMatcher(), PromotionRouteMatcher(), UploadCapabilityRouteMatcher())
                 // 027 (024 T41's browser family): Spring's default composite includes
                 // CsrfAuthenticationStrategy, written for server-side session
                 // repositories — it ROTATES the token, and DELETES the cookie when

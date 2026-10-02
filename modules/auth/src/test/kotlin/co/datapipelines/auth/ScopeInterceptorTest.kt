@@ -1,6 +1,7 @@
 package co.datapipelines.auth
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import io.kotest.assertions.withClue
 import io.kotest.matchers.booleans.shouldBeFalse
 import io.kotest.matchers.booleans.shouldBeTrue
 import io.kotest.matchers.shouldBe
@@ -332,5 +333,45 @@ class ScopeInterceptorTest {
         proceed.shouldBeFalse()
         response.status shouldBe 404
         body(response)["code"] shouldBe "workspace.not_found"
+    }
+
+    /**
+     * The confinement maps are read with `getValue` (L5's fact-finding): a kind missing from
+     * either turns the 403 into a 500 AT REQUEST TIME, silently. Every kind is asserted present
+     * in BOTH maps, and the dashboard key's surface statement is table-driven per §7.7 — on its
+     * two prefixes, off everything else.
+     */
+    @Test
+    fun `every key kind has an off-surface reason and message, and the dashboard kind's surface is the two runtime prefixes`() {
+        ApiKeyKind.entries.forEach { kind ->
+            withClue("$kind is missing from OFF_SURFACE_REASON — a 403 would become a 500") {
+                ScopeInterceptor.OFF_SURFACE_REASON.getValue(kind).isNotEmpty() shouldBe true
+            }
+            withClue("$kind is missing from OFF_SURFACE_MESSAGE — a 403 would become a 500") {
+                ScopeInterceptor.OFF_SURFACE_MESSAGE.getValue(kind).isNotEmpty() shouldBe true
+            }
+        }
+        val runtime = "/api/v1/dashboards/11111111-1111-4111-8111-111111111111"
+        listOf(
+            "$runtime/runtime/config" to true,
+            "$runtime/runtime/parameters" to true,
+            "$runtime/runtime/visualizations" to true,
+            "$runtime/runtime/refreshes/22222222-2222-4222-8222-222222222222/abort" to true,
+            "$runtime/refreshes" to true,
+            "$runtime/refreshes/22222222-2222-4222-8222-222222222222" to true,
+            // The family's OTHER routes are OFF the surface — the lifecycle reads and writes, the binding verb.
+            "$runtime" to false,
+            "/api/v1/dashboards" to false,
+            "/api/v1/dashboards/bindings" to false,
+            "$runtime/versions" to false,
+            "$runtime/release" to false,
+            "/dashboards" to false,
+            "/partials/dashboards/tree" to false,
+            "/mcp" to false,
+            "/api/v1/promotion/inventory" to false,
+            "/api/nyc/v1/revenue" to false,
+        ).forEach { (path, onSurface) ->
+            withClue(path) { ScopeInterceptor.reachableBy(ApiKeyKind.DASHBOARD, path) shouldBe onSurface }
+        }
     }
 }
