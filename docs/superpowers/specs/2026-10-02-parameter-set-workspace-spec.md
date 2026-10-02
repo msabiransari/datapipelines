@@ -1,7 +1,7 @@
 # Parameter Sets workspace — implementation specification
 
 **Status:** implementation specification for review; freezes what [issue #357](https://github.com/msabiransari/datapipelines/issues/357)
-left open. Written 2026-10-01 against `main` at `0b2c0922`; every existing name, table, route, count
+left open. Written 2026-10-02 against `main` at `0b2c0922`; every existing name, table, route, count
 and file cited below was read from that tree, not recalled.
 **Implements:** the issue's body and its two owner comments of 2026-10-01 — the rulings are binding
 here and are not restated: **R1** (SSE evaluation tracing is exclusive to the Parameter Sets
@@ -13,7 +13,7 @@ execution history, independent of the page-only SSE, recorded ONCE per actual at
 terminal/failure paths) and **R3** (the history is exposed on the Parameter Sets workspace with the
 house table component, reusing execution-history conventions for access control, bounded
 diagnostics/redaction and retention). Where this document chooses a name or a number the rulings did
-not, the choice is marked **(spec 2026-10-01)** and collected in §11.
+not, the choice is marked **(spec 2026-10-02)** and collected in §11.
 **Mould:** the dashboard implementation spec (`2026-09-28-dashboard-implementation-spec.md`) — same
 section shape, same FROZEN/CHOSEN discipline. **Route shape:** the pipeline workspace's
 (#348, landed on this base).
@@ -197,7 +197,7 @@ change (§11.5).
 
 ### 4.1 The request
 
-`POST /api/v1/parameter-sets/{id}/evaluations` **(spec 2026-10-01 — the route R1 left to this
+`POST /api/v1/parameter-sets/{id}/evaluations` **(spec 2026-10-02 — the route R1 left to this
 spec)** — a distinct route, not an option on `POST /{id}/evaluate`, so the ordinary evaluate's
 byte-for-byte stability is provable (§4.5). Session-authenticated, CSRF as every POST route,
 `@RequiredScope(Permission.PARAMETER_SET_EVALUATE)` — the SAME action observed, no new permission
@@ -629,7 +629,7 @@ lanes):
 
 | # | Record says | As the tree has it, and what replaces it |
 |---|---|---|
-| C1 | `docs/auth.md:895` (`parameter_set.read`'s row) and `docs/rest-api.md:2412` (§21's intro) both state there is **no UI page** ("no UI page (the record's §13)" / "No UI page exists (the record's §13) — this section and the MCP tools are the whole surface") | Both sentences predate this work and are now false by ratification of this spec. Replacement sentences, landed by S1's lane in the same commit as the routes: auth.md — "the Parameter Sets workspace (the [parameter-set workspace spec](superpowers/specs/2026-10-01-parameter-set-workspace-spec.md)) reads and evaluates through these rows: the tree and workspace pages and their partials on `parameter_set.read` (the promoter's lens), the observed evaluation on `parameter_set.evaluate`."; rest-api.md — "The first-party Parameter Sets workspace (ui-screens §4.22) reads and evaluates through this section; the observed evaluation stream is §21.x." |
+| C1 | `docs/auth.md:895` (`parameter_set.read`'s row) and `docs/rest-api.md:2412` (§21's intro) both state there is **no UI page** ("no UI page (the record's §13)" / "No UI page exists (the record's §13) — this section and the MCP tools are the whole surface") | Both sentences predate this work and are now false by ratification of this spec. Replacement sentences, landed by S1's lane in the same commit as the routes: auth.md — "the Parameter Sets workspace (the [parameter-set workspace spec](superpowers/specs/2026-10-02-parameter-set-workspace-spec.md)) reads and evaluates through these rows: the tree and workspace pages and their partials on `parameter_set.read` (the promoter's lens), the observed evaluation on `parameter_set.evaluate`."; rest-api.md — "The first-party Parameter Sets workspace (ui-screens §4.22) reads and evaluates through this section; the observed evaluation stream is §21.x." |
 | C2 | `docs/auth.md:859` says the catalog is "**98 on this base**" | The catalog is **99** on this base (the `:870` heading is right; `Permission.kt` carries 99 entries). Stale since the transfer's L1c row; not this spec's file to fix, but S1's lane touches auth.md for C1 anyway and corrects the number in the same commit. |
 | C3 | The parameter engine record's §1 (`:80`) and §13 (`:952`) place "any UI page" out of scope, owned by "dashboards (#10) or its own issue" | This spec is that issue's resolution: the record's §13 row is superseded by this document for the workspace surfaces (read-only workspace + observed evaluation + history); the record's §13 out-of-scope LIST is otherwise untouched (authoring UI, consumer binding, options cache and the rest remain out). Landed as one sentence in the record's §13 row by S1's lane IF the record is edited at all — otherwise this C-row IS the amendment: the record is a design record, and its "or its own issue" clause resolves here without touching the file. |
 | C4 | The brief's fact pass (2026-10-01 18:40 UTC, at 3c0d6098) recorded the engine record's header as draft 5.7 "all five lanes landed" and the vendor scripts as bare tags at `editor.html:13–:20` | On this base (`0b2c0922`) the record's change log reaches **draft 5.10** (2026-09-29, C36) while its header still reads 5.7 — quote the change log, not the header. And the vendor scripts moved behind `editor.html`'s `pe-runtime-scripts` template + `runtime.js` (the #358 stacked-bindings fix): a second graph page must load them the SAME way — this spec's §6.2 bakes that in. |
