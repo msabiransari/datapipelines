@@ -658,8 +658,6 @@ class IdempotentAttachRowOrderE2eTest {
 
             registry.add("datapipelines.jwt.secret") { JWT_SECRET }
             registry.add("datapipelines.db.encryption-key") { randomSecret() }
-            registry.add("logging.file.name") { "/tmp/opencode/dp324-app.log" }
-            registry.add("logging.level.co.datapipelines.auth") { "DEBUG" }
 
             // The negative half's forceability: ONE per-user slot, so a second POST is refused
             // (inside the executor, after its reservation) before any event — the never-started
