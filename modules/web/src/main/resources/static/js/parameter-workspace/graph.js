@@ -118,6 +118,8 @@
         ),
       style: stylesheet(tokens),
       layout: { name: "dagre", rankDir: "LR", nodeSep: 24, rankSep: 56 },
+      // The fit-to-container zoom is capped at 1: a one- or two-node graph is drawn at its natural size, never magnified.
+      maxZoom: 1,
       userZoomingEnabled: false,
       boxSelectionEnabled: false,
       autoungrabify: true,

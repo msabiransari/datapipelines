@@ -125,10 +125,40 @@ class ParameterSetPagesBrowserTest : ParameterSetBrowserSuite() {
     }
 
     @Test
+    fun `a one-node graph is drawn at its natural size - the fit zoom is capped at 1`() {
+        startTrace()
+        val root = ready("psgz")
+        val (id, hash) = createSet(setBody("$root/parameters/solo", "[${constants("kind", listOf("a"))}]"))
+        release(id, hash)
+        page.navigate("$baseUrl/parameter-sets/$id")
+        page.waitForSelector("#ps-graph canvas")
+        // The page's own graph module, on a throwaway host: a single node in a roomy container is what fit() magnifies.
+        val zoom =
+            page.evaluate(
+                """() => {
+                  const host = document.createElement('div');
+                  host.style.width = '600px';
+                  host.style.height = '400px';
+                  document.body.appendChild(host);
+                  const graph = window.PSGraph.create(host, { nodes: [{ id: 'solo', label: 'Solo', badge: 'input' }], edges: [] }, () => {});
+                  const zoom = graph.cy.zoom();
+                  graph.destroy();
+                  host.remove();
+                  return zoom;
+                }""",
+            ) as Number
+        assertTrue(zoom.toDouble() <= 1.0, "a one-node graph was magnified to zoom $zoom")
+    }
+
+    @Test
     fun `zero CSP refusals across the catalog and a workspace - and light and dark screens of both`() {
         startTrace()
         val root = ready("psshot")
-        val (id, hash) = createSet(setBody("$root/parameters/shot", "[${constants("kind", listOf("a", "b"))}]"))
+        val count = """{"name":"n","label":"Count","type":"INTEGER","kind":"INPUT","cardinality":"SINGLE","default_value":5}"""
+        val kind = constants("kind", listOf("a", "b"))
+        val level = constants("level", listOf("low", "high"))
+        val shotParameters = "[$kind,$level,$count]"
+        val (id, hash) = createSet(setBody("$root/parameters/shot", shotParameters))
         release(id, hash)
         drainCspViolations()
 
