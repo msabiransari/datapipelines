@@ -833,11 +833,11 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
          */
         const val SHELL_FLOOR = 768
 
-        /** A meta column narrower than this cannot set "3 days ago - someone - 7 runs" at all. */
-        // #349: the row is the house table now — six columns in the explorer's ~524px
-        // pane give each cell a real but modest share. The bug this guard exists for was
-        // a ~10px column setting ONE CHARACTER per line; the floor stays an order of
-        // magnitude above it.
+        // A meta column narrower than this cannot set "3 days ago - someone - 7 runs" at
+        // all. #349: the row is the house table now — six columns in the explorer's
+        // ~524px pane give each cell a real but modest share. The bug this guard exists
+        // for was a ~10px column setting ONE CHARACTER per line; the floor stays an
+        // order of magnitude above it.
         const val META_MIN_WIDTH = 48.0
 
         /** ...and it must not need more than a few lines to do it. */

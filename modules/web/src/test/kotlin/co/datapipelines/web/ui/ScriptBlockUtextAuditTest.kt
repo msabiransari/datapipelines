@@ -70,7 +70,9 @@ class ScriptBlockUtextAuditTest {
         val pipelineBlob =
             Regex("""ScriptSafeJson\.forScriptBlock\(mapper\.writeValueAsString\(tree\)\)""")
         val workspaceBlob =
-            Regex("""model\.addAttribute\(\s*"workspaceJson",\s*ScriptSafeJson\.forScriptBlock\(""")
+            // #349: the block's shape moved into workspaceState() — the audit pins the
+            // ONE ScriptSafeJson wrap, not the call site's spelling.
+            Regex("""ScriptSafeJson\.forScriptBlock\(mapper\.writeValueAsString\(workspaceState\(""")
         source shouldContainAssignment pipelineBlob
         source shouldContainAssignment workspaceBlob
     }
