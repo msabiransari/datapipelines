@@ -103,7 +103,14 @@ class TemplateWorkspaceBrowserTest : BrowserSuite() {
         query: String? = null,
     ) {
         openCatalog(name.substringAfterLast('/'))
-        page.locator("a.tpl-result", com.microsoft.playwright.Page.LocatorOptions().setHasText(name)).first().click()
+        page
+            .locator(
+                "a.tpl-result",
+                com.microsoft.playwright.Page
+                    .LocatorOptions()
+                    .setHasText(name),
+            ).first()
+            .click()
         page.waitForURL("**/templates/$name**")
         page.waitForSelector(".tw-root")
         query?.let { q ->
@@ -113,9 +120,10 @@ class TemplateWorkspaceBrowserTest : BrowserSuite() {
 
     private fun viewedVersion(): String = page.locator(".tw-root").getAttribute("data-viewed-version")
 
-    private fun sourceBody(): String = page.evaluate(
-        "() => document.getElementById('versionBody')?.textContent ?? document.getElementById('templateBody')?.value ?? ''",
-    ) as String
+    private fun sourceBody(): String =
+        page.evaluate(
+            "() => document.getElementById('versionBody')?.textContent ?? document.getElementById('templateBody')?.value ?? ''",
+        ) as String
 
     private val consoleErrors = mutableListOf<String>()
 
@@ -270,15 +278,11 @@ class TemplateWorkspaceBrowserTest : BrowserSuite() {
         // Both themes photograph the Source tab.
         listOf("light", "dark").forEach { theme ->
             ensureTheme(theme)
-            page.screenshot(
-                Page.ScreenshotOptions()
-                    .setPath(
-                        java.nio.file.Paths
-                            .get("build", "reports", "398-screenshots")
-                            .also { it.toFile().mkdirs() }
-                            .resolve("398-workspace-$theme.png"),
-                    ).setFullPage(false),
-            )
+            val dir =
+                java.nio.file.Paths
+                    .get("build", "reports", "398-screenshots")
+                    .also { it.toFile().mkdirs() }
+            page.screenshot(Page.ScreenshotOptions().setPath(dir.resolve("398-workspace-$theme.png")))
         }
         consoleErrors shouldBe emptyList()
     }

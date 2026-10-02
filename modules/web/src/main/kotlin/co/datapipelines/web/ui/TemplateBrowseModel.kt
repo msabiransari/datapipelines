@@ -281,6 +281,7 @@ class TemplateBrowseModel(
 
         /** How many pinning pipelines the Runs tab will ask for executions (see [fillRuns]). */
         const val USED_BY_FANOUT = 20
+
         /** Hex characters of a nested level's id digest — 64 bits, over one screen's folders. */
         private const val LEVEL_ID_HEX_LENGTH = 16
 

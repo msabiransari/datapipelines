@@ -133,7 +133,9 @@ class TemplateLifecycleDialogController(
                 redirect("/templates?ok=template_purged")
             }
 
-            else -> redirect(versionsTab(name, "draft_purged"))
+            else -> {
+                redirect(versionsTab(name, "draft_purged"))
+            }
         }
     }
 
@@ -257,6 +259,7 @@ class TemplateLifecycleDialogController(
      * editor redirect uses); the tab and the code are the controller's own wire words, so the
      * built URI carries no free input but the grammar-checked name.
      */
+    @Suppress("SpreadOperator") // pathSegment has no List overload; the split is bounded by the grammar
     private fun versionsTab(
         name: String,
         ok: String,

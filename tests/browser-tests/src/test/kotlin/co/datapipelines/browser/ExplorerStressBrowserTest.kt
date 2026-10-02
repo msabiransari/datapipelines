@@ -424,11 +424,10 @@ class ExplorerStressBrowserTest : BrowserSuite() {
     }
 
     @Test
-    fun `search, boosted navigation and a mid-expand reload leave both trees consistent - the sidebar's Pipelines tree included`() {
+    fun `search, boosted navigation and a mid-expand reload leave both trees consistent - the sidebar's trees`() {
         startTrace()
         loginReadyUser("plpx")
         seedPipelines()
-        seedTemplates()
         val throttle = PartialThrottle(seed = 85_073).apply { install() }
         try {
             // #350: the pipelines half of the hammer runs on the SIDEBAR's tree — the explorer
@@ -446,30 +445,10 @@ class ExplorerStressBrowserTest : BrowserSuite() {
             assertNoStrandedLevels()
             duplicatedRowTitles().shouldBeEmpty()
 
-            // Search, then clear, with the search response held. The sidebar's box is
-            // `hx-sync="this:replace"`: the clear ABORTS the held search and is sent at once, and
-            // the generation guard drops anything older that still arrives — the tree must come
-            // back, and no result row may land over it.
-            val search = "$PIPELINES_TREE [data-nav-tree-search]"
-            // Stamp the CURRENT root, so "the tree is back" can only be satisfied by a new one.
-            page.evaluate("() => { document.getElementById('pipeline-nav-root').dataset.p350Old = '1'; }")
-            page.waitForRequest({ req -> req.url().contains("/partials/pipelines") && req.url().contains("q=mob") }) {
-                page.fill(search, "mob")
-            }
-            page.waitForRequest({ req ->
-                req.url().contains("/partials/pipelines") && !req.url().contains("q=mob") && !req.url().contains("prefix=")
-            }) {
-                page.fill(search, "")
-            }
-            // Back to browsing, the tree re-opens what was open (its remembered paths) — let
-            // that sequence land completely before the next stress.
-            throttle.releaseUntil {
-                page.locator("#pipeline-nav-root[data-p350-old]").count() == 0 &&
-                    page.locator("#pipeline-nav-root .tpl-tree").count() > 0 &&
-                    page.locator(folderSummary("nyc/lib")).count() > 0 &&
-                    page.locator("$PIPELINES_TREE details.tpl-folder[open] > div.tpl-level-pending").count() == 0
-            }
-            page.locator("$PIPELINES_TREE .tpl-result").count() shouldBe 0
+            // Search, then clear, with the search response held (the sidebar box is
+            // `hx-sync="this:replace"` — the clear ABORTS the held search); the generation
+            // guard drops anything older. Back to browsing: the tree re-opens what was open.
+            searchClearPass(throttle, PIPELINES_TREE, "/partials/pipelines", "pipeline-nav-root", "p350Old")
             duplicatedRowTitles().shouldBeEmpty()
 
             // Boosted navigation with a level request held: the rail is NOT swapped by a boosted
@@ -502,42 +481,67 @@ class ExplorerStressBrowserTest : BrowserSuite() {
 
             // #398: the SAME consistency pass over the SIDEBAR's TEMPLATES tree — the page
             // pane it used to stress is the catalog now, and this is the one tree left.
-            tree = TEMPLATES_TREE
-            page.click("[data-nav-branch='templates'] [data-nav-tree-toggle]")
-            throttle.releaseUntil { page.locator(folderSummary("nyc")).count() > 0 }
-
-            val tplSearch = "$TEMPLATES_TREE [data-nav-tree-search]"
-            page.evaluate("() => { document.getElementById('template-nav-root').dataset.dp398Old = '1'; }")
-            page.waitForRequest({ req -> req.url().contains("/partials/templates") && req.url().contains("q=mob") }) {
-                page.fill(tplSearch, "mob")
-            }
-            page.waitForRequest({ req ->
-                req.url().contains("/partials/templates") && !req.url().contains("q=mob") && !req.url().contains("prefix=")
-            }) {
-                page.fill(tplSearch, "")
-            }
-            throttle.releaseUntil {
-                page.locator("#template-nav-root[data-dp398-old]").count() == 0 &&
-                    page.locator("#template-nav-root .tpl-tree").count() > 0 &&
-                    page.locator(folderSummary("nyc/lib")).count() > 0 &&
-                    page.locator("$TEMPLATES_TREE details.tpl-folder[open] > div.tpl-level-pending").count() == 0
-            }
-            page.locator("$TEMPLATES_TREE .tpl-result").count() shouldBe 0
-            duplicatedRowTitles().shouldBeEmpty()
-
-            expandFolder("nyc/hr")
-            page.reload()
-            page.waitForSelector("[data-nav-branch='templates']")
-            throttle.releaseUntil {
-                page.locator(leafButton("nyc/hr/roster")).count() > 0 &&
-                    page.locator("$TEMPLATES_TREE details.tpl-folder[open] > div.tpl-level-pending").count() == 0
-            }
-            page.locator(leafButton("trade/ledger")).count() shouldBe 1
-            assertNoStrandedLevels()
-            duplicatedRowTitles().shouldBeEmpty()
+            templatesConsistencyPass(throttle)
         } finally {
             throttle.releaseAll()
         }
+    }
+
+    /**
+     * Search "mob" into [tree]'s box and clear it with the responses held; the root is stamped
+     * BEFORE the search, so "the tree is back" can only be satisfied by a NEW one — the clear
+     * (the box is `hx-sync="this:replace"`) aborts the held search, and the generation guard
+     * drops anything older that still arrives.
+     */
+    private fun searchClearPass(
+        throttle: PartialThrottle,
+        tree: String,
+        partial: String,
+        rootId: String,
+        stamp: String,
+    ) {
+        val search = "$tree [data-nav-tree-search]"
+        page.evaluate(
+            """([rootId, stamp]) => { document.getElementById(rootId).dataset[stamp] = '1'; }""",
+            listOf(rootId, stamp),
+        )
+        page.waitForRequest({ req -> req.url().contains(partial) && req.url().contains("q=mob") }) {
+            page.fill(search, "mob")
+        }
+        page.waitForRequest({ req ->
+            req.url().contains(partial) && !req.url().contains("q=mob") && !req.url().contains("prefix=")
+        }) {
+            page.fill(search, "")
+        }
+        throttle.releaseUntil {
+            page.locator("#$rootId[data-$stamp]").count() == 0 &&
+                page.locator("#$rootId .tpl-tree").count() > 0 &&
+                page.locator(folderSummary("nyc/lib")).count() > 0 &&
+                page.locator("$tree details.tpl-folder[open] > div.tpl-level-pending").count() == 0
+        }
+        page.locator("$tree .tpl-result").count() shouldBe 0
+    }
+
+    /** The pass's second half — search-and-clear, a held level across boosted nav, a mid-expand reload. */
+    private fun templatesConsistencyPass(throttle: PartialThrottle) {
+        seedTemplates()
+        tree = TEMPLATES_TREE
+        page.click("[data-nav-branch='templates'] [data-nav-tree-toggle]")
+        throttle.releaseUntil { page.locator(folderSummary("nyc")).count() > 0 }
+
+        searchClearPass(throttle, TEMPLATES_TREE, "/partials/templates", "template-nav-root", "dp398Old")
+        duplicatedRowTitles().shouldBeEmpty()
+
+        expandFolder("nyc/hr")
+        page.reload()
+        page.waitForSelector("[data-nav-branch='templates']")
+        throttle.releaseUntil {
+            page.locator(leafButton("nyc/hr/roster")).count() > 0 &&
+                page.locator("$TEMPLATES_TREE details.tpl-folder[open] > div.tpl-level-pending").count() == 0
+        }
+        page.locator(leafButton("trade/ledger")).count() shouldBe 1
+        assertNoStrandedLevels()
+        duplicatedRowTitles().shouldBeEmpty()
     }
 
     private companion object {

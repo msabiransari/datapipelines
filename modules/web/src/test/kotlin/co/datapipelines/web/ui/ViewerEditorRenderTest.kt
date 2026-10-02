@@ -278,21 +278,44 @@ class ViewerEditorRenderTest {
         setVariable("activeTab", "source")
         setVariable("interpolations", emptyList<String>())
         setVariable("isTransform", false)
+        fillUsedByFacts()
+        // The selector reads the admitted history; one row of each side of the fork.
+        setVariable("versions", selectorRows())
+    }
+
+    private fun WebContext.fillUsedByFacts() {
         setVariable("templateWorkspace", resolved())
         setVariable("usedBy", emptyList<Any>())
         setVariable("usedByCount", 0)
         setVariable("usedBySets", emptyList<Any>())
         setVariable("usedByVisualizations", emptyList<Any>())
         setVariable("usedBySummary", "nothing")
-        // The selector reads the admitted history; one row of each side of the fork.
-        setVariable(
-            "versions",
-            listOf(
-                VersionRowView.of(2, PipelineVersionStatus.RELEASED, Instant.EPOCH, "Muhammad", Instant.EPOCH, 0, "pipeline", true, isViewed = true),
-                VersionRowView.of(1, PipelineVersionStatus.RELEASED, Instant.EPOCH, "Muhammad", Instant.EPOCH, 1, "pipeline", false),
+    }
+
+    private fun selectorRows(): List<VersionRowView> =
+        listOf(
+            VersionRowView.of(
+                version = 2,
+                status = PipelineVersionStatus.RELEASED,
+                createdAt = Instant.EPOCH,
+                actor = "Muhammad",
+                now = Instant.EPOCH,
+                usage = 0,
+                usageUnit = "pipeline",
+                isCurrent = true,
+                isViewed = true,
+            ),
+            VersionRowView.of(
+                version = 1,
+                status = PipelineVersionStatus.RELEASED,
+                createdAt = Instant.EPOCH,
+                actor = "Muhammad",
+                now = Instant.EPOCH,
+                usage = 1,
+                usageUnit = "pipeline",
+                isCurrent = false,
             ),
         )
-    }
 
     private fun resolved(): TemplateWorkspaceModel.Resolved =
         TemplateWorkspaceModel.Resolved(

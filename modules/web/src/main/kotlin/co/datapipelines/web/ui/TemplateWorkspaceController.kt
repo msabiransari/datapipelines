@@ -58,7 +58,8 @@ class TemplateWorkspaceController(
         val templateName = name.removePrefix("/")
         // A name that fails the grammar cannot name a stored template: the family's 404,
         // before any read — a climb segment or a bare slash never becomes a folder path.
-        if (!co.datapipelines.templates.TemplateNameGrammar.matches(templateName)) {
+        val grammar = co.datapipelines.templates.TemplateNameGrammar
+        if (!grammar.matches(templateName)) {
             throw workspace.notFound(templateName)
         }
         val resolved = workspace.resolve(workspaceId, view, templateName, requested)

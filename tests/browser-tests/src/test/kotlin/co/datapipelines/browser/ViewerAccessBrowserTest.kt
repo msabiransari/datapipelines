@@ -70,9 +70,8 @@ class ViewerAccessBrowserTest : BrowserSuite() {
         viewer.roleBadge() shouldBe "viewer"
         // The row IS the destination (#398) — a full navigation, watched before the URL for
         // the same reason the Open-in-editor hop was: the red must name a refused request.
-        val workspace = viewer.page.waitForResponse(::isWorkspaceDocument) {
-            viewer.page.locator("a.tpl-result").first().click()
-        }
+        val openRow = viewer.page.locator("a.tpl-result").first()
+        val workspace = viewer.page.waitForResponse(::isWorkspaceDocument) { openRow.click() }
         watch.bad shouldBe emptyList()
         workspace.status() shouldBe 200
         watch.editorDocumentStatus shouldBe 200
@@ -180,7 +179,10 @@ class ViewerAccessBrowserTest : BrowserSuite() {
         val author = signIn("va-author", role = "author")
         val watch = author.watchResponses()
         author.page.navigate("$baseUrl/templates?q=${fixture.leaf}")
-        author.page.locator("a.tpl-result").first().click()
+        author.page
+            .locator("a.tpl-result")
+            .first()
+            .click()
         author.page.waitForURL("**/templates/${fixture.name}")
         // The default view is the RELEASE: read-only with the Edit verb (Q1(b)'s kept
         // affordance), the editable surface one version away.
@@ -207,9 +209,8 @@ class ViewerAccessBrowserTest : BrowserSuite() {
         val reader = signIn("va-reader", role = "viewer")
         val readerWatch = reader.watchResponses()
         reader.page.navigate("$baseUrl/templates?q=${fixture.leaf}")
-        reader.page.waitForResponse(::isWorkspaceDocument) {
-            reader.page.locator("a.tpl-result").first().click()
-        }
+        val readerRow = reader.page.locator("a.tpl-result").first()
+        reader.page.waitForResponse(::isWorkspaceDocument) { readerRow.click() }
         readerWatch.bad shouldBe emptyList()
         reader.page.waitForURL("**/templates/${fixture.name}")
         reader.page.locator(".tw-version-link[data-version='2']").click()

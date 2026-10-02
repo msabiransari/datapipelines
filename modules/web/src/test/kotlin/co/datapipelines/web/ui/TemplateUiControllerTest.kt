@@ -165,7 +165,16 @@ class TemplateUiControllerTest {
         val model = ExtendedModelMap()
         val response = MockHttpServletResponse()
         val viewName =
-            partialController.list(model, response, q = null, dialect = null, type = null, prefix = null, offset = 0, scope = TemplateListScope.NAV.wire)
+            partialController.list(
+                model,
+                response,
+                q = null,
+                dialect = null,
+                type = null,
+                prefix = null,
+                offset = 0,
+                scope = TemplateListScope.NAV.wire,
+            )
 
         viewName shouldBe TemplateBrowseModel.LEVEL_VIEW
         model["searching"] shouldBe false
@@ -218,11 +227,31 @@ class TemplateUiControllerTest {
         stubFlatList()
 
         val nav = MockHttpServletResponse()
-        partialController.list(ExtendedModelMap(), nav, q = null, dialect = null, type = null, prefix = null, offset = 0, scope = TemplateListScope.NAV.wire)
+        partialController
+            .list(
+                ExtendedModelMap(),
+                nav,
+                q = null,
+                dialect = null,
+                type = null,
+                prefix = null,
+                offset = 0,
+                scope = TemplateListScope.NAV.wire,
+            )
         nav.getHeader(PipelineBrowseModel.NAV_STAMP_HEADER) shouldBe "acme|all"
 
         val page = MockHttpServletResponse()
-        partialController.list(ExtendedModelMap(), page, q = null, dialect = null, type = null, prefix = null, offset = 0, scope = TemplateListScope.CATALOG.wire)
+        partialController
+            .list(
+                ExtendedModelMap(),
+                page,
+                q = null,
+                dialect = null,
+                type = null,
+                prefix = null,
+                offset = 0,
+                scope = TemplateListScope.CATALOG.wire,
+            )
         page.getHeader(PipelineBrowseModel.NAV_STAMP_HEADER) shouldBe null
     }
 
@@ -233,7 +262,8 @@ class TemplateUiControllerTest {
 
         val model = ExtendedModelMap()
         val viewName =
-            partialController.list(model, MockHttpServletResponse(), q = null, dialect = null, type = null, prefix = null, offset = 0, scope = "bogus")
+            partialController
+                .list(model, MockHttpServletResponse(), q = null, dialect = null, type = null, prefix = null, offset = 0, scope = "bogus")
 
         viewName shouldBe TemplateBrowseModel.SEARCH_VIEW
         model["rootId"] shouldBe TemplateBrowseModel.CATALOG_ROOT_ID

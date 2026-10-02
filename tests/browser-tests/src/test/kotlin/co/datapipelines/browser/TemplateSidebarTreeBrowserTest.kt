@@ -84,7 +84,6 @@ class TemplateSidebarTreeBrowserTest : BrowserSuite() {
     // ------------------------------------------------------------------ the rail
 
     private val panel = "#nav-tree-templates"
-    private val region = "#nav-tree-templates [data-nav-tree-scroll]"
 
     private fun railWidth(): Double =
         (page.evaluate("() => document.querySelector('.app-rail').getBoundingClientRect().width") as Number).toDouble()
@@ -199,7 +198,7 @@ class TemplateSidebarTreeBrowserTest : BrowserSuite() {
         // The workspace names itself to the rail (the [data-nav-current] hook) — a boosted
         // arrival or a fresh document re-marks the leaf either way.
         page.waitForFunction(
-            "() => document.querySelector('[data-nav-current=\\'templates\\']')?.getAttribute('data-nav-current-path') === 'test/nav_probe.sql'",
+            "() => document.querySelector('[data-nav-current]').getAttribute('data-nav-current-path') === 'test/nav_probe.sql'",
         )
         page.navigate("$baseUrl/dashboard")
         openTree()

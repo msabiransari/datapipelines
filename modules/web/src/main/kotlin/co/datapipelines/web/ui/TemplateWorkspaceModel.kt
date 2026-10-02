@@ -98,8 +98,10 @@ class TemplateWorkspaceModel(
      * Marks every row with the version the page is viewing — called once, after [resolve], so
      * the Versions tab and the selector cannot disagree with the page about which row is viewed.
      */
-    fun markViewed(versions: List<VersionRowView>, viewedVersion: Int?): List<VersionRowView> =
-        versions.map { if (it.version == viewedVersion) it.copy(isViewed = true) else it }
+    fun markViewed(
+        versions: List<VersionRowView>,
+        viewedVersion: Int?,
+    ): List<VersionRowView> = versions.map { if (it.version == viewedVersion) it.copy(isViewed = true) else it }
 
     /** Rule 1 — the explicit version, admitted or the family's 404. */
     private fun explicit(

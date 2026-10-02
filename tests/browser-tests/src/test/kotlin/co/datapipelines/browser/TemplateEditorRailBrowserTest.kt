@@ -258,6 +258,4 @@ class TemplateEditorRailBrowserTest : BrowserSuite() {
     }
 
     private fun suffix(): String = generatedPassword("s").take(8).lowercase()
-
-
 }

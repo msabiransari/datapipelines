@@ -131,8 +131,8 @@ class TemplateExplorerRenderTest {
                 fillUsedBy(
                     pipelines =
                         listOf(
-                            pin("acme/rollup", "acme/rollup", 1),
-                            pin("acme/rollup", "acme/rollup", 2),
+                            pin("acme/rollup", 1),
+                            pin("acme/rollup", 2),
                         ),
                     sets = listOf(setPin("acme/sales/region_filters", 1)),
                     visualizations = listOf(visualizationPin("acme/charts/revenue", 1)),
@@ -308,7 +308,6 @@ class TemplateExplorerRenderTest {
     }
 
     private fun pin(
-        pipelineId: String,
         pipelineName: String,
         version: Int,
     ): co.datapipelines.pipeline.TemplatePin =

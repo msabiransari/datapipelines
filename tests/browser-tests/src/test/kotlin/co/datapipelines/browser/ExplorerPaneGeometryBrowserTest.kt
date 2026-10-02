@@ -59,9 +59,6 @@ import java.nio.file.Paths
  * below — it is the right instrument for the FONT half of §B — but the geometry at the first
  * animation frame after `htmx:afterSwap` is what pins this one.
  */
-import co.datapipelines.browser.ScheduleFixtures.createSchedule
-import co.datapipelines.browser.ScheduleFixtures.releasedPipeline
-
 class ExplorerPaneGeometryBrowserTest : SchedulesBrowserSuite() {
     private fun postJsonFresh(
         url: String,

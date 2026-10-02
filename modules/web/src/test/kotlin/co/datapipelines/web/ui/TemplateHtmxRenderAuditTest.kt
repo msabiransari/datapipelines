@@ -308,8 +308,20 @@ class TemplateHtmxRenderAuditTest {
                 createdBy = UUID.randomUUID(),
             ),
         )
-        setVariable("templateName", "acme/revenue.sql")
-        setVariable("navCurrentPath", "acme/revenue.sql")
+        fillWorkspacePage("acme/revenue.sql")
+        setVariable("selectedVersion", 1)
+        setVariable("workingVersion", 2)
+        setVariable("readOnly", true)
+        setVariable("selectedStatus", "RELEASED")
+        setVariable("releasedAt", Instant.parse("2026-08-11T00:00:00Z"))
+        setVariable("releasedBy", UUID.randomUUID().toString())
+        setVariable("skeleton", TransformSkeleton)
+    }
+
+    /** The workspace page's own stamp, shared by the audits that render it. */
+    private fun WebContext.fillWorkspacePage(templateName: String) {
+        setVariable("templateName", templateName)
+        setVariable("navCurrentPath", templateName)
         setVariable("hasSelectedBody", true)
         setVariable("viewedVersion", 1)
         setVariable("viewedLabel", "v1 · released · current")
@@ -333,7 +345,7 @@ class TemplateHtmxRenderAuditTest {
         setVariable(
             "templateWorkspace",
             TemplateWorkspaceModel.Resolved(
-                name = "acme/revenue.sql",
+                name = templateName,
                 selected = TemplateWorkspaceModel.Selected(null, null),
                 draft = null,
                 currentVisible = 1,
@@ -348,13 +360,6 @@ class TemplateHtmxRenderAuditTest {
         setVariable("usedByVisualizations", emptyList<Any>())
         setVariable("usedBySummary", "nothing")
         setVariable("versions", emptyList<Any>())
-        setVariable("selectedVersion", 1)
-        setVariable("workingVersion", 2)
-        setVariable("readOnly", true)
-        setVariable("selectedStatus", "RELEASED")
-        setVariable("releasedAt", Instant.parse("2026-08-11T00:00:00Z"))
-        setVariable("releasedBy", UUID.randomUUID().toString())
-        setVariable("skeleton", TransformSkeleton)
     }
 
     /** DatasourceUiController's model — ONE row, or the pager never renders and the guard is vacuous. */

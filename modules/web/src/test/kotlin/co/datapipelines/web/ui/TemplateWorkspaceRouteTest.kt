@@ -4,7 +4,6 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import org.junit.jupiter.api.Test
 import org.springframework.http.server.PathContainer
-import org.springframework.web.util.pattern.PatternParseException
 import org.springframework.web.util.pattern.PathPattern
 import org.springframework.web.util.pattern.PathPatternParser
 
@@ -60,14 +59,6 @@ class TemplateWorkspaceRouteTest {
         val name = best?.matchAndExtract(container)?.uriVariables?.get("name")
         return Routed(best, name)
     }
-
-    private fun refusing(pattern: String): Boolean =
-        try {
-            parser.parse(pattern)
-            false
-        } catch (_: PatternParseException) {
-            true
-        }
 
     @Test
     fun `a dotted multi-segment template name is captured whole`() {

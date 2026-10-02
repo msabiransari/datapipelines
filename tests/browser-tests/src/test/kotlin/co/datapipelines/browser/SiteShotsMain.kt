@@ -851,7 +851,14 @@ object SiteShotsMain {
             // catalog row into it.
             page.navigate("$baseUrl/templates?q=" + SHARED_TEMPLATE.substringAfterLast('/'))
             waitFor("#template-list-wrapper")
-            page.locator("a.tpl-result", com.microsoft.playwright.Page.LocatorOptions().setHasText(SHARED_TEMPLATE)).first().click()
+            page
+                .locator(
+                    "a.tpl-result",
+                    com.microsoft.playwright.Page
+                        .LocatorOptions()
+                        .setHasText(SHARED_TEMPLATE),
+                ).first()
+                .click()
             waitFor(".tw-root")
             page.locator("#tw-tab-used").click()
             waitFor("#tw-pane-used .tplx-usage")

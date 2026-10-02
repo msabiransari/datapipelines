@@ -134,7 +134,7 @@ class UiBoundaryShotsBrowserTest : BrowserSuite() {
     }
 
     @Test
-    fun `the template workspace works with no script of its own beyond its files — preview through htmx, purge asked in the page by the 102 dialog`() {
+    fun `the template workspace works with no script of its own beyond its files — preview through htmx, purge asked in the page`() {
         // Re-aimed by #398: the editor page is the WORKSPACE now (the old route redirects);
         // the preview lives on the Render tab, the purge draft verb in the workspace header.
         startTrace()
@@ -189,12 +189,27 @@ class UiBoundaryShotsBrowserTest : BrowserSuite() {
 
         // Purge draft asks IN THE PAGE. Since 102 the ask is the §4.3d purge dialog served into
         // `#tx-dialog` (a window.confirm would be auto-dismissed by Playwright and the draft
-        // would be gone by the next line); closing it leaves the draft untouched. A fresh
-        // draft-only template is the {D} shape — the header's one destructive is the ENTITY
-        // purge — so the version purge comes from its row's ⋯ menu on the Versions tab.
+        // would be gone by the next line); closing it leaves the draft untouched.
+        purgeDialogShot()
+        // Nothing was purged: the draft's own affordances are still there.
+        page.locator("[data-verb='template-release']").isVisible shouldBe true
+    }
+
+    /** The {D} shape's version purge, from its row's ⋯ menu on the Versions tab, photographed. */
+    private fun purgeDialogShot() {
         page.locator("#tw-tab-versions").click()
-        page.locator("#tw-pane-versions tr[data-version-row] details.tplx-vmenu summary").first().click()
-        page.locator("#tw-pane-versions .tplx-vmenu-list button", com.microsoft.playwright.Page.LocatorOptions().setHasText("Purge v1")).first().click()
+        page
+            .locator("#tw-pane-versions tr[data-version-row] details.tplx-vmenu summary")
+            .first()
+            .click()
+        page
+            .locator(
+                "#tw-pane-versions .tplx-vmenu-list button",
+                com.microsoft.playwright.Page
+                    .LocatorOptions()
+                    .setHasText("Purge v1"),
+            ).first()
+            .click()
         page.waitForSelector("#tx-dialog [data-lifecycle-dialog='template-purge'] .app-modal")
         shot("template-editor-discard-confirm")
         page.click("#tx-dialog [data-lifecycle-close]")
@@ -203,8 +218,6 @@ class UiBoundaryShotsBrowserTest : BrowserSuite() {
                 .WaitForOptions()
                 .setState(com.microsoft.playwright.options.WaitForSelectorState.HIDDEN),
         )
-        // Nothing was purged: the draft's own affordances are still there.
-        page.locator("[data-verb='template-release']").isVisible shouldBe true
     }
 
     private fun shot(state: String) {

@@ -76,7 +76,11 @@ class TemplateEditorController(
      * each segment percent-encodes anything that is not a path character). The workspace's
      * capture-everything variable is the one place a path may carry the name.
      */
-    private fun canonicalBuilder(name: String): UriComponentsBuilder = UriComponentsBuilder.fromPath("/templates").pathSegment(*name.split("/").toTypedArray())
+    @Suppress("SpreadOperator") // pathSegment has no List overload; the split is bounded by the grammar
+    private fun canonicalBuilder(name: String): UriComponentsBuilder =
+        UriComponentsBuilder
+            .fromPath("/templates")
+            .pathSegment(*name.split('/').toTypedArray())
 
     /**
      * The source column alone — what the workspace's Source tab and the version selector

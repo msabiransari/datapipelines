@@ -113,10 +113,8 @@ class TemplateWorkspaceControllerTest {
             )
         every { repository.findVersion(workspaceId, name, 2) } returns template(name, 2)
         every { repository.findVersion(workspaceId, name, 1) } returns template(name, 1)
-        every { repository.findVersionDetail(workspaceId, name, 2) } returns
-            TemplateVersionDetail(name, 2, PipelineVersionStatus.RELEASED, "h2", Instant.EPOCH, userId, releasedAt = Instant.EPOCH, releasedBy = userId)
-        every { repository.findVersionDetail(workspaceId, name, 1) } returns
-            TemplateVersionDetail(name, 1, PipelineVersionStatus.RELEASED, "h1", Instant.EPOCH, userId, releasedAt = Instant.EPOCH, releasedBy = userId)
+        every { repository.findVersionDetail(workspaceId, name, 2) } returns releasedDetail(name, 2)
+        every { repository.findVersionDetail(workspaceId, name, 1) } returns releasedDetail(name, 1)
         every { repository.findVersionDetail(workspaceId, name, 3) } returns
             TemplateVersionDetail(name, 3, PipelineVersionStatus.DRAFT, "h3", Instant.EPOCH, userId)
     }
@@ -339,18 +337,31 @@ class TemplateWorkspaceControllerTest {
                 )
             }
         val context =
-            org.thymeleaf.context.WebContext(
-                org.thymeleaf.web.servlet.JakartaServletWebApplication
-                    .buildApplication(org.springframework.mock.web.MockServletContext())
-                    .buildExchange(
-                        MockHttpServletRequest(),
-                        org.springframework.mock.web.MockHttpServletResponse(),
-                    ),
+            WebContext(
+                JakartaServletWebApplication
+                    .buildApplication(MockServletContext())
+                    .buildExchange(MockHttpServletRequest(), MockHttpServletResponse()),
             )
         context.setVariable("renderOutput", renderOutput)
         context.setVariable("renderError", renderError)
         return engine.process("partials/template-render", context)
     }
+
+    /** A RELEASED row with its provenance — the stub detail the resolve rules read. */
+    private fun releasedDetail(
+        id: String,
+        version: Int,
+    ): TemplateVersionDetail =
+        TemplateVersionDetail(
+            templateId = id,
+            version = version,
+            status = PipelineVersionStatus.RELEASED,
+            bodyHash = "h$version",
+            createdAt = Instant.EPOCH,
+            createdBy = userId,
+            releasedAt = Instant.EPOCH,
+            releasedBy = userId,
+        )
 
     // ------------------------------------------------------------------ the page's model
 
@@ -402,8 +413,7 @@ class TemplateWorkspaceControllerTest {
             listOf(co.datapipelines.templates.TemplateVersionSummary(transformName, 1, Instant.EPOCH, userId))
         every { repository.findVersion(workspaceId, transformName, 1) } returns
             TransformFixtures.storedSkeleton(version = 1).let { it.copy(id = transformName) }
-        every { repository.findVersionDetail(workspaceId, transformName, 1) } returns
-            TemplateVersionDetail(transformName, 1, PipelineVersionStatus.RELEASED, "h1", Instant.EPOCH, userId, releasedAt = Instant.EPOCH, releasedBy = userId)
+        every { repository.findVersionDetail(workspaceId, transformName, 1) } returns releasedDetail(transformName, 1)
         every { themeResolver.resolve(any()) } returns "saas"
 
         val page = ExtendedModelMap()
@@ -412,5 +422,4 @@ class TemplateWorkspaceControllerTest {
         page["activeTab"] shouldBe "source"
         page["isTransform"] shouldBe true
     }
-
 }
