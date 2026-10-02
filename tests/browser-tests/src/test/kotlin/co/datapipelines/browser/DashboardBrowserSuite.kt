@@ -826,9 +826,14 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
         val path =
             when {
                 client["recorded"] == false -> "the client never recorded this refresh id"
-                client["ended"] == true ->
+
+                client["ended"] == true -> {
                     "the ended short-circuit answered (datapipelines-dashboard.js abort(): refresh.ended) — no POST was sent"
-                else -> "the POST was rejected (datapipelines-dashboard.js abort()'s rejection handler)"
+                }
+
+                else -> {
+                    "the POST was rejected (datapipelines-dashboard.js abort()'s rejection handler)"
+                }
             }
         throw AssertionError(
             "the abort was not acknowledged: acked=$acked | row status=${row["status"]} finished=${row["finished"]} | client=$client | $path",
