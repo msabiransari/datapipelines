@@ -180,7 +180,7 @@ class DashboardGridRowUnitBrowserTest : DashboardBrowserSuite() {
         target.waitForFunction(RENDERED_JS, mapOf("scope" to scope, "slots" to figures))
         val measured = Measured(label, target.evaluate(MEASURE_JS, mapOf("scope" to scope, "slots" to slots.toList())) as Map<*, *>)
         record(measured.toString())
-        shoot(target, scope, label)
+        shoot(target, scope, label, figures)
         return measured
     }
 
@@ -300,19 +300,26 @@ class DashboardGridRowUnitBrowserTest : DashboardBrowserSuite() {
     }
 
     /**
-     * The page as a person sees it, named by page, viewport and theme, beside the measurements — and
-     * the board element whole: the app's main pane scrolls inside the viewport, so a full-page shot of
-     * a stacked (collapsed) board stops at the viewport's foot.
+     * The page as a person sees it, named by page, viewport and theme, beside the measurements — the
+     * board element whole, and each figure's slot on its own. The app's main pane scrolls inside the
+     * viewport, so neither the full-page shot nor the board's shows what lies below the pane's fold of a
+     * stacked (collapsed) board; a slot shot scrolls its slot into view first, so every figure is seen.
      */
     private fun shoot(
         target: Page,
         scope: String,
         label: String,
+        slots: Collection<String>,
     ) {
         Files.createDirectories(REPORT.parent)
         val name = label.replace('/', '-')
         target.screenshot(Page.ScreenshotOptions().setFullPage(true).setPath(REPORT.parent.resolve("$name.png")))
         target.locator("$scope .dp-dashboard").screenshot(Locator.ScreenshotOptions().setPath(REPORT.parent.resolve("$name-board.png")))
+        for (slot in slots) {
+            target
+                .locator("$scope [data-dp-slot='$slot']")
+                .screenshot(Locator.ScreenshotOptions().setPath(REPORT.parent.resolve("$name-$slot.png")))
+        }
     }
 
     /** One line per measurement into the build's reports, for the handback's record of the geometry. */
