@@ -3,7 +3,7 @@
 **Status:** v1.51 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
-**Last updated:** 2026-09-29
+**Last updated:** 2026-10-02
 
 ---
 
@@ -230,8 +230,8 @@ SQL-sourced source against. This subsection is the source of truth for that reco
   name as the driver reported it, `type` a §7 `LogicalType` wire value (`DECIMAL` entries may
   also carry `precision`/`scale`), `nullable` boolean — an absent or JSON-null `nullable` reads
   as `true` (unknown admits). A record past the bounds (256 columns, 128 characters per name —
-  `ExecutionRepository`'s constants) is recorded as NULL with a `warn`: never a truncated array,
-  never a failed execution. The record is OUTSIDE `body_hash` (like `implements`): recording
+  `ExecutionRepository`'s constants), or one with a blank column name, is recorded as NULL with a
+  `warn`: never a truncated array, never a failed execution. The record is OUTSIDE `body_hash` (like `implements`): recording
   changes no hash and opens no draft.
 - **The one word (D3).** The release response (`caller_output`, rest-api §5.10) and the
   `pipeline.version.released` audit row carry exactly one word — `recorded` (the D1 read found
@@ -1874,7 +1874,7 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
-| 2026-10-02 | v1.51 | 328 (#328) the release records its caller node's result columns | New **§3.3.1** — the source of truth for the caller-output record: the flip copies the version's latest qualifying execution's `result_schema_json` into `pipeline_versions.caller_output_json` (D1, in the flip's own statement); the D2 `{name, type, nullable}` shape with the 256-column / 128-character record bounds and the JSON-null-reads-`true` rule; the D3 word (`recorded` \| `declared` \| `none` \| `not_observed`) the response and audit row carry — never the column list; the D4 precedence (the record never overrides a transform caller's declared contract) and the promotion carry (validated at the receiver, stored on the imported release). No new error code; the body, the hash and §12.12 are untouched. NEXT: renumber at the final merge of main. |
+| 2026-10-02 | v1.51 | 328 (#328) the release records its caller node's result columns | New **§3.3.1** — the source of truth for the caller-output record: the flip copies the version's latest qualifying execution's `result_schema_json` into `pipeline_versions.caller_output_json` (D1, in the flip's own statement); the D2 `{name, type, nullable}` shape with the 256-column / 128-character record bounds and the JSON-null-reads-`true` rule; the D3 word (`recorded` \| `declared` \| `none` \| `not_observed`) the response and audit row carry — never the column list; the D4 precedence (the record never overrides a transform caller's declared contract) and the promotion carry (validated at the receiver, stored on the imported release). No new error code; the body, the hash and §12.12 are untouched. |
 | 2026-10-02 | v1.50 | 333 (#333) the strict contract readers | **§13.21 gains the scalar-shapes paragraph**: the pipeline, template, transform-block and DTO readers refuse a JSON number or boolean where a string is declared (and a string or float where an integer is declared) with the path and the expected shape, never the value. `pipeline.validation.schema_version_unsupported` is also the pipeline reader's wrong-type answer (`details.reason: "wrong_type"`); `template.contract_invalid` gains `details.rule: "wrong_type"`. No new code, no status change. |
 | 2026-10-01 | v1.49 | L5 (#367, #10) the `dashboard` key kind | New **§13.23 row `dashboard.binding.path_invalid`** (400): a dashboard binding's `name_prefix` is not a legal folder of the name grammar (1–9 segments, or the root `/`), or names no folder at or above a dashboard the CALLER's workspace has (the #191 non-disclosure rule). The refusal the binding routes and the Keys page's dashboard binding editor answer; the reserved `dashboard.key.kind_refused` stays unused (the surfaces answer the one catalogued `endpoint.key_kind_refused`, whose `details.reason` names the kind). §13.23 is 36 rows. |
 | 2026-10-01 | v1.48 | L4b (#353) stale text after the gate landed | **§13.22, no new code:** `visualization.release.tests_missing` no longer says the default gate refuses every release (#352 installed the gate — it names `no_runs` / `run_open` / `no_cases`), and `visualization.test.session_expired` names the shipped key `datapipelines.visualization.session-ttl-minutes`, not the spec's unshippable `tests.session-ttl-minutes`. |

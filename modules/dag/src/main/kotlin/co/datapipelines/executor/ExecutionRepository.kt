@@ -133,7 +133,7 @@ data class ExecutionRecord(
      * `List<ColumnSchema>`). History, exactly like [resultRowCount]: it says what the run
      * PRODUCED, never whether the result is still fetchable. Null for a run with no caller
      * node, a run whose schema was never recorded, and a schema past the record bounds —
-     * `pipeline_executions` §4.6; the release flip reads it (pipeline-contract §5.3).
+     * `pipeline_executions` §4.6; the release flip reads it (versioning §5.3).
      */
     val resultSchemaJson: String? = null,
     val parentExecutionId: UUID? = null,
@@ -359,6 +359,12 @@ class ExecutionRepository(
                 "Result schema has a column name longer than {} characters; recording nothing.",
                 MAX_RECORDED_COLUMN_NAME_LENGTH,
             )
+            return null
+        }
+        // The importer and the reader refuse a blank name (pipeline-contract §3.3.1), so a
+        // whitespace-only one (`SELECT 1 AS " "`) would store a record no read could parse.
+        if (schema.any { it.name.isBlank() }) {
+            log.warn("Result schema has a blank column name; recording nothing.")
             return null
         }
         return ExecutorJson.write(schema)

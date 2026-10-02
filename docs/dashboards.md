@@ -414,8 +414,8 @@ through child pipelines) and its parameters. Its OUTPUT columns are the release'
 - A **transform** caller node's pinned contract names the columns — the declared answer, and it outranks everything
   else.
 - Any other (SQL) caller node's columns are **the release's record**: what the release copied from the version's
-  latest run when the checks ran (`caller_output_json`; D1). A release with no qualifying run records nothing, and
-  answers `caller_output = not_observed` — **the one remaining skip**: the save-time
+  latest successful run after the draft's last edit (`caller_output_json`; D1). A release with no qualifying run
+  records nothing, and answers `caller_output = not_observed` — **the one remaining skip**: the save-time
   `dashboard.validation.input_contract_mismatch` check is left to the runtime (L2), which judges the real columns.
 - A release with **no caller node** answers an empty output (every mapped input is refused).
 

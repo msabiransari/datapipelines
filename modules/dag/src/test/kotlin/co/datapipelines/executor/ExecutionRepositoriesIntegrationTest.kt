@@ -170,7 +170,7 @@ class ExecutionRepositoriesIntegrationTest {
      * #328 A — the D2 record: the stored result's schema rides `recordResult` and reads back
      * as the `{name, type, nullable}` array, element by element. DECIMAL carries precision (the
      * §7.1 rule); a null `nullable` is recorded as JSON's absence and read back as absent —
-     * "unknown admits" is the READER's rule (pipeline-contract §5.3), the record stores the truth.
+     * "unknown admits" is the READER's rule (pipeline-contract §3.3.1), the record stores the truth.
      */
     @Test
     fun `recordResult records the result schema as the D2 array, element by element`() {
@@ -221,6 +221,16 @@ class ExecutionRepositoriesIntegrationTest {
             .shouldBeNull()
 
         executions.recordResult(record.executionId, 1, 16, oversize).shouldBeTrue()
+        executions
+            .findById(WORKSPACE_ID, record.executionId)
+            .shouldNotBeNull()
+            .resultSchemaJson
+            .shouldBeNull()
+
+        // A whitespace-only name is a record the reader would refuse: recorded as NULL instead.
+        executions
+            .recordResult(record.executionId, 1, 16, listOf(ColumnSchema(" ", LogicalType.STRING, nullable = true)))
+            .shouldBeTrue()
         executions
             .findById(WORKSPACE_ID, record.executionId)
             .shouldNotBeNull()

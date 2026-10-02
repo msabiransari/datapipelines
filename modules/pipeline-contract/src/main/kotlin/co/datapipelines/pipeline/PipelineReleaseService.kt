@@ -19,7 +19,7 @@ enum class ReleaseCallerOutput(
     /** The flip copied the version's latest qualifying execution's schema (D1 hit). */
     RECORDED("recorded"),
 
-    /** The caller node is a TRANSFORM: the pinned contract declares the columns; nothing copied (D4). */
+    /** The caller node is a TRANSFORM: the pinned contract declares the columns and outranks any copied record (D4). */
     DECLARED("declared"),
 
     /** The released body has no caller node — it returns no rows at all. */
@@ -135,7 +135,7 @@ open class PipelineReleaseService(
          * #328 (D3) — what the release did about its caller node's result columns, as the one
          * word the response, the audit row and every doc share: `recorded` (the D1 read found
          * the version's latest run and copied its schema), `declared` (a TRANSFORM caller — the
-         * pinned contract is the answer, nothing copied), `none` (no caller node), or
+         * pinned contract is the answer; a copied record never overrides it), `none` (no caller node), or
          * `not_observed` (a SQL caller node with no qualifying execution — the version released
          * anyway, recording NULL; today's validator behaviour continues for that release).
          * Never the column list: ids, names, versions and this word are all an audit row says
