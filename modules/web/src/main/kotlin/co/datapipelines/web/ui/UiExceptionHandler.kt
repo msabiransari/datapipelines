@@ -20,6 +20,8 @@ import org.springframework.web.bind.MethodArgumentNotValidException
 import org.springframework.web.bind.MissingServletRequestParameterException
 import org.springframework.web.bind.annotation.ControllerAdvice
 import org.springframework.web.bind.annotation.ExceptionHandler
+import org.springframework.web.bind.annotation.PathVariable
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException
 import org.springframework.web.server.ResponseStatusException
 import org.springframework.web.servlet.ModelAndView
 
@@ -45,8 +47,9 @@ import org.springframework.web.servlet.ModelAndView
  * explicit order EVERY exception from a UI controller was answered with the REST JSON
  * envelope — this advice was dead code and the `error/403` / `error/500` pages never
  * rendered (verified against the running demo stack, 034). The scope restriction
- * (`basePackageClasses` — the `web.ui` package holds no `@RestController`) keeps the
- * REST surface on `ApiExceptionHandler` exactly as before.
+ * (`basePackageClasses`) keeps the REST surface on `ApiExceptionHandler` exactly as before.
+ * It is by PACKAGE, not by controller kind: the one `@RestController` in `web.ui`,
+ * [AvatarController] (`GET /avatar`, image bytes), is covered by this advice too.
  *
  * Winning first means the `Throwable` backstop would also steal exceptions that carry
  * their OWN status — `ResponseStatusException` (the disabled-local-login 404 the
@@ -154,6 +157,49 @@ class UiExceptionHandler(
             INTERNAL_STAND_IN_CODE,
             request,
         )
+    }
+
+    /**
+     * #408 — a typed `@PathVariable` or `@RequestParam` whose value does not convert (`UUID`, `Int`,
+     * `Long`, `Boolean`): `GET /dashboards/not-a-uuid`, `?version=abc`. Spring raises this before
+     * the handler runs, after [co.datapipelines.auth.ScopeInterceptor] admitted the caller. It used
+     * to reach [onUnexpected]: 500, "Something went wrong on our side" and an ERROR line with a
+     * stack, for a typo in the address bar.
+     *
+     * - A malformed PATH value names nothing, exactly like a well-formed absent id, so it answers
+     *   as one: the 404 page, or the 404 toast with the stand-in code [onResponseStatus] gives an
+     *   absent id. A caller cannot tell the two apart — no "this id is well-formed" oracle.
+     * - A malformed QUERY or FORM value is a 400, the REST advice's answer to the same value
+     *   (`ApiExceptionHandler.onBadParameter`): its code and its message, which names the
+     *   parameter and never echoes the value. A GET's page says the ADDRESS is unreadable; any
+     *   other method keeps `error/400`'s form sentence, since its value came from a form.
+     *
+     * The split keys on the parameter's annotation, never on the value's shape. A DEBUG line with
+     * the throwable (the REST advice's shape): a caller's typo is not an operator's incident.
+     * `MethodArgumentConversionNotSupportedException` is deliberately NOT here — Spring raises it
+     * when no converter exists for the declared type, which is our defect whatever was sent, so
+     * it keeps the backstop's 500 and its stack.
+     */
+    @ExceptionHandler(MethodArgumentTypeMismatchException::class)
+    fun onTypeMismatch(
+        error: MethodArgumentTypeMismatchException,
+        request: HttpServletRequest,
+    ): Any {
+        if (error.parameter.hasParameterAnnotation(PathVariable::class.java)) {
+            log.debug("404 {} {}: malformed path variable '{}'", request.method, request.requestURI, error.name, error)
+            return refusal(HttpStatus.NOT_FOUND, HttpStatus.NOT_FOUND.reasonPhrase, INTERNAL_STAND_IN_CODE, request)
+        }
+        log.debug("400 {} {}: malformed parameter '{}'", request.method, request.requestURI, error.name, error)
+        if (isHtmx(request)) {
+            return toast(
+                HttpStatus.BAD_REQUEST,
+                "Parameter '${error.name}' is missing or not of the expected type.",
+                PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE,
+            )
+        }
+        val page = errorModel("error/400", HttpStatus.BAD_REQUEST)
+        if (request.method == "GET" || request.method == "HEAD") page.addObject("detail", ADDRESS_DETAIL)
+        return page
     }
 
     /**
@@ -277,5 +323,8 @@ class UiExceptionHandler(
          * only "we broke, not you" entry. Keep the two in sync until the catalog grows one.
          */
         val INTERNAL_STAND_IN_CODE = PipelineErrorCodes.Execution.ABORTED
+
+        /** `error/400`'s `detail` when the unreadable value came in the address — it names no value (#408). */
+        const val ADDRESS_DETAIL = "The address names a value this page cannot read. Check the link and try again."
     }
 }
