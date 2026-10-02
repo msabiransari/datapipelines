@@ -806,8 +806,15 @@ open class WorkspaceService(
         val context = contextFor(principal, workspace.name) ?: throw WorkspaceNotFoundException(workspace.name)
         when (kind) {
             ApiKeyKind.MCP -> requirePermission(principal, workspace, Permission.MCP_KEY_CREATE)
+
             ApiKeyKind.ENDPOINT -> requirePermission(principal, workspace, Permission.API_KEY_CREATE)
+
             ApiKeyKind.SERVER -> requirePermission(principal, workspace, Permission.SERVER_KEY_CREATE)
+
+            // L5 (the lane's decision, recorded in the handback): a dashboard key is a TRANSPORT key like the
+            // endpoint key — minted by the same `api_key.create` holders, on the same Keys page. The bindings
+            // are a separate verb (`dashboard.key.bind`), exactly as an endpoint key's are.
+            ApiKeyKind.DASHBOARD -> requirePermission(principal, workspace, Permission.API_KEY_CREATE)
         }
         return context
     }

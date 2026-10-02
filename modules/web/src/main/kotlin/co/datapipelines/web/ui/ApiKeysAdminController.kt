@@ -1,5 +1,7 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.application.dashboards.DashboardKeyBindingRepository
+import co.datapipelines.application.dashboards.DashboardKeyService
 import co.datapipelines.application.endpoints.EndpointKeyBindingRepository
 import co.datapipelines.application.endpoints.EndpointKeyService
 import co.datapipelines.application.endpoints.EndpointPublishService
@@ -45,6 +47,7 @@ import java.util.UUID
  * answer the form's user would, and a caller the route admits can never exceed their kind.
  */
 @Controller
+@Suppress("LongParameterList") // the page's ports ARE its constructor (DashboardRuntime's rule)
 class ApiKeysAdminController(
     private val apiKeyService: ApiKeyService,
     private val apiKeyRepository: ApiKeyRepository,
@@ -53,6 +56,11 @@ class ApiKeysAdminController(
     private val publishing: EndpointPublishService,
     private val keyRows: ApiKeyRows,
     private val bindings: EndpointKeyBindingRepository,
+    /** L5 — the dashboard bindings' service and table: the kind's own card and rows. */
+    private val dashboardKeys: DashboardKeyService,
+    private val dashboardBindings: DashboardKeyBindingRepository,
+    /** The workspace's dashboards — what a dashboard binding picker may offer (#191's rule). */
+    private val dashboards: co.datapipelines.visualization.DashboardService,
     private val userRepository: UserRepository,
     private val themeResolver: ThemeResolver,
 ) {
@@ -176,6 +184,36 @@ class ApiKeysAdminController(
         return "partials/api-keys-rows"
     }
 
+    /**
+     * The `dashboard` key's association set (L5) — `associate`'s twin, on the dashboard kind's
+     * own route with its own picker: the FOLDERS of the workspace's dashboard name space, the
+     * delta written by the dashboard key's service (the same set-delta shape: the multi-select
+     * posts the full selection, the service writes what moved). A hand-crafted folder fails
+     * `DashboardKeyService`'s normalization, not here.
+     */
+    @PostMapping("/partials/api-keys/{keyId}/dashboard-bindings")
+    @RequiredScope(Permission.DASHBOARD_KEY_BIND)
+    fun associateDashboards(
+        @PathVariable keyId: String,
+        @RequestParam("bindings", required = false) selected: List<String>?,
+        model: Model,
+    ): String {
+        val principal = requirePrincipal()
+        val key = requireWorkspaceDashboardKey(principal, keyId)
+        val wanted =
+            selected
+                .orEmpty()
+                .flatMap { it.split(',') }
+                .mapNotNull { it.trim().takeIf { folder -> folder.isNotEmpty() } }
+                .toSet()
+        val current = dashboardBindings.findByKey(key.id).map { it.namePrefix }.toSet()
+        wanted.filter { it !in current }.forEach { dashboardKeys.bind(principal, key.id, it) }
+        current.filter { it !in wanted }.forEach { dashboardKeys.unbind(principal, key.id, it) }
+        model.addAttribute("keys", rows(principal))
+        RoleModel.stamp(model, principal)
+        return "partials/api-keys-rows"
+    }
+
     /** The page's model — shared by the page render and every partial that redraws the table. */
     private fun fillPage(
         model: Model,
@@ -190,6 +228,12 @@ class ApiKeysAdminController(
         model.addAttribute(
             "bindingNodes",
             ApiKeyForm.bindingNodes(publishing.list(principal).map { it.pathPattern }),
+        )
+        // L5 — the dashboard binding picker offers the FOLDERS of this workspace's dashboard
+        // names (the root first). Validated server-side by DashboardKeyService either way.
+        model.addAttribute(
+            "dashboardFolders",
+            ApiKeyForm.dashboardFolders(dashboards.currentVersions(principal.requireWorkspace().id).map { it.name }),
         )
         RoleModel.stamp(model, principal)
     }
@@ -272,9 +316,26 @@ class ApiKeysAdminController(
     private fun requireWorkspaceEndpointKey(
         principal: AuthenticatedPrincipal,
         keyId: String,
+    ): ApiKey = requireWorkspaceKey(principal, keyId, ApiKeyKind.ENDPOINT)
+
+    /**
+     * The key the DASHBOARD association verbs address (L5): a `dashboard` key of the ACTIVE
+     * workspace, not-found for anything else — the same guard, the other table, so this page's
+     * dashboard verbs can never write a folder binding onto a key of another kind.
+     */
+    private fun requireWorkspaceDashboardKey(
+        principal: AuthenticatedPrincipal,
+        keyId: String,
+    ): ApiKey = requireWorkspaceKey(principal, keyId, ApiKeyKind.DASHBOARD)
+
+    /** The one workspace+kind shape guard both association routes share. */
+    private fun requireWorkspaceKey(
+        principal: AuthenticatedPrincipal,
+        keyId: String,
+        kind: ApiKeyKind,
     ): ApiKey {
         val key = apiKeyRepository.findById(keyId)
-        if (key == null || key.kind != ApiKeyKind.ENDPOINT || key.workspaceId != principal.requireWorkspace().id) {
+        if (key == null || key.kind != kind || key.workspaceId != principal.requireWorkspace().id) {
             throw DatapipelinesException(
                 code = PipelineErrorCodes.Endpoint.NOT_FOUND,
                 message = "No API key '$keyId' in this workspace.",

@@ -64,6 +64,13 @@ enum class ExecutedByKeyKind {
 
     /** Reserved for the promotion peer's credential; nothing writes it today. */
     SERVER,
+
+    /**
+     * A `dashboard` key's delegated run (L5, D50): the refresh's executions attribute the KEY
+     * (the runtime's own authorization was `dashboard.execute`; the run names the credential
+     * that held it), listed as the key identity's own — like every transport kind's runs.
+     */
+    DASHBOARD,
     ;
 
     /** The database and wire token — the CHECK constraint's values. */

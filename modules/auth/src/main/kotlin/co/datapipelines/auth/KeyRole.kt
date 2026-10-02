@@ -35,6 +35,14 @@ enum class KeyRole {
 
     /** An `mcp` key minted by (or for) a workspace admin: the workspace-admin column, over `/mcp`. */
     WORKSPACE_ADMIN,
+
+    /**
+     * A `dashboard` key (L5, the dashboards spec §5): exactly `dashboard.read` — through the LENS
+     * its `dashboard_key_bindings` folders are, unbound = unservable — and `dashboard.execute`, on
+     * the runtime routes only. A transport role like [API_CALLER]: never a member role, never a
+     * super-admin role (B1).
+     */
+    DASHBOARD_VIEWER,
     ;
 
     /** The wire and database token (`api_caller`, `author`, …) — snake_case everywhere (A5). */
@@ -66,15 +74,16 @@ enum class KeyRole {
         fun find(token: String): KeyRole? = entries.firstOrNull { it.wire == token.trim().lowercase() }
 
         /**
-         * The transport role a key of [kind] carries when its kind fixes the role — `endpoint`
-         * and `server`. An `mcp` key's role is chosen at creation (A13): null here, the caller
-         * supplies it.
+         * The transport role a key of [kind] carries when its kind fixes the role — `endpoint`,
+         * `server` and `dashboard`. An `mcp` key's role is chosen at creation (A13): null here,
+         * the caller supplies it.
          */
         fun forKind(kind: ApiKeyKind): KeyRole? =
             when (kind) {
                 ApiKeyKind.MCP -> null
                 ApiKeyKind.ENDPOINT -> API_CALLER
                 ApiKeyKind.SERVER -> PROMOTION_RECEIVER
+                ApiKeyKind.DASHBOARD -> DASHBOARD_VIEWER
             }
 
         /** The member key role mirroring [role] — the values the create surface offers for an `mcp` key. */

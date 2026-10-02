@@ -1,6 +1,6 @@
 # REST API + SSE Specification
 
-**Status:** v2.67 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
+**Status:** v2.68 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
 **Last updated:** 2026-09-30
@@ -1781,13 +1781,14 @@ The ONE creation path for every kind (keys v2 A15 — the login mint is retired;
 
 `key` is the full plaintext, returned **exactly once** — it is never retrievable again.
 
-**`kind`** ([Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings), [Enums §8A](enums.md#8a-apikeykind--what-an-api-key-is)) is `mcp`, `endpoint`, or `server`. It changes what the rest of the body means:
+**`kind`** ([Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings), [Enums §8A](enums.md#8a-apikeykind--what-an-api-key-is)) is `mcp`, `endpoint`, `server`, or `dashboard` (L5). It changes what the rest of the body means:
 
 | `kind` | `role` | `bindings` | Who may create |
 |---|---|---|---|
 | `mcp` (V37, renamed from `user` — A19) | one of `author` \| `promoter` \| `workspace_admin`, chosen under the subset rule (A14) — never viewer (A15), never `super_admin` (B1) | Refused | Author (author only), promoter (promoter only), workspace admin (any of the three), super admin (any) — `mcp_key.create` + the subset rule |
 | `endpoint` | `api_caller` (the only one offered, record A1); another role is `403 endpoint.key_kind_refused` | The endpoint-tree nodes it authorises, validated BEFORE the key is minted — and since 2026-09-21 (#191) each must be the root or lie at or above a path the CALLER'S workspace publishes (`400 endpoint.path_invalid`, naming only the caller's own tree) | Workspace admins and super admins (`api_key.create`) |
 | `server` | `promotion_receiver`; another role is `403 endpoint.key_kind_refused` | Refused | Super admin only (`server_key.create`) |
+| `dashboard` (L5, #367) | `dashboard_viewer`; another role is `403 endpoint.key_kind_refused` | Refused — the dashboard FOLDERS are a separate verb, `dashboard.key.bind` on the key's card after mint (§23.2's binding routes) | Workspace admins and super admins (`api_key.create` — the lane's decision, the endpoint key's floor) |
 
 **`scopes` is refused by name** (`400 pipeline.execution.invalid_parameter_type`, `details.field = "scopes"`): scopes were removed (#215, PK8), and a caller who still sends them believes the key will carry them. An unknown `role` token is the same 400 with `details.supported`. **A name already taken by a live key in the workspace is `409 auth.key_name_taken`** (keys v2 A18; revoking the old key frees the name). **An unbound published path is unservable until a key is bound to it** (#215 B3) — a session is refused on the published tree, and no other key kind reaches it.
 
@@ -2570,7 +2571,14 @@ The seven lifecycle permissions govern the same thirteen routes as §22.2 under 
 | `GET /api/v1/dashboards/{id}/export` | `dashboard.read` | The export envelope (§12, [Dashboards §3.3](dashboards.md#33-export-and-import)): the dashboard's payload, each pinned visualization's OWN envelope inside it, and the manifest naming the pinned pipelines and set BY REFERENCE — a dashboard export assumes they were promoted first. Lensed before the export (§22.2's mould); audited `dashboard.exported`. |
 | `POST /api/v1/dashboards/import` | `dashboard.import` | Import the envelope ([Dashboards §3.3](dashboards.md#33-export-and-import)): every bundled visualization (D61), then the dashboard; the exported ids KEPT. The same §13.21 read + READER bind as §22.2's import — the two dashboard bounds hold, a non-array `visualizations` refuses, and the bundle is count-bounded (O7: at most `max-visualizations-per-dashboard` entries, `body_invalid` `reason: too_many` before any member binds). ONE transaction around templates → visualizations → dashboard (F1 of the L1c pass): a refused dashboard leaves NOTHING landed. Lands RELEASED, judged by the RELEASE rules (O2): a pinned set or visualization that exists here but is not RELEASED refuses `409 dashboard.release.dependency_not_released`; a pin the deployment lacks is `400 dashboard.import.missing_dependency`; an id another workspace's artifact holds is `409 dashboard.import.id_taken` (C29). The workspace-admin verb (the owner's ruling, exactly `visualization.import`'s row). Audited `dashboard.imported` — and one `visualization.imported` row per LANDED bundled visualization, each naming its id, its version and its own envelope manifest's evidence flag (F1's record honesty: nothing landed is unaudited). |
 
-A source whose pinned release does not DECLARE its caller columns — a SQL caller node; only a transform caller node's contract names them — is not judged against its visualization's input contract at save (`input_contract_mismatch` needs declared columns); the runtime judges the real columns ([Dashboards §2.2](dashboards.md#22-dashboard)). The runtime, refresh and key-binding routes (L5) are not routes yet; the runtime and refresh routes are §23.3, and the export/import routes (L1c) are the `/export` and `/import` rows above.
+A source whose pinned release does not DECLARE its caller columns — a SQL caller node; only a transform caller node's contract names them — is not judged against its visualization's input contract at save (`input_contract_mismatch` needs declared columns); the runtime judges the real columns ([Dashboards §2.2](dashboards.md#22-dashboard)). The export/import routes (L1c) are the `/export` and `/import` rows above; the runtime and refresh routes are §23.3, and L5's key-binding routes are here:
+
+| Route | Permission | What |
+|---|---|---|
+| `POST /api/v1/dashboards/bindings` | `dashboard.key.bind` | Bind a `dashboard` key to a folder of the dashboard name space (L5): `{api_key_id, name_prefix}` — or `{api_key_name, name_prefix}`, the caller's OWN key (kind-filtered: a dashboard binding names no other kind). `name_prefix` is a folder of the name grammar (1–9 segments) or the root `/` (everything); `400 dashboard.binding.path_invalid` off the grammar or when no dashboard of the CALLER's workspace lies at or under it (#191 — the refusal names only the caller's own tree). The key must be a `dashboard` key of the ACTIVE workspace; anything else is `404 dashboard.not_found` — a key id must not be probeable. Idempotent; `201` with `{name_prefix, api_key_name, api_key_id}`. Audited `dashboard.key_bound`. |
+| `DELETE /api/v1/dashboards/bindings?name_prefix=&api_key_id=` | `dashboard.key.bind` | Unbind — the same addressing forms and refusals. `404 dashboard.not_found` when the binding is not there. Audited `dashboard.key_unbound`. |
+
+The DEEPER-BINDING-REPLACES rule (R-EP2, [Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings)) applies verbatim: a binding at `finance/dashboards/private` hides the one at `finance/dashboards` for that subtree, and an unbound key serves nothing.
 
 | Error | HTTP | When |
 |---|---|---|
@@ -2585,8 +2593,7 @@ A source whose pinned release does not DECLARE its caller columns — a SQL call
 
 Six routes under `/api/v1/dashboards/{id}`, all `dashboard.execute` ([Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative);
 the promoter reads through the lens of §23.1 — a dashboard it hides is `404 dashboard.not_found`). The semantics are
-[Dashboards §5](dashboards.md#5-the-runtime); this section is the wire. Only signed-in sessions reach them until the `dashboard`
-key kind (L5); no MCP tool executes a dashboard. A request body is read whole before anything is looked up: not JSON, or a
+[Dashboards §5](dashboards.md#5-the-runtime); this section is the wire. Since L5 (#367) a `dashboard` key reaches them too — the runtime and refreshes prefixes are its whole surface, its bindings the lens, one key one budget ([Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings), [Dashboards §6.5](dashboards.md#65-credentials-session-and-proxy)) — and no MCP tool executes a dashboard. A request body is read whole before anything is looked up: not JSON, or a
 field missing / of the wrong type, is `400 dashboard.validation.body_invalid` with `details.path` and `details.reason`
 (`missing`, `wrong_type`, `malformed`, `too_large`, `unknown_value`, `unexpected`, `reused`) — never the value.
 
@@ -2637,6 +2644,7 @@ window. A dashboard execution has no stored result: `GET /api/v1/executions/{id}
 
 ## Appendix A: Change Log
 
+| 2026-10-01 | v2.68 | L5 (#367, #10) the `dashboard` key kind | **§23.2 gains the two binding routes** — `POST`/`DELETE /api/v1/dashboards/bindings` under `dashboard.key.bind`, the `api_key.bind` twin (`400 dashboard.binding.path_invalid` off the grammar or the caller's own tree; the key by id or own-name, kind-filtered; audited `dashboard.key_bound`/`dashboard.key_unbound`). **§16.1's `kind` table gains `dashboard`** — `dashboard_viewer` fixed, bindings refused at create (they are the binding verb's), `api_key.create` holders. **§23.3:** the runtime routes' caller sentence names the key kind — its bindings are the lens, one key one budget. |
 | 2026-10-01 | v2.67 | L4b (#353) the visualization test workflow | Additive. **§22.2: seven routes** — `POST /{id}/tests/sessions` and `POST /{id}/tests/sessions/{sessionId}/results` (`visualization.update`), `POST /{id}/tests/sessions/{sessionId}/screenshot` (no permission: the single-use `DP-Upload-Token` capability alone, the raw PNG/WebP under the route's own 4 MiB cap), `GET /{id}/tests/runs` (the newest 100), `GET /{id}/tests/runs/{runId}`, `GET /{id}/tests/runs/{runId}/screenshot` and `POST /{id}/versions/{version}/check` (`visualization.read`, lensed). The release row names the installed gate; the refusal ladder with every `details.reason` (`draft_missing`, `draft_changed`, `no_runs`, `run_expired`, `run_hash_mismatch`, `run_open`, `red` / `incomplete`, `mechanical`) and the four `visualization.test.*` codes are tabled. The stale "until L4" and "not routes yet" sentences are gone. |
 | 2026-10-01 | v2.66 | #356 the abort that arrives before the row | **§23.3:** an abort arriving while the refresh is still starting — before `insertRunning` writes its row — is honoured: the in-flight start registers a transient, TTL'd marker (bounded per principal by the stream cap, removed on the start's every exit), a matching caller (same workspace and dashboard, own principal AND instance, or `execution.cancel_all`) is answered the SAME `202 {refresh_id, status: "abort_requested"}`, the intent is recorded under the id like any abort flag, and the refresh ends `ABORTED` before any source runs (the engine's check at job start). A stranger's, another instance's, another dashboard's, an unknown and a finished id all answer the identical `404 dashboard.refresh.not_found`. No route, body or response shape changed; the frozen §8.4 wire is untouched. |
 | 2026-09-30 | v2.65 | #343 stream workspace authority | Recheck dashboard refresh events and heartbeats only in the stream's opening workspace, matched by immutable id; other memberships do not preserve access, and the refresh remains running. |

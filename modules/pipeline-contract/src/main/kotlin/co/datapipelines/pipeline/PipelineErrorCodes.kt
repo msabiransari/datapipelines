@@ -1854,5 +1854,11 @@ object PipelineErrorCodes {
         const val REFRESH_NOT_FOUND = "dashboard.refresh.not_found"
 
         const val KEY_KIND_REFUSED = "dashboard.key.kind_refused"
+
+        /**
+         * 400 — a dashboard binding's folder prefix fails the folder grammar, or names no folder
+         * of the caller's own tree (#191's rule).
+         */
+        const val BINDING_PATH_INVALID = "dashboard.binding.path_invalid"
     }
 }

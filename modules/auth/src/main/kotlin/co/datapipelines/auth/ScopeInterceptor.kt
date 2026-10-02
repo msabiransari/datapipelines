@@ -334,7 +334,10 @@ class ScopeInterceptor(
          * `/api/v1/executions/…` reads are OFF its surface (A16 retired them); a `server` key
          * gets the promotion receiver's route family; the MCP key gets NO MVC route (A10, B2 —
          * "MCP key should be only MCP"): its surface is the `/mcp` servlet, which never reaches
-         * this interceptor.
+         * this interceptor; a `dashboard` key (L5) gets the runtime routes of the dashboards
+         * its bindings cover — the reach statement names the two prefixes, and the BINDINGS are
+         * the lens the runtime reads through (an unbound key is admitted to the prefix and
+         * served nothing, which is the endpoint key's "unbound authorises nothing" verbatim).
          *
          * A server key normally reaches the promotion routes through `DP-Promotion-Key`, whose
          * filter runs upstream and refuses the whole prefix without a valid one; the prefix is
@@ -349,7 +352,29 @@ class ScopeInterceptor(
                 ApiKeyKind.MCP -> uri == MCP_PREFIX || uri.startsWith("$MCP_PREFIX/")
                 ApiKeyKind.ENDPOINT -> isPublishedEndpointPath(uri)
                 ApiKeyKind.SERVER -> uri.startsWith(PromotionServerKeyFilter.PROMOTION_PREFIX)
+                ApiKeyKind.DASHBOARD -> isDashboardRuntimePath(uri)
             }
+
+        /**
+         * The `dashboard` key's two prefixes (the dashboards spec §5): a dashboard's runtime
+         * routes and its refreshes routes — the per-dashboard `/runtime/…` and `/refreshes/…`
+         * subtrees under `/api/v1/dashboards/`. Everything else — the lifecycle REST routes,
+         * the pages, the partials, the binding routes themselves — is off the surface. The
+         * runtime/{id} shape is matched structurally (an id segment, then the family's own
+         * subtree), never by a literal id list.
+         */
+        fun isDashboardRuntimePath(uri: String): Boolean {
+            if (!uri.startsWith("$API_PREFIX${DASHBOARDS_SEGMENT}/")) return false
+            val rest = uri.removePrefix("$API_PREFIX${DASHBOARDS_SEGMENT}/")
+            val id = rest.substringBefore('/')
+            if (id.isEmpty()) return false
+            val family = rest.removePrefix("$id/")
+            return family.startsWith(RUNTIME_FAMILY) || family.startsWith(REFRESHES_FAMILY)
+        }
+
+        private const val DASHBOARDS_SEGMENT = "v1/dashboards"
+        private const val RUNTIME_FAMILY = "runtime"
+        private const val REFRESHES_FAMILY = "refreshes"
 
         /** The audit `reason` for each kind, off its surface. */
         val OFF_SURFACE_REASON: Map<ApiKeyKind, String> =
@@ -357,6 +382,7 @@ class ScopeInterceptor(
                 ApiKeyKind.MCP to "mcp_key_off_surface",
                 ApiKeyKind.ENDPOINT to "endpoint_key_off_surface",
                 ApiKeyKind.SERVER to "server_key_off_surface",
+                ApiKeyKind.DASHBOARD to "dashboard_key_off_surface",
             )
 
         /** What the refusal tells the caller — the operator-actionable half. */
@@ -369,6 +395,9 @@ class ScopeInterceptor(
                     "executions it started, under those endpoints' paths.",
                 ApiKeyKind.SERVER to
                     "A server key may only be presented as DP-Promotion-Key on the promotion routes of a receiving deployment.",
+                ApiKeyKind.DASHBOARD to
+                    "A dashboard key may only call the runtime routes of the dashboards its folder bindings cover — " +
+                    "a dashboard with no binding on any ancestor of its name is served to no one.",
             )
 
         private const val HTTP_FORBIDDEN = 403

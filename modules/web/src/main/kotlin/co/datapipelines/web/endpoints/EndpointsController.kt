@@ -227,12 +227,14 @@ class EndpointsController(
      * key ID, which is a separate decision.
      *
      * A key belonging to someone else is reported as **not found** rather than forbidden — the
-     * same non-disclosure rule the rest of the key surface follows.
+     * same non-disclosure rule the rest of the key surface follows. (L5 fix: the kind filter the
+     * BY-ID path always had — an `endpoint` binding on a `dashboard` key would write rows nothing
+     * reads; the by-name path now refuses it exactly the same way.)
      */
     private fun requireOwnedKey(name: String) =
         apiKeys
             .findByUser(currentPrincipal().userId)
-            .firstOrNull { it.name == name && !it.isRevoked }
+            .firstOrNull { it.name == name && !it.isRevoked && it.kind == ApiKeyKind.ENDPOINT }
             ?: throw ApiException(
                 PipelineErrorCodes.Auth.API_KEY_INVALID,
                 "No API key named '$name' that you can bind.",

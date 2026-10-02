@@ -1,5 +1,6 @@
 package co.datapipelines.web.pipelines
 
+import co.datapipelines.application.dashboards.DashboardKeyBindingRepository
 import co.datapipelines.application.lens.LensedView
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
@@ -136,7 +137,9 @@ class PromotableViewDashboardLensTest {
                 ),
             )
 
-        val view = PromotableViews(pipelines, templates, client, sets, dashboards, visualizations).viewFor(promoter(workspace))
+        val view =
+            PromotableViews(pipelines, templates, client, sets, dashboards, visualizations, mockk(relaxed = true))
+                .viewFor(promoter(workspace))
 
         assertAll(
             { view.dashboards shouldBe ReadLens.Only(setOf("ops/dashboards/shown")) },
@@ -165,6 +168,8 @@ class PromotableViewDashboardLensTest {
                     .also { every { it.findCurrentVersions(workspace) } returns emptyList() },
                 dashboards,
                 mockk<VisualizationService>(),
+                // a promoter never reaches the key arm (L5): a strict mock proves no binding read runs
+                mockk<DashboardKeyBindingRepository>(),
             ).viewFor(promoter(workspace))
 
         // The pipelines-shaped request: the pipeline lens only, so no dashboard statement may run.
@@ -211,7 +216,9 @@ class PromotableViewDashboardLensTest {
         every { client.cachedInventory("ops") } returns PromotionTargetClient.CachedInventory.Unreachable("connect_refused", "x")
         every { client.targetBaseUrl } returns "https://uat.example.test"
 
-        val view = PromotableViews(mockk(), mockk(), client, mockk(), dashboards, mockk()).viewFor(promoter(UUID.randomUUID()))
+        val view =
+            PromotableViews(mockk(), mockk(), client, mockk(), dashboards, mockk(), mockk(relaxed = true))
+                .viewFor(promoter(UUID.randomUUID()))
 
         assertAll(
             { view.dashboards shouldBe ReadLens.NOTHING },

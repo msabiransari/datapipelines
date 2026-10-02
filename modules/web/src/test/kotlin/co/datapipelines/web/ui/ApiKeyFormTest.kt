@@ -98,7 +98,8 @@ class ApiKeyFormTest {
                 choices.map { it.wire } shouldBe listOf("mcp")
                 choices.single().roles.map { it.wire } shouldBe listOf("author")
             },
-            // A workspace admin: every mcp role, the endpoint card, no server card.
+            // A workspace admin: every mcp role, the endpoint card, the dashboard card (L5 — the
+            // same api_key.create floor), no server card.
             {
                 val choices =
                     ApiKeyForm.kindChoices(
@@ -106,14 +107,14 @@ class ApiKeyFormTest {
                         mayCreateApiKeys = true,
                         isSuperAdmin = false,
                     )
-                choices.map { it.wire } shouldBe listOf("mcp", "endpoint")
+                choices.map { it.wire } shouldBe listOf("mcp", "endpoint", "dashboard")
                 choices.first().roles.map { it.wire } shouldBe listOf("author", "promoter", "workspace_admin")
             },
             // A super admin sees the server card too.
             {
                 val choices =
                     ApiKeyForm.kindChoices(RolePermissions.KEY_OFFERABLE, mayCreateApiKeys = true, isSuperAdmin = true)
-                choices.map { it.wire } shouldBe listOf("mcp", "endpoint", "server")
+                choices.map { it.wire } shouldBe listOf("mcp", "endpoint", "server", "dashboard")
             },
             // A viewer: no create permission, no mcp card at all (A15 — no card, never an empty choice).
             {

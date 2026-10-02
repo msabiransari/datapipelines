@@ -113,7 +113,7 @@ class DashboardRefreshRepositoryIntegrationTest {
         val first = record().also(repository::insertRunning)
 
         repository.find(OTHER_WORKSPACE, first.id).shouldBeNull()
-        repository.list(OTHER_WORKSPACE, dashboard, null, 10) shouldBe emptyList()
+        repository.list(OTHER_WORKSPACE, dashboard, null, null, 10) shouldBe emptyList()
         repository.count(OTHER_WORKSPACE, dashboard, null) shouldBe 0
     }
 
@@ -178,9 +178,9 @@ class DashboardRefreshRepositoryIntegrationTest {
         val mine = record(startedAt = now.minusSeconds(30)).also(repository::insertRunning)
         val theirs = record(user = OTHER_AUTHOR, startedAt = now.minusSeconds(10)).also(repository::insertRunning)
 
-        repository.list(WORKSPACE, dashboard, null, 10).map { it.id } shouldContainExactly listOf(theirs.id, mine.id, old.id)
-        repository.list(WORKSPACE, dashboard, AUTHOR, 10).map { it.id } shouldContainExactly listOf(mine.id, old.id)
-        repository.list(WORKSPACE, dashboard, AUTHOR, limit = 1, offset = 1).map { it.id } shouldContainExactly listOf(old.id)
+        repository.list(WORKSPACE, dashboard, null, null, 10).map { it.id } shouldContainExactly listOf(theirs.id, mine.id, old.id)
+        repository.list(WORKSPACE, dashboard, AUTHOR, null, 10).map { it.id } shouldContainExactly listOf(mine.id, old.id)
+        repository.list(WORKSPACE, dashboard, AUTHOR, null, limit = 1, offset = 1).map { it.id } shouldContainExactly listOf(old.id)
         repository.count(WORKSPACE, dashboard, AUTHOR) shouldBe 2
         repository.count(WORKSPACE, dashboard, null) shouldBe 3
         repository.latestOf(WORKSPACE, dashboard, AUTHOR)!!.id shouldBe mine.id

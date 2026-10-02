@@ -1,11 +1,14 @@
 package co.datapipelines.web.dashboards.runtime
 
+import co.datapipelines.application.dashboards.DashboardKeyBindingRepository
+import co.datapipelines.application.dashboards.DashboardKeyService
 import co.datapipelines.application.dashboards.DashboardTransformer
 import co.datapipelines.application.dashboards.RefreshAdmission
 import co.datapipelines.application.dashboards.RefreshEngine
 import co.datapipelines.application.dashboards.SourceStarter
 import co.datapipelines.application.lens.PromoterLens
 import co.datapipelines.application.templates.TemplateEvaluateService
+import co.datapipelines.auth.ApiKeyRepository
 import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.auth.PrincipalLiveness
 import co.datapipelines.auth.UserService
@@ -108,7 +111,24 @@ class DashboardRuntimeConfiguration {
         liveness: PrincipalLiveness,
         workspaces: WorkspaceService,
         users: UserService,
-    ): RefreshStreamAuthority = RefreshStreamAuthority(liveness, workspaces, users)
+        apiKeys: ApiKeyRepository,
+    ): RefreshStreamAuthority = RefreshStreamAuthority(liveness, workspaces, users, apiKeys)
+
+    /** The `dashboard` key's binding table (L5, metadata-db §4.36). */
+    @Bean
+    fun dashboardKeyBindingRepository(jdbc: NamedParameterJdbcTemplate): DashboardKeyBindingRepository = DashboardKeyBindingRepository(jdbc)
+
+    /**
+     * Binding a `dashboard` key to dashboard folders (L5) — the cross-aggregate half, wired here
+     * exactly as the endpoint twin's service is: `auth` owns the key, the dashboards family owns
+     * the namespace the folders name (#191's bind-time rule reads the workspace's dashboards).
+     */
+    @Bean
+    fun dashboardKeyService(
+        bindings: DashboardKeyBindingRepository,
+        audit: AuditEventSink,
+        dashboards: DashboardService,
+    ): DashboardKeyService = DashboardKeyService(bindings, audit, dashboards)
 
     @Bean
     fun refreshStreamRegistry(

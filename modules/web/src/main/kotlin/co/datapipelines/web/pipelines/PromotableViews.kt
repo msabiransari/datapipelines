@@ -1,8 +1,12 @@
 package co.datapipelines.web.pipelines
 
+import co.datapipelines.application.dashboards.DashboardKeyAuthorizer
+import co.datapipelines.application.dashboards.DashboardKeyBindingRepository
 import co.datapipelines.application.lens.LensedView
 import co.datapipelines.application.lens.PromoterLens
+import co.datapipelines.auth.ApiKeyKind
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.KeyRole
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.templates.TemplateRepository
@@ -12,7 +16,8 @@ import java.util.UUID
 
 /**
  * The [PromoterLens] port's implementation — [PromotableView] built per request for a lensed
- * principal, and the "every other role sees everything, at no cost" short-circuit.
+ * principal, the "every other role sees everything, at no cost" short-circuit, and — L5 — the
+ * `dashboard` key's arm: its BINDINGS are the lens.
  *
  * ## The fail-closed branch (roles design §3.1)
  * A lensed principal whose target cannot be read — unreachable, refusing, malformed,
@@ -31,6 +36,16 @@ import java.util.UUID
  * snapshot the eager arms were computed from, so one request's view is one §10.2 world.
  * Promoters are ops people; the read surfaces they reach are the listing screens, not the
  * execution hot path.
+ *
+ * ## The dashboard key's lens (L5)
+ * A `dashboard_viewer` principal is confined to the runtime routes by its KIND, and the runtime
+ * consults `viewFor(principal).dashboards` exactly where it consults a promoter's; the key's
+ * answer is an EXPANSION to names ([co.datapipelines.pipeline.ReadLens.Only]): the workspace's
+ * dashboard names run through the R-EP2 walk ([DashboardKeyAuthorizer]) over the workspace's
+ * `dashboard_key_bindings`, and the surviving names are the lens. An unbound key answers the
+ * EMPTY set — the lens admitting nothing, fail closed — and the runtime's 404 follows. The
+ * other arms stay [ReadLens.Everything] on purpose: the kind's confinement means no other read
+ * can reach this principal, and a narrowed arm here would only lie about what it narrows.
  */
 class PromotableViews(
     private val pipelines: PipelineRepository,
@@ -42,8 +57,13 @@ class PromotableViews(
     private val dashboards: DashboardService,
     /** #10 L1c — the visualizations the lens's pins filter against (and the page's visualization rows). */
     private val visualizations: VisualizationService,
+    /** L5 — the `dashboard` key's bindings; the walk's only read. */
+    private val dashboardKeyBindings: DashboardKeyBindingRepository,
 ) : PromoterLens {
     override fun viewFor(principal: AuthenticatedPrincipal): LensedView {
+        if (principal.keyKind == ApiKeyKind.DASHBOARD && principal.keyRole == KeyRole.DASHBOARD_VIEWER) {
+            return dashboardKeyView(principal)
+        }
         if (!principal.isLensed) return LensedView.EVERYTHING
         // A lensed principal holds a workspace role, hence a workspace; the fallback is the
         // fail-closed answer rather than a 403 from a read that never named a workspace.
@@ -76,6 +96,30 @@ class PromotableViews(
                 unavailable(cached.reason)
             }
         }
+    }
+
+    /**
+     * The dashboard key's view: the R-EP2 walk over the workspace's bindings and names. No
+     * workspace resolved (a principal without its pin) is the fail-closed EMPTY lens — the
+     * same answer an unbound key gets, never an error: the runtime turns a hidden dashboard
+     * into the family's 404 (auth.md §7.7).
+     */
+    private fun dashboardKeyView(principal: AuthenticatedPrincipal): LensedView {
+        val workspace = principal.workspace
+        val keyId = principal.keyId
+        val admitted =
+            if (workspace == null || keyId == null) {
+                emptySet()
+            } else {
+                val bindings = dashboardKeyBindings.findByWorkspace(workspace.id)
+                val authorizer = DashboardKeyAuthorizer()
+                val names = dashboards.currentVersions(workspace.id).map { it.name }
+                names
+                    .filter { name ->
+                        authorizer.authorize(name, workspace.id, keyId, bindings) == DashboardKeyAuthorizer.Decision.Allowed
+                    }.toSet()
+            }
+        return LensedView(ReadLens.Everything, ReadLens.Everything, dashboards = ReadLens.Only(admitted))
     }
 
     /**
