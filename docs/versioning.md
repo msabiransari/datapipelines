@@ -1,6 +1,6 @@
 # Versioning: Draft, Release, Promotion
 
-**Status:** v1.23 — #332: the three families audit every lifecycle verb (§7's blanket sentence); #348: §7.2's table disambiguates the REST `GET /api/v1/pipelines/{id}` from the UI read workspace `GET /pipelines/{id}`; #10 L1c-c: the count ceiling stated as aggregate; the receive's refused-dashboard rollback witnessed (§10.4); #320: the reverse arrows into other families (§3.5.3); #10: visualizations and dashboards join the lifecycle table (§3.5)
+**Status:** v1.24 — #344: the push closure is read at the pinned versions without the promoter lens (§10.4); #332: the three families audit every lifecycle verb (§7's blanket sentence); #348: §7.2's table disambiguates the REST `GET /api/v1/pipelines/{id}` from the UI read workspace `GET /pipelines/{id}`; #10 L1c-c: the count ceiling stated as aggregate; the receive's refused-dashboard rollback witnessed (§10.4); #320: the reverse arrows into other families (§3.5.3); #10: visualizations and dashboards join the lifecycle table (§3.5)
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Contract](pipeline-contract.md) (§13 error catalog, §17 persistence), [Templates](templates.md), [Metadata DB](metadata-db.md) (§4.4/§4.5/§4.8/§4.9 — DDL authority), [REST API](rest-api.md), [Pipeline Editor UI](pipeline-editor.md)
 **Last updated:** 2026-10-01
@@ -1153,6 +1153,13 @@ accepted-audit row survives.
 Pins are immutable and cycle-free, so the order always exists. Templates/pipelines already
 present at the same version and hash are skipped (idempotent).
 
+**The closure is read at the exact PINNED versions, without the promoter lens** (the owner's ruling
+of 2026-10-02, #344; [Auth §11A.1](auth.md#11a1-the-404-rule)'s lens clause). §10.3's guards and the lens govern the
+ROOTS a human selects — a root the lens hides refuses with its family's `404` — never the
+dependencies they pin: a pinned template §10.2's view hides (already on the target, or behind it)
+still rides, and the skip rule above is the only thing that leaves one out. The export bundles
+(rest-api §5.9 and the families' export routes) follow the same rule.
+
 ### 10.5 Datasource pre-validation
 
 Pipelines reference datasources by name. Before pushing anything, the orchestrator
@@ -1450,6 +1457,7 @@ re-opening it.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-02 | v1.24 | 344 (#344) bundled templates are the artifact's pins | **§10.4** states the rule the sender already followed (the owner's ruling of 2026-10-02): the closure is read at the exact pinned versions without the promoter lens — the lens and §10.3's guards govern the roots; a pinned template the view hides still rides, and the same-version-and-hash skip is the only omission. No behaviour changed. |
 | 2026-10-01 | v1.23 | 332 (#332) the three families audit every lifecycle verb | **§7's blanket sentence** extends: the parameter-set, visualization and dashboard families emit their five human-verb events and their `<family>.version.released` (cascade provenance included), the same `LifecycleVerbs.audit`/`auditRelease` twins the pipelines and templates surfaces run; §3.5's table itself is unchanged (the audit column is enums.md §15's). |
 | 2026-09-30 | v1.22 | 348 (#348) the version-explicit workspace — renumbered at merge after L1c-c's v1.21 | **§7.2's table** disambiguates the REST `GET /api/v1/pipelines/{id}` (working version, unchanged) from the UI read workspace `GET /pipelines/{id}`, whose default is the ACTUAL current pointer (a permitted current draft shows as the draft it is), then an accessible draft, then choose-a-version — never "latest release" (§3.4's sticky pointer stated in the UI's own contract); an explicit `?version=N` renders exactly or 404. The workspace's execute POSTs always pin their viewed version, so no UI default decides a run. §3.5's draft-affordance sentence now describes the header's role-gated lifecycle verbs and the viewed-version chip. Service/REST/MCP defaults are untouched. |
 | 2026-09-30 | v1.21 | L1c-c (#10) transfer limits and evidence | **§10.4:** the count ceiling stated as AGGREGATE — `max-visualizations-per-dashboard` also caps each whole batch arm on top of the per-document bound (two individually valid dashboards can together exceed it; the batch refuses whole, no partial writes, no split; a batch at exactly the ceiling lands whole — E2E-proven both ways). The receive's refused-dashboard rollback witnessed end to end: earlier batch members land, the dashboard refuses on landing, every preceding write (template, visualization, version, current pointer, accepted-audit row) absent. |

@@ -1,6 +1,6 @@
 # Dashboards
 
-**Status:** v0.17 — the two documents and their lifecycle (#10, lane L1a); the REST routes, the MCP tools and the
+**Status:** v0.18 — the two documents and their lifecycle (#10, lane L1a); the REST routes, the MCP tools and the
 permissions (§4, lane L1b); the transfer routes and their limits' honest contract (§3.3, lanes L1c/L1c-b/L1c-c: the
 import's atomicity, the RELEASE rules on a landing, the aggregate count ceiling, the wire's per-family arms); the server
 runtime (§5, lane L2; #343's released pins and stream authority); the client runtime (§6, lanes L3a/L3a-b/L3a-c); the
@@ -234,7 +234,7 @@ reach a visualization's own draft transform pin, which needs that visualization'
 ### 3.3 Export and import
 
 An export is the CURRENT release's envelope: `{"visualization": …, "templates": […], "manifest": {…}}` — the transform
-pin's templates travel with it — and `{"dashboard": …, "visualizations": [each pinned visualization's envelope],
+pin's templates travel with it, read without the template lens — and `{"dashboard": …, "visualizations": [each pinned visualization's envelope],
 "manifest": {…}}`, whose manifest names the pinned pipelines and set by reference: a dashboard assumes they were
 promoted first (D61's order: templates, parameter sets, pipelines, visualizations, dashboards). The manifest carries
 `evidence: null` until the test sessions land (L4) — the exported release's evidence summary rides it from then on,
@@ -244,6 +244,11 @@ envelope's shape is judged before anything lands, the lifecycle fields beside a 
 other unknown key refuses; the same version with the same hash is a no-op; a pin the target lacks is
 `visualization.import.missing_template` or `dashboard.import.missing_dependency`; an id another artifact on the
 server holds is `*.import.id_taken` — never re-issued (C29).
+
+**What the artifact pins travels unlensed** (the owner's ruling of 2026-10-02, #344; [Auth §11A.1](auth.md#11a1-the-404-rule)'s lens
+clause): the promoter lens decides whether a visualization or dashboard exports at all — a hidden one is the absent
+`404` — never what its envelope carries. A dashboard's pinned visualizations ride whatever the visualization lens says,
+and each one's templates whatever the template lens says; the same holds for a promotion batch.
 
 **The import is ONE transaction for a dashboard** (the L1c-b round, F1): templates → bundled visualizations → the
 dashboard inside one transaction, so a refused dashboard leaves NOTHING landed — the visualization import keeps the
@@ -798,6 +803,7 @@ full navigation).
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-02 | v0.18 | 344 (#344) the envelope is the artifact's pins | **§3.3:** what the artifact pins travels unlensed — a dashboard's pinned visualizations and each one's templates ride whatever the visualization and template lenses say; only the root is lensed (the owner's ruling of 2026-10-02, auth §11A.1's lens clause). No behaviour changed. |
 | 2026-10-01 | v0.17 | L4b (#353) the test workflow on the wire | **New §3.4.1** — the five-step workflow over REST and MCP (start, the session-less preview page, submit, the single-use screenshot upload, the human release), the confinement (each capability opens one route for one run; the starter re-judged at the moment of use; one indistinguishable answer for every capability failure) and the lensed evidence reads; §3.4's retention bullet gains the UI sentence (an author who re-tests keeps only the last screenshot). **§6.5:** the runtime's fixture mode (the transport swapped, nothing else; no `fetch`). §4.4 names the two test tools; §5.8 no longer lists the test surfaces. |
 | 2026-10-01 | v0.16 | 332 (#332, #330, #331) the lifecycle audit + the pins projection | **§3:** the five human verbs and the release audit (the `dashboard.*` events, the cascaded visualization releases named with `cascade_from_dashboard_id`) — the pipelines mould, ids/names/versions/counts only. |
 | 2026-10-01 | v0.15 | L4a (#352) the test sessions and the release gate — renumbered at merge after #356's v0.14 | **New §3.4 The test sessions and the evidence** — the durable run per session over the exact draft hash, the two hash-only capabilities (preview; the single-use screenshot upload minted at submit), the mechanical check (the reduced vendored 4.1.1 plot-schema at save AND release, binding type rules, the real fixture evaluation, static assertion feasibility, `not_available` rendered state), the screenshot's detected-type validation and retention (D35), and the release gate's installed verdicts (§3.1). §2.1.2's Plotly schema is the deep one now; §4.4's test tools and §5.8's test surfaces are explicitly L4b's (#353), the dashboard draft preview is #369's and marked unavailable until then. No new route, tool or permission row. **At merge (the orchestrator's follow-up):** an OPEN latest session refuses `tests_missing`/`run_open` and a RUNNING row past its deadline is `run_expired` without a sweep (F1/F6); the mechanical report keeps its first 100 failures and COUNTS the rest (`failures_dropped`, F2); the upload consume stamps the app clock (F3); a 12-byte or top-bit RIFF WebP is `truncated`, not a 500 (F4); the gate's draft lock is `FOR NO KEY UPDATE` so two releases serialize (F5). |
