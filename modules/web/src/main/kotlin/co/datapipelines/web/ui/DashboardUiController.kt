@@ -14,13 +14,15 @@ import org.springframework.stereotype.Controller
 import org.springframework.ui.Model
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
+import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.server.ResponseStatusException
 import java.util.UUID
 
 /**
- * The dashboards screens (ui-screens.md §4.x; the implementation spec's §6.3) — the tree page and
- * the board page, [PipelineUiController]'s shape: a `@Controller` for the screen family, every
- * handler session-authenticated and scope-declared, the model work in [DashboardBrowseModel].
+ * The dashboards screens (ui-screens.md §4.x; the implementation spec's §6.3) — the tree page,
+ * the board page and its draft-preview twin, [PipelineUiController]'s shape: a `@Controller` for
+ * the screen family, every handler session-authenticated and scope-declared, the model work in
+ * [DashboardBrowseModel].
  *
  * ## The board page's refusal state, and why it is in-page
  * A dashboard the caller cannot see (absent, foreign, lens-hidden) is the family's 404 — the
@@ -101,6 +103,57 @@ class DashboardUiController(
                 return "dashboards/board"
             }
         model.addAttribute("dashboardName", config.get("dashboard").get("name").asText())
+        model.addAttribute("bundle", config.get("renderer").get("bundle").asText())
+        browse.fillRefreshes(model, principal, id)
+        return "dashboards/board"
+    }
+
+    /**
+     * The DRAFT PREVIEW page (#369, the implementation spec's §6.3) — the board handler's twin, rendering the SAME
+     * template for a NAMED version (`?version=N`, a positive integer): the draft the engineer is perfecting, or a
+     * released one (R2). The declared permission stays `dashboard.read` — the record's §7 sentence, "a
+     * `dashboard.read` holder with `dashboard.execute`", reads as the page on read and the RUNTIME it mounts on
+     * execute; the runtime's config read below already carries the version through to the resolver, whose
+     * RELEASED-only pin rule (R1) is the draft's admission. Visibility first, exactly as [board]: absent, foreign or
+     * lens-hidden is the family's 404 (a promoter is never told a draft exists); a version that does not resolve, or
+     * a pin that does not hold, is the refusal state IN PLACE — this dashboard exists in the caller's tree, so the
+     * refusal names the code where the person is looking. The page differs from [board] in what it tells the
+     * template: the previewed version rides a data attribute (an integer, never a script body) and the banner names
+     * it with the way back to the released view. No audit event: the preview is a read.
+     */
+    @GetMapping("/dashboards/{id}/preview")
+    @RequiredScope(Permission.DASHBOARD_READ)
+    fun preview(
+        @PathVariable id: UUID,
+        @RequestParam version: Int,
+        model: Model,
+        request: HttpServletRequest,
+    ): String {
+        if (version < 1) {
+            // The runtime routes' rule for a named version, at the page: a bounded positive integer, else the 400.
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "'version' must be a positive integer.")
+        }
+        val principal = currentPrincipal()
+        val workspaceId = principal.requireWorkspace().id
+        val view = lens.viewFor(principal)
+        dashboards.findWorking(workspaceId, view.dashboards, id)
+            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "Dashboard not found")
+        model.addAttribute("activeTheme", themeResolver.resolve(request))
+        model.addAttribute("dashboardId", id.toString())
+        model.addAttribute("previewVersion", version)
+        RoleModel.stamp(model)
+        val config =
+            try {
+                runtime.config(principal, id, version)
+            } catch (e: DatapipelinesException) {
+                // The named version does not resolve (absent, discarded, hidden) or the board cannot run: the
+                // refusal state, in place — the preview URL stays in the address bar where the person is.
+                model.addAttribute("refusalCode", e.code)
+                model.addAttribute("refusalMessage", e.message)
+                return "dashboards/board"
+            }
+        model.addAttribute("dashboardName", config.get("dashboard").get("name").asText())
+        model.addAttribute("previewStatus", config.get("dashboard").get("status").asText())
         model.addAttribute("bundle", config.get("renderer").get("bundle").asText())
         browse.fillRefreshes(model, principal, id)
         return "dashboards/board"

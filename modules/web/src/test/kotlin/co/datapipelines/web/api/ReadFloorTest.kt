@@ -80,9 +80,11 @@ class ReadFloorTest {
         familyOf("/partials/recent-executions") shouldBeFamily Family.EXECUTIONS
         // #10 L3b: the dashboards PAGES are the family's reads (DASHBOARD_READ — D50 makes
         // every reader an executor, and the page must not "simplify" into execute), while the
-        // events-pane partial is the refresh routes' data and floors with them.
+        // events-pane partial is the refresh routes' data and floors with them. #369: the
+        // draft preview page is the family's read too — never an execute declaration.
         familyOf("/dashboards") shouldBeFamily Family.DASHBOARDS
         familyOf("/dashboards/{id}") shouldBeFamily Family.DASHBOARDS
+        familyOf("/dashboards/{id}/preview") shouldBeFamily Family.DASHBOARDS
         familyOf("/partials/dashboards/tree") shouldBeFamily Family.DASHBOARDS
         familyOf("/partials/dashboards/{id}/refreshes") shouldBeFamily Family.DASHBOARD_RUNTIME
         familyOf("/workspaces") shouldBeFamily Family.WORKSPACES
@@ -268,10 +270,10 @@ class ReadFloorTest {
             },
         ),
 
-        /** #10 L1b the API family (six GET handlers, L1c's export joined), L3b the three pages: the dashboards —
-         * the same row shape; the family's reads. */
+        /** #10 L1b the API family (six GET handlers, L1c's export joined), L3b the three pages, #369 the preview:
+         * the dashboards — the same row shape; the family's reads. */
         DASHBOARDS(
-            floor = 9,
+            floor = 10,
             permissions = setOf(Permission.DASHBOARD_READ),
             matches = { path ->
                 path.startsWith("/api/v1/dashboards") ||

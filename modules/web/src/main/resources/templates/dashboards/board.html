@@ -2,11 +2,13 @@
 <html xmlns:th="http://www.thymeleaf.org"
       th:replace="~{layouts/default :: page(~{::content})}">
 <th:block th:fragment="content">
-  <!-- #10 L3b — the board page (ui-screens.md §4.x; dashboards.md §6): the released view. The
-       ONE Plotly bundle the SERVER chose (renderer.bundle, §10.4) is declared on its script
-       tag (data-dp-plotly-bundle) and the runtime judges the pair at bootstrap — the §6.4
-       backstop. The glue is a FILE (the CSP has no unsafe-inline) reading the two data
-       attributes below; no server value reaches a script body.
+  <!-- #10 L3b — the board page (ui-screens.md §4.x; dashboards.md §6): the released view, and
+        since #369 the SAME template for the draft preview (a named version, data-dp-dashboard-version
+        and the banner below; the released view writes no version attribute). The
+        ONE Plotly bundle the SERVER chose (renderer.bundle, §10.4) is declared on its script
+        tag (data-dp-plotly-bundle) and the runtime judges the pair at bootstrap — the §6.4
+        backstop. The glue is a FILE (the CSP has no unsafe-inline) reading the two data
+        attributes below; no server value reaches a script body.
 
        Links to this route are NEVER boosted (the tree leaf, the sidebar): the two bundles
        must never travel between pages — a boosted board-to-board swap would run one page's
@@ -28,6 +30,17 @@
   </th:block>
 
   <div class="dp-board-page">
+    <!-- #369 — the draft preview's banner: the version the person is looking at, and the way
+         back to the released view. Server-rendered text only (th:text, never utext); it shows
+         on a refusal page too, where no bundle loads. -->
+    <div class="dp-board-preview-banner" th:if="${previewVersion != null}">
+      <span>
+        Previewing version <b th:text="${previewVersion}">2</b>
+        <span th:if="${previewStatus != null}" th:text="'(' + ${previewStatus} + ')'">(DRAFT)</span> —
+        this is not the released view.
+      </span>
+      <a th:href="@{/dashboards/{id}(id=${dashboardId})}">Back to the released view</a>
+    </div>
     <div class="app-page-h">
       <div>
         <h1 class="ds-headline" th:text="${dashboardName}">finance/dashboards/revenue_overview</h1>
@@ -39,7 +52,7 @@
            dashboard id from the container; the refusal state (below) is what shows when the
            board cannot run. -->
       <main id="dp-board" class="dp-board"
-            th:attr="data-dp-dashboard-id=${dashboardId}"></main>
+            th:attr="data-dp-dashboard-id=${dashboardId}, data-dp-dashboard-version=${previewVersion}"></main>
 
       <!-- The refusal state: the in-page answer to a board that cannot run (no release yet, a
            dependency missing) and to a runtime boot failure — the onNotification sink's
