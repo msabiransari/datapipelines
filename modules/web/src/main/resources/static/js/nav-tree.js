@@ -62,6 +62,8 @@
   /* A paged level is walked page by page to reach the current leaf — at most this many pages
      (25 rows each), so a reveal can never become a crawl of a huge folder. */
   var MAX_PAGE_WALK = 20;
+  /* A lens change resets the tree; more than this many in one document is shown, not repeated. */
+  var MAX_LENS_RESETS = 3;
 
   // ------------------------------------------------------------------ pure halves
 
@@ -515,7 +517,14 @@
       resetTree(t, false);
       showFailure(rootEl(t), "This tab belongs to another workspace now — reload to browse it.", null, true);
     } else if (verdict === "lens-changed") {
-      resetTree(t, true);
+      // Bounded: a view that keeps changing under the tree is a failure to show, not a loop.
+      t.lensResets = (t.lensResets || 0) + 1;
+      if (t.lensResets > MAX_LENS_RESETS) {
+        resetTree(t, false);
+        showFailure(rootEl(t), "Your access keeps changing — reload to browse the current view.", null, true);
+      } else {
+        resetTree(t, true);
+      }
     }
   }
 
@@ -539,7 +548,7 @@
     // settle belongs to is the one its request was stamped with; a refused swap never settles.
     var t = (d.xhr && d.xhr.__dpNavTree) || (target && treeFor(target));
     if (t) {
-      if (!continueRestore(t)) markCurrent(t, false);
+      scheduleRestore(t);
       scheduleFit();
       return;
     }
@@ -556,8 +565,24 @@
       }
       tree.restoring = true;
       tree.pageWalks = 0;
-      if (!continueRestore(tree)) markCurrent(tree, true);
+      tree.revealPending = true;
+      scheduleRestore(tree);
     });
+  }
+
+  /* One restore step per task, never inside htmx's own settle: a level that has just been
+     swapped in is bound by htmx after the settle events fire, so clicking one of its folders
+     from within the handler would open the <details> while its `click once` fetch is not yet
+     wired — an open folder with a spinner forever (measured: the reveal stalled one level
+     down). The next task sees a fully processed level. Coalesced per tree. */
+  function scheduleRestore(t) {
+    if (t.restoreQueued) return;
+    t.restoreQueued = true;
+    setTimeout(function () {
+      t.restoreQueued = false;
+      if (!continueRestore(t)) markCurrent(t, t.revealPending);
+      t.revealPending = false;
+    }, 0);
   }
 
   function onToggle(evt) {
@@ -694,8 +719,10 @@
     if (typeof document === "undefined" || !document.body || window.__dpNavTreeInit) return;
     if (!window.htmx) return;
     window.__dpNavTreeInit = true;
-    Array.prototype.forEach.call(document.querySelectorAll("[data-nav-branch]"), setup);
-    syncRailClass();
+    // Listeners FIRST: setup() re-opens a remembered branch, and its root request leaves
+    // synchronously — a request that left before onBeforeRequest existed carries no tree stamp,
+    // so its answer would land unguarded and nothing would restore after it (measured: the
+    // full-document entry came back with the root and no revealed leaf).
     var body = document.body;
     body.addEventListener("htmx:beforeRequest", onBeforeRequest);
     body.addEventListener("htmx:beforeSwap", onBeforeSwap);
@@ -715,6 +742,8 @@
       persistRail();
     });
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(scheduleFit);
+    Array.prototype.forEach.call(document.querySelectorAll("[data-nav-branch]"), setup);
+    syncRailClass();
     trees.forEach(function (t) { markCurrent(t, false); });
   }
 
