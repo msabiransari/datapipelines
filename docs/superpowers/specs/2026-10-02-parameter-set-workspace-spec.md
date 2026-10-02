@@ -100,7 +100,7 @@ frames and records are plain data. The migration lands in `modules/app/src/main/
 ## 2. Data model — one migration, two tables
 
 The migration is **the next free `V__` at the build lane's dispatch, recorded in its handback**
-(on this base the latest applied is V43 `dashboard_refreshes`; V44 is 352's claim, V45 L5's (367);
+(on this base the latest applied is V43 `dashboard_refreshes`; main now carries V44 (353) and V46 (332), V45 is L5's (367), unmerged;
 the residue lane may take one — a lane never guesses, it reads `db/migration/` at dispatch). The
 mould is V39 (`parameter_sets.sql`) for the constraint style; the principal/identity columns copy
 V43's `dashboard_refreshes` (metadata-db §4.34, `:1304`).
@@ -309,7 +309,7 @@ the Dashboards branch `:288–:304` is the exemplar): `div.app-nav-branch` → t
 `details.app-nav-branch-tree > summary[hx-get=/partials/parameter-sets/tree(scope='nav')][hx-trigger="click once"]`
 → `div.tpl-level.tpl-level-pending#params-tree-nav` — lazy, ONE level per click, no JS beyond the
 house tree conventions. **Icon (§11.1):** the existing `chevrons-up-down` glyph — the sprite
-(`/vendor/icons/lucide-sprite.svg`, 44 ids read on this base) has no sliders/variable glyph, and
+(`/vendor/icons/lucide-sprite.svg`, 43 ids read on this base) has no sliders/variable glyph, and
 `IconSpriteAuditTest` keeps referenced = vendored = manifest subset, so an existing id is free and
 a new one is a vendoring step (§11.1's alternative).
 
@@ -433,7 +433,7 @@ originated elsewhere or no page was open") — with the caller column naming whi
 
 **No MCP tool changes.** The catalog keeps its six parameter tools (`McpToolCatalog.kt:136–:141`)
 and its count as read at dispatch (60 entries on this base; the pinned NAMES count 59 — L4's two
-test-session tools land with 352; neither is this spec's). Evaluation exists as
+test-session tools land with 353; neither is this spec's). Evaluation exists as
 `parameter_sets_evaluate` (unchanged, no trace events — R1). **History reads: NO tool in round
 one** (§11.6) — no agent surface consumes the history today, the wire would need its own
 redaction/lens review, and the UI need is met; exposing it later is additive rows in the
