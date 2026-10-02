@@ -71,6 +71,12 @@
     return !!value && typeof value === "object" && !Array.isArray(value);
   }
 
+  /** #369 — `"released"`, or the positive integer a draft preview names. Nothing else inits. */
+  function isValidVersion(value) {
+    if (value === "released") return true;
+    return typeof value === "number" && isFinite(value) && value > 0 && value % 1 === 0;
+  }
+
   function randomUuid() {
     var bytes = new Uint8Array(16);
     crypto.getRandomValues(bytes);
@@ -250,22 +256,34 @@
     return String(base || "").replace(/\/$/, "");
   };
 
+  // #369 — the draft preview's named version: `"released"` (or nothing) rides no query; a
+  // positive integer rides `?version=N` on EVERY runtime path this instance builds.
+  DashboardInstance.prototype._versionQuery = function () {
+    var version = this._init.dashboard.version;
+    return typeof version === "number" && isFinite(version) && version > 0 && version % 1 === 0
+      ? "?version=" + version
+      : "";
+  };
+
+  /** The controller's ONE runtime segment: /api/v1/dashboards/{id}/runtime/<segment> (+ ?version=N). */
+  DashboardInstance.prototype._runtimePath = function (segment) {
+    return "/api/v1/dashboards/" + encodeURIComponent(this._init.dashboard.id) + "/runtime/" + segment + this._versionQuery();
+  };
+
   DashboardInstance.prototype._configPath = function () {
-    return "/api/v1/dashboards/" + encodeURIComponent(this._init.dashboard.id) + "/runtime/config";
+    return this._runtimePath("config");
   };
 
   DashboardInstance.prototype._parametersPath = function () {
-    return this._configPath().replace(/\/config$/, "/parameters");
+    return this._runtimePath("parameters");
   };
 
   DashboardInstance.prototype._streamPath = function () {
-    return this._configPath().replace(/\/config$/, "/visualizations");
+    return this._runtimePath("visualizations");
   };
 
   DashboardInstance.prototype._abortPath = function (refreshId) {
-    // The controller's ONE runtime segment: /api/v1/dashboards/{id}/runtime/refreshes/{rid}/abort
-    // (DashboardRuntimeController §8.4). The config path's own /runtime is reused, never doubled.
-    return this._configPath().replace(/\/config$/, "/refreshes/" + encodeURIComponent(refreshId) + "/abort");
+    return this._runtimePath("refreshes/" + encodeURIComponent(refreshId) + "/abort");
   };
 
   DashboardInstance.prototype._renderTimeoutMs = function () {
@@ -1650,10 +1668,11 @@
       if (options.server.baseUrl !== undefined || options.server.credentials !== undefined) {
         throw DashboardError("init.invalid", "fixture mode names no server: no baseUrl, no credentials");
       }
-    } else if (options.dashboard.version !== "released") {
-      // The server serves the current release only (spec §18.12: no version route exists); a number
-      // is refused with a clear error until the preview lane (L4) defines it.
-      throw DashboardError("init.version_unsupported", 'this runtime serves version "released" only', {
+    } else if (!isValidVersion(options.dashboard.version)) {
+      // "released" serves the current release; since #369 a positive INTEGER names the version
+      // the draft preview is looking at (the server refuses a version the caller may not see).
+      // Anything else is refused with a clear error naming what this runtime serves.
+      throw DashboardError("init.version_unsupported", 'this runtime serves version "released" or a positive integer version number', {
         requested: String(options.dashboard.version),
       });
     }

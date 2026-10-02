@@ -111,6 +111,28 @@
   font-weight: var(--weight-medium);
 }
 
+/* The draft preview's banner (#369): the one honest sentence about the version the person is
+   looking at, above the page headline. Tokens only; text first, no colour alone — the same
+   discipline as the status chip. */
+.dp-board-preview-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--gap-sm);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  background: var(--surface-inset);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: var(--gap-sm) var(--gap-md);
+  margin-bottom: var(--gap-sm);
+}
+
+.dp-board-preview-banner a {
+  color: var(--text-secondary);
+}
+
 /* ---- The first-party pages (#10 L3b) ---------------------------------------------- */
 
 /* The board page: the board LEFT (it owns the space), the events pane RIGHT (a fixed,

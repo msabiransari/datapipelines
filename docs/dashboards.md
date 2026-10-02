@@ -1,13 +1,12 @@
 # Dashboards
 
-**Status:** v0.18 — the two documents and their lifecycle (#10, lane L1a); the REST routes, the MCP tools and the
+**Status:** v0.NEXT — the two documents and their lifecycle (#10, lane L1a); the REST routes, the MCP tools and the
 permissions (§4, lane L1b); the transfer routes and their limits' honest contract (§3.3, lanes L1c/L1c-b/L1c-c: the
 import's atomicity, the RELEASE rules on a landing, the aggregate count ceiling, the wire's per-family arms); the server
 runtime (§5, lane L2; #343's released pins and stream authority); the client runtime (§6, lanes L3a/L3a-b/L3a-c); the
-first-party pages (§7, lane L3b); the tests' backend — sessions, capabilities, the mechanical check and the release
-gate — is §3.4 (lane L4a, #352), and its workflow on the wire — the session routes, the preview page, the screenshot
-upload and the two test tools — §3.4.1 (lane L4b, #353). The dashboard draft preview (#369) and the `dashboard` key kind (L5)
-add their sections as they land.
+first-party pages (§7, lane L3b, the draft preview #369); the tests' backend — sessions, capabilities, the mechanical
+check and the release gate — is §3.4 (lane L4a, #352), and its workflow on the wire — the session routes, the preview
+page, the screenshot upload and the two test tools — §3.4.1 (lane L4b, #353). The `dashboard` key kind (L5) is §4.1/§5.8/§6.5.
 **Owner:** datapipelines.co core
 **Depends on:** [Versioning](versioning.md) (§3.5 — the lifecycle table), [Pipeline Contract](pipeline-contract.md)
 (§13.22, §13.23 — the codes), [Metadata DB](metadata-db.md) (§4.28–§4.35 — the tables), [Enumerations](enums.md)
@@ -462,8 +461,17 @@ it for everyone — and it writes NO stored result (§5.5).
 | `POST /{id}/runtime/refreshes/{refresh_id}/abort` | 202; aborts a RUNNING refresh the caller owns. |
 | `GET /{id}/refreshes`, `GET /{id}/refreshes/{refresh_id}` | The caller's own refreshes; every refresh with `execution.read_all`. |
 
-The dashboard served is its CURRENT RELEASED version, never a draft (the draft preview is L4's). A dashboard with no
-release is absent, exactly like a hidden one.
+The dashboard served is its CURRENT RELEASED version — and since #369 the four runtime routes above take an optional
+`version` query parameter naming a DRAFT or RELEASED version (a bounded positive integer, the execute route's 400
+otherwise); absent means exactly today's read. The named version must resolve for the caller — absent, DISCARDED, or
+hidden under a narrowing lens is the family 404 naming the version they named — and a `dashboard` key never names one:
+the version routes are the session-authenticated preview page's ([§7](#7-the-first-party-pages-l3b)), and a version
+parameter would be a second credential for the same principal (refused `dashboard.key.kind_refused` before anything is
+looked up). The pin rule does not move (R1, the owner's ruling on #369): every pinned visualization, its transform
+template, the parameter set and each source pipeline release must be RELEASED — a draft pinning a DRAFT pin is the
+existing `dashboard.runtime.dependency_missing` (`reason: "not_released"`, naming the pin, the message carrying the
+release hint), the engineer's way out being the release, not a second renderer. A dashboard with no release is absent,
+exactly like a hidden one.
 
 ### 5.3 The configuration
 
@@ -558,10 +566,11 @@ dashboard she can read but holds no `execution.read`, so her refresh names no ex
 
 ### 5.8 What is not here
 
-The dashboard draft preview (#369, unowned after the L4 split) and the visualization tests (L4). The `dashboard` key kind IS here now (L5, #367): an external
+The visualization tests' remaining human surfaces (L4). The `dashboard` key kind IS here now (L5, #367): an external
 application's backend holds a `dashboard` key and proxies the runtime routes — §6.5 is the wire contract and
 [Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings) the kind's specification. No MCP tool refreshes a
-dashboard. The first-party pages are §7 (L3b).
+dashboard. The first-party pages are §7 (L3b); the dashboard draft preview IS here now (#369, §5.2's `version`
+parameter and §7's preview page).
 
 ## 6. The client runtime (L3a)
 
@@ -577,7 +586,7 @@ stale frame touch the DOM.
 ```js
 const instance = DatapipelinesDashboard.init({
   server: { baseUrl, credentials: "session" | { proxyBaseUrl } },
-  dashboard: { id, version: "released" },
+  dashboard: { id, version: "released" | 2 },  // the preview's named version (§5.2, #369)
   container: HTMLElement,
   adapter: DatapipelinesDashboard.adapters(container),  // or the host's own §6.2 object
   options: { renderTimeoutMs, onNotification },
@@ -590,8 +599,9 @@ instance.resize(); instance.dispose();
 instance.recover("retry" | "reload"); instance.on("edit" | "commit" | "action", listener);
 ```
 
-`version` is `"released"` only — the server serves the current release and nothing else (§5.2); a
-numeric version is refused with a clear error until the preview lane (L4) defines it. Re-initialising
+`version` is `"released"` — the current release and the first-party page's own value — or, since #369, a positive
+INTEGER naming the version a preview is looking at (§5.2; the server refuses a version the caller may not see, and a
+`dashboard` key never names one). Anything else is refused with `init.version_unsupported`. Re-initialising
 a container that already mounts an instance throws `DashboardAlreadyMounted`; after `dispose()` the
 container is unmarked and a fresh `init` is legitimate.
 
@@ -791,6 +801,22 @@ pane, and a refusal page loads no bundle at all. `dashboards.css` and the vendor
 no page template carries its own stylesheet link, and a page-scoped sheet on any route paints
 an unstyled first frame.
 
+**The draft preview page (#369).** `GET /dashboards/{id}/preview?version=N` renders the SAME
+board template for a NAMED version — the draft the engineer is perfecting before releasing it,
+or a released one. The declared permission stays `dashboard.read` (the record's §6.3 sentence:
+a `dashboard.read` holder with `dashboard.execute` — the page on the read row, the runtime it
+mounts on the execute rows, D50's unchanged half), the visibility oracle is the same
+working-version read as the board's, and the runtime's config read carries the version through
+§5.2's rule: a version that does not resolve, or a pin that does not hold (R1), is the refusal
+state IN PLACE — this dashboard exists in the caller's tree, so the refusal names the code
+where the person is looking. What the page adds is the truth about what is on screen: the
+banner naming the previewed version with the way back to the released view, and the version
+riding `data-dp-dashboard-version` — the SAME data-attribute channel the id rides, an integer,
+never a script body — which the glue passes to `init` as the named version. A promoter's lens
+hides the draft: the family's 404, never a hidden row; a `dashboard` key never reaches the page
+(session-only surface, §5.2's key rule). The preview is a read: no audit event, and the
+refreshes pane beside the board is the dashboard's own, version-independent.
+
 **Navigation onto the route is never boosted; disposal is the `htmx:beforeHistorySave` hook.**
 Every link TO a board carries `hx-boost="false"` — §6.4's rule: the two bundles must never
 travel between pages, and a boosted board-to-board swap would run one page's bundle under the
@@ -820,6 +846,7 @@ full navigation).
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-02 | v0.NEXT | #369 the dashboard draft preview — renumber at merge (344's v0.19 and 372's v0.20 land first) | **§5.2:** the four runtime routes take an optional `version` query parameter naming a DRAFT or RELEASED version (R2, owner-confirmed): absent = the current RELEASED version unchanged; a value is a bounded positive integer, must resolve for the caller (the family 404 naming it), and is refused to a `dashboard` key (`dashboard.key.kind_refused` — the version routes are the session page's). R1 (owner-confirmed): the pin rule is RELEASED-only on a draft exactly as on a release — a draft pinning a DRAFT pin is `dashboard.runtime.dependency_missing`/`not_released` naming the pin, the message carrying the release hint. **§6.1:** `init` admits `"released"` or a positive integer; the integer rides `?version=N` on every runtime path the instance builds. **§7:** the draft preview page (`GET /dashboards/{id}/preview?version=N`) — the board template for a named version, the banner with the way back to the released view, the version on the `data-dp-dashboard-version` attribute channel, refusals in place, the promoter's 404, session-only. No MCP tool, no migration, no new permission row. |
 | 2026-10-01 | v0.18 | L5 (#367, #10) the `dashboard` key kind | **§4.1: the `dashboard_viewer` column and the binding row are HERE** — the key's one role holds `dashboard.read` + `dashboard.execute`, `bound` in both cells, the bindings ARE the lens (`dashboard_key_bindings`, R-EP2 verbatim: deeper replaces, unbound = the family 404). **§5.8:** the key kind is no longer "not here" — the runtime routes have a non-session caller. **§6.5:** the wire contract gained its implementation — the reference proxy is `examples/dashboard-proxy/proxy.mjs`, its conformance test `dashboard-proxy.test.mjs` (the streaming timing is the buffering detector) and the real-stack E2E; `/refreshes` is deliberately not relayed (owner-scoped by the key; one key = one budget, sized by `max-streams-per-user`); refresh rows carry `principal_key_id`, executions `executed_by_key_kind = 'dashboard'`. |
 | 2026-10-01 | v0.17 | L4b (#353) the test workflow on the wire | **New §3.4.1** — the five-step workflow over REST and MCP (start, the session-less preview page, submit, the single-use screenshot upload, the human release), the confinement (each capability opens one route for one run; the starter re-judged at the moment of use; one indistinguishable answer for every capability failure) and the lensed evidence reads; §3.4's retention bullet gains the UI sentence (an author who re-tests keeps only the last screenshot). **§6.5:** the runtime's fixture mode (the transport swapped, nothing else; no `fetch`). §4.4 names the two test tools; §5.8 no longer lists the test surfaces. |
 | 2026-10-01 | v0.16 | 332 (#332, #330, #331) the lifecycle audit + the pins projection | **§3:** the five human verbs and the release audit (the `dashboard.*` events, the cascaded visualization releases named with `cascade_from_dashboard_id`) — the pipelines mould, ids/names/versions/counts only. |

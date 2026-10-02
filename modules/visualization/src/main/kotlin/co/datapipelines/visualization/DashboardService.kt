@@ -203,10 +203,10 @@ class DashboardService(
 
     /**
      * The version the RUNTIME serves (#10 L2, spec §18 premise 12): the CURRENT RELEASED version of dashboard [id],
-     * through [lens] — nothing else. A draft is never served here (the draft preview is L4's, §6.3), a dashboard
-     * whose pointer names no live release (never released, or every release discarded) is absent, and a hidden one
-     * (the promoter lens) is the same absence. `ArtifactLifecycle.findWorking` cannot answer this: under the whole view
-     * it prefers the draft.
+     * through [lens] — nothing else. A draft is never served here (the draft preview names its version through
+     * [findServedVersion], §6.3), a dashboard whose pointer names no live release (never released, or every release
+     * discarded) is absent, and a hidden one (the promoter lens) is the same absence. `ArtifactLifecycle.findWorking`
+     * cannot answer this: under the whole view it prefers the draft.
      */
     fun findServed(
         workspaceId: UUID,
@@ -218,6 +218,28 @@ class DashboardService(
                 workspaceId,
                 id,
             )?.takeIf { it.detail.status == PipelineVersionStatus.RELEASED && lens.admits(it.record.name) }
+
+    /**
+     * One NAMED version the RUNTIME serves (#369, the draft preview's R2): the version [version] of dashboard [id]
+     * through [lens] — DRAFT or RELEASED. Absent = [findServed]'s answer, exactly today's behaviour; a value names a
+     * version. The lens holds the record's line: under the whole view a DRAFT or RELEASED version is served (the
+     * engineer perfects the board before releasing it, R1 — the pins are judged RELEASED-only by the resolver either
+     * way), while a narrowing lens never learns of a draft — RELEASED only, the same answer [findVersion] gives, so a
+     * hidden or draft version is the family's 404, never a served row. DISCARDED is served to no one under any lens.
+     */
+    fun findServedVersion(
+        workspaceId: UUID,
+        lens: ReadLens,
+        id: UUID,
+        version: Int,
+    ): ArtifactVersion<DashboardBody>? =
+        repository.findVersion(workspaceId, id, version)?.takeIf {
+            lens.admits(it.record.name) &&
+                (
+                    it.detail.status == PipelineVersionStatus.RELEASED ||
+                        (it.detail.status == PipelineVersionStatus.DRAFT && lens.isEverything)
+                )
+        }
 
     /** A version by name, through [lens] — `ArtifactLifecycle.findVersionByName`. */
     fun findVersionByName(

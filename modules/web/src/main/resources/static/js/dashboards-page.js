@@ -9,9 +9,11 @@
  * NO polling (the events pane's fragment re-fetches itself over htmx). What it owns is the
  * page contract:
  *
- *   - init with `credentials: "session"` and `version: "released"` — the only values the
- *     first-party page may use (dashboards.md §6.1: the server serves the current release
- *     and nothing else).
+ *   - init with `credentials: "session"` and `version: "released"` — the released view's only
+ *     value — or, since #369, the integer the preview page wrote into
+ *     `data-dp-dashboard-version` (a DRAFT or named RELEASED version; dashboards.md §5.2/§7).
+ *     The version crosses the SAME data-attribute channel the id rides; nothing else crosses
+ *     into script data.
  *   - options.onNotification is the page's sink: notifications land in window.__dpPage AND,
  *     for a boot failure, in the refusal region the server pre-rendered.
  *   - window.__dpPage is the page's test seam (window.__dp is the conformance host's): ready,
@@ -39,6 +41,12 @@
   if (!container) return;
   var id = container.getAttribute("data-dp-dashboard-id");
   if (!id) return;
+  // #369 — the draft preview names its version in the same data attribute channel the id rides
+  // (an integer attribute, never a script body); the released view writes none and stays on
+  // "released", the only value the first-party page may pass beside a number.
+  var versionAttribute = container.getAttribute("data-dp-dashboard-version");
+  var version = versionAttribute === null || versionAttribute === "" ? "released" : parseInt(versionAttribute, 10);
+  if (typeof version !== "number" || !isFinite(version)) return;
 
   var runtime = window.DatapipelinesDashboard;
   if (!runtime) return;
@@ -85,7 +93,7 @@
   try {
     var instance = runtime.init({
       server: { baseUrl: "", credentials: "session" },
-      dashboard: { id: id, version: "released" },
+      dashboard: { id: id, version: version },
       container: container,
       adapter: runtime.adapters(container),
       options: {
