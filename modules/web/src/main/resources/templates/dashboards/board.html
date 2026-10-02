@@ -2,23 +2,26 @@
 <html xmlns:th="http://www.thymeleaf.org"
       th:replace="~{layouts/default :: page(~{::content})}">
 <th:block th:fragment="content">
-  <!-- #10 L3b — the board page (ui-screens.md §4.x; dashboards.md §6): the released view, and
-        since #369 the SAME template for the draft preview (a named version, data-dp-dashboard-version
-        and the banner below; the released view writes no version attribute). The
-        ONE Plotly bundle the SERVER chose (renderer.bundle, §10.4) is declared on its script
-        tag (data-dp-plotly-bundle) and the runtime judges the pair at bootstrap — the §6.4
-        backstop. The glue is a FILE (the CSP has no unsafe-inline) reading the two data
-        attributes below; no server value reaches a script body.
+  <!-- #400 — the dashboard WORKSPACE (the parent ruling #396's tabbed, version-explicit page):
+        one URL names one dashboard, one viewed version and one tab. The Board pane is today's
+        board page EXACTLY — the ONE Plotly bundle the SERVER chose (renderer.bundle, §10.4)
+        declared on its script tag, the glue (dashboards-page.js, unchanged) reading the two
+        data attributes, the refusal region, the events pane beside the board — and the
+        Overview, Refreshes, Versions and Keys panes are the workspace's other reading
+        surfaces (Versions carrying the lifecycle verbs' dialogs; the browser never authors a
+        dashboard, #396).
 
-       Links to this route are NEVER boosted (the tree leaf, the sidebar): the two bundles
-       must never travel between pages — a boosted board-to-board swap would run one page's
-       bundle scripts under the other's document. LEAVING the board can still be boosted (the
-       layout's nav links are), which is why the glue disposes on htmx:beforeHistorySave:
-       htmx saves a snapshot of this document on the way out, and a snapshot carrying the
-       mounted marker would make the restored page's init hit DashboardAlreadyMounted. -->
-  <!-- The runtime's scripts ride ONLY a board that resolved: a refusal page loads no bundle
-       at all (the refusal state is already server-rendered, and a megabyte of Plotly has
-       nothing to render into). -->
+        The ONE-bundle rule (dashboards.md §6.4) still governs: links ONTO any version of this
+        page are NEVER boosted (tree leaf, catalog rows, the selector, the choose-a-version
+        links — every one carries hx-boost="false"), so the scripts below execute on full
+        document loads alone. Tab switches are IN-PAGE (dashboards/workspace.js — no scripts
+        re-run, no navigation); version switches are FULL navigations (a draft's bundle can
+        differ from the release's — #369 review F1); lifecycle dialogs answer HX-Redirect
+        (a full navigation back onto the Versions tab).
+
+        The runtime's scripts ride ONLY a page whose version resolved: a refusal page or the
+        choose-a-version state loads no bundle at all (the refusal state is already
+        server-rendered, and a megabyte of Plotly has nothing to render into). -->
   <th:block th:if="${bundle != null}">
     <script th:src="@{/vendor/plotly/plotly-{bundle}.min.js(bundle=${bundle})}"
             th:attr="data-dp-plotly-bundle=${bundle}"></script>
@@ -28,56 +31,159 @@
     <script th:src="@{/js/datapipelines-dashboard-kpi.js}"></script>
     <script th:src="@{/js/dashboards-page.js}" defer></script>
   </th:block>
+  <!-- #400 — the workspace's tab state (the shared core pipeline-editor's tabs.js delegates
+        to, and the dashboards glue over it). A bare tag here is safe by the one-bundle rule:
+        this page is never a boosted SWAP TARGET, so the tag cannot replay from a history
+        cache the way an editor page's would (#358's lesson does not apply). -->
+  <script th:src="@{/js/workspace/tabs.js}"></script>
+  <script th:src="@{/js/dashboards/workspace.js}" defer></script>
+  <!-- 102: the lifecycle dialogs' client half — the ONE per-screen container is #dp-dialog. -->
+  <script th:src="@{/js/lifecycle-dialog.js}" defer></script>
 
-  <div class="dp-board-page">
-    <!-- #369 — the draft preview's banner: the version the person is looking at, and the way
-         back to the released view. Server-rendered text only (th:text, never utext); it shows
-         on a refusal page too, where no bundle loads. -->
-    <div class="dp-board-preview-banner" th:if="${previewVersion != null}">
-      <span>
-        Previewing version <b th:text="${previewVersion}">2</b>
-        <span th:if="${previewStatus != null}" th:text="'(' + ${previewStatus} + ')'">(DRAFT)</span> —
-        this is not the released view.
-      </span>
-      <!-- A FULL navigation: preview -> board is board-to-board, and the two pages' bundles
-           must never travel between documents (the one-bundle rule above; #369 review F1). -->
-      <a th:href="@{/dashboards/{id}(id=${dashboardId})}" hx-boost="false">Back to the released view</a>
+  <!-- #350 — the global sidebar's current-leaf hook: which dashboard this page shows, by id
+        AND full path, so the rail's Dashboards tree (nav-tree.js) can mark the leaf and
+        reveal its folders (editor.html:11's shape, for the second family). -->
+  <span hidden data-nav-current="dashboards"
+        th:attr="data-nav-current-id=${dashboardId},data-nav-current-path=${navCurrentPath}"></span>
+
+  <div class="dp-workspace">
+    <!-- Top bar: back to the catalog, the crumb name, the VIEWED-version chip (the #369
+         preview banner's successor — the truth about what is on screen), the version
+         selector over the admitted history. Every version switch is a FULL navigation
+         (hx-boost="false"): the two bundles must never travel between documents. -->
+    <div class="dp-ws-topbar">
+      <a th:href="@{/dashboards}" class="dp-back"><svg class="ds-icon ds-icon-xs" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#arrow-left"></use></svg> Dashboards</a>
+      <div class="dp-crumb">
+        <!-- THE h1 — the choose-a-version state (#409) and the refusal state keep the name in
+             the heading: a dashboard the tree just linked to never renders an empty one. -->
+        <h1 class="dp-crumb-name" th:text="${dashboardName}">finance/dashboards/revenue_overview</h1>
+        <!-- The chip names the VIEWED version and its own status — never "latest release".
+             No version resolved: the chip says so (#409's state, never an empty badge). -->
+        <span class="ds-badge dp-vchip" data-dp-viewed-label
+              th:classappend="${viewedIsDraft} ? 'ds-badge-warning' : 'ds-badge-default'"
+              th:text="${viewedLabel}">v1 · released · current</span>
+      </div>
+      <!-- The version selector: READ navigation over the admitted history (#348's D5 rule,
+           one family later). The row's href is the canonical deep link (middle-click,
+           no-JS); the click is a full navigation by the one-bundle rule, never intercepted. -->
+      <nav class="dp-versions" aria-label="View another version"
+           th:if="${!#lists.isEmpty(versions)}">
+        <a th:each="row : ${versions}" class="ds-button ds-button-ghost ds-button-sm" hx-boost="false"
+           th:href="@{/dashboards/{id}(id=${dashboardId}, version=${row.version}, tab=${activeTab})}"
+           th:attr="aria-current=${row.isSelected} ? 'true' : null"
+           th:title="${'v' + row.version + ' — ' + row.status.toLowerCase() + (row.isServed ? ' · current' : '')}"
+           th:text="'v' + ${row.version}">v1</a>
+      </nav>
     </div>
-    <div class="app-page-h">
-      <div>
-        <h1 class="ds-headline" th:text="${dashboardName}">finance/dashboards/revenue_overview</h1>
+
+    <!-- #409 — the choose-a-version state: the record exists (the tree linked it), but no
+          version is served to this caller and none was named. The heading shows the NAME,
+          the draft is offered with its preview link, and "no release yet" says what state
+          the dashboard is in — never the empty `h1` and the "not found" the old board page
+          answered for a dashboard the tree had just linked. -->
+    <div class="ds-empty app-center u-modal-tall" th:if="${!hasSelected}">
+      <p class="ds-empty-title" th:text="${#lists.isEmpty(versions)} ? 'No viewable version yet' : 'Choose a version'">Choose a version</p>
+      <p class="ds-empty-description">
+        <span th:text="${dashboardName}">finance/dashboards/revenue_overview</span>
+        <span>has no release yet — opening it says so instead of rendering a board.</span>
+      </p>
+      <p class="ds-empty-actions">
+        <a th:each="row : ${versions}" class="ds-button ds-button-secondary" hx-boost="false"
+           th:href="@{/dashboards/{id}(id=${dashboardId}, version=${row.version}, tab='board')}"
+           th:text="'v' + ${row.version} + ' — ' + ${row.status.toLowerCase()} + (${row.isServed} ? ' · current' : '')">v2 — draft</a>
+      </p>
+    </div>
+
+    <!-- The workspace: the tab strip and its panes, only for a page whose version resolved.
+         The panels hide through the `hidden` ATTRIBUTE (never an inline style); the Board
+         pane's chart re-sizes on reveal through the runtime's own resize. -->
+    <div th:if="${hasSelected}" class="dp-ws-root"
+         th:attr="data-active-tab=${activeTab}">
+      <nav class="dp-ws-tabs" role="tablist" aria-label="Dashboard workspace tabs">
+        <button type="button" class="dp-ws-tab" role="tab" id="dp-tab-board" aria-controls="dp-pane-board"
+                data-dp-tab="board" th:attr="aria-selected=${activeTab == 'board'} ? 'true' : 'false'">Board</button>
+        <button type="button" class="dp-ws-tab" role="tab" id="dp-tab-overview" aria-controls="dp-pane-overview"
+                data-dp-tab="overview" th:attr="aria-selected=${activeTab == 'overview'} ? 'true' : 'false'">Overview</button>
+        <button type="button" class="dp-ws-tab" role="tab" id="dp-tab-refreshes" aria-controls="dp-pane-refreshes"
+                data-dp-tab="refreshes" th:attr="aria-selected=${activeTab == 'refreshes'} ? 'true' : 'false'">Refreshes</button>
+        <button type="button" class="dp-ws-tab" role="tab" id="dp-tab-versions" aria-controls="dp-pane-versions"
+                data-dp-tab="versions" th:attr="aria-selected=${activeTab == 'versions'} ? 'true' : 'false'">Versions</button>
+        <button th:if="${canBindKeys == true}" type="button" class="dp-ws-tab" role="tab" id="dp-tab-keys"
+                aria-controls="dp-pane-keys"
+                data-dp-tab="keys" th:attr="aria-selected=${activeTab == 'keys'} ? 'true' : 'false'">Keys</button>
+      </nav>
+
+      <div class="dp-ws-panes">
+        <!-- BOARD — today's board page exactly: the runtime mounts the configuration's grid
+             in #dp-board, the refusal region stands in for a board that cannot run, and the
+             events pane sits beside it. The version attribute is the #369 channel: an
+             INTEGER for a named version, ABSENT for the default (the glue's init stays
+             "released", dashboards.md §6.1). -->
+        <div class="dp-ws-pane" id="dp-pane-board" role="tabpanel" aria-labelledby="dp-tab-board"
+             data-dp-pane="board" th:attr="hidden=${activeTab != 'board'} ? 'hidden' : null">
+          <div class="dp-board-page">
+            <div class="dp-board-layout">
+              <main id="dp-board" class="dp-board"
+                    th:attr="data-dp-dashboard-id=${dashboardId}, data-dp-dashboard-version=${boardVersion}"></main>
+
+              <!-- The refusal state: the in-page answer to a board that cannot run (no
+                   release yet, a dependency missing) and to a runtime boot failure — the
+                   onNotification sink's region. The NAME stays in the h1 above (#409's
+                   refusal arm); never a blank pane. -->
+              <div id="dp-board-refusal" class="ds-empty" hidden
+                   th:attr="data-dp-refusal-code=${refusalCode}, data-dp-refusal-message=${refusalMessage}"
+                   th:hidden="${refusalCode == null}">
+                <p class="ds-empty-title">This dashboard cannot be shown</p>
+                <p class="ds-empty-description" id="dp-board-refusal-message"
+                   th:text="${refusalMessage}">The board could not start.</p>
+                <p class="ds-empty-description">
+                  <code id="dp-board-refusal-code" th:text="${refusalCode}">dashboard.not_found</code>
+                </p>
+              </div>
+
+              <!-- The events pane: the caller's refreshes, newest first, beside the board;
+                   the fragment's root re-fetches itself on a bounded poll. -->
+              <aside class="dp-board-side" aria-label="Refreshes">
+                <div th:replace="~{partials/dashboard-refreshes :: pane}"></div>
+              </aside>
+            </div>
+          </div>
+        </div>
+
+        <!-- OVERVIEW — the viewed version's definition, read-only (no authoring control:
+             #396, the browser never authors). Lazy: the partial loads on the tab's first
+             activation for the version the PAGE resolved. -->
+        <div class="dp-ws-pane" id="dp-pane-overview" role="tabpanel" aria-labelledby="dp-tab-overview"
+             data-dp-pane="overview" th:attr="hidden=${activeTab != 'overview'} ? 'hidden' : null, data-lazy-url=@{/partials/dashboards/{id}/overview(id=${dashboardId}, version=${viewedVersion})}">
+          <p class="dp-tab-note">Loading overview…</p>
+        </div>
+
+        <!-- REFRESHES — the caller's refreshes of this dashboard, full width (the board
+             pane keeps its own beside the board, exactly as today). Lazy, version-independent
+             as #369 documents. -->
+        <div class="dp-ws-pane" id="dp-pane-refreshes" role="tabpanel" aria-labelledby="dp-tab-refreshes"
+             data-dp-pane="refreshes" th:attr="hidden=${activeTab != 'refreshes'} ? 'hidden' : null, data-lazy-url=@{/partials/dashboards/{id}/refreshes(id=${dashboardId})}">
+          <p class="dp-tab-note">Loading refreshes…</p>
+        </div>
+
+        <!-- VERSIONS — the admitted history and the lifecycle verbs' dialogs (a success
+             reloads the workspace onto this tab: a lifecycle change moves the version set). -->
+        <div class="dp-ws-pane" id="dp-pane-versions" role="tabpanel" aria-labelledby="dp-tab-versions"
+             data-dp-pane="versions" th:attr="hidden=${activeTab != 'versions'} ? 'hidden' : null, data-lazy-url=@{/partials/dashboards/{id}/versions(id=${dashboardId})}">
+          <p class="dp-tab-note">Loading versions…</p>
+        </div>
+
+        <!-- KEYS — the `dashboard` keys bound to this dashboard, read-only; ws_admin and
+             super admin only (the tab is absent, and its partial never fetched, otherwise). -->
+        <div th:if="${canBindKeys == true}" class="dp-ws-pane" id="dp-pane-keys" role="tabpanel" aria-labelledby="dp-tab-keys"
+             data-dp-pane="keys" th:attr="hidden=${activeTab != 'keys'} ? 'hidden' : null, data-lazy-url=@{/partials/dashboards/{id}/keys(id=${dashboardId})}">
+          <p class="dp-tab-note">Loading keys…</p>
+        </div>
       </div>
     </div>
 
-    <div class="dp-board-layout">
-      <!-- The board: the runtime mounts the configuration's grid here. The glue reads the
-           dashboard id from the container; the refusal state (below) is what shows when the
-           board cannot run. -->
-      <main id="dp-board" class="dp-board"
-            th:attr="data-dp-dashboard-id=${dashboardId}, data-dp-dashboard-version=${previewVersion}"></main>
-
-      <!-- The refusal state: the in-page answer to a board that cannot run (no release yet, a
-           dependency missing) and to a runtime boot failure — the onNotification sink's
-           region. Never a blank pane (the implementation spec's §6.3). The server fills the
-           code and message when the config read refused; the glue fills them when a later boot
-           step fails, then reveals the region. -->
-      <div id="dp-board-refusal" class="ds-empty" hidden
-           th:attr="data-dp-refusal-code=${refusalCode}, data-dp-refusal-message=${refusalMessage}"
-           th:hidden="${refusalCode == null}">
-        <p class="ds-empty-title">This dashboard cannot be shown</p>
-        <p class="ds-empty-description" id="dp-board-refusal-message"
-           th:text="${refusalMessage}">The board could not start.</p>
-        <p class="ds-empty-description">
-          <code id="dp-board-refusal-code" th:text="${refusalCode}">dashboard.not_found</code>
-        </p>
-      </div>
-
-      <!-- The events pane: the caller's refreshes, newest first, beside the board; the
-           fragment's root re-fetches itself on a bounded poll (dashboard-refreshes.html). -->
-      <aside class="dp-board-side" aria-label="Refreshes">
-        <div th:replace="~{partials/dashboard-refreshes :: pane}"></div>
-      </aside>
-    </div>
+    <!-- 102: the lifecycle dialogs' single per-screen container. -->
+    <div id="dp-dialog"></div>
   </div>
 </th:block>
 </html>

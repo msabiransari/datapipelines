@@ -8,19 +8,21 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestMethodOrder
 
 /**
- * #369 — the DRAFT PREVIEW page in a real browser (the implementation spec's §6.3): the preview
- * route renders the board page's template for a NAMED version — the banner with the way back to
- * the released view, the version riding the `data-dp-dashboard-version` attribute the glue reads,
- * a real chart rendered from the draft's own pins (R1: released pins only), the refusal block IN
- * PLACE for a draft whose pin is not released (with the release hint), and the light/dark
- * handback screens. The suite's after-each proves ZERO CSP violations for every page this test
- * opens — asserted there, never weaker here.
+ * #369 — the DRAFT PREVIEW in a real browser (the implementation spec's §6.3), since #400 a
+ * REDIRECT: `GET /dashboards/{id}/preview?version=N` answers 303 onto the workspace's Board
+ * tab at the named version, where the browser lands. What the page carries is #369's truth
+ * about what is on screen — the viewed-version chip naming v2 · draft, the version riding the
+ * `data-dp-dashboard-version` attribute the glue reads, a real chart rendered from the draft's
+ * own pins (R1: released pins only), the refusal block IN PLACE for a draft whose pin is not
+ * released (with the release hint), and the light/dark handback screens. The suite's
+ * after-each proves ZERO CSP violations for every page this test opens — asserted there,
+ * never weaker here.
  */
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
 class DashboardDraftPreviewBrowserTest : DashboardBrowserSuite() {
     @Test
     @Order(1)
-    fun `the preview page boots the draft - the banner, the version attribute and one rendered chart`() {
+    fun `the preview deep link lands in the workspace - the chip, the version attribute and one rendered chart`() {
         startTrace()
         val root = ready("dpprev")
         val board = seedBoardWithGrid(root)
@@ -33,14 +35,16 @@ class DashboardDraftPreviewBrowserTest : DashboardBrowserSuite() {
         )
         page.locator("#dp-board .plotly .main-svg").first().waitFor()
 
-        // The version travelled the data-attribute channel the glue reads, and the banner names
-        // it with the way back to the released view.
+        // The 303 landed on the canonical workspace URL, Board tab, viewing the draft.
+        page.url() shouldContain "/dashboards/$board?version=2"
+        page.url() shouldContain "tab=board"
+        // The version travelled the data-attribute channel the glue reads, and the chip names
+        // what is on screen (the #369 banner's successor).
         (page.evaluate("() => document.getElementById('dp-board').getAttribute('data-dp-dashboard-version')") as String?) shouldBe "2"
         (page.evaluate("() => document.getElementById('dp-board').getAttribute('data-dp-dashboard-id')") as String?) shouldBe board
-        val banner = page.locator(".dp-board-preview-banner").innerText()
-        banner shouldContain "Previewing version"
-        banner shouldContain "2"
-        banner shouldContain "Back to the released view"
+        val chip = page.locator("[data-dp-viewed-label]").first().innerText()
+        chip shouldContain "v2"
+        chip shouldContain "draft"
         (page.evaluate("() => document.getElementById('dp-board-refusal').hidden") as Boolean) shouldBe true
     }
 
@@ -63,7 +67,7 @@ class DashboardDraftPreviewBrowserTest : DashboardBrowserSuite() {
         val refusal = page.locator("#dp-board-refusal").innerText()
         refusal shouldContain "dashboard.runtime.dependency_missing"
         refusal shouldContain "release it first"
-        // A refusal page loads no bundle and mounts no runtime: the region is the whole answer.
+        // A refusal loads no bundle and mounts no runtime: the region is the whole answer.
         (page.evaluate("() => window.__dpPage === undefined || window.__dpPage.instance === null") as Boolean) shouldBe true
     }
 
@@ -76,11 +80,14 @@ class DashboardDraftPreviewBrowserTest : DashboardBrowserSuite() {
 
         page.navigate("$baseUrl/dashboards/$board")
         page.waitForFunction("() => window.__dpPage && window.__dpPage.ready === true")
-        // The released page writes NO version attribute; the glue must not mistake its absence
-        // for a refusal to boot (the merged suite's #371 case caught exactly that).
+        // The default resolution writes NO version attribute; the glue must not mistake its
+        // absence for a refusal to boot (the merged suite's #371 case caught exactly that).
         (page.evaluate("() => document.getElementById('dp-board').getAttribute('data-dp-dashboard-version')") as String?) shouldBe null
         (page.evaluate("() => window.__dpPage.instance === null") as Boolean) shouldBe false
-        page.locator(".dp-board-preview-banner").count() shouldBe 0
+        val chip = page.locator("[data-dp-viewed-label]").first().innerText()
+        chip shouldContain "v1"
+        chip shouldContain "released"
+        chip shouldContain "current"
     }
 
     @Test

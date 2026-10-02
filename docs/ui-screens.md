@@ -1,6 +1,6 @@
 # UI Screens Inventory
 
-**Status:** v1.104
+**Status:** v1.105
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
 **Last updated:** 2026-10-02 (#374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
@@ -192,8 +192,9 @@ lens). The pattern, normative:
 - **Three parts, kept distinct.** The item LINK is unchanged (the catalog page — `/pipelines`
   §4.3, `/dashboards` §4.21 — the active section, the crumb). BESIDE it a **toggle button**
   (`data-nav-tree-toggle`, `aria-expanded`/`aria-controls`): opening a tree is not navigating.
-  BELOW them a **panel** (`[data-nav-tree]`): the Pipelines panel carries its own search box
-  (the Dashboards route has no search), and the tree sits in a **bounded scroll region**
+  BELOW them a **panel** (`[data-nav-tree]`): the Pipelines and Dashboards panels each carry
+  their own search box (a non-empty query swaps the FLAT results into the panel's root;
+  clearing returns the tree), and the tree sits in a **bounded scroll region**
   (`--app-nav-tree-max-block`, `min(50dvh, 32rem)`) so the sections below stay reachable.
 - **Server-backed and lazy, the existing fragments.** The first open fetches the ROOT level
   (`/partials/pipelines?scope=nav` under `#pipeline-nav-root`; `/partials/dashboards/tree?scope=nav`
@@ -1825,52 +1826,67 @@ association save swaps in all render `api/keys :: keysTable` / `:: keyRows` from
 
 Guards: `SchedulesUiControllerTest` (the route's row, `canAuthor` = the five write rows, the zone list against the scheduler's parser), `SchedulesPageRenderTest` (the role ladder at the render; no htmx request attribute and no partial route; the script order), `SchedulesCssTokenTest`, `schedules-model.test.mjs`, `ApiErrorCatalogUserMessageTest` (#280 — every field-placed code carries its override), and the browser suites `SchedulesBrowserTest` (explorer by prefix and search; create with field-level refusals asserting the catalogue's own words, the draft-only pipeline named at pick time and refused at save with the release-first words, and the next five equal to §20.9; the stale revision; pause/resume/block/unblock; Run now with the merged trail; delete; the role ladder and a viewer's refused POST from the page's own request path; light/dark; no overflow at 1100/1440/1920) and `SchedulesShotsBrowserTest` (the picture set).
 
-### 4.21 Dashboards (the tree page and the board page — #10 L3b)
+### 4.21 Dashboards — the catalog, the sidebar tree and the workspace (#400; the L3b pages before it)
 
-**The tree page.**
-
-| Attribute | Value |
-|---|---|
-| URL | `GET /dashboards` |
-| Auth required | Yes — `dashboard.read`, every role (a promoter through the lens: released dashboards whose every source pipeline her pipeline lens admits; a hidden one is absent from the tree) |
-| Purpose | Browse the dashboards' folder hierarchy; open a dashboard's board |
-| Design primitives | §4.3's explorer chrome (`template-tree.css` — `tplx-*`, `tpl-*`), `.ds-empty`; the page's tree pane is single (`tplx-tree-solo`) — a leaf NAVIGATES, so there is no detail pane and the shared explorer keyboard layer is deliberately NOT wired (`data-explorer-pane` is absent: arrow-key "selection" would trigger navigation). The SIDEBAR's Dashboards branch is the rail's navigating-tree pattern since #350 (§3.4): there the engine's NAV context IS wired — the arrows move focus and never navigate, which is what made wiring a navigating tree safe |
-| JS | None of its own (no glue on the tree page) |
-| htmx | Yes — **one level per request** (`hx-get="/partials/dashboards/tree?prefix=…&scope=page"` on a folder's `summary`, `hx-trigger="click once"`, targeting that folder's `.tpl-level` placeholder with `outerHTML`); the shared §5 pager when a level pages |
-
-Content: the folder tree (virtual folders, the pipelines' grammar — a dashboard name needs a
-folder, so the root level lists folders only) with per-folder counts, and dashboard leaves at
-their WORKING version — a leaf's badge names the version and marks a draft (versioning §7:
-unreleased edits stay visible; opening one is the board page's refusal state, not an error).
-**A leaf is a full navigation** — `hx-boost="false"` (§3.2): the board page loads a Plotly
-bundle, and the two bundles must never travel between pages ([Dashboards §6.4](dashboards.md)).
-Empty state: dashboards are authored through the MCP server (R10) — the note says so.
-
-**The board page.**
+**The catalog.**
 
 | Attribute | Value |
 |---|---|
-| URL | `GET /dashboards/{id}` |
-| Auth required | Yes — `dashboard.read` (D50 makes every reader an executor; the page must NOT declare `dashboard.execute` to "simplify"). Absent, foreign or lens-hidden → the family's 404. Present but unrunnable (no release yet, a purged pin, a source that stopped passing the read-only rule) → the in-page REFUSAL state, the code and sentence the runtime's own read refused with |
-| Purpose | The released view: the runtime mounts the board, the events pane shows the caller's refreshes |
+| URL | `GET /dashboards` (`?q=&offset=` the deep links) |
+| Auth required | Yes — `dashboard.read`, every role (a promoter through the lens: released dashboards whose every source pipeline her pipeline lens admits; a hidden one is absent from the list) |
+| Purpose | The flat catalog landing: every dashboard the caller may read — or the matches of `q` — one row each, a row linking the workspace |
+| Design primitives | §4.3's catalog shape ([Pipelines](#43-pipelines--the-catalog-page-and-the-sidebar-tree-350), #350's owner ruling — one flat, server-paged list, no tree, no detail pane): `.app-catalog-search`, `.tpl-results`, the shared pager; `dashboards.css` dresses the page's own bits |
+| JS | None of its own — the search control is the htmx SPA pattern (a debounced `hx-get` into the stable `#dash-list-wrapper` root, focus and value preserved) |
+| htmx | Yes — the search and the pager re-fetch `GET /partials/dashboards` (`scope=page`) into `#dash-list-wrapper`, `outerHTML` |
+
+Content: the flat rows at their WORKING version — a row's badge names the version and marks a
+draft (versioning §7: unreleased edits stay visible; a draft-ONLY dashboard's row says so —
+the list page's "opening a dashboard with no release says so" promise survives as a ROW
+state, and opening one is the workspace's choose-a-version state below, not an error).
+**A row is a full navigation** — `hx-boost="false"` ([Dashboards §6.4](dashboards.md)): the
+workspace loads a Plotly bundle, and the bundles must never travel between pages. Empty
+state: dashboards are authored through the MCP server (R10) — the note says so. The Browse
+folders button opens the sidebar's Dashboards branch (nav-tree.js) — the tree is the
+sidebar's, never this page's.
+
+**The sidebar tree (D58, #350's pattern; #400 adds the search).** The rail's Dashboards
+branch is the ONE navigating-tree pattern: the item link (this catalog), a separate toggle
+button, and a panel whose lazy server-backed tree renders the same one-level-per-request
+fragment as before (`GET /partials/dashboards/tree?prefix=&scope=nav` — a leaf is a full
+navigation, `hx-boost="false"`). #400: the panel gains the search box in the Pipelines
+branch's exact markup — a non-empty `q` swaps the FLAT results into the same nav root
+(`role=listbox`), clearing returns to the tree by construction; the shared engine
+(`nav-tree.js`) serves it with no JS change.
+
+**The workspace.**
+
+| Attribute | Value |
+|---|---|
+| URL | `GET /dashboards/{id}?version=N&tab=…` — one URL names one dashboard, one viewed version and one tab (`GET /dashboards/{id}/preview?version=N` is a 303 redirect onto it: #369's deep links survive) |
+| Auth required | Yes — `dashboard.read` (D50 makes every reader an executor; the page must NOT declare `dashboard.execute` to "simplify"). Absent, foreign or lens-hidden → the family's 404. A NAMED version that does not resolve (absent, DISCARDED, or draft under a narrowing lens) → the family's 404 NAMING the version. No served release and none named → the choose-a-version state (#409): the heading shows the NAME, the draft is offered with its preview link, and "no release yet" says what state the dashboard is in — never the empty `h1` and the "not found" the old board page answered for a dashboard the tree had just linked |
+| Purpose | The tabbed, version-explicit workspace (#396's ruling): the Board tab is today's board page exactly; Overview, Refreshes, Versions and Keys are the other reading surfaces; the Versions tab carries the lifecycle verbs' dialogs. The browser NEVER authors — agents author over MCP; a person releases from the Versions tab |
+| Tabs (the floor) | **Board** — the runtime mounts the released or named version's grid, the refusal region stands in for a board that cannot run, and the events pane sits beside it exactly as the L3b page had it. **Overview** — the viewed version's definition, read-only: the sources with their pinned pipeline releases, the parameter set, the pinned visualizations with each pin's status (RELEASED, or DRAFT with the release hint — R1), the layout summary; no authoring control anywhere. **Refreshes** — the caller's refreshes full width (the board pane keeps its own beside the board), version-independent as #369 documents. **Versions** — the admitted history with served/draft/discarded markers and the lifecycle dialogs: Release (the one D61 consent for a DRAFT visualization pin), Purge draft, Discard, Restore, Purge version, Switch (make current), Purge dashboard — each a confirm dialog into `#dp-dialog` whose POST calls the SAME service the REST route wires and answers `HX-Redirect` back onto this tab with a flash toast. **Keys** — the `dashboard` keys bound to this dashboard, read-only, linking the Keys page's editor; rendered only for a caller with `dashboard.key.bind` (workspace admin, super admin) |
 | Grid rows | Every row of the board's grid is one `--dashboard-row-unit` (app.css, `var(--space-20)` = 5rem) — a fixed track, so a slot of `h` rows is `h` units plus its gaps tall and a chart fills its slot instead of collapsing (#371). Below the layout's `breakpoint_px` (768 px when absent) the grid collapses to one column: every item spans the full width, stacked in grid order (row, then column) with its own row span, the row unit unchanged — 767 px stacks, 768 px holds the stored grid, and crossing the breakpoint re-places the slots and resizes the charts (#387). A chart in a 2-row slot keeps a plot area of at least half its slot: compact margins, the axes' labels sized by `automargin` (#386, dashboards.md §6.3). The visualization test preview (§4.22) mounts the same grid under the same rule |
-| Design primitives | `dashboards.css` (the runtime's emitted classes and the page's layout) and the vendored `plotly.css` (the §6.6 design-around's real stylesheet) — both head-loaded (§3.0 is normative: no page template carries its own stylesheet link) |
-| JS | `static/js/datapipelines-dashboard.js` + the three renderers (L3a's vendored runtime) and `static/js/dashboards-page.js` — the glue, a FILE (no inline script): it reads exactly two data attributes (the dashboard id on the container; the bundle name rides the script tag's `data-dp-plotly-bundle`), inits the runtime with `credentials: "session"` and `version: "released"`, and surfaces notifications; `window.__dpPage` is its test seam |
-| htmx | Only the events pane's bounded poll (below). Links TO the route are never boosted (`hx-boost="false"`, the one-bundle rule); leaving CAN be boosted (the layout's nav), so the glue disposes on `htmx:beforeHistorySave` — htmx's history snapshot must not carry the mounted container's marker, or the restored page's init hits `DashboardAlreadyMounted`. The pages' browser suite proves exactly one mount across a back/forward pass |
+| Design primitives | `dashboards.css` (the workspace chrome, the runtime's emitted classes and the page's layout) and the vendored `plotly.css` (the §6.6 design-around's real stylesheet) — both head-loaded (§3.0 is normative: no page template carries its own stylesheet link) |
+| JS | The board: `static/js/datapipelines-dashboard.js` + the three renderers (L3a's vendored runtime) and `static/js/dashboards-page.js` — the glue, UNCHANGED: it reads exactly two data attributes (the dashboard id on the container; the named version, when the URL named one, on `data-dp-dashboard-version`; the default resolution writes NONE, so the glue's init stays `version: "released"`), and `window.__dpPage` is its test seam. The workspace: `static/js/dashboards/workspace.js` over the SHARED tab core `static/js/workspace/tabs.js` (pipeline-editor/tabs.js runs the same machine — one admission and transition rule, never a copy) — in-page tab switches (the URL's `?tab=` replaceState'd, Back/Forward re-selecting), lazy-once tab reads, and the Board pane's reveal running the runtime instance's OWN `resize()` (a chart booted into a hidden pane re-fits). The dialogs: `static/js/lifecycle-dialog.js` (the fifth container, `#dp-dialog`) |
+| htmx | The events pane's bounded poll (below), the lazy tabs' one read, the dialogs' GET/POST pairs. Every link that names a version or a board is a FULL navigation (`hx-boost="false"` — the one-bundle rule: a draft's bundle can differ from the release's); the tab strip never navigates. A lifecycle POST answers `HX-Redirect` — a full navigation back onto the Versions tab, the flash bin rendering the toast |
 
-The ONE Plotly bundle is the SERVER's choice: the page resolves the runtime configuration
-(`renderer.bundle`) server-side and writes the script tag with its `data-dp-plotly-bundle`
-declaration — the same read the client's bootstrap performs, so the declaration and the pair
-the runtime judges can never disagree ([Dashboards §6.4](dashboards.md); the runtime's
-two-bundle refusal is the backstop). A refusal page loads no bundle at all.
+
+The ONE Plotly bundle is the SERVER's choice: the workspace resolves the runtime
+configuration for the VIEWED version (`renderer.bundle`, §10.4) and writes the script tag
+with its `data-dp-plotly-bundle` declaration — the same read the client's bootstrap
+performs, so the declaration and the pair the runtime judges can never disagree
+([Dashboards §6.4](dashboards.md); the runtime's two-bundle refusal is the backstop). A
+refusal page or the choose-a-version state loads no bundle at all.
 
 **The events pane** — the caller's refreshes of the open dashboard, newest first, beside the
-board (`GET /partials/dashboards/{id}/refreshes`, the REST refreshes route's own read through
-`DashboardRuntime`, so the lens and the own/`execution.read_all` visibility are the route's;
-it floors at `dashboard.execute` with that route — the page that embeds it stays on
-`dashboard.read`). Each row shows status, scope and age, and links its executions to
-`/executions/{id}` — for a reader who reads executions; a promoter's refresh names none
-([REST §23.3](rest-api.md), [Dashboards §5.7](dashboards.md)). **Updates are a bounded poll**
+board and again on the Refreshes tab (`GET /partials/dashboards/{id}/refreshes`, the REST
+refreshes route's own read through `DashboardRuntime`, so the lens and the
+own/`execution.read_all` visibility are the route's; it floors at `dashboard.execute` with
+that route — the page that embeds it stays on `dashboard.read`). Each row shows status,
+scope and age, and links its executions to `/executions/{id}` — for a reader who reads
+executions; a promoter's refresh names none ([REST §23.3](rest-api.md),
+[Dashboards §5.7](dashboards.md)). **Updates are a bounded poll**
 (`hx-trigger="load delay:15s, every 15s"`, the pane re-fetching ITSELF with `outerHTML`),
 deliberately not the runtime's notification hooks: the pane's source of truth is the DURABLE
 refresh record (including the `execution.read_all` reader's wider view), the hooks fire only
@@ -1879,16 +1895,30 @@ poll keeps working when the runtime instance failed to boot. The first re-fetch 
 (the server just rendered the rows); the poll dies with the page — leaving is a full
 navigation, so the element and its timer leave the DOM with it.
 
-Guards: `DashboardUiRenderTest` (the tree level's contract and the lens fixture; the ONE-bundle
-contract at the render for a 2d and a 3d board; the refusal state and no-bundle refusal page;
-the pane's rows, execution links and poll attributes), `ShellRenderTest` (Home; the Dashboards
-item and its lazy branch), `ReadFloorTest` (the pages in `DASHBOARDS`, the pane in
-`DASHBOARD_RUNTIME`), `MatrixRowReachabilityTest`/`RoleWalkE2eTest`/`PermissionSeamE2eTest`
-(the §7.6 Surfaces cells), and the browser suites `DashboardPagesBrowserTest` +
-`DashboardPageConformanceBrowserTest` (the §10.5 page half: bootstrap, freshness, the parameter
-lock, notifications, abort, connection loss, disposal across a back/forward pass, two instances
-of one dashboard on one page; zero CSP violations on both pages; the promoter lens in the tree;
-a viewer executing; light/dark screens of both pages).
+Guards: `DashboardUiRenderTest` (the tree level's contract and the lens fixture; the
+catalog's flat rows and the draft-only row state; the ONE-bundle contract at the render for
+a 2d and a 3d board; the named version's attribute channel and the un-boosted selector; the
+choose-a-version state (#409) and the refusal state with the name kept; the pane's rows,
+execution links and poll attributes), `DashboardWorkspaceControllerTest` (the resolution
+table, the tab set, the permission-derived affordances, #409's no-runtime-call), the new
+`DashboardWorkspaceModelTest` (the version resolution: explicit → `findServedVersion` or the
+404 naming the version; default → the served release; no served release → the
+choose-a-version state), `DashboardLifecycleDialogControllerTest` (the seven verbs' golden
+paths, the typed confirm before the service, the #332 audit order, the redirect targets,
+the session gate), `ShellRenderTest` (Home; the Dashboards item, its lazy branch and its
+search), `ReadFloorTest` (the pages and the read tabs in `DASHBOARDS`, the Keys tab in its
+own `dashboard.key.bind` family, the pane in `DASHBOARD_RUNTIME`, the dialogs in
+`LIFECYCLE_DIALOGS`), `RoleVisibilityRenderTest` (the ladder: no verb for a viewer or a
+promoter, the Keys pane below ws_admin absent, every verb guarded),
+`MatrixRowReachabilityTest`/`RoleWalkE2eTest`/`PermissionSeamE2eTest` (the §7.6 Surfaces
+cells), `workspace-tabs.test.mjs` + `dashboard-workspace.test.mjs` (the shared core and the
+glue's decision rules on node --test), and the browser suites `DashboardPagesBrowserTest` +
+`DashboardWorkspaceBrowserTest` + `DashboardPageConformanceBrowserTest` (the §10.5 page
+half: bootstrap, freshness, the parameter lock, notifications, abort, connection loss,
+disposal across a back/forward pass, two instances of one dashboard on one page; the tab
+strip's in-page swaps and the hidden board's re-fit; #409's state and its booting draft
+link; the promoter's lens with the no-POST collector; the dialogs into `#dp-dialog`; zero
+CSP violations on every tab in both themes; light/dark screens).
 
 ---
 
@@ -2159,6 +2189,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-02 | v1.105 | #400 the Dashboards workspace — the searchable sidebar tree, the flat catalog, the tabbed version-explicit workspace (#409 closes with it) | **§3.4**: the Dashboards panel gains the search box in the Pipelines branch's exact markup (the shared engine serves it with no JS change; a non-empty `q` swaps the flat results into the panel's root, clearing returns the tree). **§4.21 rewritten**: `GET /dashboards` is the flat CATALOG in §4.3's shape (owner ruling 2026-10-02 — the L3b tree page retired; folders are the sidebar's axis), each row a full-document link into the workspace, a draft-only dashboard's row saying so; `GET /dashboards/{id}?version=&tab=` is the tabbed, version-explicit WORKSPACE — Board (today's board page exactly: the same bundle block, the unchanged `dashboards-page.js`, the events pane beside the board), Overview (the definition, read-only, with each pin's status and the R1 release hint), Refreshes, Versions (the history and the seven lifecycle dialogs into `#dp-dialog`, `HX-Redirect` back with a flash) and Keys (`dashboard.key.bind`, read-only, linking the Keys page); #409: a dashboard with no served release opens the choose-a-version state — the heading NAMES it, the draft is offered, the runtime config never called, no `not_found`; the preview route answers 303 onto the workspace (the deep links survive); every version switch a full navigation (the one-bundle rule), tab switches in-page over the SHARED tab core (`static/js/workspace/tabs.js` — pipeline-editor/tabs.js runs the same machine), the hidden Board re-fitting through the runtime's own `resize()`. **§4.21's preview gap closed**: the #369 draft preview is documented here for the first time, as the workspace's named-version view (the chip succeeded the banner). `dashboards-page.js` unchanged; no new permission; no REST route changed. Guards: the falsifications in the handback. |
 | 2026-10-02 | v1.104 | #374 the Parameter Sets screens (workspace spec §6.2/§6.3, #357 S1) — renumbered at merge after 386's v1.103 | **§3.4**: Build gains **Parameter Sets**, the navigating-tree pattern's third use (lucide `sliders-horizontal`; link → the catalog, lazy tree beside it with no search box, leaf → the workspace). **New §4.23**: the flat paged catalog `GET /parameter-sets` and the canonical workspace `GET /parameter-sets/{id}?version=N&tab=` — the version-explicit resolve order (explicit admitted version, never clamped → the lens-visible current → an accessible draft, labelled → choose-a-version), the house 404/400, a static Cytoscape graph + inspector and the live parameter form through the dashboard runtime's new parameters-only `initParameters` entry against the EXISTING evaluate route (role-hidden: a promoter's page has no control and no request). The demo family seeds `nyc/parameters/geo_filters`. No permission, scope row or role changed; the routes are listed in auth.md §7.6's `parameter_set.read` Surfaces cell. Guards: the render/controller/model tests, `ReadFloorTest`, `SampleDataParameterSetsContentTest`, `ParameterSetPagesBrowserTest`, the falsifications in the handback. |
 | 2026-10-02 | v1.103 | #386/#387 the board's small slots and its breakpoint | **§4.21's Grid rows row** gains the collapse below `breakpoint_px` (768 px default; every item full width in grid order, the row unit kept, a crossing re-places and resizes) and the 2-row chart's plot-area floor (compact margins + `automargin`, dashboards.md §6.3). |
 | 2026-10-02 | v1.102 | #364 the history shape guard names the `<main>` element | **§3.2** — the #358 shape guard decides "body-shaped" by the serialised OPENING TAG `<main … id="app-main"` (attribute order tolerated), not by the substring `id="app-main"`. The substring test was fooled by user text — innerHTML serialisation escapes `<`, `>` and `&` in a text node but not the double quote — so a page whose text carried the literal (a pipeline description) read as body-shaped and reloaded on every Back/Forward. The test is one module-scope function in `shell.js` (`historyEntryIsBodyShaped`, exposed for `node --test`); `PipelineWorkspaceHistoryBrowserTest` gains the cache-hit-with-no-reload case for a description carrying the literal. No route, scope, template or policy change: a genuinely body-shaped entry is still purged and vetoed. |

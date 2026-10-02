@@ -1,7 +1,8 @@
 /*
  * 102 — the lifecycle dialogs' client half (ui-screens §4.3d): the ONE per-screen container
- * (#px-dialog / #tx-dialog / #pe-dialog / #te-dialog), its close paths, focus, and the typed
- * confirm. Shared by four screens; it owns no verb, no fetch and no toast — the dialogs are
+ * (#px-dialog / #tx-dialog / #pe-dialog / #te-dialog, #dp-dialog since #400), its close
+ * paths, focus, and the typed confirm. Shared by five screens; it owns no verb, no fetch and
+ * no toast — the dialogs are
  * htmx partials whose POSTs answer Shape A / HX-Redirect / Shape C, and toast.js owns the
  * toasts. Everything here is chrome, in the ds-dialog lineage (094 §A/§B).
  *
@@ -42,7 +43,7 @@
 (function () {
   'use strict';
 
-  var CONTAINERS = ['px-dialog', 'tx-dialog', 'pe-dialog', 'te-dialog'];
+  var CONTAINERS = ['px-dialog', 'tx-dialog', 'pe-dialog', 'te-dialog', 'dp-dialog'];
 
   function openContainer() {
     for (var i = 0; i < CONTAINERS.length; i++) {

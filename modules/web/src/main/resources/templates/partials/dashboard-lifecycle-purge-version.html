@@ -1,0 +1,33 @@
+<!-- The Purge-version dialog (#400) — a DRAFT version, irreversible (a release is discarded,
+     never purged: last_release). The button needs the typed confirm `v<n>`; the POST refuses
+     a mismatch before the service runs. -->
+<div xmlns:th="http://www.thymeleaf.org" class="u-backdrop" data-lifecycle-dialog="dashboard-purge-version">
+  <div class="ds-card app-modal app-modal-md" role="dialog" aria-modal="true" aria-labelledby="dp-purge-version-title">
+    <button type="button" class="ds-button ds-button-ghost ds-button-sm app-modal-close u-text-xl"
+            aria-label="Close" data-lifecycle-close>
+      <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#x"></use></svg>
+    </button>
+    <h2 class="ds-title u-m0 u-mb-md" id="dp-purge-version-title"
+        th:text="'Purge v' + ${dlg.version} + '?'">Purge v2?</h2>
+
+    <p class="u-secondary u-text-sm">
+      The draft version is deleted permanently — this cannot be undone, and a sole draft takes
+      the dashboard with it.
+    </p>
+
+    <form th:attr="hx-post=@{'/partials/dashboards/{id}/lifecycle/purge-version'(id=${dlg.id}, version=${dlg.version})},
+                     hx-swap='none'">
+      <input type="hidden" name="from" th:value="${from}">
+      <label class="ds-form-label u-mt-md" th:for="'dp-purge-version-confirm'">
+        Type <span class="u-mono" th:text="${dlg.expected}">v2</span> to confirm
+      </label>
+      <input class="ds-input u-mono" id="dp-purge-version-confirm" data-confirm-input name="confirm" autocomplete="off"
+             spellcheck="false" th:attr="data-confirm-expect=${dlg.expected}">
+      <button th:if="${canAuthor == true}" type="submit" data-verb="dashboard-purge-version-confirm" class="ds-button ds-button-danger u-full u-mt-md" data-typed-confirm
+              disabled hx-disabled-elt="this"
+              th:text="'Purge v' + ${dlg.version}">
+        Purge v2
+      </button>
+    </form>
+  </div>
+</div>

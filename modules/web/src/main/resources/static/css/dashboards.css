@@ -111,26 +111,14 @@
   font-weight: var(--weight-medium);
 }
 
-/* The draft preview's banner (#369): the one honest sentence about the version the person is
-   looking at, above the page headline. Tokens only; text first, no colour alone — the same
-   discipline as the status chip. */
-.dp-board-preview-banner {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: var(--gap-sm);
+/* The workspace's VIEWED-VERSION chip (#400) — the draft preview's banner (#369) became the
+   chip the top bar prints beside the name: the one honest badge about the version the person
+   is looking at. Tokens only; text first, no colour alone — the same discipline as the
+   status chip. (The badge variants themselves are the design system's ds-badge-*, set by the
+   template.) */
+.dp-vchip {
   font-family: var(--font-sans);
   font-size: var(--text-sm);
-  color: var(--text-secondary);
-  background: var(--surface-inset);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  padding: var(--gap-sm) var(--gap-md);
-  margin-bottom: var(--gap-sm);
-}
-
-.dp-board-preview-banner a {
-  color: var(--text-secondary);
 }
 
 /* ---- The first-party pages (#10 L3b) ---------------------------------------------- */
@@ -300,4 +288,178 @@
 .dp-dashboard-viz {
   flex: 1 1 auto;
   min-height: 0;
+}
+
+/* ---- The dashboard workspace (#400) ------------------------------------------------ */
+
+/* The top bar: back to the catalog, the crumb (name + viewed-version chip), the version
+   selector (a full navigation per switch — the one-bundle rule — so the rows are plain
+   links, ghost buttons). The pipeline editor's topbar shape, one family over. */
+.dp-workspace {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-md);
+  min-height: 0;
+}
+
+.dp-ws-topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gap-md);
+}
+
+.dp-back {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gap-xs);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.dp-back:hover {
+  color: var(--text-primary);
+}
+
+.dp-crumb {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--gap-sm);
+  min-width: 0;
+}
+
+.dp-crumb-name {
+  font-family: var(--font-sans);
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.dp-versions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap-xs);
+}
+
+/* The tab strip and its panes. The panes hide through the `hidden` attribute (the template
+   writes it; nothing here display-toggles), so the Board pane is laid out the moment it is
+   revealed — what the runtime's own resize then re-fits. */
+.dp-ws-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap-xs);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.dp-ws-tab {
+  appearance: none;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  padding: var(--gap-xs) var(--gap-sm);
+}
+
+.dp-ws-tab:hover {
+  color: var(--text-primary);
+}
+
+.dp-ws-tab[aria-selected="true"] {
+  border-bottom-color: var(--accent);
+  color: var(--text-primary);
+  font-weight: var(--weight-medium);
+}
+
+.dp-ws-panes {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.dp-tab-note {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+/* The Overview/Keys partials' pin rows and the Versions tab's action cell. */
+.dp-pin-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-xs);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dp-version-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap-xs);
+  justify-content: flex-end;
+}
+
+.dp-danger-zone {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gap-md);
+  border-top: 1px solid var(--border-subtle);
+  margin-top: var(--gap-md);
+  padding-top: var(--gap-md);
+}
+
+/* The release dialog's D61 consent group — the pipeline dialog's cascade, one family over:
+   the rows carry BOTH wordings and the checkbox selects which shows (pure CSS, `:has()`). */
+.dp-cascade-consent {
+  display: flex;
+  align-items: baseline;
+  gap: var(--gap-xs);
+  font-weight: var(--weight-medium);
+}
+
+.dp-cascade-pins {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-xs);
+  margin: var(--gap-xs) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dp-cascade-on {
+  display: inline;
+}
+
+.dp-cascade-off {
+  display: none;
+}
+
+.dp-release:has([data-consent-input]:not(:checked)) .dp-cascade-on {
+  display: none;
+}
+
+.dp-release:has([data-consent-input]:not(:checked)) .dp-cascade-off {
+  display: inline;
+}
+
+/* The switch dialog's options: a radio list, ineligible rows visible and disabled (the
+   development-posture rule, stated where it bites). */
+.dp-switch-options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-xs);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dp-switch-option {
+  display: flex;
+  align-items: baseline;
+  gap: var(--gap-sm);
 }

@@ -46,7 +46,7 @@ import java.util.concurrent.TimeUnit
  * | Ruling / scenario | Test |
  * |---|---|
  * | R2 absent = today (the golden): the four routes answer the released board identically, without and with `?version=` | `golden` |
- * | the author previews the draft — the page (banner, data attribute) and its runtime configuration | `the author previews` |
+ * | the author previews the draft — a 303 onto the workspace (the chip, the attribute); its runtime configuration | `the author previews` |
  * | the draft's visualizations STREAM through the runtime, and the row names the draft version | `the draft streams` |
  * | a viewer reads the same draft (D50: every reader an executor) | `a viewer` |
  * | the promoter's lens refuses the draft — the family 404, page and route | `a promoter` |
@@ -159,16 +159,32 @@ class DashboardDraftPreviewE2eTest {
 
     @Test
     @Order(3)
-    fun `the author previews the draft - the page renders the board with the banner and the version attribute`() {
+    fun `the author previews the draft - a 303 onto the workspace, whose page carries the chip and the version attribute`() {
+        // The compatibility route answers SEE_OTHER — pinned with redirects DISABLED, the
+        // location naming the canonical workspace URL (built server-side, never echoed).
+        val redirect =
+            given()
+                .port(port)
+                .asSession(ADMIN)
+                .redirects()
+                .follow(false)
+                .`when`()
+                .get("/dashboards/$DRAFT_BOARD/preview?version=1")
+        withClue(redirect.asString().take(EXCERPT)) {
+            redirect.statusCode shouldBe 303
+            redirect.getHeader("Location") shouldBe "/dashboards/$DRAFT_BOARD?version=1&tab=board"
+        }
+
         val page = get("/dashboards/$DRAFT_BOARD/preview?version=1", ADMIN)
         withClue(page.asString().take(EXCERPT)) {
             page.statusCode shouldBe 200
             page.body().asString() shouldContain """data-dp-dashboard-id="$DRAFT_BOARD""""
             page.body().asString() shouldContain """data-dp-dashboard-version="1""""
-            page.body().asString() shouldContain "Previewing version"
+            page.body().asString() shouldContain "data-dp-viewed-label"
+            page.body().asString() shouldContain "v1 · draft"
             page.body().asString() shouldContain "dpprev/boards/draft_board"
-            page.body().asString() shouldContain "Back to the released view"
-            page.body().asString() shouldNotContain """data-dp-refusal-code="""""
+            page.body().asString() shouldContain """data-dp-tab="board""""
+            page.body().asString() shouldNotContain """data-dp-refusal-code=""""
         }
 
         val config = get("/api/v1/dashboards/$DRAFT_BOARD/runtime/config?version=1", ADMIN)
@@ -210,6 +226,7 @@ class DashboardDraftPreviewE2eTest {
     @Test
     @Order(5)
     fun `a viewer reads the same draft - the page and the runtime configuration`() {
+        // The redirect target carries the viewer the same workspace page (the family's read).
         val page = get("/dashboards/$DRAFT_BOARD/preview?version=1", VIEWER)
         withClue(page.asString().take(EXCERPT)) {
             page.statusCode shouldBe 200
@@ -259,10 +276,11 @@ class DashboardDraftPreviewE2eTest {
             config.jsonPath().getMap<String, Any?>("error.details")["version"] shouldBe 1
         }
 
-        // The visibility oracle runs FIRST (the board handler's rule): with the only version
-        // discarded and no release, the dashboard has nothing the caller can see — the page is
-        // the family's 404, exactly like the tree and the released view. The refusal IN PLACE is
-        // the answer for a dashboard the caller CAN see (the pin-refusal case above), not this one.
+        // The visibility oracle runs FIRST (the preview handler's rule, unchanged by the
+        // redirect): with the only version discarded and no release, the dashboard has nothing
+        // the caller can see — the route is the family's 404, never a redirect to one. The
+        // refusal IN PLACE is the answer for a dashboard the caller CAN see (the pin-refusal
+        // case above), not this one.
         val page = get("/dashboards/$DISCARDED_BOARD/preview?version=1", ADMIN)
         page.statusCode shouldBe 404
     }

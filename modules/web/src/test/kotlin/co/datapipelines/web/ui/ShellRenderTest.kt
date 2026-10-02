@@ -434,6 +434,12 @@ class ShellRenderTest {
         html shouldContain "data-nav-tree=\"dashboards\""
         html shouldContain "data-nav-root-url=\"/partials/dashboards/tree?scope=nav\""
         html shouldContain "id=\"dash-tree-nav\""
+        // #400 — the branch gains the search input in the Pipelines branch's exact markup:
+        // the shared engine (nav-tree.js) serves it with no JS change, and the results swap
+        // into THIS panel's root (clearing returns to the tree by construction).
+        html shouldContain "data-nav-tree-search"
+        html shouldContain "hx-target=\"#dash-tree-nav\""
+        html shouldContain "placeholder=\"Search dashboards…\""
         html shouldNotContain "data-nav-label=\"Dashboard\""
         // The second tree engine is gone: no <details> disclosure of its own.
         html shouldNotContain "app-nav-branch-tree"

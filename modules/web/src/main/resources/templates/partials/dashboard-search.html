@@ -1,0 +1,88 @@
+<!-- A FLAT list of dashboards (#400), in TWO instances — chosen by `scope`, which also names
+     the stable swap root (partials/pipeline-search.html's shape, one family over):
+
+     - `nav`  — the global sidebar's search results, under #dash-tree-nav. Clearing the box
+                returns the sidebar to its tree (partials/dashboards dispatches on exactly
+                that). The rows are role=option in a role=listbox — a result list, not a
+                tree — and template-explorer.js's nav context gives them the same keyboard
+                as the tree.
+     - `page` — the /dashboards CATALOG, under #dash-list-wrapper: every dashboard the caller
+                may read when `q` is empty, the matches otherwise. Plain links in a plain
+                list; the page has no tree and no detail pane.
+
+     Every row is a LINK to the workspace /dashboards/{id} — a full document load
+     (hx-boost="false", dashboards.md §6.4's one-bundle rule: the workspace loads a Plotly
+     bundle), never a selection into a pane. A DRAFT-listing row says so (versioning §7:
+     unreleased edits stay visible from first paint); a dashboard whose listing version is
+     the draft and ONLY version has no release at all — the row says so, and opening it is
+     the workspace's choose-a-version state, not an error. -->
+<div xmlns:th="http://www.thymeleaf.org" th:fragment="results" th:id="${rootId}"
+     th:with="nav=${scope == 'nav'}" th:attr="data-dashboard-list=${scope}">
+  <th:block th:if="${lensUnavailable != null and #lists.isEmpty(dashboards)}">
+    <div th:replace="~{partials/lens-unavailable :: notice(${lensUnavailable})}"></div>
+  </th:block>
+  <!-- The catalog with no query and no rows is the workspace's EMPTY state, not a failed
+       search: it says how dashboards arrive (R10 — authored through agents), like the tree's. -->
+  <th:block th:if="${lensUnavailable == null and #lists.isEmpty(dashboards) and !nav and #strings.isEmpty(q)}">
+    <div class="ds-empty">
+      <p class="ds-empty-title">No dashboards yet</p>
+      <p class="ds-empty-description">
+        Dashboards are authored through the MCP server — ask your agent to create one. Give it a
+        folder path like <code>finance/dashboards/revenue_overview</code> — a folder is required.
+      </p>
+    </div>
+  </th:block>
+  <th:block th:if="${lensUnavailable == null and #lists.isEmpty(dashboards) and (nav or !#strings.isEmpty(q))}">
+    <div class="ds-empty">
+      <p class="ds-empty-title">No dashboards match your search</p>
+      <div class="ds-empty-actions">
+        <!-- The sidebar's clear also empties ITS box, so it is nav-tree.js's (data-nav-tree-clear):
+             a bare hx-get would bring the tree back under a box still holding the old query. -->
+        <button th:if="${nav}" type="button" class="ds-button ds-button-secondary ds-button-sm"
+                data-nav-tree-clear>Clear search</button>
+        <button th:unless="${nav}" type="button" class="ds-button ds-button-secondary ds-button-sm"
+                th:attr="hx-get=@{/partials/dashboards}, hx-target='#' + ${rootId}, hx-swap='outerHTML'">Clear search</button>
+      </div>
+    </div>
+  </th:block>
+
+  <ul class="tpl-results"
+      th:unless="${#lists.isEmpty(dashboards)}"
+      th:attr="role=${nav} ? 'listbox' : null,
+               aria-label=${nav} ? 'Dashboard search results' : 'Dashboards'">
+    <li th:attr="role=${nav} ? 'none' : null" th:each="d : ${dashboards}">
+      <a class="tpl-result" hx-boost="false"
+         th:href="@{'/dashboards/' + ${d.id}}"
+         th:attr="role=${nav} ? 'option' : null,
+                  aria-selected=${nav} ? 'false' : null,
+                  data-leaf-id=${d.id}">
+        <!-- The FULL path, and it rides on `title` too — a deep path in a narrow pane
+             truncates, and the truncated text must never be the only copy (§9.4). -->
+        <span class="tpl-path" th:text="${d.name}" th:title="${d.name}">finance/dashboards/revenue_overview</span>
+        <!-- D55: the working version — the draft's number when one exists (a freshly created
+             dashboard has only a draft, and there is no served version to name instead). -->
+        <span class="ds-badge ds-badge-default"
+              th:text="${'v' + d.version}">v1</span>
+        <!-- versioning §7 (the 035 regression) and the list.html promise, kept as a ROW state:
+             a draft — and a draft-only dashboard, whose draft is the ONLY version — says so
+             here. Opening one is the workspace's choose-a-version state, which names the
+             dashboard and offers the draft with its preview link. -->
+        <span th:if="${!d.released}" class="ds-badge ds-badge-warning"
+              th:text="'draft v' + ${d.version} + ' pending release'"
+              title="A draft exists; release it from the dashboard's workspace to publish."></span>
+      </a>
+    </li>
+  </ul>
+
+  <!-- The flat listing reads at most the repository's page ceiling; over it, the cut is
+       stated, never silent (the tree's overflow note's rule). -->
+  <p class="tpl-overflow" th:if="${!#lists.isEmpty(dashboards) and total >= 200}">
+    The catalog reads at most 200 dashboards — narrow the search to see the rest.
+  </p>
+
+  <th:block th:unless="${#lists.isEmpty(dashboards)}"
+            th:with="prevUrl=${nav} ? @{/partials/dashboards/tree(q=${q}, scope='nav', offset=${offset - 25})} : @{/partials/dashboards(q=${q}, offset=${offset - 25})},
+                     nextUrl=${nav} ? @{/partials/dashboards/tree(q=${q}, scope='nav', offset=${offset + 25})} : @{/partials/dashboards(q=${q}, offset=${offset + 25})}">
+    <div th:replace="~{partials/pager :: pager('#' + ${rootId}, ${prevUrl}, ${nextUrl}, ${offset}, ${hasMore}, ${dashboards.size()}, ${total})}"></div>
+  </th:block>
+</div>
