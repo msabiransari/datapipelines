@@ -152,9 +152,10 @@ class DashboardKeyService(
         }
     }
 
-    private companion object {
+    companion object {
+        /** The binding pair's audit events (enums.md §15) — `DashboardAuditEvents.ALL` holds them to the doc. */
         const val AUDIT_BOUND = "dashboard.key_bound"
         const val AUDIT_UNBOUND = "dashboard.key_unbound"
-        const val ROOT = "/"
+        private const val ROOT = "/"
     }
 }

@@ -549,10 +549,17 @@ class DashboardKeyE2eTest {
         error("timed out waiting: $what")
     }
 
-    /** The reference proxy as a CHILD PROCESS (§C): the script, this app, the real key. */
+    /**
+     * The reference proxy as a CHILD PROCESS (§C): the script, this app, the real key. The proxy binds `PORT=0` and
+     * reports the port the OS gave it on its first output line — a port derived from the app's sat inside this box's
+     * ephemeral range (10240–65535) and was taken by a passing outbound socket twice in one gate (`EADDRINUSE`).
+     */
     private inner class Proxy {
         private var process: Process? = null
-        private val proxyPort = 18_367 + (port % 1000)
+        private var proxyPort = 0
+
+        /** The child's stdout and stderr, drained as they arrive: a proxy that never answers says why HERE. */
+        private val output = StringBuffer()
 
         fun start() {
             val nodePresent = runCatching { ProcessBuilder("node", "--version").start().waitFor() }.getOrDefault(-1)
@@ -560,15 +567,31 @@ class DashboardKeyE2eTest {
                 nodePresent == 0,
                 "editorJsTest-style skip: node not on PATH - the reference proxy needs Node >= 18",
             )
-            process =
+            val child =
                 ProcessBuilder("node", findProxyScript())
                     .apply {
                         environment()["DP_BASE_URL"] = "http://localhost:$port"
                         environment()["DASHBOARD_KEY"] = KEY.plaintext
-                        environment()["PORT"] = proxyPort.toString()
-                    }.start()
-            waitUntil("the proxy answers on :$proxyPort") {
-                runCatching { raw("GET", "/readiness-probe").first }.getOrDefault(-1) == 404
+                        environment()["PORT"] = "0"
+                    }.redirectErrorStream(true)
+                    .start()
+            process = child
+            Thread({ child.inputStream.bufferedReader().forEachLine { output.append(it).append('\n') } }, "proxy-output")
+                .apply { isDaemon = true }
+                .start()
+            try {
+                waitUntil("the proxy reports the port it bound") {
+                    check(child.isAlive) { "the proxy exited with ${child.exitValue()} before reporting a port" }
+                    val reported = LISTENING.find(output.toString())
+                    if (reported != null) proxyPort = reported.groupValues[1].toInt()
+                    proxyPort > 0
+                }
+                waitUntil("the proxy answers on :$proxyPort") {
+                    check(child.isAlive) { "the proxy exited with ${child.exitValue()} before answering on :$proxyPort" }
+                    runCatching { raw("GET", "/readiness-probe").first }.getOrDefault(-1) == 404
+                }
+            } catch (e: IllegalStateException) {
+                throw IllegalStateException("${e.message}; the proxy's output so far:\n$output", e)
             }
         }
 
@@ -825,6 +848,8 @@ class DashboardKeyE2eTest {
     private val source = SharedE2e.scratchDatabase("dbkey_source")
 
     companion object {
+        /** The proxy script's first line: `dashboard-proxy listening on :<port> -> …`. */
+        private val LISTENING = Regex("listening on :(\\d+)")
         private const val EXCERPT = 400
         private const val WORKSPACE = "dbkey"
         private const val PIPELINE = "dbkey/pipelines/small"
