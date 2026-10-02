@@ -455,8 +455,15 @@ class PipelineWorkspaceHistoryBrowserTest : BrowserSuite() {
         // pane's `x-text` (hidden, but always in the DOM — and so in the cached snapshot).
         // innerHTML serialisation escapes `<`, `>` and `&` in text and NOT the double quote,
         // so this is the literal the old substring guard mistook for a body-shaped entry.
+        // The description also types the whole start tag: its `<` is escaped in the text
+        // node, and in the editor's raw-text JSON blob (where `<` survives ScriptSafeJson)
+        // every quote is a backslash-escaped one — neither can forge the opening tag.
         val literal = "id=\"app-main\""
-        val id = seedSqlVersions("pwsl" + generatedPassword("s").take(6).lowercase(), description = "Quarterly roll-up $literal")
+        val id =
+            seedSqlVersions(
+                "pwsl" + generatedPassword("s").take(6).lowercase(),
+                description = "Quarterly roll-up <main $literal> and $literal",
+            )
         val cacheKey = "/pipelines/$id?version=2"
         page.navigate("$baseUrl$cacheKey")
         page.waitForSelector(".pe-root")
