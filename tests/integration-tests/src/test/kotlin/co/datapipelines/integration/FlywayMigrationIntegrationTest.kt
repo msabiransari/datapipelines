@@ -156,6 +156,9 @@ class FlywayMigrationIntegrationTest {
                 // #331 (V46) — the pins path the containment probe reads; the up-and-down rehearsal
                 // on a demo-shaped copy is the lane's evidence.
                 "46|dashboard pins gin|true",
+                // #328 (V47) — the release's caller-output record: two nullable JSONB columns
+                // (pipeline_executions.result_schema_json, pipeline_versions.caller_output_json).
+                "47|release result columns|true",
             )
     }
 

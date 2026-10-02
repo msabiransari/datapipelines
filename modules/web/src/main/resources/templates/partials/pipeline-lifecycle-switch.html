@@ -18,7 +18,11 @@
 
     <form class="u-mt-md"
           th:attr="hx-post=@{'/partials/pipelines/{id}/lifecycle/switch'(id=${dlg.id})},
-                   hx-target='#pipeline-detail', hx-swap='innerHTML'">
+                   hx-target=${from == 'editor'} ? null : '#pipeline-detail',
+                   hx-swap=${from == 'editor'} ? 'none' : 'innerHTML'">
+      <!-- #395: the workspace's Versions tab (from=editor) reloads onto that tab with a flash; the
+           explorer keeps its in-place re-render. Release and purge have answered this way since 102. -->
+      <input type="hidden" name="from" th:value="${from}">
       <div class="tplx-switchrows" role="radiogroup" aria-label="Current version">
         <label th:each="o : ${dlg.options}" class="tplx-switchrow"
                th:classappend="${!o.eligible} ? 'tplx-switchrow-disabled'">

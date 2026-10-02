@@ -2,6 +2,8 @@ package co.datapipelines.executor
 
 import co.datapipelines.events.SseEventType
 import co.datapipelines.pipeline.PipelineErrorCodes
+import co.datapipelines.typesystem.ColumnSchema
+import co.datapipelines.typesystem.LogicalType
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.booleans.shouldBeTrue
 import io.kotest.matchers.collections.shouldBeEmpty
@@ -162,6 +164,89 @@ class ExecutionRepositoriesIntegrationTest {
         found.status shouldBe ExecutionStatus.SUCCESS
         found.durationMs shouldBe 42
         executions.recordResult(UUID.randomUUID(), 1, 1) shouldBe false
+    }
+
+    /**
+     * #328 A — the D2 record: the stored result's schema rides `recordResult` and reads back
+     * as the `{name, type, nullable}` array, element by element. DECIMAL carries precision (the
+     * §7.1 rule); a null `nullable` is recorded as JSON's absence and read back as absent —
+     * "unknown admits" is the READER's rule (pipeline-contract §3.3.1), the record stores the truth.
+     */
+    @Test
+    fun `recordResult records the result schema as the D2 array, element by element`() {
+        val record = running()
+        executions.create(record)
+        val schema =
+            listOf(
+                ColumnSchema("month", LogicalType.DATE, nullable = false),
+                ColumnSchema("amount", LogicalType.DECIMAL, precision = 12, scale = 2, nullable = true),
+                ColumnSchema("note", LogicalType.STRING, nullable = null),
+            )
+        executions.complete(record.executionId, ExecutionStatus.SUCCESS, Instant.now(), 5, NODE_STATS_JSON)
+        executions.recordResult(record.executionId, 3, 2_048, schema).shouldBeTrue()
+
+        val found = executions.findById(WORKSPACE_ID, record.executionId).shouldNotBeNull()
+        val stored = ExecutorJson.mapper.readTree(found.resultSchemaJson.shouldNotBeNull())
+        stored.size() shouldBe 3
+        stored[0].get("name").asText() shouldBe "month"
+        stored[0].get("type").asText() shouldBe "DATE"
+        stored[0].get("nullable").asBoolean() shouldBe false
+        stored[1].get("name").asText() shouldBe "amount"
+        stored[1].get("type").asText() shouldBe "DECIMAL"
+        stored[1].get("precision").asInt() shouldBe 12
+        stored[2].get("name").asText() shouldBe "note"
+        stored[2].get("type").asText() shouldBe "STRING"
+        stored[2].has("nullable") shouldBe false
+        // The history siblings ride the same write, unchanged.
+        found.resultRowCount shouldBe 3
+        found.resultSizeBytes shouldBe 2_048
+    }
+
+    /** #328 A — past a record bound the schema is recorded as NULL (never truncated, never fatal). */
+    @Test
+    fun `a schema past the record bounds records nothing, and the row still updates`() {
+        val record = running()
+        executions.create(record)
+        val longName = "c".repeat(129)
+        val oversize = (1..257).map { ColumnSchema("col_$it", LogicalType.INTEGER, nullable = true) }
+
+        executions.complete(record.executionId, ExecutionStatus.SUCCESS, Instant.now(), 5, NODE_STATS_JSON)
+        executions
+            .recordResult(record.executionId, 1, 16, listOf(ColumnSchema(longName, LogicalType.STRING, nullable = true)))
+            .shouldBeTrue()
+        executions
+            .findById(WORKSPACE_ID, record.executionId)
+            .shouldNotBeNull()
+            .resultSchemaJson
+            .shouldBeNull()
+
+        executions.recordResult(record.executionId, 1, 16, oversize).shouldBeTrue()
+        executions
+            .findById(WORKSPACE_ID, record.executionId)
+            .shouldNotBeNull()
+            .resultSchemaJson
+            .shouldBeNull()
+
+        // A whitespace-only name is a record the reader would refuse: recorded as NULL instead.
+        executions
+            .recordResult(record.executionId, 1, 16, listOf(ColumnSchema(" ", LogicalType.STRING, nullable = true)))
+            .shouldBeTrue()
+        executions
+            .findById(WORKSPACE_ID, record.executionId)
+            .shouldNotBeNull()
+            .resultSchemaJson
+            .shouldBeNull()
+
+        // At the bounds exactly — 256 columns, one named to the limit — the record lands.
+        val atBounds =
+            (1..255).map { ColumnSchema("c$it", LogicalType.INTEGER, nullable = true) } +
+                ColumnSchema("n".repeat(128), LogicalType.STRING, nullable = true)
+        executions.recordResult(record.executionId, 1, 16, atBounds).shouldBeTrue()
+        executions
+            .findById(WORKSPACE_ID, record.executionId)
+            .shouldNotBeNull()
+            .resultSchemaJson
+            .shouldNotBeNull()
     }
 
     @Test

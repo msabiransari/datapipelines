@@ -1,6 +1,6 @@
 # REST API + SSE Specification
 
-**Status:** v2.72 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
+**Status:** v2.74 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
 **Last updated:** 2026-10-02
@@ -364,6 +364,14 @@ template version that reads `needs_review` (it cites a retired learned fact, [Te
 A warning never refuses and never changes the status: the release happened, the fact edit is
 the releaser's to know about ([Pipeline Contract §13.13](pipeline-contract.md#1313-versioning--draft-release-lifecycle--promotion)
 catalogues the code with HTTP `—`). The release dialog shows the same facts on its pin rows.
+
+**`caller_output` (#328, additive):** the body also carries the one word
+`recorded` | `declared` | `none` | `not_observed` — what the release did about its caller
+node's result columns ([pipeline-contract §3.3.1](pipeline-contract.md)): `recorded` — the
+flip copied the version's latest run's schema; `declared` — a transform caller, the pinned
+contract is the answer; `none` — no caller node; `not_observed` — a SQL caller with nothing
+observed, the release succeeded anyway and a dashboard save skips the input-contract check
+for it (dashboards §4.3). The audit row carries the same word, never the column list.
 
 ### 5.11 Purge pipeline draft
 
@@ -2709,6 +2717,7 @@ window. A dashboard execution has no stored result: `GET /api/v1/executions/{id}
 
 ## Appendix A: Change Log
 
+| 2026-10-02 | v2.74 | 328 (#328) the release response carries `caller_output` | Additive only. **§5.10:** the release body gains the one word `caller_output` (`recorded` \| `declared` \| `none` \| `not_observed`) — what the release did about its caller node's result columns (pipeline-contract §3.3.1); the `pipeline.version.released` audit row carries the same word and never the column list. No new route, no status change, no MCP schema change (`dashboards_validate`'s input is unchanged). |
 | 2026-10-02 | v2.73 | 324 (#324) the idempotent retry waits for the row | **§3.5**: the retry's behaviour inside the original's START WINDOW is stated — a retry landing before the original's first event (up to the 10 s lifecycle write bound) WAITS for it (the attach follows the log for ~15 s, above the bound) and then streams the original's events, instead of the premature `410 result.expired` with an id whose row did not resolve yet. An original that never started answers `410 result.expired` with `reason: original_not_started` and NO `execution_id` (an unresolvable id is never disclosed); a genuinely expired log keeps `reason: event_log_expired` with the id. No route, scope or status-code change; the attach consults the execution row it already has. |
 | 2026-10-02 | v2.72 | 333 (#333) the strict contract readers | **§4.2 gains the scalar-shapes paragraph**: a JSON number or boolean where a body declares a string (a string or float where it declares an integer) is refused with the path and the expected shape, never bound as text, on the pipeline and template bodies, the transform blocks and the four typed-DTO routes (§16.1 `POST /auth/api-keys`, §18.2 `POST /promotion/push`, §19.5 `POST /endpoints` and `/endpoints/bindings`). Those four now answer `pipeline.execution.invalid_parameter_type` with `details.reason` `wrong_type` / `unknown_key` / `missing` and `details.path` — **behaviour change** on the two request DTOs: an unknown key is refused (it was dropped) and a missing required key answers this code (it answered the unreadable-body stand-in). Template-body refusals gain `details.rule: "wrong_type"`. No route, scope or status change. |
 | 2026-10-02 | v2.71 | S2 (#375) the observed parameter-set evaluation | Additive. **§21.5 (new): `POST /api/v1/parameter-sets/{id}/evaluations`**, the observed evaluation (the parameter-set workspace spec §4, R1; the owner's rulings §11.3, §11.4 and §11.7) — the §21.3 act on `parameter_set.evaluate`, its cascade streamed as Server-Sent Events: `version` REQUIRED, a client-minted v4 `evaluation_id` (`reused` when already open on this instance), the refusal order, the eight FROZEN events, the terminal and coverage rules (on `evaluation_failed` the unfinished parameters carry no per-parameter frame — #375 D3), the per-write authority re-judgement, and the abort of an evaluation whose client stayed away past `disconnect-grace-seconds` (no frame; with the defaults the 30 s deadline usually ends it first). `evaluation_failed` is code-only. **§21.3 is unchanged byte for byte** (a golden pins it). **§12.1, §23.3:** the per-user stream cap counts observed-evaluation streams beside execution and refresh streams. No new code, no new key. |

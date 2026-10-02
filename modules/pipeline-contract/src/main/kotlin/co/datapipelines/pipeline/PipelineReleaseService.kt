@@ -8,6 +8,35 @@ import org.springframework.transaction.support.TransactionOperations
 import java.util.UUID
 
 /**
+ * #328 (D3) — what a release did about its caller node's result columns: the one word the
+ * release response (`caller_output`, rest-api §5.10) and the `pipeline.version.released` audit
+ * row carry. A release is NEVER refused for a missing record — `not_observed` is today's
+ * skip-the-check behaviour, recorded honestly.
+ */
+enum class ReleaseCallerOutput(
+    val wire: String,
+) {
+    /** The flip copied the version's latest qualifying execution's schema (D1 hit). */
+    RECORDED("recorded"),
+
+    /** The caller node is a TRANSFORM: the pinned contract declares the columns and outranks any copied record (D4). */
+    DECLARED("declared"),
+
+    /** The released body has no caller node — it returns no rows at all. */
+    NONE("none"),
+
+    /** A SQL caller node with no qualifying execution: released with a NULL record. */
+    NOT_OBSERVED("not_observed"),
+    ;
+
+    companion object {
+        /** Strict read of the wire word — an unknown value is corruption, not a default. */
+        fun fromWire(raw: String): ReleaseCallerOutput =
+            entries.firstOrNull { it.wire == raw } ?: error("Unknown caller output word '$raw'")
+    }
+}
+
+/**
  * Pipeline release and discard (versioning §5.3/§5.4) — the human half of the lifecycle.
  *
  * Release is an explicit, UI-driven action (D4: agents never release; the REST endpoint
@@ -102,6 +131,18 @@ open class PipelineReleaseService(
          * carries it as `warnings`; the dialog renders the same facts on its pin rows.
          */
         val warnings: List<ReleaseWarning> = emptyList(),
+        /**
+         * #328 (D3) — what the release did about its caller node's result columns, as the one
+         * word the response, the audit row and every doc share: `recorded` (the D1 read found
+         * the version's latest run and copied its schema), `declared` (a TRANSFORM caller — the
+         * pinned contract is the answer; a copied record never overrides it), `none` (no caller node), or
+         * `not_observed` (a SQL caller node with no qualifying execution — the version released
+         * anyway, recording NULL; today's validator behaviour continues for that release).
+         * Never the column list: ids, names, versions and this word are all an audit row says
+         * (enums.md §15). The owner may later rule that `not_observed` refuses; that is a
+         * one-line change behind this field.
+         */
+        val callerOutput: ReleaseCallerOutput = ReleaseCallerOutput.NONE,
     )
 
     /**
@@ -185,7 +226,41 @@ open class PipelineReleaseService(
         // 7e: read AFTER the flip and outside its transaction — a warning describes what was
         // released and can never unwind it.
         val warnings = reviewWarnings(workspaceId, pipeline)
-        return Released(flipped.record, flipped.version, bodyJson, overridden.first, overridden.second, cascaded, warnings)
+        return Released(
+            flipped.record,
+            flipped.version,
+            bodyJson,
+            overridden.first,
+            overridden.second,
+            cascaded,
+            warnings,
+            callerOutputOf(pipeline, flipped.version),
+        )
+    }
+
+    /**
+     * #328 (D3) — the release's one word about its caller output, decided from the body the
+     * flip just locked and the row the flip just wrote: a caller node that is a TRANSFORM
+     * answers `declared` (its pinned contract names the columns; the record, if one exists,
+     * never overrides it — D4), no caller node answers `none`, and a SQL caller node answers
+     * `recorded` when the flip copied a record and `not_observed` when it found nothing.
+     *
+     * Resolution is `singleOrNull`, not [CallerNodeResolver.resolve]: the resolver's
+     * multiple-caller throw is the EXECUTOR's defensive answer to an unvalidated pipeline,
+     * while this body has already passed §12 (which rejects >1 caller before the flip) —
+     * a second resolution path that can throw mid-release would only re-litigate what the
+     * precondition settled.
+     */
+    private fun callerOutputOf(
+        pipeline: Pipeline,
+        flipped: PipelineVersionDetail,
+    ): ReleaseCallerOutput {
+        val caller = pipeline.nodes.singleOrNull { it.isCallerNode } ?: return ReleaseCallerOutput.NONE
+        return when {
+            caller.type == NodeType.TRANSFORM -> ReleaseCallerOutput.DECLARED
+            flipped.callerOutputJson != null -> ReleaseCallerOutput.RECORDED
+            else -> ReleaseCallerOutput.NOT_OBSERVED
+        }
     }
 
     /**

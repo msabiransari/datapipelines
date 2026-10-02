@@ -229,56 +229,9 @@
   margin-left: var(--gap-xs);
 }
 
-/* The tree leaf is a LINK on the dashboards tree (it navigates, it does not select): the
-   shared .tpl-leaf row styles apply, and the link's own voice is reset. */
-a.tpl-leaf {
-  text-decoration: none;
-}
-
-/* The sidebar's Dashboards branch (D58): the item's link row stays the rail's own; the
-   disclosure is a small chevron beside it, and the loaded tree indents under the item.
-   The chevron rotates when the branch is open — the same affordance the trees' summaries
-   get from details[open]. */
-.app-nav-branch {
-  display: flex;
-  align-items: center;
-  gap: var(--gap-xs);
-}
-
-.app-nav-branch > .app-nav-link {
-  flex: 1;
-}
-
-.app-nav-branch-tree {
-  position: relative;
-}
-
-.app-nav-branch-tree summary {
-  list-style: none;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  padding: var(--gap-xs);
-}
-
-.app-nav-branch-tree summary::-webkit-details-marker {
-  display: none;
-}
-
-.app-nav-branch-tree[open] summary .tpl-chevron {
-  transform: rotate(90deg);
-}
-
-.app-nav-branch-tree .tpl-level {
-  margin: var(--gap-xs) 0 0 calc(var(--gap-lg) + var(--gap-sm));
-  font-size: var(--text-sm);
-}
-
-/* The template-tree row contract sizes its rows at the explorers' widths; inside the rail
-   the labels tighten so the branch reads as a rail child. */
-.app-nav-branch-tree .tpl-label {
-  font-size: var(--text-xs);
-}
+/* The dashboards tree's link leaves and the sidebar's Dashboards branch (D58) are styled by the
+   shared tree rules since #350 — template-tree.css `a.tpl-leaf` and app.css's navigating-tree
+   pattern (`.app-nav-branch` / `.app-nav-tree`), like the Pipelines branch beside it. */
 
 /* #353 — the visualization test preview: a session-less page with no app shell (no rail, no
    top bar), one card per test case, each holding one runtime-mounted board. Tokens only. */

@@ -45,26 +45,36 @@ import java.util.UUID
  * Comments are stripped before every assertion: the markup documents its own absences at
  * length, and a promise in a comment is not an affordance (the discipline
  * [TemplateExplorerRenderTest] established, for exactly this reason).
+ *
+ * `LargeClass` is suppressed knowingly: the pipelines list fragments (sidebar tree, nav search,
+ * catalog) and the detail pane #401 retires share one fixture set; the split lands with #401.
  */
+@Suppress("LargeClass")
 class PipelineExplorerRenderTest {
     // ------------------------------------------------------------- the two panes
 
     @Test
-    fun `the screen renders a tree pane and a detail pane, and the tree pane wraps the swap root`() {
+    fun `#350 - the page is the CATALOG - a flat list under its own root, no tree pane and no detail pane`() {
         val html = render("pipelines/list") { fillPage() }
+        val main = html.substringAfter("id=\"app-main\"")
 
-        html shouldContain "class=\"tplx-body\""
-        html shouldContain "tplx-tree\" id=\"pipeline-tree-pane\""
-        html shouldContain "class=\"tplx-detail\""
-        // The left pane is a STABLE container AROUND the long-standing swap root: the search
-        // and the levels replace #pipeline-list-wrapper's contents, never the pane itself.
-        html shouldContain "id=\"pipeline-list-wrapper\""
-        // Nothing selected: a quiet empty state, not a blank panel.
-        html shouldContain "id=\"pipeline-detail\""
-        html shouldContain "Select a pipeline"
-        // The shared keyboard layer is on the page, and finds this pane by its marker.
-        html shouldContain "src=\"/js/template-explorer.js\""
-        html shouldContain "data-explorer-pane"
+        // The catalog's one stable swap root, rendered as the FLAT list of full paths.
+        main shouldContain "id=\"pipeline-list-wrapper\""
+        main shouldContain "data-pipeline-list=\"page\""
+        main shouldContain ">$DEEP_PATH</span>"
+        // The tree and the selection pane are gone from the page (spec §3.2/§5): the tree lives
+        // in the sidebar now and a row opens the workspace.
+        main shouldNotContain "tplx-body"
+        main shouldNotContain "pipeline-tree-pane"
+        main shouldNotContain "id=\"pipeline-detail\""
+        main shouldNotContain "data-explorer-pane"
+        main shouldNotContain "tpl-folder"
+        main shouldNotContain "/js/splitter.js"
+        main shouldNotContain "/js/explorer-detail.js"
+        // The sidebar tree's other door, and the sidebar tree itself in the same document.
+        main shouldContain "data-nav-tree-reveal=\"pipelines\""
+        html shouldContain "data-nav-tree=\"pipelines\""
+        html shouldContain "id=\"pipeline-nav-root\""
     }
 
     @Test
@@ -73,11 +83,15 @@ class PipelineExplorerRenderTest {
 
         html shouldNotContain "Create Pipeline"
         html shouldNotContain "Phase 2 other worktree"
-        html shouldNotContain "disabled"
+        // No disabled control in the page's head (the catalog's pager below may disable its
+        // Previous on the first page — that is the pager's own honest state, not T108's).
+        html.substringAfter("id=\"app-main\"").substringBefore("id=\"pipeline-list-wrapper\"") shouldNotContain "disabled"
         // …replaced by what is actually true, and by where authoring happens.
         html shouldContain "authored through agents"
         html shouldContain "/docs/mcp-server"
-        html shouldContain "on the roadmap"
+        // D1 (workspace spec, owner 2026-09-30): pipeline definitions are AI-native — the old
+        // "browser authoring is on the roadmap" sentence became false and is gone.
+        html shouldNotContain "on the roadmap"
     }
 
     @Test
@@ -166,17 +180,24 @@ class PipelineExplorerRenderTest {
     }
 
     @Test
-    fun `a leaf SELECTS - its detail swaps into the detail pane and nothing in the tree moves`() {
+    fun `#350 - a leaf NAVIGATES - a full-document link to the canonical workspace, never a detail swap`() {
         // A NESTED level: since 077 a leaf can only sit under a folder (§4.1).
         val html = render("partials/pipeline-tree-level") { fillNestedLevel() }
 
-        html shouldContain "hx-target=\"#pipeline-detail\""
-        html shouldContain "hx-swap=\"innerHTML\""
+        // The canonical read workspace with NO version (its current-first rule resolves it,
+        // spec §3.1), as a full document load (the graph entry spec §2 keeps).
+        val leaf = Regex("""<a class="tpl-leaf"[^>]*>""").find(html)?.value ?: error("no leaf link in $html")
+        leaf shouldContain "href=\"/pipelines/$LEAF_ID\""
+        leaf shouldContain "hx-boost=\"false\""
+        leaf shouldContain "role=\"treeitem\""
+        leaf shouldContain "data-leaf-id=\"$LEAF_ID\""
+        leaf shouldNotContain "version="
+        // The old selection contract is gone with the pane.
+        html shouldNotContain "pipeline-detail"
+        html shouldNotContain "data-editor-url"
+        html shouldNotContain "/editor"
         html shouldNotContain "hx-swap-oob"
         html shouldContain "aria-selected=\"false\""
-        html shouldContain "data-editor-url=\"/pipelines/$LEAF_ID/editor\""
-        // A rapid keyboard sweep must not race stale detail loads into the pane.
-        html shouldContain "hx-sync=\"#pipeline-detail:replace\""
     }
 
     @Test
@@ -639,17 +660,58 @@ class PipelineExplorerRenderTest {
     }
 
     @Test
-    fun `a search result SELECTS exactly like a tree leaf`() {
+    fun `#350 - a SIDEBAR search result is a listbox option linking to the workspace, under the sidebar's root`() {
         val html = render("partials/pipeline-search") { fillSearch() }
 
+        html shouldContain "id=\"pipeline-nav-root\""
         html shouldContain "role=\"listbox\""
-        html shouldContain "aria-label=\"Search results\""
+        html shouldContain "aria-label=\"Pipeline search results\""
         html shouldContain "role=\"option\""
-        html shouldContain "hx-target=\"#pipeline-detail\""
-        html shouldContain "hx-swap=\"innerHTML\""
-        html shouldContain "data-editor-url=\"/pipelines/$LEAF_ID/editor\""
+        html shouldContain "href=\"/pipelines/$LEAF_ID\""
+        html shouldContain "hx-boost=\"false\""
+        html shouldNotContain "pipeline-detail"
+        html shouldNotContain "data-editor-url"
+        // The pager stays in the sidebar: its requests carry the nav scope and target its root.
+        html shouldContain "scope=nav"
+        html shouldContain "hx-target=\"#pipeline-nav-root\""
         // The flat list shows the FULL path — that is what someone searching wants to read.
         html shouldContain ">$DEEP_PATH</span>"
+    }
+
+    @Test
+    fun `#350 - a CATALOG row is a plain link in a plain list, and its pager stays on the page`() {
+        val html = render("partials/pipeline-search") { fillCatalog() }
+
+        html shouldContain "id=\"pipeline-list-wrapper\""
+        html shouldNotContain "role=\"listbox\""
+        html shouldNotContain "role=\"option\""
+        html shouldContain "href=\"/pipelines/$LEAF_ID\""
+        html shouldContain "hx-target=\"#pipeline-list-wrapper\""
+        html shouldNotContain "scope=nav"
+    }
+
+    @Test
+    fun `#350 - the catalog's empty answer says how pipelines arrive, a sidebar no-match offers its own clear`() {
+        val empty =
+            render("partials/pipeline-search") {
+                fillCatalog()
+                setVariable("pipelines", emptyList<PipelineRecord>())
+                setVariable("q", "")
+                setVariable("total", 0)
+            }
+        empty shouldContain "No pipelines yet"
+        empty shouldNotContain "match your search"
+
+        val noMatch =
+            render("partials/pipeline-search") {
+                fillSearch()
+                setVariable("pipelines", emptyList<PipelineRecord>())
+                setVariable("total", 0)
+            }
+        noMatch shouldContain "No pipelines match your search"
+        noMatch shouldContain "data-nav-tree-clear"
+        // The sidebar's clear is nav-tree.js's (it empties the box too) — no bare hx-get.
+        noMatch shouldNotContain "hx-get=\"/partials/pipelines\""
     }
 
     @Test
@@ -701,8 +763,11 @@ class PipelineExplorerRenderTest {
         setVariable("total", 1)
     }
 
+    /** The SIDEBAR's search (#350): `scope=nav`, rooted at the sidebar's swap root. */
     private fun WebContext.fillSearch() {
         setVariable("searching", true)
+        setVariable("scope", PipelineListScope.NAV.wire)
+        setVariable("rootId", PipelineListScope.NAV.rootId)
         setVariable("pipelines", listOf(record(DEEP_PATH)))
         setVariable("drafts", emptyMap<UUID, Any>())
         setVariable("q", "revenue")
@@ -789,9 +854,17 @@ class PipelineExplorerRenderTest {
             isCurrent = false,
         )
 
+    /** The /pipelines CATALOG (#350): the flat list under the page's own root. */
+    private fun WebContext.fillCatalog() {
+        fillSearch()
+        setVariable("scope", PipelineListScope.CATALOG.wire)
+        setVariable("rootId", PipelineListScope.CATALOG.rootId)
+        setVariable("q", "")
+    }
+
     private fun WebContext.fillPage() {
         fillChrome()
-        fillLevel()
+        fillCatalog()
         setVariable("dialects", listOf("POSTGRES", "MYSQL"))
     }
 

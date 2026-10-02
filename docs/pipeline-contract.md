@@ -1,9 +1,9 @@
 # Pipeline Contract Specification
 
-**Status:** v1.50 (revised — see Change Log)
+**Status:** v1.51 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
-**Last updated:** 2026-09-29
+**Last updated:** 2026-10-02
 
 ---
 
@@ -207,6 +207,46 @@ Normative notes:
 - `checks` is versioned with the body exactly like `nodes`: additive per §15.2, and body-hash neutral — an existing body (no `checks` key) deserializes to an empty list and serializes back byte-identically; an explicit `"checks": []` canonicalizes to the same absent form.
 - Every `:name` bind in `sql` must name a **declared pipeline parameter** (§6). The calculator Context (§7.2) is NOT available to a check — a check runs outside any execution. A run binds the declared parameters exactly as an execute does, and the release gate's run supplies **no parameters**: for any parameter a check binds, the declared DEFAULTS are what the gate proves — not every combination a caller can pass — while a check written against fixed literals proves exactly the baseline those literals name. Expectations are static — a fixed value, range or row count — so an expectation that is only true for one window is a baseline-specific statement, and the baseline belongs in the check's `name`.
 - The author — agent or human — supplies the query and the expectation, **never an observed value**. `observed` exists only on the server's own run rows (`pipeline_check_runs`, metadata-db §4.20); the body's shape has no field that could carry one in.
+
+### 3.3.1 The release's caller-output record (#328)
+
+A release records **the caller node's result columns** — what the dashboard save-time
+input-contract check (§12.12's cousin on the dashboard side, dashboards.md §4.3) judges a
+SQL-sourced source against. This subsection is the source of truth for that record.
+
+- **What is recorded (D1).** At release, the flip copies the `result_schema_json` of the most
+  recent `pipeline_executions` row for THIS `(pipeline_id, pipeline_version)` with
+  `status = 'SUCCESS'`, a non-null schema, and `started_at > COALESCE(v.updated_at, v.created_at)`
+  of the version row — an execution that ran THIS body (`updated_at` moves on every draft write
+  and never at release). Child executions (`parent_execution_id` non-null) are never candidates.
+  **No probe and no execution runs at release**: a release with no qualifying execution still
+  releases and records NULL (`caller_output = not_observed` in the response); a release is never
+  refused for a missing run.
+- **Where it lives (D2).** Two nullable JSONB columns (metadata-db §4.5/§4.6, migration V47):
+  `pipeline_executions.result_schema_json` — every execution's caller-output schema, written by
+  the same `recordResult` write that fills `result_row_count`; and
+  `pipeline_versions.caller_output_json` — the release's copy, written in the flip's own
+  statement. The JSON is an **array of `{name, type, nullable}`** objects: `name` is the column
+  name as the driver reported it, `type` a §7 `LogicalType` wire value (`DECIMAL` entries may
+  also carry `precision`/`scale`), `nullable` boolean — an absent or JSON-null `nullable` reads
+  as `true` (unknown admits). A record past the bounds (256 columns, 128 characters per name —
+  `ExecutionRepository`'s constants), or one with a blank column name, is recorded as NULL with a
+  `warn`: never a truncated array, never a failed execution. The record is OUTSIDE `body_hash` (like `implements`): recording
+  changes no hash and opens no draft.
+- **The one word (D3).** The release response (`caller_output`, rest-api §5.10) and the
+  `pipeline.version.released` audit row carry exactly one word — `recorded` (the D1 read found
+  the version's latest run), `declared` (a TRANSFORM caller: the pinned contract is the answer),
+  `none` (no caller node), `not_observed` (a SQL caller, nothing observed — today's validator
+  behaviour continues for that release). Ids, names, versions and this word are all an audit row
+  says; never the column list.
+- **Precedence in the reader (D4).** The dashboard-save reader
+  (`PipelineReleaseFacts.releaseOf`) answers a release's `outputColumns` in this order: no
+  caller node → EMPTY; a TRANSFORM caller → its contract's table columns (the record never
+  overrides a declared contract); any other caller node → the version's `caller_output_json`
+  parsed to columns, null when there is none. The promotion payload carries the record beside
+  `version` and `body_hash`, validated at the receiver (shape, wire types, the bounds) and
+  stored on the imported release row (§9.2/§10.4) — a malformed record refuses the batch and
+  nothing unchecked is stored.
 
 ---
 
@@ -1834,6 +1874,7 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-02 | v1.51 | 328 (#328) the release records its caller node's result columns | New **§3.3.1** — the source of truth for the caller-output record: the flip copies the version's latest qualifying execution's `result_schema_json` into `pipeline_versions.caller_output_json` (D1, in the flip's own statement); the D2 `{name, type, nullable}` shape with the 256-column / 128-character record bounds and the JSON-null-reads-`true` rule; the D3 word (`recorded` \| `declared` \| `none` \| `not_observed`) the response and audit row carry — never the column list; the D4 precedence (the record never overrides a transform caller's declared contract) and the promotion carry (validated at the receiver, stored on the imported release). No new error code; the body, the hash and §12.12 are untouched. |
 | 2026-10-02 | v1.50 | 333 (#333) the strict contract readers | **§13.21 gains the scalar-shapes paragraph**: the pipeline, template, transform-block and DTO readers refuse a JSON number or boolean where a string is declared (and a string or float where an integer is declared) with the path and the expected shape, never the value. `pipeline.validation.schema_version_unsupported` is also the pipeline reader's wrong-type answer (`details.reason: "wrong_type"`); `template.contract_invalid` gains `details.rule: "wrong_type"`. No new code, no status change. |
 | 2026-10-01 | v1.49 | L5 (#367, #10) the `dashboard` key kind | New **§13.23 row `dashboard.binding.path_invalid`** (400): a dashboard binding's `name_prefix` is not a legal folder of the name grammar (1–9 segments, or the root `/`), or names no folder at or above a dashboard the CALLER's workspace has (the #191 non-disclosure rule). The refusal the binding routes and the Keys page's dashboard binding editor answer; the reserved `dashboard.key.kind_refused` stays unused (the surfaces answer the one catalogued `endpoint.key_kind_refused`, whose `details.reason` names the kind). §13.23 is 36 rows. |
 | 2026-10-01 | v1.48 | L4b (#353) stale text after the gate landed | **§13.22, no new code:** `visualization.release.tests_missing` no longer says the default gate refuses every release (#352 installed the gate — it names `no_runs` / `run_open` / `no_cases`), and `visualization.test.session_expired` names the shipped key `datapipelines.visualization.session-ttl-minutes`, not the spec's unshippable `tests.session-ttl-minutes`. |

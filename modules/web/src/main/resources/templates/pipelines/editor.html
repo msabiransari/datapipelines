@@ -3,6 +3,14 @@
       th:replace="~{layouts/default :: page(~{::content})}">
 <th:block th:fragment="content">
 
+  <!--/* #350 — the global sidebar's current-leaf hook: which pipeline this page shows, by id AND
+          full path, so the rail's Pipelines tree (nav-tree.js) can mark the leaf and reveal its
+          folders one level at a time — on a full-document entry, a boosted arrival and a
+          history restore alike (it rides inside #app-main). The record is the one this page
+          already resolved through the caller's lens; nothing here is new information. */-->
+  <span hidden data-nav-current="pipelines"
+        th:attr="data-nav-current-id=${pipelineId},data-nav-current-path=${navCurrentPath}"></span>
+
   <link th:href="@{/css/pipeline-editor.css}" rel="stylesheet">
   <!-- 059b: the icon system the cards and view controls draw from. Without this
        link every .ds-icon class on the page is inert and each <svg> falls to the
@@ -194,7 +202,17 @@
                          hx-target='#pe-dialog', hx-swap='innerHTML'">
           Release v<span th:text="${draftVersion}"></span>…
         </button>
-        <button th:if="${hasDraft == true and canAuthor == true}" data-verb="pipeline-purge" class="ds-button ds-button-secondary ds-button-sm"
+        <!-- #395 — ONE destructive in the header (the explorer's 102 §B.1 rule, kept now that the
+             explorer's detail pane is gone, #350): a draft-only pipeline (the {D} shape) offers the
+             ENTITY purge — its own dialog, with the exclusive draft templates and #335's kept list —
+             and every other draft the version purge below. -->
+        <button th:if="${canDelete == true and canAuthor == true}" data-verb="pipeline-purge-entity" class="ds-button ds-button-secondary ds-button-sm"
+                id="pe-purge-entity"
+                th:attr="hx-get=@{'/partials/pipelines/{id}/lifecycle/purge-entity'(id=${pipelineId}, from='editor')},
+                         hx-target='#pe-dialog', hx-swap='innerHTML'">
+          Purge pipeline…
+        </button>
+        <button th:if="${hasDraft == true and canAuthor == true and canDelete != true}" data-verb="pipeline-purge" class="ds-button ds-button-secondary ds-button-sm"
                 id="pe-discard-draft"
                 th:attr="hx-get=@{'/partials/pipelines/{id}/lifecycle/purge'(id=${pipelineId}, version=${draftVersion}, from='editor')},
                          hx-target='#pe-dialog', hx-swap='innerHTML'">

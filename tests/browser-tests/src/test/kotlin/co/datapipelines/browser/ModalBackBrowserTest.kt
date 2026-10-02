@@ -77,22 +77,18 @@ class ModalBackBrowserTest : BrowserSuite() {
         login(admin.email, admin.oneTimePassword)
         page.waitForURL("**/dashboard")
         val pipelineId = seedPipeline("test/mbv-" + generatedPassword("p").take(8).lowercase(), admin.email)
-        page.navigate("$baseUrl/pipelines")
-        page.waitForSelector("summary.tpl-summary")
-        if (page.locator("details.tpl-folder[open]").count() == 0) {
-            page.locator("summary.tpl-summary").first().click()
-        }
-        page.waitForSelector("button.tpl-leaf")
-        page.waitForResponse({ it.url().contains("/detail") || it.url().contains("/versions") }) {
-            page.locator("button.tpl-leaf").first().click()
-        }
-        page.locator("#pipeline-tab-versions tr[data-version-row]").first().waitFor()
+        // #350: the version rows (and their ⋯ menus) are the WORKSPACE's Versions tab — the
+        // explorer's detail pane is gone. The same fragment, the same placement script
+        // (lifecycle-dialog.js), the same restore discipline under test.
+        page.navigate("$baseUrl/pipelines/$pipelineId?tab=versions")
+        page.waitForSelector(".pe-root")
+        page.locator("#pe-pane-versions tr[data-version-row]").first().waitFor()
 
         // The ⋯ usually sits below the fold: scroll it into view OURSELVES, then wait for the
         // scroll to have SETTLED — the summary's rect inside the viewport and unchanged across
         // two animation frames (301 #301; was a fixed 300 ms sleep) — so Playwright's own
         // pre-click auto-scroll cannot race the menu's scroll-out-of-sight close.
-        page.locator("#pipeline-tab-versions details.tplx-vmenu > summary").first().evaluate("el => el.scrollIntoView({ block: 'center' })")
+        page.locator("#pe-pane-versions details.tplx-vmenu > summary").first().evaluate("el => el.scrollIntoView({ block: 'center' })")
         page.waitForFunction(
             """(sel) => {
               const el = document.querySelector(sel);
@@ -104,9 +100,9 @@ class ModalBackBrowserTest : BrowserSuite() {
                 done(after.top === rect.top && after.bottom === rect.bottom);
               })));
             }""",
-            "#pipeline-tab-versions details.tplx-vmenu > summary",
+            "#pe-pane-versions details.tplx-vmenu > summary",
         )
-        page.locator("#pipeline-tab-versions details.tplx-vmenu > summary").first().click()
+        page.locator("#pe-pane-versions details.tplx-vmenu > summary").first().click()
         page.waitForFunction(
             """() => {
               const list = document.querySelector('details.tplx-vmenu[open] .tplx-vmenu-list');

@@ -112,6 +112,22 @@ class ExplorerStressBrowserTest : BrowserSuite() {
             }
         }
 
+        /**
+         * #350: releases held responses until [done] holds — for a SEQUENCE of requests where
+         * each is sent only after the previous one lands (the sidebar's incremental restore:
+         * root, then one folder level per request). One driver round trip per pass lets queued
+         * route handlers capture the next request; bounded, never a bare sleep.
+         */
+        fun releaseUntil(done: () -> Boolean) {
+            val deadline = System.currentTimeMillis() + RELEASE_UNTIL_MILLIS
+            while (!done()) {
+                check(System.currentTimeMillis() < deadline) { "the held sequence never settled" }
+                releaseAll()
+                page.evaluate("() => 0")
+            }
+            releaseAll()
+        }
+
         /** Fulfills everything held, in deadline order; the ONLY place a sleep is allowed. */
         @Suppress("SwallowedException") // the abort is the counted signal; see the catch
         fun releaseAll() {
@@ -207,12 +223,25 @@ class ExplorerStressBrowserTest : BrowserSuite() {
 
     // ------------------------------------------------------------------ tree driving
 
-    private fun folderSummary(path: String) = "summary.tpl-summary:has(span.tpl-label[title='$path'])"
+    /**
+     * #350: two trees can share the page — the templates explorer's pane and the sidebar's
+     * Pipelines tree — and the stress seeds the SAME paths into both, so every selector is
+     * scoped to the tree under test.
+     */
+    private var tree = TEMPLATES_TREE
 
-    private fun leafButton(path: String) = "button.tpl-leaf:has(span.tpl-label[title='$path'])"
+    private fun folderSummary(path: String) = "$tree ${summaryRow(path)}"
+
+    private fun leafButton(path: String) = "$tree ${leafRow(path)}"
+
+    /** Unscoped row selectors, for lookups INSIDE an already-scoped level locator. */
+    private fun summaryRow(path: String) = "summary.tpl-summary:has(span.tpl-label[title='$path'])"
+
+    private fun leafRow(path: String) = ".tpl-leaf:has(span.tpl-label[title='$path'])"
 
     /** The level that landed (or the pending placeholder) directly under one folder's details. */
-    private fun levelOf(path: String) = "details.tpl-folder:has(> summary.tpl-summary:has(span.tpl-label[title='$path'])) > div.tpl-level"
+    private fun levelOf(path: String) =
+        "$tree details.tpl-folder:has(> summary.tpl-summary:has(span.tpl-label[title='$path'])) > div.tpl-level"
 
     /** Expands one folder and waits until its level request has actually fired (held or not). */
     private fun expandFolder(path: String) {
@@ -252,7 +281,7 @@ class ExplorerStressBrowserTest : BrowserSuite() {
      */
     @Suppress("SwallowedException") // the timeout is the stranded signal; see the catch
     private fun assertNoStrandedLevels() {
-        val pending = "details.tpl-folder[open] > div.tpl-level-pending"
+        val pending = "$tree details.tpl-folder[open] > div.tpl-level-pending"
         try {
             page.waitForSelector(
                 pending,
@@ -287,12 +316,13 @@ class ExplorerStressBrowserTest : BrowserSuite() {
 
     private fun treeDump(): String =
         page.evaluate(
-            """() => Array.from(document.querySelectorAll('[data-explorer-pane] details.tpl-folder'))
+            """(tree) => Array.from(document.querySelectorAll(tree + ' details.tpl-folder'))
                  .map(d => {
                    const s = d.querySelector(':scope > summary span.tpl-label');
                    const kids = Array.from(d.querySelectorAll(':scope > div')).map(k => k.className).join('|');
                    return (d.open ? 'OPEN  ' : 'shut  ') + (s ? s.getAttribute('title') : '?') + '  [' + kids + ']';
                  }).join('\n')""",
+            tree,
         ) as String
 
     /** FM4: one title per row, tree-wide. Returns the duplicated full paths (empty = clean). */
@@ -300,14 +330,15 @@ class ExplorerStressBrowserTest : BrowserSuite() {
     private fun duplicatedRowTitles(): List<String> =
         (
             page.evaluate(
-                """() => {
+                """(tree) => {
                   const seen = new Set(), dups = new Set();
-                  document.querySelectorAll('[data-explorer-pane] .tpl-label[title]').forEach(el => {
+                  document.querySelectorAll(tree + ' .tpl-label[title]').forEach(el => {
                     const t = el.getAttribute('title');
                     if (seen.has(t)) dups.add(t); else seen.add(t);
                   });
                   return Array.from(dups);
                 }""",
+                tree,
             ) as List<String>
         )
 
@@ -338,10 +369,10 @@ class ExplorerStressBrowserTest : BrowserSuite() {
             // FM2: nyc's level landed inside nyc's OWN details, holding exactly nyc's
             // children — nothing of trade's subtree leaked across.
             val nycLevel = page.locator(levelOf("nyc"))
-            nycLevel.locator(folderSummary("nyc/lib")).count() shouldBe 1
-            nycLevel.locator(folderSummary("nyc/hr")).count() shouldBe 1
-            nycLevel.locator(leafButton("nyc/overview")).count() shouldBe 1
-            nycLevel.locator(leafButton("trade/ledger")).count() shouldBe 0
+            nycLevel.locator(summaryRow("nyc/lib")).count() shouldBe 1
+            nycLevel.locator(summaryRow("nyc/hr")).count() shouldBe 1
+            nycLevel.locator(leafRow("nyc/overview")).count() shouldBe 1
+            nycLevel.locator(leafRow("trade/ledger")).count() shouldBe 0
 
             // FM4: not one row doubled anywhere in the tree.
             duplicatedRowTitles().shouldBeEmpty()
@@ -355,9 +386,9 @@ class ExplorerStressBrowserTest : BrowserSuite() {
             throttle.releaseAll()
             page.waitForSelector(folderSummary("nyc/lib/mobility"))
             val libLevel = page.locator(levelOf("nyc/lib"))
-            libLevel.locator(folderSummary("nyc/lib/mobility")).count() shouldBe 1
-            libLevel.locator(leafButton("nyc/lib/agg_daily")).count() shouldBe 1
-            libLevel.locator(leafButton("nyc/hr/roster")).count() shouldBe 0
+            libLevel.locator(summaryRow("nyc/lib/mobility")).count() shouldBe 1
+            libLevel.locator(leafRow("nyc/lib/agg_daily")).count() shouldBe 1
+            libLevel.locator(leafRow("nyc/hr/roster")).count() shouldBe 0
             assertNoStrandedLevels()
 
             expandFolder("nyc/lib/mobility")
@@ -365,7 +396,7 @@ class ExplorerStressBrowserTest : BrowserSuite() {
             page.waitForSelector(leafButton("nyc/lib/mobility/trips"))
             page
                 .locator(levelOf("nyc/lib/mobility"))
-                .locator(leafButton("nyc/lib/mobility/routes"))
+                .locator(leafRow("nyc/lib/mobility/routes"))
                 .count() shouldBe 1
             assertNoStrandedLevels()
             duplicatedRowTitles().shouldBeEmpty()
@@ -438,104 +469,98 @@ class ExplorerStressBrowserTest : BrowserSuite() {
             throttle.releaseAll()
             page.locator("#template-detail h2.tplx-detail-title").getAttribute("title") shouldBe "nyc/lib/mobility/routes"
 
-            // ---- pipelines: same contract, second explorer. ledger (A) then settlement (B).
-            page.navigate("$baseUrl/pipelines")
-            page.waitForSelector(folderSummary("trade"))
-            expandFolder("trade")
-            throttle.releaseAll()
-            page.waitForSelector(leafButton("trade/ledger"))
-
-            page.waitForRequest({ req -> req.url().contains("/partials/pipelines/detail") }) {
-                page.click(leafButton("trade/ledger"))
-            }
-            page.waitForRequest({ req -> req.url().contains("/partials/pipelines/detail") }) {
-                page.click(leafButton("trade/settlement"))
-            }
-            throttle.releaseAll()
-            page.waitForSelector("#pipeline-detail h2.tplx-detail-title")
-            page.locator("#pipeline-detail h2.tplx-detail-title").getAttribute("title") shouldBe "trade/settlement"
-            page.locator("#pipeline-detail").innerText() shouldNotContain "ledger"
+            // #350: the PIPELINES half is gone with the pipelines explorer's detail pane — a pipeline
+            // leaf (sidebar tree or catalog row) NAVIGATES to its workspace, so there is no
+            // selection race to settle; the sidebar's own admission guard (stale and foreign
+            // answers) is PipelineSidebarTreeStateBrowserTest's.
         } finally {
             throttle.releaseAll()
         }
     }
 
     @Test
-    fun `search, boosted navigation and a mid-expand reload leave both explorers consistent`() {
+    fun `search, boosted navigation and a mid-expand reload leave both trees consistent - the sidebar's Pipelines tree included`() {
         startTrace()
         loginReadyUser("plpx")
         seedPipelines()
         val throttle = PartialThrottle(seed = 85_073).apply { install() }
         try {
-            page.navigate("$baseUrl/pipelines")
-            page.waitForSelector(folderSummary("nyc"))
+            // #350: the pipelines half of the hammer runs on the SIDEBAR's tree — the explorer
+            // page it used to drive is the flat catalog now.
+            tree = PIPELINES_TREE
+            page.navigate("$baseUrl/dashboard")
+            page.click("[data-nav-branch='pipelines'] [data-nav-tree-toggle]")
+            throttle.releaseUntil { page.locator(folderSummary("nyc")).count() > 0 }
 
-            // The pipelines half of the hammer — both explorers must take the stress.
             listOf("nyc", "trade", "wide").forEach { expandFolder(it) }
             hammerRootFolders(listOf("nyc", "trade", "wide"))
-            throttle.releaseAll()
-            page.waitForSelector(folderSummary("nyc/lib"))
-            page.waitForSelector(leafButton("trade/ledger"))
+            throttle.releaseUntil {
+                page.locator(folderSummary("nyc/lib")).count() > 0 && page.locator(leafButton("trade/ledger")).count() > 0
+            }
             assertNoStrandedLevels()
             duplicatedRowTitles().shouldBeEmpty()
 
-            // Search, then clear, with the search response held: htmx queues the clear
-            // behind the in-flight search request on the same input (queue:last), so the
-            // tree must return AFTER the results — never the stale order.
+            // Search, then clear, with the search response held. The sidebar's box is
+            // `hx-sync="this:replace"`: the clear ABORTS the held search and is sent at once, and
+            // the generation guard drops anything older that still arrives — the tree must come
+            // back, and no result row may land over it.
+            val search = "$PIPELINES_TREE [data-nav-tree-search]"
+            // Stamp the CURRENT root, so "the tree is back" can only be satisfied by a new one.
+            page.evaluate("() => { document.getElementById('pipeline-nav-root').dataset.p350Old = '1'; }")
             page.waitForRequest({ req -> req.url().contains("/partials/pipelines") && req.url().contains("q=mob") }) {
-                page.fill("#pipeline-filter-q", "mob")
+                page.fill(search, "mob")
             }
-            page.fill("#pipeline-filter-q", "")
-            // The clear's request is QUEUED by htmx behind the held search request on the same
-            // input (queue:last) — it fires only once the search response completes, so the
-            // release rides INSIDE the wait: the wait starts before the request can exist.
             page.waitForRequest({ req ->
                 req.url().contains("/partials/pipelines") && !req.url().contains("q=mob") && !req.url().contains("prefix=")
             }) {
-                throttle.releaseAll()
+                page.fill(search, "")
             }
-            page.waitForSelector("button.tpl-result") // the search results DID land first
-            throttle.releaseAll() // now the queued clear
-            page.waitForSelector(folderSummary("nyc"))
-            page.locator("button.tpl-result").count() shouldBe 0
+            // Back to browsing, the tree re-opens what was open (its remembered paths) — let
+            // that sequence land completely before the next stress.
+            throttle.releaseUntil {
+                page.locator("#pipeline-nav-root[data-p350-old]").count() == 0 &&
+                    page.locator("#pipeline-nav-root .tpl-tree").count() > 0 &&
+                    page.locator(folderSummary("nyc/lib")).count() > 0 &&
+                    page.locator("$PIPELINES_TREE details.tpl-folder[open] > div.tpl-level-pending").count() == 0
+            }
+            page.locator("$PIPELINES_TREE .tpl-result").count() shouldBe 0
             duplicatedRowTitles().shouldBeEmpty()
 
-            // Boosted navigation with a level request held: the response lands in a DOM the
-            // nav already replaced. The LIVE tree must stay whole, and the other explorer's
-            // tree must be unaffected. (The clear re-rendered the tree collapsed, so nyc
-            // opens first — nyc/lib's summary does not exist until its level lands.)
-            expandFolder("nyc")
-            throttle.releaseAll()
-            expandFolder("nyc/lib")
+            // Boosted navigation with a level request held: the rail is NOT swapped by a boosted
+            // navigation (it lives outside #app-main), so the held level — a folder never
+            // fetched before — lands in the SAME live tree after the navigation, whole and once.
+            if (page.locator("$PIPELINES_TREE details.tpl-folder:has(> summary span.tpl-label[title='nyc/lib'])[open]").count() == 0) {
+                expandFolder("nyc/lib")
+                throttle.releaseUntil { page.locator(folderSummary("nyc/lib/mobility")).count() > 0 }
+            }
+            expandFolder("nyc/lib/mobility")
             page.click("a.app-nav-link[data-nav-section='/templates']")
-            page.waitForSelector("#template-list-wrapper")
-            throttle.releaseAll() // releases nyc/lib's orphaned response into the void
-            page.click("a.app-nav-link[data-nav-section='/pipelines']")
-            page.waitForSelector(folderSummary("nyc"))
-            // The fresh tree re-fetches on demand: nyc/lib opens again and lands.
-            expandFolder("nyc")
-            throttle.releaseAll()
-            expandFolder("nyc/lib")
-            throttle.releaseAll()
-            page.waitForSelector(folderSummary("nyc/lib/mobility"))
+            throttle.releaseUntil { page.locator("#template-list-wrapper").count() > 0 }
+            throttle.releaseUntil { page.locator(leafButton("nyc/lib/mobility/trips")).count() > 0 }
             assertNoStrandedLevels()
             duplicatedRowTitles().shouldBeEmpty()
 
-            // Reload MID-EXPAND: initiate trade's level fetch and reload while it is held.
-            // The reload aborts the held request; the fresh page must render a clean tree,
-            // and the same folder must open normally afterwards (recoverability, FM1's tail).
-            expandFolder("trade")
+            // Reload MID-EXPAND: initiate a never-fetched folder's level and reload while it is
+            // held. The reload aborts the held request; the fresh document restores the tree from
+            // its remembered paths — that folder included — one level per request.
+            expandFolder("nyc/hr")
             page.reload()
-            page.waitForSelector(folderSummary("nyc"))
-            throttle.releaseAll() // the mid-flight trade fetch was aborted by the navigation
-            assertNoStrandedLevels()
-            expandFolder("trade")
-            throttle.releaseAll()
-            page.waitForSelector(leafButton("trade/ledger"))
+            page.waitForSelector("[data-nav-branch='pipelines']")
+            throttle.releaseUntil {
+                page.locator(leafButton("nyc/hr/roster")).count() > 0 &&
+                    page.locator("$PIPELINES_TREE details.tpl-folder[open] > div.tpl-level-pending").count() == 0
+            }
+            page.locator(leafButton("trade/ledger")).count() shouldBe 1
             assertNoStrandedLevels()
             duplicatedRowTitles().shouldBeEmpty()
         } finally {
             throttle.releaseAll()
         }
+    }
+
+    private companion object {
+        const val TEMPLATES_TREE = "[data-explorer-pane]"
+        const val PIPELINES_TREE = "#nav-tree-pipelines"
+        const val RELEASE_UNTIL_MILLIS = 30_000L
     }
 }

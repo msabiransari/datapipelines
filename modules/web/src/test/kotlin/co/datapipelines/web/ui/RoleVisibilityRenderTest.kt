@@ -33,6 +33,7 @@ import java.nio.file.Paths
  *     verb exists. This arm is the one that catches the SEVENTH screen.
  *  2. **The inventory has not shrunk.** A guard that hides everything passes arm 1 perfectly.
  */
+@Suppress("LargeClass") // the role inventory is one table (ui-screens §4.3e) and reads best as one class
 class RoleVisibilityRenderTest {
     // ------------------------------------------------------------------ the editors
 
@@ -98,6 +99,42 @@ class RoleVisibilityRenderTest {
         author shouldContain "data-verb=\"pipeline-release\""
         author shouldContain "data-verb=\"pipeline-purge\""
         author shouldNotContain "data-role-note=\"read-only\""
+    }
+
+    /**
+     * #395 — the workspace header keeps the explorer's ONE-destructive rule (102 §B.1): a
+     * draft-only pipeline (the {D} shape, `canDelete`) offers the ENTITY purge — its own dialog,
+     * opened into the workspace's #pe-dialog — in place of the version purge; any other draft keeps
+     * Purge draft. A promoter gets neither.
+     */
+    @Test
+    fun `#395 - a draft-only pipeline's workspace offers Purge pipeline in place of Purge draft`() {
+        val entity =
+            render("pipelines/editor") {
+                editorModel()
+                setVariable("canDelete", true)
+                withRoles(canPromote = false, canAdminWorkspace = false, isSuperAdmin = false, roleLabel = "author")
+            }
+        entity shouldContain "data-verb=\"pipeline-purge-entity\""
+        entity shouldContain "lifecycle/purge-entity?from=editor"
+        entity shouldNotContain "data-verb=\"pipeline-purge\""
+
+        val versioned =
+            render("pipelines/editor") {
+                editorModel()
+                setVariable("canDelete", false)
+                withRoles(canPromote = false, canAdminWorkspace = false, isSuperAdmin = false, roleLabel = "author")
+            }
+        versioned shouldContain "data-verb=\"pipeline-purge\""
+        versioned shouldNotContain "data-verb=\"pipeline-purge-entity\""
+
+        val promoter =
+            render("pipelines/editor") {
+                editorModel()
+                setVariable("canDelete", true)
+                withRoles(canExecute = false, canAuthor = false, canAdminWorkspace = false, isSuperAdmin = false, roleLabel = "promoter")
+            }
+        promoter shouldNotContain "data-verb=\"pipeline-purge-entity\""
     }
 
     /**

@@ -1,6 +1,6 @@
 # DAG Executor Specification
 
-**Status:** v1.28 (revised — see Change Log)
+**Status:** v1.30 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Contract spec](pipeline-contract.md), [Templates spec](templates.md), [Datasources spec](datasources.md), [Staging spec](staging.md)
 **Last updated:** 2026-10-02
@@ -1619,6 +1619,7 @@ document a customer can read before they need it.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-02 | v1.30 | 328 (#328) the result history gains the schema | **The result-history bookkeeping** (`recordResult` — the surfaces' write that fills `result_row_count` / `result_size_bytes` after `execute` returns the result ref) now also records `result_schema_json` (V47) — the materialized result's columns as the driver reported them, `{name, type, nullable}` (pipeline-contract §3.3.1). History, not availability: it survives the Redis TTL, and the release flip copies it. Past the record bounds (256 columns, 128 characters per name) the record is NULL with a `warn` — never a failed execution. A `direct`/`directSink` delivery (a PIPELINE child, a dashboard refresh) writes no stored result and therefore no record, exactly as it writes no row count. |
 | 2026-10-02 | v1.29 | lane 324 (#324) | §11.2: the retry's behaviour inside the original's start window is stated — a retry landing before the original's first event (up to the 10 s lifecycle write bound) waits for it (the attach follows the log for ~15 s, above the bound) and then streams the original's events, instead of the premature `410` with an id whose row did not resolve yet; a never-started original answers the id-free `410 result.expired` (`reason: original_not_started`), an expired log keeps `reason: event_log_expired` with the id. The attach consults the execution row; no new config key (the wait is the log follower's existing give-up patience). |
 | 2026-09-30 | v1.28 | lane 336 (#336 D5) | §10.1's Failures paragraph: the terminal row's two degraded diagnostics are now stated — an unserializable context snapshot logs the failure's class (the row keeps its insert-time `parameters_json`, unchanged), and an unreadable aborted-duration read records 0 with a WARN that the duration is unknown (metadata-db §8.3's terminal-row rule kept; never a fabricated duration). |
 | 2026-09-30 | v1.27 | lane 336 (#336 D1) | §6.4 gains **the source connection's streaming commit** rule: `SourceStreaming.enable`'s out-of-autocommit and the finally's unconditional commit were documented in the code only, and the commit's own refusal was discarded (`runCatching`) on every path — a successful node whose finalizing commit refused reported SUCCESS. Now: on a node that returned, a refused commit fails it with the new catalogued `pipeline.node.commit_failed` (§13.4, 502); on a failing or cancelled node the refusal is `addSuppressed` to the primary failure, which stays the verdict. |

@@ -602,6 +602,45 @@ class PipelineLifecycleDialogRenderTest {
             setVariable("from", "explorer")
         }
 
+    @Test
+    fun `#395 - discard, restore and switch post WITHOUT the explorer target from the workspace, and keep it for the explorer`() {
+        val switchDialog =
+            PipelineLifecycleDialogModel.SwitchDialog(
+                id = LEAF_ID,
+                name = "nyc/mobility/probe",
+                currentVersion = 2,
+                options = listOf(PipelineLifecycleDialogModel.SwitchOption(1, PipelineVersionStatus.RELEASED, false, true)),
+            )
+        val dialogs =
+            mapOf<String, WebContext.() -> Unit>(
+                "partials/pipeline-lifecycle-discard" to { setVariable("dlg", discardDialog()) },
+                "partials/pipeline-lifecycle-restore" to { setVariable("dlg", restoreDialog(movesPointer = true)) },
+                "partials/pipeline-lifecycle-switch" to {
+                    setVariable("dlg", switchDialog)
+                    setVariable("preselect", null)
+                },
+            )
+        dialogs.forEach { (view, fill) ->
+            val workspace =
+                render(view) {
+                    fill()
+                    setVariable("from", "editor")
+                }
+            val form = Regex("""<form[^>]*hx-post[^>]*>""").find(workspace)?.value ?: error("$view: no form")
+            // The workspace page has no #pipeline-detail: a target there is a request never sent (#395).
+            form shouldNotContain "#pipeline-detail"
+            form shouldContain "hx-swap=\"none\""
+            workspace shouldContain "<input type=\"hidden\" name=\"from\" value=\"editor\">"
+
+            val explorer =
+                render(view) {
+                    fill()
+                    setVariable("from", "explorer")
+                }
+            Regex("""<form[^>]*hx-post[^>]*>""").find(explorer)!!.value shouldContain "hx-target=\"#pipeline-detail\""
+        }
+    }
+
     // ------------------------------------------------------------------ harness
 
     private fun render(

@@ -165,6 +165,72 @@ class PipelineReleaseServiceTest {
         )
 
     /**
+     * #328 B (D3) — the release's `caller_output` word. `draftBody`'s single node has no
+     * output, so it IS the caller node, and it is a DQL (SQL) node: `recorded` when the flip
+     * copied a record, `not_observed` when it found none — a release is never refused for a
+     * missing run.
+     */
+    @Test
+    fun `a SQL caller node releases recorded or not_observed - never refused for a missing run`() {
+        every { pipelines.findDraftDetail(workspaceId, pipelineId) } returns draftDetail()
+        every { pipelines.findVersionBody(workspaceId, pipelineId, 2) } returns draftBody
+        every { validator.validateOrThrow(any(), workspaceId) } answers { firstArg() }
+        every { templates.statusOf(workspaceId, "test/t.sql", 2) } returns PipelineVersionStatus.RELEASED
+        every { pipelines.releaseDraft(any(), any(), any(), any(), any(), any(), any()) } returns
+            releasedFlip().copy(version = releasedFlip().version.copy(callerOutputJson = null))
+
+        service.release(workspaceId, pipelineId, "draft-hash", userId).callerOutput shouldBe
+            ReleaseCallerOutput.NOT_OBSERVED
+
+        every { pipelines.releaseDraft(any(), any(), any(), any(), any(), any(), any()) } returns
+            releasedFlip().copy(
+                version = releasedFlip().version.copy(callerOutputJson = """[{"name":"a","type":"STRING","nullable":true}]"""),
+            )
+
+        service.release(workspaceId, pipelineId, "draft-hash", userId).callerOutput shouldBe
+            ReleaseCallerOutput.RECORDED
+    }
+
+    /** #328 B (D3) — a body whose only node writes the tempdb has NO caller node: `none`. */
+    @Test
+    fun `no caller node releases the word none`() {
+        val tempdbBody =
+            """{"schema_version":1,"name":"test/monthly_revenue","display_name":"M","description":"d",""" +
+                """"parameters":{},"settings":{"tempdb":{"engine":"H2"}},""" +
+                """"nodes":[{"id":"n1","type":"DQL","source":"pg","template":{"id":"test/t.sql","version":2},""" +
+                """"output":{"target":"tempdb","table":"stg_revenue"},"depends_on":[]}]}"""
+        every { pipelines.findDraftDetail(workspaceId, pipelineId) } returns draftDetail()
+        every { pipelines.findVersionBody(workspaceId, pipelineId, 2) } returns tempdbBody
+        every { validator.validateOrThrow(any(), workspaceId) } answers { firstArg() }
+        every { templates.statusOf(workspaceId, "test/t.sql", 2) } returns PipelineVersionStatus.RELEASED
+        every { pipelines.releaseDraft(any(), any(), any(), any(), any(), any(), any()) } returns releasedFlip()
+
+        service.release(workspaceId, pipelineId, "draft-hash", userId).callerOutput shouldBe ReleaseCallerOutput.NONE
+    }
+
+    /** #328 B (D3/D4) — a transform caller's contract is the answer: `declared`, record or no record. */
+    @Test
+    fun `a transform caller releases declared - the record never overrides the contract`() {
+        val transformBody =
+            """{"schema_version":1,"name":"test/monthly_revenue","display_name":"M","description":"d",""" +
+                """"parameters":{},"settings":{"tempdb":{"engine":"H2"}},""" +
+                """"nodes":[{"id":"n1","type":"TRANSFORM","source":"pg","template":{"id":"test/t.sql","version":2},""" +
+                """"output":{"target":"caller"},"depends_on":[]}]}"""
+        every { pipelines.findDraftDetail(workspaceId, pipelineId) } returns draftDetail()
+        every { pipelines.findVersionBody(workspaceId, pipelineId, 2) } returns transformBody
+        every { validator.validateOrThrow(any(), workspaceId) } answers { firstArg() }
+        every { templates.statusOf(workspaceId, "test/t.sql", 2) } returns PipelineVersionStatus.RELEASED
+        // Even WITH a copied record on the row, the declared contract outranks it (D4).
+        every { pipelines.releaseDraft(any(), any(), any(), any(), any(), any(), any()) } returns
+            releasedFlip().copy(
+                version = releasedFlip().version.copy(callerOutputJson = """[{"name":"a","type":"STRING","nullable":true}]"""),
+            )
+
+        service.release(workspaceId, pipelineId, "draft-hash", userId).callerOutput shouldBe
+            ReleaseCallerOutput.DECLARED
+    }
+
+    /**
      * 7e (transform-nodes design §8.2) — pinning a version that cites a retired fact WARNS and
      * the release PROCEEDS: the flip happens exactly as for a clean pin, and the result carries
      * one `pipeline.release.template_needs_review` naming the pin, the retired fact and its

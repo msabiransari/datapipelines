@@ -12,6 +12,8 @@ import co.datapipelines.executor.ResultStore
 import co.datapipelines.executor.StoredResultView
 import co.datapipelines.pipeline.Pipeline
 import co.datapipelines.templates.WorkspaceTemplateEngines
+import co.datapipelines.typesystem.ColumnSchema
+import co.datapipelines.typesystem.LogicalType
 import co.datapipelines.web.sse.ExecutionStreamRegistry
 import io.kotest.matchers.shouldBe
 import io.mockk.coEvery
@@ -155,7 +157,28 @@ class RecordingExecutionRunnerTest {
 
             runner(executor).run(request(), workspaceId, ExecutionTrigger.MCP)
 
-            verify { executionRepository.recordResult(executionId, 42L, 512L) }
+            // #328: the launcher passes view.schema verbatim — an empty one here — and the
+            // repository serializes and bounds it.
+            verify { executionRepository.recordResult(executionId, 42L, 512L, emptyList()) }
+        }
+
+    /**
+     * #328 A — the stored result's schema reaches the repository: the launcher passes
+     * `view.schema` and the record is the repository's business (serialize + bound there).
+     */
+    @Test
+    fun `the result schema rides the record - the stored view schema reaches the repository`() =
+        runTest {
+            val executor = mockk<PipelineExecutor>()
+            coEvery { executor.execute(any()) } returns result()
+            every { templateEngines.engineFor(workspaceId) } returns mockk()
+            val schema = listOf(ColumnSchema("month", LogicalType.DATE, nullable = false))
+            every { resultStore.describe("dp:result:$executionId") } returns
+                view(rows = 42, bytes = 512).copy(schema = schema)
+
+            runner(executor).run(request(), workspaceId, ExecutionTrigger.MCP)
+
+            verify { executionRepository.recordResult(executionId, 42L, 512L, schema) }
         }
 
     @Test

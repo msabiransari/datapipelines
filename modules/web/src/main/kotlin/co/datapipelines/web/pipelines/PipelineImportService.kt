@@ -1,5 +1,7 @@
 package co.datapipelines.web.pipelines
 
+import co.datapipelines.executor.MAX_RECORDED_COLUMN_NAME_LENGTH
+import co.datapipelines.executor.MAX_RECORDED_SCHEMA_COLUMNS
 import co.datapipelines.pipeline.ContextKeys
 import co.datapipelines.pipeline.CreateLifecycle
 import co.datapipelines.pipeline.NewPipeline
@@ -17,6 +19,7 @@ import co.datapipelines.pipeline.RequestLimits
 import co.datapipelines.pipeline.TemplateDryRenderer
 import co.datapipelines.pipeline.ValidationResult
 import co.datapipelines.pipeline.WriteSurface
+import co.datapipelines.typesystem.LogicalType
 import co.datapipelines.web.api.ApiErrors
 import co.datapipelines.web.api.ApiException
 import co.datapipelines.web.api.RequestBodies
@@ -113,11 +116,13 @@ class PipelineImportService(
         }
     }
 
-    /** The §9.2 payload: `version` plus the `body_hash` / `released_at` that ride with it. */
+    /** The §9.2 payload: `version` plus the `body_hash` / `released_at` / `caller_output` (#328) that ride with it. */
     private data class Preserved(
         val version: Int,
         val bodyHash: String?,
         val releasedAt: Instant?,
+        /** #328 — the validated D2 record JSON, or null when the payload carries none. */
+        val callerOutputJson: String? = null,
     )
 
     /** The textual value of [field] when present as a JSON string, else null. */
@@ -139,8 +144,83 @@ class PipelineImportService(
             version = versionNode.asInt(),
             bodyHash = textual(tree, "body_hash"),
             releasedAt = textual(tree, "released_at")?.let(Instant::parse),
+            callerOutputJson = callerOutputRecord(tree),
         )
     }
+
+    /**
+     * #328 — the payload's `caller_output` record, read and VALIDATED before the strip
+     * (refuse at the entry point: a malformed record refuses the import — and, on promotion,
+     * the whole batch — and nothing unchecked is ever stored). The shape is the D2 array:
+     * at most [MAX_RECORDED_SCHEMA_COLUMNS] entries of
+     * `{name, type, nullable}` — a non-empty name at most
+     * [MAX_RECORDED_COLUMN_NAME_LENGTH] characters, `type` a
+     * `LogicalType` wire value, `nullable` boolean or null. The bounds are the ONE spelling
+     * the writer (`ExecutionRepository.recordedSchemaJson`) and this reader share.
+     */
+    private fun callerOutputRecord(tree: ObjectNode): String? {
+        val node = tree.get("caller_output") ?: return null
+        if (!node.isArray) {
+            throw malformedCallerOutput(
+                "'caller_output', when present on an import payload, must be an array of {name, type, nullable} columns.",
+                "caller_output" to node.toString().take(MAX_ECHOED_ID_CHARS),
+            )
+        }
+        if (node.size() > MAX_RECORDED_SCHEMA_COLUMNS) {
+            throw malformedCallerOutput(
+                "'caller_output' carries ${node.size()} columns; at most ${MAX_RECORDED_SCHEMA_COLUMNS} are recorded.",
+                "count" to node.size(),
+                "max" to MAX_RECORDED_SCHEMA_COLUMNS,
+            )
+        }
+        node.forEach(::callerOutputColumn)
+        return node.toString()
+    }
+
+    /** One `{name, type, nullable}` entry of the payload's `caller_output` record (#328). */
+    private fun callerOutputColumn(column: JsonNode) {
+        columnDefect(column)?.let { throw it }
+    }
+
+    /** The entry's first shape defect, or null when it conforms to the D2 record (#328). */
+    private fun columnDefect(column: JsonNode): ApiException? {
+        if (!column.isObject) {
+            return malformedCallerOutput(
+                "'caller_output' entries must be objects of {name, type, nullable}.",
+                "caller_output" to column.toString().take(MAX_ECHOED_ID_CHARS),
+            )
+        }
+        val name = column.path("name").textValue()
+        if (name.isNullOrBlank() || name.length > MAX_RECORDED_COLUMN_NAME_LENGTH) {
+            return malformedCallerOutput(
+                "'caller_output' column names must be 1..${MAX_RECORDED_COLUMN_NAME_LENGTH} characters.",
+                "name" to (name ?: "").take(MAX_ECHOED_ID_CHARS),
+            )
+        }
+        val type = column.path("type").textValue()
+        if (type.isNullOrBlank() || runCatching { LogicalType.fromWire(type) }.getOrNull() == null) {
+            return malformedCallerOutput(
+                "'caller_output' column '$name' carries an unknown type; use a LogicalType wire value.",
+                "name" to name.take(MAX_ECHOED_ID_CHARS),
+                "type" to (type ?: "").take(MAX_ECHOED_ID_CHARS),
+            )
+        }
+        val nullable = column.get("nullable")
+        return if (nullable != null && !nullable.isNull && !nullable.isBoolean) {
+            malformedCallerOutput(
+                "'caller_output' column '$name' carries a non-boolean 'nullable'.",
+                "name" to name.take(MAX_ECHOED_ID_CHARS),
+            )
+        } else {
+            null
+        }
+    }
+
+    /** The one catalogued shape refusal for a malformed `caller_output` record (#328). */
+    private fun malformedCallerOutput(
+        message: String,
+        vararg details: Pair<String, Any?>,
+    ): ApiException = ApiException(PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE, message, details.toMap())
 
     /** Version-less import — today's allocate-next-local behavior (§9.2: "when absent"). */
     private fun importNextLocal(
@@ -226,6 +306,7 @@ class PipelineImportService(
                         declared,
                         preserved.releasedAt,
                         actorId,
+                        preserved.callerOutputJson,
                     )
                 return Imported(record, canonical, created = true)
             } catch (e: DuplicateKeyException) {
@@ -285,6 +366,7 @@ class PipelineImportService(
                 declared,
                 preserved.releasedAt,
                 actorId,
+                preserved.callerOutputJson,
             )
         } catch (e: DuplicateKeyException) {
             // The row appeared between the read and the insert — classify by what is there now.
@@ -473,6 +555,9 @@ class PipelineImportService(
                 "released_at",
                 "current_version",
                 "draft",
+                // #328 — read (and validated) BEFORE the strip like the lifecycle fields; never
+                // part of the canonical body, so the hash is untouched by the record.
+                "caller_output",
             )
 
         /** Reflected client input is bounded before it reaches an error message. */

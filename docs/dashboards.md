@@ -1,6 +1,6 @@
 # Dashboards
 
-**Status:** v0.23 — the two documents and their lifecycle (#10, lane L1a); the REST routes, the MCP tools and the
+**Status:** v0.24 — the dashboard draft preview (§5.2's `version`, §7's page, #369) beside 328's release-record judgement (§4.3); the two documents and their lifecycle (#10, lane L1a); the REST routes, the MCP tools and the
 permissions (§4, lane L1b); the transfer routes and their limits' honest contract (§3.3, lanes L1c/L1c-b/L1c-c: the
 import's atomicity, the RELEASE rules on a landing, the aggregate count ceiling, the wire's per-family arms); the server
 runtime (§5, lane L2; #343's released pins and stream authority); the client runtime (§6, lanes L3a/L3a-b/L3a-c); the
@@ -407,11 +407,20 @@ state of a pin the caller could not otherwise see; the verb therefore sits on `d
 ### 4.3 What a source must declare
 
 A dashboard source's release is judged at save by its status, its read-only verdict (the published-endpoint rule,
-through child pipelines) and its parameters. Its OUTPUT columns are judged against the visualization input it feeds
-(`dashboard.validation.input_contract_mismatch`) only when the release DECLARES them — when its caller node is a
-transform whose contract names a table output. A release with no caller node declares an empty output (every mapped
-input is refused); a SQL caller node declares nothing, and the check is left to the runtime, which judges the real
-columns (L2) — a guess would refuse or admit on nothing.
+through child pipelines) and its parameters. Its OUTPUT columns are the release's own answer, in #328's precedence
+(pipeline-contract §3.3.1):
+
+- A **transform** caller node's pinned contract names the columns — the declared answer, and it outranks everything
+  else.
+- Any other (SQL) caller node's columns are **the release's record**: what the release copied from the version's
+  latest successful run after the draft's last edit (`caller_output_json`; D1). A release with no qualifying run
+  records nothing, and answers `caller_output = not_observed` — **the one remaining skip**: the save-time
+  `dashboard.validation.input_contract_mismatch` check is left to the runtime (L2), which judges the real columns.
+- A release with **no caller node** answers an empty output (every mapped input is refused).
+
+The record outlives the datasource: it is read from the release, never from the live schema, so an `ALTER TABLE`
+after the release does not change what save-time validation judges (the runtime still fails on the real columns —
+that contrast is the point of the record).
 
 ### 4.4 The tools
 
@@ -857,7 +866,8 @@ full navigation).
 
 | Date | Version | Author | Change |
 |---|---|---|---|
-| 2026-10-02 | v0.23 | #369 the dashboard draft preview — renumbered at merge (main sat at v0.22) | **§5.2:** the four runtime routes take an optional `version` query parameter naming a DRAFT or RELEASED version (R2, owner-confirmed): absent = the current RELEASED version unchanged; a value is a bounded positive integer, must resolve for the caller (the family 404 naming it), and is refused to a `dashboard` key (`dashboard.key.kind_refused` — the version routes are the session page's). R1 (owner-confirmed): the pin rule is RELEASED-only on a draft exactly as on a release — a draft pinning a DRAFT pin is `dashboard.runtime.dependency_missing`/`not_released` naming the pin, the message carrying the release hint. **§6.1:** `init` admits `"released"` or a positive integer; the integer rides `?version=N` on every runtime path the instance builds. **§7:** the draft preview page (`GET /dashboards/{id}/preview?version=N`) — the board template for a named version, the banner with the way back to the released view, the version on the `data-dp-dashboard-version` attribute channel, refusals in place, the promoter's 404, session-only. No MCP tool, no migration, no new permission row. |
+| 2026-10-02 | v0.24 | #369 the dashboard draft preview — renumbered at merge (main sat at v0.23) | **§5.2:** the four runtime routes take an optional `version` query parameter naming a DRAFT or RELEASED version (R2, owner-confirmed): absent = the current RELEASED version unchanged; a value is a bounded positive integer, must resolve for the caller (the family 404 naming it), and is refused to a `dashboard` key (`dashboard.key.kind_refused` — the version routes are the session page's). R1 (owner-confirmed): the pin rule is RELEASED-only on a draft exactly as on a release — a draft pinning a DRAFT pin is `dashboard.runtime.dependency_missing`/`not_released` naming the pin, the message carrying the release hint. **§6.1:** `init` admits `"released"` or a positive integer; the integer rides `?version=N` on every runtime path the instance builds. **§7:** the draft preview page (`GET /dashboards/{id}/preview?version=N`) — the board template for a named version, the banner with the way back to the released view, the version on the `data-dp-dashboard-version` attribute channel, refusals in place, the promoter's 404, session-only. No MCP tool, no migration, no new permission row. |
+| 2026-10-02 | v0.23 | 328 (#328) a SQL source is judged against the release's record | **§4.3 rewritten:** a SQL caller node's columns are the release's RECORD (`caller_output_json`, pipeline-contract §3.3.1) — judged at save like a declared contract; `not_observed` (no qualifying run at release) is the one remaining skip, left to the runtime (L2). The record outlives the datasource: read from the release, never from the live schema. No tool, route, permission or error-shape change (`dashboards_validate`'s input is unchanged). |
 | 2026-10-02 | v0.22 | 371 (#371) the board grid has a row unit | **§6.2:** the first-party adapter's grid rows are each `--dashboard-row-unit` (app.css, `var(--space-20)`, 5rem) — a FIXED `grid-auto-rows` track, so a slot of `h` rows is `h` units plus its gaps tall and a Plotly figure fills its slot instead of collapsing (measured on the base: 34 px for a 4-row slot). The adapter's empty default slot is hidden, so the board is exactly its grid's rows tall. One unscoped rule serves the board page and the visualization preview; #353's preview-scoped copy is retired. Routes, permissions, roles: none changed. |
 | 2026-10-02 | v0.21 | 370 (#370) the late-abort ending | **§5.6:** a late abort changes nothing on a refresh that delivered — the ending consults the work's outcome, not the flag's timing: every target delivered `ok`/no-data ends the refresh DONE with its frames standing, an abort that actually interrupted the work still ends ABORTED. |
 | 2026-10-02 | v0.20 | 373 (#373) the upload gate judges expiry before the body | §3.4.1's confinement sentence names the one exception to the one-answer rule: a presented token matching an UNCONSUMED upload capability past its deadline is 410 `capability_expired`, judged before any byte of the body; a wrong or consumed token keeps the one 404 `session_not_found`. Authority: rest-api §22.2's error ladder. |

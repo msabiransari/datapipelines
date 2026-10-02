@@ -129,11 +129,13 @@ object LifecycleVerbs {
     fun via(principal: AuthenticatedPrincipal): String = if (principal.keyId != null) "api_key" else "session"
 
     /**
-     * The shared `pipeline.version.released` details (T187 + 140 + 142): ids, name, version,
-     * `via` — when the release-check gate was overridden, `checks_overridden` and
-     * `override_reason` — and `templates_released`, the `{template_id, version}` list the
-     * release cascaded to (empty when nothing did). One constructor so the REST surface and
-     * the dialog cannot drift on what an audited release records (enums.md §15).
+     * The shared `pipeline.version.released` details (T187 + 140 + 142 + #328): ids, name,
+     * version, `via`, the #328 `caller_output` word (recorded | declared | none | not_observed —
+     * never the column list; enums.md §15) — when the release-check gate was overridden,
+     * `checks_overridden` and `override_reason` — and `templates_released`, the
+     * `{template_id, version}` list the release cascaded to (empty when nothing did). One
+     * constructor so the REST surface and the dialog cannot drift on what an audited release
+     * records (enums.md §15).
      */
     fun releaseDetails(
         principal: AuthenticatedPrincipal,
@@ -145,6 +147,7 @@ object LifecycleVerbs {
             put("pipeline_name", released.record.name)
             put("version", released.version.version)
             put("via", via(principal))
+            put("caller_output", released.callerOutput.wire)
             if (released.checksOverridden.isNotEmpty()) {
                 put("checks_overridden", released.checksOverridden)
                 put("override_reason", released.checksOverrideReason)

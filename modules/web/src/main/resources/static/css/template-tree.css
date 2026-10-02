@@ -402,6 +402,13 @@ details[open] > .tpl-summary > .tpl-icon-folder-open {
   padding-left: calc(var(--gap-xs) + var(--icon-xs) + var(--gap-sm));
 }
 
+/* A row that NAVIGATES is a link (the dashboards tree since L3b; every sidebar tree and the
+   pipelines catalog since #350): the shared row styles apply and the link's own voice is reset. */
+a.tpl-leaf,
+a.tpl-result {
+  text-decoration: none;
+}
+
 .tpl-leaf:hover,
 .tpl-result:hover {
   background: var(--surface-hover);

@@ -529,6 +529,35 @@ class PromotionServiceTest {
         payload["tests"].isArray shouldBe true
     }
 
+    /**
+     * #328 F (D5) — the sender's payload carries `caller_output` beside `version` and
+     * `body_hash`, only for a version that HAS a record, verbatim from the stored row. The
+     * receiver validates and stores it; the hash recompute reads the body only, so the record
+     * riding outside it is what keeps a recorded push importable at all.
+     */
+    @Test
+    fun `a pipeline payload carries caller_output beside version and body_hash - only when recorded`() {
+        val recorded = record("recorded", version = 3)
+        val bare = record("bare", version = 1)
+        val recordJson = """[{"name":"month","type":"DATE","nullable":false}]"""
+        stubReleased(recorded, bodyOf("recorded"))
+        every { pipelines.findVersionDetail(workspaceId, recorded.id, 3) } returns
+            detail(recorded, "hash-recorded").copy(callerOutputJson = recordJson)
+        stubReleased(bare, bodyOf("bare"))
+        every { templates.lookupVersion(workspaceId, any(), any()) } returns templateVersion("test/q.sql", 1)
+        every { templates.findVersion(workspaceId, any(), any()) } returns storedTemplate("test/q.sql", 1)
+        every { client.inventory(workspace) } returns inventory()
+
+        val batch = capturePush { service.promote(workspaceId, workspace, listOf("recorded", "bare")) }
+
+        val pushed = batch.pipelines.associateBy { it["name"].asText() }
+        pushed.getValue("recorded")["caller_output"][0]["name"].asText() shouldBe "month"
+        pushed.getValue("recorded")["caller_output"][0]["type"].asText() shouldBe "DATE"
+        pushed.getValue("recorded")["version"].asInt() shouldBe 3
+        pushed.getValue("recorded").has("caller_output").shouldBe(true)
+        pushed.getValue("bare").has("caller_output") shouldBe false
+    }
+
     // ------------------------------------------------------------------------------- fixtures
 
     private fun capturePush(promote: () -> Unit): PromotionWire.Batch {

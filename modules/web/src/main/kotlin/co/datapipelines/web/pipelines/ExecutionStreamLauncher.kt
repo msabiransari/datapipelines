@@ -365,7 +365,7 @@ class ExecutionStreamLauncher(
         val ref = result.resultRef ?: return
         runCatching {
             val view = resultStore.describe(ref) ?: return
-            executionRepository.recordResult(result.executionId, view.totalRows, view.bytes)
+            executionRepository.recordResult(result.executionId, view.totalRows, view.bytes, view.schema)
         }.onFailure { log.warn("Result columns for execution {} not recorded.", result.executionId, it) }
     }
 

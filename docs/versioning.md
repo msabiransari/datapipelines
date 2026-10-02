@@ -1,9 +1,9 @@
 # Versioning: Draft, Release, Promotion
 
-**Status:** v1.25 — #349: the UI workspace row states the in-page version switch (§7.2); #344: the push closure is read at the pinned versions without the promoter lens (§10.4); #332: the three families audit every lifecycle verb (§7's blanket sentence); #348: §7.2's table disambiguates the REST `GET /api/v1/pipelines/{id}` from the UI read workspace `GET /pipelines/{id}`; #10 L1c-c: the count ceiling stated as aggregate; the receive's refused-dashboard rollback witnessed (§10.4); #320: the reverse arrows into other families (§3.5.3); #10: visualizations and dashboards join the lifecycle table (§3.5)
+**Status:** v1.26 — #328: the release flip records the caller output (§5.3). #349: the UI workspace row states the in-page version switch (§7.2); #344: the push closure is read at the pinned versions without the promoter lens (§10.4); #332: the three families audit every lifecycle verb (§7's blanket sentence); #348: §7.2's table disambiguates the REST `GET /api/v1/pipelines/{id}` from the UI read workspace `GET /pipelines/{id}`; #10 L1c-c: the count ceiling stated as aggregate; the receive's refused-dashboard rollback witnessed (§10.4); #320: the reverse arrows into other families (§3.5.3); #10: visualizations and dashboards join the lifecycle table (§3.5)
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Contract](pipeline-contract.md) (§13 error catalog, §17 persistence), [Templates](templates.md), [Metadata DB](metadata-db.md) (§4.4/§4.5/§4.8/§4.9 — DDL authority), [REST API](rest-api.md), [Pipeline Editor UI](pipeline-editor.md)
-**Last updated:** 2026-10-01
+**Last updated:** 2026-10-02
 
 ---
 
@@ -662,7 +662,16 @@ One statement, three effects — validate happens in the service layer immediate
 WITH locked AS (
     UPDATE pipeline_versions
        SET status = 'RELEASED', released_at = NOW(), released_by = :actor,
-           updated_at = NOW()
+           caller_output_json = (              -- #328: the D1 record, in the SAME statement
+               SELECT e.result_schema_json
+                 FROM pipeline_executions e
+                WHERE e.pipeline_id = :id
+                  AND e.pipeline_version = pipeline_versions.version
+                  AND e.status = 'SUCCESS' AND e.parent_execution_id IS NULL
+                  AND e.result_schema_json IS NOT NULL
+                  AND e.started_at > COALESCE(pipeline_versions.updated_at,
+                                              pipeline_versions.created_at)
+                ORDER BY e.started_at DESC LIMIT 1)
      WHERE pipeline_id = :id AND status = 'DRAFT' AND body_hash = :expectedHash
     RETURNING version
 ), bumped AS (
@@ -679,6 +688,13 @@ SELECT * FROM locked, bumped          -- 0 rows ⇒ 409
 *(v1.3 dropped the sketch's `updated_at = NOW()` from the flip: §11's column note makes
 `updated_at` draft-write metadata — a release or discard does not restamp it, so a
 released row keeps the timestamp of its last draft write. The two sections now agree.)*
+
+*(#328, v1.26: the flip also records `caller_output_json` — the D1 read, sketched above. The
+ordering predicate is exactly the draft-write clock §11 pins: `updated_at` moves on every draft
+write and never at release, so "started after the last draft write" reads precisely "ran THIS
+body". A never-run draft releases with a NULL record; the response and audit row say
+`caller_output = not_observed` and the release is never refused for a missing run. The record's
+shape, bounds and the reader's precedence are [pipeline-contract §3.3.1](pipeline-contract.md).)*
 
 Preconditions, evaluated server-side before the statement runs:
 
@@ -1457,6 +1473,7 @@ re-opening it.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-02 | v1.26 | 328 (#328) the flip records the caller output | **§5.3's sketch mirrors the statement**: the flip now also sets `caller_output_json` — the D1 subselect over `pipeline_executions` (SUCCESS, root, non-null schema, `started_at >` the last draft write's clock), in the SAME statement, so the record is atomic with the flip and cannot drift from it. A never-run draft releases with NULL (`not_observed` in the response/audit); the release is never refused for a missing run; the record is outside `body_hash`. Shape and precedence: pipeline-contract §3.3.1. |
 | 2026-10-01 | v1.25 | #349 the workspace composition — UI wording only | **§7.2's table**, the UI row: the viewed version moves IN PAGE (the selector and the Versions tab apply the admitted body through the REST version read — never a document reload, so an active run keeps its stream and identity), and the client's viewed-version state is the lens-filtered admitted history — a hidden current or draft never enters it. Service/REST/MCP defaults untouched; no route, permission or role changed. |
 | 2026-10-02 | v1.24 | 344 (#344) bundled templates are the artifact's pins | **§10.4** states the rule the sender already followed (the owner's ruling of 2026-10-02): the closure is read at the exact pinned versions without the promoter lens — the lens and §10.3's guards govern the roots; a pinned template the view hides still rides, and the same-version-and-hash skip is the only omission. No behaviour changed. |
 | 2026-10-01 | v1.23 | 332 (#332) the three families audit every lifecycle verb | **§7's blanket sentence** extends: the parameter-set, visualization and dashboard families emit their five human-verb events and their `<family>.version.released` (cascade provenance included), the same `LifecycleVerbs.audit`/`auditRelease` twins the pipelines and templates surfaces run; §3.5's table itself is unchanged (the audit column is enums.md §15's). |

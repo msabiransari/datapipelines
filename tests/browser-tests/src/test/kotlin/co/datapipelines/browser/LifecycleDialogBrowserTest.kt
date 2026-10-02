@@ -83,8 +83,14 @@ class LifecycleDialogBrowserTest : BrowserSuite() {
         rs shouldBe 200
     }
 
-    /** A draft over the current release — the PUT's copy-on-write first write (§5.1). */
-    private fun openDraftOverRelease(id: String) {
+    /**
+     * A draft over the current release — the PUT's copy-on-write first write (§5.1). [note] is the
+     * body's description: an identical body opens no new draft, so a second draft needs its own.
+     */
+    private fun openDraftOverRelease(
+        id: String,
+        note: String = "102 golden path (draft)",
+    ) {
         val name = "test/" + id
         val (gs, gbody) = send("GET", "/api/v1/pipelines/$id")
         gs shouldBe 200
@@ -94,7 +100,7 @@ class LifecycleDialogBrowserTest : BrowserSuite() {
                 "PUT",
                 "/api/v1/pipelines/$id",
                 """{"schema_version":1,"name":"$name","display_name":"${name.substringAfterLast('/')}",""" +
-                    """"description":"102 golden path (draft)","parameters":{},""" +
+                    """"description":"$note","parameters":{},""" +
                     """"nodes":[{"id":"fq","type":"CALCULATOR","kind":"fiscal_quarter",""" +
                     """"context_key":"run_fiscal_quarter","inputs":{"date":"2026-08-14","fiscal_start":"09-15"}}]}""",
                 ifMatch = hash,
@@ -187,13 +193,6 @@ class LifecycleDialogBrowserTest : BrowserSuite() {
         return page.locator("#toast .ds-toast").first().innerText()
     }
 
-    private fun badgeOf(name: String): String? {
-        page.waitForLoadState(LoadState.NETWORKIDLE)
-        val leaf = page.locator("button.tpl-leaf", Page.LocatorOptions().setHasText(name.substringAfterLast('/'))).first()
-        val version = leaf.locator(".tpl-leaf-version")
-        return if (version.count() > 0) version.innerText() else null
-    }
-
     private fun shot(name: String) {
         val dir = Paths.get("build", "reports", "102-screenshots")
         Files.createDirectories(dir)
@@ -208,70 +207,126 @@ class LifecycleDialogBrowserTest : BrowserSuite() {
 
     // ---------------------------------------------------------------- the pipelines path
 
+    /**
+     * #350: the pipelines explorer's detail pane is gone — every pipeline verb lives on the
+     * WORKSPACE now (its header and its Versions tab, `from=editor`), whose POSTs answer
+     * HX-Redirect with a flash (#395 made Switch/Discard/Restore do so too). The tree badge the
+     * explorer refreshed in place is the SIDEBAR leaf's now, re-rendered by each reload.
+     */
+    private fun openWorkspace(
+        id: String,
+        tab: String? = null,
+    ) {
+        page.navigate("$baseUrl/pipelines/$id" + (tab?.let { "?tab=$it" } ?: ""))
+        page.waitForSelector(".pe-root")
+        if (tab == "versions") page.waitForSelector("tr[data-version-row]")
+    }
+
+    private fun openSidebarTree() {
+        page.click("[data-nav-branch='pipelines'] [data-nav-tree-toggle]")
+        page.waitForSelector("#pipeline-nav-root .tpl-tree")
+    }
+
+    /** The sidebar leaf of the page being viewed, its working-version badge (the tree is open). */
+    private fun sidebarBadgeOf(name: String): String? {
+        val leaf = page.locator("#nav-tree-pipelines a.tpl-leaf[aria-current='page']:has(span.tpl-label[title='$name'])")
+        leaf.waitFor()
+        val version = leaf.locator(".tpl-leaf-version")
+        return if (version.count() > 0) version.innerText() else null
+    }
+
+    /** The service's own outcome, read back — the redirect's flash is generic by design. */
+    private fun currentVersionOf(id: String): Int? {
+        val (_, body) = send("GET", "/api/v1/pipelines/$id")
+        return Regex(""""current_version"\s*:\s*(\d+)""")
+            .find(body ?: "")
+            ?.groupValues
+            ?.get(1)
+            ?.toInt()
+    }
+
+    private fun workspaceDialog(kind: String): Locator = page.locator("#pe-dialog [data-lifecycle-dialog='$kind']").also { it.waitFor() }
+
     @Test
-    fun `the pipelines golden path - every verb through its dialog, badge and toast after each`() {
+    @Suppress("LongMethod") // the golden path IS the sequence: each verb's precondition is the previous verb's outcome
+    fun `the pipelines golden path - every verb through its dialog on the workspace, the flash and the sidebar badge after each`() {
         startTrace()
         ready()
         page.navigate("$baseUrl/dashboard")
         val probeId = createDraftPipeline("test/lifecycle_probe")
 
         page.setViewportSize(1280, 900)
-        page.navigate("$baseUrl/pipelines")
-        selectLeafOf("test/lifecycle_probe")
+        openWorkspace(probeId)
+        openSidebarTree()
+        sidebarBadgeOf("test/lifecycle_probe") shouldBe "v1"
 
-        // 1 — Release v1 (the header's dialog): the toast names it, the tree loses the draft
-        //      badge, and the pointer chip is the released number.
-        val releaseDialog = openDialog(page.locator(".tplx-detail-actions button", Page.LocatorOptions().setHasText("Release v1")))
+        // 1 — Release v1 (the header's dialog): the reload carries the flash, and the sidebar leaf
+        //      is the released number with no draft badge.
+        page.locator(".pe-topbar [data-verb='pipeline-release']").click()
+        val releaseDialog = workspaceDialog("pipeline-release")
         releaseDialog.innerText() shouldContain "Releasing makes v"
-        successToastAfter { releaseDialog.locator("button[type=submit]").click() } shouldContain "Released v1"
-        badgeOf("test/lifecycle_probe") shouldBe "v1"
+        releaseDialog.locator("button[type=submit]").click()
+        page.waitForURL("**/pipelines/$probeId?ok=released")
+        flashToast() shouldContain "Released"
+        sidebarBadgeOf("test/lifecycle_probe") shouldBe "v1"
+        page.locator("#nav-tree-pipelines a.tpl-leaf[aria-current='page'] .tpl-leaf-draft").count() shouldBe 0
 
-        // 2 — A draft over the release (§5.1 copy-on-write), then Discard the CURRENT release:
-        //      the §3.5.2 fallback catches the draft, and the TOAST says so (row 286).
+        // 2 — A draft over the release (§5.1 copy-on-write), then Discard the CURRENT release from
+        //      the Versions tab: the §3.5.2 fallback catches the draft (the service's outcome).
         openDraftOverRelease(probeId)
-        page.navigate("$baseUrl/pipelines")
-        selectLeafOf("test/lifecycle_probe")
-        badgeOf("test/lifecycle_probe") shouldBe "v2"
-        val discardDialog = openDialog(page.locator(".tplx-detail-actions button", Page.LocatorOptions().setHasText("Discard v1")))
+        openWorkspace(probeId, "versions")
+        sidebarBadgeOf("test/lifecycle_probe") shouldBe "v2"
+        rowMenu("v1").locator("button", Locator.LocatorOptions().setHasText("Discard v1")).click()
+        val discardDialog = workspaceDialog("pipeline-discard")
         discardDialog.innerText() shouldContain "v2 becomes current"
         shot("pipelines-discard-1280-light")
-        successToastAfter { discardDialog.locator("button[type=submit]").click() } shouldContain "v2 is current now."
+        discardDialog.locator("button[type=submit]").click()
+        page.waitForURL("**/pipelines/$probeId?tab=versions&ok=discarded")
+        flashToast() shouldContain "Version discarded"
+        currentVersionOf(probeId) shouldBe 2
 
-        // 3 — Restore v1: below the pointer, so the pointer stays (§3.4) — the toast's words.
+        // 3 — Restore v1: below the pointer, so the pointer stays (§3.4).
+        page.waitForSelector("tr[data-version-row]")
         rowMenu("v1").locator("button", Locator.LocatorOptions().setHasText("Restore v1")).click()
-        successToastAfter {
-            page.locator("#px-dialog [data-lifecycle-dialog='pipeline-restore'] button[type=submit]").click()
-        } shouldContain "the pointer stays at v2"
+        workspaceDialog("pipeline-restore").locator("button[type=submit]").click()
+        page.waitForURL("**/pipelines/$probeId?tab=versions&ok=restored")
+        flashToast() shouldContain "Version restored"
+        currentVersionOf(probeId) shouldBe 2
 
         // 4 — Switch to v1 (the row's Switch-to, when not current): endpoints follow.
+        page.waitForSelector("tr[data-version-row]")
         rowMenu("v1").locator("button", Locator.LocatorOptions().setHasText("Switch to v1")).click()
-        val switchDialog = page.locator("#px-dialog [data-lifecycle-dialog='pipeline-switch']")
-        switchDialog.waitFor()
-        successToastAfter { switchDialog.locator("button[type=submit]").click() } shouldContain "Switched to v1"
+        workspaceDialog("pipeline-switch").locator("button[type=submit]").click()
+        page.waitForURL("**/pipelines/$probeId?tab=versions&ok=switched")
+        flashToast() shouldContain "Current version switched"
+        currentVersionOf(probeId) shouldBe 1
 
-        // 5 — Purge the draft v2, which IS the pointer: purge-of-current falls back (§3.5.2
-        //      row 330), through the typed confirm the whole way.
+        // 5 — Purge the draft v2, through the typed confirm the whole way.
+        page.waitForSelector("tr[data-version-row]")
         rowMenu("v2").locator("button", Locator.LocatorOptions().setHasText("Purge v2")).click()
-        val purgeDialog = page.locator("#px-dialog [data-lifecycle-dialog='pipeline-purge']")
-        purgeDialog.waitFor()
+        val purgeDialog = workspaceDialog("pipeline-purge")
         purgeDialog.innerText() shouldContain "cannot be undone"
-        val typed = purgeDialog.locator("[data-confirm-input]")
-        typed.fill("v2")
-        successToastAfter { purgeDialog.locator("button[data-typed-confirm]").click() } shouldContain "Purged v2"
-        badgeOf("test/lifecycle_probe") shouldBe "v1"
+        purgeDialog.locator("[data-confirm-input]").fill("v2")
+        purgeDialog.locator("button[data-typed-confirm]").click()
+        page.waitForURL("**/pipelines/$probeId?ok=draft_purged")
+        flashToast() shouldContain "Draft purged"
+        sidebarBadgeOf("test/lifecycle_probe") shouldBe "v1"
 
-        // 6 — The {D} shape's entity purge: a never-released pipeline, the NAME typed, the
-        //      tree loses the leaf, and the flash toast lands after the redirect.
-        createDraftPipeline("test/lifecycle_chaff")
-        page.navigate("$baseUrl/pipelines")
-        selectLeafOf("test/lifecycle_chaff")
-        val entityDialog = openDialog(page.locator(".tplx-detail-actions button", Page.LocatorOptions().setHasText("Purge pipeline")))
-        entityDialog.waitFor()
+        // 6 — The {D} shape's entity purge from the WORKSPACE header (#395 — the explorer's
+        //      one-destructive rule): a never-released pipeline, the NAME typed; the catalog and
+        //      the sidebar lose it, and the flash lands on the catalog.
+        val chaffId = createDraftPipeline("test/lifecycle_chaff")
+        openWorkspace(chaffId)
+        page.locator(".pe-topbar [data-verb='pipeline-purge']").count() shouldBe 0
+        page.locator(".pe-topbar [data-verb='pipeline-purge-entity']").click()
+        val entityDialog = workspaceDialog("pipeline-purge-entity")
         entityDialog.locator("[data-confirm-input]").fill("test/lifecycle_chaff")
         entityDialog.locator("button[data-typed-confirm]").click()
         page.waitForURL("**/pipelines?ok=entity_purged")
         flashToast() shouldContain "Pipeline purged"
-        page.locator("button.tpl-leaf", Page.LocatorOptions().setHasText("lifecycle_chaff")).count() shouldBe 0
+        page.locator("#pipeline-list-wrapper .tpl-path", Page.LocatorOptions().setHasText("lifecycle_chaff")).count() shouldBe 0
+        page.waitForSelector("#pipeline-nav-root .tpl-tree")
+        page.locator("#nav-tree-pipelines span[title='test/lifecycle_chaff']").count() shouldBe 0
     }
 
     // --------------------------------------------------------------- the templates path
@@ -333,6 +388,10 @@ class LifecycleDialogBrowserTest : BrowserSuite() {
         val probeId = createDraftPipeline("test/lifecycle_probe")
         releaseViaRest(probeId)
         openDraftOverRelease(probeId)
+        // #350: a SECOND release and a third draft, so the workspace's Versions tab offers every
+        // pipeline dialog at once — v1 released (Discard, Switch to), v2 current, v3 draft (Purge).
+        releaseViaRest(probeId)
+        openDraftOverRelease(probeId, note = "350 third draft")
         createDraftTemplate("test/lifecycle_probe_twin.sql")
 
         listOf("light", "dark").forEach { mode ->
@@ -342,29 +401,28 @@ class LifecycleDialogBrowserTest : BrowserSuite() {
             page.waitForLoadState(LoadState.NETWORKIDLE)
             ensureTheme(mode)
             listOf(1280, 390).forEach { w ->
+                // #350: the pipeline dialogs open from the WORKSPACE (header + Versions tab) at the
+                // desktop width, and are photographed at each width (the dialog is a fixed modal).
+                page.setViewportSize(1280, 900)
+                openWorkspace(probeId, "versions")
+                listOf(
+                    "release" to { rowMenu("v3").locator("button", Locator.LocatorOptions().setHasText("Release v3")).click() },
+                    "discard" to { rowMenu("v1").locator("button", Locator.LocatorOptions().setHasText("Discard v1")).click() },
+                    "purge" to { rowMenu("v3").locator("button", Locator.LocatorOptions().setHasText("Purge v3")).click() },
+                    "switch" to { rowMenu("v1").locator("button", Locator.LocatorOptions().setHasText("Switch to v1")).click() },
+                ).forEach { (kind, open) ->
+                    open()
+                    workspaceDialog("pipeline-$kind")
+                    page.setViewportSize(w, 900)
+                    shot("pipelines-$kind-$w-$mode")
+                    page.keyboard().press("Escape")
+                    page
+                        .locator(
+                            "#pe-dialog [data-lifecycle-dialog]",
+                        ).waitFor(Locator.WaitForOptions().setState(com.microsoft.playwright.options.WaitForSelectorState.DETACHED))
+                    page.setViewportSize(1280, 900)
+                }
                 page.setViewportSize(w, 900)
-                page.navigate("$baseUrl/pipelines")
-                selectLeafOf("test/lifecycle_probe")
-
-                // The {R,D} shape's header dialogs.
-                openDialog(page.locator(".tplx-detail-actions button", Page.LocatorOptions().setHasText("Release v"))).let {
-                    shot("pipelines-release-$w-$mode")
-                }
-                page.keyboard().press("Escape")
-                openDialog(page.locator(".tplx-detail-actions button", Page.LocatorOptions().setHasText("Discard v"))).let {
-                    shot("pipelines-discard-$w-$mode")
-                }
-                page.keyboard().press("Escape")
-                rowMenu("v2").locator("button", Locator.LocatorOptions().setHasText("Purge v2")).click()
-                page.locator("#px-dialog [data-lifecycle-dialog='pipeline-purge']").let {
-                    it.waitFor()
-                    shot("pipelines-purge-$w-$mode")
-                }
-                page.keyboard().press("Escape")
-                openDialog(page.locator(".tplx-detail-actions button", Page.LocatorOptions().setHasText("Switch"))).let {
-                    shot("pipelines-switch-$w-$mode")
-                }
-                page.keyboard().press("Escape")
 
                 // The template twin's release + purge-entity ({D} shape on a fresh template).
                 page.navigate("$baseUrl/templates")
@@ -384,12 +442,13 @@ class LifecycleDialogBrowserTest : BrowserSuite() {
 
     // ------------------------------------------------------------------ shared helpers
 
+    /** The TEMPLATES explorer's selection (#350: the pipelines page has no explorer any more). */
     private fun selectLeafOf(name: String) {
         openDrawerIfPresent()
-        page.waitForSelector("summary.tpl-summary")
-        if (page.locator("details.tpl-folder[open]").count() == 0) {
+        page.waitForSelector("[data-explorer-pane] summary.tpl-summary")
+        if (page.locator("[data-explorer-pane] details.tpl-folder[open]").count() == 0) {
             page.waitForResponse({ it.url().contains("prefix=test") }) {
-                page.locator("summary.tpl-summary").first().click()
+                page.locator("[data-explorer-pane] summary.tpl-summary").first().click()
             }
         }
         page.waitForSelector("button.tpl-leaf")

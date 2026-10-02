@@ -106,6 +106,41 @@ class DashboardValidatorTest {
         }
     }
 
+    /**
+     * #328 D — the SQL-sourced twin: the source's RECORDED columns (what the release copied
+     * from its latest run, answered by the reader from `caller_output_json`) are judged at
+     * save like a declared contract. A record lacking the input's column refuses with
+     * `input_contract_mismatch` naming the column; the matching record passes.
+     */
+    @Test
+    fun `a recorded output lacking the input column refuses at save, naming the column - the matching record passes`() {
+        val setup: (ValidatorFakes.Fakes) -> Unit = { fakes ->
+            // As the reader answers it: the D2 record parsed to OutputColumns — here one that lacks `month`.
+            fakes.pipelines[ValidatorFakes.PIPELINE_REF] =
+                fakes.pipelines.getValue(ValidatorFakes.PIPELINE_REF).copy(
+                    outputColumns = listOf(OutputColumn("note", LogicalType.STRING, nullable = true)),
+                )
+        }
+        codes(setup = setup) shouldBe listOf(DashboardErrorCodes.INPUT_CONTRACT_MISMATCH to "visualizations[0].inputs.revenue")
+
+        // Non-vacuity: `details.column` names the planted absence, with expected/actual.
+        val failure = failures(DocumentFixtures.dashboard(), setup = setup).single()
+        failure.details["column"] shouldBe "month"
+        failure.details["expected"] shouldBe "DATE"
+        failure.details["actual"] shouldBe null
+
+        valid(DocumentFixtures.dashboard()) { fakes ->
+            fakes.pipelines[ValidatorFakes.PIPELINE_REF] =
+                fakes.pipelines.getValue(ValidatorFakes.PIPELINE_REF).copy(
+                    outputColumns =
+                        listOf(
+                            OutputColumn("month", LogicalType.DATE, nullable = false),
+                            OutputColumn("amount", LogicalType.DECIMAL, nullable = true),
+                        ),
+                )
+        }
+    }
+
     @Test
     fun `the actions and controls - scope all with targets, an unknown target, a control naming no action or parameter`() {
         reasons(mutate = { it.obj("actions[0]").put("scope", "all") }) shouldBe listOf("actions[0].targets" to "targets_with_all")

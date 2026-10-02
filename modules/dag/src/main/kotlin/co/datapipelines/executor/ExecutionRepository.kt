@@ -1,6 +1,8 @@
 package co.datapipelines.executor
 
 import co.datapipelines.pipeline.PipelineErrorCodes
+import co.datapipelines.typesystem.ColumnSchema
+import org.slf4j.LoggerFactory
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.RowMapper
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
@@ -82,6 +84,19 @@ enum class ExecutedByKeyKind {
 }
 
 /**
+ * #328 — the record bounds (metadata-db §4.6): a result schema is recorded only WHOLE. 256
+ * columns and 128 characters per name are far above every real cursor (the widest staging
+ * table the product itself builds is tens of columns); past either, the record is NULL with a
+ * `warn` — a release later reads `not_observed`, never a lie. ONE spelling for every writer
+ * and reader: the execution write ([ExecutionRepository.recordResult]) and the promotion
+ * receiver's validation (`PipelineImportService`, web) both read these constants.
+ */
+const val MAX_RECORDED_SCHEMA_COLUMNS = 256
+
+/** #328 — the per-column-name half of the record bounds; see [MAX_RECORDED_SCHEMA_COLUMNS]. */
+const val MAX_RECORDED_COLUMN_NAME_LENGTH = 128
+
+/**
  * One `pipeline_executions` row (metadata-db §4.6).
  *
  * `result_row_count` / `result_size_bytes` are **history, not availability**: a row saying
@@ -112,6 +127,15 @@ data class ExecutionRecord(
     val nodeStatsJson: String? = null,
     val resultRowCount: Long? = null,
     val resultSizeBytes: Long? = null,
+    /**
+     * #328 — the caller node's result schema at execution time, the D2 array of
+     * `{name, type, nullable}` (ExecutorJson's serialization of the stored
+     * `List<ColumnSchema>`). History, exactly like [resultRowCount]: it says what the run
+     * PRODUCED, never whether the result is still fetchable. Null for a run with no caller
+     * node, a run whose schema was never recorded, and a schema past the record bounds —
+     * `pipeline_executions` §4.6; the release flip reads it (versioning §5.3).
+     */
+    val resultSchemaJson: String? = null,
     val parentExecutionId: UUID? = null,
     val parentNodeId: String? = null,
     val rootExecutionId: UUID? = null,
@@ -172,6 +196,8 @@ class ExecutionRepository(
      */
     lifecycleWriteTimeoutSeconds: Int = 0,
 ) {
+    private val log = LoggerFactory.getLogger(ExecutionRepository::class.java)
+
     private val lifecycleJdbc: NamedParameterJdbcTemplate =
         if (lifecycleWriteTimeoutSeconds > 0) {
             val dataSource =
@@ -282,26 +308,67 @@ class ExecutionRepository(
      * the §10.2 metadata cannot distinguish "succeeded with a result" from "zero caller
      * nodes" — both would read as NULL.
      *
+     * #328 — [resultSchema] rides the same write: the stored result's columns, serialized
+     * to the §4.6 `result_schema_json` record. **Bookkeeping, never a gate**: a schema past
+     * [MAX_RECORDED_SCHEMA_COLUMNS] columns or [MAX_RECORDED_COLUMN_NAME_LENGTH] per name is
+     * recorded as NULL with a `warn` — the execution's completion is never failed for it, and
+     * the release of the version simply has nothing recorded (`not_observed`).
+     *
      * @return true when a row was updated; false when [executionId] is unknown.
      */
     fun recordResult(
         executionId: UUID,
         resultRowCount: Long,
         resultSizeBytes: Long,
+        resultSchema: List<ColumnSchema>? = null,
     ): Boolean =
         jdbc.update(
             """
             UPDATE pipeline_executions
                SET result_row_count = :resultRowCount,
-                   result_size_bytes = :resultSizeBytes
+                   result_size_bytes = :resultSizeBytes,
+                   result_schema_json = CAST(:resultSchemaJson AS jsonb)
              WHERE execution_id = :executionId
             """.trimIndent(),
             mapOf(
                 "executionId" to executionId,
                 "resultRowCount" to resultRowCount,
                 "resultSizeBytes" to resultSizeBytes,
+                "resultSchemaJson" to resultSchema?.let(::recordedSchemaJson),
             ),
         ) == 1
+
+    /**
+     * #328 — the D2 record for [schema], or null past the bounds. The bounds are the ONE
+     * spelling every writer shares: this serialization, the promotion receiver's validation
+     * (`PipelineImportService`, web) and the docs all read them from here. Past a bound the
+     * record is NULL and the caller is told why — never an exception, never a truncated array
+     * (a partial schema would read as the truth).
+     */
+    private fun recordedSchemaJson(schema: List<ColumnSchema>): String? {
+        if (schema.size > MAX_RECORDED_SCHEMA_COLUMNS) {
+            log.warn(
+                "Result schema of {} columns exceeds the record bound ({}); recording nothing.",
+                schema.size,
+                MAX_RECORDED_SCHEMA_COLUMNS,
+            )
+            return null
+        }
+        if (schema.any { it.name.length > MAX_RECORDED_COLUMN_NAME_LENGTH }) {
+            log.warn(
+                "Result schema has a column name longer than {} characters; recording nothing.",
+                MAX_RECORDED_COLUMN_NAME_LENGTH,
+            )
+            return null
+        }
+        // The importer and the reader refuse a blank name (pipeline-contract §3.3.1), so a
+        // whitespace-only one (`SELECT 1 AS " "`) would store a record no read could parse.
+        if (schema.any { it.name.isBlank() }) {
+            log.warn("Result schema has a blank column name; recording nothing.")
+            return null
+        }
+        return ExecutorJson.write(schema)
+    }
 
     /**
      * Writes the LIVE per-node progress of a still-running execution (108 §D, metadata-db §8.3).
@@ -641,7 +708,7 @@ class ExecutionRepository(
             SELECT execution_id, pipeline_id, pipeline_version, status, parameters_json::TEXT AS parameters_json,
                    executed_by, executed_by_key_kind, triggered_via, correlation_id, started_at, completed_at, duration_ms,
                    failed_node_id, error_json::TEXT AS error_json, node_stats_json::TEXT AS node_stats_json,
-                   result_row_count, result_size_bytes,
+                   result_row_count, result_size_bytes, result_schema_json::TEXT AS result_schema_json,
                    parent_execution_id, parent_node_id, root_execution_id
               FROM pipeline_executions
             """.trimIndent()
@@ -666,6 +733,7 @@ class ExecutionRepository(
                     nodeStatsJson = rs.getString("node_stats_json"),
                     resultRowCount = rs.getObject("result_row_count")?.let { (it as Number).toLong() },
                     resultSizeBytes = rs.getObject("result_size_bytes")?.let { (it as Number).toLong() },
+                    resultSchemaJson = rs.getString("result_schema_json"),
                     parentExecutionId = rs.getObject("parent_execution_id", UUID::class.java),
                     parentNodeId = rs.getString("parent_node_id"),
                     rootExecutionId = rs.getObject("root_execution_id", UUID::class.java),

@@ -18,7 +18,11 @@
 
     <form class="u-mt-md"
           th:attr="hx-post=@{'/partials/pipelines/{id}/lifecycle/restore'(id=${dlg.id}, version=${dlg.version})},
-                   hx-target='#pipeline-detail', hx-swap='innerHTML'">
+                   hx-target=${from == 'editor'} ? null : '#pipeline-detail',
+                   hx-swap=${from == 'editor'} ? 'none' : 'innerHTML'">
+      <!-- #395: the workspace's Versions tab (from=editor) reloads onto that tab with a flash; the
+           explorer keeps its in-place re-render. Release and purge have answered this way since 102. -->
+      <input type="hidden" name="from" th:value="${from}">
       <button th:if="${canAuthor == true}" type="submit" data-verb="pipeline-restore-confirm" class="ds-button ds-button-primary u-full" hx-disabled-elt="this"
               th:text="'Restore v' + ${dlg.version}">Restore v2</button>
     </form>

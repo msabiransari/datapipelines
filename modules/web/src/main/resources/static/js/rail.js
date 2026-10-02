@@ -22,3 +22,23 @@ try {
   if (dpRail === "1") document.documentElement.classList.add("rail-collapsed");
   else if (dpRail === "0") document.documentElement.classList.add("rail-expanded");
 } catch (e) {}
+
+/*
+ * #350 — the sidebar tree's width, applied before the first paint for the same reason as the
+ * collapse above. A workspace page is entered by a FULL document load (the graph's entry), and
+ * nav-tree.js runs at the end of <body>: without this, a reader with an open Pipelines tree
+ * would see the rail paint at its ordinary width and widen in front of them on every entry.
+ * The key is the ACTIVE workspace's (the layout stamps it on <html>), so another workspace's
+ * remembered width never leaks in; the value is a bounded pixel count, nothing else. nav-tree.js
+ * re-derives both from the trees it actually opens, so a stale entry costs one corrected frame.
+ */
+try {
+  var dpWs = document.documentElement.getAttribute("data-dp-workspace");
+  var dpNav = dpWs ? JSON.parse(localStorage.getItem("dp-nav-rail:" + dpWs) || "null") : null;
+  if (dpNav && dpNav.open === true) {
+    document.documentElement.classList.add("rail-tree-open");
+    if (typeof dpNav.fit === "number" && dpNav.fit > 0 && dpNav.fit <= 2000) {
+      document.documentElement.style.setProperty("--app-rail-tree-fit", Math.round(dpNav.fit) + "px");
+    }
+  }
+} catch (e) {}
