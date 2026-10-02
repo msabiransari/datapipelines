@@ -825,7 +825,9 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
         val client = readClientRefresh(instanceExpr, refreshId)
         val path =
             when {
-                client["recorded"] == false -> "the client never recorded this refresh id"
+                client["recorded"] == false -> {
+                    "the client never recorded this refresh id"
+                }
 
                 client["ended"] == true -> {
                     "the ended short-circuit answered (datapipelines-dashboard.js abort(): refresh.ended) — no POST was sent"
