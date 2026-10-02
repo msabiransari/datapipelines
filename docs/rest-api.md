@@ -1,9 +1,9 @@
 # REST API + SSE Specification
 
-**Status:** v2.70 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
+**Status:** v2.71 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
-**Last updated:** 2026-09-30
+**Last updated:** 2026-10-02
 
 ---
 
@@ -1682,7 +1682,7 @@ All limits are **per principal** — a signed-in person, or a key acting as its 
 
 - Requests: `rate-limit.requests-per-second` (100), `rate-limit.requests-per-minute` (1000).
 - Pipeline execution: `executor.max-concurrent-executions-per-user` (10) → `pipeline.execution.concurrency_limit`.
-- SSE connections: `sse.max-streams-per-user` (50) concurrent streams per user.
+- SSE connections: `sse.max-streams-per-user` (50) concurrent streams per user — execution, refresh (§23.3) and observed-evaluation (§21.5) streams count together.
 
 Counters are tracked in Redis, so limits hold across instances in a multi-instance deployment.
 
@@ -2486,6 +2486,58 @@ Export bundles the CURRENT release — the set body with its lifecycle fields, t
 | `parameter.evaluate.response_too_large` | 413 | The response would exceed `max-evaluate-response-bytes` — options are never truncated |
 | `request.body_too_large` | 413 | The evaluate body over the route's stated 1,048,576-byte cap (`details.limit_bytes`), refused before its JSON is parsed; the same code the platform filter answers over `datapipelines.web.max-request-bytes` (§4.2) |
 
+### 21.5 The observed evaluation
+
+The Parameter Sets workspace's stream (the [parameter-set workspace spec](superpowers/specs/2026-10-02-parameter-set-workspace-spec.md) §4, R1; its page lands with S1, #374). It is the §21.3 act — the same engine, the same `SelectorPool` bulkhead, the same caps and the same row, `parameter_set.evaluate` — with the cascade's progress streamed as Server-Sent Events. It is a separate route (the owner's §11.4 ruling) so that §21.3 stays byte-for-byte what it was, pinned by a golden of its response bytes. No ordinary caller attaches an observer: `POST …/evaluate`, the dashboard runtime and the `parameter_sets_evaluate` tool get the completed response and produce no trace events. Unlike the rest of §21 the route is **session-only**: no key kind reaches it, and it has no MCP placement (spec §7).
+
+| Route | Request | Answer |
+|---|---|---|
+| `POST /api/v1/parameter-sets/{id}/evaluations` | `{version, selections, evaluation_id, instance_id}` | `200` `text/event-stream` (below) |
+
+- `version` is **REQUIRED** — the page is version-explicit. Absent or `null` is `missing`; a value that is not an integer is `wrong_type`. It is read exactly through the caller's lens, never clamped and never fallen back to the served version. `selections` follows §21.3 exactly: absent or `null` is `{}`, a non-object is `wrong_type`, and an unknown key refuses the whole request.
+- `evaluation_id` is a fresh **v4 UUID the client mints** per attempt, in its canonical lower-case spelling (the owner's §11.3 ruling). Every frame carries it, and the page drops any frame whose id is not its current attempt's. Missing is `missing`, a non-string is `wrong_type`, and a non-UUID, another version or a non-canonical spelling is `malformed`. An id already open on this instance is `reused`. Reuse is judged per instance; across instances it becomes the history row's key conflict when S3 (#376) lands. `instance_id` (the page instance, for diagnostics only — the server keeps no per-instance state) follows the same rule.
+- **Refusals, in order** — a refused observation opens nothing and starts nothing:
+  1. The route's row (the scope interceptor, before the handler, as for every route).
+  2. The body's shape: the §21.3 pre-parse bound of 1,048,576 UTF-8 bytes (`413 request.body_too_large`), then the fields above (`400 parameter.validation.body_invalid` with `details.path` and `details.reason`, never the value).
+  3. The set and the explicit version through the lens. A hidden set or a missing version answers the IDENTICAL `404 parameter.not_found` §21.3 answers.
+  4. Every selections key against the set (`400 parameter.evaluate.unknown_parameter`, the evaluator's own judge, the same `details`).
+  5. A reused `evaluation_id`.
+  6. The per-user SSE cap (§12.1): execution, refresh and observed-evaluation streams count together (`429 rate_limit.exceeded`).
+
+**The stream.** The execution stream's framing (§6): `event:` name, `id:` monotonic per stream from 1, `data:` JSON, and a `: heartbeat` comment while quiet. Before EVERY write, the heartbeat included, the stream re-judges its subscriber in order:
+
+1. The session's expiry.
+2. The user's liveness.
+3. The workspace the stream OPENED in, strictly re-resolved and matched by immutable id (another membership preserves nothing).
+4. `parameter_set.evaluate`.
+
+A refusal ends the stream at that write with a final `: revoked` comment, and the evaluation runs on to its end (#343's rule). Frames carry identity and progress only — **never a value, an option, SQL, a bind or a driver message**. The events (spec §4.2, FROZEN):
+
+| Event | `data` |
+|---|---|
+| `evaluation_started` | `{evaluation_id, parameter_set_id, version, deadline_at}` — always first |
+| `parameter_waiting` | `{evaluation_id, parameter, waiting_on: [parents]}` — its coroutine awaits its parents (a parameter without parents never waits) |
+| `parameter_admitted` | `{evaluation_id, parameter}` — template-backed; the `SelectorPool` running slot is held |
+| `parameter_running` | `{evaluation_id, parameter, datasource, template: {id, version}}` — render + run began on the selector's worker (the statement reaches the driver inside it) |
+| `parameter_resolved` | `{evaluation_id, parameter, origin, reset, rows?}` — the parameter resolved with no error; `rows` = the option count when a query produced them (a template `SELECT`) |
+| `parameter_failed` | `{evaluation_id, parameter, code, detail?}` — the parameter carries an error: the first error's catalogued code; `detail` is that code's own `details.reason` word (≤ 200 characters), never its message. A saturated selector is THIS event with `parameter.evaluate.selectors_saturated` |
+| `evaluation_completed` | `{evaluation_id, response}` — `response` is the §21.3 response, byte-identical to what `POST …/evaluate` returns for the same evaluation; always the last frame on success |
+| `evaluation_failed` | `{evaluation_id, code}` — the whole-request refusal (`parameter.evaluate.timeout`, `parameter.evaluate.response_too_large`; a server fault carries the §4 backstop's `pipeline.execution.aborted`, as §21.3's 500 does). The spec's optional `message` is never sent. Always the last frame on failure |
+
+**Terminal and coverage rules.** `evaluation_completed` or `evaluation_failed` is always the last frame; nothing follows it. On `evaluation_completed`, every parameter of the set has had exactly one `parameter_resolved` or `parameter_failed`: hidden and disabled parameters included, and constants-resolved and input-typed parameters with no query frames. On `evaluation_failed`, the parameters still unfinished when the request was refused get no per-parameter frame, because their coroutines were cancelled. The client marks every node without a terminal state `failed` from the terminal frame (#375 D3, a clarification of the spec's coverage rule). A stream that ends without a terminal frame is a transport failure ([Dashboards §6.6](dashboards.md#66-the-states-notifications-and-the-csp)'s rule).
+
+**A disconnected client aborts its evaluation** (the owner's §11.7 ruling, superseding the spec's "a disconnect does NOT cancel"). A client gone past `datapipelines.sse.disconnect-grace-seconds` (§6.8, the same key) has its evaluation's coroutines cancelled: the evaluate deadline's own path runs, and a running statement is abandoned (statement cancel, connection discard). The evaluation ends `ABORTED`, and no frame says so — the table has no aborted event and the catalogue no aborted code; it is a log event. With the defaults the grace (30 s) and `datapipelines.parameters.evaluate-timeout-seconds` (30 s) coincide, so the deadline usually ends an abandoned evaluation first. The abort fires only where the deadline exceeds the grace, and it is built for that case. No abort route exists: the page supersedes an attempt by closing its stream, and the grace does the rest. A stream cut by the authority check is not a disconnect.
+
+| Error | HTTP | When |
+|---|---|---|
+| `parameter.validation.body_invalid` | 400 | The body is unreadable, or a field is missing (`missing`), mistyped (`wrong_type`), not a canonical v4 UUID (`malformed`), or a `evaluation_id` already open on this instance (`reused`) |
+| `request.body_too_large` | 413 | The body exceeds 1,048,576 UTF-8 bytes — refused before its JSON is parsed |
+| `auth.role_required` | 403 | The caller's role lacks `parameter_set.evaluate` (the promoter) |
+| `parameter.not_found` | 404 | No such set, a set the lens hides, or no such version — the identical body §21.3 answers |
+| `parameter.evaluate.unknown_parameter` | 400 | A selections key names no parameter of the set — judged before the stream opens |
+| `rate_limit.exceeded` | 429 | The per-user concurrent-stream cap (§12.1) — execution, refresh and observed-evaluation streams count together; no stream opened |
+| `parameter.evaluate.timeout` / `.response_too_large` | — | Inside the stream only: `evaluation_failed` |
+
 ## 22. Visualizations
 
 The visualization artifact's REST surface (#10; the [dashboard implementation spec](superpowers/specs/2026-09-28-dashboard-implementation-spec.md) §6.1 — §21's parameter-set routes are the mould, addressed by **id** per P24; a multi-segment NAME never travels in a path segment). The document is [Dashboards §2.1](dashboards.md#21-visualization); the lifecycle is [Dashboards §3](dashboards.md#3-the-lifecycle). Authorization is the seven `visualization.*` rows of [Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative); every route is session-or-key like §5 (the MCP key refused as everywhere off `/mcp`), and the version verbs are session-only like §21's. Envelopes per §4; every refusal is a `visualization.*` code of [Pipeline Contract §13.22](pipeline-contract.md#1322-visualizations). No UI page exists yet — this section and the MCP tools ([MCP Server §6.2.50](mcp-server.md)) are the whole surface. **Audit:** the lifecycle verbs ride the request-interceptor logging (and a refusal's `auth.scope.denied`); the MCP tools ride the dispatcher's `mcp.tool.called`; the transfer routes (below) write `visualization.exported` / `visualization.imported` (enums §15).
@@ -2644,10 +2696,11 @@ window. A dashboard execution has no stored result: `GET /api/v1/executions/{id}
 | `dashboard.refresh.saturated` | 429 | No room for the refresh within `max-wait-seconds`; carries `Retry-After`; **no row is written** |
 | `dashboard.refresh.result_too_large` | — | Inside the stream only: `source_failed` / a target's `reason` at stage `budget` |
 | `dashboard.refresh.not_found` | 404 | No such refresh for the caller on this dashboard, or it already finished (abort), or it is still starting for someone else — the four answer the identical body |
-| `rate_limit.exceeded` | 429 | The per-user concurrent-stream cap (§12.1) — execution and refresh streams count together |
+| `rate_limit.exceeded` | 429 | The per-user concurrent-stream cap (§12.1) — execution, refresh and observed-evaluation (§21.5) streams count together |
 
 ## Appendix A: Change Log
 
+| 2026-10-02 | v2.71 | S2 (#375) the observed parameter-set evaluation | Additive. **§21.5 (new): `POST /api/v1/parameter-sets/{id}/evaluations`**, the observed evaluation (the parameter-set workspace spec §4, R1; the owner's rulings §11.3, §11.4 and §11.7) — the §21.3 act on `parameter_set.evaluate`, its cascade streamed as Server-Sent Events: `version` REQUIRED, a client-minted v4 `evaluation_id` (`reused` when already open on this instance), the refusal order, the eight FROZEN events, the terminal and coverage rules (on `evaluation_failed` the unfinished parameters carry no per-parameter frame — #375 D3), the per-write authority re-judgement, and the abort of an evaluation whose client stayed away past `disconnect-grace-seconds` (no frame; with the defaults the 30 s deadline usually ends it first). `evaluation_failed` is code-only. **§21.3 is unchanged byte for byte** (a golden pins it). **§12.1, §23.3:** the per-user stream cap counts observed-evaluation streams beside execution and refresh streams. No new code, no new key. |
 | 2026-10-02 | v2.70 | 373 (#373) the upload gate judges expiry before the body | §22.2: the screenshot route names the pre-read expiry judgement (a past-deadline capability is the 410 before any byte of the body); the `session_expired` error row states its order — 410 only for a presented token whose hash matches an unconsumed capability, wrong or consumed keeps the one 404. Additive clarifications; no status or route changes. |
 | 2026-10-02 | v2.69 | 344 (#344) the bundle is the artifact's pins | **§5.9 and the three export rows (§21.2's set, §22.2's visualization, §23.2's dashboard)** say what the routes already did: the bundled closure is the artifact's pins, read without the promoter lens; only the root is lensed (the owner's ruling of 2026-10-02, auth §11A.1's lens clause). No route, status code, permission or wire shape changed. |
 | 2026-10-01 | v2.68 | L5 (#367, #10) the `dashboard` key kind | **§23.2 gains the two binding routes** — `POST`/`DELETE /api/v1/dashboards/bindings` under `dashboard.key.bind`, the `api_key.bind` twin (`400 dashboard.binding.path_invalid` off the grammar or the caller's own tree; the key by id or own-name, kind-filtered; audited `dashboard.key_bound`/`dashboard.key_unbound`). **§16.1's `kind` table gains `dashboard`** — `dashboard_viewer` fixed, bindings refused at create (they are the binding verb's), `api_key.create` holders. **§23.3:** the runtime routes' caller sentence names the key kind — its bindings are the lens, one key one budget. |

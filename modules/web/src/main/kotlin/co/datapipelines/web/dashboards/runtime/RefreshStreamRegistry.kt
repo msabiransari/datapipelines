@@ -30,8 +30,8 @@ import java.util.concurrent.TimeUnit
  * not a disconnect: the refresh runs to its end (P4's first half).
  *
  * ## Per-user stream cap (§12.1)
- * `datapipelines.sse.max-streams-per-user` counts execution AND refresh streams together — a refresh stream is an SSE
- * stream like an execution's, so the one cap holds them both.
+ * `datapipelines.sse.max-streams-per-user` counts execution, refresh AND observed-evaluation streams together (#375 D7)
+ * — each is an SSE stream like an execution's, so the one cap holds them all.
  */
 class RefreshStreamRegistry(
     private val properties: SseProperties,
@@ -40,6 +40,8 @@ class RefreshStreamRegistry(
     private val mapper: ObjectMapper,
     private val scheduler: ScheduledExecutorService = defaultScheduler(),
     private val nowMillis: () -> Long = System::currentTimeMillis,
+    /** The user's open observed-evaluation streams (#375 D7) — the cap's third term. */
+    private val evaluationStreams: (UUID) -> Int = { 0 },
 ) {
     private val log = LoggerFactory.getLogger(RefreshStreamRegistry::class.java)
     private val streams = ConcurrentHashMap<UUID, RefreshStream>()
@@ -62,7 +64,7 @@ class RefreshStreamRegistry(
      * [ExecutionStreamRegistry.atStreamLimit] documents.
      */
     fun atStreamLimit(userId: UUID): Boolean =
-        executionStreams.activeStreamsFor(userId) + activeStreamsFor(userId) >= properties.maxStreamsPerUser
+        executionStreams.activeStreamsFor(userId) + activeStreamsFor(userId) + evaluationStreams(userId) >= properties.maxStreamsPerUser
 
     val maxStreamsPerUser: Int get() = properties.maxStreamsPerUser
 

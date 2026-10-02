@@ -221,6 +221,70 @@ class ArchitectureGuardTest {
     }
 
     /**
+     * **The ordinary evaluate attaches no observer** (the parameter-set workspace spec §4.5, R1; #375).
+     * The observed evaluation is exclusive to the Parameter Sets page's stream: the three ordinary
+     * call sites — the REST evaluate, the dashboard runtime and the MCP tool — never name the observer
+     * or its events, and every production `evaluateBlocking(` call passes exactly its three arguments
+     * (`workspaceId, set, selections`), so an observer cannot ride in positionally either. Grep-able
+     * by TYPE: a leak is red, never a silent trace on every evaluate.
+     *
+     * When S3 (#376) lands `attempt: EvaluationAttempt` the expected count becomes four — that lane
+     * rewrites [ORDINARY_EVALUATE_ARGUMENTS] in the same commit.
+     */
+    @Test
+    fun `the ordinary evaluate call sites attach no observer`() {
+        val files = productionFiles()
+        val ordinary = files.filter { it.name in ORDINARY_EVALUATE_CALLERS }
+        val leaks =
+            ordinary.flatMap { file ->
+                OBSERVER_TOKEN.findAll(file.readText()).map { "${file.name}: ${it.value}" }.toList()
+            }
+        val calls =
+            files.flatMap { file ->
+                val text = file.readText()
+                EVALUATE_BLOCKING_CALL
+                    .findAll(text)
+                    .map { match -> "${file.name}:${lineOf(text, match.range.first)}" to argumentCount(text, match.range.last + 1) }
+                    .toList()
+            }
+        val misfits = calls.filter { (_, count) -> count != ORDINARY_EVALUATE_ARGUMENTS }
+
+        withClue("an ordinary evaluate call site names the observer or its events") { leaks.joinToString("\n") shouldBe "" }
+        withClue("an evaluateBlocking( call that does not pass exactly $ORDINARY_EVALUATE_ARGUMENTS arguments") {
+            misfits.joinToString("\n") { (site, count) -> "$site → $count" } shouldBe ""
+        }
+        // Non-vacuity: the three callers were read, and the four known calls were counted.
+        ordinary.map { it.name }.toSet() shouldBe ORDINARY_EVALUATE_CALLERS
+        calls.size shouldBeGreaterThanOrEqual ORDINARY_EVALUATE_CALL_FLOOR
+    }
+
+    /** The 1-based line of [offset] in [text]. */
+    private fun lineOf(
+        text: String,
+        offset: Int,
+    ): Int = text.substring(0, offset).count { it == '\n' } + 1
+
+    /**
+     * The top-level arguments of the call whose `(` ends at [start]: string literals blanked, the text at bracket
+     * depth zero up to the matching `)` split on its commas — a trailing comma names no argument.
+     */
+    private fun argumentCount(
+        text: String,
+        start: Int,
+    ): Int {
+        val code = STRING_LITERAL.replace(text.substring(start), "\"\"")
+        val topLevel = StringBuilder()
+        var depth = 0
+        for (c in code) {
+            if (depth == 0 && c in CLOSERS) return topLevel.split(',').count { it.isNotBlank() }
+            if (c in OPENERS) depth++
+            if (c in CLOSERS) depth--
+            if (depth == 0 && c !in CLOSERS) topLevel.append(c)
+        }
+        error("unterminated evaluateBlocking( call")
+    }
+
+    /**
      * Konsist resolves a scope path against the ROOT PROJECT it detects, not against the test
      * task's working directory, so the plain relative name is correct here — an absolute path is
      * double-prefixed and throws. The plain-file scans below have the opposite problem and use
@@ -441,5 +505,26 @@ class ArchitectureGuardTest {
                     "DatasourcePoolReaperScheduler|ExecutionEventRetentionScheduler|AuditLogRetention|" +
                     "ScheduleDispatcher|ScheduledRunWorker|RunReconciler|SchedulerTasks|SchedulerAdmission)\\b",
             )
+
+        /** The ordinary evaluate's call sites (spec §4.5) — the REST route, the dashboard runtime, the MCP tool. */
+        val ORDINARY_EVALUATE_CALLERS = setOf("ParameterSetsController.kt", "DashboardRuntime.kt", "ParameterSetsTools.kt")
+
+        /** The observer port and its events, by TYPE name (#375). */
+        val OBSERVER_TOKEN = Regex("\\bParameterEvaluation(Observer|Event)\\b")
+
+        /** A call of the blocking evaluate — never its declaration. */
+        val EVALUATE_BLOCKING_CALL = Regex("(?<!fun )\\bevaluateBlocking\\(")
+
+        /** A double-quoted string literal, escapes included — blanked before counting a call's arguments. */
+        val STRING_LITERAL = Regex("\"(?:\\\\.|[^\"\\\\])*\"")
+
+        const val OPENERS = "([{"
+        const val CLOSERS = ")]}"
+
+        /** `workspaceId, set, selections` — S3 (#376) makes it four when `attempt` lands. */
+        const val ORDINARY_EVALUATE_ARGUMENTS = 3
+
+        /** The four calls on this base: the REST route, the dashboard runtime's two, the MCP tool. */
+        const val ORDINARY_EVALUATE_CALL_FLOOR = 4
     }
 }
