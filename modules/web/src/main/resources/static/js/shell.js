@@ -236,6 +236,30 @@
     return detail.target;
   }
 
+  /* #364 — the history SHAPE tell (#358): does a cached history entry hold the OLD
+     whole-<body> snapshot rather than the #app-main region? htmx stores no marker
+     of which element an entry holds, so the content is the tell: a body-shaped entry
+     serialises the layout's own opening tag, `<main id="app-main" …>`, as a CHILD,
+     and a main-shaped one is the region's innerHTML, which cannot contain it.
+
+     The test names the ELEMENT — a `<main` start tag carrying id="app-main", the
+     attributes in any order — never the bare attribute literal. #358's substring
+     test on `id="app-main"` alone was fooled by user text: innerHTML serialisation
+     escapes `<`, `>` and `&` in a text node but NOT the double quote, so a pipeline
+     description that reads `… id="app-main"` made a main-shaped entry look
+     body-shaped (one needless full reload per Back/Forward on that page). Text
+     cannot forge the start tag: its `<` arrives as `&lt;`. The raw-text blocks are
+     the only places `<` is serialised verbatim (the editor's JSON blobs, whose
+     ScriptSafeJson escapes `</` and `<!--` but not a lone `<`); inside one every
+     `"` is written `\"` and the JSON grammar never puts `app-main` directly after a
+     string's closing quote, so those cannot carry the literal either. A regex, not
+     a DOM parse: this runs on every cache hit and the node suite has no DOM. */
+  var BODY_SHAPED_OPENING_TAG = /<main\b[^>]*\sid="app-main"(?=[\s>\/])/i;
+
+  function historyEntryIsBodyShaped(content) {
+    return typeof content === "string" && BODY_SHAPED_OPENING_TAG.test(content);
+  }
+
   function progressBar(doc) {
     return doc.getElementById("app-progress");
   }
@@ -1128,8 +1152,10 @@
        region from now on, but a session that straddles the change still holds entries
        saved by the previous build: they snapshot the whole <body>, footer scripts and
        all, and htmx stores no marker of WHICH element an entry holds. The one honest
-       tell is the content itself — a body-shaped entry serialises `<main id="app-main">`
-       as a CHILD; a main-shaped one cannot contain it. Two defences, one rule:
+       tell is the content itself — a body-shaped entry serialises the `<main
+       id="app-main">` OPENING TAG as a CHILD; a main-shaped one cannot contain it
+       (#364: historyEntryIsBodyShaped matches that tag, never the attribute literal,
+       which user text may carry). Two defences, one rule:
 
          - at shell init, a ONE-TIME purge drops every body-shaped entry from
            sessionStorage (self-healing without a navigation);
@@ -1143,9 +1169,8 @@
            body-shaped entry, and a session without storage never reaches this event
            (htmx's own cache reads fail first). */
     (function () {
-      var OLD_BODY_SHAPE = 'id="app-main"';
       var isBodyShaped = function (item) {
-        return !!item && typeof item.content === "string" && item.content.indexOf(OLD_BODY_SHAPE) !== -1;
+        return !!item && historyEntryIsBodyShaped(item.content);
       };
       var dropBodyShaped = function () {
         var cache = JSON.parse(sessionStorage.getItem("htmx-history-cache") || "[]");
@@ -1527,6 +1552,7 @@
     activeTheme: activeTheme,
     applyTheme: applyTheme,
     swapTargetFor: swapTargetFor,
+    historyEntryIsBodyShaped: historyEntryIsBodyShaped,
     setMenuOpen: setMenuOpen,
     menuIsOpen: menuIsOpen,
     menuSelection: menuSelection,
