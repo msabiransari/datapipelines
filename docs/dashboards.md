@@ -1,6 +1,6 @@
 # Dashboards
 
-**Status:** v0.24 — the dashboard draft preview (§5.2's `version`, §7's page, #369) beside 328's release-record judgement (§4.3); the two documents and their lifecycle (#10, lane L1a); the REST routes, the MCP tools and the
+**Status:** v0.25 — the board's small-slot margins and its breakpoint collapse (§6.2, §6.3, #386/#387) beside the dashboard draft preview (§5.2's `version`, §7's page, #369) beside 328's release-record judgement (§4.3); the two documents and their lifecycle (#10, lane L1a); the REST routes, the MCP tools and the
 permissions (§4, lane L1b); the transfer routes and their limits' honest contract (§3.3, lanes L1c/L1c-b/L1c-c: the
 import's atomicity, the RELEASE rules on a landing, the aggregate count ceiling, the wire's per-family arms); the server
 runtime (§5, lane L2; #343's released pins and stream authority); the client runtime (§6, lanes L3a/L3a-b/L3a-c); the
@@ -638,7 +638,7 @@ of them, and a no-op is not conformant (the conformance suite drives real behavi
 
 | Function | The host does | The runtime guarantees |
 |---|---|---|
-| `mountLayout(layout) → Promise` | build the grid from the system layout; the first-party adapter's rows are each one `--dashboard-row-unit` (app.css, default `var(--space-20)` = 5rem), so a slot of `h` rows is `h` units plus the gaps between them tall and a figure's height is its slot's; the empty default slot takes no row (`dashboards.css`) | awaited before anything mounts |
+| `mountLayout(layout) → Promise` | build the grid from the system layout; the first-party adapter's rows are each one `--dashboard-row-unit` (app.css, default `var(--space-20)` = 5rem), so a slot of `h` rows is `h` units plus the gaps between them tall and a figure's height is its slot's; the empty default slot takes no row (`dashboards.css`); below `layout.breakpoint_px` (768 when absent; clamped to the server's 1–10 000, a non-number is the default) the first-party adapter places every item across all 12 columns, stacked in grid order (by `y`, then `x`) with its own row span — the row unit unchanged — through `matchMedia("not all and (min-width: <breakpoint>px)")`, so 767 px collapses and 768 px holds the stored grid; a viewport crossing re-places the slots and resizes every mounted renderer, the listener removed by `dispose`; the gap is the `--space-4` token | awaited before anything mounts |
 | `mountVisualization(occurrence, renderer) → Promise<handle>` | create the placeholder and its renderer | the handle's `renderData` is the ONLY data path |
 | `renderParameters(state) → Promise` | render the FULL server state, hidden and disabled included | awaited INSIDE the parameter gate — the lock releases only after the render resolves |
 | `readSelections() → {name: value}` | return every current committed value, in the wire's type | merged over the server state at each evaluation; hidden and disabled values included (D23) |
@@ -684,7 +684,14 @@ boards in one document never share a native radio group); repeated renders REPLA
   `--chart-*` tokens (app.css, bridged off the theme) through a probe element and maps them onto
   `paper_bgcolor`, `plot_bgcolor`, the grid, the font and the categorical `colorway`.
   `presentation.tokens` is an OPEN map: `series: "categorical"` is the one name the adapter knows;
-  names it does not know are ignored.
+  names it does not know are ignored. **The size defaults (#386):** Plotly's own margins (about 100 px
+  top, 80 px elsewhere) would consume a 2-row slot (176 px), so the adapter starts every figure from a
+  compact frame — `margin` `{l: 8, r: 8, t: 8, b: 8, pad: 0}`, `t: 36` when the figure has a title —
+  and sets `automargin: true` on `xaxis`, `yaxis` and every numbered axis the layout declares, so
+  each axis's tick labels and title take what they need and no more. **Two precedences, opposite:**
+  the size defaults sit UNDER the author — a stored `layout.margin` key or a stored `automargin`
+  (`false` included) wins, key by key; the theme's colours sit OVER the author — a stored
+  `paper_bgcolor` or grid colour loses to the token at render. Neither touches the other's keys.
 - **Table.** `columns[]` (`label`, `values` — the path the binding fills, `format`, `align`),
   `page_size` capping the rows. Every cell is `textContent`.
 - **KPI.** `label`, `value` (the bound path), `format` (`number|integer|percent|currency`), `unit`,
@@ -866,6 +873,7 @@ full navigation).
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-02 | v0.25 | 386 (#386, #387) the small-slot margins and the breakpoint collapse | **§6.3:** the Plotly adapter's size defaults — a compact margin (`t` opens for a title only) and `automargin` on the axes, UNDER the author's stored `margin`/`automargin` key by key, beside the theme's colours OVER the author (both precedences side by side); a 2-row slot keeps a plot area of at least half its height (measured by `DashboardGridRowUnitBrowserTest`). **§6.2:** the first-party adapter implements §2.2's promise — below `breakpoint_px` (768 when absent) every item spans the 12 columns in grid order with its own row span, the row unit kept; a viewport crossing re-places and resizes; the grid gap is the `--space-4` token. §2.2 is unchanged: its sentence is now true. |
 | 2026-10-02 | v0.24 | #369 the dashboard draft preview — renumbered at merge (main sat at v0.23) | **§5.2:** the four runtime routes take an optional `version` query parameter naming a DRAFT or RELEASED version (R2, owner-confirmed): absent = the current RELEASED version unchanged; a value is a bounded positive integer, must resolve for the caller (the family 404 naming it), and is refused to a `dashboard` key (`dashboard.key.kind_refused` — the version routes are the session page's). R1 (owner-confirmed): the pin rule is RELEASED-only on a draft exactly as on a release — a draft pinning a DRAFT pin is `dashboard.runtime.dependency_missing`/`not_released` naming the pin, the message carrying the release hint. **§6.1:** `init` admits `"released"` or a positive integer; the integer rides `?version=N` on every runtime path the instance builds. **§7:** the draft preview page (`GET /dashboards/{id}/preview?version=N`) — the board template for a named version, the banner with the way back to the released view, the version on the `data-dp-dashboard-version` attribute channel, refusals in place, the promoter's 404, session-only. No MCP tool, no migration, no new permission row. |
 | 2026-10-02 | v0.23 | 328 (#328) a SQL source is judged against the release's record | **§4.3 rewritten:** a SQL caller node's columns are the release's RECORD (`caller_output_json`, pipeline-contract §3.3.1) — judged at save like a declared contract; `not_observed` (no qualifying run at release) is the one remaining skip, left to the runtime (L2). The record outlives the datasource: read from the release, never from the live schema. No tool, route, permission or error-shape change (`dashboards_validate`'s input is unchanged). |
 | 2026-10-02 | v0.22 | 371 (#371) the board grid has a row unit | **§6.2:** the first-party adapter's grid rows are each `--dashboard-row-unit` (app.css, `var(--space-20)`, 5rem) — a FIXED `grid-auto-rows` track, so a slot of `h` rows is `h` units plus its gaps tall and a Plotly figure fills its slot instead of collapsing (measured on the base: 34 px for a 4-row slot). The adapter's empty default slot is hidden, so the board is exactly its grid's rows tall. One unscoped rule serves the board page and the visualization preview; #353's preview-scoped copy is retired. Routes, permissions, roles: none changed. |

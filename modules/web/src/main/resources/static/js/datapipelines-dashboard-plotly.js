@@ -23,6 +23,11 @@
  * names the adapter knows (`series`) are honoured, names it does not know are ignored. A token that
  * resolves to nothing degrades to Plotly's own defaults rather than painting wrong.
  *
+ * ## The size defaults (#386)
+ * A compact margin and `automargin` on the axes, so a figure in a 2-row slot keeps a plot area. They
+ * sit UNDER the author's stored `margin`/`automargin` (the author wins, key by key); the theme sits
+ * OVER the author's colours. Both precedences: dashboards.md §6.3.
+ *
  * ## The bundle
  * The page loads exactly one bundle (`plotly-2d.min.js` default; `plotly-3d.min.js` for a board with a
  * 3D trace), declared on its script tag as `data-dp-plotly-bundle`; the runtime refuses a board whose
@@ -188,6 +193,45 @@
     return layout;
   }
 
+  /**
+   * #386 — the SIZE defaults (dashboards.md §6.3). Plotly's own margins (about 100 px top, 80 px on
+   * the other sides) consume a 2-row slot (176 px) whole; a figure starts from a compact frame and
+   * each axis's `automargin` grows it by what its tick labels and axis title need, and no more. The
+   * top margin opens for a title only. These are DEFAULTS under the author: a stored `layout.margin`
+   * key and a stored `automargin` win over them key by key — the opposite precedence to the theme's
+   * colours, which win over the author's ([mergeLayout]).
+   */
+  var COMPACT_MARGIN = { l: 8, r: 8, t: 8, b: 8, pad: 0 };
+
+  /** The top margin of a titled figure: one line of Plotly's default title font (17 px) with its leading. */
+  var COMPACT_TITLED_TOP = 36;
+
+  /** `xaxis`, `yaxis` and the numbered axes an author declared (`xaxis2`, `yaxis3`, …). */
+  var AXIS_KEY = /^[xy]axis\d*$/;
+
+  function hasTitle(layout) {
+    var title = layout.title;
+    if (typeof title === "string") return title.length > 0;
+    return isObject(title) && title.text !== undefined && title.text !== null && String(title.text).length > 0;
+  }
+
+  function withSizeDefaults(stored) {
+    var out = clone(stored && isObject(stored) ? stored : {});
+    var margin = Object.assign({}, COMPACT_MARGIN);
+    if (hasTitle(out)) margin.t = COMPACT_TITLED_TOP;
+    out.margin = Object.assign(margin, isObject(out.margin) ? out.margin : {});
+    var axes = ["xaxis", "yaxis"];
+    for (var key in out) {
+      if (Object.prototype.hasOwnProperty.call(out, key) && AXIS_KEY.test(key) && axes.indexOf(key) === -1) axes.push(key);
+    }
+    for (var i = 0; i < axes.length; i++) {
+      var axis = isObject(out[axes[i]]) ? out[axes[i]] : {};
+      if (axis.automargin === undefined) axis.automargin = true;
+      out[axes[i]] = axis;
+    }
+    return out;
+  }
+
   function mergeLayout(stored, theme) {
     var out = clone(stored && isObject(stored) ? stored : {});
     for (var key in theme) {
@@ -228,7 +272,7 @@
           throw new Error("Plotly is not loaded; the page must load one vendored bundle");
         }
         var config = substitute(stored, bindings || {}, escapeMarkup);
-        config.layout = mergeLayout(config.layout, themeLayout(occurrence.presentation));
+        config.layout = mergeLayout(withSizeDefaults(config.layout), themeLayout(occurrence.presentation));
         var plotConfig = Object.assign({ responsive: true, displaylogo: false }, config.config || {});
         return new Promise(function (resolve, reject) {
           var settled = false;
@@ -286,8 +330,17 @@
       dashboard.registerRenderer({ kind: "plotly", version: "4", create: create });
       REGISTERED = true;
     },
-    /** Exported for the node tests: the pure substitution and escaping. */
-    _internal: { substitute: substitute, escapeMarkup: escapeMarkup, parsePath: parsePath, themeLayout: themeLayout, mergeLayout: mergeLayout },
+    /** Exported for the node tests: the pure substitution and escaping, the theme and the size defaults. */
+    _internal: {
+      substitute: substitute,
+      escapeMarkup: escapeMarkup,
+      parsePath: parsePath,
+      themeLayout: themeLayout,
+      mergeLayout: mergeLayout,
+      withSizeDefaults: withSizeDefaults,
+      COMPACT_MARGIN: COMPACT_MARGIN,
+      COMPACT_TITLED_TOP: COMPACT_TITLED_TOP,
+    },
   };
 
   if (typeof module !== "undefined" && module.exports) module.exports = api; // node --test
