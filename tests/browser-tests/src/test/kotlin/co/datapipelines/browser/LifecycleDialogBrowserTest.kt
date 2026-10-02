@@ -193,7 +193,6 @@ class LifecycleDialogBrowserTest : BrowserSuite() {
         return page.locator("#toast .ds-toast").first().innerText()
     }
 
-
     private fun shot(name: String) {
         val dir = Paths.get("build", "reports", "102-screenshots")
         Files.createDirectories(dir)
@@ -239,13 +238,17 @@ class LifecycleDialogBrowserTest : BrowserSuite() {
     /** The service's own outcome, read back — the redirect's flash is generic by design. */
     private fun currentVersionOf(id: String): Int? {
         val (_, body) = send("GET", "/api/v1/pipelines/$id")
-        return Regex(""""current_version"\s*:\s*(\d+)""").find(body ?: "")?.groupValues?.get(1)?.toInt()
+        return Regex(""""current_version"\s*:\s*(\d+)""")
+            .find(body ?: "")
+            ?.groupValues
+            ?.get(1)
+            ?.toInt()
     }
 
-    private fun workspaceDialog(kind: String): Locator =
-        page.locator("#pe-dialog [data-lifecycle-dialog='$kind']").also { it.waitFor() }
+    private fun workspaceDialog(kind: String): Locator = page.locator("#pe-dialog [data-lifecycle-dialog='$kind']").also { it.waitFor() }
 
     @Test
+    @Suppress("LongMethod") // the golden path IS the sequence: each verb's precondition is the previous verb's outcome
     fun `the pipelines golden path - every verb through its dialog on the workspace, the flash and the sidebar badge after each`() {
         startTrace()
         ready()
@@ -413,7 +416,10 @@ class LifecycleDialogBrowserTest : BrowserSuite() {
                     page.setViewportSize(w, 900)
                     shot("pipelines-$kind-$w-$mode")
                     page.keyboard().press("Escape")
-                    page.locator("#pe-dialog [data-lifecycle-dialog]").waitFor(Locator.WaitForOptions().setState(com.microsoft.playwright.options.WaitForSelectorState.DETACHED))
+                    page
+                        .locator(
+                            "#pe-dialog [data-lifecycle-dialog]",
+                        ).waitFor(Locator.WaitForOptions().setState(com.microsoft.playwright.options.WaitForSelectorState.DETACHED))
                     page.setViewportSize(1280, 900)
                 }
                 page.setViewportSize(w, 900)

@@ -45,7 +45,11 @@ import java.util.UUID
  * Comments are stripped before every assertion: the markup documents its own absences at
  * length, and a promise in a comment is not an affordance (the discipline
  * [TemplateExplorerRenderTest] established, for exactly this reason).
+ *
+ * `LargeClass` is suppressed knowingly: the pipelines list fragments (sidebar tree, nav search,
+ * catalog) and the detail pane #401 retires share one fixture set; the split lands with #401.
  */
+@Suppress("LargeClass")
 class PipelineExplorerRenderTest {
     // ------------------------------------------------------------- the two panes
 

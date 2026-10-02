@@ -467,7 +467,10 @@ class PipelineLifecycleDialogControllerTest {
                 id = PIPELINE,
                 name = "test/pipeline",
                 currentVersion = 2,
-                options = listOf(PipelineLifecycleDialogModel.SwitchOption(1, PipelineVersionStatus.RELEASED, isCurrent = false, eligible = true)),
+                options =
+                    listOf(
+                        PipelineLifecycleDialogModel.SwitchOption(1, PipelineVersionStatus.RELEASED, isCurrent = false, eligible = true),
+                    ),
             )
 
         mvc

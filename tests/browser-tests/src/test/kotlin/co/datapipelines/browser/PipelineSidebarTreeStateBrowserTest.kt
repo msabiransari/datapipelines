@@ -117,8 +117,13 @@ class PipelineSidebarTreeStateBrowserTest : BrowserSuite() {
     private fun leaf(path: String) = "$panel a.tpl-leaf:has(span.tpl-label[title='$path'])"
 
     private fun titlesInTree(): List<String> =
-        (page.evaluate("s => [...document.querySelectorAll(s + ' .tpl-label[title], ' + s + ' .tpl-path[title]')].map(e => e.getAttribute('title'))", panel) as List<*>)
-            .map { it.toString() }
+        (
+            page.evaluate(
+                "s => [...document.querySelectorAll(s + ' .tpl-label[title], ' + s + ' .tpl-path[title]')]" +
+                    ".map(e => e.getAttribute('title'))",
+                panel,
+            ) as List<*>
+        ).map { it.toString() }
 
     /** Requests to the sidebar's level route, recorded as their `prefix` (null = the root/search). */
     private fun recordLevelRequests(into: MutableList<String?>) {
@@ -135,7 +140,11 @@ class PipelineSidebarTreeStateBrowserTest : BrowserSuite() {
     private fun levelOf(prefix: String): java.util.function.Predicate<String> =
         java.util.function.Predicate { url ->
             url.contains("/partials/pipelines?") &&
-                Regex("[?&]prefix=([^&]*)").find(url)?.groupValues?.get(1)?.let { java.net.URLDecoder.decode(it, Charsets.UTF_8) } == prefix
+                Regex("[?&]prefix=([^&]*)")
+                    .find(url)
+                    ?.groupValues
+                    ?.get(1)
+                    ?.let { java.net.URLDecoder.decode(it, Charsets.UTF_8) } == prefix
         }
 
     /** Holds every captured response until [release]; the capture-and-hold idiom of ShellBusyBrowserTest. */
@@ -144,6 +153,7 @@ class PipelineSidebarTreeStateBrowserTest : BrowserSuite() {
     ) {
         private val held = mutableListOf<Pair<Route, APIResponse>>()
 
+        @Suppress("SwallowedException") // a dead request has nothing to hold; see the catch
         fun install(fetch: (Route) -> APIResponse = { it.fetch() }) {
             page.route(pattern) { route ->
                 try {
@@ -216,7 +226,10 @@ class PipelineSidebarTreeStateBrowserTest : BrowserSuite() {
             arrayOf(leaf("acme/a1/a2/target"), "$panel [data-nav-tree-scroll]"),
         ) shouldBe true
         // The opened path is now remembered for this workspace (paths only).
-        val stored = page.evaluate("() => Object.entries(localStorage).filter(([k]) => k.startsWith('dp-nav:pipelines:')).map(([, v]) => v).join()") as String
+        val stored =
+            page.evaluate(
+                "() => Object.entries(localStorage).filter(([k]) => k.startsWith('dp-nav:pipelines:')).map(([, v]) => v).join()",
+            ) as String
         stored shouldContain "\"acme/a1/a2\""
         consoleErrors.shouldBeEmpty()
     }
@@ -272,7 +285,10 @@ class PipelineSidebarTreeStateBrowserTest : BrowserSuite() {
 
     /** True for a sidebar SEARCH request (a `q` on the nav-scoped wrapper route). */
     private val navSearch =
-        java.util.function.Predicate<String> { url -> url.contains("/partials/pipelines?") && url.contains("scope=nav") && url.contains("q=") }
+        java.util.function.Predicate<String> { url ->
+            url.contains("/partials/pipelines?") && url.contains("scope=nav") &&
+                url.contains("q=")
+        }
 
     @Test
     fun `A12 - an old query's page that lands after a NEW query was typed is dropped - its positive control lands`() {
@@ -310,14 +326,17 @@ class PipelineSidebarTreeStateBrowserTest : BrowserSuite() {
         hold.release() shouldBe 2 // in capture order: the stale page first
         page.waitForLoadState(com.microsoft.playwright.options.LoadState.NETWORKIDLE)
         settle()
-        val shown = page.evaluate("() => [...document.querySelectorAll('#pipeline-nav-root .tpl-path')].map(e => e.getAttribute('title'))") as List<*>
+        val shown =
+            page.evaluate(
+                "() => [...document.querySelectorAll('#pipeline-nav-root .tpl-path')].map(e => e.getAttribute('title'))",
+            ) as List<*>
         shown shouldBe listOf("acme/gen/omega_only")
         noToast()
         consoleErrors.shouldBeEmpty()
     }
 
     @Test
-    fun `A12 - an answer rendered for ANOTHER workspace never joins the rows - visible notice, no toast - the own-workspace control lands`() {
+    fun `A12 - another workspace's answer never joins the rows, a visible notice and no toast - its own-workspace control lands`() {
         page.setViewportSize(1440, 900)
         val other = loginReadyUser("p350ws")
         // The SAME folder exists in both workspaces with different leaves, so the other
@@ -404,7 +423,9 @@ class PipelineSidebarTreeStateBrowserTest : BrowserSuite() {
         // the tree must not mix them — it resets and asks for the root again under the view the
         // server now applies, then re-opens the remembered folder under that view.
         val acmeLevel = levelOf("acme")
-        val rewritten = java.util.concurrent.atomic.AtomicInteger(0)
+        val rewritten =
+            java.util.concurrent.atomic
+                .AtomicInteger(0)
         page.route(acmeLevel) { route ->
             if (rewritten.getAndIncrement() > 0) {
                 route.resume()
@@ -412,7 +433,10 @@ class PipelineSidebarTreeStateBrowserTest : BrowserSuite() {
             }
             val response = route.fetch()
             route.fulfill(
-                Route.FulfillOptions().setResponse(response).setHeaders(response.headers() + ("dp-nav-stamp" to "$workspace|lens")),
+                Route
+                    .FulfillOptions()
+                    .setResponse(response)
+                    .setHeaders(response.headers() + ("dp-nav-stamp" to "$workspace|lens")),
             )
         }
         page.click("${folder("acme")} > summary")
@@ -428,11 +452,20 @@ class PipelineSidebarTreeStateBrowserTest : BrowserSuite() {
     // ------------------------------------------------------------------ history + handlers
 
     @Test
-    fun `A12 - boosted navigation and history restores keep ONE set of tree handlers and re-mark the current leaf - the templates explorer keeps its keyboard`() {
+    @Suppress("LongMethod") // one session on purpose: the listener counts are only meaningful across ONE document
+    fun `A12 - boosted and history navigation keep ONE set of tree handlers and re-mark the leaf - templates keep their keyboard`() {
         page.setViewportSize(1440, 900)
         loginReadyUser("p350hist")
         val id = seedPipeline("acme/hist/current")
-        val tplHash = hashOf(must("POST", "/api/v1/templates", """{"id":"acme/tpl/one","type":"sql","dialect":"H2","display_name":"one","description":"350","imports":[],"body":"SELECT 1"}"""))
+        val tplHash =
+            hashOf(
+                must(
+                    "POST",
+                    "/api/v1/templates",
+                    """{"id":"acme/tpl/one","type":"sql","dialect":"H2","display_name":"one",""" +
+                        """"description":"350","imports":[],"body":"SELECT 1"}""",
+                ),
+            )
         must("POST", "/api/v1/templates/release", """{"name":"acme/tpl/one"}""", ifMatch = tplHash)
         // Count every listener the two tree files install, by source file (from the stack).
         page.addInitScript(

@@ -108,9 +108,9 @@ class ExplorerPaneGeometryBrowserTest : BrowserSuite() {
 
     /**
      * The root level shows FOLDERS, and a folder must be OPEN before its leaf exists (§9.1 —
-     * one request per level). Opening it is also what puts a real name in the pane.
+     * one request per level). Opening it is also what puts a real name in the pane. #350: the
+     * TEMPLATES explorer's first folder — the one page explorer left.
      */
-    /** The TEMPLATES explorer's first folder (#350: the one page explorer left). */
     private fun openFirstFolder() {
         page.waitForSelector("[data-explorer-pane] summary.tpl-summary")
         if (page.locator("[data-explorer-pane] details.tpl-folder[open]").count() == 0) {

@@ -33,6 +33,7 @@ import java.nio.file.Paths
  *     verb exists. This arm is the one that catches the SEVENTH screen.
  *  2. **The inventory has not shrunk.** A guard that hides everything passes arm 1 perfectly.
  */
+@Suppress("LargeClass") // the role inventory is one table (ui-screens §4.3e) and reads best as one class
 class RoleVisibilityRenderTest {
     // ------------------------------------------------------------------ the editors
 

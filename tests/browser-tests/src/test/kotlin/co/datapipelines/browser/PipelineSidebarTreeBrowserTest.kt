@@ -116,7 +116,8 @@ class PipelineSidebarTreeBrowserTest : BrowserSuite() {
     private val panel = "#nav-tree-pipelines"
     private val region = "#nav-tree-pipelines [data-nav-tree-scroll]"
 
-    private fun railWidth(): Double = (page.evaluate("() => document.querySelector('.app-rail').getBoundingClientRect().width") as Number).toDouble()
+    private fun railWidth(): Double =
+        (page.evaluate("() => document.querySelector('.app-rail').getBoundingClientRect().width") as Number).toDouble()
 
     /** Two animation frames: the fit is written in one, the grid lays out by the next. */
     private fun settle() {
@@ -160,7 +161,9 @@ class PipelineSidebarTreeBrowserTest : BrowserSuite() {
     }
 
     private fun documentOverflowsX(): Boolean =
-        page.evaluate("() => document.documentElement.scrollWidth > window.innerWidth || document.body.scrollWidth > window.innerWidth") as Boolean
+        page.evaluate(
+            "() => document.documentElement.scrollWidth > window.innerWidth || document.body.scrollWidth > window.innerWidth",
+        ) as Boolean
 
     // A deep, long-named path: four levels with long segments, so its leaf row is wider than
     // the rail's maximum at 1440 (the measured case, not a guess — the test asserts it).
@@ -178,6 +181,7 @@ class PipelineSidebarTreeBrowserTest : BrowserSuite() {
     // ------------------------------------------------------------------ A11 geometry
 
     @Test
+    @Suppress("LongMethod") // one walk on purpose: every width is measured against the SAME tree it just grew
     fun `A11 - the tree opens in the rail, fits between the bounds, scrolls sideways past the max, and closing restores the baseline`() {
         page.setViewportSize(1440, 900)
         loginReadyUser("p350geo")
@@ -210,7 +214,11 @@ class PipelineSidebarTreeBrowserTest : BrowserSuite() {
         widest shouldBe 400.0
 
         // Beyond the maximum the REGION scrolls sideways — and nothing else does.
-        val overflow = page.evaluate("s => { const r = document.querySelector(s); return [r.scrollWidth, r.clientWidth]; }", region) as List<*>
+        val overflow =
+            page.evaluate(
+                "s => { const r = document.querySelector(s); return [r.scrollWidth, r.clientWidth]; }",
+                region,
+            ) as List<*>
         record("region.scrollWidth/clientWidth", overflow)
         (overflow[0] as Number).toDouble() shouldBeGreaterThan (overflow[1] as Number).toDouble()
 
@@ -230,7 +238,9 @@ class PipelineSidebarTreeBrowserTest : BrowserSuite() {
         // The wheel is applied asynchronously: poll (bounded) for the region to stop moving,
         // then the TAIL is the assertion — a region that cannot scroll leaves it outside.
         var last = -1.0
-        for (attempt in 1..20) {
+        var polls = 0
+        while (polls < SCROLL_POLLS) {
+            polls += 1
             settle()
             val now = (page.evaluate("s => document.querySelector(s).scrollLeft", region) as Number).toDouble()
             if (now == last && now > 0) break
@@ -272,7 +282,11 @@ class PipelineSidebarTreeBrowserTest : BrowserSuite() {
         ) as Boolean
 
     private fun docsLinkX(): Double =
-        (page.evaluate("() => document.querySelector(\".app-nav-link[data-nav-section='/docs']\").getBoundingClientRect().x") as Number).toDouble()
+        (
+            page.evaluate(
+                "() => document.querySelector(\".app-nav-link[data-nav-section='/docs']\").getBoundingClientRect().x",
+            ) as Number
+        ).toDouble()
 
     @Test
     fun `A11 - an explicit icon collapse wins over a folder response that lands after it`() {
@@ -297,7 +311,10 @@ class PipelineSidebarTreeBrowserTest : BrowserSuite() {
         railWidth() shouldBe 60.0
         held.forEach { (route, response) -> route.fulfill(Route.FulfillOptions().setResponse(response)) }
         page.unroute("**/partials/pipelines?prefix=*")
-        page.waitForSelector("${folder(deepFolders[0])} > .tpl-level:not(.tpl-level-pending)", Page.WaitForSelectorOptions().setState(com.microsoft.playwright.options.WaitForSelectorState.ATTACHED))
+        page.waitForSelector(
+            "${folder(deepFolders[0])} > .tpl-level:not(.tpl-level-pending)",
+            Page.WaitForSelectorOptions().setState(com.microsoft.playwright.options.WaitForSelectorState.ATTACHED),
+        )
         settle()
         settle()
         // The late level measured and wrote its fit — and the collapse still wins.
@@ -391,7 +408,10 @@ class PipelineSidebarTreeBrowserTest : BrowserSuite() {
     }
 
     private fun focusedTitle(): String? =
-        page.evaluate("() => { const e = document.activeElement; const l = e && e.querySelector('.tpl-label'); return l ? l.getAttribute('title') : null; }") as String?
+        page.evaluate(
+            "() => { const e = document.activeElement; const l = e && e.querySelector('.tpl-label');" +
+                " return l ? l.getAttribute('title') : null; }",
+        ) as String?
 
     // ------------------------------------------------------------------ the catalog page
 
@@ -498,5 +518,10 @@ class PipelineSidebarTreeBrowserTest : BrowserSuite() {
         }
         drainCspViolations().shouldBeEmpty()
         consoleErrors.shouldBeEmpty()
+    }
+
+    private companion object {
+        /** Frames the wheel's asynchronous scroll gets to settle — bounded, never a sleep. */
+        const val SCROLL_POLLS = 20
     }
 }

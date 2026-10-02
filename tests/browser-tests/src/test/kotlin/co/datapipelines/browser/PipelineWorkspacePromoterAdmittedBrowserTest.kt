@@ -340,17 +340,27 @@ class PipelineWorkspacePromoterAdmittedBrowserTest : BrowserSuite() {
         promoter.page.waitForSelector("#nav-tree-pipelines a.tpl-leaf[aria-current='page']")
 
         val titles =
-            (promoter.page.evaluate("() => [...document.querySelectorAll('#nav-tree-pipelines .tpl-label[title]')].map(e => e.getAttribute('title'))") as List<*>)
-                .map { it.toString() }
+            (
+                promoter.page.evaluate(
+                    "() => [...document.querySelectorAll('#nav-tree-pipelines .tpl-label[title]')].map(e => e.getAttribute('title'))",
+                ) as List<*>
+            ).map { it.toString() }
         titles.contains("p348/promoted") shouldBe true
         (titles.contains("p348/hidden_draft")) shouldBe false
-        promoter.page.locator("#nav-tree-pipelines details.tpl-folder:has(> summary span[title='p348']) .tpl-count").first().innerText() shouldBe "1"
+        promoter.page
+            .locator(
+                "#nav-tree-pipelines details.tpl-folder:has(> summary span[title='p348']) .tpl-count",
+            ).first()
+            .innerText() shouldBe
+            "1"
 
         // The wire: the same level, read directly, carries no trace of the hidden row.
         val level =
-            promoter.page.evaluate(
-                "async () => (await fetch('/partials/pipelines?prefix=p348', { credentials: 'same-origin', headers: { 'HX-Request': 'true' } })).text()",
-            ).toString()
+            promoter.page
+                .evaluate(
+                    "async () => (await fetch('/partials/pipelines?prefix=p348'," +
+                        " { credentials: 'same-origin', headers: { 'HX-Request': 'true' } })).text()",
+                ).toString()
         level shouldContain "p348/promoted"
         level shouldNotContain "hidden_draft"
         (stamps.isNotEmpty()) shouldBe true

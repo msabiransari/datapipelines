@@ -240,7 +240,8 @@ class ExplorerStressBrowserTest : BrowserSuite() {
     private fun leafRow(path: String) = ".tpl-leaf:has(span.tpl-label[title='$path'])"
 
     /** The level that landed (or the pending placeholder) directly under one folder's details. */
-    private fun levelOf(path: String) = "$tree details.tpl-folder:has(> summary.tpl-summary:has(span.tpl-label[title='$path'])) > div.tpl-level"
+    private fun levelOf(path: String) =
+        "$tree details.tpl-folder:has(> summary.tpl-summary:has(span.tpl-label[title='$path'])) > div.tpl-level"
 
     /** Expands one folder and waits until its level request has actually fired (held or not). */
     private fun expandFolder(path: String) {

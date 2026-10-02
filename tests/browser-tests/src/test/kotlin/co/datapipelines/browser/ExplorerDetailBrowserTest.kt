@@ -247,7 +247,8 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
         seed()
 
         page.setViewportSize(390, 844)
-        listOf("/templates").forEach { route -> // #350: the one page explorer left
+        listOf("/templates").forEach { route ->
+            // #350: the one page explorer left
             page.navigate("$baseUrl$route")
             page.waitForLoadState(LoadState.NETWORKIDLE)
             selectLeaf()
@@ -577,7 +578,9 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
         page.setViewportSize(1440, 900)
         openProbeWorkspace()
         page.locator("#pe-tab-overview").click()
-        page.waitForFunction("() => (document.querySelector('#pe-pane-overview .tplx-measure') || {}).textContent?.includes('Window and door')")
+        page.waitForFunction(
+            "() => (document.querySelector('#pe-pane-overview .tplx-measure') || {}).textContent?.includes('Window and door')",
+        )
 
         @Suppress("UNCHECKED_CAST")
         val blocks =

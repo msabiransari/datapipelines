@@ -252,10 +252,19 @@ class DiscardDialogSchedulesBrowserTest : BrowserSuite() {
         val row =
             on
                 .locator("#pe-pane-versions tr[data-version-row]")
-                .filter(com.microsoft.playwright.Locator.FilterOptions().setHasText("v1"))
-                .first()
+                .filter(
+                    com.microsoft.playwright.Locator
+                        .FilterOptions()
+                        .setHasText("v1"),
+                ).first()
         row.locator("details.tplx-vmenu summary").click()
-        row.locator(".tplx-vmenu-list button", com.microsoft.playwright.Locator.LocatorOptions().setHasText("Discard v1")).click()
+        row
+            .locator(
+                ".tplx-vmenu-list button",
+                com.microsoft.playwright.Locator
+                    .LocatorOptions()
+                    .setHasText("Discard v1"),
+            ).click()
     }
 
     private fun shot(name: String) {
