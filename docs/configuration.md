@@ -1,6 +1,6 @@
 # Configuration Reference
 
-**Status:** v1.45 (single source of truth for every config key)
+**Status:** v1.46 (single source of truth for every config key)
 **Owner:** datapipelines.co core
 **Last updated:** 2026-10-02
 
@@ -1032,6 +1032,7 @@ Validation runs in `@PostConstruct` of a `ConfigValidator` bean. Failures stop s
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-02 | v1.46 | 204 (#204 L4/L5) the in-process boundaries at the pool build — renumbered at merge after 375's v1.45 | §3.26's `file-roots` row: the file itself is resolved (a final-component symlink aimed outside every root, or a dangling one, is refused) and the rule is re-checked at every pool build ([Datasources §4.2A](datasources.md)). No key, default or bound changed. |
 | 2026-10-02 | v1.45 | S2 (#375) the observed parameter-set evaluation | §3.6: no new key. `disconnect-grace-seconds` names the observed evaluation beside the execution (and the dashboard refresh it already governed): a client gone past the grace aborts its evaluation (the owner's §11.7 ruling; [REST API §21.5](rest-api.md#215-the-observed-evaluation)) — with the defaults the grace and `parameters.evaluate-timeout-seconds` are both 30, so the deadline usually ends it first. `max-streams-per-user` counts execution, refresh and observed-evaluation streams together (#375 D7). |
 | 2026-10-01 | v1.44 | L4a (#352) the visualization test sessions — renumbered at merge after L1c-c's v1.43 | §3.33 gains **`datapipelines.visualization.session-ttl-minutes`** (`60`, 1..1440): a test session's TTL — the run's `expires_at`, the preview capability's deadline and the ceiling on the submit-minted upload capability (the spec's §11.2 `tests.session-ttl-minutes`, flattened to the shipped two-level key grammar). In the §5 template, `application.yml`, `deploy/compose.yml`, `deploy/env/defaults.env`, `deploy/secrets.env.example` and `ConfigValidator` (§7). |
 | 2026-09-30 | v1.43 | L1c-c (#10) transfer limits and evidence — renumbered at merge after 337's v1.42 | **§3.33's `max-visualizations-per-dashboard` row**: the value is documented as ALSO the transfer families' aggregate ceiling (L1c-c) — it caps each whole export/import envelope array (`visualizations` bundle, `templates` closure) and each whole promotion batch arm (`visualizations`, `dashboards`), refused whole before any member binds. An additional ceiling on top of the per-document bound, not a consequence of it: two individually valid dashboards can together exceed it, and such a batch refuses with no partial writes and no automatic split. No key, default or bound changed; the production transfer bean now receives the operator's configured value (L1c-c's C1 — an override was silently ignored at the default before). |
