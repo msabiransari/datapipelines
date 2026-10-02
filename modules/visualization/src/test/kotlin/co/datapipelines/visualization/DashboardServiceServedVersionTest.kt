@@ -57,7 +57,11 @@ class DashboardServiceServedVersionTest {
                 createdAt = Instant.EPOCH,
                 createdBy = UUID.randomUUID(),
             )
-        return ArtifactVersion(record, detail, DashboardBody(displayName = "board", visualizations = emptyList(), layout = co.datapipelines.visualization.DashboardLayout()))
+        return ArtifactVersion(
+            record,
+            detail,
+            DashboardBody(displayName = "board", visualizations = emptyList(), layout = co.datapipelines.visualization.DashboardLayout()),
+        )
     }
 
     private fun stubbed(status: PipelineVersionStatus) = version(2, status)

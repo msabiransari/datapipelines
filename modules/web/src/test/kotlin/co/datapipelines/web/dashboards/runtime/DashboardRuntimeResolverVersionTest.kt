@@ -2,8 +2,8 @@ package co.datapipelines.web.dashboards.runtime
 
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.ReadLens
-import co.datapipelines.visualization.ArtifactRef
 import co.datapipelines.visualization.ArtifactRecord
+import co.datapipelines.visualization.ArtifactRef
 import co.datapipelines.visualization.ArtifactVersion
 import co.datapipelines.visualization.ArtifactVersionDetail
 import co.datapipelines.visualization.DashboardBody

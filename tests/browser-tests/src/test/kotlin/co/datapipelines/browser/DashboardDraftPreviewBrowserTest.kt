@@ -54,7 +54,11 @@ class DashboardDraftPreviewBrowserTest : DashboardBrowserSuite() {
         seedBoard(root)
         seedDraftBoardPinningDraftVisualization(root)
 
-        page.navigate("$baseUrl/dashboards/${sqlToValue("SELECT id::text AS i FROM dashboards WHERE name = '${root}/boards/draftpin'")}/preview?version=1")
+        page.navigate(
+            "$baseUrl/dashboards/${sqlToValue(
+                "SELECT id::text AS i FROM dashboards WHERE name = '$root/boards/draftpin'",
+            )}/preview?version=1",
+        )
         page.waitForSelector("#dp-board-refusal:not([hidden])")
         val refusal = page.locator("#dp-board-refusal").innerText()
         refusal shouldContain "dashboard.runtime.dependency_missing"
@@ -119,7 +123,9 @@ class DashboardDraftPreviewBrowserTest : DashboardBrowserSuite() {
         // The ACTIVE workspace's name — ready()'s returned root is an artifact-NAME prefix, never
         // the workspace's name (the same read the pages' suite and the host suite make).
         val workspaceSql = "(SELECT id FROM workspaces WHERE name = '${currentWorkspaceName()}')"
-        val adminSql = "(SELECT created_by FROM dashboards WHERE name = '${root}/boards/draftpin' AND workspace_id = $workspaceSql)"
+        val adminSql = "(SELECT created_by FROM dashboards WHERE name = '$root/boards/draftpin' AND workspace_id = $workspaceSql)"
+        val chartCreatorSql =
+            "(SELECT created_by FROM visualizations WHERE name = '$root/visualizations/chart' AND workspace_id = $workspaceSql)"
         val vizBody =
             """{"display_name":"Drafty","renderer":{"kind":"table","version":"1"},""" +
                 """"inputs":{"main":{"columns":[{"name":"n","type":"INTEGER","nullable":false}]}},""" +
@@ -127,27 +133,28 @@ class DashboardDraftPreviewBrowserTest : DashboardBrowserSuite() {
         sql(
             "INSERT INTO visualizations (id, workspace_id, name, display_name, description, current_version, created_by) " +
                 "VALUES (gen_random_uuid(), $workspaceSql, '$root/visualizations/drafty', '$root/visualizations/drafty', '', 1, " +
-                "(SELECT created_by FROM visualizations WHERE name = '$root/visualizations/chart' AND workspace_id = $workspaceSql))",
+                "$chartCreatorSql)",
         )
         sql(
             "INSERT INTO visualization_versions (visualization_id, version, body_json, status, body_hash, created_by) " +
-                "SELECT id, 1, '$vizBody'::jsonb, 'DRAFT', 'seeded-drafty', " +
-                "(SELECT created_by FROM visualizations WHERE name = '$root/visualizations/chart' AND workspace_id = $workspaceSql) " +
+                "SELECT id, 1, '$vizBody'::jsonb, 'DRAFT', 'seeded-drafty', $chartCreatorSql " +
                 "FROM visualizations WHERE name = '$root/visualizations/drafty' AND workspace_id = $workspaceSql",
         )
         val boardBody =
-            """{"display_name":"draftpin","sources":[{"name":"s1","pipeline":{"name":"$root/pipelines/chart","version":1},"parameters":{}}],""" +
-                """"visualizations":[{"name":"v1","type":"visualization","visualization":{"name":"$root/visualizations/drafty","version":1},""" +
+            """{"display_name":"draftpin",""" +
+                """"sources":[{"name":"s1","pipeline":{"name":"$root/pipelines/chart","version":1},"parameters":{}}],""" +
+                """"visualizations":[{"name":"v1","type":"visualization",""" +
+                """"visualization":{"name":"$root/visualizations/drafty","version":1},""" +
                 """"inputs":{"main":{"source":"s1"}}}],"layout":{"columns":12,"grid":[]},"actions":[]}"""
         sql(
             "INSERT INTO dashboards (id, workspace_id, name, display_name, description, current_version, created_by) " +
-                "VALUES (gen_random_uuid(), $workspaceSql, '${root}/boards/draftpin', '${root}/boards/draftpin', '', NULL, " +
-                "(SELECT created_by FROM dashboards WHERE name = '${root}/boards/overview' AND workspace_id = $workspaceSql))",
+                "VALUES (gen_random_uuid(), $workspaceSql, '$root/boards/draftpin', '$root/boards/draftpin', '', NULL, " +
+                "(SELECT created_by FROM dashboards WHERE name = '$root/boards/overview' AND workspace_id = $workspaceSql))",
         )
         sql(
             "INSERT INTO dashboard_versions (dashboard_id, version, body_json, status, body_hash, created_by) " +
                 "SELECT id, 1, '${boardBody.replace("'", "''")}'::jsonb, 'DRAFT', 'seeded-draftpin', $adminSql " +
-                "FROM dashboards WHERE name = '${root}/boards/draftpin' AND workspace_id = $workspaceSql",
+                "FROM dashboards WHERE name = '$root/boards/draftpin' AND workspace_id = $workspaceSql",
         )
     }
 

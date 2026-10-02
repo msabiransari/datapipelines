@@ -97,7 +97,8 @@ class DashboardRuntimeVersionTest {
                 createdAt = java.time.Instant.EPOCH,
                 createdBy = UUID.randomUUID(),
             )
-        val body = DashboardBody(displayName = "board", visualizations = emptyList(), layout = co.datapipelines.visualization.DashboardLayout())
+        val body =
+            DashboardBody(displayName = "board", visualizations = emptyList(), layout = co.datapipelines.visualization.DashboardLayout())
         val resolved = mockk<ResolvedDashboard>()
         every { resolved.served } returns ArtifactVersion(record, detail, body)
         every { resolved.visualizations } returns emptyMap()

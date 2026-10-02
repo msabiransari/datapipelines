@@ -142,8 +142,16 @@ class DashboardDraftPreviewE2eTest {
         val withFrames = refresh(RELEASED_BOARD, ADMIN, refreshBody(configurationId(RELEASED_BOARD, ADMIN, 1), null), 1)
         withClue("stream: ${withoutFrames.names()} vs ${withFrames.names()}") {
             withoutFrames.names() shouldBe withFrames.names()
-            withoutFrames.of("source_completed").single().data["rows"].asInt() shouldBe
-                withFrames.of("source_completed").single().data["rows"].asInt()
+            withoutFrames
+                .of("source_completed")
+                .single()
+                .data["rows"]
+                .asInt() shouldBe
+                withFrames
+                    .of("source_completed")
+                    .single()
+                    .data["rows"]
+                    .asInt()
         }
     }
 
@@ -320,7 +328,12 @@ class DashboardDraftPreviewE2eTest {
         val released = given().port(port).header("DP-API-Key", KEY.plaintext).get("/api/v1/dashboards/$RELEASED_BOARD/runtime/config")
         withClue(released.asString().take(EXCERPT)) { released.statusCode shouldBe 200 }
 
-        val versioned = given().port(port).header("DP-API-Key", KEY.plaintext).get("/api/v1/dashboards/$RELEASED_BOARD/runtime/config?version=1")
+        val versioned =
+            given()
+                .port(
+                    port,
+                ).header("DP-API-Key", KEY.plaintext)
+                .get("/api/v1/dashboards/$RELEASED_BOARD/runtime/config?version=1")
         withClue(versioned.asString().take(EXCERPT)) {
             versioned.statusCode shouldBe 403
             versioned.jsonPath().getString("error.code") shouldBe "dashboard.key.kind_refused"
@@ -617,7 +630,9 @@ class DashboardDraftPreviewE2eTest {
         currentVersion: Int?,
     ) {
         val body =
-            """{"display_name":"${name.substringAfterLast('/')}","sources":[{"name":"s1","pipeline":{"name":"$PIPELINE","version":1},"parameters":{}}],""" +
+            """{"display_name":"${name.substringAfterLast(
+                '/',
+            )}","sources":[{"name":"s1","pipeline":{"name":"$PIPELINE","version":1},"parameters":{}}],""" +
                 """"visualizations":[{"name":"v1","type":"visualization","visualization":{"name":"$visualization","version":1},""" +
                 """"inputs":{"main":{"source":"s1"}}}],"layout":{}}"""
         sql(
