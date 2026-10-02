@@ -155,7 +155,7 @@ class DashboardGridRowUnitBrowserTest : DashboardBrowserSuite() {
 
         override fun toString() =
             "$label token='${raw["token"]}' unit=${unit}px rowGap=${rowGap}px columnGap=${columnGap}px " +
-                "board=${boardWidth}x${boardHeight} slots=$slots"
+                "board=${boardWidth}x$boardHeight slots=$slots"
     }
 
     private fun openBoard(
