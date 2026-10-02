@@ -4,6 +4,7 @@ import co.datapipelines.application.checks.PipelineCheckRunRepository
 import co.datapipelines.application.checks.PipelineCheckRunner
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.SqlProbe
+import co.datapipelines.executor.ExecutorConfig
 import co.datapipelines.pipeline.PipelineService
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
@@ -41,7 +42,15 @@ class ChecksConfiguration {
         @org.springframework.context.annotation.Lazy pipelines: PipelineService,
         datasources: DatasourceRegistry,
         runs: PipelineCheckRunRepository,
-    ): PipelineCheckRunner = PipelineCheckRunner(pipelines, datasources, SqlProbe(datasources), runs)
+        executorConfig: ExecutorConfig,
+    ): PipelineCheckRunner =
+        PipelineCheckRunner(
+            pipelines,
+            datasources,
+            // #167: the probe's timeout ceiling is the node's statement timeout, per dialect.
+            SqlProbe(datasources, executorConfig.nodeQueryTimeoutSeconds, executorConfig.nodeQueryTimeoutSecondsByDialect),
+            runs,
+        )
 
     /**
      * The release gate (versioning §5.3 precondition 4) as the `ReleaseCheckGate` port

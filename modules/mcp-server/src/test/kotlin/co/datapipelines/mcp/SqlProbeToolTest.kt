@@ -36,7 +36,9 @@ import java.sql.SQLException
  */
 class SqlProbeToolTest {
     private val datasources = mockk<DatasourceRegistry>()
-    private val probe = mockk<SqlProbe>()
+
+    /** The instance ceiling the tool parses against: the executor's shipped node statement timeout. */
+    private val probe = mockk<SqlProbe> { every { maxTimeoutSeconds } returns NODE_CEILING }
     private val tool = SqlProbeTool(datasources, probe)
     private val ctx = McpFixtures.ctx()
 
@@ -61,6 +63,7 @@ class SqlProbeToolTest {
                 ),
             wallMs = 12,
             plan = plan,
+            timeoutSeconds = 10,
         )
 
     private fun args(vararg extra: Pair<String, Any?>): McpArguments =
@@ -249,8 +252,8 @@ class SqlProbeToolTest {
     fun `limit and timeout clamp into the documented windows`() {
         val limits = mutableListOf<Pair<Int, Int>>()
         every { datasources.getVisible("pg-prod", McpFixtures.WORKSPACE_ID) } returns gated
-        every { probe.probe(gated, any(), any(), 500, 30) } answers {
-            limits += 500 to 30
+        every { probe.probe(gated, any(), any(), 500, NODE_CEILING) } answers {
+            limits += 500 to NODE_CEILING
             result()
         }
         every { probe.probe(gated, any(), any(), 1, 1) } answers {
@@ -261,7 +264,45 @@ class SqlProbeToolTest {
         tool.call(args("limit" to 10_000, "timeout_seconds" to 300), ctx)
         tool.call(args("limit" to 0, "timeout_seconds" to 0), ctx)
 
-        limits shouldBe listOf(500 to 30, 1 to 1)
+        limits shouldBe listOf(500 to NODE_CEILING, 1 to 1)
+    }
+
+    /**
+     * #167 — the tool hands the probe what was asked when it is under the instance's ceiling;
+     * the base clamped it to a static 30 before the probe ever saw it.
+     */
+    @Test
+    fun `a timeout under the ceiling reaches the probe unchanged`() {
+        every { datasources.getVisible("pg-prod", McpFixtures.WORKSPACE_ID) } returns gated
+        every { probe.probe(gated, any(), any(), any(), any()) } returns result()
+
+        tool.call(args("timeout_seconds" to 45), ctx)
+
+        verify(exactly = 1) { probe.probe(gated, any(), any(), 50, 45) }
+    }
+
+    /** #167's twin — the ceiling is the probe's, not a constant: a lower instance ceiling binds the request. */
+    @Test
+    fun `a timeout over a lower ceiling clamps to that ceiling`() {
+        every { probe.maxTimeoutSeconds } returns 20
+        every { datasources.getVisible("pg-prod", McpFixtures.WORKSPACE_ID) } returns gated
+        every { probe.probe(gated, any(), any(), any(), any()) } returns result()
+
+        tool.call(args("timeout_seconds" to 45), ctx)
+
+        verify(exactly = 1) { probe.probe(gated, any(), any(), 50, 20) }
+    }
+
+    /** #167 — a timeout's details name the timeout the statement ran under, so an agent never guesses it. */
+    @Test
+    fun `a timeout reports the timeout it ran under`() {
+        every { datasources.getVisible("pg-prod", McpFixtures.WORKSPACE_ID) } returns gated
+        every { probe.probe(any(), any(), any(), any(), any()) } throws
+            SqlProbeTimeoutException("pg-prod", 45_000, null, SQLException("timeout"), timeoutSeconds = 45)
+
+        val thrown = shouldThrow<DatapipelinesException> { tool.call(args("timeout_seconds" to 45), ctx) }
+
+        thrown.details["timeout_seconds"] shouldBe 45
     }
 
     @Test
@@ -270,5 +311,10 @@ class SqlProbeToolTest {
             tool.call(args("parameters" to mapOf("x" to mapOf("type" to "CLOBBER", "value" to "1"))), ctx)
         }.jsonRpcError.code() shouldBe McpArguments.INVALID_PARAMS
         verify(exactly = 0) { probe.probe(any(), any(), any(), any(), any()) }
+    }
+
+    private companion object {
+        /** `ExecutorConfig.nodeQueryTimeoutSeconds`' shipped default — what the tool's argument bound reads. */
+        const val NODE_CEILING = 60
     }
 }

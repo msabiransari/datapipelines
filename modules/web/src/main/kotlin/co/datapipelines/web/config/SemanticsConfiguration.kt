@@ -10,6 +10,7 @@ import co.datapipelines.datasources.SchemaIntrospector
 import co.datapipelines.datasources.SqlProbe
 import co.datapipelines.datasources.semantics.LearnedFactRecorder
 import co.datapipelines.datasources.semantics.LearnedFactRepository
+import co.datapipelines.executor.ExecutorConfig
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.templates.TemplateImplementsRepository
 import org.springframework.context.annotation.Bean
@@ -37,7 +38,14 @@ class SemanticsConfiguration {
         repository: LearnedFactRepository,
         introspector: SchemaIntrospector,
         datasources: DatasourceRegistry,
-    ): LearnedFactRecorder = LearnedFactRecorder(repository, introspector, SqlProbe(datasources))
+        executorConfig: ExecutorConfig,
+    ): LearnedFactRecorder =
+        LearnedFactRecorder(
+            repository,
+            introspector,
+            // #167: the probe's timeout ceiling is the node's statement timeout, per dialect.
+            SqlProbe(datasources, executorConfig.nodeQueryTimeoutSeconds, executorConfig.nodeQueryTimeoutSecondsByDialect),
+        )
 
     /**
      * 7e — the semantic link's application half (transform-nodes design §2.3/§8.3): the citation

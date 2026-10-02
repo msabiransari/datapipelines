@@ -42,7 +42,7 @@ class SqlProbeLakeTest {
         val pool = ConnectionPoolManager.buildHikariPool(ds, LakeViewStatements.forTables(rows, adapter))
         val registry = io.mockk.mockk<DatasourceRegistry>()
         io.mockk.every { registry.poolFor(ds) } returns pool
-        return SqlProbe(registry) to ds
+        return SqlProbe(registry, nodeQueryTimeoutSeconds = 60) to ds
     }
 
     @Test

@@ -46,11 +46,12 @@ class SqlProbeTempdbWireTest {
 
     private val registry = mockk<DatasourceRegistry>()
     private val sink = RecordingSink()
-    private val dispatcher = McpToolDispatcher(listOf(SqlProbeTool(registry, SqlProbe(registry))), sink)
+    private val dispatcher = McpToolDispatcher(listOf(SqlProbeTool(registry, SqlProbe(registry, nodeQueryTimeoutSeconds = 60))), sink)
 
     private fun call(
         sql: String,
         parameters: Map<String, Any?>? = null,
+        timeoutSeconds: Int? = null,
     ): McpSchema.CallToolResult =
         dispatcher.call(
             McpFixtures.request(
@@ -59,6 +60,7 @@ class SqlProbeTempdbWireTest {
                     put("name", "tempdb")
                     put("sql", sql)
                     parameters?.let { put("parameters", it) }
+                    timeoutSeconds?.let { put("timeout_seconds", it) }
                 },
             ),
             McpFixtures.ctx(),
@@ -160,6 +162,32 @@ class SqlProbeTempdbWireTest {
         } finally {
             secret.toFile().delete()
         }
+    }
+
+    /**
+     * #167 on the wire — the real dispatcher, the real tool, the real scratch H2, the real JSON. The
+     * ceiling is the node's statement timeout (60 here), not the old static 30: a 45 s request
+     * reaches the statement as 45 s and a 90 s one as 60 s. The ENGINE says so — H2 holds a
+     * statement's `queryTimeout` as the session's `QUERY_TIMEOUT` in milliseconds, and the probe's
+     * own SELECT reads it back — and the payload's `timeout_seconds` agrees. No 35 s sleep: the
+     * driver's own record of the timeout it was handed is the observation.
+     */
+    @Test
+    fun `the statement runs under the requested timeout up to the node ceiling`() {
+        val sql = "SELECT SETTING_VALUE FROM INFORMATION_SCHEMA.SETTINGS WHERE SETTING_NAME = 'QUERY_TIMEOUT'"
+
+        fun engineAndReported(requested: Int): Pair<String, Any?> {
+            val payload = json(call(sql, timeoutSeconds = requested))
+
+            @Suppress("UNCHECKED_CAST")
+            val row = (payload["rows"] as List<Map<String, Any?>>).single()
+            return row.values.single() as String to payload["timeout_seconds"]
+        }
+
+        assertAll(
+            { engineAndReported(45) shouldBe ("45000" to 45) },
+            { engineAndReported(90) shouldBe ("60000" to 60) },
+        )
     }
 
     /** The audit row records the hash and length of the SQL, never the text (107, unchanged by #119). */

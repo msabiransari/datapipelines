@@ -26,7 +26,7 @@ import java.sql.SQLException
 class SqlProbeH2Test {
     private val h2 = DriverManager.getConnection("jdbc:h2:mem:sqlprobe;DB_CLOSE_DELAY=-1")
     private val registry = mockk<DatasourceRegistry>()
-    private val probe = SqlProbe(registry)
+    private val probe = SqlProbe(registry, nodeQueryTimeoutSeconds = 60)
 
     private fun wireDatasource(
         datasource: Datasource = Fixtures.h2(name = "h2-probe", jdbcUrl = "jdbc:h2:mem:sqlprobe;DB_CLOSE_DELAY=-1"),

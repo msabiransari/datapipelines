@@ -109,10 +109,12 @@ data class ExplainPlanSummary(
 /**
  * One probe's outcome: the capped, wire-encoded rows (the [QueryRows] shape the §7B surfaces
  * already emit), [wallMs] of QUERY execution only (prepare through last row read; the EXPLAIN
- * is excluded), and the plan — captured BEFORE the query ran, so it survives a timeout.
+ * is excluded), the plan — captured BEFORE the query ran, so it survives a timeout — and
+ * [timeoutSeconds], the statement timeout the query ran under after the probe's clamp (#167).
  */
 data class SqlProbeResult(
     val rows: QueryRows,
     val wallMs: Long,
     val plan: ExplainPlanSummary?,
+    val timeoutSeconds: Int,
 )

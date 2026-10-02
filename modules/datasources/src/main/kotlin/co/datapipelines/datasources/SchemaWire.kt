@@ -120,9 +120,10 @@ fun ColumnStats.toWireMap(): Map<String, Any?> =
  * against — the same [co.datapipelines.typesystem.ColumnSchema] projection §7A uses, without
  * `source_type` (a probe row has no catalog source to name). `warnings` carries the ingress
  * mapper's messages, like the §7A column payload. `row_count_returned` is `rows.size` named —
- * the caller must never count to learn the cap was hit; that is what `truncated` says. `plan`
- * is omitted-when-null (no EXPLAIN wrapper, or the plan read failed) per the envelope
- * convention.
+ * the caller must never count to learn the cap was hit; that is what `truncated` says.
+ * `timeout_seconds` is the timeout the statement ran under — the request after the clamp to the
+ * node's ceiling (#167), so a caller never infers it. `plan` is omitted-when-null (no EXPLAIN
+ * wrapper, or the plan read failed) per the envelope convention.
  */
 fun SqlProbeResult.toWireMap(): Map<String, Any?> =
     buildMap {
@@ -132,6 +133,7 @@ fun SqlProbeResult.toWireMap(): Map<String, Any?> =
         put("row_count_returned", rows.rows.size)
         put("truncated", rows.truncated)
         put("wall_ms", wallMs)
+        put("timeout_seconds", timeoutSeconds)
         plan?.let { put("plan", it.toWireMap()) }
     }
 

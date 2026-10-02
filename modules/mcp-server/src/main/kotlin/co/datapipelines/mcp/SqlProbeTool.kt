@@ -48,8 +48,8 @@ internal val PROBE_TYPE_ENUM_JSON: String =
  *   `pipeline.node.query_timeout` (T202 — "too slow for the budget" is not "wrong SQL"), the
  *   driver refusal `pipeline.node.query_execution_failed`, the same surface
  *   `datasources_preview_rows`'s [runningQuery] boundary uses for bad SQL. The timeout's
- *   details carry `wall_ms` and the pre-captured plan; the driver message stays bounded one
- *   level down (B1).
+ *   details carry `wall_ms`, `timeout_seconds` (the timeout it ran under, #167) and the
+ *   pre-captured plan; the driver message stays bounded one level down (B1).
  */
 class SqlProbeTool(
     private val datasources: DatasourceRegistry,
@@ -102,7 +102,7 @@ class SqlProbeTool(
                       }
                     },
                     "limit": {"type": "integer", "default": 50, "minimum": 1, "maximum": 500},
-                    "timeout_seconds": {"type": "integer", "default": 10, "minimum": 1, "maximum": 30}
+                    "timeout_seconds": {"type": "integer", "default": 10, "minimum": 1}
                   }
                 }
                 """.trimIndent(),
@@ -115,7 +115,10 @@ class SqlProbeTool(
         val name = args.requiredString("name")
         val sql = args.requiredString("sql")
         val limit = args.int("limit", default = SqlProbe.DEFAULT_LIMIT, min = 1, max = SqlProbe.MAX_LIMIT)
-        val timeout = args.int("timeout_seconds", default = SqlProbe.DEFAULT_TIMEOUT_SECONDS, min = 1, max = SqlProbe.MAX_TIMEOUT_SECONDS)
+        // #167: no static maximum — the ceiling is the node's statement timeout, which the operator
+        // configures, so the schema cannot carry it. Bounded here by the highest dialect ceiling;
+        // the probe narrows it to the datasource's own and reports the timeout it used.
+        val timeout = args.int("timeout_seconds", default = SqlProbe.DEFAULT_TIMEOUT_SECONDS, min = 1, max = probe.maxTimeoutSeconds)
         // Argument-shape faults refuse BEFORE the visibility gate: a malformed `parameters`
         // block is `-32602` regardless of what the caller may see, so the gate's answer cannot
         // depend on argument hygiene.
@@ -197,6 +200,7 @@ class SqlProbeTool(
                         put("datasource", name)
                         put("reason", "timeout")
                         put("wall_ms", e.wallMs)
+                        e.timeoutSeconds?.let { put("timeout_seconds", it) }
                         e.plan?.let { put("plan", it.toWireMap()) }
                     },
                 cause = e,
