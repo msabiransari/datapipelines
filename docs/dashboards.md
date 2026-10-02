@@ -1,6 +1,6 @@
 # Dashboards
 
-**Status:** v0.21 — the two documents and their lifecycle (#10, lane L1a); the REST routes, the MCP tools and the
+**Status:** v0.22 — the two documents and their lifecycle (#10, lane L1a); the REST routes, the MCP tools and the
 permissions (§4, lane L1b); the transfer routes and their limits' honest contract (§3.3, lanes L1c/L1c-b/L1c-c: the
 import's atomicity, the RELEASE rules on a landing, the aggregate count ceiling, the wire's per-family arms); the server
 runtime (§5, lane L2; #343's released pins and stream authority); the client runtime (§6, lanes L3a/L3a-b/L3a-c); the
@@ -15,7 +15,7 @@ add their sections as they land.
 [MCP Server](mcp-server.md) (§6.2.50–§6.2.62 — the tools), [Auth](auth.md) (§7.6 — the permissions)
 **Design:** the [dashboard implementation spec](superpowers/specs/2026-09-28-dashboard-implementation-spec.md) and
 the [design record](superpowers/specs/2026-09-25-dashboard-authoring-design-draft.md) (decisions D1–D63)
-**Last updated:** 2026-10-01
+**Last updated:** 2026-10-02
 
 A dashboard presents released pipeline results. It is built from two versioned artifacts: **visualizations** —
 a chart, table or KPI bound to named inputs, reusable across dashboards — and **dashboards**, which pin released
@@ -619,7 +619,7 @@ of them, and a no-op is not conformant (the conformance suite drives real behavi
 
 | Function | The host does | The runtime guarantees |
 |---|---|---|
-| `mountLayout(layout) → Promise` | build the grid from the system layout | awaited before anything mounts |
+| `mountLayout(layout) → Promise` | build the grid from the system layout; the first-party adapter's rows are each one `--dashboard-row-unit` (app.css, default `var(--space-20)` = 5rem), so a slot of `h` rows is `h` units plus the gaps between them tall and a figure's height is its slot's; the empty default slot takes no row (`dashboards.css`) | awaited before anything mounts |
 | `mountVisualization(occurrence, renderer) → Promise<handle>` | create the placeholder and its renderer | the handle's `renderData` is the ONLY data path |
 | `renderParameters(state) → Promise` | render the FULL server state, hidden and disabled included | awaited INSIDE the parameter gate — the lock releases only after the render resolves |
 | `readSelections() → {name: value}` | return every current committed value, in the wire's type | merged over the server state at each evaluation; hidden and disabled values included (D23) |
@@ -831,6 +831,7 @@ full navigation).
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-02 | v0.22 | 371 (#371) the board grid has a row unit | **§6.2:** the first-party adapter's grid rows are each `--dashboard-row-unit` (app.css, `var(--space-20)`, 5rem) — a FIXED `grid-auto-rows` track, so a slot of `h` rows is `h` units plus its gaps tall and a Plotly figure fills its slot instead of collapsing (measured on the base: 34 px for a 4-row slot). The adapter's empty default slot is hidden, so the board is exactly its grid's rows tall. One unscoped rule serves the board page and the visualization preview; #353's preview-scoped copy is retired. Routes, permissions, roles: none changed. |
 | 2026-10-02 | v0.21 | 370 (#370) the late-abort ending | **§5.6:** a late abort changes nothing on a refresh that delivered — the ending consults the work's outcome, not the flag's timing: every target delivered `ok`/no-data ends the refresh DONE with its frames standing, an abort that actually interrupted the work still ends ABORTED. |
 | 2026-10-02 | v0.20 | 373 (#373) the upload gate judges expiry before the body | §3.4.1's confinement sentence names the one exception to the one-answer rule: a presented token matching an UNCONSUMED upload capability past its deadline is 410 `capability_expired`, judged before any byte of the body; a wrong or consumed token keeps the one 404 `session_not_found`. Authority: rest-api §22.2's error ladder. |
 | 2026-10-02 | v0.19 | 344 (#344) the envelope is the artifact's pins | **§3.3:** what the artifact pins travels unlensed — a dashboard's pinned visualizations and each one's templates ride whatever the visualization and template lenses say; only the root is lensed (the owner's ruling of 2026-10-02, auth §11A.1's lens clause). No behaviour changed. |
