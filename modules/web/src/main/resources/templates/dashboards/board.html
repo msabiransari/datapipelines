@@ -39,7 +39,9 @@
         <span th:if="${previewStatus != null}" th:text="'(' + ${previewStatus} + ')'">(DRAFT)</span> —
         this is not the released view.
       </span>
-      <a th:href="@{/dashboards/{id}(id=${dashboardId})}">Back to the released view</a>
+      <!-- A FULL navigation: preview -> board is board-to-board, and the two pages' bundles
+           must never travel between documents (the one-bundle rule above; #369 review F1). -->
+      <a th:href="@{/dashboards/{id}(id=${dashboardId})}" hx-boost="false">Back to the released view</a>
     </div>
     <div class="app-page-h">
       <div>
