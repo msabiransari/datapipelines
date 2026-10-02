@@ -122,6 +122,16 @@ class UiConfig {
         runtime: co.datapipelines.web.dashboards.runtime.DashboardRuntime,
     ): DashboardBrowseModel = DashboardBrowseModel(dashboards, runtime)
 
+    /** #374: the Parameter Sets screens' browse model — the rail tree's levels and the catalog's flat list. */
+    @Bean
+    fun parameterSetsBrowseModel(sets: co.datapipelines.parameters.ParameterSetService): ParameterSetsBrowseModel =
+        ParameterSetsBrowseModel(sets)
+
+    /** #374: the canonical Parameter Sets workspace page's version-resolution model. */
+    @Bean
+    fun parameterSetsWorkspaceModel(sets: co.datapipelines.parameters.ParameterSetService): ParameterSetsWorkspaceModel =
+        ParameterSetsWorkspaceModel(sets)
+
     /**
      * 161: the shell search palette's one model (#155) — pipelines, templates and executions,
      * each group read through the query the group's own screen already answers with.

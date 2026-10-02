@@ -251,4 +251,19 @@
     <path d="M8 2v3" />
     <circle cx="16" cy="16" r="6" />
   </symbol>
+  <!-- #374 (the Parameter Sets workspace): the rail's Parameter Sets item (layouts/default.html) —
+       a row of sliders, the truest "parameters" glyph lucide ships (owner ruling 2026-10-02: every
+       icon is a vendored lucide glyph). Vendored from lucide-static 1.39.0
+       icons/sliders-horizontal.svg, sha256 recorded in vendor-manifest.json. -->
+  <symbol id="sliders-horizontal" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M10 5H3" />
+    <path d="M12 19H3" />
+    <path d="M14 3v4" />
+    <path d="M16 17v4" />
+    <path d="M21 12h-9" />
+    <path d="M21 19h-5" />
+    <path d="M21 5h-7" />
+    <path d="M8 10v4" />
+    <path d="M8 12H3" />
+  </symbol>
 </svg>

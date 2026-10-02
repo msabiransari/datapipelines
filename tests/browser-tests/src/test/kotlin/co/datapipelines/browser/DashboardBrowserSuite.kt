@@ -473,7 +473,7 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
 
     /** The suite's own Postgres as the source — the 151 convention; in-page fetch with the CSRF pair. */
     @Suppress("UNCHECKED_CAST")
-    private fun registerSourceDatasource(): String {
+    protected fun registerSourceDatasource(): String {
         page.navigate("$baseUrl/datasources")
         page.waitForLoadState(com.microsoft.playwright.options.LoadState.NETWORKIDLE)
         val name = "dbr-src-" + suffix()
@@ -504,7 +504,7 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
     }
 
     @Suppress("UNCHECKED_CAST")
-    private fun createTemplate(
+    protected fun createTemplate(
         id: String,
         body: String,
     ) {

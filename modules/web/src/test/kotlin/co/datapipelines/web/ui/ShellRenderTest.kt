@@ -1,6 +1,7 @@
 package co.datapipelines.web.ui
 
 import co.datapipelines.web.ui.site.REPORT_PROBLEM_URL
+import io.kotest.matchers.comparables.shouldBeLessThan
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -463,6 +464,30 @@ class ShellRenderTest {
         html shouldContain "<script src=\"/js/nav-tree.js\"></script>"
         // rail.js reads the active workspace's pre-paint width key off <html>.
         html shouldContain "data-dp-workspace=\"acme\""
+    }
+
+    @Test
+    fun `#374 - Parameter Sets carries the same branch in Build - link, a separate toggle, the lazy nav-scope tree and no search`() {
+        val html = engine.process("pipelines/list", webContext().apply { fillList() })
+        val branch =
+            html
+                .substringAfter("data-nav-branch=\"parameter-sets\"")
+                .substringBefore("<div class=\"app-nav-section app-rail-label\">Operate")
+
+        branch shouldContain "href=\"/parameter-sets\" class=\"app-nav-link"
+        branch shouldContain "data-nav-group=\"Build\" data-nav-label=\"Parameter Sets\""
+        // The lucide sliders-horizontal glyph, from the vendored sprite (icons-from-lucide-only).
+        branch shouldContain "/vendor/icons/lucide-sprite.svg#sliders-horizontal"
+        branch shouldContain "<button type=\"button\" class=\"app-nav-branch-toggle app-rail-label\" data-nav-tree-toggle"
+        branch shouldContain "aria-expanded=\"false\" aria-controls=\"nav-tree-parameter-sets\" aria-label=\"Parameter set folders\""
+        branch shouldContain "id=\"nav-tree-parameter-sets\" data-nav-tree=\"parameter-sets\" hidden"
+        branch shouldContain "data-nav-root-url=\"/partials/parameter-sets/tree?scope=nav\""
+        branch shouldContain "data-nav-workspace=\"acme\""
+        branch shouldContain "id=\"params-tree-nav\""
+        // No search box: the parameter-set service has no name search to back one.
+        branch shouldNotContain "hx-get="
+        // The branch sits in Build, before Operate, and is one more item - not a second tree engine.
+        html.indexOf("data-nav-branch=\"parameter-sets\"") shouldBeLessThan html.indexOf(">Operate<")
     }
 
     private fun webContext(): WebContext =

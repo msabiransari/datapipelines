@@ -56,8 +56,24 @@ class ScriptBlockUtextAuditTest {
      * its size makes that a deliberate, reviewed act (the AlpineCloakAuditTest rule).
      */
     @Test
-    fun `the allowlist is exactly the six files argued for`() {
-        ALLOWED.size shouldBe 6
+    fun `the allowlist is exactly the seven files argued for`() {
+        ALLOWED.size shouldBe 7
+    }
+
+    @Test
+    fun `the parameter-set controller writes both json blobs through ScriptSafeJson`() {
+        val source = File("src/main/kotlin/co/datapipelines/web/ui/ParameterSetsUiController.kt").also { require(it.isFile) }.readText()
+        // The two blocks of parameter-sets/workspace.html (#374): the set's body and the workspace state. A slot that
+        // stops matching its shape fails here, not in a browser holding a set whose display_name closes the block.
+        listOf("parameterSetJson", "workspaceJson").forEach { attribute ->
+            require(
+                Regex(
+                    """addAttribute\("$attribute", ScriptSafeJson\.forScriptBlock\(mapper\.writeValueAsString\(""",
+                ).containsMatchIn(source),
+            ) {
+                "'$attribute' is not written through ScriptSafeJson.forScriptBlock in ParameterSetsUiController.kt"
+            }
+        }
     }
 
     @Test
@@ -91,12 +107,13 @@ class ScriptBlockUtextAuditTest {
         val UTEXT = Regex("""\sth:utext=""")
 
         /**
-         * Every `th:utext` slot, with the count each file may carry. All six writers are
+         * Every `th:utext` slot, with the count each file may carry. All seven writers are
          * safe TODAY: `docs/doc.html` and `docs/doc-public.html` render packaged Markdown
          * through a renderer that escapes raw HTML (188, #190), and the three JSON writers go through
          * [ScriptSafeJson] — the docs' JSON-LD via `DocJsonLd`, the FAQ blocks via
          * `FaqJsonLd`, the editor's two blobs via `PipelineEditorController`, the test preview's block via
-         * `VisualizationPreviewController` (#353).
+         * `VisualizationPreviewController` (#353), the parameter-set workspace's two blocks via
+         * `ParameterSetsUiController` (#374).
          */
         val ALLOWED =
             mapOf(
@@ -109,6 +126,10 @@ class ScriptBlockUtextAuditTest {
                 // results the runtime's fixture mode mounts), written through ScriptSafeJson by
                 // VisualizationPreviewController; case names and assertion labels render through th:text.
                 "visualizations/preview.html" to 1,
+                // #374 — the parameter-set workspace's two JSON blocks (the set's body, the workspace state: the
+                // viewed version and the evaluate flag), written through ScriptSafeJson by ParameterSetsUiController;
+                // every label, path and count on the page renders through th:text.
+                "parameter-sets/workspace.html" to 2,
             )
     }
 }
