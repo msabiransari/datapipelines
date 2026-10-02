@@ -407,6 +407,87 @@ class PipelineLifecycleDialogControllerTest {
             )
     }
 
+    // ------------------------------------------------------------------ #395: the workspace's legs
+
+    @Test
+    fun `#395 - discard from the workspace answers HX-Redirect onto its Versions tab, after the same service call and audit`() {
+        every { pipelines.discardVersion(WORKSPACE, PIPELINE, 1, USER) } returns
+            PipelineService.DiscardResult(record(currentVersion = 1), record(currentVersion = 2), draftDetail())
+
+        mvc
+            .perform(
+                post("/partials/pipelines/$PIPELINE/lifecycle/discard")
+                    .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                    .param("version", "1")
+                    .param("from", "editor")
+                    .header("HX-Request", "true"),
+            ).andExpect(status().isOk)
+            .andExpect(header().string("HX-Redirect", "/pipelines/$PIPELINE?tab=versions&ok=discarded"))
+        verify(exactly = 1) { pipelines.discardVersion(WORKSPACE, PIPELINE, 1, USER) }
+        audit.events shouldBe listOf("pipeline.version.discarded")
+    }
+
+    @Test
+    fun `#395 - restore from the workspace answers HX-Redirect onto its Versions tab`() {
+        every { pipelines.restoreVersion(WORKSPACE, PIPELINE, 1) } returns record(currentVersion = 2)
+
+        mvc
+            .perform(
+                post("/partials/pipelines/$PIPELINE/lifecycle/restore")
+                    .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                    .param("version", "1")
+                    .param("from", "editor")
+                    .header("HX-Request", "true"),
+            ).andExpect(status().isOk)
+            .andExpect(header().string("HX-Redirect", "/pipelines/$PIPELINE?tab=versions&ok=restored"))
+        verify(exactly = 1) { pipelines.restoreVersion(WORKSPACE, PIPELINE, 1) }
+    }
+
+    @Test
+    fun `#395 - switch from the workspace answers HX-Redirect onto its Versions tab - the explorer leg keeps Shape A`() {
+        every { pipelines.switchCurrent(WORKSPACE, PIPELINE, 1) } returns record(currentVersion = 1)
+
+        mvc
+            .perform(
+                post("/partials/pipelines/$PIPELINE/lifecycle/switch")
+                    .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                    .param("version", "1")
+                    .param("from", "editor")
+                    .header("HX-Request", "true"),
+            ).andExpect(status().isOk)
+            .andExpect(header().string("HX-Redirect", "/pipelines/$PIPELINE?tab=versions&ok=switched"))
+        verify(exactly = 1) { pipelines.switchCurrent(WORKSPACE, PIPELINE, 1) }
+        // (The explorer leg without `from` is `switch - Shape A names the served version`.)
+    }
+
+    @Test
+    fun `#395 - the switch dialog honours from=editor - the Versions tab's link always sent it`() {
+        every { dialogs.switch(WORKSPACE, PIPELINE) } returns
+            PipelineLifecycleDialogModel.SwitchDialog(
+                id = PIPELINE,
+                name = "test/pipeline",
+                currentVersion = 2,
+                options =
+                    listOf(
+                        PipelineLifecycleDialogModel.SwitchOption(1, PipelineVersionStatus.RELEASED, isCurrent = false, eligible = true),
+                    ),
+            )
+
+        mvc
+            .perform(
+                org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                    .get("/partials/pipelines/$PIPELINE/lifecycle/switch")
+                    .param("version", "1")
+                    .param("from", "editor")
+                    .header("HX-Request", "true"),
+            ).andExpect(status().isOk)
+            .andExpect(
+                org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                    .model()
+                    .attribute("from", "editor"),
+            )
+    }
+
     // ------------------------------------------------------------------ fixtures
 
     /** The reads `applied` performs through the browse model and its own re-reads. */

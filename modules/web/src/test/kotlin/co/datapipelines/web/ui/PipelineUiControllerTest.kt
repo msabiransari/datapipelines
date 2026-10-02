@@ -3,8 +3,6 @@ package co.datapipelines.web.ui
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.WorkspaceContext
-import co.datapipelines.pipeline.PipelineFolder
-import co.datapipelines.pipeline.PipelineFolderLevel
 import co.datapipelines.pipeline.PipelineRecord
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.web.pipelineServiceOver
@@ -25,9 +23,10 @@ import java.util.UUID
  * [PipelineBrowseModel] the htmx partial does, so the screen and the fragment that replaces
  * its list cannot disagree about which presentation is showing.
  *
- * Browsing (no `q`) fills the tree's ROOT level; a non-empty `q` fills the flat search list
- * and its truthful total. The dispatcher view is the same either way, which is what makes
- * "clear the search box and you are back in the tree" true by construction.
+ * Since #350 the page is the CATALOG: no `q` fills the flat list of every pipeline the caller
+ * may read (newest first, the service's own page), a non-empty `q` the matches and their
+ * truthful total. The folder tree lives in the sidebar (`/partials/pipelines?scope=nav`), so the
+ * page never asks for a tree level.
  */
 class PipelineUiControllerTest {
     private val repository = mockk<PipelineRepository>()
@@ -51,13 +50,6 @@ class PipelineUiControllerTest {
             updatedAt = java.time.Instant.parse("2026-08-10T00:00:00Z"),
         )
 
-    private fun level(
-        folders: List<PipelineFolder> = emptyList(),
-        pipelines: List<PipelineRecord> = emptyList(),
-        total: Int = pipelines.size,
-        hasMore: Boolean = false,
-    ) = PipelineFolderLevel(folders, foldersTruncated = false, pipelines = pipelines, total = total, hasMore = hasMore)
-
     @AfterEach
     fun clearContext() = SecurityContextHolder.clearContext()
 
@@ -74,31 +66,36 @@ class PipelineUiControllerTest {
             UsernamePasswordAuthenticationToken(principal, null, emptyList())
     }
 
+    /** The catalog's no-query page: the service's paged read over every live row. */
+    private fun stubCatalog(vararg rows: PipelineRecord) {
+        every { repository.findAll(workspaceId, null, pageSize + 1, 0) } returns rows.toList()
+        every { repository.countAll(workspaceId) } returns rows.size
+        every { repository.findDrafts(any(), any()) } returns emptyMap()
+    }
+
     @Test
-    fun `the page renders the tree's ROOT level, and since 077 that is folders only`() {
+    fun `#350 - the page renders the flat CATALOG of every pipeline, never a tree level`() {
         authenticate()
         every { themeResolver.resolve(any()) } returns "saas"
-        // The repository is told to answer WITH a leaf — a pre-077 flat pipeline, which can
-        // still exist because §14.2 gives pipelines no migration gate. The ROOT level must
-        // drop it: §4.1 makes the root a directory of folders.
-        every { repository.listFolder(workspaceId, null, 0, pageSize) } returns
-            level(folders = listOf(PipelineFolder("nyc", "nyc", 6)), pipelines = listOf(pipeline("legacy_flat")))
-        every { repository.findDrafts(any(), any()) } returns emptyMap()
+        // A pre-077 flat name is a row of the catalog like any other — the TREE's root hides
+        // it (folders only), so the catalog is where it stays reachable besides search.
+        stubCatalog(pipeline("legacy_flat"), pipeline("nyc/mobility/alpha"))
 
         val model = ExtendedModelMap()
         val viewName = controller.list(model, mockk(), null, null)
 
         viewName shouldBe "pipelines/list"
         model["activeTheme"] shouldBe "saas"
-        model["searching"] shouldBe false
-        model["levelId"] shouldBe PipelineBrowseModel.ROOT_LEVEL_ID
+        model["searching"] shouldBe true
+        model["scope"] shouldBe PipelineListScope.CATALOG.wire
+        model["rootId"] shouldBe PipelineBrowseModel.CATALOG_ROOT_ID
         @Suppress("UNCHECKED_CAST")
-        (model["folders"] as List<PipelineFolderView>).map { it.path } shouldBe listOf("nyc")
-        @Suppress("UNCHECKED_CAST")
-        (model["pipelines"] as List<PipelineRecord>) shouldHaveSize 0
-        model["total"] shouldBe 0
+        (model["pipelines"] as List<PipelineRecord>).map { it.name } shouldBe listOf("legacy_flat", "nyc/mobility/alpha")
+        model["total"] shouldBe 2
         model["hasMore"] shouldBe false
         model["offset"] shouldBe 0
+        // The tree moved into the sidebar: the page asks for no tree level at all.
+        verify(exactly = 0) { repository.listFolder(any(), any(), any(), any()) }
     }
 
     @Test
@@ -141,22 +138,22 @@ class PipelineUiControllerTest {
     }
 
     @Test
-    fun `a blank search is not a search - it renders the tree`() {
+    fun `a blank search is not a search - it renders the whole catalog`() {
         authenticate()
         every { themeResolver.resolve(any()) } returns "saas"
-        every { repository.listFolder(workspaceId, null, 0, pageSize) } returns level()
+        stubCatalog()
 
         controller.list(ExtendedModelMap(), mockk(), "   ", null)
 
         verify(exactly = 0) { repository.findAll(workspaceId) }
-        verify(exactly = 1) { repository.listFolder(workspaceId, null, 0, pageSize) }
+        verify(exactly = 1) { repository.findAll(workspaceId, null, pageSize + 1, 0) }
     }
 
     @Test
     fun `a negative offset is clamped to zero`() {
         authenticate()
         every { themeResolver.resolve(any()) } returns "saas"
-        every { repository.listFolder(workspaceId, null, 0, pageSize) } returns level()
+        stubCatalog()
 
         val model = ExtendedModelMap()
         controller.list(model, mockk(), null, -5)
@@ -168,7 +165,7 @@ class PipelineUiControllerTest {
     fun `the page carries no scopes attribute - the role is the whole answer (#215)`() {
         authenticate()
         every { themeResolver.resolve(any()) } returns "saas"
-        every { repository.listFolder(workspaceId, null, 0, pageSize) } returns level()
+        stubCatalog()
 
         val model = ExtendedModelMap()
         controller.list(model, mockk(), null, null)
@@ -179,18 +176,18 @@ class PipelineUiControllerTest {
     }
 
     @Test
-    fun `an empty workspace renders an empty level, and asks for no drafts`() {
+    fun `an empty workspace renders an empty catalog with an honest zero`() {
         authenticate()
         every { themeResolver.resolve(any()) } returns "saas"
-        every { repository.listFolder(workspaceId, null, 0, pageSize) } returns level()
+        stubCatalog()
 
         val model = ExtendedModelMap()
         controller.list(model, mockk(), null, null)
 
         model["total"] shouldBe 0
         model["hasMore"] shouldBe false
+        model["q"] shouldBe ""
         @Suppress("UNCHECKED_CAST")
         (model["pipelines"] as List<*>) shouldHaveSize 0
-        verify(exactly = 0) { repository.findDrafts(any(), any()) }
     }
 }

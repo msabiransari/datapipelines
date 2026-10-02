@@ -66,10 +66,10 @@ class PipelineEditorMultiOutputBrowserTest : BrowserSuite() {
         val name = "test/browser_pmo_" + generatedPassword("p").take(6).lowercase()
         seedWindowPipeline(name) shouldBe 201
 
-        // Explorer → detail → editor, the app's own links the whole way.
+        // Catalog → workspace, the app's own links the whole way.
         page.navigate("$baseUrl/pipelines?q=$name")
-        page.locator("button.tpl-result, button.tpl-leaf").first().click()
-        page.locator("a.tplx-detail-open").first().click()
+        // #350: the catalog row IS the link into the workspace (the detail pane and its Open are gone).
+        page.locator("#pipeline-list-wrapper a.tpl-result").first().click()
         page.waitForURL(PipelineWorkspaceUrl.PATTERN)
         val card = page.locator(".pe-card").first()
         card.waitFor()

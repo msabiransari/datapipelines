@@ -352,6 +352,10 @@ class ShellRenderTest {
         fillLayoutChrome()
         setVariable("scopes", setOf("READ"))
         setVariable("dialects", emptyList<String>())
+        // #350: the /pipelines page is the flat catalog under its own root.
+        setVariable("searching", true)
+        setVariable("scope", PipelineListScope.CATALOG.wire)
+        setVariable("rootId", PipelineListScope.CATALOG.rootId)
         setVariable("pipelines", emptyList<Any>())
         setVariable("drafts", emptyMap<Any, Any>())
         setVariable("q", "")
@@ -422,12 +426,43 @@ class ShellRenderTest {
         html shouldContain "data-nav-group=\"\" data-nav-label=\"Home\""
         html shouldContain "data-nav-section=\"/dashboards\""
         html shouldContain "data-nav-group=\"Build\" data-nav-label=\"Dashboards\""
-        // The lazy branch: the disclosure rides the summary (one level per request, scope=nav),
-        // and the placeholder's id is the NAV instance's root — never the page tree's.
-        html shouldContain "aria-label=\"Expand dashboards tree\""
-        html shouldContain "/partials/dashboards/tree?scope=nav"
+        // The lazy branch: since #350 the rail's ONE navigating-tree pattern — a toggle BUTTON
+        // beside the link (aria-controls the panel), a panel whose root URL is the nav scope
+        // (one level per request), and the NAV instance's root placeholder, never the page's.
+        html shouldContain "aria-controls=\"nav-tree-dashboards\" aria-label=\"Dashboard folders\""
+        html shouldContain "data-nav-tree=\"dashboards\""
+        html shouldContain "data-nav-root-url=\"/partials/dashboards/tree?scope=nav\""
         html shouldContain "id=\"dash-tree-nav\""
         html shouldNotContain "data-nav-label=\"Dashboard\""
+        // The second tree engine is gone: no <details> disclosure of its own.
+        html shouldNotContain "app-nav-branch-tree"
+    }
+
+    @Test
+    fun `#350 - Pipelines carries the same branch - link, a separate toggle, and the lazy sidebar tree with its search`() {
+        val html = engine.process("pipelines/list", webContext().apply { fillList() })
+        val branch = html.substringAfter("data-nav-branch=\"pipelines\"").substringBefore("data-nav-branch=\"dashboards\"")
+
+        // The item LINK is unchanged: the catalog page, the active section, the crumb pair.
+        branch shouldContain "href=\"/pipelines\" class=\"app-nav-link"
+        branch shouldContain "data-nav-group=\"Build\" data-nav-label=\"Pipelines\""
+        // The TOGGLE is its own control — opening the tree is not navigating.
+        branch shouldContain "<button type=\"button\" class=\"app-nav-branch-toggle app-rail-label\" data-nav-tree-toggle"
+        branch shouldContain "aria-expanded=\"false\" aria-controls=\"nav-tree-pipelines\""
+        // The PANEL: closed on paint, the nav-scope root URL, the document's workspace for the
+        // admission guard, the sidebar search addressing the sidebar's root, the bounded region.
+        branch shouldContain "id=\"nav-tree-pipelines\" data-nav-tree=\"pipelines\" hidden"
+        branch shouldContain "data-nav-root-url=\"/partials/pipelines?scope=nav\""
+        branch shouldContain "data-nav-workspace=\"acme\""
+        branch shouldContain "hx-get=\"/partials/pipelines?scope=nav\""
+        branch shouldContain "hx-target=\"#pipeline-nav-root\""
+        branch shouldContain "data-nav-tree-scroll"
+        branch shouldContain "id=\"pipeline-nav-root\""
+        // The shared engine and the branch controller load once, from the layout's footer.
+        html shouldContain "<script src=\"/js/template-explorer.js\"></script>"
+        html shouldContain "<script src=\"/js/nav-tree.js\"></script>"
+        // rail.js reads the active workspace's pre-paint width key off <html>.
+        html shouldContain "data-dp-workspace=\"acme\""
     }
 
     private fun webContext(): WebContext =

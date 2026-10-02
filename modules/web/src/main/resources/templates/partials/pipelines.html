@@ -8,10 +8,12 @@
      paths is what someone searching `nyc/mob` wants to see. Clearing `q` returns to the tree,
      by construction: the same dispatcher answers both.
 
-     Either branch's own root element carries id="pipeline-list-wrapper", so the single stable
-     swap target of ui-screens.md §4.3 survives every refresh in both presentations. This
-     th:block contributes no element and MUST NOT carry the id — th:replace removes the host,
-     so an id written here would never reach the DOM. -->
+     #350: two instances. In the global sidebar (`scope=nav`) both branches' root element
+     carries id="pipeline-nav-root", so the sidebar's one stable swap target survives every
+     refresh in both presentations; the /pipelines CATALOG (any other scope) is always the flat
+     branch, rooted at id="pipeline-list-wrapper" (PipelineBrowseModel.fillWrapper decides).
+     This th:block contributes no element and MUST NOT carry the id — th:replace removes the
+     host, so an id written here would never reach the DOM. -->
 <th:block xmlns:th="http://www.thymeleaf.org" th:fragment="fragment"
           th:replace="${searching} ? ~{partials/pipeline-search :: results} : ~{partials/pipeline-tree-level :: level}">
   <!-- ONE conditional fragment expression, not two blocks each carrying th:if + th:replace:

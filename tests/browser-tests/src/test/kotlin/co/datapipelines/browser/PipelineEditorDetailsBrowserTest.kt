@@ -138,8 +138,8 @@ class PipelineEditorDetailsBrowserTest : BrowserSuite() {
 
     private fun openEditorFor(name: String) {
         page.navigate("$baseUrl/pipelines?q=$name")
-        page.locator("button.tpl-result, button.tpl-leaf").first().click()
-        page.locator("a.tplx-detail-open").first().click()
+        // #350: the catalog row IS the link into the workspace (the detail pane and its Open are gone).
+        page.locator("#pipeline-list-wrapper a.tpl-result").first().click()
         page.waitForURL(PipelineWorkspaceUrl.PATTERN)
         page.locator(".pe-card").first().waitFor()
     }
@@ -254,8 +254,8 @@ class PipelineEditorDetailsBrowserTest : BrowserSuite() {
         seedCalculatorPipeline(name) shouldBe 201
 
         page.navigate("$baseUrl/pipelines?q=$name")
-        page.locator("button.tpl-result, button.tpl-leaf").first().click()
-        page.locator("a.tplx-detail-open").first().click()
+        // #350: the catalog row IS the link into the workspace (the detail pane and its Open are gone).
+        page.locator("#pipeline-list-wrapper a.tpl-result").first().click()
         page.waitForURL(PipelineWorkspaceUrl.PATTERN)
         val card = page.locator(".pe-card").first()
         card.waitFor()
@@ -287,13 +287,11 @@ class PipelineEditorDetailsBrowserTest : BrowserSuite() {
         val name = "test/browser_ped_" + generatedPassword("p").take(6).lowercase()
         seedCalculatorPipeline(name) shouldBe 201
 
-        // The explorer: find the pipeline, select it (search mode renders a FLAT
-        // list of `tpl-result` rows; the tree presentation uses `tpl-leaf`), its
-        // detail swaps into #pipeline-detail, then open the editor — a FULL
-        // document load (hx-boost="false", 87c20d4), so this is a plain navigation wait.
+        // The catalog: find the pipeline (a FLAT list of `tpl-result` rows) and follow its
+        // row into the workspace — a FULL document load (hx-boost="false", 87c20d4), so this
+        // is a plain navigation wait. (#350: the explorer's detail pane and its Open are gone.)
         page.navigate("$baseUrl/pipelines?q=$name")
-        page.locator("button.tpl-result, button.tpl-leaf").first().click()
-        page.locator("a.tplx-detail-open").first().click()
+        page.locator("#pipeline-list-wrapper a.tpl-result").first().click()
         page.waitForURL(PipelineWorkspaceUrl.PATTERN)
 
         // The canvas laid its cards out; the four-tab dock is there from page load.

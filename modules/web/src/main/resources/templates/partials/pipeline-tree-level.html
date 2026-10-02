@@ -1,9 +1,9 @@
-<!-- ONE level of the pipeline tree (067), as the LEFT pane of the explorer renders it.
+<!-- ONE level of the pipeline tree (067), as the GLOBAL SIDEBAR renders it since #350.
 
-     Deliberately the same shape as partials/template-tree-level.html, down to the class
-     names: 067 ships the convention templates already have, so a reader who knows one tree
-     knows the other, one stylesheet dresses both, and the browser-test selectors
-     (details.tpl-folder, summary.tpl-summary, .tpl-leaf) transfer unchanged.
+     Deliberately the same shape as partials/template-tree-level.html and
+     partials/dashboard-tree-level.html, down to the class names: one stylesheet
+     (template-tree.css) dresses every tree, a reader who knows one tree knows the others, and
+     the browser-test selectors (details.tpl-folder, summary.tpl-summary, .tpl-leaf) transfer.
 
      The tree is backed by server-side prefix queries: this fragment renders the direct
      sub-folders and the direct pipeline children of one prefix, and expanding a folder issues
@@ -15,25 +15,27 @@
      this file, and no empty-folder state — a folder is derived from the live rows beneath it,
      so one with nothing beneath it does not exist to be rendered.
 
-     A leaf SELECTS: it swaps the pipeline's settings, parameters and versions into
-     #pipeline-detail on the RIGHT, and nothing in this pane moves. The selection swap is
-     innerHTML into a stable pane outside this fragment — the tree's DOM is untouched by
-     construction.
+     #350: a leaf NAVIGATES. It is a link to the canonical workspace `/pipelines/{id}` (no
+     version: the page's current-first rule resolves it, workspace spec §3.1), and a FULL
+     document load — hx-boost="false", the graph entry spec §2 keeps until boosted
+     initialization is proven (the dashboards tree's leaf precedent). The old explorer's
+     select-into-a-detail-pane is gone with the pane.
 
      Folder expansion is <details>/<summary>: the browser owns open/closed state and the
      keyboard and screen-reader semantics, and htmx loads the level on the summary's FIRST
-     click only (hx-trigger="click once"). No JS of our own is involved in expansion.
+     click only (hx-trigger="click once"). nav-tree.js owns what the sidebar adds around it —
+     the visible failure + retry, the stale-response guard, the width fit and the
+     per-workspace state — without a second expansion path.
 
-     The root level's id is the screen's long-standing #pipeline-list-wrapper, so browsing
-     inherits the existing SPA swap contract instead of inventing a second one; nested levels
-     get a derived id from PipelineBrowseModel.levelId so a placeholder and the fragment that
-     replaces it cannot disagree.
+     The root level's id is #pipeline-nav-root, the sidebar's stable swap root (its search and
+     "clear" address it too); nested levels get a derived id from PipelineBrowseModel.levelId,
+     so a placeholder and the fragment that replaces it cannot disagree.
 
      ARIA: the ROOT level's list is role=tree; a NESTED level's container is role=group under
-     its folder's treeitem. aria-expanded/aria-selected/tabindex are owned by
-     static/js/template-explorer.js, which serves both explorers and initialises them on load
-     and after every htmx swap (the server cannot know which leaf is selected — selection is
-     client state). -->
+     its folder's treeitem. aria-expanded and the roving tabindex are owned by
+     static/js/template-explorer.js (its nav context); aria-selected / aria-current mark the
+     leaf of the page being viewed and are nav-tree.js's — the server cannot know which page
+     the sidebar sits beside. -->
 <div xmlns:th="http://www.thymeleaf.org" th:fragment="level"
      th:id="${levelId}" class="tpl-level"
      th:attr="role=${#strings.isEmpty(prefix)} ? null : 'group'">
@@ -91,17 +93,13 @@
       </details>
     </li>
 
-    <!-- LEAVES. A leaf SELECTS: its detail swaps into #pipeline-detail on the right
-         (innerHTML). Enter opens the editor; data-editor-url is what the keyboard path reads,
-         and it is the same URL the detail pane's Open button uses. -->
+    <!-- LEAVES. #350: a leaf is a LINK to the pipeline's workspace — a full navigation
+         (hx-boost="false", see the header). Enter on it is the browser's own link activation;
+         the arrow keys only move focus (template-explorer.js's nav context). -->
     <li class="tpl-node" role="none" th:each="p : ${pipelines}">
-      <button type="button" class="tpl-leaf" role="treeitem" aria-selected="false"
-              th:attr="hx-get=@{/partials/pipelines/detail(id=${p.id})},
-                       data-leaf-id=${p.id},
-                       data-editor-url=@{'/pipelines/' + ${p.id} + '/editor'}"
-              hx-target="#pipeline-detail" hx-swap="innerHTML"
-              hx-sync="#pipeline-detail:replace"
-              hx-indicator="#pipeline-detail-spinner">
+      <a class="tpl-leaf" role="treeitem" aria-selected="false" hx-boost="false"
+         th:href="@{/pipelines/{id}(id=${p.id})}"
+         th:attr="data-leaf-id=${p.id}">
         <!-- The label is the leaf's own segment; the full path always rides on `title`
              (§9.4's rule for every surface that shows a path-shaped name). The
              file-code glyph sits where a sibling FOLDER's glyph sits — the leaf keeps the
@@ -130,7 +128,7 @@
           <span th:if="${d != null}" class="ds-badge ds-badge-warning tpl-leaf-draft"
                 th:title="'Draft v' + ${d.version} + ' is pending release — release it to publish.'">draft</span>
         </th:block>
-      </button>
+      </a>
     </li>
   </ul>
 

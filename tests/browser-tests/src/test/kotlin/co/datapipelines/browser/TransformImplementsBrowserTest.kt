@@ -67,9 +67,7 @@ class TransformImplementsBrowserTest : BrowserSuite() {
         themedShots("template-editor", listOf(1440))
 
         // 3 — the pipeline editor: the card's kind line and the Details row, off the pin's read.
-        openPipelineDetail(slug)
-        page.locator("a.tplx-detail-open").first().click()
-        page.waitForURL(PipelineWorkspaceUrl.PATTERN)
+        openPipelineWorkspace(slug)
         page.waitForFunction(
             "() => (document.querySelector(\".pe-card[data-node-id='active_orders']\") || {}).innerText?.includes('needs review')",
         )
@@ -79,7 +77,9 @@ class TransformImplementsBrowserTest : BrowserSuite() {
 
         // 4 — the release dialog: one warning row, for the transform, naming the retired rule and
         //     its successor; the confirm is ENABLED; the release lands through the dialog's POST.
-        openPipelineDetail(slug)
+        //     #350: from the WORKSPACE's own Release (the explorer's detail pane is gone), whose
+        //     POST answers HX-Redirect — the success is the layout's flash on the reloaded page.
+        openPipelineWorkspace(slug)
         releaseDialogShots()
         val dialog = openDialog(releaseButton())
         val warning = dialog.locator("[data-release-needs-review]")
@@ -90,7 +90,8 @@ class TransformImplementsBrowserTest : BrowserSuite() {
         val confirm = dialog.locator("button[data-verb='pipeline-release-confirm']")
         confirm.isDisabled shouldBe false
         val toast = successToastAfter { confirm.click() }
-        toast shouldContain "Released v1"
+        toast shouldContain "Released"
+        toast shouldContain "is now the current version"
         drainCspViolations().shouldBeEmpty()
     }
 
@@ -219,19 +220,20 @@ class TransformImplementsBrowserTest : BrowserSuite() {
             prefix,
         ) as Map<String, Boolean>
 
-    /** The pipeline explorer's search, its one result selected — the detail pane with its verbs. */
-    private fun openPipelineDetail(slug: String) {
+    /** #350: the catalog's search, its one row followed — the pipeline's workspace with its verbs. */
+    private fun openPipelineWorkspace(slug: String) {
         page.navigate("$baseUrl/pipelines?q=$slug")
-        page.locator("button.tpl-result, button.tpl-leaf").first().click()
-        page.waitForSelector(".tplx-detail-header")
+        page.locator("#pipeline-list-wrapper a.tpl-result").first().click()
+        page.waitForURL(PipelineWorkspaceUrl.PATTERN)
+        page.waitForSelector(".pe-root")
     }
 
-    private fun releaseButton(): Locator = page.locator(".tplx-detail-actions button", Page.LocatorOptions().setHasText("Release v1"))
+    private fun releaseButton(): Locator = page.locator(".pe-topbar [data-verb='pipeline-release']")
 
     private fun openDialog(button: Locator): Locator {
         button.click()
         return page
-            .locator("#px-dialog [data-lifecycle-dialog]")
+            .locator("#pe-dialog [data-lifecycle-dialog]")
             .first()
             .also { it.waitFor() }
     }
@@ -293,7 +295,7 @@ class TransformImplementsBrowserTest : BrowserSuite() {
                 page.screenshot(Page.ScreenshotOptions().setPath(shotDir().resolve("7e-release-dialog-$width-$theme.png")))
             }
             page.keyboard().press("Escape")
-            page.locator("#px-dialog [data-lifecycle-dialog]").waitFor(Locator.WaitForOptions().setState(WaitForSelectorState.DETACHED))
+            page.locator("#pe-dialog [data-lifecycle-dialog]").waitFor(Locator.WaitForOptions().setState(WaitForSelectorState.DETACHED))
         }
         ensureTheme(back)
         page.setViewportSize(1440, 1000)

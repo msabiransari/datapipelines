@@ -1,9 +1,9 @@
 # Pipeline Editor UI Specification
 
-**Status:** v1.23 (revised — see Change Log)
+**Status:** v1.24 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Contract](pipeline-contract.md), [REST API + SSE](rest-api.md), [Type System](type-system.md), [Enums](enums.md), [Auth](auth.md), [Configuration](configuration.md), [@acme/design-tokens Design System](https://github.com/msabir/design-system-starter)
-**Last updated:** 2026-10-01
+**Last updated:** 2026-10-02
 
 ---
 
@@ -166,6 +166,18 @@ pointer, and since #349 it never reloads the document either — the selector an
 Versions tab apply the version IN PAGE (§10.8), so an active run keeps its stream and
 identity. The old `/editor` URL redirects here — preserving a valid explicit `version` and a
 supported `tab` — so every historical link keeps working; its floor is `read` (see below).
+
+**How a reader arrives (#350).** From the global sidebar's **Pipelines tree** (ui-screens §3.4 —
+a leaf is a full-document link to `/pipelines/{id}`, no version, so the current-first rule above
+resolves it) or from a row of the `/pipelines` **catalog** (ui-screens §4.3, the same link).
+Both are full document loads, the graph entry this page keeps (#348's spec §2: boosted entry
+is not turned on until initialization and teardown are proven under it); boosted arrivals and
+history restores still work through the runtime (§3.2). The page carries one hook for the
+sidebar, `<span hidden data-nav-current="pipelines" data-nav-current-id data-nav-current-path>`:
+the rail marks this pipeline's leaf `aria-current` and reveals its folders one level per request.
+The explorer's separate detail pane and its "Open" are gone — this page is the one place a
+pipeline is read, run and managed. In-page version/tab switches still `replaceState` (§10.8);
+Back/Forward across them is #402.
 
 Authentication: session cookie carrying the internal JWT (browser flow). See [Auth §6](auth.md#6-session-tokens-internal-jwt). Required scope per the authoritative matrix in [Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative): `read` to view (`pipeline.read` — every admitted role, the promoter through the lens), `execute` to run, `execute` to cancel.
 
@@ -2010,6 +2022,7 @@ Themes shipped by the design system — `saas` (modern indigo, devtool-oriented)
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-02 | v1.24 | #350 the sidebar tree (renumber at merge) | **§4.1**: how a reader arrives — the global sidebar's Pipelines tree leaf or a `/pipelines` catalog row, both full-document links to the canonical `/pipelines/{id}` (no version: the current-first rule); the page's `data-nav-current` hook (id + path) lets the rail mark and reveal its leaf; the explorer's detail pane and "Open" are gone (ui-screens §4.3); Back/Forward across in-page switches is #402. The workspace header's lifecycle verbs and the Versions tab's Switch/Discard/Restore redirect with a flash since #395 (ui-screens §4.3d). |
 | 2026-10-01 | v1.23 | #349 — the workspace composition. **§5** principle 5: six tabs (Flow the graph + dock, Overview, Parameters, Runs, Usage, Versions); the settings sidebar withdrawn, the graph owns the width (§4.3's row updated; the 1024px drawer and the sidebar resize contract die with the pane). **§4.1**: the selector is IN-PAGE read navigation — a version switch never reloads the document (an active run keeps its stream; §10.8). **§10**: the dock is Node Details beside Results/Errors/Events; the execution tabs render only with the execution read, belong to ONE captured run named by the identity strip (§10.9), and the Details pane's run-derived rows attach only when run version = viewed version. **§10.8** (new): the state keys, the generation/token discipline over every in-page read (the token rides the request; stale never paints; the `hx-sync="this:replace"` requester supersedes an in-flight read — the default drops it and `abort` aborts without issuing, both verified in the vendored 2.0.10), per-version run-input drafts (never persisted), refused switches move nothing. No route, permission or role changed. |
 | 2026-10-01 | v1.22 | #358 the restore lifecycle, by lane 348-c | **§3.2**: the editor's vendors and modules load through `pipeline-editor/runtime.js` — an inert `<template id="pe-runtime-scripts">` catalog, Alpine LAST — and the `.pe-root` is served and cached with `x-ignore`; the runtime's single `mutateDom` activation (destroy-before-bind, context read first) is the ONE initializer a restored or swapped-in root can get, so a cached history restore cannot stack Alpine components (the 080 afterSettle rescue is GONE — init.js wires no afterSettle initializer; §10.6's exactly-once toast contract unchanged, its mechanism superseded). **§7.1 step 8**: navigating during a run DETACHES the stream without cancelling (`dispose()` — no DELETE; the run continues server-side) and a restored page re-attaches through the §10.3 replay stream — the terminal event is delivered, and toasted, exactly once; the live-run record clears at the terminal. Layout-scoped history (`hx-history-elt` on `#app-main`) and the old-cache shape guard are UI Screens v1.94's. Tests: `runtime-activation.test.mjs`, `sse-disposal.test.mjs`, `PipelineWorkspaceHistoryBrowserTest` (real cache-hit restores: one component, one pane, one version-pinned POST, zero CSP violations), `editor-teardown`/`editor-toast-once` rewritten to the ownership shape. |
 | 2026-09-30 | v1.21 | 348-b (#348) the workspace's version-context corrections | **§8.3**: the workspace page is not a legacy caller — a page whose validated version context cannot produce a pin refuses the preview visibly with ZERO requests (the working-version default stays with callers that omit the parameter). The page's context has ONE validated initialization path (`workspace.js`: positive bounded integer, body presence, pipeline identity) shared by full load, boost and cached history restoration — the restore re-reads the restored block and clears stale refusal flags. **§4.1's projection**: the page's script JSON states only the LENS-VISIBLE current pointer (a development-posture current draft's number cannot leak into `current_version` for a promoter); PipelineResponses' REST shape untouched. |

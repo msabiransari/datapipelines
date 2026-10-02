@@ -1,9 +1,9 @@
 # UI Screens Inventory
 
-**Status:** v1.100
+**Status:** v1.101
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
-**Last updated:** 2026-10-02 (#371; #349; L4b, #353; 348-c, #358; L3b, #10)
+**Last updated:** 2026-10-02 (#350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
 
 ---
 
@@ -157,7 +157,7 @@ Measured on the owner's ~3,000px window (2026-09-05): four content widths across
 - **Full navigations remain** — marked `hx-boost="false"` and pinned by `ShellRenderTest`: `/logout`, the OIDC redirects and file downloads (external links too — htmx 2 rejects cross-origin requests). **Amended 090 §C:** `/login` and the forced-change gate no longer opt OUT of boosting; they render `layouts/auth`, which has no `hx-boost` and no `#app-main` at all, so there is no boosting to opt out of. Removing the machinery beats marking each link.
 - **The progress signal.** A document load used to say "loading" with a white flash; a swap must not flash, so one 2px bar under the nav (`#app-progress`, tokens only, reduced-motion respected) does the talking. Since 085 §D it shows for EVERY htmx request, boosted or partial, counted in flight between `htmx:beforeRequest` and `htmx:afterRequest` — the full loading-state contract (busy control, delayed skeleton) is §5.1's.
 - **Active-section state.** Server-computed from `currentPath` for the first paint; after swaps `shell.js` mirrors the same rule (Dashboard exact, others prefix) off `data-nav-section` + `window.location.pathname`.
-- **Scripts re-arm per swap — or never re-execute at all.** Page scripts whose tags ride inside `#app-main` re-execute on arrival; anything document-level installs ONCE per session. The pipeline editor is the deep case, owned by its runtime since #358: its vendors and modules ride in an inert catalog and its `.pe-root` is served — and cached — with `x-ignore`, so a cached history restore replays only the guarded `runtime.js` bootstrap, whose single `mutateDom` activation (context read, then destroy-before-bind) is the ONE initializer the restored root can get. The editor tears down on host-replacing swaps — the execution stream is DETACHED, never cancelled (`dispose()`: the run continues server-side, visible on `/executions`), the Cytoscape instance is destroyed, timers and document listeners come off — and a run that outlives the navigation is re-attached on the restored page through the execution replay stream, its terminal event arriving exactly once. The shell's own pending/busy chrome comes off before every snapshot (`snapshotClean`) and is purged from restored pages (`htmx:historyRestore`), so a restored link never looks clicked or answers `aria-disabled`. `toast.js` and `template-explorer.js` follow the same idempotent-init contract; `editorJsTest` pins them.
+- **Scripts re-arm per swap — or never re-execute at all.** Page scripts whose tags ride inside `#app-main` re-execute on arrival; anything document-level installs ONCE per session. The pipeline editor is the deep case, owned by its runtime since #358: its vendors and modules ride in an inert catalog and its `.pe-root` is served — and cached — with `x-ignore`, so a cached history restore replays only the guarded `runtime.js` bootstrap, whose single `mutateDom` activation (context read, then destroy-before-bind) is the ONE initializer the restored root can get. The editor tears down on host-replacing swaps — the execution stream is DETACHED, never cancelled (`dispose()`: the run continues server-side, visible on `/executions`), the Cytoscape instance is destroyed, timers and document listeners come off — and a run that outlives the navigation is re-attached on the restored page through the execution replay stream, its terminal event arriving exactly once. The shell's own pending/busy chrome comes off before every snapshot (`snapshotClean`) and is purged from restored pages (`htmx:historyRestore`), so a restored link never looks clicked or answers `aria-disabled`. `toast.js` and `template-explorer.js` follow the same idempotent-init contract; `editorJsTest` pins them. **Since #350 `template-explorer.js` is loaded ONCE by the layout's footer** (the sidebar's trees need it on every page) together with `nav-tree.js`; an explorer page's own tag still rides inside `#app-main`, and its re-execution on a boosted visit is a guarded RE-INIT of the one module — never a second closure (the old per-closure `docWired` flag stacked a document `toggle`/`htmx:afterSwap` pair per visit; `template-explorer.test.mjs` re-requires the file to pin it, `PipelineSidebarTreeStateBrowserTest` counts the listeners per source file across boosted and history navigation).
 
 ### 3.4 The shell chrome (079, normative)
 
@@ -183,13 +183,58 @@ styled transparent over the card), then the sections grouped **Build** / **Opera
 **Organisation** with Home alone above them (D58, #10 L3b — the landing item `Dashboard` was
 RENAMED Home; the route `/dashboard` and its exact-match section are unchanged), then the
 collapse control at the foot. The nav packs to the top; the free space below it is deliberate.
-Build's last item is **Dashboards** (#10 L3b, D58): the link to the tree page (§4.21), and
-BESIDE it a chevron disclosure that expands IN PLACE into the dashboards' folder hierarchy —
-lazy (the summary's first click fetches ONE level of the same `/partials/dashboards/tree`
-fragment the page's tree renders, `scope=nav`, so the sidebar's tree and the page's tree can
-coexist in one document with distinct level ids), collapsible, and carried on `app-rail-label`
-so it hides with the collapsed rail. Every role sees the item (`dashboard.read` is an
-every-role read; the promoter through the lens).
+Build's **Pipelines** (#350) and **Dashboards** (#10 L3b, D58) items are **navigating-tree
+branches** — one pattern for every artifact family that browses as a folder tree (workspace
+spec §5, D7/D8; Templates is its declared next use, after its page design). Every role sees
+both items (`pipeline.read` and `dashboard.read` are every-role reads; the promoter through the
+lens). The pattern, normative:
+
+- **Three parts, kept distinct.** The item LINK is unchanged (the catalog page — `/pipelines`
+  §4.3, `/dashboards` §4.21 — the active section, the crumb). BESIDE it a **toggle button**
+  (`data-nav-tree-toggle`, `aria-expanded`/`aria-controls`): opening a tree is not navigating.
+  BELOW them a **panel** (`[data-nav-tree]`): the Pipelines panel carries its own search box
+  (the Dashboards route has no search), and the tree sits in a **bounded scroll region**
+  (`--app-nav-tree-max-block`, `min(50dvh, 32rem)`) so the sections below stay reachable.
+- **Server-backed and lazy, the existing fragments.** The first open fetches the ROOT level
+  (`/partials/pipelines?scope=nav` under `#pipeline-nav-root`; `/partials/dashboards/tree?scope=nav`
+  under `#dash-tree-nav`); each folder is the same `<details>` + `click once` one-level fetch
+  every tree has; pagers page a level in place. Nothing ships the catalog to the browser.
+- **A leaf NAVIGATES**, as a full document (`hx-boost="false"`): a pipeline leaf to its canonical
+  workspace `/pipelines/{id}` (no version — the current-first rule, §4.4), a dashboard leaf to its
+  board. The keyboard is the explorers' engine in its NAV context (`template-explorer.js`): the
+  arrows move FOCUS and never navigate, ArrowRight/Left open/close and climb, Enter is the link's
+  own activation, one roving tab stop per tree. `aria-current="page"` + `aria-selected` mark the
+  leaf of the page being viewed (the workspace page's `[data-nav-current]` hook names its id and
+  path; a board page is read off the URL).
+- **The width.** The closed-tree rail is the ordinary `--app-rail-expanded` (232px). An open tree
+  widens the rail to FIT its visible rows — `nav-tree.js` measures the rows' max-content width
+  (closed levels render nothing, so hidden descendants cost nothing) and writes one property,
+  `--app-rail-tree-fit`, on `<html>` (the splitter's shape, §4.3a) — clamped by CSS between
+  `--app-rail-tree-min` (320px) and `--app-rail-tree-max` (400px). Past the maximum the tree's
+  region scrolls sideways with FULL labels (never an ellipsis); `.app-nav` itself never scrolls
+  sideways, so the other sections and the page do not move. Re-measured on open, every tree
+  swap, folding, fonts and resize — event-driven, no `ResizeObserver` (the measured content does
+  not depend on the rail's width, so there is no loop). **An icon collapse always wins**: the
+  tree-open width is gated `:not(.rail-collapsed)` in the selector, so a late response can only
+  rewrite the fit, never the collapse; the 768–1099px band widens only once the reader expanded
+  the rail (`rail-expanded`); the phone drawer keeps its own full-size width (§3.6).
+- **Failure, staleness, foreign answers.** A refused or failed level is a visible row with a
+  **Retry** (the request's own URL into the same target) — never a stranded spinner, never a
+  toast. Every request into a tree is stamped with the tree's live **generation** (a search typed
+  or cleared, or a reset, makes every older answer stale and it is dropped), and every Pipelines
+  answer carries `DP-Nav-Stamp: <workspace>|<lens>`: an answer for another workspace is refused
+  with a visible reload notice and never joins the rows; a changed lens resets the tree and
+  re-reads the root under the new view (bounded: a fourth reset in one document is shown, not
+  repeated). No route returns a hidden row for CSS to hide — the rows are the lens's answer.
+- **State, per workspace and family, paths only.** `localStorage` `dp-nav:<family>:<workspace>`
+  holds open/closed, the open folders' PATHS and the region's scroll offsets — never a row, a
+  count, a query or a pipeline body — and `dp-nav-rail:<workspace>` the open flag and the fit,
+  which `rail.js` applies before the first paint (so a full-document workspace entry paints at
+  the remembered width). A full-document load restores INCREMENTALLY: the root, then each
+  remembered folder whose parent is open and the folders above the current leaf, one level per
+  request; a leaf past its level's first page is walked to through the level's pager (bounded).
+  Boosted swaps and history restores keep the rail (it is outside `#app-main`) and only re-mark
+  the current leaf. Another workspace's key is never read; a workspace switch is a full document.
 
 - **The brand mark (163, #157, "D1").** Three rings converging into an outlined tile with three
   rising bars — the tile is a 4-unit `currentColor` stroke and the bars are `currentColor`
@@ -424,9 +469,9 @@ One breakpoint table for the whole shell — the rail, the top bar and the main 
 
 | Width | Rail | Topbar | Main gutter |
 |---|---|---|---|
-| ≥ 1100 px | as today (expanded; `rail-collapsed` on user choice, remembered) | as today | `--gap-lg` |
-| 768–1099 px | **starts collapsed** (icons only) unless the user expanded it — same class, same `localStorage` key, one more rule: the default flips at this width | search text hidden (the existing 900 rule moves to this breakpoint) and the search ICON BUTTON stands in (#159: it reveals the topbar copy in place; ⌘K drives it too), crumbs truncate to the LEAF with the full path in `title` (106's pattern on `h2.tplx-detail-title`) | `--gap-lg` |
-| < 768 px | **off-canvas drawer**: not in the grid (`grid-template-columns: 1fr`), `position: fixed`, `z-index: var(--z-drawer)`, translated off-screen; opened by a hamburger button that appears FIRST in the topbar; closed by Escape, backdrop tap, or any boosted navigation | brand tile → hamburger, crumbs (leaf only), workspace switcher as its avatar only, user menu; **nothing wraps**; the search moves INTO the drawer's head (it is hidden today — `app.css` — it must not disappear, it must move) | `--gap-md` |
+| ≥ 1100 px | as today (expanded; `rail-collapsed` on user choice, remembered); **an open sidebar tree (#350) widens it to fit, 320–400px** (`--app-rail-tree-min`/`-max`), never under `rail-collapsed` | as today | `--gap-lg` |
+| 768–1099 px | **starts collapsed** (icons only) unless the user expanded it — same class, same `localStorage` key, one more rule: the default flips at this width; an open sidebar tree widens an EXPANDED rail within the same 320–400px bounds (#350) — the icon default hides the trees with every label | search text hidden (the existing 900 rule moves to this breakpoint) and the search ICON BUTTON stands in (#159: it reveals the topbar copy in place; ⌘K drives it too), crumbs truncate to the LEAF with the full path in `title` (106's pattern on `h2.tplx-detail-title`) | `--gap-lg` |
+| < 768 px | **off-canvas drawer**: not in the grid (`grid-template-columns: 1fr`), `position: fixed`, `z-index: var(--z-drawer)`, translated off-screen; opened by a hamburger button that appears FIRST in the topbar; closed by Escape, backdrop tap, or any boosted navigation; the drawer keeps its full 232px with a tree open (#350: the phone breakpoint wins over the desktop minimum) and the tree scrolls sideways inside it | brand tile → hamburger, crumbs (leaf only), workspace switcher as its avatar only, user menu; **nothing wraps**; the search moves INTO the drawer's head (it is hidden today — `app.css` — it must not disappear, it must move) | `--gap-md` |
 
 Rules the table rides on, all testable:
 
@@ -560,28 +605,60 @@ Content:
 - **My pipelines** (top 5 by updated_at): name, description, version. Clickable → pipeline editor.
 - **Quick stats**: total pipelines, total executions today, success rate.
 
-### 4.3 Pipelines Explorer
+### 4.3 Pipelines — the catalog page and the sidebar tree (#350)
 
 | Attribute | Value |
 |---|---|
-| URL | `GET /pipelines` |
+| URL | `GET /pipelines` (`?q=` — the deep link every "find this pipeline" link uses: the search palette's "All pipelines matching", datasource delete, the node-SQL and Details child links, the schedules detail, the workspace's phone note) |
 | Auth required | Yes (`read`) |
-| Purpose | Browse the pipeline folder tree, search across full paths, open a pipeline in its version-explicit workspace (`/pipelines/{id}`; the old editor route is a redirect into it) |
-| Design primitives | the data table (§3.7), `.ds-input`, `.ds-badge`, `.ds-button`, `.ds-empty`; the tree/two-pane chrome is `template-tree.css` (`tplx-*`, `tpl-*`), shared with §4.6 |
-| JS | `static/js/template-explorer.js` — selection, focus and keyboard, shared with §4.6; it finds its pane by the `data-explorer-pane` marker, so both explorers use one file. Expansion itself is `<details>` + htmx and needs no JS |
-| htmx | Yes — **one level per request** (`hx-get="/partials/pipelines?prefix=…"` on a folder's `summary`, `hx-trigger="click once"`, targeting that folder's own `.tpl-level` placeholder with `outerHTML`); leaf selection (`hx-get="/partials/pipelines/detail?id=…"` into `#pipeline-detail`, `innerHTML`, `hx-sync=replace`); search and pagination (`hx-get="/partials/pipelines"` into the fragment-root `#pipeline-list-wrapper`, `outerHTML`) via the `#pipeline-filter-q` search input (`input changed delay:300ms`, `#pipeline-filter-spinner` indicator) and the shared §5 pager — full pattern in §5 |
+| Purpose | The **catalog**: one flat, server-paged list of full paths — every pipeline the caller may read (newest first, the service's own page) or the matches of `q` — each row a link into the pipeline's workspace (§4.4). The folder TREE is the sidebar's (§3.4) |
+| Design primitives | `.ds-input`, `.ds-badge`, `.ds-button`, `.ds-empty`; the rows are `template-tree.css`'s `.tpl-results` / `a.tpl-result` |
+| JS | none of its own — the sidebar's `nav-tree.js` owns **Browse folders** (`data-nav-tree-reveal`), which opens the sidebar's Pipelines tree (the phone drawer first; an icon-collapsed rail is expanded — the reader's explicit choice) and puts focus in its search |
+| htmx | the search input (`#pipeline-filter-q`, `input changed delay:300ms, search`, `hx-sync="this:replace"`) and the shared §5 pager re-fetch ONLY the list into its stable root `#pipeline-list-wrapper` (`GET /partials/pipelines`, `outerHTML`); the sidebar addresses the same route with `scope=nav` (§3.4) |
 
-Since 067 pipeline names are **folder paths** ([Template Hierarchy §14](template-hierarchy-design.md)), so this screen is the pipelines **explorer**: the folder tree on the left, the selected pipeline on the right. It is the same shape §4.6 gave templates, deliberately — same server-side prefix levels, same virtual folders, same browse-vs-search rule, same stylesheet and keyboard layer.
+**Owner ruling 2026-10-02 (#350):** with the tree in the sidebar, the page keeps the catalog the
+workspace spec retains (§3.2: "#350 removes the redundant tree panel from the landing page") — a
+flat list, not a second tree and not a detail pane: a pipeline is read, run and managed in ONE
+place, its workspace. Since 067 pipeline names are **folder paths**
+([Template Hierarchy §14](template-hierarchy-design.md)); the folders are browsed in the sidebar.
 
-- **Browse (no `q`)** renders one tree level per request. A folder shows its own segment as the label with the FULL prefix on `title`, and a badge counting the live pipelines beneath it. Folders are virtual — derived from name prefixes — so there is **no New folder / rename / move / delete control anywhere, and no empty-folder state**: a folder with nothing beneath it does not exist to be rendered.
-- **Search (non-empty `q`)** replaces the tree with a **flat list of full paths**, not a tree pruned to matches (§9.2's decided rule in the hierarchy design). Clearing the box returns to the tree — the same dispatcher fragment answers both, so that is true by construction.
-- **A new pipeline appears as `v1 draft`** (D55, 099). Creation lands version 1 as a DRAFT, so the leaf's version badge names the **working** version — the draft's number when one exists, the released one otherwise — beside the existing `draft` badge whose tooltip says it is pending release. (`p.currentVersion` alone rendered `vnull` the moment creation stopped releasing.) The Release action lives in the editor and renders for a v1 draft exactly as for any later one; nothing on this screen releases.
-- **The detail pane** is three regions since 106 (§4.3b): a header, a READING column and an ACTING column. A selection swaps `#pipeline-detail`'s innerHTML and touches nothing in the tree.
-- **The screen is READ-ONLY.** The pre-067 "Create Pipeline" button was permanently `disabled` and its tooltip read "Pipeline editor — Phase 2 other worktree" — an affordance the server does not have, advertised with an internal note. Both are gone (T108), replaced by a sentence saying pipelines are authored through agents over the MCP server, with a link to that spec and the fact that browser authoring is on the roadmap.
-- **Rendered for** — every verb on this screen is role-gated since 114; the role boolean each one needs is [§4.3e](#43e-role-visibility--every-verb-and-the-role-boolean-that-renders-it-114-normative)'s table. Release and Switch are `canAuthor` since 2026-09-20 (D8 — the author releases, the promoter promotes); a promoter's explorer carries no verb.
-- There is deliberately **no datasource filter**: the one shipped before v1.12 was labelled datasources but populated from `${dialects}`, the controller never had the parameter, and `PipelineRecord` carries no datasource field — serving it needs a join through the pipeline definition, so it was deleted rather than half-wired (deferred).
+- **One route, two instances (`scope`).** `GET /partials/pipelines` (`pipeline.read`, the lens)
+  renders the SIDEBAR when `scope=nav` (an empty `q` is the tree's ROOT level and a non-empty one
+  its flat search, both under `#pipeline-nav-root`; a `prefix` is always one sidebar level) and the
+  CATALOG otherwise (always the flat list under `#pipeline-list-wrapper` — an absent or unknown
+  scope degrades to the page's own list, never an error or the sidebar). Same rows, same
+  permission, same lens: the scope picks the markup, never the rows.
+- **Every row is a link** to the canonical workspace `/pipelines/{id}` — no version, the
+  current-first rule (§4.4) — as a FULL document (`hx-boost="false"`, workspace spec §2).
+- **A new pipeline appears as `v1 draft`** (D55, 099): every row's version badge names the
+  **working** version — the draft's number when one exists, the released one otherwise — beside
+  the "pending release" badge. A pre-077 flat name (no folder) is an ordinary catalog row; the
+  sidebar tree's root lists folders only.
+- **No verbs.** The catalog renders no lifecycle verb: Release, Discard, Restore, Switch and the
+  purges are the workspace's (§4.4, §4.3d). The authoring note says how pipelines arrive (agents
+  over the MCP server, D1); the pre-067 "Create Pipeline" stub (T108) and the "browser authoring
+  is on the roadmap" sentence are gone — definitions are AI-native.
+- **Empty and no-match are different answers:** an empty workspace (no `q`) says how pipelines
+  arrive; a search that matches nothing offers Clear search; a lensed caller whose target cannot
+  be read gets the promotion page's sentence (178).
+- There is deliberately **no datasource filter**: the one shipped before v1.12 was labelled
+  datasources but populated from `${dialects}`, the controller never had the parameter, and
+  `PipelineRecord` carries no datasource field (deferred).
+- **What moved, and where (spec capability inventory):** folder browse, search, counts, paging,
+  loading/empty/refusal/retry → the sidebar tree (§3.4); the selected pipeline's header, reading
+  and acting columns (§4.3b) → the workspace's header and tabs (§4.4, #349); the lifecycle verbs
+  → the workspace's header and Versions tab (§4.3d — #395 made Switch/Discard/Restore work
+  there); the tree-badge refresh → each workspace verb's reload re-renders the sidebar.
+- Guards: `PipelineSidebarTreeBrowserTest`, `PipelineSidebarTreeStateBrowserTest`,
+  `PipelinePartialControllerTest`, `PipelineUiControllerTest`, `PipelineExplorerRenderTest`,
+  `nav-tree.test.mjs`, `template-explorer.test.mjs`.
 
 #### 4.3a The divider handle — both explorers (104)
+
+> **Since #350 the pipelines page has no pane, divider or drawer** — §4.3a and §4.3c describe the
+> TEMPLATES explorer (§4.6), the one page explorer left; the lake-table tree (§4.5) still inherits
+> the pane class. The shared `dp.pane.explorer-tree` key keeps its name.
+
 
 The tree pane's width was a stylesheet's guess, and it was re-guessed three times: `clamp(260px, 30vw, 480px)` left the tree 14% of the owner's 3491px window, `26vw` uncapped gave it 908px for a column of short names, and the divider itself then had to be drawn. The pane did carry the browser's native `resize: horizontal` — at the pane's **bottom-right corner**, which is where nobody looks for a divider, so every round was spent editing CSS instead.
 
@@ -602,6 +679,13 @@ The size lands as ONE CSS custom property, `--tplx-tree-w`, written on `<html>` 
 The datasource lake-table tree (§4.5) uses the same pane class and so inherits the remembered width, but has no detail pane beside it and therefore no handle.
 
 #### 4.3b The detail pane — reading and acting (106, owner-approved mock 2026-09-08)
+
+> **Since #350 no page renders the pipeline detail pane** — the catalog's rows open the workspace
+> (§4.4), whose header and tabs carry everything below (#349's capability map). The fragment
+> (`partials/pipeline-detail`, `GET /partials/pipelines/detail`) and the explorer legs of the
+> lifecycle dialogs survive with no page to call them; their removal (with their auth §7.6 row) is
+> #401. The text below is the record of what moved.
+
 
 The pane used to be a stack of four tables (badges, Settings, Parameters, Versions) in one
 column. The owner's mock, layout B, splits it into what a reader does and what an operator
@@ -732,8 +816,9 @@ fits its own box at 390 and that nothing inside the detail sticks out of the det
 
 Every version-lifecycle verb 101 shipped ([Versioning §3.5](versioning.md#35-the-lifecycle-table))
 is reachable from a **confirm dialog**, one partial per verb, opened into a single per-screen
-container — `#px-dialog` (pipelines explorer), `#tx-dialog` (templates explorer), `#pe-dialog`
-(pipeline editor), `#te-dialog` (template editor) — emptied on close, `Escape` closed, focus
+container — `#px-dialog` (pipelines explorer — no page renders it since #350, see §4.3b),
+`#tx-dialog` (templates explorer), `#pe-dialog` (the pipeline workspace, §4.4), `#te-dialog`
+(template editor) — emptied on close, `Escape` closed, focus
 landing on the first control, the destructive button `ds-button-danger` and last in tab order.
 The exemplar is §4.5's delete dialog (094 §B): the question is asked BEFORE the button exists,
 the refused branch renders NO button, and the POST re-runs the guard because the screen is
@@ -769,9 +854,20 @@ never touch the tree. Every refusal — `pinned` with its pinners, `last_release
 the editors the POST answers `HX-Redirect` back to the editor URL with the flash toast: the
 page's draft state (`PEDraft`, the version chips) is embedded across the document, so the
 honest refresh is the document itself, exactly as the pre-102 editor already reloaded.
+**#395 (with #350): on the pipeline workspace that is now true of EVERY verb.** Release and the
+purges always answered the redirect; Switch, Discard and Restore (the Versions tab's row verbs)
+posted to the explorer's `#pipeline-detail` from the workspace too — an element the workspace
+does not have, so htmx refused the swap target and no request was ever sent. Their dialogs are
+`from`-aware now (`from=editor`: no target, `hx-swap="none"`, a hidden `from`), and their POSTs
+answer `HX-Redirect` onto `/pipelines/{id}?tab=versions&ok=discarded|restored|switched` with
+the layout's flash (`Version discarded` / `Version restored` / `Current version switched`); the
+toast states what happened and the reloaded Versions tab shows the pointer the service left. The
+explorer legs are unchanged (the templates explorer is the one that still renders them).
 
-**One destructive verb per entity per view** (owner rule). The detail header shows at most one
-of Purge pipeline / Discard / Purge draft — `{D}` gets Purge pipeline beside Release; a released
+**One destructive verb per entity per view** (owner rule). The detail header — and since #395 the
+pipeline WORKSPACE's header, now that the explorer pane is gone — shows at most one of Purge
+pipeline / Discard / Purge draft — `{D}` gets Purge pipeline beside Release (on the workspace: the
+entity dialog with its exclusive draft templates and #335's kept list, in place of Purge draft); a released
 current gets Discard; a draft with no header-destructive gets Purge draft; everything else
 lives on the row it names. The version rows (§4.3b's compact list) carry their verbs in a
 per-row overflow menu (⋯): DRAFT → Release, Purge; RELEASED → Discard, Switch-to (when not
@@ -817,10 +913,9 @@ Each boolean narrows for an API-key principal by the key's SCOPE as well as its 
 
 | Screen | Verb(s) | Rendered when | §7.6 permission |
 |---|---|---|---|
-| Pipelines explorer (§4.3) | Edit, Discard draft, Restore, Purge draft, Purge pipeline | `canAuthor` | `pipeline.update` / `pipeline.version.manage` / `pipeline.delete` |
-| Pipelines explorer | Release | `canAuthor` (D8, 2026-09-20 — the author releases) | `pipeline.release` |
-| Pipelines explorer | Switch served version | `canAuthor` (O-1 collapsed onto the author with D8) | `pipeline.switch_version` |
-| Pipeline editor (§4.4) | Purge draft, Release | `canAuthor` | `pipeline.version.manage` / `pipeline.release` |
+| Pipelines catalog (§4.3, since #350) | none — the rows open the workspace | — | `pipeline.read` |
+| Pipeline workspace (§4.4) | Purge draft, Release; Purge pipeline in the `{D}` shape (#395); the Versions tab's Discard, Restore, Purge | `canAuthor` | `pipeline.version.manage` / `pipeline.release` / `pipeline.delete` |
+| Pipeline workspace (§4.4) | Switch served version (the Versions tab's Switch to) | `canAuthor` (O-1 collapsed onto the author with D8) | `pipeline.switch_version` |
 | Pipeline editor | Execute, Cancel | `canExecute` — **viewer-level** (D3); never the promoter (D5) | `pipeline.execute` / `execution.cancel` |
 | Templates explorer/editor (§4.6/§4.7) | Create, Edit, Discard, Restore, Purge, Release | `canAuthor` | `template.create` / `template.update` / `template.version.manage` / `template.delete` / `template.release` |
 | Template editor (§4.7) | the editable textarea, **Preview** and the render-context rail (143) | `canAuthor` — everyone else reads the working version in the read-only pane | `template.update` / `template.render` (the preview POST) |
@@ -1730,7 +1825,7 @@ Guards: `SchedulesUiControllerTest` (the route's row, `canAuthor` = the five wri
 | URL | `GET /dashboards` |
 | Auth required | Yes — `dashboard.read`, every role (a promoter through the lens: released dashboards whose every source pipeline her pipeline lens admits; a hidden one is absent from the tree) |
 | Purpose | Browse the dashboards' folder hierarchy; open a dashboard's board |
-| Design primitives | §4.3's explorer chrome (`template-tree.css` — `tplx-*`, `tpl-*`), `.ds-empty`; the page's tree pane is single (`tplx-tree-solo`) — a leaf NAVIGATES, so there is no detail pane and the shared explorer keyboard layer is deliberately NOT wired (`data-explorer-pane` is absent: arrow-key "selection" would trigger navigation) |
+| Design primitives | §4.3's explorer chrome (`template-tree.css` — `tplx-*`, `tpl-*`), `.ds-empty`; the page's tree pane is single (`tplx-tree-solo`) — a leaf NAVIGATES, so there is no detail pane and the shared explorer keyboard layer is deliberately NOT wired (`data-explorer-pane` is absent: arrow-key "selection" would trigger navigation). The SIDEBAR's Dashboards branch is the rail's navigating-tree pattern since #350 (§3.4): there the engine's NAV context IS wired — the arrows move focus and never navigate, which is what made wiring a navigating tree safe |
 | JS | None of its own (no glue on the tree page) |
 | htmx | Yes — **one level per request** (`hx-get="/partials/dashboards/tree?prefix=…&scope=page"` on a folder's `summary`, `hx-trigger="click once"`, targeting that folder's `.tpl-level` placeholder with `outerHTML`); the shared §5 pager when a level pages |
 
@@ -1978,6 +2073,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-02 | v1.101 | #350 the pipeline tree in the expanding global sidebar (workspace spec §5, D7/D8) | **§3.4**: Build's Pipelines and Dashboards items are **navigating-tree branches** — one normative pattern (item link + separate toggle + a panel with the lazy server-backed tree in a bounded scroll region), the leaf a full-document link (pipelines → the canonical workspace, current-first), the explorers' keyboard engine in its NAV context, `aria-current` on the viewed page's leaf; the rail FITS an open tree's visible rows between `--app-rail-tree-min` 320px and `--app-rail-tree-max` 400px and the region scrolls sideways past the max with full labels; an icon collapse wins by selector; visible failure + Retry; the generation + `DP-Nav-Stamp` (workspace\|lens) admission guard; per-workspace+family state (paths and offsets only) restored incrementally, `rail.js` painting the remembered width before the first frame. The Dashboards branch adopts the pattern (its `<details>` disclosure retired — one tree engine in the rail). **§3.2**: `template-explorer.js` loads once from the layout; a re-executed page tag re-inits. **§3.6**: the tree-open widths per band (desktop; tablet only when expanded; the phone drawer keeps 232px). **§4.3 rewritten**: `/pipelines` is the flat, paged CATALOG (owner ruling 2026-10-02) — no tree, no detail pane, every row a full-document link into the workspace, `?q=` kept as the deep link; `GET /partials/pipelines` gains `scope` (nav \| catalog — same route, permission and lens). §4.3a/§4.3c now describe the templates explorer only; §4.3b is the record of what moved (its fragment and the explorer lifecycle legs have no page — #401). **§4.3d/§4.3e (#395)**: the workspace's Switch/Discard/Restore never sent their request (their dialogs targeted the explorer's `#pipeline-detail`); they are `from`-aware now and redirect onto the Versions tab with a flash, and the workspace header keeps the one-destructive rule (Purge pipeline in the `{D}` shape). **§4.21**: the sidebar's Dashboards branch is the pattern. No permission or role changed; no new route. Guards: `PipelineSidebarTreeBrowserTest`, `PipelineSidebarTreeStateBrowserTest`, `nav-tree.test.mjs`, `template-explorer.test.mjs`, the controller/render tests, the falsifications in the handback. |
 | 2026-10-02 | v1.100 | #371 the dashboard grid row unit | **§4.21's board table** gains the **Grid rows** row: every row of the board's grid is one `--dashboard-row-unit` (app.css), so a Plotly figure has its slot's height on the board page (it measured 34 px for a 4-row slot before). The preview-scoped copy of the rule (#353, §4.22) is retired — one unscoped rule serves both pages. Routes, permissions, roles: none changed. |
 | 2026-10-01 | v1.99 | #349 the unified pipeline workspace — six tabs, the bottom Node Details dock, house tables, view/run ownership | **§3.7**: four surfaces join the house table — the Parameters tab's declared schema (`dt-fit`, client-rendered rows the observer upgrades), and the versions/runs/usage fragments (one shape for the explorer pane and the workspace; the ⋯ verb menus and `data-version-row` ride the rows; runs keep the `data-href` keyboard contract; the parent links name the canonical workspace). **§4.4**: the composition — six tabs (Flow the default; Runs omitted with NO lazy fetch for a caller without the execution read; Runs/Usage lazy-once; Overview client-rendered from the lens-filtered workspace block; the sidebar withdrawn, its content in Overview and Parameters), the IN-PAGE version switch (selector and Versions-tab Open; URL via replaceState; one generation/token discipline over node SQL, checks, runs and usage; per-version run-input drafts, nothing persisted), and run ownership (the identity strip with the effective SUBMITTED parameters and View run's version; graph paint, node states and the Details pane's run rows gate on run version = viewed version). The dock keeps Node Details beside Results/Errors/Events; the execution tabs render only with the execution read. No route, permission or role changed. Guards: `PipelineWorkspaceTabsBrowserTest`, `PipelineWorkspaceRunOwnershipBrowserTest`, the promoter tab-omission arm in `PipelineWorkspacePromoterAdmittedBrowserTest`, `PipelineWorkspaceLayoutBrowserTest` (which replaces the 141 sidebar-resize suite — the pane it resized is withdrawn by the same ruling), `tabs.test.mjs`, `workspace-view.test.mjs`, the falsifications in the handback. **Corrected at merge (orchestrator, review F1/F2):** §4.4's 141 sidebar-resize bullet now records the withdrawal (the pane is gone; `PipelineWorkspaceLayoutBrowserTest` pins it) and §4.3b's "compact rows, never a table" now states the shared house-table fragment. |
 | 2026-10-01 | v1.98 | L4b (#353) the visualization test preview | **New §4.22** — the first session-less, capability-authenticated page: `GET /visualizations/{id}/preview?session=`, its standalone head (no layout, no CSRF token, no cookie), the per-case cards mounted by the vendored runtime in its fixture mode, the one byte-identical 404 state for every refusal, and its guards. |

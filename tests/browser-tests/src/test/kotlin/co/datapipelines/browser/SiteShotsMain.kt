@@ -1142,7 +1142,10 @@ object SiteShotsMain {
             setTheme("dark")
             page.navigate("$baseUrl/pipelines")
             waitFor("#pipeline-list-wrapper")
-            // The showcase's folders, so the dark shell shows the pipeline the other shots do.
+            // #350: the pipeline tree is the SIDEBAR's — open it and the showcase's folders, so
+            // the dark shell shows the pipeline the other shots do.
+            if (page.locator("#nav-tree-pipelines").isHidden) page.click("[data-nav-branch='pipelines'] [data-nav-tree-toggle]")
+            waitFor("#pipeline-nav-root .tpl-tree")
             folderPrefixes(showcase).forEach { expandFolder(it, PIPELINES_PARTIAL) }
             shoot("shell-dark.png")
             setTheme("light")
@@ -1395,19 +1398,16 @@ object SiteShotsMain {
         // ---------------------------------------------------------------- helpers
 
         private fun openEditor(name: String) {
-            page.navigate("$baseUrl/pipelines")
+            // #350: /pipelines is the flat catalog — its row for [name] IS the link into the
+            // workspace (read off the row, never guessed), the same URL the sidebar leaf carries.
+            page.navigate("$baseUrl/pipelines?q=" + java.net.URLEncoder.encode(name, Charsets.UTF_8))
             waitFor("#pipeline-list-wrapper")
-            // 067: the explorer is a folder tree, not a table — expand the name's prefix one
-            // segment at a time (each expansion fetches ONE more level), then read the editor
-            // URL off the LEAF itself: data-editor-url is the same URL the detail pane's Open
-            // button uses, and reading it depends on no detail-pane markup.
-            folderPrefixes(name).forEach { prefix -> expandFolder(prefix, PIPELINES_PARTIAL) }
-            val leaf = page.locator("button.tpl-leaf:has(.tpl-label[title='$name'])").first()
-            leaf.waitFor()
-            val editorUrl =
-                leaf.getAttribute("data-editor-url")
-                    ?: error("pipeline leaf '$name' carries no data-editor-url")
-            page.navigate("$baseUrl$editorUrl")
+            val row = page.locator("#pipeline-list-wrapper a.tpl-result:has(.tpl-path[title='$name'])").first()
+            row.waitFor()
+            val workspaceUrl =
+                row.getAttribute("href")
+                    ?: error("catalog row '$name' carries no href")
+            page.navigate("$baseUrl$workspaceUrl")
             // 080 renamed the canvas element: `#cy-container` (065) is `#cy-canvas` now, and
             // `PipelineGraph` is constructed against that id (init.js). Waiting on the old one
             // times out on a page that rendered perfectly.

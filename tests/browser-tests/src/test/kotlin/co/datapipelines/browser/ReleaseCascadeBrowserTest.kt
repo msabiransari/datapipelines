@@ -119,20 +119,9 @@ class ReleaseCascadeBrowserTest : BrowserSuite() {
     private fun openDialog(button: Locator): Locator {
         button.click()
         return page
-            .locator("#px-dialog [data-lifecycle-dialog]")
+            .locator("#pe-dialog [data-lifecycle-dialog]")
             .first()
             .also { it.waitFor() }
-    }
-
-    /** The success toast wait of LifecycleDialogBrowserTest — baseline BEFORE the action. */
-    private fun successToastAfter(action: () -> Unit): String {
-        val before = page.locator("#toast .ds-toast").count()
-        action()
-        page.waitForFunction(
-            "(n) => document.querySelectorAll('#toast .ds-toast').length > n",
-            before,
-        )
-        return page.locator("#toast .ds-toast").nth(before).innerText()
     }
 
     @Test
@@ -145,16 +134,17 @@ class ReleaseCascadeBrowserTest : BrowserSuite() {
         val shared = fixture.shared
         val own = fixture.own
 
+        // #350: the release opens from the pipeline's WORKSPACE header (the explorer's detail
+        // pane is gone); its POST answers HX-Redirect with the layout's flash.
         page.setViewportSize(1280, 900)
-        page.navigate("$baseUrl/pipelines")
+        openWorkspace(fixture.pipelineId)
         // The seeded user's default theme is whatever the deployment says; the pictures
         // below are labelled by theme, so pin it before the first one.
         ensureTheme("light")
-        selectLeafOf(fixture.pipelineName)
 
         // 2 — the dialog: the consent group, checked, one row per draft pin, the shared one
         //     naming its other pinner; Release ENABLED (no checks on this version).
-        val dialog = openDialog(page.locator(".tplx-detail-actions button", Page.LocatorOptions().setHasText("Release v1")))
+        val dialog = openDialog(releaseButton())
         // Located by the arm's hook, NOT by name — so stripping the checkbox's `name` (the
         // consent the POST carries) is caught at the release arm below, where it matters
         // (the server refuses template_not_released and no success toast lands), and not by
@@ -179,14 +169,14 @@ class ReleaseCascadeBrowserTest : BrowserSuite() {
         //     again arms it (the live-listener transition).
         consent.uncheck()
         page.waitForFunction(
-            "() => document.querySelector(\"#px-dialog button[data-verb='pipeline-release-confirm']\").disabled === true",
+            "() => document.querySelector(\"#pe-dialog button[data-verb='pipeline-release-confirm']\").disabled === true",
         )
         dialog.locator("[data-cascade-pin='$shared@1'] .plc-cascade-off").isVisible shouldBe true
         dialog.locator("[data-cascade-pin='$shared@1'] .plc-cascade-off").innerText() shouldContain "release the template first"
         dialog.locator("[data-cascade-pin='$shared@1'] .plc-cascade-on").isVisible shouldBe false
         consent.check()
         page.waitForFunction(
-            "() => document.querySelector(\"#px-dialog button[data-verb='pipeline-release-confirm']\").disabled === false",
+            "() => document.querySelector(\"#pe-dialog button[data-verb='pipeline-release-confirm']\").disabled === false",
         )
 
         // The handback's pictures: the checked and unchecked group, light and dark — taken
@@ -200,12 +190,12 @@ class ReleaseCascadeBrowserTest : BrowserSuite() {
         val releaseAgain = again.locator("button[data-verb='pipeline-release-confirm']")
         releaseAgain.waitFor()
 
-        // 4 — the release lands through the dialog's own POST, and the toast names the cascade.
-        val toast = successToastAfter { releaseAgain.click() }
-        page.locator("#toast .ds-toast").first().waitFor()
+        // 4 — the release lands through the dialog's own POST; the workspace reloads with the
+        //     cascade's flash (the editor-surface shape), and the AUDIT names the templates.
+        val toast = releaseAndFlash(fixture.pipelineId) { releaseAgain.click() }
         page.screenshot(Page.ScreenshotOptions().setPath(shotDir().resolve("142-release-applied-light.png")))
-        toast shouldContain "Released v1"
-        toast shouldContain "Also released: $shared@1, $own@1."
+        toast shouldContain "Released"
+        toast shouldContain "the draft templates it pinned were released with it"
         toast shouldNotContain "release the template first"
 
         assertAuditedCascade(fixture.pipelineId, shared, own)
@@ -253,10 +243,9 @@ class ReleaseCascadeBrowserTest : BrowserSuite() {
             )
 
         page.setViewportSize(1280, 900)
-        page.navigate("$baseUrl/pipelines")
-        selectLeafOf(pipelineName)
+        openWorkspace(pipelineId)
 
-        val dialog = openDialog(page.locator(".tplx-detail-actions button", Page.LocatorOptions().setHasText("Release v1")))
+        val dialog = openDialog(releaseButton())
         val consent = dialog.locator("[data-consent-input]")
         consent.waitFor()
         consent.isChecked shouldBe true
@@ -275,11 +264,10 @@ class ReleaseCascadeBrowserTest : BrowserSuite() {
             bothOrdersOn(dialog, consent)
         }
 
-        // The override releases WITH the cascade: the toast names the template, the audit
-        // row carries the override reason and the cascade list.
-        val toast = successToastAfter { page.locator(OVERRIDE).click() }
-        toast shouldContain "Released v1"
-        toast shouldContain "Also released: $template@1."
+        // The override releases WITH the cascade: the flash says so, the audit row carries the
+        // override reason and the cascade list.
+        val toast = releaseAndFlash(pipelineId) { page.locator(OVERRIDE).click() }
+        toast shouldContain "the draft templates it pinned were released with it"
         assertAuditedOverrideWithCascade(pipelineId, template)
     }
 
@@ -311,7 +299,7 @@ class ReleaseCascadeBrowserTest : BrowserSuite() {
     }
 
     private fun fillReason(text: String) {
-        page.locator("#px-dialog textarea[name='overrideChecksReason']").fill(text)
+        page.locator("#pe-dialog textarea[name='overrideChecksReason']").fill(text)
     }
 
     private fun waitDisabled(
@@ -402,10 +390,28 @@ class ReleaseCascadeBrowserTest : BrowserSuite() {
 
     private fun closeDialog() {
         page.keyboard().press("Escape")
-        page.locator("#px-dialog [data-lifecycle-dialog]").waitFor(Locator.WaitForOptions().setState(WaitForSelectorState.DETACHED))
+        page.locator("#pe-dialog [data-lifecycle-dialog]").waitFor(Locator.WaitForOptions().setState(WaitForSelectorState.DETACHED))
     }
 
-    private fun releaseButton(): Locator = page.locator(".tplx-detail-actions button", Page.LocatorOptions().setHasText("Release v1"))
+    /** The workspace header's Release (the draft is the viewed version of a draft-only pipeline). */
+    private fun releaseButton(): Locator = page.locator(".pe-topbar [data-verb='pipeline-release']")
+
+    private fun openWorkspace(id: String) {
+        page.navigate("$baseUrl/pipelines/$id")
+        page.waitForSelector(".pe-root")
+        releaseButton().waitFor()
+    }
+
+    /** The editor-surface release: HX-Redirect back onto the workspace, the flash in the stack. */
+    private fun releaseAndFlash(
+        id: String,
+        action: () -> Unit,
+    ): String {
+        action()
+        page.waitForURL("**/pipelines/$id?ok=released_with_templates")
+        page.locator("#toast .ds-toast").first().waitFor()
+        return page.locator("#toast .ds-toast").first().innerText()
+    }
 
     /** The dark pictures of the same dialog, then the dialog reopened in light with the box checked again. */
     private fun darkShotsThenReopen(shared: String): Locator {
@@ -475,30 +481,8 @@ class ReleaseCascadeBrowserTest : BrowserSuite() {
         }
     }
 
-    private fun selectLeafOf(name: String) {
-        openDrawerIfPresent()
-        page.waitForSelector("summary.tpl-summary")
-        if (page.locator("details.tpl-folder[open]").count() == 0) {
-            page.waitForResponse({ it.url().contains("prefix=test") }) {
-                page.locator("summary.tpl-summary").first().click()
-            }
-        }
-        page.waitForSelector("button.tpl-leaf")
-        val leaf = page.locator("button.tpl-leaf", Page.LocatorOptions().setHasText(name.substringAfterLast('/'))).first()
-        page.waitForResponse({ it.url().contains("/detail") || it.url().contains("/versions") }) { leaf.click() }
-        page.waitForSelector(".tplx-detail-header")
-    }
-
-    private fun openDrawerIfPresent() {
-        val browse = page.locator("[data-explorer-drawer-open]")
-        if (browse.count() > 0 && browse.first().isVisible) {
-            browse.first().click()
-            page.locator(".tplx-body.is-drawer-open").waitFor()
-        }
-    }
-
     private companion object {
-        const val OVERRIDE = "#px-dialog button[data-verb='pipeline-release-override']"
+        const val OVERRIDE = "#pe-dialog button[data-verb='pipeline-release-override']"
         const val REASON = "Verified by hand against the source rollup."
     }
 }

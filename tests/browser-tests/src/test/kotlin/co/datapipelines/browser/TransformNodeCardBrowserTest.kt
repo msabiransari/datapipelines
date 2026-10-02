@@ -37,8 +37,8 @@ class TransformNodeCardBrowserTest : BrowserSuite() {
         val name = seedPipeline(slug, datasource)
 
         page.navigate("$baseUrl/pipelines?q=$slug")
-        page.locator("button.tpl-result, button.tpl-leaf").first().click()
-        page.locator("a.tplx-detail-open").first().click()
+        // #350: the catalog row IS the link into the workspace (the detail pane and its Open are gone).
+        page.locator("#pipeline-list-wrapper a.tpl-result").first().click()
         page.waitForURL(PipelineWorkspaceUrl.PATTERN)
         page.locator(".pe-card[data-node-id='shape_orders']").waitFor()
         // The pin resolves after the first paint — wait for the language, never for time.

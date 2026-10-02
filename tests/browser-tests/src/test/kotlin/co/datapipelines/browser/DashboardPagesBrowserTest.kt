@@ -73,13 +73,28 @@ class DashboardPagesBrowserTest : DashboardBrowserSuite() {
         val root = ready("dpbranch")
         seedBoard(root)
         page.navigate("$baseUrl/dashboard")
-        page.waitForSelector(".app-nav-branch-tree")
+        page.waitForSelector("[data-nav-branch='dashboards']")
 
-        // Closed until its own disclosure is clicked; the page tree's id does not exist here.
+        // Closed until its own toggle is clicked (#350: the rail's one navigating-tree pattern —
+        // a toggle beside the link, a panel below); the page tree's id does not exist here.
         page.locator("#dash-tree-nav .tpl-tree").count() shouldBe 0
-        page.click(".app-nav-branch-tree summary")
+        page.click("[data-nav-branch='dashboards'] [data-nav-tree-toggle]")
         page.waitForSelector("#dash-tree-nav .tpl-tree")
         page.waitForSelector("#dash-tree-nav .tpl-summary")
+        page.locator("[data-nav-branch='dashboards'] [data-nav-tree-toggle]").getAttribute("aria-expanded") shouldBe "true"
+        // The shared engine's NAV context: the arrows move focus through the tree and navigate
+        // nowhere (L3b left this tree unwired for exactly that reason; the context solves it).
+        val start = page.url()
+        page.waitForFunction(
+            "() => { const s = document.querySelector('#dash-tree-nav .tpl-summary'); " +
+                "const d = s && s['htmx-internal-data']; return !!(d && d.initHash); }",
+        )
+        page.focus("#dash-tree-nav .tpl-summary")
+        page.keyboard().press("ArrowRight")
+        page.waitForSelector("#dash-tree-nav details.tpl-folder[open] > .tpl-level:not(.tpl-level-pending)")
+        page.keyboard().press("ArrowDown")
+        page.evaluate("() => !!document.activeElement.closest('#dash-tree-nav')") shouldBe true
+        page.url() shouldBe start
         // The NAV scope rides the lazy request: this level's folder placeholder carries the
         // nav-scope derived id, never the page's.
         val levelIds =

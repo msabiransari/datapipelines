@@ -226,6 +226,7 @@ class PipelineLifecycleDialogController(
         response: HttpServletResponse,
         @PathVariable id: UUID,
         @RequestParam version: Int,
+        @RequestParam(required = false) from: String?,
     ): Any {
         val principal = LifecycleVerbs.requireSession()
         val workspaceId = principal.requireWorkspace().id
@@ -250,6 +251,9 @@ class PipelineLifecycleDialogController(
             } else {
                 "Nothing eligible remains — the pipeline has no current version; its endpoints answer 503."
             }
+        // #395: the workspace's Versions tab (from=editor) has no explorer detail to re-render —
+        // it reloads onto that tab with a flash, the editor-surface shape release/purge answer.
+        if (from == FROM_EDITOR) return redirect(versionsTab(id, "discarded"))
         return applied(model, response, workspaceId, id, "Discarded v$version", outcome)
     }
 
@@ -279,6 +283,7 @@ class PipelineLifecycleDialogController(
         response: HttpServletResponse,
         @PathVariable id: UUID,
         @RequestParam version: Int,
+        @RequestParam(required = false) from: String?,
     ): Any {
         val principal = LifecycleVerbs.requireSession()
         val workspaceId = principal.requireWorkspace().id
@@ -291,6 +296,7 @@ class PipelineLifecycleDialogController(
             mapOf("pipeline_id" to id.toString(), "version" to version, "current_version_after" to record.currentVersion),
         )
         val moved = record.currentVersion == version
+        if (from == FROM_EDITOR) return redirect(versionsTab(id, "restored")) // #395, as discard
         return applied(
             model,
             response,
@@ -364,11 +370,13 @@ class PipelineLifecycleDialogController(
         model: Model,
         @PathVariable id: UUID,
         @RequestParam(required = false) version: Int?,
+        @RequestParam(required = false) from: String?,
     ): String {
         LifecycleVerbs.requireSession()
         model.addAttribute("dlg", dialogs.switch(currentPrincipal().requireWorkspace().id, id))
         model.addAttribute("preselect", version)
-        model.addAttribute("from", FROM_EXPLORER)
+        // #395: the Versions tab passes from=editor (its row link always did; this GET ignored it).
+        model.addAttribute("from", from ?: FROM_EXPLORER)
         // 177 §D.8: the dialog's verb renders inside a role guard like every other verb — the route
         // already refuses the wrong role; the markup now says so too, and the exemption list is empty.
         RoleModel.stamp(model)
@@ -382,7 +390,8 @@ class PipelineLifecycleDialogController(
         response: HttpServletResponse,
         @PathVariable id: UUID,
         @RequestParam version: Int,
-    ): String {
+        @RequestParam(required = false) from: String?,
+    ): Any {
         val principal = LifecycleVerbs.requireSession()
         val workspaceId = principal.requireWorkspace().id
         val record = pipelines.switchCurrent(workspaceId, id, version)
@@ -393,6 +402,7 @@ class PipelineLifecycleDialogController(
             workspaceId,
             mapOf("pipeline_id" to id.toString(), "to" to record.currentVersion),
         )
+        if (from == FROM_EDITOR) return redirect(versionsTab(id, "switched")) // #395, as discard
         return applied(
             model,
             response,
@@ -439,6 +449,12 @@ class PipelineLifecycleDialogController(
      * flash bin renders the toast after it lands.
      */
     private fun redirect(url: String): ResponseEntity<String> = ResponseEntity.ok().header("HX-Redirect", url).body("")
+
+    /** #395 — the workspace's Versions tab with the layout flash [ok] names (default.html's bin). */
+    private fun versionsTab(
+        id: UUID,
+        ok: String,
+    ): String = "/pipelines/$id?tab=versions&ok=$ok"
 
     /** The typed-confirm guard — BEFORE the service, so a mismatch never reaches the verb. */
     private fun requireTypedConfirm(

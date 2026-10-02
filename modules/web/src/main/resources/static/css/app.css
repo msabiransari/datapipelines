@@ -606,6 +606,19 @@ button.app-busy::after {
   --app-rail-expanded: 232px;
   --app-rail-width: var(--app-rail-expanded);
   --app-rail-collapsed: 60px;
+  /* #350 (workspace spec §5) — the rail while a sidebar TREE is open: it fits the visible rows
+     (`--app-rail-tree-fit`, measured by nav-tree.js and written on <html>) between these two
+     bounds, and the tree's own region scrolls sideways past the maximum. Layout tokens, not
+     configuration; the closed-tree rail keeps --app-rail-expanded. */
+  --app-rail-tree-min: 320px;
+  --app-rail-tree-max: 400px;
+  --app-rail-tree-width: clamp(
+    var(--app-rail-tree-min),
+    var(--app-rail-tree-fit, var(--app-rail-tree-min)),
+    var(--app-rail-tree-max)
+  );
+  /* The tree region's vertical bound, so the sections below it stay reachable. */
+  --app-nav-tree-max-block: min(50dvh, 32rem);
 }
 
 /* #237: the content track is minmax(0, 1fr), never a bare 1fr — the phone band's rule below,
@@ -652,6 +665,33 @@ button.app-busy::after {
    never renders at one width and snaps to the other in front of the reader. */
 :root.rail-collapsed .app-shell {
   --app-rail-width: var(--app-rail-collapsed);
+}
+
+/* #350 — an open sidebar tree widens the rail to --app-rail-tree-width. Only on the widths
+   where the rail is a column, and NEVER under an icon collapse: `:not(.rail-collapsed)` is
+   in the selector, so an explicit collapse wins over any width a late tree response measures
+   (spec §5 — it is a selector, not a race). From 768 to 1099px the rail is collapsed by
+   default, so there it widens only after the reader expanded it (`rail-expanded`). Below 768
+   the drawer keeps its own full-size width (the phone breakpoint takes precedence). The status
+   pill is a fixed sibling outside the shell and is told the same thing (see its rules). */
+@media (min-width: 1100px) {
+  :root.rail-tree-open:not(.rail-collapsed) .app-shell {
+    --app-rail-width: var(--app-rail-tree-width);
+  }
+
+  :root.rail-tree-open:not(.rail-collapsed) .app-status-pill {
+    left: calc(var(--app-rail-tree-width) + var(--gap-lg));
+  }
+}
+
+@media (min-width: 768px) and (max-width: 1099.98px) {
+  :root.rail-tree-open.rail-expanded:not(.rail-collapsed) .app-shell {
+    --app-rail-width: var(--app-rail-tree-width);
+  }
+
+  :root.rail-tree-open.rail-expanded:not(.rail-collapsed) .app-status-pill {
+    left: calc(var(--app-rail-tree-width) + var(--gap-lg));
+  }
 }
 
 .app-rail {
@@ -823,6 +863,9 @@ button.app-busy::after {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  /* #350: the rail never scrolls sideways — a sidebar tree past its maximum scrolls inside its
+     own region, and the other sections stay where they are. */
+  overflow-x: hidden;
   padding: var(--gap-xs) var(--gap-sm);
   display: grid;
   gap: var(--space-0-5);
@@ -898,6 +941,138 @@ button.app-busy::after {
     justify-content: center;
     padding-inline: 0;
   }
+}
+
+/* ---- #350: the navigating-tree pattern (layouts/default.html `.app-nav-branch`) ----
+   One shape for every sidebar tree — Pipelines and Dashboards today, Templates next: the item
+   link and its toggle share a row; the panel spans the row below them. The tree rows are the
+   explorers' own (template-tree.css); what is here is the SIDEBAR's: a compact row height, the
+   guide geometry the rows draw against, whole labels (the region scrolls sideways instead of
+   truncating), and the bounded scroll region itself. */
+.app-nav-branch {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: var(--space-0-5);
+}
+
+.app-nav-branch > .app-nav-tree {
+  grid-column: 1 / -1;
+}
+
+.app-nav-branch-toggle {
+  display: grid;
+  place-items: center;
+  width: var(--field-height-sm);
+  height: var(--field-height-sm);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-base);
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.app-nav-branch-toggle:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.app-nav-branch-toggle:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: calc(-1 * var(--space-px));
+}
+
+.app-nav-branch-toggle[aria-expanded="true"] .tpl-chevron {
+  transform: rotate(90deg);
+}
+
+.app-nav-tree {
+  /* The explorers' guide geometry (template-tree.css derives the rows' guides from these;
+     `.tplx-tree` declares them for the page explorer). --tpl-row-h follows the sidebar's
+     compact padding below, so the guides still meet the chevrons. */
+  --tpl-indent: calc(var(--gap-md) + var(--gap-xs));
+  --tpl-row-h: calc(var(--space-1) * 2 + var(--text-sm) * var(--leading-normal));
+  --tpl-guide-x: calc(var(--gap-xs) + var(--icon-xs) / 2 - var(--tpl-indent));
+
+  display: grid;
+  gap: var(--gap-xs);
+  min-width: 0;
+  margin: var(--space-0-5) 0 var(--gap-xs) var(--gap-sm);
+}
+
+.app-nav-tree[hidden] {
+  display: none;
+}
+
+.app-nav-tree-input {
+  width: 100%;
+  height: var(--field-height-sm);
+  font-size: var(--text-sm);
+}
+
+/* The bounded region: vertical AND horizontal scrolling live here and nowhere else. */
+.app-nav-tree-scroll {
+  min-width: 0;
+  max-height: var(--app-nav-tree-max-block);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+/* The tree is as wide as its widest VISIBLE row (closed levels render nothing), and never
+   narrower than the region — nav-tree.js measures it with the floor lifted (is-measuring). */
+.app-nav-tree-scroll > .tpl-level,
+.app-nav-tree-scroll > [data-pipeline-list] {
+  width: max-content;
+  min-width: 100%;
+}
+
+.app-nav-tree.is-measuring .app-nav-tree-scroll > * {
+  min-width: 0;
+}
+
+/* Prose in the region (empty states, the lens notice, the folder-overflow note, the pager, a
+   failure row) wraps to the region instead of setting its width. */
+.app-nav-tree-scroll :is(.tpl-level, [data-pipeline-list]) > :not(ul) {
+  width: 0;
+  min-width: 100%;
+}
+
+.app-nav-tree .tpl-summary,
+.app-nav-tree .tpl-leaf,
+.app-nav-tree .tpl-result {
+  padding-block: var(--space-1);
+}
+
+/* Whole labels: the sidebar's answer to a long name is the region's horizontal scrollbar,
+   never an ellipsis (the owner's ruling, spec §5). */
+.app-nav-tree .tpl-label,
+.app-nav-tree .tpl-path {
+  overflow: visible;
+  text-overflow: clip;
+}
+
+/* The leaf of the page being viewed (nav-tree.js marks it aria-current). */
+.app-nav-tree .tpl-leaf[aria-current="page"],
+.app-nav-tree .tpl-result[aria-current="page"] {
+  font-weight: var(--weight-semibold);
+}
+
+.app-nav-tree-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gap-xs);
+  margin: 0;
+  padding: var(--gap-xs);
+  color: var(--text-danger);
+  font-size: var(--text-xs);
+}
+
+/* #350 — the /pipelines catalog: the search above the flat list (the list rows are
+   template-tree.css's .tpl-results). */
+.app-catalog-search {
+  margin-bottom: var(--gap-md);
 }
 
 .app-rail-foot {
