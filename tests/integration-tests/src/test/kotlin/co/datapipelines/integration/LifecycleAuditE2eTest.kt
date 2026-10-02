@@ -66,6 +66,7 @@ class LifecycleAuditE2eTest {
                     "parameter_set_name" to name,
                     "version" to 1,
                     "workspace_id" to WORKSPACE_ID,
+                    "scope" to "entity",
                 ),
         )
     }
@@ -93,6 +94,7 @@ class LifecycleAuditE2eTest {
                     "visualization_name" to name,
                     "version" to 1,
                     "workspace_id" to WORKSPACE_ID,
+                    "scope" to "entity",
                 ),
         )
     }
@@ -129,6 +131,7 @@ class LifecycleAuditE2eTest {
                     "dashboard_name" to board["name"].asText(),
                     "version" to 1,
                     "workspace_id" to WORKSPACE_ID,
+                    "scope" to "entity",
                 ),
         )
     }
