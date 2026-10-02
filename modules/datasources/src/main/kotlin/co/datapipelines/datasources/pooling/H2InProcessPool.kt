@@ -50,10 +50,20 @@ internal object H2InProcessPool {
      * (or `sa`/"" for a credential-less fresh database), then pool connections as
      * [RESTRICTED_USER]. On any failure the session's first connection is closed with the pool
      * that never came up — fully built or not at all, the `openLakeInstance` rule.
+     *
+     * [onRestrictedAuthFailure] is #204 L2's repair wire: a file database whose restricted
+     * password was rotated by ANOTHER builder (a second instance, a restore, a hand edit) keeps
+     * its warm connections but fails every post-build creation with H2's `28000`. Hikari surfaces
+     * that on the caller's thread with the driver's SQLState attached, the pool's
+     * [HikariConnectionPool.leaseConnection] detects it, and this callback — wired by the
+     * production registry to its own pool eviction — takes the pool out of the map so the next
+     * acquisition rebuilds through this method, rotating the password again. Detect only: the
+     * failing lease's own error reaches its caller unchanged.
      */
     fun build(
         datasource: Datasource,
         config: HikariConfig,
+        onRestrictedAuthFailure: (() -> Unit)? = null,
     ): HikariConnectionPool {
         val session =
             H2RestrictedSession.open(
@@ -78,7 +88,11 @@ internal object H2InProcessPool {
             config.initializationFailTimeout = maxOf(1, config.initializationFailTimeout)
             val pool = HikariDataSource(config)
             session.firstConnection.close()
-            return HikariConnectionPool(datasource.name, pool)
+            return HikariConnectionPool(
+                datasource.name,
+                pool,
+                onRestrictedAuthFailure = onRestrictedAuthFailure,
+            )
         } catch (
             // HikariDataSource construction and PoolInitializationException are RuntimeExceptions
             // (the §8.1 probe catches the same family for the same reason): whichever half failed,
