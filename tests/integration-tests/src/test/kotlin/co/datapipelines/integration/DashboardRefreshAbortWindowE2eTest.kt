@@ -146,7 +146,7 @@ class DashboardRefreshAbortWindowE2eTest {
         post("/api/v1/dashboards/$HUNG/runtime/refreshes/${holder1.refreshId}/abort", """{"instance_id":"$INSTANCE"}""", OWNER)
             .statusCode shouldBe 202
         awaitNoRunningRefresh()
-        withClue("every admitted place was returned") { refreshesInWorkspace() shouldBe 0 }
+        awaitEveryPlaceReturned()
         refresh(FAST, OWNER, refreshBody(configurationId(FAST, OWNER), uuid()))
             .of("refresh_completed")
             .single()
@@ -263,7 +263,7 @@ class DashboardRefreshAbortWindowE2eTest {
         }
         held.forEach { (_, future) -> future.get(90, TimeUnit.SECONDS).done(60) }
         awaitNoRunningRefresh()
-        withClue("every admitted place was returned") { refreshesInWorkspace() shouldBe 0 }
+        awaitEveryPlaceReturned()
     }
 
     // ================================================================================================ helpers
@@ -344,6 +344,19 @@ class DashboardRefreshAbortWindowE2eTest {
             Thread.sleep(POLL_MILLIS)
         }
         error("no start marker for $refreshId within $MARKER_WAIT_SECONDS s — the start never reached its registration")
+    }
+
+    /**
+     * The places come back in the engine launch's `finally`, AFTER the engine ended the row — so a poll that saw no
+     * RUNNING row can still see the counter one release behind it. Awaited, like the row; the deadline is the leak.
+     */
+    private fun awaitEveryPlaceReturned() {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(STREAM_WAIT_SECONDS)
+        while (System.nanoTime() < deadline) {
+            if (refreshesInWorkspace() == 0) return
+            Thread.sleep(POLL_MILLIS)
+        }
+        withClue("every admitted place was returned within $STREAM_WAIT_SECONDS s") { refreshesInWorkspace() shouldBe 0 }
     }
 
     private fun awaitNoRunningRefresh() {
