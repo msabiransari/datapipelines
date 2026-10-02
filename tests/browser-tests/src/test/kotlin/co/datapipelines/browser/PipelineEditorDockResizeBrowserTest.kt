@@ -83,11 +83,16 @@ class PipelineEditorDockResizeBrowserTest : BrowserSuite() {
         () => {
           const dock = document.querySelector('.pe-dock');
           const tabs = document.querySelector('.pe-dock-tabs');
+          // #349: the execution identity strip is the dock's first row for a caller with
+          // the execution read — the PANE is what the splitter sizes, so the strip comes
+          // off the measure.
+          const strip = document.querySelector('.pe-run-strip');
+          const stripH = strip && getComputedStyle(strip).display !== 'none' ? strip.getBoundingClientRect().height : 0;
           const canvas = document.getElementById('cy-canvas');
           const handle = document.querySelector('[data-splitter="editor-dock"]');
           const cy = window.__peInstance && window.__peInstance.cy;
           return {
-            paneH: dock.getBoundingClientRect().height - tabs.getBoundingClientRect().height,
+            paneH: dock.getBoundingClientRect().height - tabs.getBoundingClientRect().height - stripH,
             dockH: dock.getBoundingClientRect().height,
             canvasH: canvas.getBoundingClientRect().height,
             bodyH: document.querySelector('.pe-body').getBoundingClientRect().height,

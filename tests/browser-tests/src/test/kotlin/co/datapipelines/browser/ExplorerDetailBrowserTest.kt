@@ -242,6 +242,10 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
 
             // Nothing inside the detail sticks out of it: a table or a chip row that does is
             // exactly what "tables scroll inside their cards, never the page" forbids.
+            // A element inside a SCROLL CONTAINER (.dt-viewport) is clipped by it — its
+            // rect may extend past the edge while the VISIBLE box does not (#349's house
+            // tables scroll inside their frames at phone widths) — so contained
+            // descendants are judged by their scroll container, not their own rect.
             val stickingOut =
                 page
                     .evaluate(
@@ -249,8 +253,17 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
                         () => {
                           const d = document.querySelector('.tplx-detail');
                           const edge = d.getBoundingClientRect().right;
+                          const clipped = (e) => {
+                            let a = e.parentElement;
+                            while (a && a !== d) {
+                              const o = getComputedStyle(a).overflowX;
+                              if ((o === 'auto' || o === 'scroll' || o === 'clip') && a.getBoundingClientRect().right <= edge + 1) return true;
+                              a = a.parentElement;
+                            }
+                            return false;
+                          };
                           return Array.from(d.querySelectorAll('*'))
-                            .filter(e => e.getBoundingClientRect().right > edge + 1)
+                            .filter(e => e.getBoundingClientRect().right > edge + 1 && !clipped(e))
                             .slice(0, 5)
                             .map(e => (e.tagName + (typeof e.className === 'string' && e.className.trim()
                               ? '.' + e.className.trim().split(/\s+/).join('.') : '')))

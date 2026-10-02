@@ -353,6 +353,7 @@
    run the execution tabs belong to — version, status, id, effective parameters —
    with the way back to the run's version when the page is viewing another. ---- */
 .pe-run-strip {
+  grid-row: 1;
   display: flex;
   align-items: center;
   gap: var(--gap-sm, 8px);
@@ -1510,9 +1511,11 @@
  * 2026-09-05), so the dock is always present — there is no hidden state. */
 .pe-dock {
   display: grid;
-  /* #349: the run strip is the dock's FIRST grid child when the caller has the
-     execution read — `auto` collapses to nothing without it (a promoter's dock),
-     and the tabs + pane keep their own rows either way. */
+  /* #349: the run strip is the dock's first row for a caller with the execution read.
+     The children are PINNED to their tracks below — a display:none child (the strip
+     before a run, the hidden panes) leaves the grid entirely, and without the pins
+     every sibling would shift up a row (the tabs wearing the pane's 232px, the pane
+     clipped to the tabs' 38px — measured on the lane instance). */
   grid-template-rows: auto var(--pe-dock-tabs-h) var(--pe-dock-pane-h);
   flex: 0 0 auto;
   min-height: 0;
@@ -1608,6 +1611,7 @@ html.dp-splitting-y * {
 }
 
 .pe-dock-tabs {
+  grid-row: 2;
   display: flex;
   align-items: center;
   gap: 2px;
@@ -1707,6 +1711,7 @@ html.dp-splitting-y * {
 }
 
 .pe-dock-body {
+  grid-row: 3;
   min-height: 0;
   overflow: auto;
 }
