@@ -15,6 +15,9 @@ object VisualizationAuditEvents {
     const val EXPORTED = "visualization.exported"
     const val IMPORTED = "visualization.imported"
 
+    /** enums.md §15 and auth.md §10.1 — the test workflow's one REST write, the screenshot upload (#164). */
+    const val SCREENSHOT_UPLOADED = "visualization.test.screenshot_uploaded"
+
     /** The five human verbs' events — the drift guards' non-vacuity floor. */
     val FIVE: Set<String> =
         setOf(
@@ -26,5 +29,5 @@ object VisualizationAuditEvents {
         )
 
     /** Every visualization.* event the surfaces can emit — exactly what §15 documents. */
-    val ALL: Set<String> = FIVE + lifecycle.versionReleased + setOf(EXPORTED, IMPORTED)
+    val ALL: Set<String> = FIVE + lifecycle.versionReleased + setOf(EXPORTED, IMPORTED, SCREENSHOT_UPLOADED)
 }

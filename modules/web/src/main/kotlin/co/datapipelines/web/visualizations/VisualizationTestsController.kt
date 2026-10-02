@@ -51,7 +51,7 @@ import java.util.UUID
  * (`RequestBodyCapFilter`'s one route exemption), never the platform's 2 MiB.
  *
  * ## The upload is audited (#164)
- * The route reads no principal, so the row [AUDIT_SCREENSHOT_UPLOADED] names the run's STARTER (`started_by`, which
+ * The route reads no principal, so the row [VisualizationAuditEvents.SCREENSHOT_UPLOADED] names the run's STARTER (`started_by`, which
  * the stored screenshot already carries as `uploadedBy`) with no key, and the source IP the platform's one resolver
  * reads. It is written once the store has returned — a refused upload (the capability judged before a byte is
  * read, or the service's refusals) stores nothing and writes no row — and its details are ids, size, type and the
@@ -201,7 +201,7 @@ class VisualizationTestsController(
         request: HttpServletRequest,
     ) {
         audit.log(
-            event = AUDIT_SCREENSHOT_UPLOADED,
+            event = VisualizationAuditEvents.SCREENSHOT_UPLOADED,
             userId = stored.uploadedBy,
             keyId = null,
             sourceIp = clientAddresses.clientAddressOf(request),
@@ -245,9 +245,6 @@ class VisualizationTestsController(
             ?.takeIf { it.isNotEmpty() }
 
     companion object {
-        /** enums.md §15 and auth.md §10.1 — the screenshot upload's audit event (#164). */
-        const val AUDIT_SCREENSHOT_UPLOADED = "visualization.test.screenshot_uploaded"
-
         private val FAMILY = ArtifactFamily.VISUALIZATION
 
         /** The runs list's bound: the repository's newest-first read (rest-api §22.2 documents it). */

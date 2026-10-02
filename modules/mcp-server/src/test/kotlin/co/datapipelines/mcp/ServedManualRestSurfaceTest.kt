@@ -110,13 +110,16 @@ class ServedManualRestSurfaceTest {
         const val MAX_QUOTE = 90
 
         /**
-         * What teaches a REST call or a credential, case-insensitively: `curl`, an `Authorization: Bearer` line, a key literal
-         * (`dpk_…`), an API-key header in any spelling (hyphenated or underscored, with or without a prefix — never the prose
-         * words "API key", nor a dotted identifier such as `auth.api_key.invalid` or `api_key.create`), the upload capability's header, and the REST path roots.
+         * What teaches a REST call or a credential, case-insensitively: `curl`, an `Authorization: Bearer` line, a key
+         * literal (`dpk_…`), an API-key header in any spelling (hyphenated or underscored, with or without a prefix —
+         * never the prose words "API key", nor a dotted identifier such as `auth.api_key.invalid` or `api_key.create`),
+         * the upload capability's header, and the REST path roots.
          */
         val SURFACE =
             Regex(
-                "curl|bearer|dpk_|(?<![a-z0-9])(?<![a-z]\\.)(?:[a-z]+-)*api[-_]?key(?![a-z0-9-])(?!\\.[a-z])|dp-upload-token|/api/v1/|/api/<",
+                "curl|bearer|dpk_|" +
+                    "(?<![a-z0-9])(?<![a-z]\\.)(?:[a-z]+-)*api[-_]?key(?![a-z0-9-])(?!\\.[a-z])|" +
+                    "dp-upload-token|/api/v1/|/api/<",
                 RegexOption.IGNORE_CASE,
             )
 

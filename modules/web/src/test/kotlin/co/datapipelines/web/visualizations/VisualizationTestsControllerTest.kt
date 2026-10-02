@@ -212,7 +212,7 @@ class VisualizationTestsControllerTest {
 
         audit.events.size shouldBe 1 // `expected:<1> but was:<0>` is the red this assertion gives without the log call
         val row = audit.events.single()
-        row.event shouldBe VisualizationTestsController.AUDIT_SCREENSHOT_UPLOADED
+        row.event shouldBe VisualizationAuditEvents.SCREENSHOT_UPLOADED
         row.event shouldBe "visualization.test.screenshot_uploaded"
         row.userId shouldBe userId // the run's STARTER: the route has no principal
         row.keyId.shouldBeNull() // and no key
@@ -236,11 +236,18 @@ class VisualizationTestsControllerTest {
     fun `an upload that names no case writes a row without a case key`() {
         every { capabilities.storeScreenshot(id, sessionId, "UPLOAD-MATERIAL", "image/webp", any(), null) } returns
             ScreenshotView(runId, "image/webp", "cd".repeat(32), 3, 2, null, userId, EXPIRES)
-        val request = MockHttpServletRequest("POST", "/").apply { contentType = "image/webp"; setContent(ByteArray(8)) }
+        val request =
+            MockHttpServletRequest("POST", "/").apply {
+                contentType = "image/webp"
+                setContent(ByteArray(8))
+            }
 
         controller.screenshot(id, sessionId, "UPLOAD-MATERIAL", null, request)
 
-        audit.events.single().details.containsKey("case") shouldBe false
+        audit.events
+            .single()
+            .details
+            .containsKey("case") shouldBe false
     }
 
     @Test
