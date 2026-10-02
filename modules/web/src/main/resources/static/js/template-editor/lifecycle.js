@@ -45,6 +45,19 @@
     return (page && page.getAttribute("data-template-id")) || "";
   }
 
+  /**
+   * The version the preview targets — the page's VIEWED version (#398: the workspace names
+   * one resolved version in its root's data attribute; the old editor read the `<select>`).
+   * The server renders the STORED version either way; this keeps the request honest about
+   * what the author is looking at.
+   */
+  function viewedVersion() {
+    var d = doc();
+    var root = d && d.querySelector(".tw-root");
+    if (root) return root.getAttribute("data-viewed-version") || "1";
+    return (byId("versionSelect") && byId("versionSelect").value) || "1";
+  }
+
   /* The draft lifecycle (Release / Discard) that this file carried from 097 §D is gone:
      since 102 those buttons open the §4.3d dialogs (`#te-dialog`, js/lifecycle-dialog.js),
      which own the confirm, the CSRF header and the If-Match hash. What stays here is the
@@ -146,7 +159,7 @@
     var spinner = byId("previewSpinner");
     var pane = byId("previewPane");
     if (!pane || typeof htmx === "undefined") return null;
-    var version = (byId("versionSelect") && byId("versionSelect").value) || "1";
+    var version = viewedVersion();
     /* Whichever body is on screen: the editable textarea on the working version, the
        read-only <pre> on a selected one. The server renders the STORED version either
        way — this only keeps the request honest about what the author is looking at. */

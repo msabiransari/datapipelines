@@ -465,6 +465,28 @@ class ShellRenderTest {
         html shouldContain "data-dp-workspace=\"acme\""
     }
 
+    @Test
+    fun `#398 - Templates carries the same branch - link, a separate toggle, and the lazy sidebar tree with its search`() {
+        val html = engine.process("pipelines/list", webContext().apply { fillList() })
+        val branch = html.substringAfter("data-nav-branch=\"templates\"").substringBefore("data-nav-branch=\"dashboards\"")
+
+        // The item LINK is unchanged: the catalog page, the active section, the crumb pair.
+        branch shouldContain "href=\"/templates\" class=\"app-nav-link"
+        branch shouldContain "data-nav-group=\"Build\" data-nav-label=\"Templates\""
+        // The TOGGLE is its own control — opening the tree is not navigating.
+        branch shouldContain "<button type=\"button\" class=\"app-nav-branch-toggle app-rail-label\" data-nav-tree-toggle"
+        branch shouldContain "aria-expanded=\"false\" aria-controls=\"nav-tree-templates\""
+        // The PANEL: closed on paint, the nav-scope root URL, the document's workspace for the
+        // admission guard, the sidebar search addressing the sidebar's root, the bounded region.
+        branch shouldContain "id=\"nav-tree-templates\" data-nav-tree=\"templates\" hidden"
+        branch shouldContain "data-nav-root-url=\"/partials/templates?scope=nav\""
+        branch shouldContain "data-nav-workspace=\"acme\""
+        branch shouldContain "hx-get=\"/partials/templates?scope=nav\""
+        branch shouldContain "hx-target=\"#template-nav-root\""
+        branch shouldContain "data-nav-tree-scroll"
+        branch shouldContain "id=\"template-nav-root\""
+    }
+
     private fun webContext(): WebContext =
         WebContext(
             JakartaServletWebApplication

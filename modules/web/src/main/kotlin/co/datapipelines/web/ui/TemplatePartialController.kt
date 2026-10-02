@@ -18,6 +18,7 @@ import co.datapipelines.templates.TemplateValidationException
 import co.datapipelines.templates.TemplateValidator
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.web.api.currentPrincipal
+import jakarta.servlet.http.HttpServletResponse
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.security.core.context.SecurityContextHolder
@@ -36,15 +37,20 @@ import org.springframework.web.servlet.ModelAndView
  * fragment endpoint joins the same authorization posture as the one it sits beside rather
  * than quietly opening a hole (§9.1).
  *
- * ## One route, two fragment shapes — chosen by `prefix`
+ * ## One route, two fragment shapes — chosen by `prefix` and `scope`
  *
- * - **`prefix` absent** → the wrapper: the whole `#template-list-wrapper`, which is the search
- *   result list when `q` is non-empty and the tree's root level otherwise. This is the target
- *   of the filter controls and of the search pager — the existing SPA contract, unchanged.
- * - **`prefix` present** (empty string = the root) → that ONE tree level: its direct
- *   sub-folders and its direct template children, and nothing else. This is what a folder's
- *   lazy expansion fetches, so expanding `acme/finance` never returns `acme/hr`'s rows and
- *   never returns the whole list (§9.1: the tree is backed by server-side prefix queries).
+ * - **`prefix` present** (empty string = the root) → that ONE tree level of the SIDEBAR: its
+ *   direct sub-folders and its direct template children, and nothing else. This is what a
+ *   folder's lazy expansion fetches, so expanding `acme/finance` never returns `acme/hr`'s
+ *   rows and never returns the whole list (§9.1: the tree is backed by server-side prefix
+ *   queries). A `prefix` request is always a sidebar level.
+ * - **`prefix` absent** → a flat list of full paths, under the [TemplateListScope]'s root:
+ *   `scope=nav` is the sidebar's search (clearing it returns the sidebar to its tree), any
+ *   other value — absent included — is the `/templates` catalog's list (every template when
+ *   `q` is empty, the matches otherwise). Same rows, same `TEMPLATE_READ`, same lens: the
+ *   scope picks the markup, never the rows (#398). Every sidebar response carries
+ *   [PipelineBrowseModel.NAV_STAMP_HEADER] so the rail can refuse a level rendered under
+ *   another workspace or lens.
  *
  * `q` is ignored while `prefix` is present: browse and search are different presentations
  * (§9.2) and a folder expansion is unambiguously a browse.
@@ -60,68 +66,49 @@ class TemplatePartialController(
 ) {
     @GetMapping("/partials/templates")
     @RequiredScope(Permission.TEMPLATE_READ)
+    @Suppress("LongParameterList") // one request parameter per query value the route has always taken, plus #398's scope
     fun list(
         model: Model,
+        response: HttpServletResponse,
         @RequestParam(required = false) q: String?,
         @RequestParam(required = false) dialect: String?,
         @RequestParam(required = false) type: String?,
         @RequestParam(required = false) prefix: String?,
         @RequestParam(required = false) offset: Int?,
+        @RequestParam(required = false) scope: String? = null,
     ): String {
         val principal = currentPrincipal()
-        val workspaceId = principal.requireWorkspace().id
+        val workspace = principal.requireWorkspace()
         val view = lens.viewFor(principal)
+        val listScope = if (prefix != null) TemplateListScope.NAV else TemplateListScope.fromWire(scope)
         val dialectFilter = TemplateFilters.dialect(dialect)
         val typeFilter = TemplateFilters.type(type)
         TemplateFilters.fill(model, dialect, type)
         model.addAttribute("q", q ?: "")
         RoleModel.stamp(model)
+        if (listScope == TemplateListScope.NAV) {
+            response.setHeader(PipelineBrowseModel.NAV_STAMP_HEADER, PipelineBrowseModel.navStamp(workspace.name, view))
+        }
         return if (prefix != null) {
-            browse.fillLevel(model, workspaceId, view, prefix, dialectFilter, typeFilter, offset ?: 0)
+            browse.fillLevel(model, workspace.id, view, prefix, dialectFilter, typeFilter, offset ?: 0)
         } else {
             browse.fillWrapper(
                 model,
-                workspaceId,
+                workspace.id,
                 view,
                 q = q?.trim()?.takeIf { it.isNotEmpty() },
                 dialect = dialectFilter,
                 type = typeFilter,
                 offset = offset ?: 0,
+                scope = listScope,
             )
         }
     }
 
     /**
-     * The SELECTED template, for the explorer's right pane (058, reshaped by 106) — the
-     * header (path eyebrow, leaf name, Open in editor and 101's verbs), the READING column
-     * (Overview with the source excerpt, and Used by) and the ACTING column
-     * (Versions · Source · Runs).
-     *
-     * A selection swaps this fragment into `#template-detail` with `innerHTML` and touches
-     * nothing else: the tree pane's DOM is never re-rendered by a selection.
-     *
-     * The route keeps its historical spelling (`/versions`) — it is what every leaf, every
-     * search row and the explorer script already point at, and renaming it would be a
-     * migration for no reader's benefit.
-     *
-     * §9.6: the name is a query parameter. It may contain `/`, and an encoded `%2F` in a URL
-     * **path segment** is refused 400 by the container below routing — which is why the two
-     * fragments below take `name` as a parameter where the pipelines twin can use `{id}`.
-     */
-    @GetMapping("/partials/templates/versions")
-    @RequiredScope(Permission.TEMPLATE_READ)
-    fun versions(
-        model: Model,
-        @RequestParam name: String,
-    ): String {
-        RoleModel.stamp(model)
-        val principal = currentPrincipal()
-        return browse.fillDetail(model, principal.requireWorkspace().id, lens.viewFor(principal), name)
-    }
-
-    /**
-     * The acting column's **Runs** tab — recent executions of the pipelines pinning this
-     * template, loaded on the tab's first click.
+     * The workspace Runs tab's fragment — recent executions of the pipelines pinning this
+     * template, loaded on the tab's first open. The explorer detail pane this fragment used
+     * to sit in is gone with #398; the workspace's Runs tab is its only page.
      *
      * Visibility is the execution-history screen's ([TemplateBrowseModel.fillRuns], #275): an
      * admin sees the workspace's runs, a member with `execution.read` her own plus the
@@ -144,10 +131,10 @@ class TemplatePartialController(
     }
 
     /**
-     * The create modal's action (§9.3) — form-encoded fields, the §5 idiom, bound into a
-     * [TemplateDraft] and put through the **same** [TemplateValidator] and repository call
-     * the REST `POST /api/v1/templates` uses. One component, two surfaces: a refusal the API
-     * would give is a refusal here.
+     * The create modal's action (§9.3; Q1(b) — the browser keeps authoring templates) —
+     * form-encoded fields, the §5 idiom, bound into a [TemplateDraft] and put through the
+     * **same** [TemplateValidator] and repository call the REST `POST /api/v1/templates`
+     * uses. One component, two surfaces: a refusal the API would give is a refusal here.
      *
      * `type` is a create-time input and appears on no other form (§5.3 makes it immutable);
      * `dialect` is conditional on it — required for `sql`, absent for `html` and the transform
@@ -218,13 +205,23 @@ class TemplatePartialController(
             // D55: the editor's create lands version 1 DRAFT — the same rule the API follows.
             templates.create(workspaceId, draft, principal.userId, CreateLifecycle.DRAFT, WriteSurface.SESSION)
             // Shape A (§5.1): the success node lands in #template-create-result — its arrival
-            // is what closes the modal — and the refreshed list rides along out-of-band. No
-            // HX-Redirect: a navigation would discard the toast.
+            // is what closes the modal — and the refreshed CATALOG list rides along
+            // out-of-band (the modal lives on the catalog page, #398). No HX-Redirect: a
+            // navigation would discard the toast.
             TemplateFilters.fill(model, dialect = null, type = null)
             model.addAttribute("q", "")
             RoleModel.stamp(model)
             // An author's re-render after a create (MUTATE row): the view is theirs — Everything.
-            browse.fillWrapper(model, workspaceId, LensedView.EVERYTHING, q = null, dialect = null, type = null, offset = 0)
+            browse.fillWrapper(
+                model,
+                workspaceId,
+                LensedView.EVERYTHING,
+                q = null,
+                dialect = null,
+                type = null,
+                offset = 0,
+                scope = TemplateListScope.CATALOG,
+            )
             model.addAttribute("createdName", trimmedName)
             model.addAttribute("oob", true)
             "partials/template-created"

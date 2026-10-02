@@ -29,10 +29,10 @@ import java.util.UUID
  * exactly the whole-list-in-the-browser work the tree exists to avoid, and a flat list of
  * full paths is what someone searching `finance/agg` wants to see (§9.2, decided).
  *
- * Both presentations swap the same stable root `#template-list-wrapper` with `outerHTML`, and
- * both render the shared `partials/pager` — the existing SPA contract (ui-screens.md §4.5)
- * carries over unchanged, because this is a new fragment shape on an existing surface, not a
- * new surface.
+ * Since #398 there are **two instances** of the presentation, chosen by
+ * [TemplateListScope]: the global sidebar's tree (the root level, or its flat search) and
+ * the `/templates` catalog's flat list. Both render rows that link to the template
+ * workspace; neither renders a row the lens hides.
  *
  * Nothing here creates, renames, moves or deletes a folder, and nothing can: a folder is a
  * name prefix with no identity (§3.1), so it is derived per request from the live rows
@@ -96,6 +96,8 @@ class TemplateBrowseModel(
             }
         val leaves = leafProbe.take(PAGE_SIZE)
         model.addAttribute("searching", false)
+        // #398: a tree level exists only in the sidebar.
+        model.addAttribute("scope", TemplateListScope.NAV.wire)
         model.addAttribute("prefix", prefix ?: "")
         model.addAttribute("levelId", levelId(prefix))
         model.addAttribute("folders", folderProbe.take(FOLDER_LIMIT).map(::TemplateFolderView))
@@ -130,38 +132,44 @@ class TemplateBrowseModel(
     }
 
     /**
-     * Fills [model] for a **search** — a flat list of full paths under the same filters,
-     * paged by the shared pager against `#template-list-wrapper` (§9.2).
+     * Fills [model] for a **flat list of full paths** under the same filters, paged by the
+     * shared pager against the [scope]'s root (§9.2): the sidebar's search results
+     * ([TemplateListScope.NAV], `q` non-empty), or the `/templates` catalog
+     * ([TemplateListScope.CATALOG], where an absent `q` lists every template the caller may
+     * read — the owner's ruling for the pipelines catalog, #398's own floor).
      */
     fun fillSearch(
         model: Model,
         workspaceId: UUID,
         view: LensedView,
-        q: String,
+        q: String?,
         dialect: Dialect?,
         type: TemplateType?,
         offset: Int,
+        scope: TemplateListScope = TemplateListScope.NAV,
     ): String {
         val page = maxOf(0, offset)
         val probe = templates.list(workspaceId, view.templates, dialect = dialect, type = type, q = q, offset = page, limit = PAGE_SIZE + 1)
         val items = probe.take(PAGE_SIZE)
+        model.addAttribute(PipelineBrowseModel.LENS_UNAVAILABLE, view.unavailable)
         model.addAttribute("searching", true)
+        model.addAttribute("scope", scope.wire)
+        model.addAttribute("rootId", scope.rootId)
         model.addAttribute("templates", items)
         model.addAttribute("drafts", templates.findDrafts(workspaceId, view.templates, items.map { it.id }))
         model.addAttribute(NEEDS_REVIEW_IDS, needReview(items))
         model.addAttribute("offset", page)
         model.addAttribute("hasMore", probe.size > PAGE_SIZE)
         model.addAttribute("total", templates.count(workspaceId, view.templates, dialect = dialect, type = type, q = q))
-        model.addAttribute(PipelineBrowseModel.LENS_UNAVAILABLE, view.unavailable)
         return SEARCH_VIEW
     }
 
     /**
-     * Fills [model] for whichever presentation [q] selects, and returns the **dispatcher**
-     * view whose one root element is `#template-list-wrapper` either way.
-     *
-     * This is what a filter control's swap and the page's first render both go through, so
-     * clearing the search box returns to the tree by construction (§9.2).
+     * Fills [model] for whichever presentation [q] and [scope] select, and returns the
+     * concrete view to render — the sidebar's tree root ([TemplateListScope.NAV], `q` empty)
+     * or one flat list either way (partials/templates' two-pane dispatcher is gone with
+     * #398's explorer page: the catalog has no tree to return to, and the sidebar's search
+     * clearing returns to its tree by the nav's own convention).
      */
     fun fillWrapper(
         model: Model,
@@ -171,133 +179,19 @@ class TemplateBrowseModel(
         dialect: Dialect?,
         type: TemplateType?,
         offset: Int,
+        scope: TemplateListScope = TemplateListScope.NAV,
     ): String {
-        if (q.isNullOrEmpty()) {
-            fillLevel(model, workspaceId, view, prefix = null, dialect = dialect, type = type, offset = offset)
-        } else {
-            fillSearch(model, workspaceId, view, q, dialect, type, offset)
+        if (scope == TemplateListScope.NAV && q.isNullOrEmpty()) {
+            return fillLevel(model, workspaceId, view, prefix = null, dialect = dialect, type = type, offset = offset)
         }
-        return WRAPPER_VIEW
+        return fillSearch(model, workspaceId, view, q, dialect, type, offset, scope)
     }
 
     // -------------------------------------------------------------------------------------
-    // 106 — the detail pane's three regions, the pipelines explorer's twin
+    // #398 — the detail pane is gone; the workspace page (TemplateWorkspaceModel) owns the
+    // per-template facts. What stays here is the derived Runs read, which the workspace's
+    // Runs tab lazy-loads.
     // -------------------------------------------------------------------------------------
-
-    /**
-     * Fills [model] for the SELECTED template's detail — header, reading column (Overview +
-     * Used by), acting column (Versions · Source · Runs) — and returns the view name.
-     *
-     * Versions and Source ride the FIRST PAINT because both are already in hand: the working
-     * version's body is one read and the version list is another, and a tab that costs nothing
-     * extra should not cost a round trip. Runs is the one lazy tab, for the same reason as the
-     * pipelines twin.
-     */
-    fun fillDetail(
-        model: Model,
-        workspaceId: UUID,
-        view: LensedView,
-        id: String,
-    ): String {
-        // 114 — the verbs this fragment renders are role-gated, so the ROLE arrives in the SAME
-        // model call the facts do. Stamped here rather than at each caller because there are
-        // three of them — the selection partial, the explorer page, and the lifecycle dialogs'
-        // Shape A re-render — and the third one forgot: after a Release the re-rendered detail
-        // came back with no role attributes at all, so every verb on it silently vanished until
-        // the next selection re-fetched the pane. One model call, one answer.
-        RoleModel.stamp(model)
-        val template = templates.findWorking(workspaceId, view.templates, id)
-        model.addAttribute("templateId", id)
-        model.addAttribute("template", template)
-        if (template == null) return DETAIL_VIEW
-
-        val cut = id.lastIndexOf('/')
-        model.addAttribute("folderPath", if (cut < 0) "" else id.substring(0, cut + 1))
-        model.addAttribute("leafName", if (cut < 0) id else id.substring(cut + 1))
-
-        val draft = templates.findDraftDetail(workspaceId, view.templates, id)
-        // The CURRENT RELEASE, not the working version: "current" in a version row means the
-        // one a pin without a version would resolve to, which a draft never is.
-        val currentRelease = templates.findLatest(workspaceId, view.templates, id)?.version
-        // The header's Discard names the RESOLVED RELEASE, never the working version — in a
-        // {R,D} shape the working version is the draft and discard refuses drafts.
-        model.addAttribute("currentReleaseVersion", currentRelease)
-        val versions = templates.listVersions(workspaceId, view.templates, id)
-        val names = actors.lookup(versions.map { it.createdBy })
-        val inUse = usage.inUseCounts(workspaceId, view, id)
-        val now = Instant.now()
-        model.addAttribute("draftVersion", draft?.version)
-        model.addAttribute("draftHash", draft?.bodyHash)
-        // 7e (§8.2): the working version's needs-review marker — computed on read by the
-        // projection's own query (a cited fact is retired), never stored.
-        model.addAttribute("needsReview", template.needsReview)
-        model.addAttribute("inUse", inUse)
-        model.addAttribute(
-            "versions",
-            versions.map { v ->
-                VersionRowView.of(
-                    version = v.version,
-                    status = v.status,
-                    createdAt = v.createdAt,
-                    actor = names[v.createdBy] ?: ActorNames.fallback(v.createdBy),
-                    now = now,
-                    usage = inUse[v.version] ?: 0,
-                    // The count is the composed reverse arrow's — pipelines, parameter sets AND (#320) visualizations
-                    // — so the unit names none of them: a per-version "N pipelines" undercounted the moment a set pinned it.
-                    usageUnit = "use",
-                    isCurrent = v.version == currentRelease,
-                    // The chip's fact (V20): a draft row shows its last write's surface.
-                    via = if (v.status == PipelineVersionStatus.DRAFT) v.updatedVia else v.createdVia,
-                )
-            },
-        )
-        model.addAttribute("versionCount", versions.size)
-        model.addAttribute("releasableVersion", draft?.version)
-        // The header's one destructive (102 §B.1): the entity purge in the {D} shape, else
-        // Discard of the resolved release, else Purge draft — at most one of the three.
-        val canDelete = versions.size == 1 && draft != null
-        val canDiscard = !canDelete && currentRelease != null
-        model.addAttribute("canDelete", canDelete)
-        model.addAttribute("canDiscardCurrent", canDiscard)
-        model.addAttribute("canPurgeDraftInHeader", draft != null && !canDelete && !canDiscard)
-        model.addAttribute("createdVia", versions.minByOrNull { it.version }?.createdVia)
-        model.addAttribute("excerpt", excerpt(template.body))
-        model.addAttribute("excerptTruncated", template.body.lineSequence().count() > EXCERPT_LINES)
-        model.addAttribute("interpolations", interpolations(template.body))
-
-        fillUsedBy(model, workspaceId, view, id)
-        return DETAIL_VIEW
-    }
-
-    /**
-     * The "Used by" card's facts. 178/178b: neither a hidden pipeline nor a visible one's DRAFT pin leaks through the
-     * reverse arrow. #320: the card lists what the `template.in_use` refusal would name — parameter sets and
-     * visualizations beside the pipelines, each under its own lens, from the same evidence methods every guard reads.
-     */
-    private fun fillUsedBy(
-        model: Model,
-        workspaceId: UUID,
-        view: LensedView,
-        id: String,
-    ) {
-        val pins = usage.pipelinesReferencedAnywhere(workspaceId, view, id)
-        val setPins = usage.referencedAnywhere(workspaceId, view, id)
-        val visualizationPins = usage.visualizationsReferencedAnywhere(workspaceId, view, id)
-        val pipelineCount = pins.map { it.pipelineId }.distinct().size
-        model.addAttribute("usedBy", pins)
-        model.addAttribute("usedByCount", pipelineCount)
-        model.addAttribute("usedBySets", setPins)
-        model.addAttribute("usedByVisualizations", visualizationPins)
-        model.addAttribute(
-            "usedBySummary",
-            usedBySummary(
-                pipelines = pipelineCount,
-                parameterSets = setPins.map { it.setId }.distinct().size,
-                visualizations = visualizationPins.map { it.artifactId }.distinct().size,
-            ),
-        )
-        model.addAttribute("runCount", pipelineCount)
-    }
 
     /**
      * Fills [model] for the templates twin's Runs tab — the recent executions of the pipelines
@@ -358,44 +252,6 @@ class TemplateBrowseModel(
      */
     private fun needReview(rows: List<Template>): Set<String> = rows.filter { it.needsReview }.mapTo(HashSet()) { it.id }
 
-    /** The first [EXCERPT_LINES] lines of the current body — the Overview's peek at the source. */
-    private fun excerpt(body: String): String = body.lineSequence().take(EXCERPT_LINES).joinToString("\n")
-
-    /**
-     * The distinct leading identifiers the body interpolates: `start_date` from a
-     * `start_date` interpolation, `row` from a `row.borough` one.
-     *
-     * This is a **derived reading, not a declared contract**: a template declares no parameter
-     * schema anywhere in this system (only a pipeline does), so the honest thing to show is
-     * what the text references, labelled as that. Directives (`<#if …>`) are deliberately not
-     * scanned — a loop variable is not an input, and listing one would invent a parameter.
-     */
-    private fun interpolations(body: String): List<String> =
-        INTERPOLATION
-            .findAll(body)
-            .map { it.groupValues[1] }
-            .distinct()
-            .sorted()
-            .toList()
-
-    /** The "Used by" card's header: each kind that pins the template, counted once per object ("nothing" when none does). */
-    private fun usedBySummary(
-        pipelines: Int,
-        parameterSets: Int,
-        visualizations: Int,
-    ): String =
-        listOfNotNull(
-            plural(pipelines, "pipeline", "pipelines"),
-            plural(parameterSets, "parameter set", "parameter sets"),
-            plural(visualizations, "visualization", "visualizations"),
-        ).joinToString(" · ").ifEmpty { "nothing" }
-
-    private fun plural(
-        count: Int,
-        one: String,
-        many: String,
-    ): String? = if (count == 0) null else "$count ${if (count == 1) one else many}"
-
     companion object {
         /** The templates screen's page size — the value the flat list has always used. */
         const val PAGE_SIZE = 25
@@ -404,29 +260,27 @@ class TemplateBrowseModel(
         const val FOLDER_LIMIT = TemplateRepository.MAX_PAGE_LIMIT
 
         /**
-         * The root level's container id is the screen's long-standing stable swap root, so the
-         * browse tree inherits the existing SPA contract instead of inventing a second one.
+         * #398 — the sidebar tree's root container id (the nav scope's stable swap root, the
+         * pipelines twin's shape). The historical `#template-list-wrapper` stays the CATALOG's
+         * list root ([TemplateListScope.CATALOG]).
          */
-        const val ROOT_LEVEL_ID = "template-list-wrapper"
+        const val ROOT_LEVEL_ID = "template-nav-root"
 
-        const val WRAPPER_VIEW = "partials/templates"
+        /**
+         * The catalog's list root — the screen's long-standing stable swap root, kept for the
+         * page's search control and pager (ui-screens §4.5's contract).
+         */
+        const val CATALOG_ROOT_ID = "template-list-wrapper"
+
         const val LEVEL_VIEW = "partials/template-tree-level"
         const val SEARCH_VIEW = "partials/template-search"
-        const val DETAIL_VIEW = "partials/template-detail"
         const val RUNS_VIEW = "partials/template-runs"
 
         /** The model attribute the needs-review marker reads in the tree and the search list (7d). */
         const val NEEDS_REVIEW_IDS = "needsReviewIds"
 
-        /** The Overview's source peek — the mock's "first 12 lines, then open full source". */
-        const val EXCERPT_LINES = 12
-
         /** How many pinning pipelines the Runs tab will ask for executions (see [fillRuns]). */
         const val USED_BY_FANOUT = 20
-
-        /** A Freemarker interpolation's leading identifier — the scan [interpolations] runs. */
-        private val INTERPOLATION = Regex("""\$\{\s*([A-Za-z_][A-Za-z0-9_]*)""")
-
         /** Hex characters of a nested level's id digest — 64 bits, over one screen's folders. */
         private const val LEVEL_ID_HEX_LENGTH = 16
 
@@ -467,4 +321,29 @@ data class TemplateFolderView(
         folder.templateCount,
         TemplateBrowseModel.levelId(folder.path),
     )
+}
+
+/**
+ * #398 — which instance of the templates list a `/partials/templates` request renders, the
+ * pipelines twin's shape ([PipelineListScope]).
+ *
+ * [NAV] is the global sidebar: the lazy tree (one level per request) and its flat search, under
+ * `#template-nav-root`. [CATALOG] is the `/templates` landing page: the flat full-path list only,
+ * under `#template-list-wrapper` — the page carries no tree since #398. Both render rows that
+ * link to the template workspace; neither renders a row the lens hides.
+ *
+ * [wire] is the `scope` query value; anything but `nav` is the catalog, so an old or hand-typed
+ * URL degrades to the page's own list rather than to an error.
+ */
+enum class TemplateListScope(
+    val wire: String,
+    val rootId: String,
+) {
+    NAV("nav", TemplateBrowseModel.ROOT_LEVEL_ID),
+    CATALOG("page", TemplateBrowseModel.CATALOG_ROOT_ID),
+    ;
+
+    companion object {
+        fun fromWire(value: String?): TemplateListScope = if (value == NAV.wire) NAV else CATALOG
+    }
 }

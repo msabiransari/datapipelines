@@ -26,8 +26,10 @@
         The template and its draft version are deleted permanently — this cannot be undone.
       </p>
 
-      <form th:attr="hx-post=@{'/partials/templates/lifecycle/purge-entity'(name=${dlg.id})},
-                       hx-target='#template-detail', hx-swap='innerHTML'">
+      <form th:attr="hx-post=@{'/partials/templates/lifecycle/purge-entity'(name=${dlg.id})}">
+        <!-- #398: the POST answers HX-Redirect onto the catalog (the template is gone — the
+             tree must lose the leaf). -->
+        <input type="hidden" name="from" th:value="${from}">
         <label class="ds-form-label">
           Type the template's name — <span class="u-mono" th:text="${dlg.expected}">test/my_template.sql</span> — to confirm
         </label>

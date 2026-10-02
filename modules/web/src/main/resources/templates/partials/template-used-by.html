@@ -13,7 +13,9 @@
   </p>
 
   <div class="tplx-vrow" th:each="p : ${usedBy}">
-    <a class="u-mono" hx-boost="false" th:href="@{'/pipelines/' + ${p.pipelineId} + '/editor'}"
+    <!-- #398: the link is the CANONICAL pipeline workspace — the /editor hop is the redirect
+         it replaced. -->
+    <a class="u-mono" hx-boost="false" th:href="@{'/pipelines/' + ${p.pipelineId}}"
        th:text="${p.pipelineName}">nyc/mobility/revenue</a>
     <span class="ds-badge ds-badge-default app-chip-mono" th:text="${'pins v' + p.pinnedVersion}">pins v1</span>
     <span class="tplx-vmeta">

@@ -294,6 +294,11 @@ The tree keeps that contract rather than replacing it:
 
 **Browse vs. search are different presentations (decided, §13.8).** Browsing shows the tree, one level per request. A non-empty `q` shows a **flat result list of full paths**, not a tree pruned to matching leaves: pruning requires walking ancestors of every match, which is precisely the whole-list-in-the-browser work §9.1 forbids, and a flat list of full paths is what a user searching `finance/agg` actually wants to see. Clearing `q` returns to the tree.
 
+**Since #398 the tree lives in the global sidebar** (ui-screens §3.4's Templates branch): the
+same fragments serve one prefix level per request under `scope=nav` in the rail, a leaf is a
+full-document link into the template workspace `/templates/{name}`, and the `/templates` page
+itself is the flat catalog (§9.2's swap-root contract above is the sidebar's now).
+
 ### 9.3 Create and edit forms
 
 - **Create** gains a `type` selector (`sql` default) and makes `dialect` conditional on it — required for `sql`, absent and hidden for `html` (§5.1's `chk_type_dialect` is the backstop).

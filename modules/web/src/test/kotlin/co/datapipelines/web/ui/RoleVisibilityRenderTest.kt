@@ -372,10 +372,11 @@ class RoleVisibilityRenderTest {
             val html = engine().process(view, bare().apply { pipelineDetailModel() })
             html shouldNotContain "data-verb="
         }
-        listOf("partials/template-detail", "partials/template-versions").forEach { view ->
-            val html = engine().process(view, bare().apply { templateDetailModel() })
-            html shouldNotContain "data-verb="
-        }
+        // #398: the templates detail pane is gone; the Versions tab's fragment is the one
+        // template surface that renders verbs from row flags — with no role attributes at
+        // all, every verb flag must read false and nothing may render.
+        val html = engine().process("partials/template-versions", bare().apply { templateDetailModel() })
+        html shouldNotContain "data-verb="
         // 162 (#156): the discovered-schema Tables tree is read-only by construction — same
         // role floor as the datasources list itself (a viewer may read) — and carries no verb
         // on any of its three levels, with no role attribute required to make that true.
