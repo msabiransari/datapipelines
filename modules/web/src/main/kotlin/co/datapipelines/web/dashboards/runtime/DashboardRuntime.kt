@@ -282,8 +282,9 @@ class DashboardRuntime internal constructor(
         dashboardVersion = resolved.served.detail.version,
         workspaceId = principal.requireWorkspace().id,
         instanceId = request.instanceId,
-        principalUserId = principal.userId,
-        principalKeyId = null,
+        // V43's CHECK wants exactly one: a session names its person, a key its credential (L5).
+        principalUserId = principal.takeIf { it.keyId == null }?.userId,
+        principalKeyId = principal.keyId,
         scope = request.scope,
         targetsJson =
             JsonNodeFactory.instance
@@ -349,7 +350,7 @@ class DashboardRuntime internal constructor(
     ) {
         val workspaceId = principal.requireWorkspace().id
         val record = refreshes.find(workspaceId, refreshId)
-        val mine = record != null && record.principalUserId == principal.userId && record.instanceId == request.instanceId
+        val mine = record != null && owns(principal, record) && record.instanceId == request.instanceId
         val abortable = record != null && record.dashboardId == id && record.status == RefreshStatus.RUNNING
         when {
             abortable && (mine || principal.holds(Permission.EXECUTION_CANCEL_ALL)) -> {
@@ -409,12 +410,19 @@ class DashboardRuntime internal constructor(
         requireVisible(principal, id)
         val page = Pagination.clampOffset(offset)
         val size = Pagination.clampLimit(limit)
-        val owner = principal.userId.takeUnless { principal.holds(Permission.EXECUTION_READ_ALL) }
+        val keyId = principal.keyId
+        val readAll = principal.holds(Permission.EXECUTION_READ_ALL)
+        // A key's own refreshes are ITS rows (`principal_key_id`); the identity id matches none of
+        // them (V43's CHECK keeps exactly one non-null), so a key owner filter is the KEY — every
+        // end user behind the key sees the key's budget's refreshes, which is the documented
+        // one-key-one-budget shape (auth.md §7.7, dashboards.md §6.5).
+        val ownerUserId = principal.userId.takeUnless { readAll || keyId != null }
+        val ownerKeyId = keyId.takeUnless { readAll }
         val items =
-            refreshes.list(workspaceId, id, owner, size, page).map {
+            refreshes.list(workspaceId, id, ownerUserId, ownerKeyId, size, page).map {
                 RuntimeViews.refresh(it, null, showExecutions = false)
             }
-        return PagedData(items, Pagination.of(page, size, refreshes.count(workspaceId, id, owner), items.size))
+        return PagedData(items, Pagination.of(page, size, refreshes.count(workspaceId, id, ownerUserId, ownerKeyId), items.size))
     }
 
     fun getRefresh(
@@ -425,12 +433,32 @@ class DashboardRuntime internal constructor(
         val workspaceId = principal.requireWorkspace().id
         requireVisible(principal, id)
         val record = refreshes.find(workspaceId, refreshId)?.takeIf { it.dashboardId == id } ?: throw refreshNotFound(refreshId)
-        if (record.principalUserId != principal.userId && !principal.holds(Permission.EXECUTION_READ_ALL)) throw refreshNotFound(refreshId)
+        if (!owns(principal, record) && !principal.holds(Permission.EXECUTION_READ_ALL)) throw refreshNotFound(refreshId)
         val showExecutions = principal.holds(Permission.EXECUTION_READ)
         return RuntimeViews.refresh(record, if (showExecutions) refreshes.linksOf(refreshId) else null, showExecutions)
     }
 
     // ---- shared --------------------------------------------------------------------------------------------
+
+    /**
+     * Whose refresh row is this caller's: a session owns by its person (`principal_user_id`), a
+     * key by its credential (`principal_key_id` — V43's CHECK keeps exactly one non-null, so a
+     * key's identity id never appears in the user column). The abort's per-instance rule and the
+     * refreshes reads both ask here, so a host relaying the runtime routes cannot let one end
+     * user of a shared key abort or read another's refresh — but two users of the SAME key DO
+     * share the key's rows (§6.5's one-key-one-budget note).
+     */
+    private fun owns(
+        principal: AuthenticatedPrincipal,
+        record: RefreshRecord,
+    ): Boolean {
+        val keyId = principal.keyId
+        return if (keyId != null) {
+            record.principalKeyId == keyId
+        } else {
+            record.principalUserId == principal.userId
+        }
+    }
 
     private fun resolve(
         principal: AuthenticatedPrincipal,

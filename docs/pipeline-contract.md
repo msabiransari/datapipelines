@@ -1,6 +1,6 @@
 # Pipeline Contract Specification
 
-**Status:** v1.48 (revised — see Change Log)
+**Status:** v1.49 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
 **Last updated:** 2026-09-29
@@ -1590,6 +1590,7 @@ The dashboard artifact's refusals (#10; the implementation spec §3.2, §8, §9,
 | `dashboard.refresh.result_too_large` | 422 | a source's result exceeded `results.max-bytes-per-source` (or the refresh's budget); inside the stream it is a `visualization_status` reason (D54) |
 | `dashboard.refresh.not_found` | 404 | an abort or read of a refresh that does not exist, is not the caller's, or already finished |
 | `dashboard.key.kind_refused` | 403 | a `dashboard` API key presented outside the runtime and refresh routes, or on `/mcp` |
+| `dashboard.binding.path_invalid` | 400 | a dashboard binding's `name_prefix` is not a legal folder of the name grammar (1–9 segments, or the root `/`), or names no folder at or above a dashboard the CALLER's workspace has — the #191 rule: whether another workspace has dashboards at the prefix is exactly what the refusal must not reveal; `details.name_prefix`. Asked on the binding routes and the Keys page's binding editor (L5) |
 
 
 ---
@@ -1831,6 +1832,7 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-01 | v1.49 | L5 (#367, #10) the `dashboard` key kind | New **§13.23 row `dashboard.binding.path_invalid`** (400): a dashboard binding's `name_prefix` is not a legal folder of the name grammar (1–9 segments, or the root `/`), or names no folder at or above a dashboard the CALLER's workspace has (the #191 non-disclosure rule). The refusal the binding routes and the Keys page's dashboard binding editor answer; the reserved `dashboard.key.kind_refused` stays unused (the surfaces answer the one catalogued `endpoint.key_kind_refused`, whose `details.reason` names the kind). §13.23 is 36 rows. |
 | 2026-10-01 | v1.48 | L4b (#353) stale text after the gate landed | **§13.22, no new code:** `visualization.release.tests_missing` no longer says the default gate refuses every release (#352 installed the gate — it names `no_runs` / `run_open` / `no_cases`), and `visualization.test.session_expired` names the shipped key `datapipelines.visualization.session-ttl-minutes`, not the spec's unshippable `tests.session-ttl-minutes`. |
 | 2026-09-29 | v1.47 | L2 (#10) the dashboard runtime — renumbered at merge after 320's v1.45 and 264's v1.46 | New **§13.23 row `dashboard.validation.too_many_invocations`** (400): the validator counts a dashboard's DISTINCT invocations — the refresh's own sharing identity: a pinned pipeline release plus its resolved bindings, outgoing overrides applied — and refuses more than `max-executions-per-refresh` at save and at release. The reader bounded `sources[]` at 400 (50 × 8) while a refresh admits 16 executions, so a document valid at save could be permanently `dashboard.refresh.saturated` (429 says "retry"); the runtime's saturated answer stays for a genuinely full instance. §13.23 is 35 rows. |
 | 2026-09-29 | v1.46 | 264 (#264) parameter values at every entry — renumbered at merge after 320's v1.45 | **§12.9's save answers tighten (#264)** — REST API v2.58. A `PIPELINE` node's parameter literal is judged by the child parameter's WHOLE declaration (the shared validator, §12.7's `checkDefault` mould): a value that coerces but breaks the child's `constraints`, length, pattern or declared precision/scale is refused at save — and at release and import, which run the same composition rules — with the new `pipeline.validation.pipeline_parameter_invalid` (§12.9; `details.reason`, never the value text), the composition twin of `default_invalid` and of the run-time `parameter_constraint_violation`. A same-type `${ref}` is accepted only when the parent PARAMETER's descriptor widens losslessly into the child's (parameter-engine record §6.4; `reason: narrowing`); tiers without a descriptor (calculator `context_key`s, org/platform keys) stay type-only, and a cross-type pair stays `pipeline_parameter_type_mismatch` — widening across types is NOT adopted (the run's wire encoder re-encodes by the child's type). A child declaration today's own rules refuse falls back to the type-only check. Existing stored bodies keep running; a next save re-judges (the shipped demos and every §16 example replayed: 12 bodies, 3 composition mappings, 0 refused — `CompositionRulesReplayTest` pins the corpus). |

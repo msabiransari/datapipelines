@@ -223,6 +223,14 @@ class ApiKeysAdminControllerTest {
     private val auditSink = mockk<AuditEventSink>(relaxed = true)
     private val publishedEndpoints = mockk<co.datapipelines.application.endpoints.PublishedEndpointRepository>()
     private val publishing = mockk<EndpointPublishService>()
+
+    // L5 — the dashboard bindings' own service/table pair, the dashboard family's reads relaxed
+    // (the picker's folders derive from them).
+    private val dashboardBindingRepository = mockk<co.datapipelines.application.dashboards.DashboardKeyBindingRepository>(relaxed = true)
+
+    private val dashboardKeys = mockk<co.datapipelines.application.dashboards.DashboardKeyService>(relaxed = true)
+
+    private val dashboards = mockk<co.datapipelines.visualization.DashboardService>(relaxed = true)
     private val userRepository = mockk<UserRepository>()
     private val themeResolver = mockk<ThemeResolver>()
     private val controller =
@@ -231,8 +239,11 @@ class ApiKeysAdminControllerTest {
             apiKeyRepository,
             EndpointKeyService(apiKeyService, bindingRepository, auditSink, publishedEndpoints),
             publishing,
-            ApiKeyRows(bindingRepository),
+            ApiKeyRows(bindingRepository, dashboardBindingRepository),
             bindingRepository,
+            dashboardKeys,
+            dashboardBindingRepository,
+            dashboards,
             userRepository,
             themeResolver,
         )

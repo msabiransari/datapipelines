@@ -127,6 +127,9 @@ object DashboardErrorCodes {
     /** 403 — a `dashboard` key outside the runtime and refresh routes, or on `/mcp`. */
     const val KEY_KIND_REFUSED = "dashboard.key.kind_refused"
 
+    /** 400 — a dashboard binding's folder prefix fails the folder grammar, or names no folder of the caller's own tree (#191's rule). */
+    const val BINDING_PATH_INVALID = "dashboard.binding.path_invalid"
+
     /** Every code above — the catalog tests' handle. */
     val ALL: Set<String> =
         DashboardErrorCodes::class.java.declaredFields

@@ -83,6 +83,25 @@ class McpEndpointKeyRefusalTest {
         (chain.request != null) shouldBe true
     }
 
+    @Test
+    fun `a dashboard key is refused on mcp too, and the refusal names the kind`() {
+        // L5 (#367) — the fourth kind, the same servlet-shaped gap: `/mcp` is not on the
+        // dashboard key's surface (its reach is the runtime routes), and without this branch it
+        // could still read the whole tool catalogue through `tools/list`.
+        authenticate(ApiKeyKind.DASHBOARD)
+        val response = MockHttpServletResponse()
+        val chain = MockFilterChain()
+
+        filter.doFilter(MockHttpServletRequest("POST", "/mcp"), response, chain)
+
+        assertAll(
+            { response.status shouldBe 403 },
+            { error(response)["code"] shouldBe "endpoint.key_kind_refused" },
+            { (error(response)["details"] as Map<*, *>)["reason"] shouldBe "dashboard_key_off_surface" },
+            { chain.request shouldBe null },
+        )
+    }
+
     private fun authenticate(kind: ApiKeyKind) {
         val principal =
             AuthenticatedPrincipal(

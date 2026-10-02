@@ -2,6 +2,7 @@ package co.datapipelines.web.dashboards.runtime
 
 import co.datapipelines.application.dashboards.RefreshEvent
 import co.datapipelines.application.dashboards.RefreshEvents
+import co.datapipelines.auth.ApiKeyRepository
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.Permission
 import co.datapipelines.auth.PrincipalLiveness
@@ -176,9 +177,12 @@ internal fun projectRefreshPayload(
  * failing closed:
  *
  * 0. the validated session token's expiry (#263) — before any store read;
- * 1. liveness ([PrincipalLiveness], through the auth cache's TTL);
- * 2. the live identity (`is_admin`), and the workspace the stream OPENED in, strictly re-resolved through the
- *    membership cache and matched by immutable workspace id;
+ * 1. for a TRANSPORT-key principal (L5): the credential itself — the key row not revoked, not past expiry, still
+ *    pinned to the workspace it opened in, identity and workspace live ([PrincipalLiveness]) — then `dashboard.execute`
+ *    from the key role's column. A key identity holds no membership, so the session path's `contextFor` cannot judge
+ *    it; the credential re-check is what makes a revocation MID-REFRESH end the stream with the terminal verdict.
+ * 2. for a member or session: the live identity (`is_admin`), and the workspace the stream OPENED in, strictly
+ *    re-resolved through the membership cache and matched by immutable workspace id;
  * 3. `dashboard.execute` — the route's own declared permission, asked of the refreshed principal.
  *
  * It does not re-run the promoter lens: the dashboard was served at open and the refresh runs to its end; what a
@@ -189,6 +193,8 @@ class RefreshStreamAuthority(
     private val liveness: PrincipalLiveness,
     private val workspaces: WorkspaceService,
     private val users: UserService,
+    /** The key store — a `dashboard` key's credential is re-checked mid-stream (L5): revoked means cut. */
+    private val apiKeys: ApiKeyRepository,
     private val nowMillis: () -> Long = System::currentTimeMillis,
 ) {
     private val log = LoggerFactory.getLogger(RefreshStreamAuthority::class.java)
@@ -211,6 +217,44 @@ class RefreshStreamAuthority(
     fun verdict(subscriber: AuthenticatedPrincipal): StreamVerdict = access(subscriber).verdict
 
     private fun judge(subscriber: AuthenticatedPrincipal): RefreshStreamAccess {
+        val role = subscriber.keyRole
+        return if (role != null && role.asMemberRole() == null) {
+            judgeTransportKey(subscriber)
+        } else {
+            judgeMemberOrSession(subscriber)
+        }
+    }
+
+    /**
+     * A TRANSPORT key's re-judgement (L5): the credential is live NOW — the key row not revoked
+     * and not expired (a revocation mid-refresh cuts the stream at its next write, the same
+     * freshness §7.3 gives every request), the identity active, the PINNED workspace active —
+     * and `dashboard.execute` still holds (the key role's column; `holds` reads it directly for
+     * a transport role, no membership consulted — a key identity HAS no membership). The
+     * member/session path's `contextFor` would answer null for a key identity (no membership
+     * row) and cut every key stream at its first write; this branch is why a key stream runs.
+     */
+    @Suppress("ReturnCount") // fail-closed: every exit is a refusal but the one allowed path; the returns ARE the order
+    private fun judgeTransportKey(subscriber: AuthenticatedPrincipal): RefreshStreamAccess {
+        val keyId = subscriber.keyId ?: return denied(StreamVerdict.REVOKED)
+        val record = apiKeys.findById(keyId) ?: return denied(StreamVerdict.REVOKED)
+        if (record.isRevoked) return denied(StreamVerdict.REVOKED)
+        record.expiresAt?.let { expiresAt -> if (nowMillis() >= expiresAt.toEpochMilli()) return denied(StreamVerdict.EXPIRED) }
+        val workspace = subscriber.workspace ?: return denied(StreamVerdict.REVOKED)
+        if (record.workspaceId != workspace.id) return denied(StreamVerdict.REVOKED)
+        if (liveness.check(subscriber.userId, PrincipalLiveness.Pin(workspace.id, workspace.name)) != null) {
+            return denied(StreamVerdict.REVOKED)
+        }
+        // The key role IS the authority: judged on a copy whose workspace is the pinned context,
+        // exactly as validation built it — `holds` answers from the key role's column.
+        return if (subscriber.copy(workspace = workspace).holds(Permission.DASHBOARD_EXECUTE)) {
+            RefreshStreamAccess(StreamVerdict.ALLOWED, executionRead = false)
+        } else {
+            denied(StreamVerdict.REVOKED)
+        }
+    }
+
+    private fun judgeMemberOrSession(subscriber: AuthenticatedPrincipal): RefreshStreamAccess {
         if (liveness.check(subscriber.userId, pin = null) != null) return denied(StreamVerdict.REVOKED)
         val user = users.snapshot(subscriber.userId) ?: return denied(StreamVerdict.REVOKED)
         val live = subscriber.copy(superAdmin = user.isAdmin)

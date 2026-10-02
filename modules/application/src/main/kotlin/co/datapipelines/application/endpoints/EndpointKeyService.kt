@@ -290,6 +290,7 @@ class EndpointKeyService(
             ApiKeyKind.MCP -> "its role in its workspace, over /mcp"
             ApiKeyKind.ENDPOINT -> "its bindings"
             ApiKeyKind.SERVER -> "the promotion route family it opens"
+            ApiKeyKind.DASHBOARD -> "its dashboard folder bindings, over the runtime routes"
         }
 
     private fun refused(message: String) =

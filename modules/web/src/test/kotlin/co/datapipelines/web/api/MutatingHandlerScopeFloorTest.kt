@@ -226,6 +226,26 @@ class MutatingHandlerScopeFloorTest {
                 // Keys v2 A16: the endpoint key's reach no longer includes the framework's
                 // execution routes at all, so ExecutionsController#cancel is off its surface and
                 // the map carries the one entry left (the promotion receiver's push).
+                //
+                // L5 (#367): the `dashboard` key's surface is the runtime routes' mutating POSTs —
+                // parameters, the refresh stream, the abort. Each is held by `dashboard_viewer`'s
+                // `dashboard.execute` (D50: the one row the kind's role carries beside `dashboard.read`);
+                // the runtime's own checks (the lens, ownership) are the second line, not the role's.
+                "dashboard DashboardRuntimeController#parameters" to
+                    SurfaceEntry(
+                        heldByKeyRole = true,
+                        reason = "the runtime's parameter evaluation — dashboard_viewer holds dashboard.execute (L5)",
+                    ),
+                "dashboard DashboardRuntimeController#refresh" to
+                    SurfaceEntry(
+                        heldByKeyRole = true,
+                        reason = "the refresh stream — dashboard_viewer holds dashboard.execute (L5)",
+                    ),
+                "dashboard DashboardRuntimeController#abort" to
+                    SurfaceEntry(
+                        heldByKeyRole = true,
+                        reason = "aborting an OWN refresh — dashboard.execute plus the per-instance ownership rule (L5)",
+                    ),
             )
 
         /**

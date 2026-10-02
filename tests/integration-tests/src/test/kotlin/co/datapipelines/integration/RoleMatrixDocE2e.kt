@@ -17,10 +17,11 @@ import java.io.File
  * "refused" by accident would be a row silently refusing a role the record admits, and the walk
  * would then demand a refusal the server rightly does not give.
  *
- * Since keys v2 (#233, A13/A14) each row carries TWELVE cells: permission, surfaces, the five
- * member columns and the five key-role columns — the two transport roles (`api_caller`,
- * `promotion_receiver`, record §3.2) and the three MEMBER roles an `mcp` key may carry
- * (`author`, `promoter`, `workspace_admin`, each judged by the member column of the same name).
+ * Since keys v2 (#233, A13/A14) each row carries THIRTEEN cells: permission, surfaces, the five
+ * member columns and the six key-role columns — the two transport roles (`api_caller`,
+ * `promotion_receiver`, record §3.2), the three MEMBER roles an `mcp` key may carry
+ * (`author`, `promoter`, `workspace_admin`, each judged by the member column of the same name),
+ * and L5's `dashboard_viewer` (the `dashboard` key's transport role).
  */
 object RoleMatrixDocE2e {
     const val AUTH_SPEC_PATH = "docs/auth.md"
@@ -29,8 +30,8 @@ object RoleMatrixDocE2e {
     /** The four workspace roles in the doc's column order, then super admin. */
     val ROLE_COLUMNS = listOf("viewer", "author", "promoter", "workspace_admin", "super_admin")
 
-    /** The five key roles, after the member columns (#215 record §3.2; keys v2 A13/A14). */
-    val KEY_ROLE_COLUMNS = listOf("api_caller", "promotion_receiver", "mcp:author", "mcp:promoter", "mcp:ws_admin")
+    /** The six key roles, after the member columns (#215 record §3.2; keys v2 A13/A14; L5 appends `dashboard_viewer`). */
+    val KEY_ROLE_COLUMNS = listOf("api_caller", "promotion_receiver", "mcp:author", "mcp:promoter", "mcp:ws_admin", "dashboard_viewer")
 
     private val ALL_COLUMNS = ROLE_COLUMNS + KEY_ROLE_COLUMNS
 

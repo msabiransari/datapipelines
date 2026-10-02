@@ -49,7 +49,11 @@ class UiConfig {
      * the post-create refresh and the rows a revoke swaps in (see [ApiKeyRows]).
      */
     @Bean
-    fun apiKeyRows(bindings: co.datapipelines.application.endpoints.EndpointKeyBindingRepository): ApiKeyRows = ApiKeyRows(bindings)
+    fun apiKeyRows(
+        bindings: co.datapipelines.application.endpoints.EndpointKeyBindingRepository,
+        // L5 — a `dashboard` key's folders read from their own table.
+        dashboardBindings: co.datapipelines.application.dashboards.DashboardKeyBindingRepository,
+    ): ApiKeyRows = ApiKeyRows(bindings, dashboardBindings)
 
     /** 047: the templates screen's one model, shared by the page and the partial controllers. */
     @Bean

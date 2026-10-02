@@ -1,5 +1,6 @@
 package co.datapipelines.web.dashboards.runtime
 
+import co.datapipelines.auth.ApiKeyRepository
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.PrincipalLiveness
@@ -23,7 +24,8 @@ class RefreshStreamAuthorityTest {
     private val liveness = mockk<PrincipalLiveness>()
     private val workspaces = mockk<WorkspaceService>()
     private val users = mockk<UserService>()
-    private val authority = RefreshStreamAuthority(liveness, workspaces, users)
+    private val apiKeys = mockk<ApiKeyRepository>()
+    private val authority = RefreshStreamAuthority(liveness, workspaces, users, apiKeys)
     private val subscriber =
         AuthenticatedPrincipal(
             userId = userId,

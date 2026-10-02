@@ -70,6 +70,7 @@ class PromotionServiceTest {
             parameterSets,
             mockk<co.datapipelines.visualization.DashboardService>(relaxed = true),
             mockk<co.datapipelines.visualization.VisualizationService>(relaxed = true),
+            mockk<co.datapipelines.application.dashboards.DashboardKeyBindingRepository>(relaxed = true),
         )
     private val parameterSetPromotion = mockk<co.datapipelines.web.parameters.ParameterSetPromotion>()
     private val visualizationPromotion = mockk<co.datapipelines.web.visualizations.VisualizationPromotion>()

@@ -1,6 +1,6 @@
 # Enumerations Reference
 
-**Status:** v1.27 (living document — updated as enums evolve)
+**Status:** v1.29 (living document — updated as enums evolve)
 **Owner:** datapipelines.co core
 **Purpose:** Single source of truth for every enum value used across the system. Prevents spelling drift across specs and across the codebase.
 
@@ -247,12 +247,15 @@ V23's three additive booleans (`author` / `promoter` / `admin`) were folded back
 | `mcp` (V37, renamed from `user` — A19; kind is the transport and the word says which) | The agent's key: CREATED on the Keys page (A15 — the login mint is retired) by someone holding `mcp_key.create`, with the role chosen at creation under the subset rule (A14); acts as its own `service` identity holding that member role (A13); presented on `/mcp` and nowhere else (#215 B2) |
 | `endpoint` | A credential for published endpoints only: acts as its own identity with the `api_caller` role (§8D), workspace-pinned, and serves exactly the endpoints its bindings cover plus the metadata and result cursor of executions it started |
 | `server` | The promotion peer's credential (091): created by a super admin, presented as `DP-Promotion-Key` by a SENDING deployment, and accepted on the promotion receiver's routes and nowhere else. Acts as its own identity with the `promotion_receiver` role (§8D), for any workspace (B6) |
+| `dashboard` (L5, #367, V45) | An external application's credential for the dashboard runtime: created on the Keys page by an `api_key.create` holder, acts as its own identity with the `dashboard_viewer` role (§8D), presented on the runtime and refreshes routes of the dashboards its `dashboard_key_bindings` folders cover and NOWHERE ELSE — refused centrally everywhere else with `endpoint.key_kind_refused` (`details.reason` `dashboard_key_off_surface`) |
 
 > A kind answers "where may this credential be presented?"; its ROLE (§8D, or the chosen member role for the `mcp` key) answers "what may it do there?". Each kind carries exactly one role — the database CHECK (`chk_api_keys_role`) makes it a fact. The wire form is the lowercase name.
 
 > **A `server` key authenticates nothing outside the promotion routes.** Presented as an ordinary `DP-API-Key` it is refused on every route — REST, htmx partials, `/mcp` and every UI page — with `endpoint.key_kind_refused`. Same rule as the endpoint kind, different family.
 
 > **An endpoint key with no binding on any ancestor of the path it presents at authorises nothing.** The absence of a binding is never a fall-through (since #215 B3 an unbound path serves no key at all); if it were, publishing a new endpoint would silently widen every existing endpoint key's reach at the moment of publication.
+
+> **A `dashboard` key with no binding on any ancestor of the dashboard's name serves nothing** (L5, R-EP2 verbatim): an unbound key, a key bound elsewhere and a key of another workspace all get the dashboard family's ordinary 404, and a deeper binding REPLACES an inherited one.
 
 ---
 
@@ -268,6 +271,7 @@ V23's three additive booleans (`author` / `promoter` / `admin`) were folded back
 | `workspace_admin` | an `mcp` key CHOSEN at creation | the §7.6 `mcp:workspace_admin` column — the workspace-admin member's permissions, exactly |
 | `api_caller` | every `endpoint` key | `endpoint.serve` (the paths bound to the key), `execution.read` and `execution.result.read` (the executions it started) |
 | `promotion_receiver` | every `server` key (and the deprecated config-value peer) | `promotion.inventory.read`, `promotion.push` — for any workspace (B6) |
+| `dashboard_viewer` (L5, #367) | every `dashboard` key | `dashboard.read` (the BINDINGS are the lens — `dashboard_key_bindings`' folders; unbound = unservable) and `dashboard.execute`, on the runtime routes only |
 
 Pre-created and fixed: the three member roles are the ONLY roles an `mcp` key can carry (A15 — viewer is never a key role; B1 — `super_admin` is neither offerable nor acceptable), and no key role holds workspace admin or super admin AUTHORITY over people (PK3). `snake_case` everywhere (A5); the UI prints it with a space (`api caller`, `workspace admin`).
 
@@ -416,6 +420,8 @@ Pre-created and fixed: the three member roles are the ONLY roles an `mcp` key ca
 | `endpoint.served` | A published endpoint served a request (074). Details carry the endpoint id, the execution id and the outcome; the key id is the row's own `key_id`. This row is also what proves an endpoint key may read that execution's result |
 | `endpoint.key_bound` | An API key was bound to a node of the endpoint tree |
 | `endpoint.key_unbound` | An API key's binding to a node was removed |
+| `dashboard.key_bound` (L5, #367) | A `dashboard` key was bound to a folder of the dashboard name space; `details.name_prefix` and `workspace_id` |
+| `dashboard.key_unbound` (L5, #367) | A `dashboard` key's folder binding was removed; `details.name_prefix` |
 | `endpoint.published` | An endpoint was published over a released pipeline |
 | `endpoint.unpublished` | An endpoint was deleted |
 
@@ -598,8 +604,9 @@ Roles design D11 (2026-09-20). `executed_by` names the user a run belongs to —
 | `user` | A user API key (REST or MCP): the run is the key owner's, listed as their own |
 | `endpoint` | A published endpoint's key. `executed_by` still names the key's owner (the concurrency slot and the audit trail need a user), but the run is NOT that person's: the own-runs filter excludes it, so it lists for workspace admins only — and for the endpoint key itself through the serve audit row (auth.md §7.7) |
 | `server` | Reserved for the promotion peer's credential; nothing writes it today |
+| `dashboard` (L5, #367, V45) | A delegated dashboard refresh's key (D50): `executed_by` names the key's own `service` identity and the run is the key's — the own-runs predicate reads it as the key's own, and the refresh's row names the key in `principal_key_id` |
 
-The CHECK (`chk_executions_executed_by_key_kind`) admits these three and NULL. V30 backfilled `ENDPOINT`-triggered rows to `endpoint` and `MCP` rows to `user`; REST and UI rows stayed NULL (a REST run may have been a key or a cookie, and NULL reads as "a person's run", which is what those rows meant).
+The CHECK (`chk_executions_executed_by_key_kind`) admits these four and NULL. V30 backfilled `ENDPOINT`-triggered rows to `endpoint` and `MCP` rows to `user`; REST and UI rows stayed NULL (a REST run may have been a key or a cookie, and NULL reads as "a person's run", which is what those rows meant).
 
 ---
 
@@ -997,6 +1004,7 @@ This document itself is **additive-only** — values are never removed (only mar
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-01 | v1.29 | L5 (#367, #10) the `dashboard` key kind | **§8A gains `dashboard`** (V45) — the runtime routes' credential, `dashboard_key_bindings` folders are its reach, unbound = unservable; **§8D gains `dashboard_viewer`** — exactly `dashboard.read` (bindings as the lens) and `dashboard.execute`; **§15 gains `dashboard.key_bound` / `dashboard.key_unbound`**; **§18A gains `dashboard`** (V45) — a delegated refresh's attribution (`executed_by` the key's identity), the CHECK widens with it. |
 | 2026-10-01 | v1.28 | 332 (#332, #330, #331) the three families' lifecycle audit | §15 gains the parameter-set, visualization and dashboard twins of the five human verbs' events, and the family twins of `pipeline.version.released` with their cascade provenance (`cascade_from_parameter_set_id` / `cascade_from_visualization_id` / `cascade_from_dashboard_id`) — emitted by the three families' REST verbs, the pipelines mould's `LifecycleVerbs.audit`; the family drift guards carry the five-event non-vacuity floor. Authority: rest-api §21/§22/§23; versioning §7's "every verb emits its audit event". |
 | 2026-09-29 | v1.27 | L1c (#10 L1c) the transfer's audit events — renumbered at merge after L2's v1.26 | §15 gains the four transfer events — `visualization.exported` / `visualization.imported` and the dashboard twins — the pipelines' lifecycle-audit shape (ids, versions, counts) plus `imported_with_evidence` recorded verbatim from the envelope manifest (the #332 review's rule for the transfer verbs; the lifecycle verbs' own rows remain that issue's). Authority: rest-api §22/§23; emitted by the two transfer controllers. |
 | 2026-09-29 | v1.26 | L2 (#10) the dashboard runtime — renumbered at merge after 320's v1.25 | §15 gains the **dashboard audit event** `dashboard.refresh` (one awaited row per refresh, at its end). §18 gains **`DASHBOARD`** (V43): the delegated-act trigger — `executed_by` the refreshing person, no stored result, cancelled only through its refresh. New **§38 `RefreshStatus`**. |
