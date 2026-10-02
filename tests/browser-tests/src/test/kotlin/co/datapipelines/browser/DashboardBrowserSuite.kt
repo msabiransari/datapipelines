@@ -826,7 +826,8 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
         val path =
             when {
                 client["recorded"] == false -> "the client never recorded this refresh id"
-                client["ended"] == true -> "the ended short-circuit answered (datapipelines-dashboard.js abort(): refresh.ended) — no POST was sent"
+                client["ended"] == true ->
+                    "the ended short-circuit answered (datapipelines-dashboard.js abort(): refresh.ended) — no POST was sent"
                 else -> "the POST was rejected (datapipelines-dashboard.js abort()'s rejection handler)"
             }
         throw AssertionError(

@@ -62,7 +62,9 @@ class DashboardConformanceBrowserTest : DashboardBrowserSuite() {
         // a real, styled element the moment it is attached (computed style needs no box).
         page.waitForSelector(
             "#board .js-plotly-plot .plotly",
-            com.microsoft.playwright.Page.WaitForSelectorOptions().setState(com.microsoft.playwright.options.WaitForSelectorState.ATTACHED),
+            com.microsoft.playwright.Page
+                .WaitForSelectorOptions()
+                .setState(com.microsoft.playwright.options.WaitForSelectorState.ATTACHED),
         )
         page.waitForFunction("() => window.__dp.renders.length >= 1")
         val fontFamily =
