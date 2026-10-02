@@ -1,41 +1,61 @@
-<!-- Search results: a FLAT list of full paths (template-hierarchy-design §9.2, decided),
-     rendered in the explorer's LEFT pane (067).
+<!-- A FLAT list of full paths (template-hierarchy-design §9.2, decided), in TWO instances since
+     #350 — chosen by `scope`, which also names the stable swap root (`rootId`):
+
+     - `nav`  — the global sidebar's search results, under #pipeline-nav-root. Clearing the box
+                returns the sidebar to its tree (partials/pipelines dispatches on exactly that).
+                The rows are role=option in a role=listbox — a result list, not a tree — and
+                template-explorer.js's nav context gives them the same keyboard as the tree.
+     - `page` — the /pipelines CATALOG, under #pipeline-list-wrapper: every pipeline the caller
+                may read when `q` is empty, the matches otherwise (owner ruling 2026-10-02).
+                Plain links in a plain list; the page has no tree and no detail pane any more.
 
      Not a tree pruned to matching leaves. Pruning requires walking the ancestors of every
      match, which is precisely the whole-list-in-the-browser work §9.1 forbids, and a flat list
-     of full paths is what someone searching `nyc/mob` actually wants to see. Clearing `q`
-     returns to the tree — partials/pipelines dispatches on exactly that.
+     of full paths is what someone searching `nyc/mob` actually wants to see.
 
-     A result row SELECTS, exactly like a tree leaf: its detail swaps into #pipeline-detail on
-     the right, and Enter opens the editor. The rows are role=option in a role=listbox — this
-     is a result list, not a tree, so it does not wear tree machinery.
-
-     The ROOT carries id="pipeline-list-wrapper", the same stable swap target the tree's root
-     level carries, so the search box and the pager address one id in both presentations
-     (ui-screens.md §4.3). -->
-<div xmlns:th="http://www.thymeleaf.org" th:fragment="results" id="pipeline-list-wrapper">
+     Every row is a LINK to the canonical workspace /pipelines/{id} — a full document load
+     (hx-boost="false", the graph entry workspace spec §2 keeps), never a selection into a pane. -->
+<div xmlns:th="http://www.thymeleaf.org" th:fragment="results" th:id="${rootId}"
+     th:with="nav=${scope == 'nav'}" th:attr="data-pipeline-list=${scope}">
   <th:block th:if="${lensUnavailable != null and #lists.isEmpty(pipelines)}">
     <div th:replace="~{partials/lens-unavailable :: notice(${lensUnavailable})}"></div>
   </th:block>
-  <th:block th:if="${lensUnavailable == null and #lists.isEmpty(pipelines)}">
+  <!-- The catalog with no query and no rows is the workspace's EMPTY state, not a failed
+       search: it says how pipelines arrive (R10 — authored through agents), like the tree's. -->
+  <th:block th:if="${lensUnavailable == null and #lists.isEmpty(pipelines) and !nav and #strings.isEmpty(q)}">
+    <div class="ds-empty">
+      <p class="ds-empty-title">No pipelines yet</p>
+      <p class="ds-empty-description">
+        Pipelines are authored through the MCP server — ask your agent to create one. Give it a
+        folder path like <code>nyc/mobility/revenue_by_borough</code> — a folder is required,
+        and <code>test/&hellip;</code> is the place for experiments.
+      </p>
+    </div>
+  </th:block>
+  <th:block th:if="${lensUnavailable == null and #lists.isEmpty(pipelines) and (nav or !#strings.isEmpty(q))}">
     <div class="ds-empty">
       <p class="ds-empty-title">No pipelines match your search</p>
       <div class="ds-empty-actions">
-        <button class="ds-button ds-button-secondary ds-button-sm"
-                th:attr="hx-get=@{/partials/pipelines}, hx-target='#pipeline-list-wrapper', hx-swap='outerHTML'">Clear search</button>
+        <!-- The sidebar's clear also empties ITS box, so it is nav-tree.js's (data-nav-tree-clear):
+             a bare hx-get would bring the tree back under a box still holding the old query. -->
+        <button th:if="${nav}" type="button" class="ds-button ds-button-secondary ds-button-sm"
+                data-nav-tree-clear>Clear search</button>
+        <button th:unless="${nav}" type="button" class="ds-button ds-button-secondary ds-button-sm"
+                th:attr="hx-get=@{/partials/pipelines}, hx-target='#' + ${rootId}, hx-swap='outerHTML'">Clear search</button>
       </div>
     </div>
   </th:block>
 
-  <ul class="tpl-results" role="listbox" aria-label="Search results"
-      th:unless="${#lists.isEmpty(pipelines)}">
-    <li role="none" th:each="p : ${pipelines}">
-      <button type="button" class="tpl-result" role="option" aria-selected="false"
-              th:attr="hx-get=@{/partials/pipelines/detail(id=${p.id})},
-                       data-editor-url=@{'/pipelines/' + ${p.id} + '/editor'}"
-              hx-target="#pipeline-detail" hx-swap="innerHTML"
-              hx-sync="#pipeline-detail:replace"
-              hx-indicator="#pipeline-detail-spinner">
+  <ul class="tpl-results"
+      th:unless="${#lists.isEmpty(pipelines)}"
+      th:attr="role=${nav} ? 'listbox' : null,
+               aria-label=${nav} ? 'Pipeline search results' : 'Pipelines'">
+    <li th:attr="role=${nav} ? 'none' : null" th:each="p : ${pipelines}">
+      <a class="tpl-result" hx-boost="false"
+         th:href="@{/pipelines/{id}(id=${p.id})}"
+         th:attr="role=${nav} ? 'option' : null,
+                  aria-selected=${nav} ? 'false' : null,
+                  data-leaf-id=${p.id}">
         <!-- The FULL path, and it rides on `title` too — a deep path in a narrow pane
              truncates, and the truncated text must never be the only copy (§9.4). -->
         <span class="tpl-path" th:text="${p.name}" th:title="${p.name}">nyc/mobility/revenue_by_borough</span>
@@ -54,14 +74,14 @@
              says the whole thing; the tree's leaf keeps the compact badge. -->
         <span th:if="${drafts != null && drafts[p.id] != null}" class="ds-badge ds-badge-warning"
               th:text="'draft v' + ${drafts[p.id].version} + ' pending release'"
-              title="A draft exists; release it from the editor to publish."></span>
-      </button>
+              title="A draft exists; release it from the pipeline's workspace to publish."></span>
+      </a>
     </li>
   </ul>
 
   <th:block th:unless="${#lists.isEmpty(pipelines)}"
-            th:with="prevUrl=@{/partials/pipelines(q=${q}, offset=${offset - 25})},
-                     nextUrl=@{/partials/pipelines(q=${q}, offset=${offset + 25})}">
-    <div th:replace="~{partials/pager :: pager('#pipeline-list-wrapper', ${prevUrl}, ${nextUrl}, ${offset}, ${hasMore}, ${pipelines.size()}, ${total})}"></div>
+            th:with="prevUrl=${nav} ? @{/partials/pipelines(q=${q}, scope='nav', offset=${offset - 25})} : @{/partials/pipelines(q=${q}, offset=${offset - 25})},
+                     nextUrl=${nav} ? @{/partials/pipelines(q=${q}, scope='nav', offset=${offset + 25})} : @{/partials/pipelines(q=${q}, offset=${offset + 25})}">
+    <div th:replace="~{partials/pager :: pager('#' + ${rootId}, ${prevUrl}, ${nextUrl}, ${offset}, ${hasMore}, ${pipelines.size()}, ${total})}"></div>
   </th:block>
 </div>

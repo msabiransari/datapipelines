@@ -3,6 +3,14 @@
       th:replace="~{layouts/default :: page(~{::content})}">
 <th:block th:fragment="content">
 
+  <!--/* #350 — the global sidebar's current-leaf hook: which pipeline this page shows, by id AND
+          full path, so the rail's Pipelines tree (nav-tree.js) can mark the leaf and reveal its
+          folders one level at a time — on a full-document entry, a boosted arrival and a
+          history restore alike (it rides inside #app-main). The record is the one this page
+          already resolved through the caller's lens; nothing here is new information. */-->
+  <span hidden data-nav-current="pipelines"
+        th:attr="data-nav-current-id=${pipelineId},data-nav-current-path=${navCurrentPath}"></span>
+
   <link th:href="@{/css/pipeline-editor.css}" rel="stylesheet">
   <!-- 059b: the icon system the cards and view controls draw from. Without this
        link every .ds-icon class on the page is inert and each <svg> falls to the

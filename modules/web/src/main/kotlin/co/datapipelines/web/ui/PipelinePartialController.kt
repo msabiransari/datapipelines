@@ -4,6 +4,7 @@ import co.datapipelines.application.lens.PromoterLens
 import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.web.api.currentPrincipal
+import jakarta.servlet.http.HttpServletResponse
 import org.springframework.stereotype.Controller
 import org.springframework.ui.Model
 import org.springframework.web.bind.annotation.GetMapping
@@ -32,6 +33,16 @@ import java.util.UUID
  *
  * `q` is ignored while `prefix` is present: browse and search are different presentations
  * (§9.2) and a folder expansion is unambiguously a browse.
+ *
+ * ## #350 — which instance: `scope`
+ *
+ * The tree moved into the global sidebar. `scope=nav` is the sidebar's wrapper (the root level,
+ * or its flat search when `q` is set, under `#pipeline-nav-root`); any other value — absent
+ * included — is the `/pipelines` catalog's flat list under `#pipeline-list-wrapper`. A `prefix`
+ * request is always a sidebar level. Same route, same `PIPELINE_READ`, same lens: the scope
+ * picks the markup, never the rows. Every sidebar response carries
+ * [PipelineBrowseModel.NAV_STAMP_HEADER] so the rail can refuse a level rendered under another
+ * workspace or lens.
  */
 @Controller
 class PipelinePartialController(
@@ -41,20 +52,27 @@ class PipelinePartialController(
 ) {
     @GetMapping("/partials/pipelines")
     @RequiredScope(Permission.PIPELINE_READ)
+    @Suppress("LongParameterList") // one request parameter per query value the route has always taken, plus #350's scope
     fun list(
         model: Model,
+        response: HttpServletResponse,
         @RequestParam(required = false) q: String?,
         @RequestParam(required = false) prefix: String?,
         @RequestParam(required = false) offset: Int?,
+        @RequestParam(required = false) scope: String?,
     ): String {
         val principal = currentPrincipal()
-        val workspaceId = principal.requireWorkspace().id
+        val workspace = principal.requireWorkspace()
         val view = lens.viewFor(principal)
+        val listScope = if (prefix != null) PipelineListScope.NAV else PipelineListScope.fromWire(scope)
         model.addAttribute("q", q ?: "")
+        if (listScope == PipelineListScope.NAV) {
+            response.setHeader(PipelineBrowseModel.NAV_STAMP_HEADER, PipelineBrowseModel.navStamp(workspace.name, view))
+        }
         return if (prefix != null) {
-            browse.fillLevel(model, workspaceId, view, prefix, offset ?: 0)
+            browse.fillLevel(model, workspace.id, view, prefix, offset ?: 0)
         } else {
-            browse.fillWrapper(model, workspaceId, view, q?.trim()?.takeIf { it.isNotEmpty() }, offset ?: 0)
+            browse.fillWrapper(model, workspace.id, view, q?.trim()?.takeIf { it.isNotEmpty() }, offset ?: 0, listScope)
         }
     }
 

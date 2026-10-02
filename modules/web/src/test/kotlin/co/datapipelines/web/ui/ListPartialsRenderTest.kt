@@ -203,22 +203,18 @@ class ListPartialsRenderTest {
     }
 
     /**
-     * Layout chrome plus PipelineUiController's model in its BROWSE presentation — what a page
-     * load with no `q` renders since 067. One folder and one root leaf, so the level renders
-     * its rows AND its pager and the guard is not vacuous.
+     * Layout chrome plus PipelineUiController's model — since #350 the CATALOG: the flat list
+     * under `#pipeline-list-wrapper`, one row and `hasMore` so the pager renders and the guard
+     * is not vacuous.
      */
     private fun WebContext.fillPipelineList() {
         fillLayoutChrome()
         setVariable("scopes", setOf("READ"))
         setVariable("dialects", emptyList<String>())
-        setVariable("searching", false)
-        setVariable("prefix", "")
-        setVariable("levelId", PipelineBrowseModel.ROOT_LEVEL_ID)
-        setVariable(
-            "folders",
-            listOf(PipelineFolderView("nyc", "nyc", 6, PipelineBrowseModel.levelId("nyc"))),
-        )
-        setVariable("foldersTruncated", false)
+        // #350: the page is the CATALOG — the flat list under its own root, never a tree level.
+        setVariable("searching", true)
+        setVariable("scope", PipelineListScope.CATALOG.wire)
+        setVariable("rootId", PipelineListScope.CATALOG.rootId)
         setVariable("pipelines", listOf(pipelineRecord()))
         setVariable("drafts", emptyMap<UUID, co.datapipelines.pipeline.PipelineVersionDetail>())
         setVariable("q", "")
@@ -248,6 +244,8 @@ class ListPartialsRenderTest {
      */
     private fun WebContext.fillPipelinesModel(rows: List<PipelineRecord>) {
         setVariable("searching", true)
+        setVariable("scope", PipelineListScope.CATALOG.wire)
+        setVariable("rootId", PipelineListScope.CATALOG.rootId)
         setVariable("pipelines", rows)
         setVariable("drafts", emptyMap<UUID, co.datapipelines.pipeline.PipelineVersionDetail>())
         setVariable("q", "")

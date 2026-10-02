@@ -76,6 +76,9 @@ class PipelineWorkspaceController(
         RoleModel.stamp(model)
         model.addAttribute("pipelineId", id)
         model.addAttribute("pipelineName", resolved.record.displayName)
+        // #350 — the sidebar tree's current-leaf hook reads the FULL path (the name), so the rail
+        // can reveal this pipeline's folders; the record is the lens-admitted one this page shows.
+        model.addAttribute("navCurrentPath", resolved.record.name)
         stampVersionState(model, resolved, roles)
         model.addAttribute("canReadExecutions", roles.canReadExecutions)
         model.addAttribute("activeTab", PipelineWorkspaceTab.fromWire(tab, roles.canReadExecutions).wire)

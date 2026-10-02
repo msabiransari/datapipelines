@@ -207,23 +207,19 @@ class TemplateHtmxRenderAuditTest {
     }
 
     /**
-     * PipelineUiController's model — the BROWSE presentation, which is what a page load with
-     * no `q` renders since 067 (the screen is a tree). One folder and one root leaf, so the
-     * level renders its rows AND its pager and the guard is not vacuous; `levelId` is what the
-     * pager's `hx-target` is built from, so an absent one would target `#null`.
+     * PipelineUiController's model — since #350 the CATALOG, the flat list under
+     * `#pipeline-list-wrapper` (the tree moved into the sidebar). One row and `hasMore`, so the
+     * pager renders and the guard is not vacuous; `rootId` is what the pager's `hx-target` is
+     * built from, so an absent one would target `#null`.
      */
     private fun WebContext.fillPipelineList() {
         fillLayoutChrome()
         setVariable("scopes", setOf("READ"))
         setVariable("dialects", emptyList<String>())
-        setVariable("searching", false)
-        setVariable("prefix", "")
-        setVariable("levelId", PipelineBrowseModel.ROOT_LEVEL_ID)
-        setVariable(
-            "folders",
-            listOf(PipelineFolderView("nyc", "nyc", 6, PipelineBrowseModel.levelId("nyc"))),
-        )
-        setVariable("foldersTruncated", false)
+        // #350: the page is the CATALOG — the flat list under its own root, never a tree level.
+        setVariable("searching", true)
+        setVariable("scope", PipelineListScope.CATALOG.wire)
+        setVariable("rootId", PipelineListScope.CATALOG.rootId)
         setVariable("drafts", emptyMap<UUID, co.datapipelines.pipeline.PipelineVersionDetail>())
         setVariable(
             "pipelines",

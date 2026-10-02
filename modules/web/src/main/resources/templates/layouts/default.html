@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="en" xmlns:th="http://www.thymeleaf.org"
-      th:attr="data-theme=${activeTheme}"
+      th:attr="data-theme=${activeTheme},data-dp-workspace=${activeWorkspace}"
       th:fragment="page(content)">
 <head>
   <meta charset="utf-8">
@@ -266,10 +266,50 @@
            th:attr="aria-current=${currentPath != null and currentPath == '/dashboard'} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#layout-grid"></use></svg><span class="app-rail-label">Home</span></a>
 
         <div class="app-nav-section app-rail-label">Build</div>
-        <a th:href="@{/pipelines}" class="app-nav-link" data-nav-section="/pipelines"
-           data-nav-group="Build" data-nav-label="Pipelines"
-           th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/pipelines')} ? 'active' : null"
-           th:attr="aria-current=${currentPath != null and #strings.startsWith(currentPath, '/pipelines')} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#workflow"></use></svg><span class="app-rail-label">Pipelines</span><span class="app-nav-badge app-rail-label" th:if="${navCounts?.pipelines != null}" th:text="${navCounts.pipelines}">0</span></a>
+        <!-- #350 (workspace spec §5, D7/D8) — THE NAVIGATING-TREE PATTERN, one shape for every
+             artifact family that browses as a folder tree (Pipelines here, Dashboards below;
+             Templates is its declared next use). Three parts, kept distinct on purpose:
+
+               - the item LINK (unchanged: the catalog page, the active section, the crumb);
+               - the TOGGLE beside it (a real button, aria-expanded/aria-controls) — opening the
+                 tree is not navigating, so it is never the link;
+               - the PANEL: a server-backed, lazy tree (one prefix level per request, the same
+                 fragments as ever, `scope=nav`) with its own search, in a bounded scroll region.
+
+             nav-tree.js owns the panel's lifecycle: the first open fetches the ROOT level into
+             the placeholder; a failure stays visible with a Retry; every tree swap is admitted
+             only for the live request generation AND the tree's own workspace/lens stamp; the
+             rail widens to fit the visible rows between the --app-rail-tree-min/max tokens and
+             scrolls sideways past the maximum; open folders + scroll persist per workspace and
+             family (paths only, never rows). template-explorer.js (its nav context) owns the
+             keyboard. The panel carries app-rail-label, so the icon-collapsed rail hides it and
+             a collapse always wins over a late width (app.css). -->
+        <div class="app-nav-branch" data-nav-branch="pipelines">
+          <a th:href="@{/pipelines}" class="app-nav-link" data-nav-section="/pipelines"
+             data-nav-group="Build" data-nav-label="Pipelines"
+             th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/pipelines')} ? 'active' : null"
+             th:attr="aria-current=${currentPath != null and #strings.startsWith(currentPath, '/pipelines')} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#workflow"></use></svg><span class="app-rail-label">Pipelines</span><span class="app-nav-badge app-rail-label" th:if="${navCounts?.pipelines != null}" th:text="${navCounts.pipelines}">0</span></a>
+          <button type="button" class="app-nav-branch-toggle app-rail-label" data-nav-tree-toggle
+                  aria-expanded="false" aria-controls="nav-tree-pipelines" aria-label="Pipeline folders">
+            <svg class="ds-icon ds-icon-xs tpl-chevron" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#chevron-right"></use></svg>
+          </button>
+          <div class="app-nav-tree app-rail-label" id="nav-tree-pipelines" data-nav-tree="pipelines" hidden
+               th:attr="data-nav-workspace=${activeWorkspace},data-nav-root-url=@{/partials/pipelines(scope='nav')}">
+            <div class="app-nav-tree-search">
+              <input type="search" name="q" class="ds-input app-nav-tree-input" autocomplete="off"
+                     placeholder="Search pipelines…" aria-label="Search pipelines in the tree"
+                     data-nav-tree-search
+                     th:attr="hx-get=@{/partials/pipelines(scope='nav')}"
+                     hx-target="#pipeline-nav-root" hx-swap="outerHTML"
+                     hx-trigger="input changed delay:300ms, search" hx-sync="this:replace">
+            </div>
+            <div class="app-nav-tree-scroll" data-nav-tree-scroll>
+              <div id="pipeline-nav-root" class="tpl-level tpl-level-pending" data-nav-tree-root>
+                <span class="ds-spinner htmx-indicator" aria-hidden="true"></span>
+              </div>
+            </div>
+          </div>
+        </div>
         <a th:href="@{/templates}" class="app-nav-link" data-nav-section="/templates"
            data-nav-group="Build" data-nav-label="Templates"
            th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/templates')} ? 'active' : null"
@@ -281,25 +321,30 @@
         <!-- D58 (#10 L3b): the Dashboards item — every role (dashboard.read is an every-role
              read, the promoter through the lens), so unlike Executions/Promotion it rides no
              advice boolean. The PARENT item is the link to the tree page; BESIDE it, the
-             disclosure expands IN PLACE into the hierarchy (D58), lazy: the summary's first
-             click fetches ONE level (the same /partials/dashboards/tree fragment the page's
-             tree renders, scope=nav) into the placeholder below, and htmx never touches it
-             again. The branch carries app-rail-label so it hides with the collapsed rail. -->
-        <div class="app-nav-branch">
+             disclosure expands IN PLACE into the hierarchy (D58), lazy: the first open fetches
+             ONE level (the same /partials/dashboards/tree fragment the page's tree renders,
+             scope=nav) into the placeholder below. #350: the branch adopts the sidebar's ONE
+             navigating-tree pattern above (toggle + panel, nav-tree.js + the explorer keyboard's
+             nav context) instead of its own <details> — two tree engines in one rail is what
+             the workspace spec forbids. Its fragment, route and full-navigation leaves are
+             unchanged; it has no search route, so its panel carries no search box. -->
+        <div class="app-nav-branch" data-nav-branch="dashboards">
           <a th:href="@{/dashboards}" class="app-nav-link" data-nav-section="/dashboards"
              data-nav-group="Build" data-nav-label="Dashboards"
              th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/dashboards')} ? 'active' : null"
              th:attr="aria-current=${currentPath != null and #strings.startsWith(currentPath, '/dashboards')} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#boxes"></use></svg><span class="app-rail-label">Dashboards</span></a>
-          <details class="app-nav-branch-tree app-rail-label">
-            <summary aria-label="Expand dashboards tree"
-                     th:attr="hx-get=@{/partials/dashboards/tree(scope='nav')}"
-                     hx-trigger="click once" hx-target="next .tpl-level" hx-swap="outerHTML">
-              <svg class="ds-icon ds-icon-xs tpl-chevron" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#chevron-right"></use></svg>
-            </summary>
-            <div class="tpl-level tpl-level-pending" id="dash-tree-nav">
-              <span class="ds-spinner htmx-indicator" aria-hidden="true"></span>
+          <button type="button" class="app-nav-branch-toggle app-rail-label" data-nav-tree-toggle
+                  aria-expanded="false" aria-controls="nav-tree-dashboards" aria-label="Dashboard folders">
+            <svg class="ds-icon ds-icon-xs tpl-chevron" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#chevron-right"></use></svg>
+          </button>
+          <div class="app-nav-tree app-rail-label" id="nav-tree-dashboards" data-nav-tree="dashboards" hidden
+               th:attr="data-nav-workspace=${activeWorkspace},data-nav-root-url=@{/partials/dashboards/tree(scope='nav')}">
+            <div class="app-nav-tree-scroll" data-nav-tree-scroll>
+              <div class="tpl-level tpl-level-pending" id="dash-tree-nav" data-nav-tree-root>
+                <span class="ds-spinner htmx-indicator" aria-hidden="true"></span>
+              </div>
             </div>
-          </details>
+          </div>
         </div>
 
         <div class="app-nav-section app-rail-label">Operate</div>
@@ -609,5 +654,12 @@
   <script th:src="@{/js/toast.js}"></script>
   <!-- 282 (#282) — the data table's enhancer: sort, resize, the header cap, keyboard rows. -->
   <script th:src="@{/js/data-table.js}"></script>
+  <!-- #350 — the sidebar's navigating trees: the shared explorer keyboard (template-explorer.js,
+       loaded ONCE here; an explorer page's own tag re-executing on a boosted visit is a re-init,
+       never a second set of listeners) and the rail branches' lifecycle (nav-tree.js). Both are
+       footer scripts OUTSIDE #app-main, so the region-scoped history cache (#358) never replays
+       them. -->
+  <script th:src="@{/js/template-explorer.js}"></script>
+  <script th:src="@{/js/nav-tree.js}"></script>
 </body>
 </html>

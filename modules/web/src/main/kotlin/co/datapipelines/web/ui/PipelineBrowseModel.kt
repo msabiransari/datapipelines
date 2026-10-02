@@ -39,10 +39,16 @@ import java.util.UUID
  * exactly the whole-list-in-the-browser work the tree exists to avoid (§9.2, decided for
  * templates in 047 and inherited here).
  *
- * Both presentations swap the same stable root `#pipeline-list-wrapper` with `outerHTML`, and
- * both render the shared `partials/pager` — the SPA contract this screen has had since 028
- * (ui-screens.md §4.3) carries over unchanged, because this is a new fragment shape on an
- * existing surface, not a new surface.
+ * Both presentations swap one stable root with `outerHTML`, and both render the shared
+ * `partials/pager` — the SPA contract this screen has had since 028 (ui-screens.md §4.3).
+ *
+ * **#350 — two scopes, one model.** The tree lives in the global sidebar now
+ * ([PipelineListScope.NAV]: the root level / nav search under `#pipeline-nav-root`, every
+ * nested level under its digest id), and `/pipelines` is the flat **catalog**
+ * ([PipelineListScope.CATALOG]: the full-path list under `#pipeline-list-wrapper`, every
+ * pipeline when `q` is empty, the matches otherwise — owner ruling 2026-10-02). There is no
+ * second tree on the page and no detail pane: every row of both scopes is a link to the
+ * canonical workspace `/pipelines/{id}`.
  *
  * Nothing here creates, renames, moves or deletes a folder, and nothing can: a folder is a
  * name prefix with no identity (§3.1), derived per request from the live rows beneath it and
@@ -148,6 +154,8 @@ class PipelineBrowseModel(
         level: PipelineFolderLevel,
     ) {
         model.addAttribute("searching", false)
+        // #350: a tree level exists only in the sidebar.
+        model.addAttribute("scope", PipelineListScope.NAV.wire)
         model.addAttribute("prefix", prefix ?: "")
         model.addAttribute("levelId", levelId(prefix))
         model.addAttribute("folders", level.folders.map(::PipelineFolderView))
@@ -168,20 +176,27 @@ class PipelineBrowseModel(
     }
 
     /**
-     * Fills [model] for a **search** — a flat list of full paths, paged by the shared pager
-     * against `#pipeline-list-wrapper` (§9.2).
+     * Fills [model] for a **flat list of full paths**, paged by the shared pager against the
+     * [scope]'s root (§9.2): the sidebar's search results ([PipelineListScope.NAV], `q`
+     * non-empty), or the `/pipelines` catalog ([PipelineListScope.CATALOG], where an absent
+     * `q` lists every pipeline the caller may read — [PipelineService.page]'s own null-query
+     * page, the same lens and the same page size).
      */
     fun fillSearch(
         model: Model,
         workspaceId: UUID,
         view: LensedView,
-        q: String,
+        q: String?,
         offset: Int,
+        scope: PipelineListScope = PipelineListScope.NAV,
     ): String {
         val page = maxOf(0, offset)
         val result = pipelines.page(workspaceId, view.pipelines, q, page, PAGE_SIZE)
         model.addAttribute(LENS_UNAVAILABLE, view.unavailable)
         model.addAttribute("searching", true)
+        model.addAttribute("scope", scope.wire)
+        model.addAttribute("rootId", scope.rootId)
+        model.addAttribute("q", q.orEmpty())
         model.addAttribute("pipelines", result.items)
         model.addAttribute("drafts", result.drafts)
         model.addAttribute("offset", page)
@@ -191,11 +206,13 @@ class PipelineBrowseModel(
     }
 
     /**
-     * Fills [model] for whichever presentation [q] selects, and returns the **dispatcher**
-     * view whose one root element is `#pipeline-list-wrapper` either way.
+     * Fills [model] for whichever presentation [q] and [scope] select, and returns the
+     * **dispatcher** view whose one root element is the scope's stable swap root either way.
      *
-     * This is what the search box's swap and the page's first render both go through, so
-     * clearing the search box returns to the tree by construction (§9.2).
+     * In the sidebar ([PipelineListScope.NAV]) an empty `q` is the tree's ROOT level and a
+     * non-empty one the flat search, so clearing the box returns to the tree by construction
+     * (§9.2). The catalog ([PipelineListScope.CATALOG]) has no tree to return to (#350): it
+     * is always the flat list.
      */
     fun fillWrapper(
         model: Model,
@@ -203,11 +220,12 @@ class PipelineBrowseModel(
         view: LensedView,
         q: String?,
         offset: Int,
+        scope: PipelineListScope = PipelineListScope.NAV,
     ): String {
-        if (q.isNullOrEmpty()) {
+        if (scope == PipelineListScope.NAV && q.isNullOrEmpty()) {
             fillLevel(model, workspaceId, view, prefix = null, offset = offset)
         } else {
-            fillSearch(model, workspaceId, view, q, offset)
+            fillSearch(model, workspaceId, view, q, offset, scope)
         }
         return WRAPPER_VIEW
     }
@@ -647,10 +665,29 @@ class PipelineBrowseModel(
         const val LENS_UNAVAILABLE = "lensUnavailable"
 
         /**
-         * The root level's container id is the screen's long-standing stable swap root, so the
-         * browse tree inherits the existing SPA contract instead of inventing a second one.
+         * #350 — the sidebar tree's stable swap root: the ROOT level and the nav search results
+         * both carry it, so the search box, its pager and "clear" address one id in both
+         * presentations (the old page explorer's `#pipeline-list-wrapper` contract, moved).
          */
-        const val ROOT_LEVEL_ID = "pipeline-list-wrapper"
+        const val ROOT_LEVEL_ID = "pipeline-nav-root"
+
+        /** #350 — the `/pipelines` catalog's stable swap root: its search and its pager target it. */
+        const val CATALOG_ROOT_ID = "pipeline-list-wrapper"
+
+        /**
+         * #350 — the response header every sidebar fragment carries: `<workspace>|<lens>` (`all`
+         * or `lens`). The rail's nav-tree.js admits a tree swap only when the stamp matches the
+         * tree it lands in, so a level fetched under another workspace or another lens can never
+         * join rows rendered under this one (spec §5: never reuse another workspace's rows or
+         * lens). Read by the client; carries nothing the page does not already show.
+         */
+        const val NAV_STAMP_HEADER = "DP-Nav-Stamp"
+
+        /** The [NAV_STAMP_HEADER] value for [workspaceName] under [view]. */
+        fun navStamp(
+            workspaceName: String,
+            view: LensedView,
+        ): String = workspaceName + "|" + if (view.pipelines.isEverything) "all" else "lens"
 
         const val WRAPPER_VIEW = "partials/pipelines"
         const val LEVEL_VIEW = "partials/pipeline-tree-level"
@@ -710,4 +747,28 @@ data class PipelineFolderView(
         folder.pipelineCount,
         PipelineBrowseModel.levelId(folder.path),
     )
+}
+
+/**
+ * #350 — which instance of the pipelines list a `/partials/pipelines` request renders.
+ *
+ * [NAV] is the global sidebar: the lazy tree (one level per request) and its flat search, under
+ * `#pipeline-nav-root`. [CATALOG] is the `/pipelines` landing page: the flat full-path list only,
+ * under `#pipeline-list-wrapper` — the page carries no tree since #350 (spec §3.2/§5). Both
+ * render rows that link to the canonical workspace; neither renders a row the lens hides.
+ *
+ * [wire] is the `scope` query value; anything but `nav` is the catalog, so an old or hand-typed
+ * URL degrades to the page's own list rather than to an error.
+ */
+enum class PipelineListScope(
+    val wire: String,
+    val rootId: String,
+) {
+    NAV("nav", PipelineBrowseModel.ROOT_LEVEL_ID),
+    CATALOG("page", PipelineBrowseModel.CATALOG_ROOT_ID),
+    ;
+
+    companion object {
+        fun fromWire(value: String?): PipelineListScope = if (value == NAV.wire) NAV else CATALOG
+    }
 }
