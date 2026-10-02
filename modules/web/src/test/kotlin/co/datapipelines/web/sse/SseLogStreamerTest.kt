@@ -1,6 +1,8 @@
 package co.datapipelines.web.sse
 
+import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.web.CapturingSseEmitter
+import co.datapipelines.web.api.ApiException
 import com.fasterxml.jackson.databind.json.JsonMapper
 import io.kotest.matchers.shouldBe
 import io.mockk.every
@@ -93,7 +95,7 @@ class SseLogStreamerTest {
     }
 
     @Test
-    fun `follow gives up on a log that never appears`() {
+    fun `follow gives up on a log that never appears with the id-free never-started 410`() {
         val log = mockk<SseEventLog>()
         every { log.replay(executionId) } returns null
         val emitter = CapturingSseEmitter()
@@ -101,7 +103,39 @@ class SseLogStreamerTest {
         streamer(log, emitter).follow(executionId)
 
         // GIVE_UP_AFTER_POLLS (60) at the 250ms follow cadence ≈ 15s, plus slack.
-        emitter.completed.await(30, TimeUnit.SECONDS) shouldBe true
+        emitter.errorCompleted.await(30, TimeUnit.SECONDS) shouldBe true
         emitter.eventNames() shouldBe emptyList()
+        // #324 — the completion is the never-started 410 as an error: code `result.expired`,
+        // `reason: original_not_started`, and NO execution_id (the id does not resolve —
+        // there is no row to GET). The exact map pins the absence.
+        val error = emitter.error()
+        (error is ApiException) shouldBe true
+        error as ApiException
+        error.code shouldBe PipelineErrorCodes.Result.EXPIRED
+        error.details shouldBe mapOf("reason" to "original_not_started")
+    }
+
+    /** #324 — the `lastSentEventId == 0` guard: a follow that SERVED an event never gives up. */
+    @Test
+    fun `a follow that served an event and then lost its log never gives up`() {
+        val reads = AtomicInteger(0)
+        val log = mockk<SseEventLog>()
+        every { log.replay(executionId) } answers {
+            if (reads.incrementAndGet() == 1) listOf(event(1, "execution_started")) else null
+        }
+        val emitter = CapturingSseEmitter()
+        try {
+            streamer(log, emitter).follow(executionId)
+
+            // One event served, then nulls past the give-up threshold: the stream stays open —
+            // no error completion (the never-started 410 would be a lie; the client already
+            // holds the original's events) and no quiet completion either (today's kept shape).
+            emitter.errorCompleted.await(20, TimeUnit.SECONDS) shouldBe false
+            emitter.completed.await(1, TimeUnit.SECONDS) shouldBe false
+            emitter.eventNames() shouldBe listOf("execution_started")
+        } finally {
+            // Releases the polling task through the completion callback.
+            emitter.complete()
+        }
     }
 }

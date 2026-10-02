@@ -178,6 +178,11 @@ class CapturingSseEmitter : SseEmitter(0L) {
     private val frames = ConcurrentLinkedQueue<String>()
     val completed = CountDownLatch(1)
 
+    /** #324 — the error-completion twin of [completed]: a `completeWithError` lands here. */
+    val errorCompleted = CountDownLatch(1)
+
+    private val errors = ConcurrentLinkedQueue<Throwable>()
+
     /** When set, the next send throws it — the dropped-client signal a servlet container gives. */
     @Volatile var failNextSendWith: IOException? = null
 
@@ -191,6 +196,12 @@ class CapturingSseEmitter : SseEmitter(0L) {
         super.complete()
     }
 
+    override fun completeWithError(ex: Throwable) {
+        errors.add(ex)
+        errorCompleted.countDown()
+        super.completeWithError(ex)
+    }
+
     /** The captured frame fragments. */
     fun frames(): List<String> = frames.toList()
 
@@ -199,6 +210,9 @@ class CapturingSseEmitter : SseEmitter(0L) {
 
     /** The `id:` values captured, in order. */
     fun eventIds(): List<String> = frames().mapNotNull { ID_REGEX.find(it)?.groupValues?.get(1) }
+
+    /** The throwable the emitter was completed with — the error-completion's cause (#324). */
+    fun error(): Throwable? = errors.peek()
 
     private companion object {
         val EVENT_REGEX = Regex("""event: ?(\w+)""")
