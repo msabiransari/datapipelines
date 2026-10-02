@@ -1,7 +1,9 @@
 package co.datapipelines.browser
 
+import com.microsoft.playwright.Locator
 import com.microsoft.playwright.Page
 import io.kotest.assertions.withClue
+import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
 import java.nio.file.Files
@@ -11,50 +13,97 @@ import java.nio.file.StandardOpenOption
 
 /**
  * #371 — the dashboard grid has a ROW UNIT, so a Plotly figure has a height on every page that
- * mounts the first-party composite adapter. The adapter builds its grid inline with columns and
- * a gap but no row size; a slot's `h` is a row SPAN, so without a row unit a slot whose only
- * content is a responsive Plotly host has no height to span and the figure collapses.
+ * mounts the first-party composite adapter; #386 — a figure in a 2-row slot keeps a PLOT AREA
+ * (compact margins with `automargin`, not Plotly's ≈100/80 px defaults, which ate the whole 176 px
+ * slot); #387 — below `layout.breakpoint_px` (768 when absent) every item spans the full width in
+ * grid order, the row unit unchanged (the implementation spec §3.2, dashboards.md §2.2).
  *
- * The assertion is a MEASUREMENT in a real browser, never a status code or a class name: for a
- * slot of `h` rows the figure must stand between `h × unit − (h − 1) × gap` (the lower bound the
- * brief states) and the slot's own box, where the unit is read from the page's own
- * `--dashboard-row-unit` token (resolved to pixels through a probe element, so a rem value
- * counts) and the gap from the board's computed `row-gap`. The unit being a positive length is
- * asserted FIRST: with no token the bound would be negative and every height would pass.
+ * Every assertion is a MEASUREMENT in a real browser, never a status code or a class name: for a
+ * slot of `h` rows the figure must stand between `h × unit − (h − 1) × gap` and the slot's own
+ * box, where the unit is read from the page's own `--dashboard-row-unit` token (resolved to pixels
+ * through a probe element, so a rem value counts) and the gap from the board's computed `row-gap`.
+ * The unit and the gap being positive lengths are asserted FIRST: with neither every bound below is
+ * vacuous. A slot's COLUMN count is derived from its width against the board's track geometry, so
+ * "full width" is a number (12), not an inline style read back. The plot area is Plotly's own
+ * `_fullLayout._size.h` (the `nsewdrag` rect beside it in the record).
  *
- * Three cases, so a regression names the page it broke: the BOARD page in both themes, the board
- * page at 767 px (below the 768 px breakpoint the dashboards document names), and the
- * visualization test PREVIEW page (one 12-wide, 4-row slot — the page #353 scoped its own copy
- * of the rule to).
+ * The 768 px breakpoint is pinned from both sides: 767 px collapses (12 columns each, stacked
+ * revenue → cells → total → slowchart, the board 4 + 4 + 2 + 2 = 12 rows tall), 768 px holds the
+ * stored 6/6/3/9 grid six rows tall. A live crossing (1280 → 767 → 1280) proves the viewport
+ * listener: the slots re-place AND the figure re-measures to its new slot width, both ways.
  */
 class DashboardGridRowUnitBrowserTest : DashboardBrowserSuite() {
     @Test
-    fun `the board page gives a figure its slot's height in both themes`() {
+    fun `the board page holds the stored grid at and above 768 px and the 2-row figure keeps a plot area, in both themes`() {
         startTrace()
         val root = ready("dprow")
         val board = seedBoardWithGrid(root)
-        for (theme in THEMES) {
-            page.navigate("$baseUrl/dashboards/$board")
-            ensureTheme(theme)
-            page.waitForFunction("() => window.__dpPage && window.__dpPage.ready === true")
-            assertFiguresFillTheirSlots(page, BOARD_SCOPE, BOARD_SLOTS, BOARD_ROWS, "board/desktop/$theme")
+        for (width in listOf(DESKTOP_WIDTH_PX, BREAKPOINT_PX)) {
+            page.setViewportSize(width, VIEWPORT_HEIGHT_PX)
+            for (theme in THEMES) {
+                openBoard(board, theme)
+                val measured = measure(page, BOARD_SCOPE, BOARD_SLOTS_ALL.keys, "board/$width/$theme")
+                assertRowUnit(measured)
+                assertBoardRows(measured, BOARD_ROWS)
+                assertColumns(measured, BOARD_STORED_COLUMNS)
+                assertFiguresFillTheirSlots(measured, BOARD_SLOTS)
+                assertHalfRatio(measured, BOARD_SLOTS)
+                assertPlotAreaFloor(measured, SMALL_SLOT)
+            }
         }
+        drainCspViolations().shouldBeEmpty()
     }
 
     @Test
-    fun `the board page keeps the row unit below the 768 px breakpoint`() {
+    fun `below 768 px every board item spans the full width in grid order, the row unit kept, in both themes`() {
         startTrace()
         val root = ready("dprowm")
         val board = seedBoardWithGrid(root)
-        page.setViewportSize(NARROW_WIDTH_PX, NARROW_HEIGHT_PX)
-        page.navigate("$baseUrl/dashboards/$board")
-        page.waitForFunction("() => window.__dpPage && window.__dpPage.ready === true")
-        val theme = page.evaluate("() => document.documentElement.getAttribute('data-theme')") as String
-        assertFiguresFillTheirSlots(page, BOARD_SCOPE, BOARD_SLOTS, BOARD_ROWS, "board/$NARROW_WIDTH_PX/$theme")
+        page.setViewportSize(NARROW_WIDTH_PX, VIEWPORT_HEIGHT_PX)
+        for (theme in THEMES) {
+            openBoard(board, theme)
+            val measured = measure(page, BOARD_SCOPE, BOARD_SLOTS_ALL.keys, "board/$NARROW_WIDTH_PX/$theme")
+            assertRowUnit(measured)
+            assertColumns(measured, BOARD_SLOTS_ALL.keys.associateWith { GRID_COLUMNS })
+            assertStackedInGridOrder(measured, BOARD_GRID_ORDER)
+            assertBoardRows(measured, BOARD_SLOTS_ALL.values.sum())
+            assertFiguresFillTheirSlots(measured, BOARD_SLOTS)
+            assertFiguresSpanTheirSlots(measured, BOARD_SLOTS.keys)
+            assertPlotAreaFloor(measured, SMALL_SLOT)
+        }
+        drainCspViolations().shouldBeEmpty()
     }
 
     @Test
-    fun `the visualization preview page gives its figure the same height in both themes`() {
+    fun `a viewport crossing the breakpoint re-places the slots and resizes the figures, both ways`() {
+        startTrace()
+        val root = ready("dprowx")
+        val board = seedBoardWithGrid(root)
+        page.setViewportSize(DESKTOP_WIDTH_PX, VIEWPORT_HEIGHT_PX)
+        val theme = THEMES.first()
+        openBoard(board, theme)
+        val wide = measure(page, BOARD_SCOPE, BOARD_SLOTS_ALL.keys, "crossing/$DESKTOP_WIDTH_PX-before/$theme")
+        assertColumns(wide, BOARD_STORED_COLUMNS)
+
+        page.setViewportSize(NARROW_WIDTH_PX, VIEWPORT_HEIGHT_PX)
+        page.waitForFunction(SETTLED_JS, mapOf("scope" to BOARD_SCOPE, "slots" to BOARD_SLOTS.keys.toList(), "full" to true))
+        val narrow = measure(page, BOARD_SCOPE, BOARD_SLOTS_ALL.keys, "crossing/$NARROW_WIDTH_PX/$theme")
+        assertColumns(narrow, BOARD_SLOTS_ALL.keys.associateWith { GRID_COLUMNS })
+        assertStackedInGridOrder(narrow, BOARD_GRID_ORDER)
+        assertFiguresSpanTheirSlots(narrow, BOARD_SLOTS.keys)
+        assertPlotAreaFloor(narrow, SMALL_SLOT)
+
+        page.setViewportSize(DESKTOP_WIDTH_PX, VIEWPORT_HEIGHT_PX)
+        page.waitForFunction(SETTLED_JS, mapOf("scope" to BOARD_SCOPE, "slots" to BOARD_SLOTS.keys.toList(), "full" to false))
+        val restored = measure(page, BOARD_SCOPE, BOARD_SLOTS_ALL.keys, "crossing/$DESKTOP_WIDTH_PX-after/$theme")
+        assertColumns(restored, BOARD_STORED_COLUMNS)
+        assertBoardRows(restored, BOARD_ROWS)
+        assertFiguresSpanTheirSlots(restored, BOARD_SLOTS.keys)
+        drainCspViolations().shouldBeEmpty()
+    }
+
+    @Test
+    fun `the visualization preview page gives its figure the same height in both themes, and its one item stays full width below 768 px`() {
         startTrace()
         val root = ready("dprowp")
         val previewUrl = startPreviewSession("$root/charts/rowunit")
@@ -64,82 +113,216 @@ class DashboardGridRowUnitBrowserTest : DashboardBrowserSuite() {
             for (theme in THEMES) {
                 agentPage.navigate("$baseUrl$previewUrl&theme=$theme")
                 agentPage.waitForSelector("$PREVIEW_SCOPE[data-dp-ready='true']")
-                assertFiguresFillTheirSlots(agentPage, PREVIEW_SCOPE, PREVIEW_SLOTS, PREVIEW_ROWS, "preview/desktop/$theme")
+                val measured = measure(agentPage, PREVIEW_SCOPE, PREVIEW_SLOTS.keys, "preview/desktop/$theme")
+                assertRowUnit(measured)
+                assertBoardRows(measured, PREVIEW_ROWS)
+                assertColumns(measured, PREVIEW_SLOTS.keys.associateWith { GRID_COLUMNS })
+                assertFiguresFillTheirSlots(measured, PREVIEW_SLOTS)
             }
-            agentPage.setViewportSize(NARROW_WIDTH_PX, NARROW_HEIGHT_PX)
+            agentPage.setViewportSize(NARROW_WIDTH_PX, VIEWPORT_HEIGHT_PX)
             agentPage.navigate("$baseUrl$previewUrl&theme=light")
             agentPage.waitForSelector("$PREVIEW_SCOPE[data-dp-ready='true']")
-            assertFiguresFillTheirSlots(agentPage, PREVIEW_SCOPE, PREVIEW_SLOTS, PREVIEW_ROWS, "preview/$NARROW_WIDTH_PX/light")
+            val narrow = measure(agentPage, PREVIEW_SCOPE, PREVIEW_SLOTS.keys, "preview/$NARROW_WIDTH_PX/light")
+            assertRowUnit(narrow)
+            assertBoardRows(narrow, PREVIEW_ROWS)
+            assertColumns(narrow, PREVIEW_SLOTS.keys.associateWith { GRID_COLUMNS })
+            assertFiguresFillTheirSlots(narrow, PREVIEW_SLOTS)
+            assertFiguresSpanTheirSlots(narrow, PREVIEW_SLOTS.keys)
         } finally {
             agent.close()
         }
+        drainCspViolations().shouldBeEmpty()
     }
 
-    /** Waits for Plotly's own render of every slot's figure, measures, and asserts the geometry. */
-    private fun assertFiguresFillTheirSlots(
+    // ------------------------------------------------------------------------------ the measurement
+
+    /** One measured page: the unit, the gaps, the board box and each slot's and figure's geometry. */
+    private class Measured(
+        val label: String,
+        val raw: Map<*, *>,
+    ) {
+        val unit = (raw["unit"] as Number).toDouble()
+        val rowGap = (raw["rowGap"] as Number).toDouble()
+        val columnGap = (raw["columnGap"] as Number).toDouble()
+        val boardWidth = (raw["boardWidth"] as Number).toDouble()
+        val boardHeight = (raw["boardHeight"] as Number).toDouble()
+        val slots = raw["slots"] as Map<*, *>
+
+        fun slot(
+            name: String,
+            key: String,
+        ): Double = (((slots[name] as Map<*, *>)[key]) as Number).toDouble()
+
+        override fun toString() =
+            "$label token='${raw["token"]}' unit=${unit}px rowGap=${rowGap}px columnGap=${columnGap}px " +
+                "board=${boardWidth}x$boardHeight slots=$slots"
+    }
+
+    private fun openBoard(
+        board: String,
+        theme: String,
+    ) {
+        page.navigate("$baseUrl/dashboards/$board")
+        ensureTheme(theme)
+        // The theme toggle swaps the stylesheet in place; a fresh load renders every figure under it.
+        page.reload()
+        page.waitForFunction("() => window.__dpPage && window.__dpPage.ready === true")
+    }
+
+    /** Waits for Plotly's own render of every figure, measures, records the line and shoots the page. */
+    private fun measure(
         target: Page,
         scope: String,
-        slots: Map<String, Int>,
-        gridRows: Int,
+        slots: Collection<String>,
         label: String,
-    ) {
-        val args = mapOf("scope" to scope, "slots" to slots.keys.toList())
-        target.waitForFunction(RENDERED_JS, args)
-        val measured = target.evaluate(MEASURE_JS, args) as Map<*, *>
-        val unit = (measured["unit"] as Number).toDouble()
-        val gap = (measured["gap"] as Number).toDouble()
-        val report = "$label token='${measured["token"]}' unit=${unit}px gap=${gap}px slots=${measured["slots"]}"
-        record(report)
-        shoot(target, label)
+    ): Measured {
+        val figures = slots.filter { it in PLOTLY_SLOTS }
+        target.waitForFunction(RENDERED_JS, mapOf("scope" to scope, "slots" to figures))
+        val measured = Measured(label, target.evaluate(MEASURE_JS, mapOf("scope" to scope, "slots" to slots.toList())) as Map<*, *>)
+        record(measured.toString())
+        shoot(target, scope, label, figures)
+        return measured
+    }
 
-        withClue("the page declares a positive --dashboard-row-unit; with none every bound below is vacuous: $report") {
-            (unit > 0.0) shouldBe true
+    private fun assertRowUnit(m: Measured) {
+        withClue("the page declares a positive --dashboard-row-unit; with none every bound below is vacuous: $m") {
+            (m.unit > 0.0) shouldBe true
         }
-        val boardHeight = (measured["board"] as Number).toDouble()
-        val expectedBoard = gridRows * unit + (gridRows - 1) * gap
-        val boardClue = "the board is $gridRows rows tall ($expectedBoard), no trailing row for the empty default slot"
-        withClue("$boardClue: $report board=$boardHeight") {
-            (Math.abs(boardHeight - expectedBoard) <= TOLERANCE_PX) shouldBe true
+        withClue("the board's gap resolves to a positive length (the --space-4 token); with none the stacking bounds are vacuous: $m") {
+            (m.rowGap > 0.0 && m.columnGap > 0.0) shouldBe true
         }
-        val figures = measured["slots"] as Map<*, *>
+    }
+
+    private fun assertBoardRows(
+        m: Measured,
+        rows: Int,
+    ) {
+        val expected = rows * m.unit + (rows - 1) * m.rowGap
+        withClue("the board is $rows rows tall ($expected), no trailing row for the empty default slot: $m") {
+            (Math.abs(m.boardHeight - expected) <= TOLERANCE_PX) shouldBe true
+        }
+    }
+
+    /** Each slot's column count from its width: `round((w + gap) / (track + gap))` over the board's 12 tracks. */
+    private fun assertColumns(
+        m: Measured,
+        expected: Map<String, Int>,
+    ) {
+        val track = (m.boardWidth - (GRID_COLUMNS - 1) * m.columnGap) / GRID_COLUMNS
+        val counted = expected.keys.associateWith { Math.round((m.slot(it, "width") + m.columnGap) / (track + m.columnGap)).toInt() }
+        record("${m.label} columns=$counted")
+        withClue("the slots span $expected columns of $GRID_COLUMNS (counted $counted): $m") {
+            counted shouldBe expected
+        }
+    }
+
+    /** Grid order: each slot starts one gap below the previous one's foot, left edges flush with the board's. */
+    private fun assertStackedInGridOrder(
+        m: Measured,
+        order: List<String>,
+    ) {
+        for (i in 1 until order.size) {
+            val above = order[i - 1]
+            val below = order[i]
+            val foot = m.slot(above, "top") + m.slot(above, "height")
+            withClue("'$below' starts one gap below '$above' (${foot + m.rowGap}): $m") {
+                (Math.abs(m.slot(below, "top") - (foot + m.rowGap)) <= TOLERANCE_PX) shouldBe true
+            }
+        }
+        for (name in order) {
+            withClue("'$name' starts at the board's left edge: $m") {
+                (Math.abs(m.slot(name, "left")) <= TOLERANCE_PX) shouldBe true
+            }
+        }
+    }
+
+    private fun assertFiguresFillTheirSlots(
+        m: Measured,
+        slots: Map<String, Int>,
+    ) {
         for ((name, rows) in slots) {
-            val figure = figures[name] as Map<*, *>
-            val slotHeight = (figure["slot"] as Number).toDouble()
-            val figureHeight = (figure["figure"] as Number).toDouble()
-            val expectedSlot = rows * unit + (rows - 1) * gap
-            val lowerBound = rows * unit - (rows - 1) * gap - TOLERANCE_PX
-            withClue("the '$name' slot spans $rows rows of the unit plus its gaps ($expectedSlot): $report") {
+            val slotHeight = m.slot(name, "height")
+            val figureHeight = m.slot(name, "figure")
+            val expectedSlot = rows * m.unit + (rows - 1) * m.rowGap
+            val lowerBound = rows * m.unit - (rows - 1) * m.rowGap - TOLERANCE_PX
+            withClue("the '$name' slot spans $rows rows of the unit plus its gaps ($expectedSlot): $m") {
                 (Math.abs(slotHeight - expectedSlot) <= TOLERANCE_PX) shouldBe true
             }
-            withClue("the '$name' figure is at least $lowerBound px (rows × unit − gaps): $report") {
+            withClue("the '$name' figure is at least $lowerBound px (rows × unit − gaps): $m") {
                 (figureHeight >= lowerBound) shouldBe true
             }
-            withClue("the '$name' figure is no taller than its slot ($slotHeight): $report") {
+            withClue("the '$name' figure is no taller than its slot ($slotHeight): $m") {
                 (figureHeight <= slotHeight + TOLERANCE_PX) shouldBe true
             }
         }
-        if (slots.size > 1) {
-            val tall = slots.entries.maxBy { it.value }.key
-            val short = slots.entries.minBy { it.value }.key
-            val ratio = (figures.heightOf(short) / figures.heightOf(tall))
-            withClue("the 2-row figure is about half the 4-row one (ratio $ratio): $report") {
-                (ratio in HALF_LOW..HALF_HIGH) shouldBe true
+    }
+
+    /** The figure follows its slot's WIDTH too: after a collapse (or a crossing) Plotly re-measured. */
+    private fun assertFiguresSpanTheirSlots(
+        m: Measured,
+        names: Collection<String>,
+    ) {
+        for (name in names) {
+            withClue("the '$name' figure is as wide as its slot (${m.slot(name, "width")}): $m") {
+                (Math.abs(m.slot(name, "figureWidth") - m.slot(name, "width")) <= WIDTH_TOLERANCE_PX) shouldBe true
             }
         }
     }
 
-    private fun Map<*, *>.heightOf(name: String): Double = ((this[name] as Map<*, *>)["figure"] as Number).toDouble()
-
-    /** The page as a person sees it, named by page, viewport and theme, beside the measurements. */
-    private fun shoot(
-        target: Page,
-        label: String,
+    private fun assertHalfRatio(
+        m: Measured,
+        slots: Map<String, Int>,
     ) {
-        Files.createDirectories(REPORT.parent)
-        target.screenshot(Page.ScreenshotOptions().setFullPage(true).setPath(REPORT.parent.resolve(label.replace('/', '-') + ".png")))
+        val tall = slots.entries.maxBy { it.value }.key
+        val short = slots.entries.minBy { it.value }.key
+        val ratio = m.slot(short, "figure") / m.slot(tall, "figure")
+        withClue("the 2-row figure is about half the 4-row one (ratio $ratio): $m") {
+            (ratio in HALF_LOW..HALF_HIGH) shouldBe true
+        }
     }
 
-    /** One line per measurement into the build's reports, for the handback's record of the heights. */
+    /**
+     * #386's floor: the 2-row figure's PLOT AREA is at least [PLOT_AREA_FLOOR] of its slot. Half,
+     * because what a compact frame leaves outside the plot — one line of x tick labels below (an axis
+     * title adds a second), a title line above when the figure has one — fits in the other half of a
+     * 176 px slot at the default font; Plotly's own margins (≈100 top + 80 bottom) left a sliver.
+     */
+    private fun assertPlotAreaFloor(
+        m: Measured,
+        name: String,
+    ) {
+        val slotHeight = m.slot(name, "height")
+        val plot = m.slot(name, "plot")
+        record("${m.label} plotArea[$name]=${plot}px of slot ${slotHeight}px (drag ${m.slot(name, "drag")}px)")
+        withClue("the '$name' plot area ($plot px) is at least ${PLOT_AREA_FLOOR * slotHeight} px ($PLOT_AREA_FLOOR of the slot): $m") {
+            (plot >= PLOT_AREA_FLOOR * slotHeight) shouldBe true
+        }
+    }
+
+    /**
+     * The page as a person sees it, named by page, viewport and theme, beside the measurements — the
+     * board element whole, and each figure's slot on its own. The app's main pane scrolls inside the
+     * viewport, so neither the full-page shot nor the board's shows what lies below the pane's fold of a
+     * stacked (collapsed) board; a slot shot scrolls its slot into view first, so every figure is seen.
+     */
+    private fun shoot(
+        target: Page,
+        scope: String,
+        label: String,
+        slots: Collection<String>,
+    ) {
+        Files.createDirectories(REPORT.parent)
+        val name = label.replace('/', '-')
+        target.screenshot(Page.ScreenshotOptions().setFullPage(true).setPath(REPORT.parent.resolve("$name.png")))
+        target.locator("$scope .dp-dashboard").screenshot(Locator.ScreenshotOptions().setPath(REPORT.parent.resolve("$name-board.png")))
+        for (slot in slots) {
+            target
+                .locator("$scope [data-dp-slot='$slot']")
+                .screenshot(Locator.ScreenshotOptions().setPath(REPORT.parent.resolve("$name-$slot.png")))
+        }
+    }
+
+    /** One line per measurement into the build's reports, for the handback's record of the geometry. */
     private fun record(line: String) {
         Files.createDirectories(REPORT.parent)
         Files.writeString(REPORT, line + "\n", StandardOpenOption.CREATE, StandardOpenOption.APPEND)
@@ -197,24 +380,44 @@ class DashboardGridRowUnitBrowserTest : DashboardBrowserSuite() {
 
     private companion object {
         val THEMES = listOf("light", "dark")
+        const val GRID_COLUMNS = 12
 
         /** The board page's container; the seeded grid pins revenue (a chart) at 4 rows and slowchart at 2. */
         const val BOARD_SCOPE = "#dp-board"
         val BOARD_SLOTS = mapOf("revenue" to 4, "slowchart" to 2)
 
+        /** The seeded grid (DashboardBrowserSuite.seedBoardWithGrid): every item's row span, in GRID ORDER (row, then column). */
+        val BOARD_SLOTS_ALL = linkedMapOf("revenue" to 4, "cells" to 4, "total" to 2, "slowchart" to 2)
+        val BOARD_GRID_ORDER = BOARD_SLOTS_ALL.keys.toList()
+
+        /** The seeded grid's stored widths (`w`): revenue 6, cells 6, total 3, slowchart 9. */
+        val BOARD_STORED_COLUMNS = mapOf("revenue" to 6, "cells" to 6, "total" to 3, "slowchart" to 9)
+
         /** The seeded grid's last row: total and slowchart sit at y 4 with h 2. */
         const val BOARD_ROWS = 6
+
+        /** The 2-row Plotly slot #386 is about. */
+        const val SMALL_SLOT = "slowchart"
+
+        /** The slots whose content is a Plotly figure (cells is a table, total a KPI). */
+        val PLOTLY_SLOTS = setOf("revenue", "slowchart", "preview")
 
         /** The preview's first case: ONE occurrence named `preview`, 12 wide, 4 rows. */
         const val PREVIEW_SCOPE = "section[data-dp-case-index='0']"
         val PREVIEW_SLOTS = mapOf("preview" to 4)
         const val PREVIEW_ROWS = 4
 
-        const val NARROW_WIDTH_PX = 767
-        const val NARROW_HEIGHT_PX = 900
+        /** The dashboards document's default breakpoint (no `breakpoint_px` in the seeded layout) and its two sides. */
+        const val BREAKPOINT_PX = 768
+        const val NARROW_WIDTH_PX = BREAKPOINT_PX - 1
+        const val DESKTOP_WIDTH_PX = 1280
+        const val VIEWPORT_HEIGHT_PX = 900
+
         const val TOLERANCE_PX = 3.0
+        const val WIDTH_TOLERANCE_PX = 3.0
         const val HALF_LOW = 0.35
         const val HALF_HIGH = 0.65
+        const val PLOT_AREA_FLOOR = 0.5
         const val EXCERPT = 600
         val HTTP_OK_RANGE = 200..299
         val REPORT: Path = Paths.get("build", "reports", "dashboard-grid-row-unit", "measurements.txt")
@@ -226,7 +429,26 @@ class DashboardGridRowUnitBrowserTest : DashboardBrowserSuite() {
               return !!(g && g._fullLayout && g.querySelector('.main-svg'));
             })"""
 
-        /** The token resolved to pixels through a probe, the board's row gap, and each slot's and figure's box. */
+        /**
+         * After a viewport crossing: every figure's slot is (full) or is not (stored) the board's width,
+         * AND Plotly's svg has caught up with its slot's width — the re-measure, not just the re-place.
+         */
+        const val SETTLED_JS =
+            """(args) => {
+              var board = document.querySelector(args.scope + ' .dp-dashboard');
+              if (!board) return false;
+              var width = board.getBoundingClientRect().width;
+              return args.slots.every(function (name) {
+                var slot = board.querySelector("[data-dp-slot='" + name + "']");
+                var svg = slot && slot.querySelector('.plotly .main-svg');
+                if (!svg) return false;
+                var slotWidth = slot.getBoundingClientRect().width;
+                var full = Math.abs(slotWidth - width) <= 1;
+                return full === args.full && Math.abs(svg.getBoundingClientRect().width - slotWidth) <= 3;
+              });
+            }"""
+
+        /** The token resolved to pixels through a probe, the board's gaps and box, and each slot's and figure's geometry. */
         const val MEASURE_JS =
             """(args) => {
               var root = document.querySelector(args.scope);
@@ -238,17 +460,32 @@ class DashboardGridRowUnitBrowserTest : DashboardBrowserSuite() {
               document.body.appendChild(probe);
               var unit = probe.getBoundingClientRect().height;
               probe.remove();
+              var boardBox = board.getBoundingClientRect();
+              var style = getComputedStyle(board);
               var out = {
                 token: getComputedStyle(document.documentElement).getPropertyValue('--dashboard-row-unit').trim(),
                 unit: unit,
-                board: board.getBoundingClientRect().height,
-                gap: parseFloat(getComputedStyle(board).rowGap) || 0,
+                boardWidth: boardBox.width,
+                boardHeight: boardBox.height,
+                rowGap: parseFloat(style.rowGap) || 0,
+                columnGap: parseFloat(style.columnGap) || 0,
                 slots: {}
               };
               args.slots.forEach(function (name) {
                 var slot = board.querySelector("[data-dp-slot='" + name + "']");
+                var box = slot.getBoundingClientRect();
+                var entry = { top: box.top - boardBox.top, left: box.left - boardBox.left, width: box.width, height: box.height };
                 var svg = slot.querySelector('.plotly .main-svg');
-                out.slots[name] = { slot: slot.getBoundingClientRect().height, figure: svg.getBoundingClientRect().height };
+                if (svg) {
+                  var graph = slot.querySelector('.js-plotly-plot');
+                  var drag = slot.querySelector('.nsewdrag');
+                  entry.figure = svg.getBoundingClientRect().height;
+                  entry.figureWidth = svg.getBoundingClientRect().width;
+                  entry.plot = graph && graph._fullLayout && graph._fullLayout._size ? graph._fullLayout._size.h : 0;
+                  entry.drag = drag ? drag.getBoundingClientRect().height : 0;
+                  entry.margin = graph && graph._fullLayout && graph._fullLayout._size ? graph._fullLayout._size : null;
+                }
+                out.slots[name] = entry;
               });
               return out;
             }"""

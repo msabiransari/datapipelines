@@ -1743,6 +1743,81 @@
     return api;
   }
 
+  // ------------------------------------------------------------- the composite's viewport rule (#387)
+
+  /** The spec's §3.2: below `layout.breakpoint_px` every item spans the full width in grid order. */
+  var DEFAULT_BREAKPOINT_PX = 768;
+
+  /** The server's range (DashboardRules: 1..MAX_BREAKPOINT_PX); a value outside it never reaches a query. */
+  var MIN_BREAKPOINT_PX = 1;
+  var MAX_BREAKPOINT_PX = 10000;
+
+  /** The grid's gap: the design system's spacing step, inline (CSSOM is CSP-clean); `1rem` where no tokens load. */
+  var GRID_GAP = "var(--space-4, 1rem)";
+
+  /**
+   * The breakpoint as a NUMBER, clamped to the server's range: absent (the wire omits a null) or not
+   * a finite number is the default. Only this number is ever written into a media query.
+   */
+  function layoutBreakpointPx(layout) {
+    var value = layout ? layout.breakpoint_px : undefined;
+    if (typeof value !== "number" || !isFinite(value)) return DEFAULT_BREAKPOINT_PX;
+    return Math.min(MAX_BREAKPOINT_PX, Math.max(MIN_BREAKPOINT_PX, Math.round(value)));
+  }
+
+  /**
+   * "Below N px", exactly: `not all and (min-width: N px)` matches every viewport narrower than N,
+   * a fractional one (767.5 under a zoom) included, and never N itself. Null without `matchMedia`
+   * (a non-browser host): the stored grid then always holds.
+   */
+  function narrowViewportQuery(breakpointPx) {
+    if (typeof window === "undefined" || !window || typeof window.matchMedia !== "function") return null;
+    return window.matchMedia("not all and (min-width: " + breakpointPx + "px)");
+  }
+
+  /**
+   * Each slot's placement. Stored: the item's own column and row span. Collapsed: every item spans all
+   * `columns`, stacked in GRID ORDER — by row (`y`), then column (`x`), the configuration's order
+   * breaking a tie — each keeping its own row span `h`, so the row unit and every slot's height stand.
+   */
+  function placeGridSlots(items, slots, defaultSlot, columns, collapsed) {
+    // The default slot (occurrences with no grid entry) auto-places after the items; collapsed, it
+    // spans the full width like them. Empty, dashboards.css hides it either way.
+    defaultSlot.style.gridColumnEnd = collapsed ? "span " + Number(columns) : "";
+    if (!collapsed) {
+      for (var i = 0; i < items.length; i++) {
+        var item = items[i];
+        var style = slots[i].style;
+        style.gridColumnStart = typeof item.x === "number" ? String(item.x + 1) : "";
+        style.gridColumnEnd = typeof item.w === "number" ? "span " + Number(item.w) : "";
+        style.gridRowStart = typeof item.y === "number" ? String(item.y + 1) : "";
+        style.gridRowEnd = typeof item.h === "number" ? "span " + Number(item.h) : "";
+      }
+      return;
+    }
+    var order = [];
+    for (var j = 0; j < items.length; j++) order.push(j);
+    order.sort(function (a, b) {
+      var ya = Number(items[a].y) || 0;
+      var yb = Number(items[b].y) || 0;
+      if (ya !== yb) return ya - yb;
+      var xa = Number(items[a].x) || 0;
+      var xb = Number(items[b].x) || 0;
+      return xa !== xb ? xa - xb : a - b;
+    });
+    var row = 1;
+    for (var k = 0; k < order.length; k++) {
+      var stacked = items[order[k]];
+      var rows = typeof stacked.h === "number" && stacked.h > 0 ? Number(stacked.h) : 1;
+      var placed = slots[order[k]].style;
+      placed.gridColumnStart = "1";
+      placed.gridColumnEnd = "span " + Number(columns);
+      placed.gridRowStart = String(row);
+      placed.gridRowEnd = "span " + rows;
+      row += rows;
+    }
+  }
+
   /**
    * The first-party composite adapter (§10.3): the object a host passes to `init` when it wants the
    * shipped renderers. `adapters(container)` takes the SAME element init will mount — the composite
@@ -1772,33 +1847,74 @@
       return implementation;
     }
 
+    // The viewport listener mountLayout added (#387); removed by dispose, replaced by a second mountLayout.
+    var viewport = null;
+
+    function stopViewport() {
+      if (!viewport) return;
+      viewport.query.removeEventListener("change", viewport.listener);
+      viewport = null;
+    }
+
+    /** Every mounted handle re-measures its host, each isolated — one renderer's throw stops no other. */
+    function resizeMounted() {
+      for (var name in implemented) {
+        if (!Object.prototype.hasOwnProperty.call(implemented, name)) continue;
+        var handle = implemented[name];
+        if (handle && typeof handle.resize === "function") {
+          try {
+            handle.resize();
+          } catch (e) {
+            /* isolated */
+          }
+        }
+      }
+    }
+
     return {
-      /** The layout: a CSS grid container from the system layout (columns, breakpoint §3.2). */
+      /**
+       * The layout: a CSS grid container from the system layout (columns, breakpoint §3.2). Below
+       * `breakpoint_px` (768 when absent) every item spans the full width in grid order (#387); a
+       * viewport crossing the breakpoint re-places the slots and resizes every mounted renderer — the
+       * listener is the composite's, removed by its `dispose`.
+       */
       mountLayout: function (layout) {
         this.root = document.createElement("div");
         this.root.className = "dp-dashboard";
         var columns = layout && layout.columns ? layout.columns : 12;
         this.root.style.display = "grid";
         this.root.style.gridTemplateColumns = "repeat(" + Number(columns) + ", minmax(0, 1fr))";
-        this.root.style.gap = "16px";
+        this.root.style.gap = GRID_GAP;
         this.grid = {};
         var items = (layout && layout.grid) || [];
+        var slots = [];
         for (var i = 0; i < items.length; i++) {
           var item = items[i];
           var slot = document.createElement("div");
           slot.className = "dp-dashboard-slot";
           slot.setAttribute("data-dp-slot", item.name);
-          if (typeof item.x === "number") slot.style.gridColumnStart = String(item.x + 1);
-          if (typeof item.w === "number") slot.style.gridColumnEnd = "span " + Number(item.w);
-          if (typeof item.y === "number") slot.style.gridRowStart = String(item.y + 1);
-          if (typeof item.h === "number") slot.style.gridRowEnd = "span " + Number(item.h);
           this.root.appendChild(slot);
           this.grid[item.name] = slot;
+          slots.push(slot);
         }
         // Occurrences and controls without a grid entry flow into the default slot order.
-        this.defaultSlot = document.createElement("div");
-        this.defaultSlot.className = "dp-dashboard-slot";
-        this.root.appendChild(this.defaultSlot);
+        var defaultSlot = document.createElement("div");
+        defaultSlot.className = "dp-dashboard-slot";
+        this.root.appendChild(defaultSlot);
+        this.defaultSlot = defaultSlot;
+        stopViewport();
+        var narrow = narrowViewportQuery(layoutBreakpointPx(layout));
+        placeGridSlots(items, slots, defaultSlot, columns, !!(narrow && narrow.matches));
+        if (narrow && typeof narrow.addEventListener === "function") {
+          var onViewport = function () {
+            placeGridSlots(items, slots, defaultSlot, columns, narrow.matches);
+            // The slots changed width: each renderer re-measures its host (Plotly's Plots.resize) —
+            // the same handles the instance's resize walks; the composite holds no instance.
+            resizeMounted();
+          };
+          narrow.addEventListener("change", onViewport);
+          viewport = { query: narrow, listener: onViewport };
+        }
         this.container = container;
         container.appendChild(this.root);
         return Promise.resolve(undefined);
@@ -2081,8 +2197,11 @@
       notify: function (notification) {
         notifications.push(notification);
       },
+      // The instance's resize walks the renderers itself and then calls this; the grid's placement is
+      // the viewport listener's (mountLayout), so the composite has nothing more to re-measure here.
       resize: function () {},
       dispose: function () {
+        stopViewport();
         for (var name in implemented) {
           if (Object.prototype.hasOwnProperty.call(implemented, name)) {
             var handle = implemented[name];
