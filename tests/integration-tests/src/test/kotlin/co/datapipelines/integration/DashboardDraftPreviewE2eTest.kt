@@ -45,15 +45,15 @@ import java.util.concurrent.TimeUnit
  *
  * | Ruling / scenario | Test |
  * |---|---|
- * | R2 absent = today (the golden): the four runtime routes answer the released board identically with and without `?version=<current>` | `golden` |
+ * | R2 absent = today (the golden): the four routes answer the released board identically, without and with `?version=` | `golden` |
  * | the author previews the draft — the page (banner, data attribute) and its runtime configuration | `the author previews` |
  * | the draft's visualizations STREAM through the runtime, and the row names the draft version | `the draft streams` |
  * | a viewer reads the same draft (D50: every reader an executor) | `a viewer` |
  * | the promoter's lens refuses the draft — the family 404, page and route | `a promoter` |
- * | a DISCARDED version is the family 404 (route) and the refusal in place (page) | `a discarded version` |
- * | R1: a draft pinning a DRAFT visualization is `dependency_missing`/`not_released` naming the pin, with the release hint | `a draft pinning a DRAFT visualization` |
+ * | a DISCARDED version is the family 404 (route); a board with no live version is absent entirely (page 404) | `a discarded version` |
+ * | R1: a draft pinning a DRAFT visualization is `dependency_missing`/`not_released` naming the pin, with the hint | `a draft pinning` |
  * | R2: an edit between two calls is `configuration_stale`, no new machinery | `a draft edited between two calls` |
- * | a `dashboard` key never names a version (the version routes are the session page's); the page is off the key's surface | `a dashboard_viewer key` |
+ * | a `dashboard` key never names a version (the version routes are the session page's) | `a dashboard_viewer key` |
  * | `version` is a bounded positive integer | `a malformed version` |
  *
  * Non-vacuity: the golden's two responses are compared field-stable (`correlation_id` dropped — it is per-request),
@@ -653,7 +653,8 @@ class DashboardDraftPreviewE2eTest {
         )
         sql(
             "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id, kind, role) " +
-                "VALUES ('${KEY.id}', '${KEY.ownerId}', '$ADMIN_ID', '${KEY.name}', '${KEY.hash}', '$WORKSPACE_ID', 'dashboard', 'dashboard_viewer')",
+                "VALUES ('${KEY.id}', '${KEY.ownerId}', '$ADMIN_ID', '${KEY.name}', '${KEY.hash}', " +
+                "'$WORKSPACE_ID', 'dashboard', 'dashboard_viewer')",
         )
     }
 
