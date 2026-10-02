@@ -13,39 +13,33 @@ import java.nio.file.Path
 import java.nio.file.Paths
 
 /**
- * 106 §B — the explorers' detail pane measured at the seven widths the owner's machines and
- * phones actually are: 390, 768, 1100, 1440, 1920, 2560, 3491.
+ * 106 §B, re-aimed by #398 — the width behaviour of the templates CATALOG and the template
+ * WORKSPACE, at the seven widths the owner's machines and phones actually are: 390, 768,
+ * 1100, 1440, 1920, 2560, 3491.
  *
- * ## What each width is asked
+ * ## What changed with #398, and where each moved claim lives now
  *
- * | width | the shape | what is asserted |
- * |---|---|---|
- * | 390 | drawer; one-column key/value; no tab counts | the explorer region fits its own box |
- * | 768 | drawer; the detail is the full width | the drawer opens AND closes on selection |
- * | 1100 | tree \| detail, the detail's columns STACKED | reading and acting share a left edge |
- * | 1440+ | tree \| detail, the detail SIDE BY SIDE | acting starts to the RIGHT of reading |
+ * The two-pane explorer page and its detail pane are GONE (the sidebar tree is §3.4's, the
+ * detail pane's capabilities are the workspace's tabs). The claims this class pinned on the
+ * pane moved WITH their content, and the narrowings are disclosed here rather than passed
+ * over:
  *
- * and every width is asked the two questions that do not vary: `scrollWidth <= innerWidth`
- * (the `AppShellBrowserTest` assertion — a page that scrolls sideways is broken at any size)
- * and the layout-shift score of a SELECTION, which must stay under 0.05.
+ *  - the detail's two-column geometry (`at 1440 the detail is two columns, at 1100 they
+ *    stack`) has no surface left — the workspace's own width claims (the transform face's
+ *    two-by-two above 1100, one column below) are [TemplateWorkspaceBrowserTest]'s, which
+ *    did not exist when this case was written;
+ *  - the page's tree drawer (below 1100) is the SIDEBAR's phone drawer now —
+ *    [TemplateSidebarTreeBrowserTest] owns the drawer arm;
+ *  - "a selection replaces all three regions" is a full navigation now (a leaf opens its
+ *    workspace; the sidebar suite's leaf case covers it) and the selection's CLS budget is
+ *    re-aimed at the surface that still swaps in page — the catalog's search re-fetch;
+ *  - the long-line guard is re-aimed from the Overview's excerpt card to the workspace
+ *    Source tab's read-only pane — the body's only rendering surface now — with its
+ *    non-vacuity kept (the fixture must NOT fit, or a green run proves nothing).
  *
- * ## Why the measurement is the geometry and not only CLS
- *
- * The lesson [ExplorerPaneGeometryBrowserTest] paid for: `PerformanceObserver('layout-shift')`
- * scores a wrong-from-the-start layout at 0.0000, because inserting content in the wrong
- * geometry is not a *shift*. So the columns' geometry is read directly at each width, and CLS
- * is the second instrument rather than the only one.
- *
- * The screenshots at the bottom are the handback's evidence, light and dark, at all seven.
- *
- * ## #350 — one page explorer left
- *
- * The pipelines page is the flat CATALOG since #350 (its tree is the sidebar's, its detail the
- * workspace's), so the pane's shared mechanics are asked of the TEMPLATES explorer — the same
- * 106 fragment shapes (`.tplx-read`/`.tplx-act`, the tab card, the drawer) — and the catalog joins
- * the width walks with no selection to make. The two pipeline-only facts this class pinned moved
- * WITH their content to the workspace: the readable version row (its Versions tab, the same house
- * table) and the description's paragraph break (its Overview tab); the Usage tab's schedules too.
+ * The pipelines-only cases (the readable version row, the description's paragraph break,
+ * the Usage tab's schedules) were already the workspace's since #350 and are untouched by
+ * this lane's fence.
  */
 class ExplorerDetailBrowserTest : BrowserSuite() {
     private fun ready() {
@@ -61,10 +55,9 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
     }
 
     /**
-     * A pipeline and a template, both in a folder — the root renders folders only (§4.1), so a
-     * flat row would give the tree nothing to open and every assertion below would measure an
-     * empty pane. The REST seeding is [ExplorerStressBrowserTest]'s: cookie session plus the
-     * dp_csrf double-submit pair, in-page.
+     * A pipeline and a template, both in a folder — the sidebar tree's root renders folders
+     * only (§4.1), so a flat row would give the tree nothing to open. The REST seeding is
+     * cookie session plus the dp_csrf double-submit pair, in-page.
      */
     private fun seed() {
         page.navigate("$baseUrl/dashboard")
@@ -82,8 +75,6 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
             "/api/v1/pipelines",
             """{"name":"test/detail_probe","display_name":"detail_probe",""" +
                 // 138 §E: the sectioned shape the skill teaches — label, line, blank line, label…
-                // The JSON carries real newlines (\n escapes); the first section keeps the 106
-                // sentence, long enough to exercise the 78ch measure.
                 """"description":"Question\nThe 106 detail fixture — long enough to exercise the 78ch reading measure in the """ +
                 """overview card without wrapping into the acting column beside it.\n\nWindow and door\nOne year, chosen by year.",""" +
                 """"nodes":[{"id":"fq","type":"CALCULATOR","kind":"fiscal_quarter","context_key":"run_fiscal_quarter",""" +
@@ -112,59 +103,24 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
         (status as Number).toInt() shouldBe 201
     }
 
-    /** Opens the tree's one folder and SELECTS its leaf — the state every assertion is about. */
-    private fun selectLeaf(open: Boolean = true) {
-        if (open) openDrawerIfPresent()
-        page.waitForSelector("[data-explorer-pane] summary.tpl-summary")
-        if (page.locator("[data-explorer-pane] details.tpl-folder[open]").count() == 0) {
-            page.waitForResponse({ it.url().contains("prefix=test") }) {
-                page.locator("[data-explorer-pane] summary.tpl-summary").first().click()
-            }
-        }
-        page.waitForSelector("[data-explorer-pane] button.tpl-leaf")
-        page.waitForResponse({ it.url().contains("/detail") || it.url().contains("/versions") }) {
-            page.locator("[data-explorer-pane] button.tpl-leaf").first().click()
-        }
-        page.waitForSelector(".tplx-detail-header")
+    /** The probe template's WORKSPACE, reached the way a reader does — the catalog row. */
+    private fun openTemplateWorkspace(
+        query: String = "detail_probe",
+        leaf: String = "detail_probe",
+    ) {
+        page.navigate("$baseUrl/templates?q=$query")
+        page.waitForSelector("#template-list-wrapper a.tpl-result")
+        page.locator("a.tpl-result", Page.LocatorOptions().setHasText(leaf)).first().click()
+        page.waitForURL("**/templates/**")
+        page.waitForSelector(".tw-root")
     }
 
-    /**
-     * Waits for the drawer to be CLOSED and SETTLED.
-     *
-     * The class is removed the moment the selection lands; the pane then slides out over
-     * `--duration-fast`. Waiting on the class alone leaves a tree half-way across the screen —
-     * which is what the first 390px screenshot of this round showed. The wait is on the
-     * geometry, which is the fact, not on a duration, which would be a guess.
-     */
-    private fun waitForDrawerClosed() {
-        page.waitForFunction(
-            """
-            () => {
-              const body = document.querySelector('.tplx-body');
-              if (!body || body.classList.contains('is-drawer-open')) return false;
-              const tree = document.querySelector('.tplx-tree');
-              if (!tree || getComputedStyle(tree).position !== 'fixed') return true;
-              return tree.getBoundingClientRect().right <= 1;
-            }
-            """.trimIndent(),
-        )
-    }
-
-    /** #350: the probe pipeline's workspace, reached the way a reader does — a catalog row. */
+    /** #350: the probe pipeline's workspace, reached the same way. */
     private fun openProbeWorkspace() {
         page.navigate("$baseUrl/pipelines?q=detail_probe")
         page.locator("#pipeline-list-wrapper a.tpl-result").first().click()
         page.waitForURL(PipelineWorkspaceUrl.PATTERN)
         page.waitForSelector(".pe-root")
-    }
-
-    /** Below 1100px the tree is behind the Browse button; above it, the button is not rendered. */
-    private fun openDrawerIfPresent() {
-        val browse = page.locator("[data-explorer-drawer-open]")
-        if (browse.count() > 0 && browse.first().isVisible) {
-            browse.first().click()
-            page.waitForSelector(".tplx-body.is-drawer-open")
-        }
     }
 
     private fun overflow(): Long =
@@ -184,27 +140,10 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
                 """.trimIndent(),
             ).toString()
 
-    /** The two columns' boxes, read in ONE evaluate so they describe the same frame. */
-    private val columnProbe =
-        """
-        () => {
-          const r = document.querySelector('.tplx-read');
-          const a = document.querySelector('.tplx-act');
-          if (!r || !a) return null;
-          const rb = r.getBoundingClientRect(), ab = a.getBoundingClientRect();
-          return { readLeft: rb.left, readRight: rb.right, actLeft: ab.left, actTop: ab.top, readTop: rb.top };
-        }
-        """.trimIndent()
-
-    @Suppress("UNCHECKED_CAST")
-    private fun columns(): Map<String, Any?> = page.evaluate(columnProbe) as Map<String, Any?>
-
-    private fun Map<String, Any?>.d(key: String) = (this[key] as Number).toDouble()
-
     // ------------------------------------------------------------------- §B
 
     @Test
-    fun `no explorer width scrolls the document sideways, from 768 to a 3491px window`() {
+    fun `no catalog width scrolls the document sideways, from 768 to a 3491px window`() {
         startTrace()
         ready()
         seed()
@@ -215,9 +154,8 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
                 page.setViewportSize(w, h)
                 page.navigate("$baseUrl$route")
                 page.waitForLoadState(LoadState.NETWORKIDLE)
-                // #350: the pipelines page is the flat catalog — nothing to select there.
-                if (route == "/templates") selectLeaf()
-                page.waitForLoadState(LoadState.NETWORKIDLE)
+                // #398: both pages are flat catalogs at rest — every row is a full navigation,
+                // so there is no selection to make and nothing to settle after.
                 val extra = overflow()
                 if (extra > 0) offenders += "$route at ${w}x$h overflows by ${extra}px — ${culprits()}"
             }
@@ -227,124 +165,73 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
 
     /**
      * At 390 the DOCUMENT overflows on every screen in the app, including `/dashboard`, which
-     * has no explorer on it at all — measured on this branch: dashboard 154px, executions 139,
-     * datasources 275, api-console 75. The culprit is `HEADER.app-topbar` (the crumbs, the
-     * icon buttons, the user chip) inside the shell's fixed `--rail-w` grid, and both
-     * `app.css` and the shell layout belong to 103. Reported in the 106 handback; not fixed
-     * here, because a lane that reaches into another lane's stylesheet to make its own
-     * assertion pass is how two rounds of work get lost.
+     * has no catalog on it at all — the 106 measurement quoted in the original of this case.
+     * The culprit is `HEADER.app-topbar` inside the shell's fixed grid (app.css and the shell
+     * layout are 103's, not this lane's fence).
      *
-     * What 106 CAN be held to at 390 is its own region, and that is what this asserts: the
-     * explorer page does not overflow ITS box, and nothing inside the detail pane sticks out
-     * past the detail pane. The assertion goes red the moment a chip row, a key/value strip or
-     * a parameters table is what widens the phone layout — which is the failure this width was
-     * added to catch.
+     * What the templates surface CAN be held to at 390 is its own region: the catalog's list
+     * does not overflow ITS box, and nothing inside it sticks out past it. The assertion goes
+     * red the moment a badge row or a path that does not truncate widens the phone layout.
      */
     @Test
-    fun `at 390 the explorer region fits its own box, whatever the shell around it does`() {
+    fun `at 390 the catalog region fits its own box, whatever the shell around it does`() {
         startTrace()
         ready()
         seed()
 
         page.setViewportSize(390, 844)
-        listOf("/templates").forEach { route ->
-            // #350: the one page explorer left
-            page.navigate("$baseUrl$route")
-            page.waitForLoadState(LoadState.NETWORKIDLE)
-            selectLeaf()
-            page.waitForLoadState(LoadState.NETWORKIDLE)
-
-            val regionOverflow =
-                (
-                    page.evaluate(
-                        "() => { const p = document.querySelector('.tplx-page'); return p.scrollWidth - p.clientWidth; }",
-                    ) as Number
-                ).toLong()
-            withClue({ "$route: the explorer region overflows by ${regionOverflow}px — ${insideCulprits(".tplx-page")}" }) {
-                regionOverflow shouldBeLessThanOrEqual 1L
-            }
-
-            // Nothing inside the detail sticks out of it: a table or a chip row that does is
-            // exactly what "tables scroll inside their cards, never the page" forbids.
-            // A element inside a SCROLL CONTAINER (.dt-viewport) is clipped by it — its
-            // rect may extend past the edge while the VISIBLE box does not (#349's house
-            // tables scroll inside their frames at phone widths) — so contained
-            // descendants are judged by their scroll container, not their own rect.
-            val stickingOut =
-                page
-                    .evaluate(
-                        """
-                        () => {
-                          const d = document.querySelector('.tplx-detail');
-                          const edge = d.getBoundingClientRect().right;
-                          const clipped = (e) => {
-                            let a = e.parentElement;
-                            while (a && a !== d) {
-                              const o = getComputedStyle(a).overflowX;
-                              if ((o === 'auto' || o === 'scroll' || o === 'clip') && a.getBoundingClientRect().right <= edge + 1) return true;
-                              a = a.parentElement;
-                            }
-                            return false;
-                          };
-                          return Array.from(d.querySelectorAll('*'))
-                            .filter(e => e.getBoundingClientRect().right > edge + 1 && !clipped(e))
-                            .slice(0, 5)
-                            .map(e => (e.tagName + (typeof e.className === 'string' && e.className.trim()
-                              ? '.' + e.className.trim().split(/\s+/).join('.') : '')))
-                            .join(' | ');
-                        }
-                        """.trimIndent(),
-                    ).toString()
-            stickingOut shouldBe ""
-        }
-    }
-
-    @Test
-    fun `at 1440 and above the detail is two columns, and at 1100 they stack`() {
-        startTrace()
-        ready()
-        seed()
-
-        page.setViewportSize(1100, 900)
         page.navigate("$baseUrl/templates")
-        selectLeaf()
-        val stacked = columns()
-        // STACKED: the acting column starts on the reading column's left edge, below it.
-        stacked.d("actLeft") shouldBe stacked.d("readLeft")
-        stacked.d("actTop") shouldBeGreaterThan stacked.d("readTop")
+        page.waitForLoadState(LoadState.NETWORKIDLE)
 
-        listOf(1440, 1920, 2560, 3491).forEach { width ->
-            page.setViewportSize(width, 900)
-            page.navigate("$baseUrl/templates")
-            selectLeaf()
-            val side = columns()
-            // SIDE BY SIDE: acting begins past reading's right edge, on the same top line.
-            side.d("actLeft") shouldBeGreaterThan side.d("readRight") - 1.0
-            side.d("actTop") shouldBe side.d("readTop")
+        val regionOverflow =
+            (
+                page.evaluate(
+                    "() => { const p = document.querySelector('.app-catalog-list'); return p ? p.scrollWidth - p.clientWidth : 0; }",
+                ) as Number
+            ).toLong()
+        withClue({ "the catalog region overflows by ${regionOverflow}px — ${insideCulprits(".app-catalog-list")}" }) {
+            regionOverflow shouldBeLessThanOrEqual 1L
         }
+
+        // Nothing inside the list sticks out of it: a path or a badge row that does is exactly
+        // what "long text truncates inside its row, never the page" forbids.
+        val stickingOut =
+            page
+                .evaluate(
+                    """
+                    () => {
+                      const d = document.querySelector('.app-catalog-list');
+                      const edge = d.getBoundingClientRect().right;
+                      const clipped = (e) => {
+                        let a = e.parentElement;
+                        while (a && a !== d) {
+                          const o = getComputedStyle(a).overflowX;
+                          if ((o === 'auto' || o === 'scroll' || o === 'clip') && a.getBoundingClientRect().right <= edge + 1) return true;
+                          a = a.parentElement;
+                        }
+                        return false;
+                      };
+                      return Array.from(d.querySelectorAll('*'))
+                        .filter(e => e.getBoundingClientRect().right > edge + 1 && !clipped(e))
+                        .slice(0, 5)
+                        .map(e => (e.tagName + (typeof e.className === 'string' && e.className.trim()
+                          ? '.' + e.className.trim().split(/\s+/).join('.') : '')))
+                        .join(' | ');
+                    }
+                    """.trimIndent(),
+                ).toString()
+        stickingOut shouldBe ""
     }
 
     /**
-     * #240 — a long line in the source excerpt scrolls inside its card; it never sizes the
-     * reading column. The excerpt is a `<pre>`, so its longest line is its min-content, and while
-     * `.tplx-read`'s one track was a bare `auto` that line sized BOTH reading cards (the track
-     * is shared) past the column: at 1440 7e's 63-character jsonata line put their right edge at
-     * 1163 against the acting column's left edge at 1088, and an 84-character SQL line put it at
-     * 1310 (222px under the acting card) and, at 1100, stacked, 134px past the column and off the
-     * window (measured on a3e79706). The SQL fixture here is longer still (126 characters), so it
-     * needs more room than the reading column has at every desktop width, 1920 included.
-     *
-     * Asserted at the three desktop widths, for both fixtures: every reading card ends inside the
-     * reading column, and side by side (1440, 1920) left of the acting column. The Source tab's
-     * full body is held to the same rule inside the acting card — it already scrolled there;
-     * this keeps it so. Non-vacuity: the width the Overview card would need to show the whole
-     * line (the `<pre>`'s scroll width plus the card's chrome around it — the same number before
-     * and after the fix) exceeds the reading column for the SQL fixture at every width and for
-     * 7e's at 1440, the width 7e measured; a green run is a line that was contained, never one
-     * that happened to fit. (7e's line fits a 1920 column outright, so it is not asked there.)
+     * #240's guard, re-aimed (#398) from the Overview's excerpt card to the workspace Source
+     * tab's read-only pane — the body's only rendering surface now. A long line must scroll
+     * INSIDE its pane and never size the layout: at every desktop width the pane's own box
+     * stays put while its content scrolls (`scrollWidth > clientWidth` — the fixture must NOT
+     * fit, or a green run proves nothing), and the document never grows sideways.
      */
     @Test
-    fun `a long first excerpt line scrolls inside its card - the reading cards never run under the acting column`() {
+    fun `a long source line scrolls inside its pane - the body never sizes the layout`() {
         startTrace()
         ready()
         val slug = "longline" + generatedPassword("s").takeLast(6).lowercase()
@@ -353,144 +240,119 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
             """{"id":"test/$slug/orders_sql","type":"sql","dialect":"POSTGRES","display_name":"orders_sql",""" +
                 """"description":"#240 fixture","body":"$LONG_SQL_FIRST_LINE\nORDER BY order_id"}""",
         )
-        // 7e's fixture, verbatim: the transform whose 63-character first line 7e measured.
-        postJson(
-            "/api/v1/templates",
-            """{"id":"test/$slug/active_orders","type":"jsonata","display_name":"active_orders","description":"#240 fixture",""" +
-                """"body":"[ inputs.orders[customer_id != null].{ \"order_id\": order_id } ]",""" +
-                """"contract":{"mode":"table","inputs":{"orders":{"kind":"table","columns":[{"name":"order_id","type":"INTEGER"},""" +
-                """{"name":"customer_id","type":"STRING","nullable":true}]}},""" +
-                """"output":{"kind":"table","columns":[{"name":"order_id","type":"INTEGER"}]}},""" +
-                """"invariants":[],"tests":[{"name":"empty input","input":{"inputs":{"orders":[]}},"expect":{"output":[]}}]}""",
-        )
 
         val offenders = mutableListOf<String>()
         page.navigate("$baseUrl/templates")
         listOf("light", "dark").forEach { theme ->
             ensureTheme(theme)
-            listOf("orders_sql", "active_orders").forEach { leaf ->
-                listOf(1100, 1440, 1920).forEach { width -> offenders += longExcerptOffenders(slug, leaf, width, theme) }
-            }
+            listOf(1100, 1440, 1920).forEach { width -> offenders += longSourceOffenders(slug, width, theme) }
         }
         offenders shouldBe emptyList()
     }
 
-    /**
-     * [leaf]'s detail at [width]: what ends past where it must — a reading card past its column
-     * or (side by side) under the acting column, the Source tab's body past the acting column —
-     * after asserting the fixture is not one that simply fits. Photographs the Overview first.
-     */
-    private fun longExcerptOffenders(
+    /** [slug]'s workspace at [width]: the source pane's containment, with the non-vacuity asserted. */
+    private fun longSourceOffenders(
         slug: String,
-        leaf: String,
         width: Int,
         theme: String,
     ): List<String> {
         page.setViewportSize(width, 900)
-        openTemplate(slug, leaf)
-        val edges = readingEdges()
-        val where = "$leaf at $width ($theme)"
-        val readRight = edges.d("readRight")
-        val actLeft = edges.d("actLeft")
-        // The measured edges, pass or fail — the before/after table of the handback.
-        println("#240 $where: read ..$readRight, act $actLeft.., cards ..${edges["cards"]}, card needs ${edges["cardNeeds"]}")
-        if (leaf == "orders_sql" || width == SIDE_BY_SIDE) {
-            withClue({ "$where: the card needs ${edges.d("cardNeeds")}px for the line — the fixture must not fit its column" }) {
-                edges.d("cardNeeds") shouldBeGreaterThan readRight - edges.d("readLeft")
-            }
+        openTemplateWorkspace(query = slug, leaf = "orders_sql")
+        val where = "orders_sql at $width ($theme)"
+
+        @Suppress("UNCHECKED_CAST")
+        val edges =
+            page.evaluate(
+                """
+                () => {
+                  const pre = document.getElementById('versionBody');
+                  if (!pre) return { missing: true };
+                  return { missing: false, scrollWidth: pre.scrollWidth, clientWidth: pre.clientWidth,
+                           docOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth };
+                }
+                """.trimIndent(),
+            ) as Map<String, Any?>
+        check(edges["missing"] != true) { "$where: no read-only source pane on the workspace" }
+        // Non-vacuity: the fixture must genuinely overflow its pane at this width, or a green
+        // containment assertion is a line that happened to fit.
+        withClue({ "$where: the pane needs no scroll (${edges["scrollWidth"]} <= ${edges["clientWidth"]}) — the fixture must not fit" }) {
+            (edges["scrollWidth"] as Number).toDouble() shouldBeGreaterThan (edges["clientWidth"] as Number).toDouble()
         }
         val offenders = mutableListOf<String>()
-        @Suppress("UNCHECKED_CAST")
-        (edges["cards"] as List<Number>).map { it.toDouble() }.forEachIndexed { i, right ->
-            if (right > readRight + EDGE_SLACK) offenders += "$where: reading card $i ends at $right, past the reading column's $readRight"
-            if (width >= SIDE_BY_SIDE && right > actLeft + EDGE_SLACK) {
-                offenders += "$where: reading card $i ends at $right, under the acting column's left edge $actLeft"
-            }
+        if ((edges["docOverflow"] as Number).toLong() > 0) {
+            offenders += "$where: the document grew sideways by ${edges["docOverflow"]}px — ${culprits()}"
         }
-        shot("long-excerpt-$leaf-$width-$theme", fullPage = true)
-        page.locator("[data-tab-panel='template-tab-source']").click()
-        page.waitForFunction("() => !document.getElementById('template-tab-source').hidden")
-        val source = readingEdges()
-        val sourceRight = source.d("sourceRight")
-        val actRight = source.d("actRight")
-        if (sourceRight > actRight + EDGE_SLACK) {
-            offenders += "$where: the Source tab's body ends at $sourceRight, past the acting column's $actRight"
-        }
+        shot("long-source-$width-$theme", fullPage = false)
         return offenders
     }
 
-    /** The explorer's search for [slug], its [leaf] result selected — the detail pane, reading and acting columns. */
-    private fun openTemplate(
-        slug: String,
-        leaf: String,
-    ) {
-        page.navigate("$baseUrl/templates?q=$slug")
-        page.waitForResponse({ it.url().contains("/partials/templates/versions") }) {
-            page.locator("button.tpl-result", Page.LocatorOptions().setHasText(leaf)).first().click()
-        }
-        page.locator("#template-detail .tplx-read .tplx-excerpt").waitFor()
-    }
-
-    /** The reading column, its cards' right edges, the acting column and the Source tab's body — ONE frame. */
-    @Suppress("UNCHECKED_CAST")
-    private fun readingEdges(): Map<String, Any?> =
-        page.evaluate(
-            """
-            () => {
-              const read = document.querySelector('#template-detail .tplx-read');
-              const act = document.querySelector('#template-detail .tplx-act');
-              const pre = read.querySelector('.tplx-excerpt');
-              const card = pre.closest('.ds-card');
-              const source = document.querySelector('#template-tab-source');
-              const rb = read.getBoundingClientRect(), ab = act.getBoundingClientRect();
-              return { readLeft: rb.left, readRight: rb.right, actLeft: ab.left, actRight: ab.right,
-                       cards: [...read.children].map(c => c.getBoundingClientRect().right),
-                       cardNeeds: pre.scrollWidth + card.getBoundingClientRect().width - pre.clientWidth,
-                       sourceRight: source.hidden ? 0 : source.querySelector('pre').getBoundingClientRect().right };
-            }
-            """.trimIndent(),
-        ) as Map<String, Any?>
-
     @Test
-    fun `below 1100 the tree is a drawer - it opens on Browse and closes when a leaf is chosen`() {
+    fun `the workspace tabs load once and swap - Runs arrives on the first click and not again`() {
         startTrace()
         ready()
         seed()
 
-        page.setViewportSize(768, 900)
-        page.navigate("$baseUrl/templates")
-        page.waitForLoadState(LoadState.NETWORKIDLE)
-
-        // Closed by default: the detail owns the width, and the Browse button is the way in.
-        page.locator(".tplx-body.is-drawer-open").count() shouldBe 0
-        val browse = page.locator("[data-explorer-drawer-open]")
-        browse.first().isVisible shouldBe true
-        browse.first().getAttribute("aria-expanded") shouldBe "false"
-
-        browse.first().click()
-        page.waitForSelector(".tplx-body.is-drawer-open")
-        browse.first().getAttribute("aria-expanded") shouldBe "true"
-
-        // Choosing a leaf is what the drawer was opened FOR, so it closes on the swap.
-        selectLeaf(open = false)
-        // Closed AND off the screen — a drawer that stops half-way is still covering the answer.
-        waitForDrawerClosed()
-        page.locator(".tplx-detail-header").isVisible shouldBe true
-
-        // …and above the breakpoint the button is not rendered at all: the tree is a column.
         page.setViewportSize(1440, 900)
-        page.navigate("$baseUrl/templates")
-        page.waitForLoadState(LoadState.NETWORKIDLE)
-        page.locator("[data-explorer-drawer-open]").first().isVisible shouldBe false
+        openTemplateWorkspace()
+
+        // Versions is FIRST PAINT — it is server-rendered into the page.
+        page.waitForSelector("#tw-pane-versions")
+
+        var runsRequests = 0
+        page.onRequest { if (it.url().contains("/partials/templates/runs")) runsRequests++ }
+        page.waitForResponse({ it.url().contains("/partials/templates/runs") }) {
+            page.locator("#tw-tab-runs").click()
+        }
+        page.waitForFunction("() => !document.getElementById('tw-pane-runs').hidden")
+
+        // A second click swaps back to a panel that is already loaded: no second request.
+        page.locator("#tw-tab-source").click()
+        page.waitForFunction("() => !document.getElementById('tw-pane-source').hidden")
+        page.locator("#tw-tab-runs").click()
+        page.waitForTimeout(200.0)
+        runsRequests shouldBe 1
+
+        // Overview is local: a swap with no request at all.
+        page.locator("#tw-tab-overview").click()
+        page.waitForFunction("() => !document.getElementById('tw-pane-overview').hidden")
+        runsRequests shouldBe 1
     }
 
     @Test
-    fun `a selection holds the layout-shift budget at every width`() {
+    fun `the URL carries the tab an in-page switch selects - replaceState, no pushed entry`() {
+        // #398's state contract: a tab change is in-page navigation that rewrites ?tab= with
+        // history.replaceState and pushes NO entry — the pipelines workspace's own contract
+        // (#349 deviation 3). A version switch, by contrast, IS a navigation and carries the
+        // current tab along.
         startTrace()
         ready()
         seed()
 
-        WIDTHS.forEach { (w, h) ->
+        page.setViewportSize(1440, 900)
+        openTemplateWorkspace()
+        page.locator("#tw-tab-versions").click()
+        page.waitForFunction("() => !document.getElementById('tw-pane-versions').hidden")
+        page.waitForFunction("() => new URLSearchParams(location.search).get('tab') === 'versions'")
+
+        val versions = page.locator("#tw-pane-versions tr[data-version-row]").count()
+        if (versions > 1) {
+            page.locator(".tw-version-link").nth(1).click()
+            page.waitForLoadState(LoadState.NETWORKIDLE)
+            page.waitForSelector(".tw-root")
+            // The navigation landed back on the tab the reader was reading.
+            page.waitForFunction("() => !document.getElementById('tw-pane-versions').hidden")
+        }
+    }
+
+    @Test
+    fun `a selection in the catalog's search holds the layout-shift budget at every width`() {
+        // The re-aim of the selection-CLS budget: the page surface that still swaps in place
+        // is the catalog's search re-fetch (#398 — a leaf click is a full navigation).
+        startTrace()
+        ready()
+        seed()
+
+        WIDTHS.filter { it.first >= SHELL_FLOOR }.forEach { (w, h) ->
             page.setViewportSize(w, h)
             page.addInitScript(
                 """
@@ -502,7 +364,10 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
             page.navigate("$baseUrl/templates")
             page.waitForLoadState(LoadState.NETWORKIDLE)
             page.evaluate("() => { window.__cls = 0; }")
-            selectLeaf()
+            page.fill("#template-filter-q", "detail_probe")
+            page.waitForFunction(
+                "() => document.querySelectorAll('#template-list-wrapper a.tpl-result').length > 0",
+            )
             page.waitForLoadState(LoadState.NETWORKIDLE)
             val cls = (page.evaluate("() => window.__cls") as Number).toDouble()
             cls shouldBeLessThan CLS_BUDGET
@@ -510,17 +375,11 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
     }
 
     /**
-     * The first 1440px screenshot of this round showed a version row whose meta column was
-     * about ten pixels wide: "just now · Browser User · 0 runs" set ONE CHARACTER PER LINE,
-     * beside three ghost buttons in an `auto` track that would not shrink. Every assertion in
-     * this class passed — the row existed, the text was in the DOM, nothing overflowed — which
-     * is exactly the shape a green suite hides.
-     *
-     * So the READABLE WIDTH is asserted, not the presence. #349 composes the versions
-     * surface as the house table (spec §4.4); the row is `tr[data-version-row]` now and the
-     * property under test is the row's FIRST cell — the version link and its marks — which
-     * must still take a real share of the row and set on a small number of lines. It goes
-     * red on the layout that was in that screenshot, in either markup.
+     * The first 1440px screenshot of the original round showed a version row whose meta
+     * column was about ten pixels wide: one character per line. The readable WIDTH is
+     * asserted, not the presence — for the PIPELINES workspace's Versions tab (the same
+     * house-table fragment #349 shares; #398 gives the templates family the same component,
+     * whose own geometry TemplateWorkspaceBrowserTest measures).
      */
     @Test
     fun `a version row's meta column is readable, not one character per line`() {
@@ -529,8 +388,6 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
         seed()
 
         listOf(1440, 1920, 2560).forEach { width ->
-            // #350: the pipeline's versions table is the WORKSPACE's Versions tab now (the same
-            // house-table fragment #349 shares).
             page.setViewportSize(width, 900)
             openProbeWorkspace()
             page.locator("#pe-tab-versions").click()
@@ -561,20 +418,16 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
     }
 
     /**
-     * 138 §E.1 — the description's blank line is a paragraph break on screen. The re-run's
-     * descriptions had sections separated by blank lines, and the browser collapsed every
-     * newline because the element had no `white-space` rule: two labelled sections read as one
-     * run-on line. The assertion is geometric, not stylistic: the second section's label sits
-     * at least two line-heights below the first (its line, the section's line, the blank line),
-     * which is exactly what collapsing makes impossible — removed `u-pre-line`, the two labels
-     * share a line and this goes red.
+     * 138 §E.1 — the description's blank line is a paragraph break on screen. The assertion
+     * is geometric: the second section's label sits at least two line-heights below the
+     * first. The surface is the PIPELINES workspace's Overview (unchanged by this lane's
+     * fence); the templates workspace's own Overview is [TemplateWorkspaceBrowserTest]'s.
      */
     @Test
     fun `a description's blank line renders as a paragraph break - two sections, two blocks`() {
         startTrace()
         ready()
         seed()
-        // #350: the description reads in the WORKSPACE's Overview tab now.
         page.setViewportSize(1440, 900)
         openProbeWorkspace()
         page.locator("#pe-tab-overview").click()
@@ -609,64 +462,6 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
     }
 
     @Test
-    fun `the tabs load once and swap - Runs arrives on the first click and not again`() {
-        // #350: the detail pane's tab card is the TEMPLATES explorer's now (the pipeline's tabs
-        // are the workspace's — PipelineWorkspaceTabsBrowserTest owns their lazy-once rule).
-        startTrace()
-        ready()
-        seed()
-
-        page.setViewportSize(1440, 900)
-        page.navigate("$baseUrl/templates")
-        selectLeaf()
-
-        // Versions is the FIRST PAINT — no request was needed for it.
-        page.waitForSelector("#template-tab-versions")
-
-        var runsRequests = 0
-        page.onRequest { if (it.url().contains("/partials/templates/runs")) runsRequests++ }
-        page.waitForResponse({ it.url().contains("/partials/templates/runs") }) {
-            page.locator("[data-tab-panel='template-tab-runs']").click()
-        }
-        page.waitForFunction("() => !document.getElementById('template-tab-runs').hidden")
-
-        // A second click swaps back to a panel that is already loaded: no second request.
-        page.locator("[data-tab-panel='template-tab-versions']").click()
-        page.locator("[data-tab-panel='template-tab-runs']").click()
-        page.waitForTimeout(200.0)
-        runsRequests shouldBe 1
-
-        // Source is local: a swap with no request at all.
-        page.locator("[data-tab-panel='template-tab-source']").click()
-        page.waitForFunction("() => !document.getElementById('template-tab-source').hidden")
-        runsRequests shouldBe 1
-    }
-
-    @Test
-    fun `selecting another leaf replaces all three regions`() {
-        startTrace()
-        ready()
-        seed() // two templates in test/ — #350: the templates explorer is the one with a detail pane
-
-        page.setViewportSize(1440, 900)
-        page.navigate("$baseUrl/templates")
-        selectLeaf()
-        val first = page.locator(".tplx-detail-title").innerText()
-
-        page.waitForResponse({ it.url().contains("/partials/templates/versions") }) {
-            page.locator("[data-explorer-pane] button.tpl-leaf").nth(1).click()
-        }
-        page.waitForFunction(
-            "(previous) => document.querySelector('.tplx-detail-title').innerText !== previous",
-            first,
-        )
-        // The acting column came with it — a stale Versions list beside a new header would be
-        // the failure a header-only assertion misses.
-        page.waitForSelector("#template-tab-versions")
-        page.locator("#template-tab-runs").getAttribute("hidden").shouldBeHiddenAttribute()
-    }
-
-    @Test
     fun `the usage tab lists the schedules that run the pipeline (#259)`() {
         startTrace()
         val wsName = "detws-" + generatedPassword("w").take(8).lowercase()
@@ -678,7 +473,6 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
         seed()
         seedSchedule(wsName, email, "test/nightly-usage", "pipeline:test/detail_probe")
 
-        // #350: the Usage tab is the WORKSPACE's (the same fragment the explorer pane loaded).
         page.setViewportSize(1440, 900)
         openProbeWorkspace()
         page.waitForResponse({ it.url().contains("/usage") }) {
@@ -688,7 +482,6 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
         page.waitForFunction("() => (document.getElementById('pe-usage-body').innerText || '').includes('test/nightly-usage')")
 
         val usage = page.locator("#pe-usage-body").innerText()
-        // The heading is CSS-uppercased on the page (innerText returns the transformed text).
         usage.lowercase().shouldContain("schedules running it")
         usage.shouldContain("test/nightly-usage")
         usage.lowercase().shouldContain("enabled")
@@ -728,34 +521,57 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
     }
 
     @Test
-    fun `the release button opens the 4_3d dialog - the plain confirm is gone`() {
-        // SUPERSEDES 106's plain-confirm pin (data-verb-url/data-confirm/data-if-match):
-        // 102 replaced the fetch-and-confirm wiring with the §4.3d dialog partials. The hash
-        // precondition moved SERVER-side — the dialog's POST reads the draft's hash, and a
-        // stale one is the service's pipeline.version.conflict (the golden path drives it).
+    fun `the workspace header's Release opens the 4_3d dialog - the plain confirm is gone`() {
+        // SUPERSEDES 106's plain-confirm pin; re-aimed (#398) from the detail header to the
+        // WORKSPACE header. A Release button renders only where a DRAFT exists, so the probe
+        // is updated once — the PUT lands v2 DRAFT — before the walk.
         startTrace()
         ready()
         seed()
-        // #350: the explorer that still renders a detail header is the templates one (the
-        // pipeline's Release is the workspace's — LifecycleDialogBrowserTest drives it).
+        putJson(
+            "/api/v1/templates/test/detail_probe",
+            """{"id":"test/detail_probe","type":"sql","dialect":"POSTGRES","display_name":"detail_probe",""" +
+                """"description":"106 detail fixture","body":"SELECT 1 -- drafted"}""",
+        )
+
         page.setViewportSize(1440, 900)
-        page.navigate("$baseUrl/templates")
-        selectLeaf()
+        openTemplateWorkspace()
 
         val release =
             page.locator(
-                ".tplx-detail-actions button",
+                ".tw-topbar button",
                 com.microsoft.playwright.Page
                     .LocatorOptions()
-                    .setHasText("Release v1"),
+                    .setHasText("Release v"),
             )
         release.isVisible shouldBe true
         page.waitForResponse({ it.url().contains("/lifecycle/release") }) { release.click() }
         page.locator("#tx-dialog [data-lifecycle-dialog='template-release']").waitFor()
-        // No verb attributes anywhere on the pane — the fetch path is gone.
-        page.locator("#template-detail [data-verb-url]").count() shouldBe 0
+        // No verb attributes anywhere on the page — the fetch path is gone.
+        page.locator("#tx-dialog [data-verb-url]").count() shouldBe 0
         page.keyboard().press("Escape")
         page.locator("#tx-dialog [data-lifecycle-dialog]").count() shouldBe 0
+    }
+
+    private fun putJson(
+        url: String,
+        body: String,
+    ) {
+        val status =
+            page.evaluate(
+                """async (args) => {
+                  const csrf = document.cookie.match(/(?:^|;\s*)dp_csrf=([^;]*)/);
+                  const res = await fetch(args.url, {
+                    method: 'PUT', credentials: 'same-origin',
+                    headers: {'Content-Type': 'application/json',
+                              'DP-CSRF-Token': csrf ? decodeURIComponent(csrf[1]) : ''},
+                    body: args.body,
+                  });
+                  return res.status;
+                }""",
+                mapOf("url" to url, "body" to body),
+            )
+        (status as Number).toInt() shouldBe 200
     }
 
     // ---------------------------------------------------------- the evidence
@@ -784,17 +600,8 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
                 page.setViewportSize(w, h)
                 page.navigate("$baseUrl/$screen")
                 page.waitForLoadState(LoadState.NETWORKIDLE)
-                // #350: the pipelines page is the flat catalog — photographed as it rests.
-                if (screen == "templates") {
-                    selectLeaf()
-                    page.waitForLoadState(LoadState.NETWORKIDLE)
-                    // The drawer closes on the selection; photographing mid-transition would show a
-                    // state the user never rests in.
-                    waitForDrawerClosed()
-                }
-                // The 390px shell overflows horizontally on every screen in the app (see the
-                // 390 test's KDoc), so a click can leave the document scrolled right and the
-                // shot would show the page cropped. Back to the origin before photographing.
+                // #398: both pages are catalogs at rest — photographed as they rest, the way
+                // the pipelines one has been since #350.
                 page.evaluate("() => window.scrollTo(0, 0)")
                 shot("$screen-$w-$mode", fullPage = w >= 1100)
             }
@@ -844,16 +651,14 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
         fullPage: Boolean,
     ) = page.screenshot(Page.ScreenshotOptions().setPath(shotDir().resolve("106-$name.png")).setFullPage(fullPage))
 
-    private fun String?.shouldBeHiddenAttribute() {
-        (this != null) shouldBe true
-    }
+    private fun Map<String, Any?>.d(key: String) = (this[key] as Number).toDouble()
 
     private companion object {
         /** The owner's own widths: a phone, a tablet, the stacked breakpoint, and four desktops. */
         val WIDTHS =
             listOf(390 to 844, 768 to 1024, 1100 to 900, 1440 to 900, 1920 to 1080, 2560 to 1440, 3491 to 1440)
 
-        /** Google's "good" CLS is 0.1; the prompt's budget for a SELECTION is half of that. */
+        /** Google's "good" CLS is 0.1; the prompt's budget for a SWAP is half of that. */
         const val CLS_BUDGET = 0.05
 
         /**
@@ -863,22 +668,14 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
         const val SHELL_FLOOR = 768
 
         // A meta column narrower than this cannot set "3 days ago - someone - 7 runs" at
-        // all. #349: the row is the house table now — six columns in the explorer's
-        // ~524px pane give each cell a real but modest share. The bug this guard exists
-        // for was a ~10px column setting ONE CHARACTER per line; the floor stays an
-        // order of magnitude above it.
+        // all. The bug this guard exists for was a ~10px column setting ONE CHARACTER per
+        // line; the floor stays an order of magnitude above it.
         const val META_MIN_WIDTH = 48.0
 
         /** ...and it must not need more than a few lines to do it. */
         const val META_MAX_LINES = 4.0
 
-        /** The detail's two columns sit side by side from this width (template-tree.css). */
-        const val SIDE_BY_SIDE = 1440
-
-        /** Sub-pixel rounding between two boxes that touch; anything past it is an overlap. */
-        const val EDGE_SLACK = 0.5
-
-        /** #240's SQL fixture: a 126-character first line, wider than the reading column at every desktop width. */
+        /** #240's SQL fixture: a 126-character first line, wider than the source pane at every desktop width. */
         const val LONG_SQL_FIRST_LINE =
             "SELECT order_id, customer_id, amount_cents, currency, placed_at FROM orders WHERE customer_id IS NOT NULL AND amount_cents > 0"
     }

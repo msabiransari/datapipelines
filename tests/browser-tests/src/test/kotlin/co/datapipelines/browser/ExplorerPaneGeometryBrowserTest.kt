@@ -1,5 +1,7 @@
 package co.datapipelines.browser
 
+import co.datapipelines.browser.ScheduleFixtures.createSchedule
+import co.datapipelines.browser.ScheduleFixtures.releasedPipeline
 import com.microsoft.playwright.Mouse
 import com.microsoft.playwright.Page
 import com.microsoft.playwright.options.LoadState
@@ -42,6 +44,13 @@ import java.nio.file.Paths
  * applied after data load". The sheet moved to `layouts/default`'s <head>; after that the
  * first frame measures identically to the settled page at all six combinations.
  *
+ * #398 re-aims the pane cases onto the SCHEDULES explorer — the pane's LAST live caller (the
+ * templates and pipelines pages are flat catalogs; their trees are the sidebar's). The pane
+ * classes, the divider key (`dp.pane.explorer-tree`) and the drawer are all the schedules
+ * page's own markup, so every geometry claim transfers; only the seeding (a released
+ * pipeline and schedules through REST, `ScheduleFixtures`) and the navigation change. The
+ * two pipelines-catalog cases and the routes CLS walk are unchanged by this lane's fence.
+ *
  * ## Why the first frame is the assertion and CLS is not
  *
  * `PerformanceObserver('layout-shift')` scored the broken navigation at **0.0000**: the panes
@@ -50,42 +59,11 @@ import java.nio.file.Paths
  * below — it is the right instrument for the FONT half of §B — but the geometry at the first
  * animation frame after `htmx:afterSwap` is what pins this one.
  */
-class ExplorerPaneGeometryBrowserTest : BrowserSuite() {
-    private fun ready() {
-        val user =
-            seedLocalUser(
-                uniqueEmail("geo-" + generatedPassword("u").take(8)),
-                generatedPassword("pw"),
-                mustChange = false,
-            )
-        login(user.email, user.oneTimePassword)
-        page.waitForURL("**/dashboard")
-        createWorkspace("geows-" + generatedPassword("w").take(8).lowercase())
-    }
+import co.datapipelines.browser.ScheduleFixtures.createSchedule
+import co.datapipelines.browser.ScheduleFixtures.releasedPipeline
 
-    /**
-     * A row in BOTH trees. The assertion "the first leaf's text is visible" is the owner's
-     * own symptom — the pane was badge-width and the names were gone — so an explorer with
-     * an empty tree would satisfy every geometric assertion here while proving nothing. The
-     * REST seeding is the [ExplorerStressBrowserTest] pattern: cookie session + the dp_csrf
-     * double-submit pair, in-page.
-     */
-    private fun seedBothTrees() {
-        page.navigate("$baseUrl/dashboard")
-        postJson(
-            "/api/v1/templates",
-            """{"id":"test/geometry_probe","type":"sql","dialect":"POSTGRES",""" +
-                """"display_name":"geometry_probe","description":"090 pane geometry fixture","body":"SELECT 1"}""",
-        )
-        postJson(
-            "/api/v1/pipelines",
-            """{"name":"test/geometry_probe","display_name":"geometry_probe","nodes":[{"id":"fq",""" +
-                """"type":"CALCULATOR","kind":"fiscal_quarter","context_key":"run_fiscal_quarter",""" +
-                """"inputs":{"date":"${'$'}current_date","fiscal_start":"${'$'}org_fiscal_start_date"}}]}""",
-        )
-    }
-
-    private fun postJson(
+class ExplorerPaneGeometryBrowserTest : SchedulesBrowserSuite() {
+    private fun postJsonFresh(
         url: String,
         body: String,
     ) {
@@ -107,14 +85,28 @@ class ExplorerPaneGeometryBrowserTest : BrowserSuite() {
     }
 
     /**
-     * The root level shows FOLDERS, and a folder must be OPEN before its leaf exists (§9.1 —
-     * one request per level). Opening it is also what puts a real name in the pane. #350: the
-     * TEMPLATES explorer's first folder — the one page explorer left.
+     * A row in the pane. The assertion "the first leaf's text is visible" is the owner's own
+     * symptom — the pane was badge-width and the names were gone — so an explorer with an
+     * empty tree would satisfy every geometric assertion here while proving nothing. The
+     * schedules fixture seeds a released pipeline and three schedules under [root].
      */
-    private fun openFirstFolder() {
+    private fun seedPane(root: String) {
+        val pipeline = "$root/jobs/rows"
+        releasedPipeline(page, pipeline)
+        listOf("$root/daily/revenue", "$root/daily/costs", "$root/weekly/summary").forEach {
+            createSchedule(page, it, pipeline)
+        }
+    }
+
+    /**
+     * The root level shows FOLDERS, and a folder must be OPEN before its leaf exists (§9.1 —
+     * one request per level). Opening it is also what puts a real name in the pane. #398: the
+     * SCHEDULES explorer's first folder — the pane's last live caller.
+     */
+    private fun openFirstFolder(root: String) {
         page.waitForSelector("[data-explorer-pane] summary.tpl-summary")
         if (page.locator("[data-explorer-pane] details.tpl-folder[open]").count() == 0) {
-            page.waitForResponse({ it.url().contains("prefix=test") }) {
+            page.waitForResponse({ it.url().contains("prefix=$root") }) {
                 page.locator("[data-explorer-pane] summary.tpl-summary").first().click()
             }
         }
@@ -321,15 +313,21 @@ class ExplorerPaneGeometryBrowserTest : BrowserSuite() {
     @Test
     fun `a freshly created pipeline renders as v1 with the pending-release badge`() {
         startTrace()
-        ready()
-        seedBothTrees()
+        val root = ready("geop")
+        // The fixture's pipeline is created by releasedPipeline; a FRESH one for the badge.
+        postJsonFresh(
+            "/api/v1/pipelines",
+            """{"name":"$root/badge_probe","display_name":"badge_probe","nodes":[{"id":"fq",""" +
+                """"type":"CALCULATOR","kind":"fiscal_quarter","context_key":"run_fiscal_quarter",""" +
+                """"inputs":{"date":"${'$'}current_date","fiscal_start":"${'$'}org_fiscal_start_date"}}]}""",
+        )
 
         // #350: the pipeline tree is the SIDEBAR's — its leaf carries the same badges.
         page.setViewportSize(WIDTHS.first(), 900)
         page.navigate("$baseUrl/dashboard")
         page.click("[data-nav-branch='pipelines'] [data-nav-tree-toggle]")
         page.waitForSelector("#nav-tree-pipelines summary.tpl-summary")
-        page.waitForResponse({ it.url().contains("prefix=test") }) {
+        page.waitForResponse({ it.url().contains("prefix=") }) {
             page.locator("#nav-tree-pipelines summary.tpl-summary").first().click()
         }
         page.waitForSelector("#nav-tree-pipelines .tpl-leaf")
@@ -353,27 +351,25 @@ class ExplorerPaneGeometryBrowserTest : BrowserSuite() {
     }
 
     @Test
-    fun `the templates explorer keeps the pane contract at three widths and both rail states`() {
+    fun `the schedules explorer keeps the pane contract at three widths and both rail states`() {
         startTrace()
-        ready()
-        seedBothTrees()
+        val root = ready("geoc")
+        seedPane(root)
 
         for (width in WIDTHS) {
             for (collapsed in listOf(false, true)) {
                 page.setViewportSize(width, 900)
-                // #350: the pipelines page is the flat catalog — no pane left to hold a contract.
-                for (route in listOf("/templates")) {
-                    page.navigate("$baseUrl$route")
-                    page.evaluate(
-                        "(c) => { document.documentElement.classList.toggle('rail-collapsed', c);" +
-                            " window.localStorage.setItem('dp-rail', c ? '1' : '0'); }",
-                        collapsed,
-                    )
-                    page.waitForSelector(".tplx-tree")
-                    page.waitForLoadState(LoadState.NETWORKIDLE)
-                    openFirstFolder()
-                    assertPanes("full load $route at ${width}px rail-collapsed=$collapsed", page.evaluate(geometryProbe))
-                }
+                // #398: the SCHEDULES page is the pane's last live caller.
+                page.navigate("$baseUrl/schedules")
+                page.evaluate(
+                    "(c) => { document.documentElement.classList.toggle('rail-collapsed', c);" +
+                        " window.localStorage.setItem('dp-rail', c ? '1' : '0'); }",
+                    collapsed,
+                )
+                page.waitForSelector(".tplx-tree")
+                page.waitForLoadState(LoadState.NETWORKIDLE)
+                openFirstFolder(root)
+                assertPanes("full load schedules at ${width}px rail-collapsed=$collapsed", page.evaluate(geometryProbe))
             }
         }
     }
@@ -386,13 +382,13 @@ class ExplorerPaneGeometryBrowserTest : BrowserSuite() {
     @Test
     fun `the pane contract already holds on the first frame after a boosted navigation`() {
         startTrace()
-        ready()
-        seedBothTrees()
+        val root = ready("geof")
+        seedPane(root)
 
         for (width in WIDTHS) {
             for (collapsed in listOf(false, true)) {
                 page.setViewportSize(width, 900)
-                for (section in listOf("/templates")) { // #350: the one page explorer left
+                for (section in listOf("/schedules")) { // #398: the one page explorer left
                     // Always start from a screen that is NOT an explorer, so the swap really
                     // introduces the explorer's markup rather than replacing like with like.
                     page.navigate("$baseUrl/dashboard")
@@ -435,16 +431,16 @@ class ExplorerPaneGeometryBrowserTest : BrowserSuite() {
     @Test
     fun `the divider handle resizes the tree, the width survives a reload, and a double-click resets it`() {
         startTrace()
-        ready()
-        seedBothTrees()
+        val root = ready("geod")
+        seedPane(root)
         page.setViewportSize(1920, 900)
-        page.navigate("$baseUrl/templates")
+        page.navigate("$baseUrl/schedules")
         page.waitForSelector(".tplx-tree")
         page.waitForLoadState(LoadState.NETWORKIDLE)
-        openFirstFolder()
+        openFirstFolder(root)
 
         val before = probe()
-        assertPanes("templates at 1920 before the drag", before)
+        assertPanes("schedules at 1920 before the drag", before)
         shot("tree-default")
 
         dragTreeBy(200.0)
@@ -483,7 +479,7 @@ class ExplorerPaneGeometryBrowserTest : BrowserSuite() {
             (before.d("treeWidth") - reset.d("treeWidth")) shouldBeLessThanOrEqual 1.0
         }
         reset["stored"] shouldBe null
-        assertPanes("templates at 1920 after the reset", reset)
+        assertPanes("schedules at 1920 after the reset", reset)
     }
 
     /**
@@ -497,13 +493,13 @@ class ExplorerPaneGeometryBrowserTest : BrowserSuite() {
         // shared key's cross-explorer case became a round trip: the catalog must not clobber the
         // remembered width, and the explorer must open at it again.
         startTrace()
-        ready()
-        seedBothTrees()
+        val root = ready("geor")
+        seedPane(root)
         page.setViewportSize(1920, 900)
-        page.navigate("$baseUrl/templates")
+        page.navigate("$baseUrl/schedules")
         page.waitForSelector(".tplx-tree")
         page.waitForLoadState(LoadState.NETWORKIDLE)
-        openFirstFolder()
+        openFirstFolder(root)
 
         dragTreeBy(200.0)
         val before = probe()
@@ -511,7 +507,7 @@ class ExplorerPaneGeometryBrowserTest : BrowserSuite() {
         page.navigate("$baseUrl/pipelines")
         page.waitForSelector("#pipeline-list-wrapper")
         page.locator(".tplx-tree").count() shouldBe 0
-        page.navigate("$baseUrl/templates")
+        page.navigate("$baseUrl/schedules")
         page.waitForSelector(".tplx-tree")
         page.waitForLoadState(LoadState.NETWORKIDLE)
         val after = probe()
@@ -534,8 +530,8 @@ class ExplorerPaneGeometryBrowserTest : BrowserSuite() {
     @Test
     fun `a full load with a remembered width paints at that width inside the layout-shift budget`() {
         startTrace()
-        ready()
-        seedBothTrees()
+        val root = ready("geow")
+        seedPane(root)
         page.setViewportSize(1920, 900)
         page.addInitScript(
             """
@@ -545,7 +541,7 @@ class ExplorerPaneGeometryBrowserTest : BrowserSuite() {
               if (!e.hadRecentInput) window.__cls += e.value; }).observe({type: 'layout-shift', buffered: true});
             """.trimIndent(),
         )
-        page.navigate("$baseUrl/templates")
+        page.navigate("$baseUrl/schedules")
         page.waitForSelector(".tplx-tree")
         page.waitForLoadState(LoadState.NETWORKIDLE)
 
@@ -567,7 +563,7 @@ class ExplorerPaneGeometryBrowserTest : BrowserSuite() {
     @Test
     fun `a boosted navigation across three routes stays inside the layout-shift budget`() {
         startTrace()
-        ready()
+        ready("geols")
         page.setViewportSize(1920, 1080)
         page.addInitScript(
             """

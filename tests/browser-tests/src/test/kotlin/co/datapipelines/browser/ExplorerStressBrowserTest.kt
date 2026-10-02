@@ -14,7 +14,7 @@ import org.junit.jupiter.api.Test
 import java.util.Random
 
 /**
- * 085 §C — the two explorers (Templates at /templates, Pipelines at /pipelines) under a
+ * 085 §C — the trees under a
  * throttled network. The owner's report: "the tree component struggles rendering sometimes".
  * This class puts the tree's htmx wiring under the stresses a slow network creates and pins
  * the four failure modes that wiring could plausibly fall into:
@@ -29,11 +29,9 @@ import java.util.Random
  *     by htmx against a DOM that a search swap, a pager swap or a boosted navigation may
  *     already have replaced. Asserted structurally: every level must land inside ITS OWN
  *     folder's <details>, with its own children and no sibling's.
- *  3. **A stale detail pane** — leaf A selected, then leaf B, and the pane still shows A.
- *     The leaves carry `hx-sync="#...-detail:replace"`, whose whole job is aborting the
- *     older in-flight selection; the test clicks A then B with both requests held, and pins
- *     BOTH the outcome (the pane shows B) and the mechanism (A's request was aborted, not
- *     merely ordered behind B — an ordering-only fix would still lose to a slower B).
+ *  3. **A stale detail pane** — RETIRED with the pane it pinned (#398, as the pipelines
+ *     half was at #350): a leaf NAVIGATES now, so there is no selection race to settle; the
+ *     sidebar's own admission guard is PipelineSidebarTreeStateBrowserTest's.
  *  4. **Duplicated rows** — the same folder or leaf rendered twice in one level. Every swap
  *     here is outerHTML-into-a-stable-target, so duplication should be structurally
  *     impossible; the assertion exists because "impossible" is exactly the kind of claim a
@@ -351,8 +349,11 @@ class ExplorerStressBrowserTest : BrowserSuite() {
         seedTemplates()
         val throttle = PartialThrottle(seed = 85_071).apply { install() }
         try {
-            page.navigate("$baseUrl/templates")
-            page.waitForSelector(folderSummary("nyc"))
+            // #398: the templates tree is the SIDEBAR's — the same server fragments, the same
+            // prefix requests, opened from any page through the branch toggle.
+            page.navigate("$baseUrl/dashboard")
+            page.click("[data-nav-branch='templates'] [data-nav-tree-toggle]")
+            throttle.releaseUntil { page.locator(folderSummary("nyc")).count() > 0 }
 
             // Open all three root folders — every level request is HELD by the throttle —
             // then hammer each folder 20× while its first fetch is still in flight.
@@ -423,66 +424,11 @@ class ExplorerStressBrowserTest : BrowserSuite() {
     }
 
     @Test
-    fun `the detail pane always settles on the last selected leaf`() {
-        startTrace()
-        loginReadyUser("dtlx")
-        seedTemplates()
-        seedPipelines()
-        val throttle = PartialThrottle(seed = 85_072).apply { install() }
-        try {
-            // ---- templates: select trips (A) then stations (B) with BOTH requests held.
-            // hx-sync="#template-detail:replace" must ABORT A's request outright — if A were
-            // merely allowed to land, a slower B would leave the pane showing A.
-            page.navigate("$baseUrl/templates")
-            page.waitForSelector(folderSummary("nyc"))
-            expandFolder("nyc")
-            throttle.releaseAll()
-            expandFolder("nyc/lib")
-            throttle.releaseAll()
-            expandFolder("nyc/lib/mobility")
-            throttle.releaseAll()
-            page.waitForSelector(leafButton("nyc/lib/mobility/trips"))
-
-            val failuresBefore = throttle.failedPartials.get()
-            page.waitForRequest({ req -> req.url().contains("/partials/templates/versions") }) {
-                page.click(leafButton("nyc/lib/mobility/trips"))
-            }
-            page.waitForRequest({ req -> req.url().contains("/partials/templates/versions") }) {
-                page.click(leafButton("nyc/lib/mobility/stations"))
-            }
-            throttle.releaseAll()
-            page.waitForSelector("#template-detail h2.tplx-detail-title")
-            page.locator("#template-detail h2.tplx-detail-title").getAttribute("title") shouldBe "nyc/lib/mobility/stations"
-            page.locator("#template-detail").innerText() shouldNotContain "trips"
-            // The mechanism, pinned: A's held request was ABORTED by hx-sync replace (a failed
-            // partial), not merely released-and-ordered behind B's — an ordering-only defense
-            // would still leave the pane stale whenever B is the slower response.
-            throttle.failedPartials.get() shouldBeGreaterThanOrEqual (failuresBefore + 1)
-
-            // Rapid alternation, ending on routes (C): every selection but the last must die.
-            val chain = listOf("trips", "stations", "trips", "stations", "routes")
-            chain.forEach { leaf ->
-                page.waitForRequest({ req -> req.url().contains("/partials/templates/versions") }) {
-                    page.click(leafButton("nyc/lib/mobility/$leaf"))
-                }
-            }
-            throttle.releaseAll()
-            page.locator("#template-detail h2.tplx-detail-title").getAttribute("title") shouldBe "nyc/lib/mobility/routes"
-
-            // #350: the PIPELINES half is gone with the pipelines explorer's detail pane — a pipeline
-            // leaf (sidebar tree or catalog row) NAVIGATES to its workspace, so there is no
-            // selection race to settle; the sidebar's own admission guard (stale and foreign
-            // answers) is PipelineSidebarTreeStateBrowserTest's.
-        } finally {
-            throttle.releaseAll()
-        }
-    }
-
-    @Test
     fun `search, boosted navigation and a mid-expand reload leave both trees consistent - the sidebar's Pipelines tree included`() {
         startTrace()
         loginReadyUser("plpx")
         seedPipelines()
+        seedTemplates()
         val throttle = PartialThrottle(seed = 85_073).apply { install() }
         try {
             // #350: the pipelines half of the hammer runs on the SIDEBAR's tree — the explorer
@@ -553,13 +499,50 @@ class ExplorerStressBrowserTest : BrowserSuite() {
             page.locator(leafButton("trade/ledger")).count() shouldBe 1
             assertNoStrandedLevels()
             duplicatedRowTitles().shouldBeEmpty()
+
+            // #398: the SAME consistency pass over the SIDEBAR's TEMPLATES tree — the page
+            // pane it used to stress is the catalog now, and this is the one tree left.
+            tree = TEMPLATES_TREE
+            page.click("[data-nav-branch='templates'] [data-nav-tree-toggle]")
+            throttle.releaseUntil { page.locator(folderSummary("nyc")).count() > 0 }
+
+            val tplSearch = "$TEMPLATES_TREE [data-nav-tree-search]"
+            page.evaluate("() => { document.getElementById('template-nav-root').dataset.dp398Old = '1'; }")
+            page.waitForRequest({ req -> req.url().contains("/partials/templates") && req.url().contains("q=mob") }) {
+                page.fill(tplSearch, "mob")
+            }
+            page.waitForRequest({ req ->
+                req.url().contains("/partials/templates") && !req.url().contains("q=mob") && !req.url().contains("prefix=")
+            }) {
+                page.fill(tplSearch, "")
+            }
+            throttle.releaseUntil {
+                page.locator("#template-nav-root[data-dp398-old]").count() == 0 &&
+                    page.locator("#template-nav-root .tpl-tree").count() > 0 &&
+                    page.locator(folderSummary("nyc/lib")).count() > 0 &&
+                    page.locator("$TEMPLATES_TREE details.tpl-folder[open] > div.tpl-level-pending").count() == 0
+            }
+            page.locator("$TEMPLATES_TREE .tpl-result").count() shouldBe 0
+            duplicatedRowTitles().shouldBeEmpty()
+
+            expandFolder("nyc/hr")
+            page.reload()
+            page.waitForSelector("[data-nav-branch='templates']")
+            throttle.releaseUntil {
+                page.locator(leafButton("nyc/hr/roster")).count() > 0 &&
+                    page.locator("$TEMPLATES_TREE details.tpl-folder[open] > div.tpl-level-pending").count() == 0
+            }
+            page.locator(leafButton("trade/ledger")).count() shouldBe 1
+            assertNoStrandedLevels()
+            duplicatedRowTitles().shouldBeEmpty()
         } finally {
             throttle.releaseAll()
         }
     }
 
     private companion object {
-        const val TEMPLATES_TREE = "[data-explorer-pane]"
+        /** #398: the templates tree is the SIDEBAR's (the page pane retired with the explorer). */
+        const val TEMPLATES_TREE = "#nav-tree-templates"
         const val PIPELINES_TREE = "#nav-tree-pipelines"
         const val RELEASE_UNTIL_MILLIS = 30_000L
     }

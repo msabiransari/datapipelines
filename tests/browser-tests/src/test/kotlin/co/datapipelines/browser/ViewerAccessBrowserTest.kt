@@ -24,10 +24,13 @@ import java.sql.DriverManager
  * render test cannot see a route floored above its reader (the 403 122 found), a rail
  * painted by an advice the controller never called, or a draft a "read" quietly created.
  *
- * Every walk rides the app's own links — explorer search, the result row, Open in editor,
- * the versions tab's Open, the keyboard's Enter, the rail — never a direct editor URL (the
- * owner's 2026-09-05 rule). A response listener records every ≥ 400 from the first paint
- * through partial swaps and boosted navigation; the list must stay empty.
+ * Every walk rides the app's own links — the catalog's search, its result row, the version
+ * selector's links, the Versions tab's Open, the keyboard's Enter, the rail — never a
+ * hand-typed workspace URL (the owner's 2026-09-05 rule). #398: the row IS the destination —
+ * a full navigation into the template workspace replaces the explorer's "Open in editor"
+ * hop, and the version select is the workspace selector's links. A response listener records
+ * every ≥ 400 from the first paint through partial swaps and boosted navigation; the list
+ * must stay empty.
  *
  * Falsifications recorded in the handback: the editor route restored to MUTATE makes the
  * viewer walk red at the recorded document status; the layout's Admin guard removed makes
@@ -65,71 +68,65 @@ class ViewerAccessBrowserTest : BrowserSuite() {
         viewer.page.navigate("$baseUrl/templates?q=${fixture.leaf}")
         viewer.page.waitForSelector("[data-role]")
         viewer.roleBadge() shouldBe "viewer"
-        viewer.page
-            .locator("button.tpl-result")
-            .first()
-            .click()
-        val open = viewer.page.locator("a:has-text('Open in editor')").first()
-        open.waitFor()
-        // The detail's verbs are already role-hidden (114); the LINK is what 143 opens.
-        viewer.verbs().shouldBeEmpty()
-        // The editor document's own response is awaited and judged BEFORE the URL: at base the
-        // route answered 403 and htmx swapped nothing, so the red must name the refused
-        // request (the listener's list), not a URL that never changed.
-        val editor = viewer.page.waitForResponse(::isEditorDocument) { open.click() }
+        // The row IS the destination (#398) — a full navigation, watched before the URL for
+        // the same reason the Open-in-editor hop was: the red must name a refused request.
+        val workspace = viewer.page.waitForResponse(::isWorkspaceDocument) {
+            viewer.page.locator("a.tpl-result").first().click()
+        }
         watch.bad shouldBe emptyList()
-        editor.status() shouldBe 200
+        workspace.status() shouldBe 200
         watch.editorDocumentStatus shouldBe 200
-        viewer.page.waitForURL("**/templates/editor**")
+        viewer.page.waitForURL("**/templates/${fixture.name}")
         viewer.page.waitForLoadState(com.microsoft.playwright.options.LoadState.LOAD)
 
+        // The DEFAULT view is the current RELEASE; the draft is one selector click away.
+        assertReadOnlyWorkspace(viewer.page, expectedVersion = 1, expectedBody = fixture.releasedBody)
+        viewer.verbs().shouldBeEmpty()
+
+        viewer.page.locator(".tw-version-link[data-version='2']").click()
+        viewer.page.waitForURL("**/templates/${fixture.name}?version=2**")
         // The working version (the DRAFT, v2) in the read-only pane; nothing editable.
-        assertReadOnlyEditor(viewer.page, expectedVersion = 2, expectedBody = fixture.draftBody)
+        assertReadOnlyWorkspace(viewer.page, expectedVersion = 2, expectedBody = fixture.draftBody)
         viewer.page.locator("[data-role-note='read-only']").waitFor()
         viewer.verbs().shouldBeEmpty()
         ensureThemeOn(viewer.page, "light")
         shot(viewer.page, "viewer-editor", "light")
     }
 
-    /** 2 — the version select, the versions tab's Open with its version, and the keyboard's Enter. */
+    /** 2 — the selector's links, the Versions tab's Open with its version, and the keyboard's Enter. */
     private fun readEveryVersion(
         viewer: RoleSession,
         fixture: TemplateFixture,
         watch: Watch,
     ) {
-        // The version select swaps the source partial: v1, still read-only.
-        viewer.page.selectOption("#versionSelect", "1")
-        viewer.page.waitForFunction(
-            "(body) => { const p = document.getElementById('versionBody'); return p !== null && p.textContent === body; }",
-            fixture.releasedBody,
-        )
-        assertReadOnlyEditor(viewer.page, expectedVersion = 1, expectedBody = fixture.releasedBody)
+        // A selector row is a full navigation to that version (the server resolves it — R5 by
+        // construction): v1, still read-only.
+        viewer.page.locator(".tw-version-link[data-version='1']").click()
+        viewer.page.waitForURL("**/templates/${fixture.name}?version=1**")
+        viewer.page.locator("#versionBody").waitFor()
+        assertReadOnlyWorkspace(viewer.page, expectedVersion = 1, expectedBody = fixture.releasedBody)
         watch.bad shouldBe emptyList()
 
-        // The versions tab's Open carries THAT row's version (the audit's finding 5).
-        viewer.page.navigate("$baseUrl/templates?q=${fixture.leaf}")
-        viewer.page
-            .locator("button.tpl-result")
-            .first()
-            .click()
-        // The TEMPLATES version row is the compact grid row (.tplx-vrow) — the house
-        // table row shape is the PIPELINE surface's (#349).
-        val v1Open = viewer.page.locator(".tplx-vrow:has(.app-chip-mono:text-is('v1')) a:has-text('Open')")
+        // The Versions tab's Open carries THAT row's version (the audit's finding 5) — both
+        // families' rows are the house table now (#349/#398).
+        viewer.page.locator("#tw-tab-versions").click()
+        viewer.page.waitForSelector("#tw-pane-versions tr[data-version-row]")
+        val v1Open = viewer.page.locator("#tw-pane-versions tr[data-version-row]:has(td:text-is('v1')) a:has-text('Open')")
         v1Open.waitFor()
         v1Open.click()
-        viewer.page.waitForURL("**/templates/editor**version=1**")
+        viewer.page.waitForURL("**/templates/${fixture.name}?version=1&tab=source")
         viewer.page.locator("#versionBody").waitFor()
-        assertReadOnlyEditor(viewer.page, expectedVersion = 1, expectedBody = fixture.releasedBody)
+        assertReadOnlyWorkspace(viewer.page, expectedVersion = 1, expectedBody = fixture.releasedBody)
 
         // Keyboard Open: Enter on the focused result row lands on the same route.
         viewer.page.navigate("$baseUrl/templates?q=${fixture.leaf}")
-        val row = viewer.page.locator("button.tpl-result").first()
+        val row = viewer.page.locator("a.tpl-result").first()
         row.waitFor()
         row.focus()
         viewer.page.keyboard().press("Enter")
-        viewer.page.waitForURL("**/templates/editor**")
+        viewer.page.waitForURL("**/templates/${fixture.name}")
         viewer.page.locator("#versionBody").waitFor()
-        assertReadOnlyEditor(viewer.page, expectedVersion = 2, expectedBody = fixture.draftBody)
+        assertReadOnlyWorkspace(viewer.page, expectedVersion = 1, expectedBody = fixture.releasedBody)
         ensureThemeOn(viewer.page, "dark")
         shot(viewer.page, "viewer-editor", "dark")
         ensureThemeOn(viewer.page, "light")
@@ -183,19 +180,21 @@ class ViewerAccessBrowserTest : BrowserSuite() {
         val author = signIn("va-author", role = "author")
         val watch = author.watchResponses()
         author.page.navigate("$baseUrl/templates?q=${fixture.leaf}")
-        author.page
-            .locator("button.tpl-result")
-            .first()
-            .click()
-        author.page
-            .locator("a:has-text('Open in editor')")
-            .first()
-            .click()
-        author.page.waitForURL("**/templates/editor**")
+        author.page.locator("a.tpl-result").first().click()
+        author.page.waitForURL("**/templates/${fixture.name}")
+        // The default view is the RELEASE: read-only with the Edit verb (Q1(b)'s kept
+        // affordance), the editable surface one version away.
+        author.page.locator("#versionBody").waitFor()
+        author.page.locator("[data-verb='template-edit']").waitFor()
+        author.page.locator(".tw-version-link[data-version='2']").click()
+        author.page.waitForURL("**/templates/${fixture.name}?version=2**")
+        // The DRAFT is the editable surface: the textarea, and the Render tab (the render
+        // context and the preview — the workspace's Render tab is where they live now).
         author.page.locator("#templateBody").waitFor()
+        author.page.locator("#tw-tab-render").waitFor()
+        author.page.locator("#tw-tab-render").click()
         author.page.locator("#previewBtn").waitFor()
         author.page.locator("#context-rows").waitFor()
-        author.page.locator("#versionBody").count() shouldBe 0
         // Preview renders the stored draft: the pane fills, the request is not refused.
         author.page.locator("#previewBtn").click()
         author.page.waitForFunction("() => document.getElementById('previewPane').textContent.trim().length > 0")
@@ -208,15 +207,14 @@ class ViewerAccessBrowserTest : BrowserSuite() {
         val reader = signIn("va-reader", role = "viewer")
         val readerWatch = reader.watchResponses()
         reader.page.navigate("$baseUrl/templates?q=${fixture.leaf}")
-        reader.page
-            .locator("button.tpl-result")
-            .first()
-            .click()
-        val readerOpen = reader.page.locator("a:has-text('Open in editor')").first()
-        reader.page.waitForResponse(::isEditorDocument) { readerOpen.click() }
+        reader.page.waitForResponse(::isWorkspaceDocument) {
+            reader.page.locator("a.tpl-result").first().click()
+        }
         readerWatch.bad shouldBe emptyList()
-        reader.page.waitForURL("**/templates/editor**")
-        assertReadOnlyEditor(reader.page, expectedVersion = 2, expectedBody = fixture.draftBody)
+        reader.page.waitForURL("**/templates/${fixture.name}")
+        reader.page.locator(".tw-version-link[data-version='2']").click()
+        reader.page.waitForURL("**/templates/${fixture.name}?version=2**")
+        assertReadOnlyWorkspace(reader.page, expectedVersion = 2, expectedBody = fixture.draftBody)
         reader.page.locator("[data-role-note='read-only']").waitFor()
         reader.verbs() shouldBe emptyList()
         reader.page.locator("[data-verb='template-release']").count() shouldBe 0
@@ -242,7 +240,7 @@ class ViewerAccessBrowserTest : BrowserSuite() {
             .locator("[data-lens-unavailable]")
             .first()
             .innerText() shouldContain "Could not read the target"
-        promoter.page.locator("button.tpl-result").count() shouldBe 0
+        promoter.page.locator("a.tpl-result").count() shouldBe 0
         promoter.verbs() shouldBe emptyList()
         promoter.page.navigate("$baseUrl/pipelines")
         promoter.page
@@ -383,11 +381,13 @@ class ViewerAccessBrowserTest : BrowserSuite() {
 
     // ------------------------------------------------------------------ shared assertions
 
-    /** The editor PAGE's response (boosted fetch or full load) — never one of its partials. */
-    private fun isEditorDocument(response: com.microsoft.playwright.Response): Boolean =
-        response.url().contains("/templates/editor") && !response.url().contains("/partials/")
+    /** The workspace DOCUMENT's response (a full navigation) — never one of its partials. */
+    private fun isWorkspaceDocument(response: com.microsoft.playwright.Response): Boolean =
+        response.request().method() == "GET" &&
+            response.url().contains("/templates/test/") &&
+            !response.url().contains("/partials/")
 
-    private fun assertReadOnlyEditor(
+    private fun assertReadOnlyWorkspace(
         page: Page,
         expectedVersion: Int,
         expectedBody: String,
@@ -400,7 +400,8 @@ class ViewerAccessBrowserTest : BrowserSuite() {
         page.locator("#previewPane").count() shouldBe 0
         page.locator("#context-rows").count() shouldBe 0
         page.locator("#tpl-edit-version").count() shouldBe 0
-        page.locator("#versionSelect").inputValue() shouldBe expectedVersion.toString()
+        // The workspace names its viewed version on the root (there is no <select>).
+        page.locator(".tw-root").getAttribute("data-viewed-version") shouldBe expectedVersion.toString()
         page.locator(".te-source .ds-badge", Page.LocatorOptions().setHasText("v$expectedVersion")).first().waitFor()
     }
 
@@ -590,11 +591,10 @@ class ViewerAccessBrowserTest : BrowserSuite() {
                 if (response.status() >= 400) {
                     watch.bad += "${response.status()} ${response.request().method()} ${response.url()}"
                 }
-                // The explorer's Open in editor is a BOOSTED link (unlike the pipeline editor's,
-                // which is a full load for its Alpine root), so the editor page arrives as
-                // htmx's fetch of the same document: record its status whichever way it came.
+                // The workspace document is a full navigation (the row IS the destination,
+                // #398); record its status by the same rule.
                 val url = response.url()
-                if (response.request().method() == "GET" && url.contains("/templates/editor") && !url.contains("/partials/")) {
+                if (response.request().method() == "GET" && url.contains("/templates/test/") && !url.contains("/partials/")) {
                     watch.editorDocumentStatus = response.status()
                 }
             }
