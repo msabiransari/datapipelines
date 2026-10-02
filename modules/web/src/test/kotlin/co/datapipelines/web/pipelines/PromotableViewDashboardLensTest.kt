@@ -1,5 +1,6 @@
 package co.datapipelines.web.pipelines
 
+import co.datapipelines.application.dashboards.DashboardKeyBindingRepository
 import co.datapipelines.application.lens.LensedView
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
@@ -167,6 +168,8 @@ class PromotableViewDashboardLensTest {
                     .also { every { it.findCurrentVersions(workspace) } returns emptyList() },
                 dashboards,
                 mockk<VisualizationService>(),
+                // a promoter never reaches the key arm (L5): a strict mock proves no binding read runs
+                mockk<DashboardKeyBindingRepository>(),
             ).viewFor(promoter(workspace))
 
         // The pipelines-shaped request: the pipeline lens only, so no dashboard statement may run.

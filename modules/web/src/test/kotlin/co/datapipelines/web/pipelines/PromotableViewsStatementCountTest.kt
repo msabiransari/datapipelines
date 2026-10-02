@@ -1,5 +1,6 @@
 package co.datapipelines.web.pipelines
 
+import co.datapipelines.application.dashboards.DashboardKeyBindingRepository
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.WorkspaceContext
@@ -158,7 +159,16 @@ class PromotableViewsStatementCountTest {
         every { templates.findCurrentVersions(workspace) } returns emptyList()
         val sets = mockk<co.datapipelines.parameters.ParameterSetRepository>()
         every { sets.findCurrentVersions(workspace) } returns emptyList()
-        return PromotableViews(pipelines, templates, client, sets, dashboards, mockk<VisualizationService>())
+        // a promoter never reaches the key arm (L5): a strict mock proves no binding read runs
+        return PromotableViews(
+            pipelines,
+            templates,
+            client,
+            sets,
+            dashboards,
+            mockk<VisualizationService>(),
+            mockk<DashboardKeyBindingRepository>(),
+        )
     }
 
     private fun defaultClient(): PromotionTargetClient {
