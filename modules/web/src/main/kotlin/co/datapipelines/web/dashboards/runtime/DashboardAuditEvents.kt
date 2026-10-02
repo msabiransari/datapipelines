@@ -1,13 +1,14 @@
 package co.datapipelines.web.dashboards.runtime
 
+import co.datapipelines.application.dashboards.DashboardKeyService
 import co.datapipelines.web.pipelines.LifecycleVerbs
 
 /**
  * The dashboard family's audit event names (enums.md §15) — wire values in `audit_log.event`, held to the doc by
  * `DashboardAuditEventsSpecDriftTest`. A typo here would write rows no query finds, and nothing else would fail.
  * The runtime's own event is [REFRESH]; the transfer pair moved here from `DashboardTransferController` and the
- * five human verbs plus the release are [LifecycleVerbs.FamilyAuditEvents]'s (#332), so ONE object holds the
- * family's whole vocabulary.
+ * five human verbs plus the release are [LifecycleVerbs.FamilyAuditEvents]'s (#332), and the `dashboard` key's
+ * binding pair is [DashboardKeyService]'s (L5, #367), so ONE object holds the family's whole vocabulary.
  */
 object DashboardAuditEvents {
     private val lifecycle = LifecycleVerbs.DASHBOARD_EVENTS
@@ -30,5 +31,7 @@ object DashboardAuditEvents {
         )
 
     /** Every dashboard.* event the surfaces can emit — exactly what §15 documents. */
-    val ALL: Set<String> = FIVE + lifecycle.versionReleased + setOf(REFRESH, EXPORTED, IMPORTED)
+    val ALL: Set<String> =
+        FIVE + lifecycle.versionReleased +
+            setOf(REFRESH, EXPORTED, IMPORTED, DashboardKeyService.AUDIT_BOUND, DashboardKeyService.AUDIT_UNBOUND)
 }
