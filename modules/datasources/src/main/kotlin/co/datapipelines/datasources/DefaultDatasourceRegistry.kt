@@ -87,6 +87,17 @@ class DefaultDatasourceRegistry(
     private val duckdbMemoryLimit: String? = null,
     private val poolMetrics: PoolLifecycleMetrics = PoolLifecycleMetrics.NONE,
     private val retireCeiling: Duration = ConnectionPoolManager.DEFAULT_RETIRE_CEILING,
+    /**
+     * #204 L4 — the declared file roots, re-checked at EVERY pool build against every
+     * `InProcessFile` row. The save-time validator holds the same instance for the same rule
+     * (wired beside it in `DomainConfiguration.datasourceRegistry`); this is the second gate:
+     * a row saved under a root whose file has since moved, been replaced by an outside symlink,
+     * or whose root left the configuration, refuses its next pool build with the SAME catalogued
+     * code the update gate throws. Default [DatasourceFileRoots.EMPTY] — an unconfigured
+     * deployment refuses every file-backed build, the same fail-closed posture the validator's
+     * own default has at registration.
+     */
+    private val fileRoots: DatasourceFileRoots = DatasourceFileRoots.EMPTY,
 ) : DatasourceRegistry {
     private val log = org.slf4j.LoggerFactory.getLogger(DefaultDatasourceRegistry::class.java)
 
@@ -140,6 +151,14 @@ class DefaultDatasourceRegistry(
                     duckdbExtensionDirectory = duckdbExtensionDirectory,
                     duckdbMemoryLimit = duckdbMemoryLimit,
                     lakeViews = lakeViewInit(withCredential),
+                    // #204 L4 — the roots re-check at the build; and L2's repair wire: a lease
+                    // that fails with the restricted user's 28000 evicts this pool so the next
+                    // acquisition rebuilds it (and re-rotates the password) through this same
+                    // factory. `retirePool` is the registry's own eviction entry point — the
+                    // same one save and delete use — so the evicted pool's row version is
+                    // dropped and the §5.7 reconcile stays consistent.
+                    fileRoots = fileRoots,
+                    onRestrictedAuthFailure = { retirePool(datasource.name) },
                 )
             },
             retireCeiling = retireCeiling,

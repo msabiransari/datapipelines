@@ -1,17 +1,21 @@
 package co.datapipelines.datasources.pooling
 
 import co.datapipelines.datasources.Datasource
+import co.datapipelines.datasources.DatasourceErrorCodes
+import co.datapipelines.datasources.DatasourceFileRoots
 import co.datapipelines.datasources.DialectAdapter
 import co.datapipelines.datasources.DialectAdapters
 import co.datapipelines.datasources.JdbcUrlForm
 import co.datapipelines.datasources.LakeViewOutcomeRecorder
 import co.datapipelines.datasources.LakeViewPlan
+import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.Dialect
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import com.zaxxer.hikari.util.DriverDataSource
 import org.slf4j.LoggerFactory
 import java.sql.Connection
+import java.sql.SQLException
 import java.time.Duration
 import java.time.Instant
 import java.util.concurrent.ConcurrentHashMap
@@ -104,6 +108,16 @@ class HikariConnectionPool(
     override val name: String,
     private val dataSource: HikariDataSource,
     private val instanceOwner: PoolInstanceOwner? = null,
+    /**
+     * #204 L2 — armed ONLY for the de-privileged in-process H2 pool ([H2InProcessPool.build]).
+     * Invoked, exactly once per failing lease, when the acquisition failure's exception graph
+     * carries SQLState `28000` — then the original error is rethrown unchanged. The callback
+     * evicts the pool from its manager so the next acquisition rebuilds it through `build`,
+     * whose bootstrap rotates the restricted user's password again (repair at the next build —
+     * the same act that rotates on every rebuild). Null for every other pool kind: their
+     * behavior is byte-identical to before this parameter existed.
+     */
+    private val onRestrictedAuthFailure: (() -> Unit)? = null,
 ) : ConnectionPool {
     /** Whether the underlying pool has been shut down — the observable half of retirement (§5.2). */
     val isClosed: Boolean get() = dataSource.isClosed
@@ -111,7 +125,37 @@ class HikariConnectionPool(
     /** Won by the ONE caller that runs the whole retire → Hikari close → owner release sequence. */
     private val closing = AtomicBoolean(false)
 
-    override fun leaseConnection(): Connection = dataSource.connection
+    /**
+     * HikariCP 6.3.3's `HikariPool.createTimeoutException` (pinned sources): a pool-growth
+     * failure surfaces as the pool's `SQLTransientConnectionException` whose SQLState/errorCode
+     * are COPIED from the last failed create and whose `nextException` carries the driver's own
+     * exception — so a wrong restricted-user password (H2 `28000`) IS observable here, on the
+     * caller's thread, after `connectionTimeout`. Both dimensions are walked — `cause` and
+     * `nextException` — because drivers nest either way; the seen-set makes the graph walk
+     * cycle-safe. Never swallows, never retries: the detection's only effect is the eviction
+     * callback; the caller's exception is what it would have been without the guard.
+     */
+    override fun leaseConnection(): Connection =
+        try {
+            dataSource.connection
+        } catch (e: SQLException) {
+            if (onRestrictedAuthFailure != null && carriesAuthFailure(e)) onRestrictedAuthFailure.invoke()
+            throw e
+        }
+
+    private fun carriesAuthFailure(failure: Throwable): Boolean {
+        val seen = HashSet<Throwable>()
+        val queue = ArrayDeque<Throwable>()
+        queue.add(failure)
+        while (queue.isNotEmpty()) {
+            val current = queue.removeFirst()
+            if (!seen.add(current)) continue
+            if (current is SQLException && current.sqlState == AUTH_FAILURE_SQLSTATE) return true
+            current.cause?.let { queue.add(it) }
+            (current as? SQLException)?.nextException?.let { queue.add(it) }
+        }
+        return false
+    }
 
     /**
      * `minimumIdle = 0` **then** `softEvictConnections()`, in that order.
@@ -174,6 +218,9 @@ class HikariConnectionPool(
 
     private companion object {
         private val LOG = LoggerFactory.getLogger(HikariConnectionPool::class.java)
+
+        /** A wrong-password failure: H2's `JdbcSQLInvalidAuthorizationSpecException` SQLState (#204 L2). */
+        private const val AUTH_FAILURE_SQLSTATE = "28000"
     }
 }
 
@@ -431,6 +478,8 @@ class ConnectionPoolManager(
             duckdbExtensionDirectory: String? = null,
             duckdbMemoryLimit: String? = null,
             lakeViews: LakeViewInit? = null,
+            fileRoots: DatasourceFileRoots? = null,
+            onRestrictedAuthFailure: (() -> Unit)? = null,
         ): ConnectionPool {
             val adapter = DialectAdapters.forDialect(datasource.dialect, duckdbExtensionDirectory, duckdbMemoryLimit)
             val config = adapter.buildHikariConfig(datasource)
@@ -463,8 +512,29 @@ class ConnectionPoolManager(
                     "datasource '${datasource.name}' carries a URL form this product refuses to pool " +
                         "(unrecognised in-process prefix); re-register it with a supported URL form"
                 }
+                if (form is JdbcUrlForm.Form.InProcessFile) {
+                    // #204 L4: the file-roots rule is a property of the BUILD, not only of
+                    // registration. A row saved while its file sat under a declared root can
+                    // leave that root afterwards — the file moved, the file replaced by a
+                    // symlink aimed outside, the root removed from configuration — and the next
+                    // build must refuse, exactly as the update gate's validator would refuse the
+                    // same row today. `null` means the caller wired no roots instance (a plain
+                    // library caller, the tests' default); the production registry always passes
+                    // one, and an EMPTY instance refuses every file-backed build, the same
+                    // fail-closed posture as an unconfigured registration. The refusal carries
+                    // the SAME catalogued code the update gate throws, so the API answer is
+                    // unchanged (ApiExceptionHandler keys on the shared DatapipelinesException
+                    // base; ApiErrorCatalog maps the code). Re-raised, not invented.
+                    fileRoots?.refusalFor(form.rawPath)?.let { refusal ->
+                        throw DatapipelinesException(
+                            DatasourceErrorCodes.WORKSPACE_FORBIDDEN,
+                            "datasource '${datasource.name}' cannot build a pool: $refusal",
+                            mapOf("datasource" to datasource.name),
+                        )
+                    }
+                }
                 if (datasource.dialect == Dialect.H2 && form.isInProcess) {
-                    return H2InProcessPool.build(datasource, config)
+                    return H2InProcessPool.build(datasource, config, onRestrictedAuthFailure)
                 }
                 return HikariConnectionPool(datasource.name, HikariDataSource(config))
             }
