@@ -207,6 +207,88 @@ class VisualizationTestCapabilitiesIntegrationTest {
             .single() shouldBe 1
     }
 
+    /** Ages the row's upload deadline past [now] — the B3 way: SQL, no sweep, the run stays GREEN. */
+    private fun expireUpload(sessionId: UUID) {
+        h.jdbc.update(
+            "UPDATE visualization_test_runs SET upload_expires_at = now() - interval '1 second' WHERE session_id = :sessionId",
+            mapOf("sessionId" to sessionId),
+        )
+    }
+
+    private fun uploadConsumedAt(sessionId: UUID): Instant? =
+        h.jdbc
+            .query(
+                "SELECT upload_consumed_at FROM visualization_test_runs WHERE session_id = :sessionId",
+                mapOf("sessionId" to sessionId),
+            ) { rs, _ -> rs.getTimestamp("upload_consumed_at")?.toInstant() }
+            .single()
+
+    @Test
+    fun `a correct unconsumed token past its deadline is the 410 - judged before the body, nothing consumed (#373)`() {
+        val session = start()
+        val submitted = submitGreen(session)
+        val token = submitted.uploadToken.shouldNotBeNull()
+        val bytes = png()
+        expireUpload(session.sessionId)
+
+        // The gate's answer, byte-for-byte, before any body work: an EMPTY body would be the 400
+        // `screenshot_invalid` if the service judged first — the 410 here proves it did not.
+        val refused = refusal { capabilities.storeScreenshot(session.visualizationId, session.sessionId, token, null, bytes, null) }
+        refused.first shouldBe VisualizationErrorCodes.TEST_SESSION_EXPIRED
+        refused.third shouldBe mapOf<String, Any?>("reason" to "capability_expired")
+        val empty = refusal { capabilities.storeScreenshot(session.visualizationId, session.sessionId, token, null, ByteArray(0), null) }
+        empty.first shouldBe VisualizationErrorCodes.TEST_SESSION_EXPIRED
+
+        uploadConsumedAt(session.sessionId).shouldBeNull() // the refusal consumed nothing
+        // A WRONG token on the same expired row keeps the one 404 — hash before expiry at the gate.
+        refusal { capabilities.storeScreenshot(session.visualizationId, session.sessionId, wellFormedWrong(), null, bytes, null) } shouldBe
+            canonical
+        // And the SERVICE's own gate never 410s a wrong token either (R1's reorder) — direct, past the route.
+        refusal {
+            h.sessions.storeScreenshot(
+                TestEvidenceHarness.WORKSPACE,
+                session.visualizationId,
+                session.sessionId,
+                "wrong-material",
+                null,
+                bytes,
+                null,
+            )
+        } shouldBe canonical
+    }
+
+    @Test
+    fun `a consumed capability stays the one 404 even past its deadline - consumed outranks expired (#373)`() {
+        val session = start()
+        val submitted = submitGreen(session)
+        val token = submitted.uploadToken.shouldNotBeNull()
+        val bytes = png()
+        capabilities.storeScreenshot(session.visualizationId, session.sessionId, token, null, bytes, null) // consumed
+        // V44's CHECK holds consumed < expiry: the state is a legitimate upload whose deadline then passed.
+        h.jdbc.update(
+            "UPDATE visualization_test_runs SET upload_expires_at = now() - interval '1 second'," +
+                " upload_consumed_at = now() - interval '2 seconds' WHERE session_id = :sessionId",
+            mapOf("sessionId" to session.sessionId),
+        )
+
+        refusal { capabilities.storeScreenshot(session.visualizationId, session.sessionId, token, null, bytes, null) } shouldBe canonical
+        // The service's replay fence agrees — the consumed check precedes the expiry there too.
+        refusal {
+            h.sessions.storeScreenshot(
+                TestEvidenceHarness.WORKSPACE,
+                session.visualizationId,
+                session.sessionId,
+                token,
+                null,
+                bytes,
+                null,
+            )
+        } shouldBe canonical
+    }
+
+    /** A well-formed token of the right length that matches no row — the wrong-token stand-in. */
+    private fun wellFormedWrong(): String = TestCapability.encode(ByteArray(TestCapability.BYTES) { 9 })
+
     // ---- the service's run-id reads --------------------------------------------------------------------
 
     @Test

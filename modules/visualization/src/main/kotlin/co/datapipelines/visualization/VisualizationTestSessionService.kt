@@ -310,6 +310,10 @@ class VisualizationTestSessionService(
      * presented material, and a depicted case must belong to the run's inventory. Wrong or consumed is
      * `session_not_found` (indistinguishable from absent — no oracle); past the deadline is
      * `session_expired`. Answers the stored hash the consume statement re-checks.
+     *
+     * The expiry judges AFTER the hash (#373, R1): only the holder of the RIGHT token is told the
+     * capability expired — a wrong token keeps the one 404, so the service alone never answers 410
+     * to a token that verified nothing.
      */
     @Suppress("ThrowsCount") // each gate refusal is its own named exit (the ReadOnlyPipelineRule mould)
     private fun capabilityGate(
@@ -318,9 +322,9 @@ class VisualizationTestSessionService(
         depictedCase: String?,
     ): String {
         val hash = row.uploadTokenHash ?: throw sessionNotFound()
-        if (row.uploadExpiresAt != null && !row.uploadExpiresAt.isAfter(now())) throw sessionExpired("capability_expired")
         if (row.uploadConsumedAt != null) throw sessionNotFound() // consumed: indistinguishable from absent
         if (TestCapability.hashEncoded(TestCapability.UPLOAD_PURPOSE, capability) != hash) throw sessionNotFound()
+        if (row.uploadExpiresAt != null && !row.uploadExpiresAt.isAfter(now())) throw sessionExpired("capability_expired")
         if (depictedCase != null) {
             val names = row.casesJson?.map { it.path("name").asText() }.orEmpty()
             if (depictedCase !in names) throw screenshotInvalid("case_unknown")

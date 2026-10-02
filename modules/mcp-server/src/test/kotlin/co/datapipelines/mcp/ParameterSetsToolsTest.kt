@@ -24,7 +24,6 @@ import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import io.mockk.every
-import io.mockk.justRun
 import io.mockk.mockk
 import io.mockk.verify
 import org.junit.jupiter.api.Test
@@ -161,7 +160,7 @@ class ParameterSetsToolsTest {
     @Test
     fun `parameter_sets_purge_draft purges under the expected hash - an unknown id is the catalogued not-found`() {
         every { repository.findRecord(workspaceId, setId) } returns record
-        justRun { sets.purgeDraft(workspaceId, setId, "hash-v2") }
+        every { sets.purgeDraft(workspaceId, setId, "hash-v2") } returns co.datapipelines.parameters.Purged.Version
         val tool = ParameterSetsPurgeDraftTool(sets, repository)
 
         val answer = tool.call(McpArguments(mapOf("id" to setId.toString(), "expected_hash" to "hash-v2")), ctx) as Map<*, *>

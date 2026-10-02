@@ -184,14 +184,14 @@ class ArtifactLifecycleIntegrationTest {
             val id = v1.record.id
             val v2 = lifecycle.write(WORKSPACE, id, name, edited, v1.detail.bodyHash, AUTHOR, WriteSurface.SESSION)
             lifecycle.flipDraft(WORKSPACE, id, v2.detail.bodyHash, AUTHOR)
-            lifecycle.discardVersion(WORKSPACE, id, 2, AUTHOR).status shouldBe PipelineVersionStatus.DISCARDED
+            lifecycle.discardVersion(WORKSPACE, id, 2, AUTHOR).detail.status shouldBe PipelineVersionStatus.DISCARDED
             checkNotNull(repository.findRecord(WORKSPACE, id)).currentVersion shouldBe 1
             refusal { lifecycle.discardVersion(WORKSPACE, id, 2, AUTHOR) }.code shouldBe kind.codes.notReleased
             refusal { lifecycle.switchCurrent(WORKSPACE, id, 2) }.code shouldBe kind.codes.notEligible
-            lifecycle.restoreVersion(WORKSPACE, id, 2).status shouldBe PipelineVersionStatus.RELEASED
+            lifecycle.restoreVersion(WORKSPACE, id, 2).detail.status shouldBe PipelineVersionStatus.RELEASED
             checkNotNull(repository.findRecord(WORKSPACE, id)).currentVersion shouldBe 2
             refusal { lifecycle.restoreVersion(WORKSPACE, id, 2) }.code shouldBe kind.codes.notDiscarded
-            lifecycle.switchCurrent(WORKSPACE, id, 1) shouldBe 1
+            lifecycle.switchCurrent(WORKSPACE, id, 1).pointer.after shouldBe 1
             refusal { lifecycle.switchCurrent(WORKSPACE, id, 9) }.code shouldBe kind.codes.notFound
         }
     }
@@ -225,7 +225,9 @@ class ArtifactLifecycleIntegrationTest {
             { receiver.lifecycle.purgeEntity(WORKSPACE, v1.record.id) },
             { receiver.lifecycle.discardVersion(WORKSPACE, v1.record.id, 1, AUTHOR) },
         ).forEach { refusal(it).code shouldBe kind.codes.authoringDisabled }
-        receiver.lifecycle.switchCurrent(WORKSPACE, v1.record.id, 1) shouldBe 1
+        receiver.lifecycle
+            .switchCurrent(WORKSPACE, v1.record.id, 1)
+            .pointer.after shouldBe 1
     }
 
     @ParameterizedTest

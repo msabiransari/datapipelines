@@ -34,6 +34,47 @@ class VisualizationServiceIntegrationTest {
 
     private fun refusal(block: () -> Unit): DatapipelinesException = shouldThrow<DatapipelinesException>(block)
 
+    @Test
+    fun `the verbs answer the pointer pair and the purge scope from their own results (#372)`() {
+        val v1 = h.createVisualization()
+        val released1 = h.visualizations.release(WORKSPACE, v1.record.id, v1.detail.bodyHash, AUTHOR).version
+        val v2draft =
+            h.visualizations.write(
+                WORKSPACE,
+                v1.record.id,
+                h.visualizationDocument { it.obj("presentation").put("title", "Second") },
+                released1.detail.bodyHash,
+                AUTHOR,
+                WriteSurface.MCP,
+            )
+        val v2 = h.visualizations.release(WORKSPACE, v1.record.id, v2draft.detail.bodyHash, AUTHOR).version
+        v2.detail.version shouldBe 2
+        // Discard the CURRENT version: the pair from the result — before = 2, after = 1.
+        h.visualizations.discardVersion(WORKSPACE, v1.record.id, 2, AUTHOR).pointer shouldBe PointerMove(before = 2, after = 1)
+        // Restore moves the pointer only upward (D60): before = 1, after = 2.
+        h.visualizations.restoreVersion(WORKSPACE, v1.record.id, 2).pointer shouldBe PointerMove(before = 1, after = 2)
+        // The switch answers from/to, and the name the service already read for its 404.
+        h.visualizations.switchCurrent(WORKSPACE, v1.record.id, 1) shouldBe
+            Switched(v1.record.name, PointerMove(before = 2, after = 1))
+        // A sole draft takes the visualization with it: scope = entity, from the result.
+        val sole = h.createVisualization("acme/viz/sole")
+        h.visualizations.purgeDraft(WORKSPACE, sole.record.id, sole.detail.bodyHash).scope shouldBe "entity"
+        // A draft beside a release purges alone: scope = version.
+        val beside =
+            h.visualizations.write(
+                WORKSPACE,
+                v1.record.id,
+                h.visualizationDocument { it.obj("presentation").put("title", "Beside") },
+                v1.detail.bodyHash,
+                AUTHOR,
+                WriteSurface.MCP,
+            )
+        h.visualizations.purgeDraft(WORKSPACE, v1.record.id, beside.detail.bodyHash).scope shouldBe "version"
+        // The entity purge is entity by definition — the only version is a DRAFT.
+        val onlyDraft = h.createVisualization("acme/viz/only_draft")
+        h.visualizations.purgeEntity(WORKSPACE, onlyDraft.record.id) shouldBe Purged.Entity
+    }
+
     private fun rows(): Int =
         checkNotNull(h.jdbc.queryForObject("SELECT COUNT(*) FROM visualizations", emptyMap<String, Any>(), Int::class.java))
 
@@ -152,7 +193,9 @@ class VisualizationServiceIntegrationTest {
             )
         h.visualizations.purgeDraft(WORKSPACE, v1.record.id, v2.detail.bodyHash)
         h.dashboards.purgeEntity(WORKSPACE, dashboard.record.id)
-        h.visualizations.discardVersion(WORKSPACE, v1.record.id, 1, AUTHOR).status shouldBe PipelineVersionStatus.DISCARDED
+        h.visualizations
+            .discardVersion(WORKSPACE, v1.record.id, 1, AUTHOR)
+            .detail.status shouldBe PipelineVersionStatus.DISCARDED
     }
 
     @Test
