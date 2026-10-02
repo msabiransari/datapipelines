@@ -25,7 +25,8 @@
 # not three times. This is still NOT the gate: scripts/gate.sh is.
 #
 # Usage: ./scripts/pregate.sh [base-ref]     (default: origin/main; the diff is base...HEAD
-#        plus the working tree). Logs: .pregate-logs/.
+#        plus the working tree). Logs: .pregate-logs/ — the verdict line of every run is
+#        appended to .pregate-logs/0-verdict.log (PASS|FAIL, base, merge-base, HEAD, UTC time).
 #        ./scripts/pregate.sh --self-test    (the stage-2b selector over isolated fixtures
 #        and a recording, refusing Gradle stand-in — no gradle, no repo state touched).
 set -u
@@ -171,7 +172,10 @@ GUARDS[":modules:web"]="co.datapipelines.web.api.ApiErrorCatalogSpecDriftTest co
 # fixture the lane never ran) and 353 (RequestNestingDepthE2eTest, a new @RequestBody String
 # route absent from its per-file inventory) went red on — each a guard that existed and that no
 # lane pregate executed.
-GUARDS[":tests:integration-tests"]="co.datapipelines.integration.ArchitectureGuardTest co.datapipelines.integration.EntryInventoryE2eTest co.datapipelines.integration.PublicContractE2eTest co.datapipelines.integration.RequestNestingDepthE2eTest co.datapipelines.integration.DependencyGuardsE2eTest"
+# 2026-10-02: 328's batch gate went red on the shipped-migrations pin; no lane pregate selects it
+# from a migration diff (FlywayMigrationIntegrationTest pins the exact V-list a lane adding a
+# migration must extend).
+GUARDS[":tests:integration-tests"]="co.datapipelines.integration.ArchitectureGuardTest co.datapipelines.integration.EntryInventoryE2eTest co.datapipelines.integration.PublicContractE2eTest co.datapipelines.integration.RequestNestingDepthE2eTest co.datapipelines.integration.DependencyGuardsE2eTest co.datapipelines.integration.FlywayMigrationIntegrationTest"
 args=()
 for m in "${!GUARDS[@]}"; do
   args+=("$m:test")
@@ -189,11 +193,19 @@ cmp=$(run "$LOGDIR/4-compile-all-tests.log" compileTestKotlin --continue)
 echo "  4 compileTestKotlin, every module                  EXIT=$cmp"
 [ "$cmp" -ne 0 ] && grep -E '^e: |error:|FAILED' "$LOGDIR/4-compile-all-tests.log" | head -20 | sed 's/^/      /'
 
+# The verdict is also APPENDED to a file, one line per run: the terminal is the only other place it
+# lives, and the lander reads a delivered lane's verdict from here (2026-10-02 — until then it had to
+# re-derive it from the five step logs).
+verdict() { # verdict PASS|FAIL → one line in .pregate-logs/0-verdict.log
+  echo "PRE-GATE $1 base=$BASE merge-base=$(git rev-parse --short "$mb" 2>/dev/null || echo "$mb") head=$(git rev-parse --short HEAD) at=$(date -u '+%Y-%m-%dT%H:%M:%SZ') lint=$lint mod=$mod t2b=$t2b grd=$grd cmp=$cmp" >> "$LOGDIR/0-verdict.log"
+}
 echo "--------------------------------------------------------------"
 if [ "$lint" -eq 0 ] && [ "$mod" -eq 0 ] && [ "$t2b" -eq 0 ] && [ "$grd" -eq 0 ] && [ "$cmp" -eq 0 ]; then
   echo "  PRE-GATE PASS — a lane stops here (protocol 2026-09-24); the orchestrator's gate on the merge SHA is the verdict"
+  verdict PASS
   exit 0
 else
   echo "  PRE-GATE FAIL — fix the lines above"
+  verdict FAIL
   exit 1
 fi
