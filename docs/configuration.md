@@ -1,8 +1,8 @@
 # Configuration Reference
 
-**Status:** v1.44 (single source of truth for every config key)
+**Status:** v1.45 (single source of truth for every config key)
 **Owner:** datapipelines.co core
-**Last updated:** 2026-09-29
+**Last updated:** 2026-10-02
 
 ---
 
@@ -148,8 +148,8 @@ Every completed execution's caller result is stored in Redis and read through th
 | YAML path | Default | Description |
 |---|---|---|
 | `datapipelines.sse.heartbeat-interval-seconds` | `15` | SSE heartbeat comment interval |
-| `datapipelines.sse.disconnect-grace-seconds` | `30` | Grace period after client disconnect before the in-flight execution is cancelled ([REST API §6.8](rest-api.md#68-client-disconnect)) |
-| `datapipelines.sse.max-streams-per-user` | `50` | Concurrent SSE streams per user |
+| `datapipelines.sse.disconnect-grace-seconds` | `30` | Grace period after client disconnect before the in-flight execution is cancelled ([REST API §6.8](rest-api.md#68-client-disconnect)) — the same grace aborts a dashboard refresh (§23.3) and an observed parameter-set evaluation ([REST API §21.5](rest-api.md#215-the-observed-evaluation)) whose client stayed away |
+| `datapipelines.sse.max-streams-per-user` | `50` | Concurrent SSE streams per user — execution, refresh and observed-evaluation streams count together |
 
 ### 3.7 Rate Limiting
 
@@ -1032,6 +1032,7 @@ Validation runs in `@PostConstruct` of a `ConfigValidator` bean. Failures stop s
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-02 | v1.45 | S2 (#375) the observed parameter-set evaluation | §3.6: no new key. `disconnect-grace-seconds` names the observed evaluation beside the execution (and the dashboard refresh it already governed): a client gone past the grace aborts its evaluation (the owner's §11.7 ruling; [REST API §21.5](rest-api.md#215-the-observed-evaluation)) — with the defaults the grace and `parameters.evaluate-timeout-seconds` are both 30, so the deadline usually ends it first. `max-streams-per-user` counts execution, refresh and observed-evaluation streams together (#375 D7). |
 | 2026-10-01 | v1.44 | L4a (#352) the visualization test sessions — renumbered at merge after L1c-c's v1.43 | §3.33 gains **`datapipelines.visualization.session-ttl-minutes`** (`60`, 1..1440): a test session's TTL — the run's `expires_at`, the preview capability's deadline and the ceiling on the submit-minted upload capability (the spec's §11.2 `tests.session-ttl-minutes`, flattened to the shipped two-level key grammar). In the §5 template, `application.yml`, `deploy/compose.yml`, `deploy/env/defaults.env`, `deploy/secrets.env.example` and `ConfigValidator` (§7). |
 | 2026-09-30 | v1.43 | L1c-c (#10) transfer limits and evidence — renumbered at merge after 337's v1.42 | **§3.33's `max-visualizations-per-dashboard` row**: the value is documented as ALSO the transfer families' aggregate ceiling (L1c-c) — it caps each whole export/import envelope array (`visualizations` bundle, `templates` closure) and each whole promotion batch arm (`visualizations`, `dashboards`), refused whole before any member binds. An additional ceiling on top of the per-document bound, not a consequence of it: two individually valid dashboards can together exceed it, and such a batch refuses with no partial writes and no automatic split. No key, default or bound changed; the production transfer bean now receives the operator's configured value (L1c-c's C1 — an override was silently ignored at the default before). |
 | 2026-09-30 | v1.42 | 337 (#337) | §3.15's `logging.format` row is now TRUE instead of aspirational: the key is bound before logging initialises (environment post-processor), the value set is closed (`json` \| `console`), an unknown value refuses startup, and the row documents what each value produces and which deploy shape ships which. No new key, no YAML or deploy-mirror change — the declared key just works. |

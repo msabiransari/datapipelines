@@ -156,7 +156,7 @@ class ParameterEvaluator(
         events: ObservedEvaluation?,
     ): EvaluateResponse {
         val body = set.body
-        refuseUnknownKeys(body, selections)
+        SelectionKeys.refuseUnknown(body, selections)
         val submissions = body.parameters.associate { it.name to judge(it, selections[it.name]) }
         val graph = ParameterSetGraph.of(body)
         val evaluation = Evaluation(workspaceId, set.record.name, body, graph, submissions, events)
@@ -190,20 +190,6 @@ class ParameterEvaluator(
         data class Refused(
             val error: ParameterError,
         ) : Submission
-    }
-
-    private fun refuseUnknownKeys(
-        body: ParameterSetBody,
-        selections: Map<String, JsonNode?>,
-    ) {
-        val names = body.parameters.mapTo(HashSet()) { it.name }
-        val unknown = selections.keys.filter { it !in names }
-        if (unknown.isEmpty()) return
-        throw DatapipelinesException(
-            code = ParameterErrorCodes.EVALUATE_UNKNOWN_PARAMETER,
-            message = "selections names ${unknown.size} key(s) that are no parameter of this set — send exactly the set's parameters.",
-            details = mapOf("unknown" to unknown.take(MAX_ECHOED_KEYS).map { it.safeEcho() }, "count" to unknown.size),
-        )
     }
 
     private fun judge(
@@ -693,7 +679,6 @@ class ParameterEvaluator(
         const val NO_OPTIONS = "no_options"
         const val NO_DEFAULT = "no_default"
         const val NO_ROW = "no_row"
-        const val MAX_ECHOED_KEYS = 20
         const val MAX_DETAIL_CHARS = 200
 
         /** A stored wire value (a constant option, a `default_value`) as its canonical value — it passed the validator at save. */

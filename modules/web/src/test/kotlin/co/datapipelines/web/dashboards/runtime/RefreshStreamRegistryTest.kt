@@ -223,6 +223,29 @@ class RefreshStreamRegistryTest {
     }
 
     @Test
+    fun `the per-user stream cap counts observed-evaluation streams too - the one cap (#375 D7)`() {
+        val evaluations =
+            java.util.concurrent.atomic
+                .AtomicInteger(0)
+        val counting =
+            RefreshStreamRegistry(
+                properties,
+                executionStreams,
+                abort,
+                SseJson.mapper,
+                mockk<ScheduledExecutorService>(relaxed = true),
+                clock::get,
+                evaluationStreams = { if (it == user) evaluations.get() else 0 },
+            )
+        every { authority.access(any()) } returns RefreshStreamAccess(StreamVerdict.ALLOWED, executionRead = false)
+        counting.open(UUID.randomUUID(), principal(), authority)
+        executionStreams.open(UUID.randomUUID(), user)
+        counting.atStreamLimit(user).shouldBeFalse() // 1 refresh + 1 execution of 3
+        evaluations.set(1)
+        counting.atStreamLimit(user).shouldBeTrue() // + 1 evaluation = 3
+    }
+
+    @Test
     fun `a quiet stream is kept alive - the tick writes a heartbeat only when nothing was written since the last one`() {
         val stream = open()
         registry.tick() // first tick: everything is older than "the last tick" (0), so it beats
