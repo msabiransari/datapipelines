@@ -111,6 +111,8 @@ class RequestNestingDepthE2eTest {
             StringRoute("PUT", "/api/v1/parameter-sets/${UUID.randomUUID()}", PARAMETER_MALFORMED),
             StringRoute("POST", "/api/v1/parameter-sets/${UUID.randomUUID()}/evaluate", PARAMETER_MALFORMED),
             StringRoute("POST", "/api/v1/parameter-sets/import", PARAMETER_MALFORMED),
+            // #375: the observed evaluation reads its body through the same request mapper.
+            StringRoute("POST", "/api/v1/parameter-sets/${UUID.randomUUID()}/evaluations", PARAMETER_MALFORMED),
         )
 
     @Test
@@ -194,12 +196,14 @@ class RequestNestingDepthE2eTest {
                 "DashboardTransferController.kt" to 1,
                 // #353: the test-session results submission.
                 "VisualizationTestsController.kt" to 1,
+                // #375: the observed parameter-set evaluation.
+                "ParameterEvaluationStreamController.kt" to 1,
             )
         withClue("files declaring an @RequestBody String parameter, and how many each declares") {
             found.entries.map { it.key to it.value } shouldContainExactlyInAnyOrder
                 (swept + ALLOWLISTED).entries.map { it.key to it.value }
         }
-        stringRoutes.size shouldBe swept.values.sum() // 29 routes sweep themselves: the allowlist is empty (#323, #10 L1c, #353)
+        stringRoutes.size shouldBe swept.values.sum() // 30 routes sweep themselves: the allowlist is empty (#323, #10 L1c, #353, #375)
     }
 
     @Test

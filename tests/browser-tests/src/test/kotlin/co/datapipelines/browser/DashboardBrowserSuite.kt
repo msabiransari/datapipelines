@@ -60,17 +60,17 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
           var real = runtime._internal.renderers();
           Object.keys(real).forEach(function (kind) {
             var implementation = real[kind];
-            wrapped[kind] = {
-              kind: implementation.kind,
-              version: implementation.version,
-              create: function (context) {
-                var handle = implementation.create(context);
-                var wrappedHandle = {
-                  renderData: function (occurrence, rows, bindings) {
-                    window.__dp.renders.push({ name: occurrence.name, rows: rows });
-                    return handle.renderData(occurrence, rows, bindings);
-                  },
-                };
+                wrapped[kind] = {
+                  kind: implementation.kind,
+                  version: implementation.version,
+                  create: function (context) {
+                    var handle = implementation.create(context);
+                    var wrappedHandle = {
+                      renderData: function (occurrence, rows, bindings) {
+                        window.__dp.renders.push({ name: occurrence.name, rows: rows });
+                        return handle.renderData(occurrence, rows, bindings);
+                      },
+                    };
                 if (handle.resize) wrappedHandle.resize = function () { return handle.resize(); };
                 if (handle.dispose) wrappedHandle.dispose = function () { return handle.dispose(); };
                 return wrappedHandle;
@@ -801,6 +801,86 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
                 body: JSON.stringify({ instance_id: window.__dp.instance._instanceId }) });
             }""",
         )
+    }
+
+    /**
+     * The abort acknowledgement, NAMED (#366 red 2): a bare `abort_requested` boolean told nothing
+     * when it came back false — the row's status and the client path that answered were the two
+     * facts the CI red needed and the assertion did not carry. On a false ack this throws with the
+     * row's status off the real read route and WHICH client path answered: the ended short-circuit
+     * (`abort()` returns without a POST when the refresh has ended — datapipelines-dashboard.js
+     * `abort`, the `refresh.ended || refresh.abortRequested` branch) or the rejected POST (its
+     * rejection handler). The client is NOT edited; its recorded refresh state is read through the
+     * page. [instanceExpr] is the instance's JS expression (`window.__dp.instance` on a host page,
+     * `window.__dpPage.instance` on a product page).
+     */
+    protected fun abortAndNameAck(
+        instanceExpr: String,
+        board: String,
+        refreshId: String,
+    ) {
+        val acked = page.evaluate("() => $instanceExpr.abort('$refreshId')") as Map<*, *>
+        if (acked["abort_requested"] == true) return
+        val row = readRow(board, refreshId)
+        val client = readClientRefresh(instanceExpr, refreshId)
+        val path =
+            when {
+                client["recorded"] == false -> {
+                    "the client never recorded this refresh id"
+                }
+
+                client["ended"] == true -> {
+                    "the ended short-circuit answered (datapipelines-dashboard.js abort(): refresh.ended) — no POST was sent"
+                }
+
+                else -> {
+                    "the POST was rejected (datapipelines-dashboard.js abort()'s rejection handler)"
+                }
+            }
+        throw AssertionError(
+            "the abort was not acknowledged: acked=$acked" +
+                " | row status=${row["status"]} finished=${row["finished"]} | client=$client | $path",
+        )
+    }
+
+    /** The client's own record of one refresh, read through the page — `ended`/`abortRequested` as the runtime holds them. */
+    protected fun readClientRefresh(
+        instanceExpr: String,
+        refreshId: String,
+    ): Map<*, *> =
+        page.evaluate(
+            """() => { const r = $instanceExpr._refreshes['$refreshId'];
+                 return { recorded: !!r, ended: !!(r && r.ended), abortRequested: !!(r && r.abortRequested) }; }""",
+        ) as Map<*, *>
+
+    /** One visualization's status chip has reached [state]; the wait synchronises on the chip, never on time. */
+    protected fun chipStateIs(
+        occurrence: String,
+        state: String,
+    ) {
+        page.waitForFunction(
+            """() => (function () {
+              const el = document.querySelector('[data-dp-viz="$occurrence"] .dp-dashboard-status');
+              return el ? el.getAttribute('data-dp-state') : null;
+            })() === "$state"""",
+        )
+    }
+
+    /**
+     * One visualization's status chip does NOT read [state] — the settled-state check, called AFTER
+     * the frame that decided it has been observed (a completion notification or a row status), so
+     * the read is of a settled chip, not of one still in flight.
+     */
+    protected fun chipStateIsNot(
+        occurrence: String,
+        state: String,
+    ) {
+        val current =
+            page.evaluate(
+                "() => { const el = document.querySelector('[data-dp-viz=\"$occurrence\"] .dp-dashboard-status');" +
+                    " return el ? el.getAttribute('data-dp-state') : null; }",
+            ) as String?
+        check(current != state) { "the chip of $occurrence reads '$state' (expected it settled away from it)" }
     }
 
     private fun currentWorkspace(): String {

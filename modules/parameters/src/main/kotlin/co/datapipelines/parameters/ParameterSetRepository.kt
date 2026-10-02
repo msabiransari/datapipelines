@@ -375,17 +375,18 @@ class ParameterSetRepository(
             .singleOrNull()
 
     /**
-     * Purge the DRAFT (versioning §5.4): hard-deleted (nothing references a version row). The sole
-     * version takes the entity with it (D57's twin); a draft that had become the pointer (the
-     * development fallback) moves it. [expectedHash] null targets the draft without a hash. False when
-     * no DRAFT matched.
+     * Purge the DRAFT (versioning §5.4): hard-deleted (nothing references a version row; the only row that
+     * references a version cascades — test evidence). The sole version takes the entity with it (D57's twin);
+     * a draft that had become the pointer (the development fallback) moves it. [expectedHash] null targets
+     * the draft without a hash. The answer is the purge's scope (#372): [Purged.Entity] when the version
+     * count hit zero, [Purged.Version] otherwise. Null when no DRAFT matched.
      */
     fun purgeDraft(
         workspaceId: UUID,
         id: UUID,
         expectedHash: String?,
         draftEligible: Boolean,
-    ): Boolean {
+    ): Purged? {
         val hashGuard = if (expectedHash == null) "" else " AND v.body_hash = :expectedHash"
         val params = mapOf("id" to id, "workspaceId" to workspaceId, "expectedHash" to expectedHash, "draftEligible" to draftEligible)
         val purged =
@@ -397,14 +398,14 @@ class ParameterSetRepository(
                         " RETURNING v.version",
                     params,
                 ) { rs, _ -> rs.getInt("version") }
-                .singleOrNull() ?: return false
+                .singleOrNull() ?: return null
         if (versionCount(workspaceId, id) == 0) {
             deleteEntity(workspaceId, id)
-            return true
+            return Purged.Entity
         }
         jdbc.update(POINTER_FALLBACK_SQL, params + ("version" to purged))
         jdbc.update(REINDEX_SQL, params)
-        return true
+        return Purged.Version
     }
 
     /** Discard a RELEASED version (versioning §3.1): stamps, pointer fallback when it WAS the pointer. Null when it was not RELEASED. */
@@ -414,7 +415,7 @@ class ParameterSetRepository(
         version: Int,
         actor: UUID,
         draftEligible: Boolean,
-    ): ParameterSetVersionDetail? {
+    ): VersionMoved? {
         val params =
             mapOf(
                 "id" to id,
@@ -423,7 +424,7 @@ class ParameterSetRepository(
                 "actor" to actor,
                 "draftEligible" to draftEligible,
             )
-        return jdbc.query(DISCARD_SQL, params, DETAIL).singleOrNull()?.also { jdbc.update(REINDEX_SQL, params) }
+        return jdbc.query(DISCARD_SQL, params, MOVED).singleOrNull()?.also { jdbc.update(REINDEX_SQL, params) }
     }
 
     /** Restore a DISCARDED version to RELEASED; the pointer moves only above-current-or-NULL (D60). Null when it was not DISCARDED. */
@@ -431,24 +432,24 @@ class ParameterSetRepository(
         workspaceId: UUID,
         id: UUID,
         version: Int,
-    ): ParameterSetVersionDetail? {
+    ): VersionMoved? {
         val params = mapOf("id" to id, "workspaceId" to workspaceId, "version" to version)
-        return jdbc.query(RESTORE_SQL, params, DETAIL).singleOrNull()?.also { jdbc.update(REINDEX_SQL, params) }
+        return jdbc.query(RESTORE_SQL, params, MOVED).singleOrNull()?.also { jdbc.update(REINDEX_SQL, params) }
     }
 
-    /** Manual switch (D60): the pointer names [version] when it is live and posture-eligible; null otherwise. */
+    /** Manual switch (D60): the pointer names [version] when it is live and posture-eligible; the pair otherwise null. */
     fun switchCurrent(
         workspaceId: UUID,
         id: UUID,
         version: Int,
         draftEligible: Boolean,
-    ): Int? {
+    ): PointerMove? {
         val params = mapOf("id" to id, "workspaceId" to workspaceId, "version" to version, "draftEligible" to draftEligible)
         return jdbc
             .query(
                 SWITCH_SQL,
                 params,
-            ) { rs, _ -> rs.getInt("current_version") }
+            ) { rs, _ -> pointerOf(rs) }
             .singleOrNull()
             ?.also { jdbc.update(REINDEX_SQL, params) }
     }
@@ -808,7 +809,9 @@ class ParameterSetRepository(
 
         /**
          * versioning §3.1 — discard a RELEASED version; the pointer falls back only when it named it
-         * (excluding it by number: a CTE cannot see the flip made beside it).
+         * (excluding it by number: a CTE cannot see the flip made beside it). The row answers the
+         * pointer pair (#372): `prev` reads the pointer from the statement's own snapshot, `bumped`
+         * returns the moved one.
          */
         private val DISCARD_SQL =
             """
@@ -819,6 +822,9 @@ class ParameterSetRepository(
                  WHERE s.id = :id AND s.workspace_id = :workspaceId AND v.parameter_set_id = s.id
                    AND v.version = :version AND v.status = 'RELEASED'
                 RETURNING $DETAIL_COLS
+            ), prev AS (
+                SELECT s.current_version FROM parameter_sets s
+                 WHERE s.id = :id AND s.workspace_id = :workspaceId
             ), bumped AS (
                 UPDATE parameter_sets s
                    SET current_version = CASE
@@ -831,12 +837,13 @@ class ParameterSetRepository(
                        END,
                        updated_at = NOW()
                  WHERE s.id = :id AND s.workspace_id = :workspaceId AND EXISTS (SELECT 1 FROM flipped)
-                RETURNING 1
+                RETURNING s.current_version
             )
-            SELECT * FROM flipped, bumped
+            SELECT flipped.*, prev.current_version AS pointer_before, bumped.current_version AS pointer_after
+              FROM flipped, bumped, prev
             """.trimIndent()
 
-        /** versioning §3.1 — restore; D60's rule `GREATEST(COALESCE(current, 0), v)`. */
+        /** versioning §3.1 — restore; D60's rule `GREATEST(COALESCE(current, 0), v)`; the row answers the pointer pair (#372). */
         private val RESTORE_SQL =
             """
             WITH restored AS (
@@ -846,25 +853,35 @@ class ParameterSetRepository(
                  WHERE s.id = :id AND s.workspace_id = :workspaceId AND v.parameter_set_id = s.id
                    AND v.version = :version AND v.status = 'DISCARDED'
                 RETURNING $DETAIL_COLS
+            ), prev AS (
+                SELECT s.current_version FROM parameter_sets s
+                 WHERE s.id = :id AND s.workspace_id = :workspaceId
             ), bumped AS (
                 UPDATE parameter_sets
                    SET current_version = GREATEST(COALESCE(current_version, 0), (SELECT version FROM restored)), updated_at = NOW()
                  WHERE id = :id AND workspace_id = :workspaceId AND EXISTS (SELECT 1 FROM restored)
-                RETURNING 1
+                RETURNING current_version
             )
-            SELECT * FROM restored, bumped
+            SELECT restored.*, prev.current_version AS pointer_before, bumped.current_version AS pointer_after
+              FROM restored, bumped, prev
             """.trimIndent()
 
-        /** D60 — the manual switch; live and posture-eligible or nothing. */
+        /** D60 — the manual switch; live and posture-eligible or nothing. The row answers the pointer pair (#372). */
         private val SWITCH_SQL =
             """
-            UPDATE parameter_sets s
-               SET current_version = :version, updated_at = NOW()
-             WHERE s.id = :id AND s.workspace_id = :workspaceId
-               AND EXISTS (SELECT 1 FROM parameter_set_versions v
-                            WHERE v.parameter_set_id = s.id AND v.version = :version
-                              AND (v.status = 'RELEASED' OR (:draftEligible AND v.status = 'DRAFT')))
-            RETURNING s.current_version
+            WITH prev AS (
+                SELECT s.current_version FROM parameter_sets s
+                 WHERE s.id = :id AND s.workspace_id = :workspaceId
+            ), moved AS (
+                UPDATE parameter_sets s
+                   SET current_version = :version, updated_at = NOW()
+                 WHERE s.id = :id AND s.workspace_id = :workspaceId
+                   AND EXISTS (SELECT 1 FROM parameter_set_versions v
+                                WHERE v.parameter_set_id = s.id AND v.version = :version
+                                  AND (v.status = 'RELEASED' OR (:draftEligible AND v.status = 'DRAFT')))
+                RETURNING s.current_version
+            )
+            SELECT prev.current_version AS pointer_before, moved.current_version AS pointer_after FROM prev, moved
             """.trimIndent()
 
         /** versioning §9.2 — an exact (or `max + 1`) RELEASED version onto an existing set; the pointer only when NULL. */
@@ -908,6 +925,9 @@ class ParameterSetRepository(
 
         private val DETAIL = RowMapper { rs: ResultSet, _: Int -> detailOf(rs) }
 
+        /** A discard/restore row: the touched version's detail beside the pointer pair its statement answered (#372). */
+        private val MOVED = RowMapper { rs: ResultSet, _: Int -> movedOf(rs) }
+
         private val VERSION =
             RowMapper { rs: ResultSet, _: Int ->
                 ParameterSetVersion(
@@ -945,6 +965,11 @@ class ParameterSetRepository(
                 createdVia = rs.getString("created_via"),
                 updatedVia = rs.getString("updated_via"),
             )
+
+        /** The pointer pair the discard/restore/switch statements return; NULL reads as null (D60's ∅). */
+        private fun pointerOf(rs: ResultSet) = PointerMove(rs.getObject("pointer_before") as Int?, rs.getObject("pointer_after") as Int?)
+
+        private fun movedOf(rs: ResultSet) = VersionMoved(detailOf(rs), pointerOf(rs))
 
         private fun ResultSet.instant(column: String): Instant? = getObject(column, OffsetDateTime::class.java)?.toInstant()
     }

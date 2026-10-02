@@ -102,10 +102,15 @@ class SelectorPool(
      * suspends on its result. A cancellation of the caller while queued returns the admission permit;
      * while running it ABANDONS the task (see the class KDoc) and rethrows. A task that throws — a
      * defect, never an author's problem — rethrows its exception to the caller.
+     *
+     * [onAdmitted] (the observed evaluation's `parameter_admitted` instant, #375) runs on the caller once the
+     * running slot is held and before the worker starts; an ordinary evaluate passes none. Should it throw, both
+     * permits come back before the exception propagates — the bulkhead never leaks a slot to an observer.
      */
     suspend fun run(
         label: SelectorLabel,
         task: SelectorTask,
+        onAdmitted: (() -> Unit)? = null,
     ): SelectorAdmission {
         if (!admission.tryAcquire()) return SelectorAdmission.Saturated
         try {
@@ -113,6 +118,17 @@ class SelectorPool(
         } catch (e: CancellationException) {
             admission.release()
             throw e
+        }
+        if (onAdmitted != null) {
+            try {
+                onAdmitted()
+            } catch (
+                @Suppress("TooGenericExceptionCaught") failure: Throwable,
+            ) {
+                running.release()
+                admission.release()
+                throw failure
+            }
         }
         // From here the worker THREAD owns both permits: it returns them when the task ends —
         // normally, by failure, or long after its caller abandoned it (the bulkhead).

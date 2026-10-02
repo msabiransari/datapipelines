@@ -57,6 +57,9 @@
   --chart-series-4: var(--accent-danger);
   --chart-series-5: color-mix(in srgb, var(--accent-info) 55%, var(--accent-success));
   --chart-series-6: color-mix(in srgb, var(--accent-warning) 55%, var(--accent-danger));
+  /* #371 — the dashboard grid's ROW UNIT: the height of one grid row, which a slot's `h` spans
+     (dashboards.css `.dp-dashboard`). A size, not a colour, so no dark-theme twin. */
+  --dashboard-row-unit: var(--space-20);
 }
 
 /* 188 (#188) — the type-coloured element declares its TYPE, not its colour: `data-type`

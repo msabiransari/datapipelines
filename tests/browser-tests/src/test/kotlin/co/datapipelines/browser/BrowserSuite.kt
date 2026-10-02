@@ -100,7 +100,29 @@ abstract class BrowserSuite {
         page.navigate("$baseUrl/login")
         page.fill("#login-email", email)
         page.fill("#login-password", password)
-        page.click("form button[type=submit]")
+        named(page, "the login form's submit button ('form button[type=submit]' on $baseUrl/login)") {
+            page.click("form button[type=submit]")
+        }
+    }
+
+    /**
+     * Runs [block]; a timeout becomes an AssertionError naming [what] and where the page was —
+     * Playwright's bare `TimeoutError` named neither the element nor the document, and four of
+     * these reds spent a gate each on setup waits nobody could attribute (#355).
+     */
+    protected fun named(
+        on: Page,
+        what: String,
+        block: () -> Unit,
+    ) {
+        try {
+            block()
+        } catch (e: com.microsoft.playwright.PlaywrightException) {
+            if (e.message?.contains("Timeout") == true) {
+                throw AssertionError("$what timed out — url=${on.url()}", e)
+            }
+            throw e
+        }
     }
 
     /**
@@ -119,8 +141,10 @@ abstract class BrowserSuite {
         page: Page,
         name: String,
     ) {
-        page.navigate("$baseUrl/workspaces")
-        page.waitForURL("**/workspaces")
+        named(page, "the workspaces page navigation ($baseUrl/workspaces)") {
+            page.navigate("$baseUrl/workspaces")
+            page.waitForURL("**/workspaces")
+        }
         // The form arrives with the page's first render, and its first appearance is the one
         // wait the whole flow hangs on: under a loaded gate it has outrun the action default
         // three gates running (#327, and #283/#303 before it). Wait for THAT event with the
@@ -137,7 +161,9 @@ abstract class BrowserSuite {
         // <option>, the members heading) — a bare text= wait resolves to the first,
         // the hidden option, and waits for visibility forever. Wait for the visible
         // table cell.
-        page.locator("td", Page.LocatorOptions().setHasText(name)).first().waitFor()
+        named(page, "the created workspace's row (the visible table cell naming '$name')") {
+            page.locator("td", Page.LocatorOptions().setHasText(name)).first().waitFor()
+        }
         enterWorkspace(page, name)
     }
 
@@ -146,14 +172,18 @@ abstract class BrowserSuite {
      * the one suite whose subject is the switcher itself.
      */
     protected fun createWorkspaceWithoutEntering(name: String) {
-        page.navigate("$baseUrl/workspaces")
-        page.waitForURL("**/workspaces")
+        named(page, "the workspaces page navigation ($baseUrl/workspaces)") {
+            page.navigate("$baseUrl/workspaces")
+            page.waitForURL("**/workspaces")
+        }
         page
             .locator("form[action*='/workspaces/create'] input[name=name]")
             .waitFor(Locator.WaitForOptions().setTimeout(FIRST_RENDER_TIMEOUT_MS))
         page.fill("form[action*='/workspaces/create'] input[name=name]", name)
         page.click("form[action*='/workspaces/create'] button[type=submit]")
-        page.locator("td", Page.LocatorOptions().setHasText(name)).first().waitFor()
+        named(page, "the created workspace's row (the visible table cell naming '$name')") {
+            page.locator("td", Page.LocatorOptions().setHasText(name)).first().waitFor()
+        }
     }
 
     /**

@@ -212,13 +212,13 @@ class VisualizationsController(
         // The name and version for the audit row, read through the caller's lens BEFORE the purge —
         // a sole-draft purge takes the visualization, so afterwards there is nothing to read (#332).
         val audited = workingForAudit(principal, workspaceId, id)
-        visualizations.purgeDraft(workspaceId, id, IfMatchHeader.required(ifMatch))
+        val purged = visualizations.purgeDraft(workspaceId, id, IfMatchHeader.required(ifMatch))
         LifecycleVerbs.audit(
             audit,
             LifecycleVerbs.VISUALIZATION_EVENTS.versionPurged,
             principal,
             workspaceId,
-            auditedDetails(id, audited),
+            auditedDetails(id, audited) + mapOf("scope" to purged.scope),
         )
     }
 
@@ -231,16 +231,22 @@ class VisualizationsController(
     ): ApiResponse<Map<String, Any?>> {
         val principal = LifecycleVerbs.requireSession()
         val workspaceId = principal.requireWorkspace().id
+        // The name comes from the pre-verb lensed read; the pointer pair from the verb's own result —
+        // never a re-read after the fact (#372).
         val audited = versionForAudit(principal, workspaceId, id, version)
-        val detail = visualizations.discardVersion(workspaceId, id, version, principal.userId)
+        val moved = visualizations.discardVersion(workspaceId, id, version, principal.userId)
         LifecycleVerbs.audit(
             audit,
             LifecycleVerbs.VISUALIZATION_EVENTS.versionDiscarded,
             principal,
             workspaceId,
-            auditedDetails(id, audited, version),
+            auditedDetails(id, audited, version) +
+                mapOf(
+                    "current_version_before" to moved.pointer.before,
+                    "current_version_after" to moved.pointer.after,
+                ),
         )
-        return ApiResponse.of(ArtifactResponses.lifecycleSummary(detail))
+        return ApiResponse.of(ArtifactResponses.lifecycleSummary(moved.detail))
     }
 
     /** §22 — restore DISCARDED version v; the pointer moves only above-current-or-NULL (D60). Session-only. */
@@ -253,15 +259,19 @@ class VisualizationsController(
         val principal = LifecycleVerbs.requireSession()
         val workspaceId = principal.requireWorkspace().id
         val audited = versionForAudit(principal, workspaceId, id, version)
-        val detail = visualizations.restoreVersion(workspaceId, id, version)
+        val moved = visualizations.restoreVersion(workspaceId, id, version)
         LifecycleVerbs.audit(
             audit,
             LifecycleVerbs.VISUALIZATION_EVENTS.versionRestored,
             principal,
             workspaceId,
-            auditedDetails(id, audited, version),
+            auditedDetails(id, audited, version) +
+                mapOf(
+                    "current_version_before" to moved.pointer.before,
+                    "current_version_after" to moved.pointer.after,
+                ),
         )
-        return ApiResponse.of(ArtifactResponses.lifecycleSummary(detail))
+        return ApiResponse.of(ArtifactResponses.lifecycleSummary(moved.detail))
     }
 
     /** §22 — purge DRAFT version v (drafts only; never a pinned one). Session-only; irreversible. */
@@ -275,13 +285,13 @@ class VisualizationsController(
         val principal = LifecycleVerbs.requireSession()
         val workspaceId = principal.requireWorkspace().id
         val audited = versionForAudit(principal, workspaceId, id, version)
-        visualizations.purgeVersion(workspaceId, id, version)
+        val purged = visualizations.purgeVersion(workspaceId, id, version)
         LifecycleVerbs.audit(
             audit,
             LifecycleVerbs.VISUALIZATION_EVENTS.versionPurged,
             principal,
             workspaceId,
-            auditedDetails(id, audited, version),
+            auditedDetails(id, audited, version) + mapOf("scope" to purged.scope),
         )
     }
 
@@ -295,7 +305,9 @@ class VisualizationsController(
         val principal = LifecycleVerbs.requireSession()
         val workspaceId = principal.requireWorkspace().id
         val target = ArtifactHttp.switchTarget(FAMILY, body)
-        val current = visualizations.switchCurrent(workspaceId, id, target)
+        // The name and the pointer pair come from the verb's own result (#372) — the service read the
+        // record for its 404 and answers the pair from the switch statement itself; no read before, none after.
+        val switched = visualizations.switchCurrent(workspaceId, id, target)
         LifecycleVerbs.audit(
             audit,
             LifecycleVerbs.VISUALIZATION_EVENTS.currentSwitched,
@@ -303,15 +315,12 @@ class VisualizationsController(
             workspaceId,
             mapOf(
                 "visualization_id" to id.toString(),
-                "visualization_name" to
-                    visualizations
-                        .findVersion(workspaceId, lens.viewFor(principal).visualizations, id, current)
-                        ?.record
-                        ?.name,
-                "to" to current,
+                "visualization_name" to switched.name,
+                "from" to switched.pointer.before,
+                "to" to switched.pointer.after,
             ),
         )
-        return ApiResponse.of(mapOf("id" to id.toString(), "current_version" to current))
+        return ApiResponse.of(mapOf("id" to id.toString(), "current_version" to switched.pointer.after))
     }
 
     /** §22 — the entity purge, only when the only version is a DRAFT and no live dashboard pins any version. Session-only. */
@@ -324,13 +333,13 @@ class VisualizationsController(
         val principal = LifecycleVerbs.requireSession()
         val workspaceId = principal.requireWorkspace().id
         val audited = workingForAudit(principal, workspaceId, id)
-        visualizations.purgeEntity(workspaceId, id)
+        val purged = visualizations.purgeEntity(workspaceId, id)
         LifecycleVerbs.audit(
             audit,
             LifecycleVerbs.VISUALIZATION_EVENTS.entityPurged,
             principal,
             workspaceId,
-            auditedDetails(id, audited),
+            auditedDetails(id, audited) + mapOf("scope" to purged.scope),
         )
     }
 
@@ -379,26 +388,22 @@ class VisualizationsController(
         return ApiResponse.of(PagedData(items, Pagination.of(page, size, total.toLong(), items.size)))
     }
 
-    // ---- the audit rows' pre-reads (#332) ----------------------------------------------------------
+    // ---- the audit rows' pre-reads (#332; BODY-FREE since #372's B2) --------------------------------
 
-    /** The working version's (name, number) for an audit row — read through the caller's lens, before the verb. */
+    /** The working version's (name, number) for an audit row — BODY-FREE, [VisualizationService.auditIdentity]'s lens rule. */
     private fun workingForAudit(
         principal: AuthenticatedPrincipal,
         workspaceId: UUID,
         id: UUID,
-    ): Pair<String, Int>? =
-        visualizations.findWorking(workspaceId, lens.viewFor(principal).visualizations, id)?.let { it.record.name to it.detail.version }
+    ): Pair<String, Int>? = visualizations.auditIdentity(workspaceId, lens.viewFor(principal).visualizations, id)
 
-    /** A named version's (name, number) — the same lens rule. */
+    /** A named version's (name, number) — BODY-FREE, [VisualizationService.auditVersionIdentity]'s lens rule. */
     private fun versionForAudit(
         principal: AuthenticatedPrincipal,
         workspaceId: UUID,
         id: UUID,
         version: Int,
-    ): Pair<String, Int>? =
-        visualizations
-            .findVersion(workspaceId, lens.viewFor(principal).visualizations, id, version)
-            ?.let { it.record.name to it.detail.version }
+    ): Pair<String, Int>? = visualizations.auditVersionIdentity(workspaceId, lens.viewFor(principal).visualizations, id, version)
 
     /** The purge row's details: the id, plus the pre-read name and version when the artifact still existed. */
     private fun auditedDetails(

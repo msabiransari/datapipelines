@@ -1,9 +1,9 @@
 # Datasources Specification
 
-**Status:** v2.49 (frozen contract — additive-only changes after this point)
+**Status:** v2.51 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md) · [Enums](enums.md) · [Configuration](configuration.md) · [Metadata DB](metadata-db.md) · [Pipeline Contract](pipeline-contract.md)
-**Last updated:** 2026-09-27
+**Last updated:** 2026-10-02
 
 ---
 
@@ -344,6 +344,19 @@ against the URL with them stripped (#186b — before it, only `DB_CLOSE_DELAY` w
 datasource carrying any other admin-gated setting could not open a pooled connection); and a
 rotation over a pre-existing file database clears the ADMIN flag a stored `DP_H2_RESTRICTED` may
 carry (`ALTER USER … ADMIN FALSE`), not merely re-passwords it.
+
+The file-roots rule is a fact of the pool's whole life, not only of registration (#204): every
+pool build re-checks the declared roots against the URL's path — the FILE itself resolved, so a
+symlink as the final path component whose target leaves every root is refused, as is a file that
+moved after its save, or a root later removed from configuration. The refusal carries the
+catalogued `datasource.validation.workspace_forbidden` (the in-process gate's code — the
+validator's own save-time roots refusal is `jdbc_url_malformed` on `jdbc_url`, §9); nothing is
+poisoned, and the next build with the file back under a root succeeds. A restricted password rotated
+outside this pool — a second instance building the same file, a restore, a hand edit — repairs by
+the same door: the warm connections keep serving, the first post-build connection creation fails
+with H2's `28000`, the pool's lease carries that SQLState to the manager, which evicts the pool,
+and the next acquisition rebuilds it through the bootstrap above, rotating the password again.
+Until that rebuild connections fail; the error surfaces unchanged — no retry loop, no masking.
 
 ### 4.3 Type mapper integration
 
@@ -936,7 +949,7 @@ Shipped in 107 as the MCP tool `sql_probe` ([MCP §6.2.34](mcp-server.md#6234-sq
 
 **Parameters are the pipeline grammar's.** `:name` placeholders bind through the same Spring `NamedParameterUtils` binder pipeline SQL uses, so probe SQL parses `:name` exactly the way a template's rendered output does; every referenced name must be supplied in `parameters` with its canonical type (`type` is a LogicalType — `NULL` is not declarable — and `value` its wire string: BIGINTEGER/BIGDECIMAL as plain decimal text, temporal in exact ISO forms, BINARY as padded base64; a null value binds SQL NULL). **The forms are judged by the one strict coercion every parameter surface shares (#265)** — a value that does not parse as its declared type is refused, nothing is trimmed (`" 12 "` for an INTEGER is refused, not read as 12 — rest-api change log v2.36's rule, now true here too), booleans are exactly `true`/`false`, and numeric text over 1024 digits is refused before parsing (#278). A reference with no supplied value is refused, never bound as null silently; both are `-32602` argument faults — nothing was leased, nothing ran — and the refusal names the parameter, never the value text.
 
-**The clamps.** `limit` defaults to 50, clamps to 500 (not refused — a probe asking for more is a sizing error, and `truncated` already says the rest exists); `timeout_seconds` defaults to 10, clamps to 30, and is the statement timeout. A driver timeout arrives as `SQLTimeoutException` OR as a server-side cancel (pgjdbc delivers `queryTimeout` as SQLState 57014, a plain `PSQLException`) — both classify as the timeout, surfaced as the catalogued `pipeline.node.query_timeout` ([Pipeline Contract §13.4](pipeline-contract.md#134-node-execution), since T202) with `details` carrying `reason: "timeout"`, `wall_ms` and the pre-captured plan. Any other driver refusal is `pipeline.node.query_execution_failed` with the bounded driver message; an unreachable datasource is `pipeline.execution.datasource_unreachable`.
+**The clamps.** `limit` defaults to 50, clamps to 500 (not refused — a probe asking for more is a sizing error, and `truncated` already says the rest exists); `timeout_seconds` defaults to 10 and is the statement timeout, clamped to **the node's statement timeout for the datasource's dialect** (#167) — [Configuration §3.2](configuration.md#32-executor)'s `node-query-timeout-seconds-by-dialect.<dialect>` when the operator set one (LAKE ships 180), else `node-query-timeout-seconds` (60). One knob, not a second constant: a probe exists to verify what a node is about to run, and a ceiling below the node's own budget refused exactly the verification scans the node completes (an acceptance run's percentile probe over the lake table timed out at the old static 30 s while the same scan ran as a node). A datasource's own `query_timeout_seconds` is deliberately not consulted — `0` there means "no limit", and a probe is never unbounded. A request above the ceiling is clamped, not refused, and the payload's `timeout_seconds` reports the timeout the statement ran under (the `tempdb` scratch check clamps to the H2 ceiling). A driver timeout arrives as `SQLTimeoutException` OR as a server-side cancel (pgjdbc delivers `queryTimeout` as SQLState 57014, a plain `PSQLException`) — both classify as the timeout, surfaced as the catalogued `pipeline.node.query_timeout` ([Pipeline Contract §13.4](pipeline-contract.md#134-node-execution), since T202) with `details` carrying `reason: "timeout"`, `wall_ms`, `timeout_seconds` and the pre-captured plan. Any other driver refusal is `pipeline.node.query_execution_failed` with the bounded driver message; an unreachable datasource is `pipeline.execution.datasource_unreachable`.
 
 **Scope: `author`** — the probe returns arbitrary customer ROW DATA, the 037 F rule it shares with `datasources_preview_rows`. **Audit:** the `sql` argument never reaches the audit log — the dispatcher records `sql_sha256` + `sql_length`, never the text ([MCP §14](mcp-server.md#14-audit)).
 
@@ -1513,6 +1526,8 @@ Every rule below runs on **create and update**, before the row is written (§2 p
 
 `datasource.in_use` (delete blocked by referencing pipelines, §6.2) is a lifecycle error rather than a save-time rule, and is likewise catalogued in §13.8.
 
+`DP_H2_RESTRICTED` bounds ONE thing: the SQL the app runs inside that one H2 file on an author's behalf (#204). It does not bound what the owner-password holder — the application itself — can do to the file, nor a process that opens the file with its own H2; against those the boundary is the file system, and the file system's answer is the declared roots ([`datapipelines.datasources.file-roots`](configuration.md#326-datasource-pools)): what the deployment declares is what the product will open.
+
 ---
 
 ## 10. JDBC Driver Packaging
@@ -1718,6 +1733,8 @@ fixture) get their Testcontainers twin.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-02 | v2.51 | 167 (#167) the probe's timeout ceiling | **§7D's clamps paragraph:** `timeout_seconds` clamps to the node's statement timeout for the datasource's dialect (Configuration §3.2's by-dialect value when set, else `node-query-timeout-seconds`), no longer to a static 30; the datasource's own `query_timeout_seconds` is not consulted (its `0` means no limit). The payload and a timeout's `details` report `timeout_seconds`, the timeout the statement ran under. Code: `SqlProbe` takes the executor's two values at all three construction sites (the MCP tool, the release-check runner, the learned-fact recorder); `MAX_TIMEOUT_SECONDS` is gone. |
+| 2026-10-02 | v2.50 | lane 204 (#204 L2/L4/L5/L6) | **§4.2A:** the in-process boundaries keep their promises at the pool build — the file-roots rule re-runs on every build with the file itself resolved (a final-component symlink aimed outside every root, a moved file, or a narrowed/removed root refuses the build with the catalogued `datasource.validation.workspace_forbidden`; nothing poisoned — a clean path builds again), and a restricted password rotated outside the pool (a second instance, a restore, a hand edit) is repaired at the next pool-growth failure: H2's `28000` rides the lease failure, the pool is evicted, and the next acquisition rebuilds through the bootstrap, which re-rotates. **§9:** the restricted user bounds one H2 file's author-facing SQL — not the owner credential's own powers, nor another process opening the file; that boundary is the declared roots. Code: `DatasourceFileRoots.underRootRefusal`, `ConnectionPoolManager.buildHikariPool`, `HikariConnectionPool.leaseConnection`, `H2InProcessPool.build`, `DefaultDatasourceRegistry` (the second gate's wiring). |
 | 2026-09-30 | v2.49 | lane 336 (#336 D3) | **§7A:** the current-namespace read's three-family classification now covers the OUTER-catalog read on a two-level shape — a capability statement keeps the fallback, any other failure raises (the old `runCatching` read "no catalog" for a failing `getCatalog()`, which is the merge shape 087 measured). Stats (§7C) shares the rule. Code: `CurrentNamespace.currentNamespace`. |
 | 2026-09-30 | v2.48 | lane 336 (#336 D2) | **§5.3 gains "The selector lease's cleanup endings":** a close/cancel refusal under a primary failure is `addSuppressed` to it; a refused cancel or close is one WARN (`datasource.lease_cleanup_failed`, class + SQLState — observability §3.4L); a connection whose `close()` failed is DISCARDED, never returned to service. The gate, the classification and the two endings' exclusivity are unchanged. |
 | 2026-09-29 | v2.47 | 265 (#265) the probe's parameters judged by the shared coercion | **§7D: `sql_probe`'s named parameters are judged by the ONE strict coercion in `typesystem`** (`ParameterCoercion` through `ParameterLift`), not the datasources-local copy — whose `trim()` (and lowercase booleans) made the probe the last surface accepting padded values. `" 12 "` for an `INTEGER`/`BIGINTEGER`/`DECIMAL`/`BIGDECIMAL` and `"TRUE"` for a `BOOLEAN` are refused now (`-32602`, the static message naming the parameter, never the value); `BIGINTEGER` binds as `BigInteger` and a `TIMESTAMP` binds through the `ReadOnlyStatementLease` jdbc-form rule (an `Instant` binds as UTC `OffsetDateTime` — pgjdbc cannot infer an `Instant`, and a Postgres TIMESTAMP probe parameter failed before this change; reproduced, then green). The §6.3 digit cap (#278) refuses oversized numeric text before any parse. The private conversion copy is deleted; the typed-string parameter shape and every null/refusal rule are unchanged. |

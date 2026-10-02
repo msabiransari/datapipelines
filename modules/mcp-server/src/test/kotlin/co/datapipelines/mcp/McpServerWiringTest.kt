@@ -105,7 +105,7 @@ class McpServerWiringTest {
             DatasourcesGetColumnsTool(introspector, datasources),
             DatasourcesGetTableStatsTool(introspector, datasources),
             DatasourcesPreviewRowsTool(datasources, co.datapipelines.datasources.SqlRunner(datasources), introspector),
-            SqlProbeTool(datasources, co.datapipelines.datasources.SqlProbe(datasources)),
+            SqlProbeTool(datasources, co.datapipelines.datasources.SqlProbe(datasources, nodeQueryTimeoutSeconds = 60)),
             ExecutionsListTool(executions),
             ExecutionsGetTool(executions),
             ExecutionsGetResultTool(executions, resultStore, resultUrls, ResultConfig()),

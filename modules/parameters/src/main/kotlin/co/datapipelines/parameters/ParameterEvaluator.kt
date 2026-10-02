@@ -4,6 +4,7 @@ import co.datapipelines.dag.Dag
 import co.datapipelines.pipeline.ContextKeys
 import co.datapipelines.pipeline.OrgContext
 import co.datapipelines.pipeline.PipelineErrorCodes
+import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.LogicalType
 import co.datapipelines.typesystem.ParameterCardinality
@@ -12,13 +13,16 @@ import co.datapipelines.typesystem.ParameterValueOutcome
 import co.datapipelines.typesystem.ParameterValueRule
 import co.datapipelines.typesystem.ParameterValueValidator
 import com.fasterxml.jackson.databind.JsonNode
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import java.time.Clock
 import java.time.LocalDate
@@ -96,6 +100,12 @@ class ParameterEvaluator(
      * Evaluates [set] (a stored version the caller resolved and may read — lane D's route and tool)
      * in [workspaceId] against [selections] (the request's `selections` object, keyed by parameter).
      *
+     * [observation] is the observed evaluation's port (the parameter-set workspace spec §4.3, #375): the
+     * Parameter Sets page's stream passes one and receives [ParameterEvaluationEvent]s — `Started` first,
+     * `Ended` exactly once and last, written from a `finally` under `NonCancellable` whatever ended the
+     * evaluation (decision D2). Every ordinary caller passes nothing: no event is built, no task wrapped,
+     * no pool callback handed over — the response is byte-for-byte what it was.
+     *
      * @throws DatapipelinesException `parameter.evaluate.unknown_parameter` (400),
      *   `parameter.evaluate.timeout` (504), `parameter.evaluate.response_too_large` (413) — the three
      *   whole-request refusals; everything else is per parameter, in `state.errors`.
@@ -104,13 +114,52 @@ class ParameterEvaluator(
         workspaceId: UUID,
         set: ParameterSetVersion,
         selections: Map<String, JsonNode?>,
+        observation: ParameterEvaluationObserver = ParameterEvaluationObserver.NONE,
     ): EvaluateResponse {
         require(set.record.workspaceId == workspaceId) { "the set is not this workspace's — the caller resolved it wrongly" }
+        val events = if (observation === ParameterEvaluationObserver.NONE) null else ObservedEvaluation(observation)
+        events?.emit(
+            ParameterEvaluationEvent.Started(
+                set.body.parameters.map { it.name },
+                clock.instant().plusSeconds(config.evaluateTimeoutSeconds),
+            ),
+        )
+        // The terminal bookkeeping (D2): what ended the evaluation, decided where it ended, written once below.
+        var outcome = EvaluationOutcome.FAILED
+        var code: String? = null
+        var completed: EvaluateResponse? = null
+        try {
+            return evaluated(workspaceId, set, selections, events).also {
+                outcome = EvaluationOutcome.COMPLETED
+                completed = it
+            }
+        } catch (e: CancellationException) {
+            // Our own deadline became `parameter.evaluate.timeout` inside [underDeadline]; a cancellation
+            // reaching here with our caller's scope stopped is the CALLER's — the observed route's grace.
+            if (!currentCoroutineContext().isActive) outcome = EvaluationOutcome.ABORTED
+            throw e
+        } catch (e: DatapipelinesException) {
+            outcome = if (e.code == ParameterErrorCodes.EVALUATE_TIMEOUT) EvaluationOutcome.TIMEOUT else EvaluationOutcome.FAILED
+            code = e.code
+            throw e
+        } finally {
+            if (events != null) {
+                withContext(NonCancellable) { events.emit(ParameterEvaluationEvent.Ended(outcome, code, completed)) }
+            }
+        }
+    }
+
+    private suspend fun evaluated(
+        workspaceId: UUID,
+        set: ParameterSetVersion,
+        selections: Map<String, JsonNode?>,
+        events: ObservedEvaluation?,
+    ): EvaluateResponse {
         val body = set.body
-        refuseUnknownKeys(body, selections)
+        SelectionKeys.refuseUnknown(body, selections)
         val submissions = body.parameters.associate { it.name to judge(it, selections[it.name]) }
         val graph = ParameterSetGraph.of(body)
-        val evaluation = Evaluation(workspaceId, set.record.name, body, graph, submissions)
+        val evaluation = Evaluation(workspaceId, set.record.name, body, graph, submissions, events)
         val states = underDeadline { evaluation.cascade() }
         val order = body.parameters.withIndex().associate { it.value.name to it.index }
         val response =
@@ -141,20 +190,6 @@ class ParameterEvaluator(
         data class Refused(
             val error: ParameterError,
         ) : Submission
-    }
-
-    private fun refuseUnknownKeys(
-        body: ParameterSetBody,
-        selections: Map<String, JsonNode?>,
-    ) {
-        val names = body.parameters.mapTo(HashSet()) { it.name }
-        val unknown = selections.keys.filter { it !in names }
-        if (unknown.isEmpty()) return
-        throw DatapipelinesException(
-            code = ParameterErrorCodes.EVALUATE_UNKNOWN_PARAMETER,
-            message = "selections names ${unknown.size} key(s) that are no parameter of this set — send exactly the set's parameters.",
-            details = mapOf("unknown" to unknown.take(MAX_ECHOED_KEYS).map { it.safeEcho() }, "count" to unknown.size),
-        )
     }
 
     private fun judge(
@@ -215,6 +250,8 @@ class ParameterEvaluator(
         body: ParameterSetBody,
         private val graph: Dag<ParameterDefinition>,
         private val submissions: Map<String, Submission>,
+        /** The observed evaluation's delivery, or null for every ordinary caller (no event is ever built then). */
+        private val events: ObservedEvaluation?,
     ) {
         private val types: Map<String, LogicalType> = body.parameters.associate { it.name to it.type }
 
@@ -237,9 +274,10 @@ class ParameterEvaluator(
                     val parents = parameter.dependsOn.distinct().associateWith { scheduled.getValue(it) }
                     scheduled[name] =
                         async {
+                            if (parents.isNotEmpty()) events?.emit(ParameterEvaluationEvent.ParameterWaiting(name, parents.keys.toList()))
                             // The parents FIRST: a child never starts before every parent completed.
                             val effective = parents.mapValues { (_, state) -> state.await().value }
-                            evaluate(parameter, effective)
+                            evaluate(parameter, effective).also { state -> events?.let { report(it, parameter, state) } }
                         }
                 }
                 scheduled.mapValues { (_, state) -> state.await() }
@@ -351,10 +389,70 @@ class ParameterEvaluator(
                 }
             }
             val task = selectors.task(SelectorRequest(workspaceId, template, datasource, context, binds, maxRows), resolver)
-            return when (val admission = pool.run(SelectorLabel(setName, parameter.name, datasource), task)) {
+            val label = SelectorLabel(setName, parameter.name, datasource)
+            val admission =
+                if (events == null) {
+                    pool.run(label, task)
+                } else {
+                    pool.run(label, observed(task, parameter.name, datasource, template, events)) {
+                        events.emit(ParameterEvaluationEvent.ParameterAdmitted(parameter.name))
+                    }
+                }
+            return when (admission) {
                 is SelectorAdmission.Completed -> admission.run
                 SelectorAdmission.Saturated -> null
             }
+        }
+
+        /**
+         * The observed task: `parameter_running` at the START of [SelectorTask.run] on the worker thread — render
+         * and run began there (the statement reaches the driver inside it). The frames before it are a few hundred
+         * bytes per parameter, so a reader that stopped reading cannot fill the socket and stall the worker here.
+         */
+        private fun observed(
+            task: SelectorTask,
+            parameter: String,
+            datasource: String,
+            template: TemplateRef,
+            events: ObservedEvaluation,
+        ): SelectorTask =
+            object : SelectorTask {
+                override fun run(): SelectorRun {
+                    events.emit(ParameterEvaluationEvent.ParameterRunning(parameter, datasource, template))
+                    return task.run()
+                }
+
+                override fun abandon() = task.abandon()
+            }
+
+        /**
+         * The parameter's ONE terminal event (spec §4.2's coverage rule — hidden, disabled, constants and inputs
+         * included): `ParameterFailed` with the first error's code when it carries one, else `ParameterResolved`.
+         * `rows` is the option count only where a query produced the options (a template `SELECT`).
+         */
+        private fun report(
+            events: ObservedEvaluation,
+            parameter: ParameterDefinition,
+            state: ParameterState,
+        ) {
+            val error = state.errors.firstOrNull()
+            val event =
+                if (error != null) {
+                    ParameterEvaluationEvent.ParameterFailed(
+                        parameter.name,
+                        error.code,
+                        (error.details["reason"] as? String)?.safeEcho(MAX_DETAIL_CHARS),
+                    )
+                } else {
+                    val queried = parameter.kind == ParameterKind.SELECT && parameter.source?.kind == SelectorSourceKind.TEMPLATE
+                    ParameterEvaluationEvent.ParameterResolved(
+                        parameter.name,
+                        state.origin.wire,
+                        state.reset,
+                        state.options?.size?.takeIf { queried },
+                    )
+                }
+            events.emit(event)
         }
 
         /** A run that did not produce rows, as the parameter's error — the owning subsystem's code; null is saturation. */
@@ -581,7 +679,6 @@ class ParameterEvaluator(
         const val NO_OPTIONS = "no_options"
         const val NO_DEFAULT = "no_default"
         const val NO_ROW = "no_row"
-        const val MAX_ECHOED_KEYS = 20
         const val MAX_DETAIL_CHARS = 200
 
         /** A stored wire value (a constant option, a `default_value`) as its canonical value — it passed the validator at save. */

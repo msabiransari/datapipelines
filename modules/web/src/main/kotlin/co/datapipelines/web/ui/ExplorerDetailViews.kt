@@ -38,6 +38,12 @@ data class VersionRowView(
     val usageLabel: String,
     /** The sticky pointer (D60) points here — "current" in the row, and never the same as "latest". */
     val isCurrent: Boolean,
+    /**
+     * #349 — the row is the version the workspace page is VIEWING. The explorer's detail pane
+     * has no viewed version (it shows the working one), so its rows leave this false; the
+     * workspace's Versions tab and header selector mark the viewed row with it.
+     */
+    val isViewed: Boolean = false,
     /** A DRAFT: `POST /{id}/release` would take it. */
     val canRelease: Boolean,
     /** A RELEASED version that nothing pins: `POST /{id}/versions/{v}/discard` would take it. */
@@ -64,6 +70,7 @@ data class VersionRowView(
             usageUnit: String,
             isCurrent: Boolean,
             via: String = co.datapipelines.pipeline.WriteSurface.SESSION.wire,
+            isViewed: Boolean = false,
         ): VersionRowView =
             VersionRowView(
                 version = version,
@@ -74,6 +81,7 @@ data class VersionRowView(
                 via = via,
                 usageLabel = "$usage $usageUnit" + if (usage == 1) "" else "s",
                 isCurrent = isCurrent,
+                isViewed = isViewed,
                 canRelease = status == PipelineVersionStatus.DRAFT,
                 canDiscard = status == PipelineVersionStatus.RELEASED,
                 canPurge = status == PipelineVersionStatus.DRAFT,
@@ -89,6 +97,35 @@ data class VersionRowView(
 data class DatasourceRowView(
     val name: String,
     val dialect: Dialect,
+)
+
+/**
+ * #349 — the workspace Overview's record-level and registry-resolved facts, handed to the
+ * page controller so the workspace JSON can carry them once. Everything here is either
+ * version-independent (the created actor and surface, the last visible run) or pre-resolved
+ * for every admitted version (the datasource dialect map), so an in-page version switch
+ * updates the pane without a second server round trip.
+ */
+data class WorkspaceTabFacts(
+    val createdBy: String,
+    /** The FIRST version's write surface (V20's chip) — `session` renders nothing. */
+    val createdVia: String?,
+    /** The pipeline's last visible run, in the explorer Overview's own shape, or null. */
+    val lastRun: WorkspaceLastRunView?,
+    /** datasource name → dialect wire name, across every admitted version's body. */
+    val datasourceDialects: Map<String, String>,
+)
+
+/** One last-visible-run line for the workspace Overview — the explorer's dd, as data. */
+data class WorkspaceLastRunView(
+    val executionId: UUID,
+    val status: String,
+    val durationMs: Long?,
+    val rowCount: Int?,
+    /** "4 mins ago" — the reading; [at] is the exact stamp for the hover. */
+    val ago: String,
+    val at: String,
+    val by: String,
 )
 
 /** One template version a pipeline's working body pins — `id@version`, linked into §4.6. */

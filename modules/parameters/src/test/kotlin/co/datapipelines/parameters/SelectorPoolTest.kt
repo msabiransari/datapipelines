@@ -185,6 +185,38 @@ class SelectorPoolTest {
         quick.discarded shouldBe emptyList()
     }
 
+    @Test
+    fun `the admission callback runs once the running slot is held and before the statement starts (#375)`() {
+        val pool = SelectorPool(size = 1, waiting = 0)
+        val quick = StubJdbc(quick = true)
+        val seen = mutableListOf<String>()
+
+        val answer =
+            bounded {
+                pool.run(label, quick.task()) {
+                    seen += "admitted=${pool.admitted()} started=${quick.stubs.size}"
+                }
+            }
+
+        answer.shouldBeInstanceOf<SelectorAdmission.Completed>()
+        seen shouldContainExactly listOf("admitted=1 started=0")
+    }
+
+    @Test
+    fun `an admission callback that throws returns both permits before the exception propagates (#375)`() {
+        val pool = SelectorPool(size = 1, waiting = 0)
+        val quick = StubJdbc(quick = true)
+
+        val failed = runCatching { bounded { pool.run(label, quick.task()) { error("the observer broke") } } }
+
+        failed.exceptionOrNull().shouldBeInstanceOf<IllegalStateException>()
+        pool.admitted() shouldBe 0
+        quick.stubs.size shouldBe 0
+        withClue("the slot came back: the next submission is admitted, not Saturated") {
+            bounded { pool.run(label, quick.task()) }.shouldBeInstanceOf<SelectorAdmission.Completed>()
+        }
+    }
+
     /**
      * [task] under an evaluate-like deadline ([DEADLINE_MS]), the answer awaited at most
      * [ANSWERED_WITHIN_MS] from the test's side: null when the pool did NOT answer in time — so a pool

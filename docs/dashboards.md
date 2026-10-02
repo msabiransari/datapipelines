@@ -1,6 +1,6 @@
 # Dashboards
 
-**Status:** v0.NEXT — the two documents and their lifecycle (#10, lane L1a); the REST routes, the MCP tools and the
+**Status:** v0.23 — the two documents and their lifecycle (#10, lane L1a); the REST routes, the MCP tools and the
 permissions (§4, lane L1b); the transfer routes and their limits' honest contract (§3.3, lanes L1c/L1c-b/L1c-c: the
 import's atomicity, the RELEASE rules on a landing, the aggregate count ceiling, the wire's per-family arms); the server
 runtime (§5, lane L2; #343's released pins and stream authority); the client runtime (§6, lanes L3a/L3a-b/L3a-c); the
@@ -14,7 +14,7 @@ page, the screenshot upload and the two test tools — §3.4.1 (lane L4b, #353).
 [MCP Server](mcp-server.md) (§6.2.50–§6.2.62 — the tools), [Auth](auth.md) (§7.6 — the permissions)
 **Design:** the [dashboard implementation spec](superpowers/specs/2026-09-28-dashboard-implementation-spec.md) and
 the [design record](superpowers/specs/2026-09-25-dashboard-authoring-design-draft.md) (decisions D1–D63)
-**Last updated:** 2026-10-01
+**Last updated:** 2026-10-02
 
 A dashboard presents released pipeline results. It is built from two versioned artifacts: **visualizations** —
 a chart, table or KPI bound to named inputs, reusable across dashboards — and **dashboards**, which pin released
@@ -233,7 +233,7 @@ reach a visualization's own draft transform pin, which needs that visualization'
 ### 3.3 Export and import
 
 An export is the CURRENT release's envelope: `{"visualization": …, "templates": […], "manifest": {…}}` — the transform
-pin's templates travel with it — and `{"dashboard": …, "visualizations": [each pinned visualization's envelope],
+pin's templates travel with it, read without the template lens — and `{"dashboard": …, "visualizations": [each pinned visualization's envelope],
 "manifest": {…}}`, whose manifest names the pinned pipelines and set by reference: a dashboard assumes they were
 promoted first (D61's order: templates, parameter sets, pipelines, visualizations, dashboards). The manifest carries
 `evidence: null` until the test sessions land (L4) — the exported release's evidence summary rides it from then on,
@@ -243,6 +243,11 @@ envelope's shape is judged before anything lands, the lifecycle fields beside a 
 other unknown key refuses; the same version with the same hash is a no-op; a pin the target lacks is
 `visualization.import.missing_template` or `dashboard.import.missing_dependency`; an id another artifact on the
 server holds is `*.import.id_taken` — never re-issued (C29).
+
+**What the artifact pins travels unlensed** (the owner's ruling of 2026-10-02, #344; [Auth §11A.1](auth.md#11a1-the-404-rule)'s lens
+clause): the promoter lens decides whether a visualization or dashboard exports at all — a hidden one is the absent
+`404` — never what its envelope carries. A dashboard's pinned visualizations ride whatever the visualization lens says,
+and each one's templates whatever the template lens says; the same holds for a promotion batch.
 
 **The import is ONE transaction for a dashboard** (the L1c-b round, F1): templates → bundled visualizations → the
 dashboard inside one transaction, so a refused dashboard leaves NOTHING landed — the visualization import keeps the
@@ -342,7 +347,10 @@ lifecycle route, a runtime route or `/mcp` the request is simply anonymous. Beca
 no principal, the run's STARTER is re-judged at the moment of use: a member demoted below `visualization.update`, a
 member removed, a revoked or expired key, a deactivated person, identity or workspace all void the capability. Every
 failure on these two routes — absent, malformed, wrong, consumed, expired-and-swept, another visualization's, a starter
-who lost the right — is one indistinguishable answer (the page's one 404; the upload's `session_not_found`). The
+who lost the right — is one indistinguishable answer (the page's one 404; the upload's `session_not_found`). The one
+exception (#373): a presented token that MATCHES an unconsumed upload capability past its deadline is `410`
+`session_expired` (`details.reason: capability_expired`), judged before any byte of the body — the holder of the right
+token learns only what it already knows; a wrong or consumed token keeps the one 404. The
 capabilities ride a URL and a header, never a cookie, are never logged by the application, and the page's
 `<meta name="referrer" content="no-referrer">` keeps them out of its subresources' `Referer`; the deadline (60 minutes) and the revocation at submit bound
 what a leaked preview URL can show — the saved fixtures of one version, nothing live.
@@ -551,7 +559,10 @@ under the id exactly like any abort and answers the same 202 — and the engine'
 `ABORTED` with `refresh_completed` last before any source runs, the row closed and audited like every other ending.
 No marker, a marker for another dashboard, or a marker for someone else is the same `dashboard.refresh.not_found` as
 every other no — an unknown id, another person's running id, another instance's id and a finished id all answer the
-identical body.
+identical body. A late abort changes nothing on a refresh that delivered (#370): the engine's ending consults the
+work's outcome, not the flag's timing — a flag raised after every target delivered `ok`/no-data leaves the refresh
+DONE (its delivered frames stand; a chip already settled to success stays there), while an abort that actually
+interrupted the work — targets unrecorded or failed — ends it ABORTED as before.
 
 ### 5.7 The record
 
@@ -618,7 +629,7 @@ of them, and a no-op is not conformant (the conformance suite drives real behavi
 
 | Function | The host does | The runtime guarantees |
 |---|---|---|
-| `mountLayout(layout) → Promise` | build the grid from the system layout | awaited before anything mounts |
+| `mountLayout(layout) → Promise` | build the grid from the system layout; the first-party adapter's rows are each one `--dashboard-row-unit` (app.css, default `var(--space-20)` = 5rem), so a slot of `h` rows is `h` units plus the gaps between them tall and a figure's height is its slot's; the empty default slot takes no row (`dashboards.css`) | awaited before anything mounts |
 | `mountVisualization(occurrence, renderer) → Promise<handle>` | create the placeholder and its renderer | the handle's `renderData` is the ONLY data path |
 | `renderParameters(state) → Promise` | render the FULL server state, hidden and disabled included | awaited INSIDE the parameter gate — the lock releases only after the render resolves |
 | `readSelections() → {name: value}` | return every current committed value, in the wire's type | merged over the server state at each evaluation; hidden and disabled values included (D23) |
@@ -846,7 +857,11 @@ full navigation).
 
 | Date | Version | Author | Change |
 |---|---|---|---|
-| 2026-10-02 | v0.NEXT | #369 the dashboard draft preview — renumber at merge (344's v0.19 and 372's v0.20 land first) | **§5.2:** the four runtime routes take an optional `version` query parameter naming a DRAFT or RELEASED version (R2, owner-confirmed): absent = the current RELEASED version unchanged; a value is a bounded positive integer, must resolve for the caller (the family 404 naming it), and is refused to a `dashboard` key (`dashboard.key.kind_refused` — the version routes are the session page's). R1 (owner-confirmed): the pin rule is RELEASED-only on a draft exactly as on a release — a draft pinning a DRAFT pin is `dashboard.runtime.dependency_missing`/`not_released` naming the pin, the message carrying the release hint. **§6.1:** `init` admits `"released"` or a positive integer; the integer rides `?version=N` on every runtime path the instance builds. **§7:** the draft preview page (`GET /dashboards/{id}/preview?version=N`) — the board template for a named version, the banner with the way back to the released view, the version on the `data-dp-dashboard-version` attribute channel, refusals in place, the promoter's 404, session-only. No MCP tool, no migration, no new permission row. |
+| 2026-10-02 | v0.23 | #369 the dashboard draft preview — renumbered at merge (main sat at v0.22) | **§5.2:** the four runtime routes take an optional `version` query parameter naming a DRAFT or RELEASED version (R2, owner-confirmed): absent = the current RELEASED version unchanged; a value is a bounded positive integer, must resolve for the caller (the family 404 naming it), and is refused to a `dashboard` key (`dashboard.key.kind_refused` — the version routes are the session page's). R1 (owner-confirmed): the pin rule is RELEASED-only on a draft exactly as on a release — a draft pinning a DRAFT pin is `dashboard.runtime.dependency_missing`/`not_released` naming the pin, the message carrying the release hint. **§6.1:** `init` admits `"released"` or a positive integer; the integer rides `?version=N` on every runtime path the instance builds. **§7:** the draft preview page (`GET /dashboards/{id}/preview?version=N`) — the board template for a named version, the banner with the way back to the released view, the version on the `data-dp-dashboard-version` attribute channel, refusals in place, the promoter's 404, session-only. No MCP tool, no migration, no new permission row. |
+| 2026-10-02 | v0.22 | 371 (#371) the board grid has a row unit | **§6.2:** the first-party adapter's grid rows are each `--dashboard-row-unit` (app.css, `var(--space-20)`, 5rem) — a FIXED `grid-auto-rows` track, so a slot of `h` rows is `h` units plus its gaps tall and a Plotly figure fills its slot instead of collapsing (measured on the base: 34 px for a 4-row slot). The adapter's empty default slot is hidden, so the board is exactly its grid's rows tall. One unscoped rule serves the board page and the visualization preview; #353's preview-scoped copy is retired. Routes, permissions, roles: none changed. |
+| 2026-10-02 | v0.21 | 370 (#370) the late-abort ending | **§5.6:** a late abort changes nothing on a refresh that delivered — the ending consults the work's outcome, not the flag's timing: every target delivered `ok`/no-data ends the refresh DONE with its frames standing, an abort that actually interrupted the work still ends ABORTED. |
+| 2026-10-02 | v0.20 | 373 (#373) the upload gate judges expiry before the body | §3.4.1's confinement sentence names the one exception to the one-answer rule: a presented token matching an UNCONSUMED upload capability past its deadline is 410 `capability_expired`, judged before any byte of the body; a wrong or consumed token keeps the one 404 `session_not_found`. Authority: rest-api §22.2's error ladder. |
+| 2026-10-02 | v0.19 | 344 (#344) the envelope is the artifact's pins | **§3.3:** what the artifact pins travels unlensed — a dashboard's pinned visualizations and each one's templates ride whatever the visualization and template lenses say; only the root is lensed (the owner's ruling of 2026-10-02, auth §11A.1's lens clause). No behaviour changed. |
 | 2026-10-01 | v0.18 | L5 (#367, #10) the `dashboard` key kind | **§4.1: the `dashboard_viewer` column and the binding row are HERE** — the key's one role holds `dashboard.read` + `dashboard.execute`, `bound` in both cells, the bindings ARE the lens (`dashboard_key_bindings`, R-EP2 verbatim: deeper replaces, unbound = the family 404). **§5.8:** the key kind is no longer "not here" — the runtime routes have a non-session caller. **§6.5:** the wire contract gained its implementation — the reference proxy is `examples/dashboard-proxy/proxy.mjs`, its conformance test `dashboard-proxy.test.mjs` (the streaming timing is the buffering detector) and the real-stack E2E; `/refreshes` is deliberately not relayed (owner-scoped by the key; one key = one budget, sized by `max-streams-per-user`); refresh rows carry `principal_key_id`, executions `executed_by_key_kind = 'dashboard'`. |
 | 2026-10-01 | v0.17 | L4b (#353) the test workflow on the wire | **New §3.4.1** — the five-step workflow over REST and MCP (start, the session-less preview page, submit, the single-use screenshot upload, the human release), the confinement (each capability opens one route for one run; the starter re-judged at the moment of use; one indistinguishable answer for every capability failure) and the lensed evidence reads; §3.4's retention bullet gains the UI sentence (an author who re-tests keeps only the last screenshot). **§6.5:** the runtime's fixture mode (the transport swapped, nothing else; no `fetch`). §4.4 names the two test tools; §5.8 no longer lists the test surfaces. |
 | 2026-10-01 | v0.16 | 332 (#332, #330, #331) the lifecycle audit + the pins projection | **§3:** the five human verbs and the release audit (the `dashboard.*` events, the cascaded visualization releases named with `cascade_from_dashboard_id`) — the pipelines mould, ids/names/versions/counts only. |

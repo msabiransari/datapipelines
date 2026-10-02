@@ -20,6 +20,11 @@
     this.pollCount = 0;
     this.maxPolls = 2;
     this.executionId = null;
+    // #349 — the run's OWN version: the pin the execute POST carried (or the version
+    // the reattach adopted). Every graph-painting decision compares this against the
+    // page's VIEWED version — node run facts attach only when pipeline AND version
+    // match (spec §4.2); the stream itself is execution-owned and never gates.
+    this.version = null;
     // #358: disposal marks a handler whose PAGE went away (boosted navigation,
     // history save). A disposed handler consumes nothing further and owns no
     // timers; disposal NEVER sends a cancellation — the run keeps going.
@@ -34,6 +39,20 @@
     this.maxReplays = 15;
     this.reattachTimer = null;
   }
+
+  /**
+   * #349 — true when this run's facts may paint the page's graph: the run's version
+   * is the version the page is VIEWING right now. The stream is execution-owned and
+   * runs regardless; only the PAINT gates on the match, so browsing another version
+   * never wears another run's progress (spec §4.2/§4.3, A9).
+   */
+  SseHandler.prototype.paintsGraph = function () {
+    var self = this;
+    if (self.version === null || self.version === undefined) return true; // pre-#349 callers: unchanged behavior
+    var state = typeof window !== "undefined" ? window.PEWorkspace : null;
+    if (!state || state.viewedVersion === null || state.viewedVersion === undefined) return false;
+    return state.viewedVersion === self.version;
+  };
 
   /**
    * Detach this page from the run. Aborts the open reader and every armed
@@ -76,10 +95,11 @@
    * within [maxReplays]; a budget that runs out says what a lost connection says.
    * Never sends a cancellation.
    */
-  SseHandler.prototype.reattach = function (executionId) {
+  SseHandler.prototype.reattach = function (executionId, version) {
     var self = this;
     if (self.disposed || !executionId || self.executionId) return;
     self.executionId = executionId;
+    if (version !== undefined && version !== null) self.version = version;
     self.isConnected = true;
     // The re-attach mode flag: a stream that ends without a terminal re-plays
     // instead of walking the live connection-loss path (see readStream).
@@ -170,6 +190,9 @@
       );
       return;
     }
+    // #349: the run's own version — every graph-paint decision below compares it
+    // against the page's VIEWED version (paintsGraph).
+    self.version = pin;
     body.version = pin;
 
     fetch(url, {
@@ -304,8 +327,12 @@
         var runId = (payload && payload.execution_id) || self.executionId;
         // The record names its PIPELINE too: a boosted entry into ANOTHER pipeline's workspace
         // (the explorer's Open links are boosted) must not adopt this run (merge follow-up).
+        // #349: it names the run's VERSION too — a restored page at another version sees
+        // the strip, never the paint.
         var runPipeline = (self.editor.pipeline && self.editor.pipeline.id) || null;
-        if (runId) window.__peLiveExecution = { executionId: runId, pipelineId: runPipeline };
+        if (runId) {
+          window.__peLiveExecution = { executionId: runId, pipelineId: runPipeline, version: self.version };
+        }
       } else if (
         eventType === "pipeline_completed" ||
         eventType === "pipeline_failed" ||
@@ -326,10 +353,25 @@
     // terminal event closes its operation before the card re-renders for it.
     self.reduceOperation(eventType, payload);
 
+    // #349 — the run's identity is armed FIRST (the strip reads it), whatever the
+    // viewed version; the PAINT below gates on the version match.
+    var paint = self.paintsGraph();
+    if (eventType === "execution_started") {
+      if (editor.handleExecutionIdentity) editor.handleExecutionIdentity(payload, self.version);
+    } else if (eventType === "pipeline_completed") {
+      if (editor.handleRunTerminal) editor.handleRunTerminal("success");
+    } else if (eventType === "pipeline_failed") {
+      if (editor.handleRunTerminal) editor.handleRunTerminal("failed");
+    } else if (eventType === "execution_aborted") {
+      if (editor.handleRunTerminal) editor.handleRunTerminal("aborted");
+    }
+
     switch (eventType) {
       case "execution_started":
         if (payload.execution_id) self.executionId = payload.execution_id;
-        if (editor.graph) editor.graph.resetAll();
+        // #349: the graph resets only when this run paints THIS view — a version
+        // switch under a live run must not wipe the viewed body's canvas.
+        if (paint && editor.graph) editor.graph.resetAll();
         // 072: the frame carries the RESOLVED Context at execution start — org config,
         // the platform keys and the parameters (pipeline-contract §7.2 tiers 1-4). The
         // inspector uses it to show a CALCULATOR node's `$org_fiscal_start_date` as
@@ -340,13 +382,15 @@
         editor.isExecuting = true;
         editor.setBanner("", "");
         // 150: the entry boundary is armed; End was reset to neutral by resetAll above.
-        self.setMarker("start", "running");
+        if (paint) self.setMarker("start", "running");
         break;
 
       case "node_started":
         // 080 §A: setNodeState owns the edge transition now — the curves INTO a
         // running node flow (active), no separate edge call here.
-        if (editor.graph) {
+        // #349: the fact is RECORDED regardless (execution-owned, replayed onto the
+        // graph on a return to the run's version); the PAINT gates on the match.
+        if (paint && editor.graph) {
           editor.graph.setNodeState(payload.node_id, "running");
         }
         if (editor.nodeStates) editor.nodeStates[payload.node_id] = "running";
@@ -365,6 +409,7 @@
         // not terminal and never moves the graph. setNodeState stops the pulse,
         // clears the incoming flow and mirrors minimap + a11y.
         if (
+          paint &&
           payload && payload.node_id && (payload.state === "aborted" || payload.state === "failed") &&
           editor.graph && editor.nodeOps && typeof editor.nodeOps.get === "function"
         ) {
@@ -377,7 +422,8 @@
 
       case "node_completed":
         // 080 §A: success turns the incoming edges --edge-done inside setNodeState.
-        if (editor.graph) {
+        // #349: recorded regardless; painted on the version match only.
+        if (paint && editor.graph) {
           editor.graph.setNodeState(payload.node_id, "success");
         }
         // 059 §A line 5: the event carries the node's stats FLAT (SseEventProjection:
@@ -387,7 +433,7 @@
         // node, which formatRunLine renders as the elapsed time alone. 080 §A: the
         // CALCULATOR's context_value rides along for the footer, and setNodeStats
         // labels the OUTGOING edges with the count flowing out of this node.
-        if (editor.graph && editor.graph.setNodeStats) {
+        if (paint && editor.graph && editor.graph.setNodeStats) {
           editor.graph.setNodeStats(payload.node_id, {
             duration_ms: payload.duration_ms,
             rows_out: payload.rows_out,
@@ -422,7 +468,7 @@
         break;
 
       case "node_failed":
-        if (editor.graph) {
+        if (paint && editor.graph) {
           editor.graph.setNodeState(payload.node_id, "failed");
         }
         if (editor.nodeStates) editor.nodeStates[payload.node_id] = "failed";
@@ -434,10 +480,14 @@
         // view beside the inspector's per-node one. One record, two homes, both
         // read-only; PEErrorDetails.build renders both.
         if (payload.error && editor.recordFailure) editor.recordFailure(payload.node_id, payload.error);
-        if (payload.dependents && editor.graph) {
+        if (payload.dependents && paint && editor.graph) {
           payload.dependents.forEach(function (depId) {
             editor.graph.setNodeState(depId, "aborted");
             if (editor.nodeStates) editor.nodeStates[depId] = "aborted";
+          });
+        } else if (payload.dependents && editor.nodeStates) {
+          payload.dependents.forEach(function (depId) {
+            editor.nodeStates[depId] = "aborted";
           });
         }
         editor.announceStatus("Node " + payload.node_id + " failed");
@@ -447,8 +497,10 @@
         self.terminalSeen = true;
         editor.isExecuting = false;
         // 150: the boundaries read the authoritative outcome — never a node event.
-        self.setMarker("start", "idle");
-        self.setMarker("end", "success");
+        if (paint) {
+          self.setMarker("start", "idle");
+          self.setMarker("end", "success");
+        }
         // 080 §D: the top bar's status takes its terminal text (elapsed from the
         // clock, the row count data_ready left on runStatus.rows).
         if (editor.stopRunClock) editor.stopRunClock("done");
@@ -470,11 +522,14 @@
         // when a node fails, emitting no node event for either — what it records in
         // node_stats is ABORTED. Sweep them here so the on-screen states equal
         // node_stats at the end of the run, exactly as execution_aborted already did.
-        self.abortUnfinishedNodes();
+        // #349: the sweep paints only its own view; the states are recorded either way.
+        self.abortUnfinishedNodes(paint);
         // 150: End reads the authoritative outcome — a failure is Failed, and a
         // root that never started stays aborted beside it, not rewritten.
-        self.setMarker("start", "idle");
-        self.setMarker("end", "failed");
+        if (paint) {
+          self.setMarker("start", "idle");
+          self.setMarker("end", "failed");
+        }
         // 057: the FULL payload goes to the result panel's failure mode — the code, the
         // message, the correlation id, the rendered SQL and the exception chain, on the
         // screen the engineer is already looking at. The modal keeps a one-line summary
@@ -497,12 +552,14 @@
         self.terminalSeen = true;
         editor.isExecuting = false;
         if (editor.stopRunClock) editor.stopRunClock("aborted");
-        self.abortUnfinishedNodes();
+        self.abortUnfinishedNodes(paint);
         // 150: the owner's cancel is Stopped at the boundary — the marker's word,
         // not a control (End is never a button; since 151/#144 Start is the run
         // trigger, and Cancel stays the toolbar's).
-        self.setMarker("start", "idle");
-        self.setMarker("end", "aborted");
+        if (paint) {
+          self.setMarker("start", "idle");
+          self.setMarker("end", "aborted");
+        }
         var abortReason = payload && payload.reason ? String(payload.reason) : null;
         if (window.DpToast && window.DpToast.show) {
           window.DpToast.show("warning", "Execution aborted", abortReason || "The execution was aborted");
@@ -522,19 +579,24 @@
    * for either. setNodeState carries the whole transition: the pulse stops, the
    * incoming flow clears, and the minimap/a11y mirrors follow. Nodes that
    * reached a real terminal state (success/failed) are not touched.
+   * #349: `paint` gates the CANVAS — the execution-owned state map records the
+   * abort regardless, so a return to the run's version replays it honestly.
    */
-  SseHandler.prototype.abortUnfinishedNodes = function () {
+  SseHandler.prototype.abortUnfinishedNodes = function (paint) {
     var editor = this.editor;
-    if (!editor.graph || !editor.graph.cy) return;
-    editor.graph.cy.nodes().forEach(function (node) {
-      // 150: the Start/End markers are not nodes — nothing about them ever ran,
-      // and End's one terminal word is the execution outcome, set by its own case.
-      if (node.data && node.data("kind") === "boundary") return;
-      var state = (editor.nodeStates && editor.nodeStates[node.id()]) || node.classes().join("");
-      if (!state || state === "idle" || state === "running") {
-        editor.graph.setNodeState(node.id(), "aborted");
-      }
-    });
+    editor.graph &&
+      editor.nodeStates &&
+      editor.graph.cy &&
+      editor.graph.cy.nodes().forEach(function (node) {
+        // 150: the Start/End markers are not nodes — nothing about them ever ran,
+        // and End's one terminal word is the execution outcome, set by its own case.
+        if (node.data && node.data("kind") === "boundary") return;
+        var state = (editor.nodeStates && editor.nodeStates[node.id()]) || node.classes().join("");
+        if (!state || state === "idle" || state === "running") {
+          editor.nodeStates[node.id()] = "aborted";
+          if (paint !== false) editor.graph.setNodeState(node.id(), "aborted");
+        }
+      });
   };
 
   /**
@@ -679,9 +741,13 @@
     var self = this;
     var kind = outcome === "success" ? "pipeline_completed" : outcome === "failed" ? "pipeline_failed" : "execution_aborted";
     self.reduceOperation(kind, {});
-    if (outcome !== "success") self.abortUnfinishedNodes();
-    self.setMarker("start", "idle");
-    self.setMarker("end", outcome);
+    // #349: the polled outcome paints only its own view — the states record either way.
+    var paint = self.paintsGraph();
+    if (outcome !== "success") self.abortUnfinishedNodes(paint);
+    if (paint) {
+      self.setMarker("start", "idle");
+      self.setMarker("end", outcome);
+    }
   };
 
   SseHandler.prototype.pollExecution = function () {

@@ -319,22 +319,32 @@ a.tpl-leaf {
   min-width: 0;
 }
 
-/* The composite adapter's grid sets its columns and each slot's row span inline but no ROW
-   height, and a responsive Plotly chart sizes itself to its host — so with nothing else in the
-   grid the chart collapses to Plotly's minimum. The preview gives its grid a row unit and lets
-   the visualization host fill its slot, scoped to the preview: the board page's own sizing is
-   L3's to settle (#371). */
-.dp-preview-board .dp-dashboard {
-  grid-auto-rows: minmax(5rem, auto);
+/* #371 — the board's ROW UNIT. The composite adapter's grid sets its columns, its gap and each
+   slot's row SPAN inline but no row height, so a slot whose only content is a responsive Plotly
+   host had nothing to span and the figure collapsed. Every row is one `--dashboard-row-unit`
+   (app.css), a FIXED track (not `minmax(unit, auto)`: an `auto` maximum lets a tall caption push
+   the row, and the figure then measures the pushed row). The slot is a flex column and the
+   visualization host fills it, so a figure's height is its slot's: `h` rows plus the gaps between
+   them. A table that outgrows its span scrolls inside its slot instead of bleeding into the next. */
+.dp-dashboard {
+  grid-auto-rows: var(--dashboard-row-unit);
 }
 
-.dp-preview-board .dp-dashboard-slot {
+.dp-dashboard-slot {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  overflow: auto;
 }
 
-.dp-preview-board .dp-dashboard-viz {
+/* The adapter always appends a default slot for occurrences and controls with no grid entry; empty,
+   it would take a whole row of the unit (and a gap) at the foot of every board. Named slots carry
+   `data-dp-slot` and are never hidden: an unmounted one still holds its place. */
+.dp-dashboard-slot:not([data-dp-slot]):empty {
+  display: none;
+}
+
+.dp-dashboard-viz {
   flex: 1 1 auto;
   min-height: 0;
 }

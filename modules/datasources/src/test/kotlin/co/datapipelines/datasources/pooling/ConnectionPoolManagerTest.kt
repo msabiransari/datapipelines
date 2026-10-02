@@ -4,13 +4,28 @@ import ch.qos.logback.classic.Level
 import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
+import co.datapipelines.datasources.CredentialKind
+import co.datapipelines.datasources.Datasource
+import co.datapipelines.datasources.DatasourceErrorCodes
+import co.datapipelines.datasources.DatasourceFileRoots
+import co.datapipelines.datasources.DatasourceProperties
 import co.datapipelines.datasources.Fixtures
+import co.datapipelines.typesystem.DatapipelinesException
+import co.datapipelines.typesystem.Dialect
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertAll
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
 import org.slf4j.LoggerFactory
+import java.nio.file.Files
+import java.nio.file.Path
 import java.sql.Connection
+import java.sql.SQLException
 import java.time.Duration
 import java.time.Instant
 import java.util.concurrent.CountDownLatch
@@ -316,6 +331,201 @@ class ConnectionPoolManagerTest {
         pool.activeConnections shouldBe 0
         manager.reapRetiring() shouldBe ReapOutcome(drained = 1, hardClosed = 0)
         pool.isClosed shouldBe true
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["H2", "DUCKDB", "SQLITE"])
+    fun `a bound row whose file now resolves outside every root does not build a pool - per in-process form`(dialectName: String) {
+        // #204 L4: the roots check is a property of the BUILD. A row saved while its file sat
+        // under a declared root is refused the moment the row's world moves out from under it —
+        // here by the root list narrowing after the save — with the same catalogued refusal the
+        // update gate throws, and builds again once the row is under a root again. Parameterised
+        // over all three in-process file forms so the plain-pool branch (DuckDB, SQLite) is
+        // proven, not only H2's.
+        //
+        // The file-replaced-by-an-outside-symlink shape (the L5 escape, re-checked here at the
+        // build) is exercised where the driver opens the URL's exact path — DuckDB and SQLite.
+        // H2 derives its own file name: ConnectionInfo.getDatabaseName (h2-2.3.232 :467) appends
+        // `.mv.db` UNCONDITIONALLY, so the URL path `/roots/data` never names the file the
+        // driver opens (`/roots/data.mv.db`) and a symlink ON the URL path is not the file's
+        // escape route for this dialect (see the handback's H2-suffix note).
+        val dialect = Dialect.valueOf(dialectName)
+        val rootsDir = Files.createTempDirectory("dp-roots-l4")
+        val outsideDir = Files.createTempDirectory("dp-outside-l4")
+        val dbFile =
+            rootsDir.resolve(
+                when (dialect) {
+                    Dialect.H2 -> "data"
+                    Dialect.DUCKDB -> "data.duckdb"
+                    else -> "data.db"
+                },
+            )
+        val datasource = fileRow(dialect, dbFile)
+        val fileRoots = DatasourceFileRoots(listOf(rootsDir))
+        val manager =
+            ConnectionPoolManager(poolFactory = { ds ->
+                ConnectionPoolManager.buildHikariPool(ds, fileRoots = fileRoots)
+            })
+
+        fun refusedAssertion(thrown: DatapipelinesException) {
+            assertAll(
+                { thrown.code shouldBe DatasourceErrorCodes.WORKSPACE_FORBIDDEN },
+                { thrown.message.orEmpty() shouldContain "file root" },
+                // Non-vacuity: the refusal names the rule, never the outside path's component.
+                { thrown.message.orEmpty() shouldNotContain "secret.db" },
+            )
+        }
+
+        try {
+            // The admitted half: a real file under the root builds.
+            manager.poolFor(datasource)
+            manager.hasPool(datasource.name) shouldBe true
+            manager.retire(datasource.name) shouldBe true
+            manager.reapRetiring() shouldBe ReapOutcome(drained = 1, hardClosed = 0)
+
+            // (1) The root list narrowed after the row was saved — every form refuses.
+            val narrowedRoots = DatasourceFileRoots(listOf(Files.createTempDirectory("dp-roots-l4-narrow")))
+            val narrowed =
+                ConnectionPoolManager(poolFactory = { ds ->
+                    ConnectionPoolManager.buildHikariPool(ds, fileRoots = narrowedRoots)
+                })
+            try {
+                refusedAssertion(shouldThrow { narrowed.poolFor(datasource) })
+                narrowed.hasPool(datasource.name) shouldBe false // the map has no entry for it
+            } finally {
+                narrowed.close()
+            }
+
+            // (2) The driver's own file replaced by a symlink aimed outside every root.
+            if (dialect != Dialect.H2) {
+                Files.delete(dbFile)
+                val outsideTarget = outsideDir.resolve("secret.db").also { it.toFile().writeText("x") }
+                Files.createSymbolicLink(dbFile, outsideTarget)
+                refusedAssertion(shouldThrow { manager.poolFor(datasource) })
+                manager.hasPool(datasource.name) shouldBe false
+                Files.delete(dbFile)
+            }
+
+            // The row's world restored (its root re-declared; the symlink gone): builds again.
+            manager.poolFor(datasource)
+            manager.hasPool(datasource.name) shouldBe true
+        } finally {
+            manager.close()
+        }
+    }
+
+    /** A credential-less file-backed row — the shape a super admin registers for an embedded engine. */
+    private fun fileRow(
+        dialect: Dialect,
+        dbFile: Path,
+    ) = Datasource(
+        name = "l4_${dialect.wire.lowercase()}",
+        displayName = "L4 file row",
+        dialect = dialect,
+        jdbcUrl =
+            when (dialect) {
+                Dialect.H2 -> "jdbc:h2:file:$dbFile"
+                Dialect.DUCKDB -> "jdbc:duckdb:$dbFile"
+                else -> "jdbc:sqlite:$dbFile"
+            },
+        username = null,
+        credentialKind = CredentialKind.NONE,
+        secret = null,
+        properties = DatasourceProperties(),
+    )
+
+    @Test
+    fun `a rotated restricted password is repaired at the next build - the pool is evicted and rebuilt, not leaked`() {
+        // #204 L2: a file database's restricted password rotated by ANOTHER builder (a second
+        // instance, a restore) leaves the warm connections working but every post-build
+        // creation failing with H2's 28000. The failing lease must evict the pool so the next
+        // acquisition rebuilds it through build — whose bootstrap re-rotates the password —
+        // and the evicted pool's connections must be closed, not leaked.
+        //
+        // Growth is forced by softEvict: it retires the pool's one warm connection, so the next
+        // lease asks Hikari to CREATE — exactly the post-build creation path a maxLifetime
+        // replacement rides in production. The tiny connectionTimeout keeps the failing borrow
+        // bounded; HikariCP 6.3.3's createTimeoutException copies the driver's SQLState onto
+        // the timeout exception and chains it via nextException, which is what makes the 28000
+        // observable here at all.
+        val scratch = Files.createTempDirectory("dp-l2-pool")
+        val dbFile = scratch.resolve("rotate-l2") // no suffix: H2 appends .mv.db (ConnectionInfo :467)
+        val datasource =
+            Datasource(
+                name = "l2_rotate",
+                displayName = "L2 rotate",
+                dialect = Dialect.H2,
+                jdbcUrl = "jdbc:h2:file:$dbFile",
+                username = null,
+                credentialKind = CredentialKind.NONE,
+                secret = null,
+                properties =
+                    DatasourceProperties(
+                        hikari =
+                            mapOf(
+                                "maximumPoolSize" to 1,
+                                "minimumIdle" to 1,
+                                "connectionTimeout" to 500,
+                            ),
+                    ),
+            )
+        lateinit var manager: ConnectionPoolManager
+        manager =
+            ConnectionPoolManager(poolFactory = { ds ->
+                // The production registry's exact wiring (DefaultDatasourceRegistry's factory).
+                ConnectionPoolManager.buildHikariPool(
+                    ds,
+                    onRestrictedAuthFailure = { manager.retire(ds.name) },
+                )
+            })
+
+        try {
+            val first = manager.poolFor(datasource) as HikariConnectionPool
+            first.leaseConnection().close() // the warm connection, authenticated with generation 1's password
+
+            // An outside builder rotates the restricted user's password out from under the pool.
+            rotateRestrictedPassword(dbFile, "rotated-by-outsider")
+
+            first.softEvict() // the warm connection is gone; the next lease forces a CREATE
+            val failed = shouldThrow<SQLException> { first.leaseConnection() }
+            // The observed failure, recorded: Hikari's timeout exception carrying H2's 28000
+            // (the pinned createTimeoutException copies sqlState/errorCode from the failed
+            // create and chains the driver exception via nextException).
+            failed.sqlState shouldBe "28000"
+
+            // The next acquisition: the pool was evicted on the failure, so this REBUILDS.
+            val second = manager.poolFor(datasource) as HikariConnectionPool
+            System.identityHashCode(first) shouldNotBe System.identityHashCode(second)
+            second.leaseConnection().use { connection -> plainSelect(connection) }
+
+            // The evicted generation is closed, not leaked (the security section's assertion).
+            manager.reapRetiring() shouldBe ReapOutcome(drained = 1, hardClosed = 0)
+            first.isClosed shouldBe true
+            manager.hasPool(datasource.name) shouldBe true
+        } finally {
+            manager.close()
+        }
+    }
+
+    /** One plain SELECT — the rebuilt pool's proof of life (extracted: detekt's nesting floor). */
+    private fun plainSelect(connection: Connection) {
+        connection.createStatement().use { statement ->
+            statement.executeQuery("SELECT 1").use { rows -> rows.next() }
+        }
+    }
+
+    /** The outside-builder act: the file's OWNER re-passwords the restricted user. */
+    private fun rotateRestrictedPassword(
+        dbFile: Path,
+        newPassword: String,
+    ) {
+        java.sql.DriverManager.getConnection("jdbc:h2:file:$dbFile", "sa", "").use { owner ->
+            owner.createStatement().use {
+                it.execute(
+                    "ALTER USER ${H2InProcessPool.RESTRICTED_USER} SET PASSWORD '$newPassword'",
+                )
+            }
+        }
     }
 
     private companion object {

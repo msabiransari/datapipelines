@@ -282,10 +282,11 @@ class McpServerAutoConfiguration {
             DatasourcesGetTableStatsTool(introspector, datasources),
             DatasourcesPreviewRowsTool(datasources, sqlRunner, introspector),
             // 107 — the bounded probe, same inline-construction discipline as `sqlRunner`. The
-            // staging MODE rides along so the tempdb scratch check parses like the real tempdb.
+            // staging MODE rides along so the tempdb scratch check parses like the real tempdb;
+            // the timeout ceiling is the node's statement timeout, per dialect (#167).
             SqlProbeTool(
                 datasources,
-                SqlProbe(datasources),
+                SqlProbe(datasources, executorConfig.nodeQueryTimeoutSeconds, executorConfig.nodeQueryTimeoutSecondsByDialect),
                 tempdbMode = environment.getProperty("datapipelines.staging.h2.mode", SqlProbe.DEFAULT_SCRATCH_MODE),
             ),
             ExecutionsListTool(executions),

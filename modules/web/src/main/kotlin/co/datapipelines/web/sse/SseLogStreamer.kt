@@ -1,6 +1,8 @@
 package co.datapipelines.web.sse
 
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.pipeline.PipelineErrorCodes
+import co.datapipelines.web.api.ApiException
 import com.fasterxml.jackson.databind.ObjectMapper
 import org.slf4j.LoggerFactory
 import org.springframework.http.MediaType
@@ -85,9 +87,13 @@ class SseLogStreamer(
      * Emits what the log already holds, then polls for more until the terminal sequence (§6.5
      * step 3) has been served and the stream closes.
      *
-     * A log that never appears (the original died before its first event could be persisted) is
-     * given up on after [GIVE_UP_AFTER_POLLS] ticks; the stream completes without events, which
-     * the client reads as "attach failed — re-execute", exactly the §6.8 guidance.
+     * A log that never appears is given up on after [GIVE_UP_AFTER_POLLS] ticks — but only by a
+     * follow that has served NOTHING (#324): that follow was attached to an original that never
+     * started, its id does not resolve, and the give-up completes the stream with the id-free
+     * `410 result.expired` (`reason: original_not_started`) instead of a silent end. A follow
+     * that HAS served events and then loses its log keeps the old quiet completion (the client
+     * already holds the original's events; the §6.8 "attach failed — re-execute" reading no
+     * longer applies).
      *
      * The subscriber (#230, P4) rides in [FollowState]: every event the follow serves is
      * re-judged first, so an attach made under valid authority cannot outlive it.
@@ -159,7 +165,26 @@ class SseLogStreamer(
             // No log yet (or any more). Only a follow that has served nothing gives up on it.
             if (state.lastSentEventId == 0 && ++state.emptyPolls >= GIVE_UP_AFTER_POLLS) {
                 cancel(emitter)
-                completeQuietly(emitter, executionId)
+                // #324 — a follow that never served an event was attached to an original that
+                // never started: the id does not resolve (there is no row to GET), so the give-up
+                // is the ID-FREE 410 (`reason: original_not_started`), completed with an error
+                // the way `ExecutionStreamLauncher.failBeforeStart` completes — nothing was sent,
+                // so the response is uncommitted. On this base the security chain renders an
+                // emitter completed with an error before any frame as `401 auth.api_key.missing`
+                // instead of the exception's envelope (#404, which also hides failBeforeStart's
+                // 429); the envelope reaches the wire once #404 lands — the unit witness pins the
+                // completion's exception. A follow that HAS served events keeps the quiet
+                // completion below.
+                completeWithErrorQuietly(
+                    emitter,
+                    executionId,
+                    ApiException(
+                        PipelineErrorCodes.Result.EXPIRED,
+                        "The original execution of this idempotency key never started; its id does not " +
+                            "resolve. Re-execute with a fresh Idempotency-Key.",
+                        mapOf("reason" to "original_not_started"),
+                    ),
+                )
             }
             return
         }
@@ -264,6 +289,22 @@ class SseLogStreamer(
             .onFailure { log.debug("SSE log stream for {} did not complete cleanly", executionId, it) }
     }
 
+    /**
+     * [completeQuietly]'s error twin (#324): the completion carries [error] to the servlet
+     * container while the response is still uncommitted — the never-started 410. Until #404 lands
+     * the security chain renders that completion as `401 auth.api_key.missing`, not the
+     * `@ControllerAdvice` envelope; the exception itself is what the unit witness pins.
+     */
+    private fun completeWithErrorQuietly(
+        emitter: SseEmitter,
+        executionId: UUID,
+        error: Exception,
+    ) {
+        follows.remove(emitter)
+        runCatching { emitter.completeWithError(error) }
+            .onFailure { log.debug("SSE log stream for {} did not complete cleanly", executionId, it) }
+    }
+
     private companion object {
         const val NEVER_TIMEOUT = 0L
 
@@ -284,7 +325,12 @@ class SseLogStreamer(
         /** Follow cadence. Sub-second, so a retry watches the original near-live. */
         const val FOLLOW_POLL_MILLIS = 250L
 
-        /** ~15s at the follow cadence: how long a follow waits for a log that never appears. */
+        /**
+         * ~15s at the follow cadence: how long a follow waits for a log that never appears.
+         * #324 — the wait doubles as the idempotent attach's start-window patience (above the
+         * 10 s lifecycle write bound), and the give-up's answer differs by what was served:
+         * nothing → the id-free never-started 410; events → the quiet completion.
+         */
         const val GIVE_UP_AFTER_POLLS = 60
 
         const val PIPELINE_COMPLETED = "pipeline_completed"

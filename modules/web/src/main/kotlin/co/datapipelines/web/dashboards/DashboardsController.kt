@@ -238,13 +238,13 @@ class DashboardsController(
         // The name and version for the audit row, read through the caller's lens BEFORE the purge —
         // a sole-draft purge takes the dashboard, so afterwards there is nothing to read (#332).
         val audited = workingForAudit(principal, workspaceId, id)
-        dashboards.purgeDraft(workspaceId, id, IfMatchHeader.required(ifMatch))
+        val purged = dashboards.purgeDraft(workspaceId, id, IfMatchHeader.required(ifMatch))
         LifecycleVerbs.audit(
             audit,
             LifecycleVerbs.DASHBOARD_EVENTS.versionPurged,
             principal,
             workspaceId,
-            auditedDetails(id, audited),
+            auditedDetails(id, audited) + mapOf("scope" to purged.scope),
         )
     }
 
@@ -257,16 +257,22 @@ class DashboardsController(
     ): ApiResponse<Map<String, Any?>> {
         val principal = LifecycleVerbs.requireSession()
         val workspaceId = principal.requireWorkspace().id
+        // The name comes from the pre-verb lensed read; the pointer pair from the verb's own result —
+        // never a re-read after the fact (#372).
         val audited = versionForAudit(principal, workspaceId, id, version)
-        val detail = dashboards.discardVersion(workspaceId, id, version, principal.userId)
+        val moved = dashboards.discardVersion(workspaceId, id, version, principal.userId)
         LifecycleVerbs.audit(
             audit,
             LifecycleVerbs.DASHBOARD_EVENTS.versionDiscarded,
             principal,
             workspaceId,
-            auditedDetails(id, audited, version),
+            auditedDetails(id, audited, version) +
+                mapOf(
+                    "current_version_before" to moved.pointer.before,
+                    "current_version_after" to moved.pointer.after,
+                ),
         )
-        return ApiResponse.of(ArtifactResponses.lifecycleSummary(detail))
+        return ApiResponse.of(ArtifactResponses.lifecycleSummary(moved.detail))
     }
 
     /** §23 — restore DISCARDED version v; the pointer moves only above-current-or-NULL (D60). Session-only. */
@@ -279,15 +285,19 @@ class DashboardsController(
         val principal = LifecycleVerbs.requireSession()
         val workspaceId = principal.requireWorkspace().id
         val audited = versionForAudit(principal, workspaceId, id, version)
-        val detail = dashboards.restoreVersion(workspaceId, id, version)
+        val moved = dashboards.restoreVersion(workspaceId, id, version)
         LifecycleVerbs.audit(
             audit,
             LifecycleVerbs.DASHBOARD_EVENTS.versionRestored,
             principal,
             workspaceId,
-            auditedDetails(id, audited, version),
+            auditedDetails(id, audited, version) +
+                mapOf(
+                    "current_version_before" to moved.pointer.before,
+                    "current_version_after" to moved.pointer.after,
+                ),
         )
-        return ApiResponse.of(ArtifactResponses.lifecycleSummary(detail))
+        return ApiResponse.of(ArtifactResponses.lifecycleSummary(moved.detail))
     }
 
     /** §23 — purge DRAFT version v (drafts only). Session-only; irreversible. */
@@ -301,13 +311,13 @@ class DashboardsController(
         val principal = LifecycleVerbs.requireSession()
         val workspaceId = principal.requireWorkspace().id
         val audited = versionForAudit(principal, workspaceId, id, version)
-        dashboards.purgeVersion(workspaceId, id, version)
+        val purged = dashboards.purgeVersion(workspaceId, id, version)
         LifecycleVerbs.audit(
             audit,
             LifecycleVerbs.DASHBOARD_EVENTS.versionPurged,
             principal,
             workspaceId,
-            auditedDetails(id, audited, version),
+            auditedDetails(id, audited, version) + mapOf("scope" to purged.scope),
         )
     }
 
@@ -321,7 +331,9 @@ class DashboardsController(
         val principal = LifecycleVerbs.requireSession()
         val workspaceId = principal.requireWorkspace().id
         val target = ArtifactHttp.switchTarget(FAMILY, body)
-        val current = dashboards.switchCurrent(workspaceId, id, target)
+        // The name and the pointer pair come from the verb's own result (#372) — the service read the
+        // record for its 404 and answers the pair from the switch statement itself; no read before, none after.
+        val switched = dashboards.switchCurrent(workspaceId, id, target)
         LifecycleVerbs.audit(
             audit,
             LifecycleVerbs.DASHBOARD_EVENTS.currentSwitched,
@@ -329,11 +341,12 @@ class DashboardsController(
             workspaceId,
             mapOf(
                 "dashboard_id" to id.toString(),
-                "dashboard_name" to dashboards.findVersion(workspaceId, lens.viewFor(principal).dashboards, id, current)?.record?.name,
-                "to" to current,
+                "dashboard_name" to switched.name,
+                "from" to switched.pointer.before,
+                "to" to switched.pointer.after,
             ),
         )
-        return ApiResponse.of(mapOf("id" to id.toString(), "current_version" to current))
+        return ApiResponse.of(mapOf("id" to id.toString(), "current_version" to switched.pointer.after))
     }
 
     /** §23 — the entity purge, only when the dashboard's only version is a DRAFT. Session-only. */
@@ -346,13 +359,13 @@ class DashboardsController(
         val principal = LifecycleVerbs.requireSession()
         val workspaceId = principal.requireWorkspace().id
         val audited = workingForAudit(principal, workspaceId, id)
-        dashboards.purgeEntity(workspaceId, id)
+        val purged = dashboards.purgeEntity(workspaceId, id)
         LifecycleVerbs.audit(
             audit,
             LifecycleVerbs.DASHBOARD_EVENTS.entityPurged,
             principal,
             workspaceId,
-            auditedDetails(id, audited),
+            auditedDetails(id, audited) + mapOf("scope" to purged.scope),
         )
     }
 
@@ -401,24 +414,22 @@ class DashboardsController(
         return ApiResponse.of(PagedData(items, Pagination.of(page, size, total.toLong(), items.size)))
     }
 
-    // ---- the audit rows' pre-reads (#332) ----------------------------------------------------------
+    // ---- the audit rows' pre-reads (#332; BODY-FREE since #372's B2) --------------------------------
 
-    /** The working version's (name, number) for an audit row — read through the caller's lens, before the verb. */
+    /** The working version's (name, number) for an audit row — BODY-FREE, [DashboardService.auditIdentity]'s lens rule. */
     private fun workingForAudit(
         principal: AuthenticatedPrincipal,
         workspaceId: UUID,
         id: UUID,
-    ): Pair<String, Int>? =
-        dashboards.findWorking(workspaceId, lens.viewFor(principal).dashboards, id)?.let { it.record.name to it.detail.version }
+    ): Pair<String, Int>? = dashboards.auditIdentity(workspaceId, lens.viewFor(principal).dashboards, id)
 
-    /** A named version's (name, number) — the same lens rule. */
+    /** A named version's (name, number) — BODY-FREE, [DashboardService.auditVersionIdentity]'s lens rule. */
     private fun versionForAudit(
         principal: AuthenticatedPrincipal,
         workspaceId: UUID,
         id: UUID,
         version: Int,
-    ): Pair<String, Int>? =
-        dashboards.findVersion(workspaceId, lens.viewFor(principal).dashboards, id, version)?.let { it.record.name to it.detail.version }
+    ): Pair<String, Int>? = dashboards.auditVersionIdentity(workspaceId, lens.viewFor(principal).dashboards, id, version)
 
     /** The purge row's details: the id, plus the pre-read name and version when the artifact still existed. */
     private fun auditedDetails(

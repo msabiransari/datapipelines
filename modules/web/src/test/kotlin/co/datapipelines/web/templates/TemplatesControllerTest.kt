@@ -23,6 +23,9 @@ import co.datapipelines.web.api.ApiException
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldHaveMaxLength
+import io.kotest.matchers.string.shouldNotContain
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -693,5 +696,59 @@ class TemplatesControllerTest {
                 refusal.details["reason"] shouldBe "malformed_json"
             }
         }
+    }
+
+    /**
+     * #333 reader 3 — the transform test's `input` binds through `TransformBlocks.mapper`. A number where its
+     * `now` is declared a string used to bind as "5"; it is the catalogued `template.contract_invalid`
+     * (`details.rule: wrong_type`, the path, never the value). The evaluate service is a STRICT mock with nothing
+     * stubbed: the refusal comes before it, and a call would fail the case with a different exception.
+     */
+    @Test
+    fun `evaluate refuses an input whose now is a number - the catalogued contract_invalid naming the path, never the value`() {
+        authenticate()
+
+        val refusal =
+            shouldThrow<ApiException> {
+                controller.evaluate("""{"name":"test/xform.jsonata","input":{"rows":[],"now":987654321}}""")
+            }
+
+        refusal.code shouldBe PipelineErrorCodes.Template.CONTRACT_INVALID
+        refusal.details.keys shouldBe setOf("rule", "path")
+        refusal.details["rule"] shouldBe "wrong_type"
+        (refusal.details["path"] as String) shouldContain "now"
+        refusal.message!! shouldNotContain "987654321"
+        refusal.details.values.forEach { (it as String) shouldNotContain "987654321" }
+    }
+
+    @Test
+    fun `evaluate refuses a boolean where the input's now is declared a string`() {
+        authenticate()
+
+        val refusal =
+            shouldThrow<ApiException> {
+                controller.evaluate("""{"name":"test/xform.jsonata","input":{"now":true}}""")
+            }
+
+        refusal.code shouldBe PipelineErrorCodes.Template.CONTRACT_INVALID
+        refusal.details["rule"] shouldBe "wrong_type"
+    }
+
+    @Test
+    fun `evaluate clips what it reflects of an input it cannot bind - a 2 KB unknown key never comes back whole`() {
+        authenticate()
+        val garbage = "g".repeat(2_048)
+
+        val refusal =
+            shouldThrow<ApiException> {
+                controller.evaluate("""{"name":"test/xform.jsonata","input":{"rows":[],"$garbage":1}}""")
+            }
+
+        refusal.code shouldBe PipelineErrorCodes.Template.CONTRACT_INVALID
+        refusal.details["rule"] shouldBe "unknown_field"
+        refusal.message!! shouldNotContain garbage
+        // The fixed prose around the clipped Jackson text, plus the 160-character clip and its ellipsis.
+        refusal.message!! shouldHaveMaxLength 160 + 1 + "The 'input' object does not bind: .".length
+        (refusal.details["path"] as String) shouldHaveMaxLength 160 + 1
     }
 }

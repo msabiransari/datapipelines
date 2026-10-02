@@ -1,9 +1,9 @@
 # MCP Server Specification
 
-**Status:** v1.67 (frozen contract — additive-only changes after this point)
+**Status:** v1.69 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [REST API spec](rest-api.md), [Auth spec](auth.md), [Templates spec](templates.md)
-**Last updated:** 2026-09-29
+**Last updated:** 2026-10-02
 
 ---
 
@@ -423,6 +423,15 @@ The whole pipeline is validated before it is stored — no invalid pipeline ever
 
 Update an existing pipeline by writing its DRAFT (versioning §3.2/§7, since 035).
 
+The tool's shipped description (the one block of §6.2 with no `inputSchema` — the input is the prose below; `McpToolSurfaceSpecDriftTest` pins the string, #235):
+
+```json
+{
+  "name": "pipelines_update",
+  "description": "Update an existing pipeline by writing its DRAFT — the first update after a release creates the draft (copy-on-write); later updates overwrite that same draft in place. Requires expected_hash: the body_hash you read (pipelines_get, or a previous update's result) for the version you based your edit on. The result carries status='DRAFT' — your work is NOT released; a human releases it from the UI. On pipeline.version.conflict someone modified it after you loaded it: re-read, rebase, retry; never retry blindly. The body takes the same node types as pipelines_create, CALCULATOR included (calculators_list has the kinds); no extra arguments are needed for one. The same entry-point checks apply: a body naming a table this key never datasources_get_columns'd is refused pipeline.validation.table_not_learned, and a raw-date door is refused pipeline.validation.door_unacknowledged until door_acknowledged: true."
+}
+```
+
 Same input as `pipelines_create` plus required `id` and required `expected_hash` — the `body_hash` of the version this edit is based on (`pipelines_get` or the previous update's result). The first update after a release creates the draft (copy-on-write); later updates overwrite that same draft in place. Same save-time validation applies — **and the same 139 entry-point checks**: a body naming a table this key never read the columns of is refused `pipeline.validation.table_not_learned`, and a raw-date door is refused `pipeline.validation.door_unacknowledged` until `door_acknowledged: true` (an update can change a body's parameters, unlike its name, so the door check belongs here too). That input includes the optional `checks[]` (§6.2.4's `checks` property, pipeline-contract §3.3) — the release checks the SERVER runs; run them with `pipelines_run_checks` (§6.2.42), and only the server's own run produces `observed`.
 
 Returns: the draft version — `version`, `status: "DRAFT"`, `body_hash` (carry this into the next write), `current_version` (the unmoved released pointer), and the `draft` pointer. **The update does NOT release**: an agent leaves the draft for a human to review and release from the UI (versioning D4). On `pipeline.version.conflict` someone else modified it after you loaded it — re-read, rebase, retry; never retry blindly.
@@ -677,7 +686,7 @@ Fetch metadata for a specific execution (no rows).
 ```json
 {
   "name": "executions_get",
-  "description": "Get metadata for a specific execution: status, timing, node_stats, parameters used. On a FAILED execution, error carries the full failure record: code, message, correlation_id, node context (datasource, dialect, pinned template), the rendered SQL (:name form, no bound values) and the exception chain with stack frames — read error.code first, then error.exception.caused_by (root cause LAST), then error.sql; quote error.correlation_id when escalating. To get the result rows, use executions_get_result.",
+  "description": "Get metadata for a specific execution: status, timing, node_stats, parameters used. On a FAILED execution, error carries the full failure record: code, message, correlation_id, node context (datasource, dialect, pinned template), the rendered SQL (:name form, no bound values) and the exception chain with stack frames — read error.code first, then error.exception.caused_by (root cause LAST), then error.sql; quote error.correlation_id when escalating. To get the result rows, use executions_get_result. Visible for YOUR OWN runs (this key's own), every run a schedule fired, or any run of the workspace when the key's role holds execution.read_all; another member's own interactive execution is not found.",
   "inputSchema": {
     "type": "object",
     "required": ["execution_id"],
@@ -725,7 +734,7 @@ Fetch result rows (paginated) for a completed execution.
 ```json
 {
   "name": "executions_get_result",
-  "description": "Fetch result rows for a completed execution, paginated via offset+limit. Returns schema + rows + pagination metadata. Works for ANY completed execution that produced a caller result, of any size, until its TTL expires (default 300s, set at execution time). Order is stable across pages. Reading pages does NOT extend the TTL — after expiry the result is gone and the pipeline must be re-run.",
+  "description": "Fetch result rows for a completed execution, paginated via offset+limit. Returns schema + rows + pagination metadata. Works for ANY completed execution that produced a caller result, of any size, until its TTL expires (default 300s, set at execution time). Order is stable across pages. Reading pages does NOT extend the TTL — after expiry the result is gone and the pipeline must be re-run. Readable for YOUR OWN runs (this key's own), every run a schedule fired, or any run of the workspace when the key's role holds execution.read_all; another member's own interactive execution is not found.",
   "inputSchema": {
     "type": "object",
     "required": ["execution_id"],
@@ -909,7 +918,7 @@ Runs ONE pipeline node's rendered SQL against its own datasource — a debug que
 ```json
 {
   "name": "pipelines_execute_node",
-  "description": "Runs ONE pipeline node's rendered SQL against its own datasource and returns up to 50 decoded rows — a debug query for testing a node in isolation, NOT a pipeline execution. DML and DDL nodes execute FOR REAL against the datasource, leaving no execution history or trace. No ancestors run and no tempdb exists: a node whose source is tempdb is refused. Parameters bind through the pipeline's declarations; unsupplied required parameters fall back to sample values and the response names them in sampled_parameters. Absent version runs the DRAFT if one exists, else the current released version; the response states which version and status ran. A draft whose pinned draft template was updated after this key's last templates_render of it is refused pipeline.execution.template_unrendered — render, then run.",
+  "description": "Runs ONE pipeline node's rendered SQL against its own datasource and returns up to 50 decoded rows — a debug query for testing a node in isolation, NOT a pipeline execution. DML and DDL nodes execute FOR REAL against the datasource, leaving no execution history or trace. No ancestors run and no tempdb exists: a node whose source is tempdb is refused, and so is a TRANSFORM node (use templates_evaluate). Parameters bind through the pipeline's declarations; unsupplied required parameters fall back to sample values and the response names them in sampled_parameters. Absent version runs the DRAFT if one exists, else the current released version; the response states which version and status ran. A draft whose pinned draft template was updated after this key's last templates_render of it is refused pipeline.execution.template_unrendered — render, then run.",
   "inputSchema": {
     "type": "object",
     "required": ["pipeline_id", "node_id"],
@@ -940,7 +949,7 @@ Which pipelines pin a given template version — the reverse arrow of a node's `
 ```json
 {
   "name": "templates_used_by",
-  "description": "Which pipelines, parameter sets AND visualizations pin a given template version in their working version (the draft when unreleased edits exist, else the latest released). Returns one reference per node — pipeline name and id, node id, and the pipeline version carrying the pin — plus the distinct pipeline count, one row per pinning parameter set (#194) and one per pinning visualization (#320: its `transform.template` pin — visualization name and id, the visualization version carrying the pin and its status). Use it before editing or retiring a template version to see who you would affect. It does not answer 'is it safe to delete' (that scan includes historical pipeline versions and lives in the delete refusal), and it never changes anything. A promoter's key sees only RELEASED templates newer than the promotion target's (the promoter lens); every other template resolves as not-found, and pinning pipelines, sets or visualizations it cannot see are left out of the answer.",
+  "description": "Which pipelines, parameter sets AND visualizations pin a given template version in their working version (the draft when unreleased edits exist, else the latest released). Returns one reference per node — pipeline name and id, node id, and the pipeline version carrying the pin — plus the distinct pipeline count, and one row per pinning parameter set (#194: set name and id, the parameter, the set version carrying the pin), and one row per pinning visualization (#320: its `transform.template` pin — visualization name and id, the visualization version carrying the pin and its status). Use it before editing or retiring a template version to see who you would affect. It does not answer 'is it safe to delete' (that scan includes historical pipeline versions and lives in the delete refusal), and it never changes anything. A promoter's key sees only RELEASED templates newer than the promotion target's (the promoter lens); every other template resolves as not-found, and pinning pipelines, sets or visualizations it cannot see are left out of the answer.",
   "inputSchema": {
     "type": "object",
     "required": ["id", "version"],
@@ -1012,7 +1021,7 @@ The published endpoints of the key's pinned workspace.
 ```json
 {
   "name": "endpoints_list",
-  "description": "List the published endpoints of the key's workspace: path, pipeline name, timeout, whether it is enabled, and the path variables it binds. A disabled endpoint answers 404 exactly like an unpublished one, so this listing is the only way to see that it exists. A promoter's key lists only the endpoints of pipelines it can see (the promoter lens: released, newer than the promotion target's).",
+  "description": "List the published endpoints of the key's workspace: path, pipeline name, timeout, whether it is enabled, and the path variables it binds. A disabled endpoint answers 404 exactly like an unpublished one, so this listing is the only way to see that it exists. A promoter's key lists only the endpoints of pipelines it can see (the promoter lens: released, newer than the promotion target's). Legacy rows (#274) are listed last with \"legacy\": true and their \"reason\": a stored path saved before the current grammar that is retired — never served, never a conflict partner; endpoints_delete removes one.",
   "inputSchema": {
     "type": "object",
     "additionalProperties": false,
@@ -1056,7 +1065,7 @@ Unpublish an endpoint. The pipeline is untouched; key bindings on that node are 
 ```json
 {
   "name": "endpoints_delete",
-  "description": "Unpublish an endpoint by its path. The pipeline is untouched — only the URL stops answering. Key bindings on that path are NOT removed: they describe a node of the tree, which may still carry other endpoints beneath it.",
+  "description": "Unpublish an endpoint by its path. The pipeline is untouched — only the URL stops answering. Key bindings on that path are NOT removed: they describe a node of the tree, which may still carry other endpoints beneath it. This is also the fix for a LEGACY row (#274) — a retired path listed with \"legacy\": true never serves under the current grammar, and deleting it removes the row.",
   "inputSchema": {
     "type": "object",
     "required": [
@@ -1305,7 +1314,7 @@ Hard-delete a template that has NEVER been released — the one lifecycle verb a
 ```json
 {
   "name": "templates_purge_draft",
-  "description": "Hard-delete a template that has NEVER been released: the only version is a DRAFT, created by this key's user, and pinned by nothing — no pipeline version anywhere, draft or released, no parameter-set version either, and no visualization version (#320), may reference any version of it (the refusal names the pinning pipelines, sets or visualizations your view admits; templates_used_by answers the working-version scan if you need to inspect them). The sole-draft purge takes the entity row with it. A template holding any RELEASED or discarded version, another user's draft, or a pinned draft is refused — humans release and humans discard releases; an agent's own draft that should not exist is what this verb removes. Mutating.",
+  "description": "Hard-delete a template that has NEVER been released: the only version is a DRAFT, created by this key's user, and pinned by nothing — no pipeline version anywhere, draft or released, no parameter-set version either (#194), and no visualization version (#320) may reference any version of it (the refusal names the pinning pipelines, sets or visualizations your view admits; templates_used_by answers the working-version scan if you need to inspect them). The sole-draft purge takes the entity row with it. A template holding any RELEASED or discarded version, another user's draft, or a pinned draft is refused — humans release and humans discard releases; an agent's own draft that should not exist is what this verb removes. Mutating.",
   "inputSchema": {
     "type": "object",
     "required": ["id"],
@@ -1381,15 +1390,15 @@ Run ONE read-only SELECT/WITH against a datasource and get rows, the canonical s
         }
       },
       "limit": {"type": "integer", "default": 50, "minimum": 1, "maximum": 500},
-      "timeout_seconds": {"type": "integer", "default": 10, "minimum": 1, "maximum": 30}
+      "timeout_seconds": {"type": "integer", "default": 10, "minimum": 1}
     }
   }
 }
 ```
 
-Returns: `{columns: [{name, type, precision?, scale?, nullable?}], warnings, rows, row_count_returned, truncated, wall_ms, plan?}` — values wire-encoded per the result-cursor rules, exactly like `datasources_preview_rows` (§6.2.19). `plan` carries `{scan?, estimated_rows?, raw, partitions_scanned?, partitions_total?}`; on LAKE the partitions pair is DuckDB's `Scanning Files: x/y` marker, null when no static file filter pruned (never `y/y` — a filter selecting every file is optimized away entirely). `limit` defaults to 50 and clamps to 500; `timeout_seconds` defaults to 10 and clamps to 30.
+Returns: `{columns: [{name, type, precision?, scale?, nullable?}], warnings, rows, row_count_returned, truncated, wall_ms, timeout_seconds, plan?}` — values wire-encoded per the result-cursor rules, exactly like `datasources_preview_rows` (§6.2.19). `plan` carries `{scan?, estimated_rows?, raw, partitions_scanned?, partitions_total?}`; on LAKE the partitions pair is DuckDB's `Scanning Files: x/y` marker, null when no static file filter pruned (never `y/y` — a filter selecting every file is optimized away entirely). `limit` defaults to 50 and clamps to 500; `timeout_seconds` defaults to 10 and is clamped to the instance's node query timeout for the datasource's dialect ([Configuration §3.2](configuration.md#32-executor) `node-query-timeout-seconds-by-dialect.<dialect>` when set, LAKE shipping 180; else `node-query-timeout-seconds`, default 60 s; #167) — a probe may run as long as a node on that dialect, never longer than the dialect's default node budget (a datasource's own `query_timeout_seconds` is not consulted — [Datasources §7D](datasources.md)) — and the payload's `timeout_seconds` is the timeout the statement actually ran under. The schema carries no `maximum` for it because the ceiling is operator configuration, not a constant.
 
-Refusals split into two families. **Argument faults** (JSON-RPC `-32602`, nothing leased, nothing ran): the statement is not a single SELECT/WITH or carries a denylisted verb (the classifier is a conservative token scan — false positives err toward refusal, and a side-effecting function call it cannot see through is NOT caught; the datasource's own DB-user privileges remain the last line), or a `parameters` entry is missing/mistyped — since #265 including a value that is not its declared type's exact wire form: nothing is trimmed, booleans are exactly `true`/`false`, numeric text over 1024 digits is refused before parsing, and the static refusal names the parameter, never the value text (datasources §7D; the shared coercion every parameter surface judges by). **Run failures** (the catalogued `pipeline.node.query_execution_failed` `isError` envelope — a timeout under `pipeline.node.query_timeout`, Pipeline Contract §13.4): a timeout, whose `details` carry `reason: "timeout"`, `wall_ms` and the pre-captured plan — the plan that explains the timeout survives it — or a driver refusal, carrying the bounded driver message. A driver refusal whose SQLSTATE is permission-denied (123 §A — and since 186, H2's `90040` "Admin rights are required", the shape a de-privileged in-process session answers with) is instead **`403 datasource.table_forbidden`** — a referenced table exists but this datasource's credentials cannot read it. `tempdb` uses the scratch check below; the real staged tables exist only inside a full execution. The `sql` argument is audited as `sql_sha256` + `sql_length`, never verbatim (§14).
+Refusals split into two families. **Argument faults** (JSON-RPC `-32602`, nothing leased, nothing ran): the statement is not a single SELECT/WITH or carries a denylisted verb (the classifier is a conservative token scan — false positives err toward refusal, and a side-effecting function call it cannot see through is NOT caught; the datasource's own DB-user privileges remain the last line), or a `parameters` entry is missing/mistyped — since #265 including a value that is not its declared type's exact wire form: nothing is trimmed, booleans are exactly `true`/`false`, numeric text over 1024 digits is refused before parsing, and the static refusal names the parameter, never the value text (datasources §7D; the shared coercion every parameter surface judges by). **Run failures** (the catalogued `pipeline.node.query_execution_failed` `isError` envelope — a timeout under `pipeline.node.query_timeout`, Pipeline Contract §13.4): a timeout, whose `details` carry `reason: "timeout"`, `wall_ms`, `timeout_seconds` (the timeout it ran under, #167) and the pre-captured plan — the plan that explains the timeout survives it — or a driver refusal, carrying the bounded driver message. A driver refusal whose SQLSTATE is permission-denied (123 §A — and since 186, H2's `90040` "Admin rights are required", the shape a de-privileged in-process session answers with) is instead **`403 datasource.table_forbidden`** — a referenced table exists but this datasource's credentials cannot read it. `tempdb` uses the scratch check below; the real staged tables exist only inside a full execution. The `sql` argument is audited as `sql_sha256` + `sql_length`, never verbatim (§14).
 
 **The `tempdb` scratch check (2026-09-11; contract corrected 2026-09-16, #119; scratch de-privileged 2026-09-21, #186).** `name: "tempdb"` no longer refuses. The statement is PREPARED against a FRESH, EMPTY in-memory H2 opened in the staging engine's own `MODE` and lower-folding (the URL shape `StagingFactory` builds, minus the execution) — no registry, no lease, no visibility gate, nothing to read. The scratch session is a grantless NON-admin user (staging §9.5's two-phase open, shared as `H2RestrictedSession`): the classifier admits only SELECT/WITH, but a SELECT can still call host-reaching functions, and those (`FILE_READ`, `CSVREAD`, …) are refused by the engine with SQLState `90040` — mapped like any permission-denied refusal to `datasource.table_forbidden`, never a 500, and the file's content is never in the answer. The payload always carries `check: "syntax_and_names"` (the check attempted), `engine`, and **`validation_status`**, which says how far the engine got. **`"incomplete"`** — H2 reported a missing table (`42102`/`42103`/`42104`): `{"check", "engine", "validation_status": "incomplete", "parsed": null, "missing_table": "<the first staged table H2 could not find>", "wall_ms", "note"}`. H2 stops preparing at the first table it cannot resolve, so nothing after it has been checked — measured on the pinned 2.3.232: `SELECT a.id FROM absent_a a FULL OUTER JOIN absent_b b ON a.id = b.id` reports `absent_a` on the empty scratch and is a `42000` syntax error at `OUTER` once both tables exist (`SqlProbeH2Test`); an acceptance run had matched the SQL hash of a "passing" probe to its subsequently failing execution. `parsed` is deliberately `null`, not omitted: the key keeps its place and the value withdraws the affirmative the pre-#119 payload made (`parsed: true`, "the SQL is sound"). The note names the two ways to finish the check — restate the suspect construct over typed, aliased `VALUES` inputs so it executes on the scratch (validates the construct, not the real column types or data), or use `pipelines_execute` to run the DAG with its real staged inputs, which validates against the real schema at the cost of a run (`pipelines_execute_node` cannot read tempdb or reuse staged tables from an earlier execution); `templates_render` checks what the template emits, not whether it runs. **`"executed"`** — the statement was self-contained (a `VALUES` spine, a constant): `parsed: true` plus the ordinary probe payload above and a note that this validates the statement as written, not other parameter values or the real staged inputs. **Anything else** → the catalogued `pipeline.node.query_execution_failed` with H2's message — never disguised as incomplete. The case that motivated the check: an agent's caller node died on `Column "column1" not found` (H2 names `VALUES` columns `C1…`) after five source nodes ran green — a full DAG run to learn one H2 spelling. Parameters bind exactly as in a real probe; the classifier still admits only one SELECT/WITH; the scratch never creates a missing table from a guessed shape and never reads another execution's tempdb. Compatibility: no tool name, argument or count changed; `parsed` became nullable on the incomplete branch and `validation_status` was added — no typed consumer of the payload exists in this repository (the field is read by agents, not code), and this paragraph is the contract.
 
@@ -1785,6 +1794,7 @@ List the key's pinned workspace's parameter sets, or browse ONE level of the nam
 ```json
 {
   "name": "parameter_sets_list",
+  "description": "List the parameter sets of the key's pinned workspace, or BROWSE one level of the name tree. Parameter sets are versioned definitions of form controls (selectors, inputs) that a client evaluates server-side; every row carries the id you pass to the other parameter_sets_* tools. Names are FOLDER PATHS (acme/sales/region_filters): pass prefix to browse one level — prefix:\"\" lists the roots, prefix:\"acme\" what is directly under acme — and the response separates folders from sets at that level. A promoter's key sees only RELEASED sets newer than the promotion target's (the promoter lens); every other set is absent for it.",
   "inputSchema": {
                   "type": "object",
                   "properties": {
@@ -1804,6 +1814,7 @@ Read one set by id: the WORKING version's full §3 document (every parameter's t
 ```json
 {
   "name": "parameter_sets_get",
+  "description": "Read one parameter set by ID: the WORKING version's full §3 document (every parameter with its type, kind, cardinality, source, depends_on, constraints and presentation), plus the lifecycle state — version and status name the returned row (the DRAFT when one exists, else the current release), current_version names the latest release, and body_hash is what an update's expected_hash carries. A set of another workspace — or one the promoter lens hides — answers not-found, never a permission error. Nothing is evaluated here; parameter_sets_evaluate runs one.",
   "inputSchema": {
                   "type": "object",
                   "required": ["id"],
@@ -1824,6 +1835,7 @@ Create a parameter set; version 1 lands DRAFT (a human releases it; no tool rele
 ```json
 {
   "name": "parameter_sets_create",
+  "description": "Create a parameter set: version 1 lands as a DRAFT (a human releases it; no tool releases anything). The document is validated in FULL at save — including a metadata run of every source template against its datasource — so a set whose selector cannot be proven is refused, not stored. A NEW top-level folder is refused until you confirm it: reuse an existing root, or ask the person first and then pass confirm_new_root: true. Before creating a SELECT with cardinality MULTI and no presentation.control, ASK the person how it should render (dropdown, checkboxes or list) and set presentation.control — a MULTI without a hint is refused by this rule's ask-first discipline and renders as a dropdown by default everywhere else. Returns the created set with its id, which the other tools take.",
   "inputSchema": {
                   "type": "object",
                   "required": ["name", "display_name", "parameters"],
@@ -1852,6 +1864,7 @@ Edit a set by id: the first change after a release opens a DRAFT (copy-on-write)
 ```json
 {
   "name": "parameter_sets_update",
+  "description": "Edit a parameter set by ID: the first change after a release opens a DRAFT (copy-on-write); later updates overwrite that same draft in place. Requires expected_hash: the body_hash you read from parameter_sets_get (or the previous update's result) for the version this edit is based on — a mismatch is a 409 conflict; re-read and rebase. The document is validated in full, and steps 5–6 (the source dry run and metadata execution) run only when the body actually changed. A set is never renamed: a document naming another set is refused.",
   "inputSchema": {
                   "type": "object",
                   "required": ["id", "expected_hash", "name", "display_name", "parameters"],
@@ -1877,6 +1890,7 @@ Evaluate a set by id (§6.2's tool face of the record's §5): submit EVERY param
 ```json
 {
   "name": "parameter_sets_evaluate",
+  "description": "Evaluate a parameter set by ID: submit EVERY parameter's current value (wire-encoded for its type, a MULTI as an array) and receive the WHOLE set re-rendered — every parameter's options, resolved value, origin, computed_default and reset flag, plus values, the consumer payload. The first render sends selections:{} and the server initialises the form. There is no client dependency logic: a stale child walks the server's selection priority (never an error — reset:true says so). The version resolves to the SERVED one unless you pass version; a DRAFT may be evaluated by its number — but a draft whose pinned DRAFT template changed after this key's last templates_render of it is refused parameter.evaluate.template_unrendered (render first, then evaluate). An unknown selections key refuses the whole request.",
   "inputSchema": {
                   "type": "object",
                   "required": ["id"],
@@ -1903,6 +1917,7 @@ Hard-delete a set's DRAFT by id (versioning §5.4): the draft row is deleted, ne
 ```json
 {
   "name": "parameter_sets_purge_draft",
+  "description": "Hard-delete a parameter set's DRAFT by ID (versioning §5.4): the draft row is deleted, never restorable. Requires expected_hash — the body_hash you read from parameter_sets_get — so you purge the draft you actually looked at. If the draft is the set's ONLY version, the set goes with it. A RELEASED version is never touched here (discard it over REST if that is the intent). A draft a dashboard pins is refused parameter.in_use, naming the dashboards (#320). This is a write: it is audited as one.",
   "inputSchema": {
                   "type": "object",
                   "required": ["id", "expected_hash"],
@@ -1924,6 +1939,7 @@ Browse ONE level of the key's pinned workspace's visualization tree (`prefix` �
 ```json
 {
   "name": "visualizations_list",
+  "description": "List the visualizations of the key's pinned workspace by BROWSING one level of the name tree. A visualization is a versioned chart, table or KPI bound to named inputs, reusable across dashboards; every row carries the id the other visualizations_* tools take, and used_by — the dashboards that pin it (name@version). Names are FOLDER PATHS (acme/visualizations/monthly_revenue): prefix:\"\" lists the roots, prefix:\"acme\" what is directly under acme; folders and visualizations are answered apart. A promoter's key sees only the visualizations a released dashboard its lens admits pins.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -1950,6 +1966,7 @@ Read one visualization by id: the WORKING version's full document (renderer, inp
 ```json
 {
   "name": "visualizations_get",
+  "description": "Read one visualization by ID: the WORKING version's full document (renderer, inputs, transform, config, bindings, presentation, tests) and its lifecycle state — version and status name the returned row (the DRAFT when one exists, else the current release), current_version the latest release, body_hash what an update's expected_hash carries — plus used_by, the dashboards that pin it. A visualization of another workspace, or one the promoter lens hides, answers not-found.",
   "inputSchema": {
     "type": "object",
     "required": [
@@ -1976,6 +1993,7 @@ Create a visualization: version 1 lands as a DRAFT (no tool releases anything), 
 ```json
 {
   "name": "visualizations_create",
+  "description": "Create a visualization: version 1 lands as a DRAFT (a human releases it; no tool releases anything). The document is validated in FULL at save — the renderer's configuration schema, every binding path (it must already exist in config) and column, the transform pin's contract against the inputs, the test cases — and a refusal names every failing path. A NEW top-level folder is refused until you confirm it: reuse an existing root, or ask the person first and then pass confirm_new_root: true. Returns the id the other tools take and the body_hash an update needs.",
   "inputSchema": {
     "type": "object",
     "required": [
@@ -2045,6 +2063,7 @@ The hash-preconditioned draft write (`parameter_sets_update`'s twin): the first 
 ```json
 {
   "name": "visualizations_update",
+  "description": "Edit a visualization by ID: the first change after a release opens a DRAFT (copy-on-write); later updates overwrite that same draft in place. Requires expected_hash — the body_hash you read from visualizations_get (or the previous update's result) for the version this edit is based on; a mismatch is a 409 conflict: re-read and rebase. The whole document is sent and validated in full. A visualization is never renamed: a document naming another is refused.",
   "inputSchema": {
     "type": "object",
     "required": [
@@ -2120,6 +2139,7 @@ Hard-delete a visualization's DRAFT by id (versioning §5.4): never restorable; 
 ```json
 {
   "name": "visualizations_purge_draft",
+  "description": "Hard-delete a visualization's DRAFT by ID (versioning §5.4): the draft row is deleted, never restorable. Requires expected_hash — the draft's body_hash from visualizations_get — so you purge the draft you looked at. If the draft is the ONLY version, the visualization goes with it. A draft a live dashboard pins is refused (visualization.version.pinned, naming the dashboards). A RELEASED version is never touched here. This is a write: it is audited as one.",
   "inputSchema": {
     "type": "object",
     "required": [
@@ -2151,6 +2171,7 @@ Browse ONE level of the dashboard tree, the `visualizations_list` shape. A promo
 ```json
 {
   "name": "dashboards_list",
+  "description": "List the dashboards of the key's pinned workspace by BROWSING one level of the name tree. A dashboard pins released pipelines as sources, maps their results onto pinned visualizations' inputs and lays them out; every row carries the id the other dashboards_* tools take. Names are FOLDER PATHS (acme/dashboards/revenue_overview): prefix:\"\" lists the roots. A promoter's key sees only released dashboards whose every source pipeline its lens admits.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -2177,6 +2198,7 @@ Read one dashboard by id: the WORKING version's full document and lifecycle stat
 ```json
 {
   "name": "dashboards_get",
+  "description": "Read one dashboard by ID: the WORKING version's full document and lifecycle state (version, status, body_hash for an update's expected_hash, current_version), plus dependencies — each pinned visualization's version status and each source pipeline release's status and read_only verdict as they are NOW (a status of null: absent, or not visible to this key) — and last_refresh, the caller's own latest refresh of it (null when they have none). No tool refreshes a dashboard. A dashboard of another workspace, or one the promoter lens hides, answers not-found.",
   "inputSchema": {
     "type": "object",
     "required": [
@@ -2203,6 +2225,7 @@ Create a dashboard: version 1 lands as a DRAFT, validated in FULL against the pi
 ```json
 {
   "name": "dashboards_create",
+  "description": "Create a dashboard: version 1 lands as a DRAFT (a human releases it; no tool releases anything). The document is validated in FULL against the pins as they are now — every source pipeline release RELEASED and read-only with its required parameters bound, every visualization input mapped to a source, one namespace for occurrences, groups, actions, controls and the set's parameters, every occurrence and control placed on the 12-column grid — and a refusal names every failing path. A pinned visualization or parameter set may still be a DRAFT at save. A NEW top-level folder is refused until you confirm it: reuse an existing root, or ask the person first and then pass confirm_new_root: true.",
   "inputSchema": {
     "type": "object",
     "required": [
@@ -2302,6 +2325,7 @@ The hash-preconditioned draft write — `visualizations_update`'s twin.
 ```json
 {
   "name": "dashboards_update",
+  "description": "Edit a dashboard by ID: the first change after a release opens a DRAFT (copy-on-write); later updates overwrite that same draft in place. Requires expected_hash — the body_hash you read from dashboards_get (or the previous update's result); a mismatch is a 409 conflict: re-read and rebase. The whole document is sent and validated in full. A dashboard is never renamed.",
   "inputSchema": {
     "type": "object",
     "required": [
@@ -2407,6 +2431,7 @@ Hard-delete a dashboard's DRAFT by id (versioning §5.4); the sole draft takes t
 ```json
 {
   "name": "dashboards_purge_draft",
+  "description": "Hard-delete a dashboard's DRAFT by ID (versioning §5.4): the draft row is deleted, never restorable. Requires expected_hash — the draft's body_hash from dashboards_get. If the draft is the ONLY version, the dashboard goes with it. A RELEASED version is never touched here. This is a write: it is audited as one.",
   "inputSchema": {
     "type": "object",
     "required": [
@@ -2438,6 +2463,7 @@ Hard-delete a dashboard's DRAFT by id (versioning §5.4); the sole draft takes t
 ```json
 {
   "name": "dashboards_validate",
+  "description": "Validate a dashboard by ID against its dependencies as they are NOW, without writing anything: the WORKING version (the draft, else the current release) is checked in full, and the answer is the verdict — valid, and every failure with its code, path and message. Run it after the pipelines, the parameter set or the visualizations a draft pins have changed, before asking a person to release. An authoring verb: a promoter's key is refused.",
   "inputSchema": {
     "type": "object",
     "required": [
@@ -2464,6 +2490,7 @@ Open a test session on a visualization's WORKING version (the draft when one exi
 ```json
 {
   "name": "visualizations_test_start",
+  "description": "Start a test session for a visualization by ID, on its WORKING version (the draft when one exists). Returns preview_url — open it in a browser: it serves the visualization's saved test fixtures through the real renderer, with no login (the token inside the URL is the only credential; it is shown once and dies when you submit or at expires_at) — plus the case names you must give verdicts for and expires_at. Check every case in the page, then call visualizations_test_submit with the SAME key. Editing the visualization voids the session.",
   "inputSchema": {
     "type": "object",
     "required": [
@@ -2490,6 +2517,7 @@ Complete a session with per-case verdicts — the REST `POST /api/v1/visualizati
 ```json
 {
   "name": "visualizations_test_submit",
+  "description": "Submit the verdicts of a test session started with visualizations_test_start — with the SAME key that started it. Give every case a verdict (green or red, optional notes): a case without one makes the run INCOMPLETE. The server re-runs its own mechanical test now; the run is GREEN only when every verdict is green AND that test passes. A GREEN answer carries upload: {url, header, token, expires_at} — POST one PNG or WebP screenshot (at most 4 MiB, raw bytes) to url with the token in that header, once, from your browser or HTTP client. No tool releases: a person releases the visualization in the UI after review.",
   "inputSchema": {
     "type": "object",
     "required": [
@@ -3089,6 +3117,8 @@ the audit green over the exported set.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-02 | v1.69 | 167 (#167) the probe's timeout ceiling follows the node's | **§6.2.34 `sql_probe`: `timeout_seconds` is clamped to the instance's node query timeout for the datasource's dialect** (`node-query-timeout-seconds-by-dialect.<dialect>` when set, else `node-query-timeout-seconds` — Configuration §3.2), no longer to a static 30 s: an acceptance run's verification probe over the lake table timed out at 30 s while the same scan completed as a node. The `inputSchema` drops `"maximum": 30` for `timeout_seconds` (the ceiling is configuration, so a static schema cannot state it; `minimum` 1 and `default` 10 unchanged, drift-pinned as before). The success payload gains **`timeout_seconds`** (the timeout the statement ran under) and a timeout's `details` carry it too. A request above the ceiling is still clamped, never refused. No tool, argument name, count or permission changed ([Datasources §7D](datasources.md#7d-the-sql-probe)). |
+| 2026-10-02 | v1.68 | 235 (#235) the drift test pins every tool's description | **Additive, no surface change.** 19 blocks gain their top-level `description` — every `parameter_sets_*` (6), `visualizations_*` (5), `dashboards_*` (6) and `visualizations_test_*` (2) block, the verbatim shipped string; the drift test now pins descriptions (it compared `inputSchema` only). Seven stale descriptions are refreshed to the shipped string (the code was right, the blocks predate #194/#274/#320 and the visibility and TRANSFORM-node refusals): `endpoints_delete`, `endpoints_list`, `executions_get`, `executions_get_result`, `pipelines_execute_node`, `templates_purge_draft`, `templates_used_by`. **§6.2.5 `pipelines_update`** (input documented in prose) gains a description-only block so its string is pinned too. No tool added or removed: **61 stays 61**, permissions and every `inputSchema` unchanged. |
 | 2026-10-01 | v1.67 | L4b (#353) the visualization test tools | **§6.1: 59 → 61 tools** — `visualizations_test_start` and `visualizations_test_submit` on `visualization.update` (both mutating): the start answers `preview_url` (the preview capability inside it, shown once), the cases and the deadline; the submit takes per-case verdicts, notes and the closed environment set through the one reader REST uses and answers the status, the mechanical report and — GREEN only — the single-use screenshot upload (url, header, token), which the agent POSTs over HTTP: an `mcp` key reaches no REST route. New §6.2.61–62; §5.1's static count 59 → 61. The manual's `dashboards` guide gains the test loop. |
 | 2026-09-29 | v1.66 | L2 (#10) the dashboard runtime — renumbered at merge after 320's v1.64 and 264's v1.65 | §6.2.56 `dashboards_get`: `last_refresh` is live — the CALLER's own latest refresh of the dashboard, `{refresh_id, dashboard_version, status, started_at, finished_at}`, or `null` when they have none (it was always `null` until the runtime shipped). Read through `DashboardRefreshHistory`, which asks by the caller's user id and no other: nobody else's refresh appears, whatever their role, and no selection is returned. No tool refreshes a dashboard — `dashboard.execute` has no MCP placement until the `dashboard` key kind (L5). The served manual's dashboards page gains one sentence. |
 | 2026-09-29 | v1.65 | 265 (#265) the probe's parameters judged by the shared coercion — renumbered at merge after 320's v1.64 | **§6.2.34 `sql_probe`: the `parameters` values are judged by the shared strict coercion** (typesystem's `ParameterCoercion` through `ParameterLift`) instead of the datasources-local copy that still trimmed — the tool's `parameters` description states the forms exactly: plain decimal text for the BIG numerics, exact ISO temporals (TIMESTAMP with an explicit offset or `Z`), padded standard base64, nothing trimmed, booleans exactly `true`/`false`, the 1024-digit cap before any parse. A padded or truthy-looking value that bound before is now a `-32602` argument fault naming the parameter, never the value. No tool, argument, count or permission changed ([Datasources §7D](datasources.md#7d-the-sql-probe)). |

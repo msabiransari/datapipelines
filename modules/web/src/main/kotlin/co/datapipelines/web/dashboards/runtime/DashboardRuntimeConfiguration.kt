@@ -135,7 +135,10 @@ class DashboardRuntimeConfiguration {
         properties: SseProperties,
         executionStreams: ExecutionStreamRegistry,
         abort: RefreshAbortSignal,
-    ): RefreshStreamRegistry = RefreshStreamRegistry(properties, executionStreams, abort, SseJson.mapper)
+        // #375 D7: the one per-user cap counts the observed evaluation's streams too.
+        evaluationStreams: co.datapipelines.web.parameters.stream.ParameterEvaluationStreamRegistry,
+    ): RefreshStreamRegistry =
+        RefreshStreamRegistry(properties, executionStreams, abort, SseJson.mapper, evaluationStreams = evaluationStreams::activeStreamsFor)
 
     @Bean
     fun dashboardSourceStarter(runner: RecordingExecutionRunner): SourceStarter = RecordingSourceStarter(runner)

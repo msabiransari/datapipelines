@@ -77,7 +77,9 @@ class ParameterSetDashboardGuardsIntegrationTest {
     fun `discard of an unpinned version still discards - the guard refuses only what a dashboard holds`() {
         val v1 = released()
 
-        h.service.discardVersion(WORKSPACE, v1.record.id, 1, AUTHOR).status shouldBe PipelineVersionStatus.DISCARDED
+        h.service
+            .discardVersion(WORKSPACE, v1.record.id, 1, AUTHOR)
+            .detail.status shouldBe PipelineVersionStatus.DISCARDED
 
         h.consumerQuestions shouldBe listOf("live $name@1")
     }

@@ -235,7 +235,11 @@ internal class ArtifactSql(
          WHERE s.id = :id AND s.workspace_id = :workspaceId AND v.$fk = s.id AND v.version = s.current_version
         """.trimIndent()
 
-    /** versioning §3.1 — discard a RELEASED version; the pointer falls back only when it named it. */
+    /**
+     * versioning §3.1 — discard a RELEASED version; the pointer falls back only when it named it.
+     * The row answers the pointer pair (#372): `prev` reads the pointer from the statement's own
+     * snapshot, `bumped` returns the moved one — the controller never re-reads.
+     */
     val discard =
         """
         WITH flipped AS (
@@ -245,6 +249,9 @@ internal class ArtifactSql(
              WHERE s.id = :id AND s.workspace_id = :workspaceId AND v.$fk = s.id
                AND v.version = :version AND v.status = 'RELEASED'
             RETURNING $detailCols
+        ), prev AS (
+            SELECT s.current_version FROM $index s
+             WHERE s.id = :id AND s.workspace_id = :workspaceId
         ), bumped AS (
             UPDATE $index s
                SET current_version = CASE
@@ -257,12 +264,13 @@ internal class ArtifactSql(
                    END,
                    updated_at = NOW()
              WHERE s.id = :id AND s.workspace_id = :workspaceId AND EXISTS (SELECT 1 FROM flipped)
-            RETURNING 1
+            RETURNING s.current_version
         )
-        SELECT * FROM flipped, bumped
+        SELECT flipped.*, prev.current_version AS pointer_before, bumped.current_version AS pointer_after
+          FROM flipped, bumped, prev
         """.trimIndent()
 
-    /** versioning §3.1 — restore; D60's rule `GREATEST(COALESCE(current, 0), v)`. */
+    /** versioning §3.1 — restore; D60's rule `GREATEST(COALESCE(current, 0), v)`; the row answers the pointer pair (#372). */
     val restore =
         """
         WITH restored AS (
@@ -272,25 +280,35 @@ internal class ArtifactSql(
              WHERE s.id = :id AND s.workspace_id = :workspaceId AND v.$fk = s.id
                AND v.version = :version AND v.status = 'DISCARDED'
             RETURNING $detailCols
+        ), prev AS (
+            SELECT s.current_version FROM $index s
+             WHERE s.id = :id AND s.workspace_id = :workspaceId
         ), bumped AS (
             UPDATE $index
                SET current_version = GREATEST(COALESCE(current_version, 0), (SELECT version FROM restored)), updated_at = NOW()
              WHERE id = :id AND workspace_id = :workspaceId AND EXISTS (SELECT 1 FROM restored)
-            RETURNING 1
+            RETURNING current_version
         )
-        SELECT * FROM restored, bumped
+        SELECT restored.*, prev.current_version AS pointer_before, bumped.current_version AS pointer_after
+          FROM restored, bumped, prev
         """.trimIndent()
 
-    /** D60 — the manual switch; live and posture-eligible or nothing. */
+    /** D60 — the manual switch; live and posture-eligible or nothing. The row answers the pointer pair (#372). */
     val switch =
         """
-        UPDATE $index s
-           SET current_version = :version, updated_at = NOW()
-         WHERE s.id = :id AND s.workspace_id = :workspaceId
-           AND EXISTS (SELECT 1 FROM $versions v
-                        WHERE v.$fk = s.id AND v.version = :version
-                          AND (v.status = 'RELEASED' OR (:draftEligible AND v.status = 'DRAFT')))
-        RETURNING s.current_version
+        WITH prev AS (
+            SELECT s.current_version FROM $index s
+             WHERE s.id = :id AND s.workspace_id = :workspaceId
+        ), moved AS (
+            UPDATE $index s
+               SET current_version = :version, updated_at = NOW()
+             WHERE s.id = :id AND s.workspace_id = :workspaceId
+               AND EXISTS (SELECT 1 FROM $versions v
+                            WHERE v.$fk = s.id AND v.version = :version
+                              AND (v.status = 'RELEASED' OR (:draftEligible AND v.status = 'DRAFT')))
+            RETURNING s.current_version
+        )
+        SELECT prev.current_version AS pointer_before, moved.current_version AS pointer_after FROM prev, moved
         """.trimIndent()
 
     val deleteEntity = "DELETE FROM $index WHERE id = :id AND workspace_id = :workspaceId"

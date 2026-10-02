@@ -112,6 +112,8 @@ class ViewerAccessBrowserTest : BrowserSuite() {
             .locator("button.tpl-result")
             .first()
             .click()
+        // The TEMPLATES version row is the compact grid row (.tplx-vrow) — the house
+        // table row shape is the PIPELINE surface's (#349).
         val v1Open = viewer.page.locator(".tplx-vrow:has(.app-chip-mono:text-is('v1')) a:has-text('Open')")
         v1Open.waitFor()
         v1Open.click()

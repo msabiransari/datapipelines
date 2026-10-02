@@ -349,6 +349,39 @@ class VisualizationTestSurfacesE2eTest {
         upload(id, green.session, green.upload, png).statusCode shouldBe 201
     }
 
+    @Test
+    @Order(25)
+    fun `B6 - an expired upload capability is the 410 before the body - nothing stored, and expiry is final (#373)`() {
+        val green = greenSession(id, AUTHOR)
+        val png = png(11, 11)
+        // Age the UPLOAD deadline (not the session's): the run stays GREEN, the capability's own clock ends —
+        // the B3 way, SQL on the row, no sweep involved.
+        sql("UPDATE visualization_test_runs SET upload_expires_at = now() - interval '1 second' WHERE session_id = '${green.session}'")
+
+        val expired = upload(id, green.session, green.upload, png)
+        expired.statusCode shouldBe 410
+        expired.jsonPath().getString("error.code") shouldBe "visualization.test.session_expired"
+        expired.jsonPath().getString("error.details.reason") shouldBe "capability_expired"
+        scalar("SELECT upload_consumed_at FROM visualization_test_runs WHERE session_id = '${green.session}'").shouldBeNull()
+
+        // The body was never judged, never stored: the run answers no_screenshot.
+        val runs = get("/api/v1/visualizations/$id/tests/runs", AUTHOR)
+        val runId =
+            runs
+                .jsonPath()
+                .getList<Map<String, Any?>>("data.runs")
+                .first { it["session_id"] == green.session }["run_id"]
+        val image = get("/api/v1/visualizations/$id/tests/runs/$runId/screenshot", AUTHOR)
+        image.statusCode shouldBe 400
+        image.jsonPath().getString("error.details.reason") shouldBe "no_screenshot"
+
+        // Expiry is final: the same correct capability is still the 410; a wrong token keeps the one 404.
+        upload(id, green.session, green.upload, png).statusCode shouldBe 410
+        val wrong = upload(id, green.session, randomCapability(), png)
+        wrong.statusCode shouldBe 404
+        envelope(wrong) shouldBe envelope(upload(id, green.session, randomCapability(), png))
+    }
+
     // ---- the caps and CSRF -----------------------------------------------------------------------------
 
     @Test

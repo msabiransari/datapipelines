@@ -225,6 +225,45 @@ class PipelineWorkspacePromoterAdmittedBrowserTest : BrowserSuite() {
     }
 
     @Test
+    fun `the promoter's workspace omits the Runs tab and the execution dock tabs - and no tab interaction fetches`() {
+        // #349 (spec §4.2, A3): a promoter retains Node Details WITHOUT the execution
+        // tabs; the Runs TAB is omitted entirely; Usage stays (a pipeline-read surface).
+        // The omission is proven on the WIRE — opening every admitted tab costs zero
+        // execution fetches.
+        val workspaceName = "p348ws-" + generatedPassword("w").take(8).lowercase()
+        val id = seedThreeVersions("p348t" + generatedPassword("s").take(6).lowercase(), workspaceName)
+
+        val promoter = openPromoterSession(workspaceName)
+        val requests = mutableListOf<String>()
+        promoter.page.onRequest { request -> requests += request.url() }
+
+        promoter.page.navigate("$baseUrl/pipelines/$id?version=2")
+        promoter.page.waitForSelector(".pe-root")
+        promoter.page.waitForFunction("() => document.querySelectorAll('.pe-versions a').length > 0")
+
+        // The workspace tab strip: five tabs — no Runs.
+        promoter.page.locator("#pe-tab-runs").count() shouldBe 0
+        val tabs = promoter.page.evaluate("() => [...document.querySelectorAll('.pe-tab')].map(b => b.id)").toString()
+        tabs shouldNotContain "pe-tab-runs"
+        tabs shouldContain "pe-tab-usage"
+        // The dock: Node Details only — no Results, no Errors, no Events.
+        promoter.page.locator("#pe-dock-tab-results").count() shouldBe 0
+        promoter.page.locator("#pe-dock-tab-errors").count() shouldBe 0
+        promoter.page.locator("#pe-dock-tab-events").count() shouldBe 0
+        promoter.page.locator("#pe-dock-tab-details").count() shouldBe 1
+        // No execution identity strip markup either.
+        promoter.page.locator(".pe-run-strip").count() shouldBe 0
+
+        // Opening every admitted tab costs nothing execution-owned.
+        for (tabId in listOf("pe-tab-overview", "pe-tab-parameters", "pe-tab-usage", "pe-tab-versions", "pe-tab-flow")) {
+            promoter.page.locator("#" + tabId).click()
+            promoter.page.waitForTimeout(400.0)
+        }
+        forbiddenRequests(requests).shouldBeEmpty()
+        promoter.close()
+    }
+
+    @Test
     fun `a RESTORED page keeps the promoter read-only - one component, no verbs, zero execution requests`() {
         val workspaceName = "p348ws-" + generatedPassword("w").take(8).lowercase()
         val id = seedThreeVersions("p348r" + generatedPassword("s").take(6).lowercase(), workspaceName)

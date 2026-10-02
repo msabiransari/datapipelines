@@ -193,24 +193,37 @@ class ExecutionStreamLauncher(
 
     /**
      * §3.5 — "a retried request with the same key returns the original execution instead of
-     * re-executing". The original's events are served from the Redis log; if the original is still
-     * running the stream follows it live. A log that has already expired (> 1h, §10.3) is the same
-     * `410` the replay endpoint gives. The retry's own principal rides along (#230, P4): the
-     * follow re-judges THIS subscriber before every event it serves.
+     * re-executing". The original's events are served from the Redis log; if the original is
+     * still running the stream follows it live. A log that has already expired (> 1h, §10.3) is
+     * the same `410` the replay endpoint gives. The retry's own principal rides along (#230, P4):
+     * the follow re-judges THIS subscriber before every event it serves.
+     *
+     * #324 — a log with no entry yet is NOT an expired log: the first entry is appended only
+     * after the RUNNING row commits and the live send (#306's order), so a retry can land inside
+     * that start window while the original is milliseconds — or up to the lifecycle write bound —
+     * from its insert, and a `410` here would name an id that `GET /executions/{id}` cannot yet
+     * resolve. The ROW decides: absent or still RUNNING (`completedAt == null`) means the original
+     * is starting or running, and the attach becomes a FOLLOW — the streamer's give-up patience
+     * (≥ 15 s, above the 10 s lifecycle write bound) is the wait for the log to appear, and it
+     * runs on the streamer's scheduler, never on the servlet thread. Only a TERMINAL row has
+     * truly finished and lost its log, and that keeps the 410 with the id (the reservation already
+     * gave this caller the id) and `reason: event_log_expired`.
      */
     private fun attachToOriginal(
         executionId: UUID,
         principal: AuthenticatedPrincipal,
     ): SseEmitter {
-        if (!streamer.hasLog(executionId)) {
-            throw ApiException(
-                PipelineErrorCodes.Result.EXPIRED,
-                "The original execution '$executionId' finished and its event stream has expired; " +
-                    "its record remains available via GET /executions/{id}.",
-                mapOf("execution_id" to executionId.toString(), "reason" to "event_log_expired"),
-            )
+        if (streamer.hasLog(executionId)) return streamer.follow(executionId, principal)
+        val record = executionRepository.findById(principal.requireWorkspace().id, executionId)
+        if (record == null || record.completedAt == null) {
+            return streamer.follow(executionId, principal)
         }
-        return streamer.follow(executionId, principal)
+        throw ApiException(
+            PipelineErrorCodes.Result.EXPIRED,
+            "The original execution '$executionId' finished and its event stream has expired; " +
+                "its record remains available via GET /executions/{id}.",
+            mapOf("execution_id" to executionId.toString(), "reason" to "event_log_expired"),
+        )
     }
 
     private fun startFresh(

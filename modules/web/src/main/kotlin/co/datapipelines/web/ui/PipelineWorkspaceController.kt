@@ -41,6 +41,12 @@ class PipelineWorkspaceController(
     private val themeResolver: ThemeResolver,
     /** 178 — the promoter lens: the page resolves and renders the caller's view. */
     private val lens: PromoterLens,
+    /**
+     * #349 — the workspace composition's fact half: the Versions tab's row shapes (the
+     * explorer fragment's own model) and the Overview's record-level facts, filled by
+     * [PipelineBrowseModel.fillWorkspaceTabs] so the two surfaces cannot drift.
+     */
+    private val browse: PipelineBrowseModel,
 ) {
     // NOT a constructor parameter: Spring injects the app's servlet ObjectMapper into an
     // ObjectMapper-typed parameter even when it has a default, and that mapper lacks the
@@ -71,9 +77,24 @@ class PipelineWorkspaceController(
         model.addAttribute("pipelineId", id)
         model.addAttribute("pipelineName", resolved.record.displayName)
         stampVersionState(model, resolved, roles)
-        model.addAttribute("versions", resolved.versions)
         model.addAttribute("canReadExecutions", roles.canReadExecutions)
         model.addAttribute("activeTab", PipelineWorkspaceTab.fromWire(tab, roles.canReadExecutions).wire)
+
+        // #349 — the composition's model half: the Versions tab's rows (the explorer
+        // fragment's own shapes, marked with the viewed version) and the Overview's
+        // record-level facts. The facts merge into the workspace block below — one source
+        // the client re-reads per in-page version switch — and the rows REPLACE the raw
+        // VersionChoice list as the page's `versions` attribute: the header selector, the
+        // choose-a-version state and the Versions tab all read the same admitted history.
+        val facts =
+            browse.fillWorkspaceTabs(
+                model,
+                workspaceId,
+                view,
+                resolved.record,
+                resolved.versions.map { it.record },
+                resolved.viewedVersion,
+            )
 
         // A body selected: the graph's data block. Two fields are the PAGE's, not the REST
         // serializer's: `version` names the VIEWED row (`PipelineResponses.full` falls back
@@ -98,21 +119,61 @@ class PipelineWorkspaceController(
         // displayed and submitted version (spec §3.4). A malformed block is a refusal, not a
         // default: workspace.js records PEWorkspaceInvalid and the execute path stops with a
         // visible error and zero requests.
-        model.addAttribute(
-            "workspaceJson",
-            ScriptSafeJson.forScriptBlock(
-                mapper.writeValueAsString(
-                    buildMap<String, Any?> {
-                        put("pipelineId", id.toString())
-                        put("viewedVersion", resolved.viewedVersion)
-                        put("hasBody", resolved.hasSelectedBody)
-                        put("canExecute", roles.canExecute && resolved.hasSelectedBody)
-                    },
-                ),
-            ),
-        )
+        val workspaceState = ScriptSafeJson.forScriptBlock(mapper.writeValueAsString(workspaceState(resolved, roles, facts)))
+        model.addAttribute("workspaceJson", workspaceState)
         return VIEW
     }
+
+    /**
+     * The workspace block's shape: the pin the execute and SQL paths read, plus (#349)
+     * the composition state the client owns in-page — the admitted history (lens-filtered
+     * rows; the header selector, the viewed chip and the Versions tab's marks all read
+     * it), and the Overview's record-level facts with the datasource dialect map across
+     * every admitted body. All of it is the lens's answer already — nothing here names a
+     * version or a datasource the caller cannot read (the #348-b projection rule, kept).
+     */
+    private fun workspaceState(
+        resolved: PipelineWorkspaceModel.Resolved,
+        roles: RoleModel.Roles,
+        facts: WorkspaceTabFacts,
+    ): Map<String, Any?> =
+        buildMap<String, Any?> {
+            put("pipelineId", resolved.record.id.toString())
+            put("viewedVersion", resolved.viewedVersion)
+            put("hasBody", resolved.hasSelectedBody)
+            put("canExecute", roles.canExecute && resolved.hasSelectedBody)
+            put(
+                "versionRows",
+                resolved.versions.map {
+                    mapOf<String, Any?>(
+                        "version" to it.version,
+                        "status" to it.status.name,
+                        "current" to it.isCurrent,
+                        "viewed" to it.isViewed,
+                    )
+                },
+            )
+            put(
+                "pageFacts",
+                mapOf<String, Any?>(
+                    "createdBy" to facts.createdBy,
+                    "createdVia" to facts.createdVia,
+                    "lastRun" to
+                        facts.lastRun?.let {
+                            mapOf<String, Any?>(
+                                "executionId" to it.executionId.toString(),
+                                "status" to it.status,
+                                "durationMs" to it.durationMs,
+                                "rowCount" to it.rowCount,
+                                "ago" to it.ago,
+                                "at" to it.at,
+                                "by" to it.by,
+                            )
+                        },
+                ),
+            )
+            put("datasourceDialects", facts.datasourceDialects)
+        }
 
     /** The version-state attributes the header, the phone band and the selector read. */
     private fun stampVersionState(

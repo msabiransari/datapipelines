@@ -266,25 +266,26 @@ open class ArtifactRepository<B : Any>(
 
     /**
      * Purge the DRAFT (versioning §5.4): hard-deleted (the only row that references a version — test evidence —
-     * cascades). The sole version takes the entity; a draft that had become the pointer moves it. False when no
-     * DRAFT matched.
+     * cascades). The sole version takes the entity; a draft that had become the pointer moves it. The answer is
+     * the purge's scope (#372): [Purged.Entity] when the version count hit zero, [Purged.Version] otherwise.
+     * Null when no DRAFT matched.
      */
     fun purgeDraft(
         workspaceId: UUID,
         id: UUID,
         expectedHash: String?,
         draftEligible: Boolean,
-    ): Boolean {
+    ): Purged? {
         val params = ids(workspaceId, id) + mapOf("expectedHash" to expectedHash, "draftEligible" to draftEligible)
         val purged =
-            jdbc.query(sql.purgeDraft(expectedHash != null), params) { rs, _ -> rs.getInt("version") }.singleOrNull() ?: return false
+            jdbc.query(sql.purgeDraft(expectedHash != null), params) { rs, _ -> rs.getInt("version") }.singleOrNull() ?: return null
         if (checkNotNull(jdbc.queryForObject(sql.versionCount, ids(workspaceId, id), Int::class.java)) == 0) {
             deleteEntity(workspaceId, id)
-            return true
+            return Purged.Entity
         }
         jdbc.update(sql.pointerFallback, params + ("version" to purged))
         jdbc.update(sql.reindex, params)
-        return true
+        return Purged.Version
     }
 
     /** Discard a RELEASED version (versioning §3.1): stamps, pointer fallback when it WAS the pointer. Null when it was not RELEASED. */
@@ -294,9 +295,9 @@ open class ArtifactRepository<B : Any>(
         version: Int,
         actor: UUID,
         draftEligible: Boolean,
-    ): ArtifactVersionDetail? {
+    ): VersionMoved? {
         val params = ids(workspaceId, id) + mapOf("version" to version, "actor" to actor, "draftEligible" to draftEligible)
-        return jdbc.query(sql.discard, params, detail).singleOrNull()?.also { jdbc.update(sql.reindex, params) }
+        return jdbc.query(sql.discard, params, moved).singleOrNull()?.also { jdbc.update(sql.reindex, params) }
     }
 
     /** Restore a DISCARDED version to RELEASED; the pointer moves only above-current-or-NULL (D60). */
@@ -304,24 +305,24 @@ open class ArtifactRepository<B : Any>(
         workspaceId: UUID,
         id: UUID,
         version: Int,
-    ): ArtifactVersionDetail? {
+    ): VersionMoved? {
         val params = ids(workspaceId, id) + ("version" to version)
-        return jdbc.query(sql.restore, params, detail).singleOrNull()?.also { jdbc.update(sql.reindex, params) }
+        return jdbc.query(sql.restore, params, moved).singleOrNull()?.also { jdbc.update(sql.reindex, params) }
     }
 
-    /** Manual switch (D60): the pointer names [version] when it is live and posture-eligible; null otherwise. */
+    /** Manual switch (D60): the pointer names [version] when it is live and posture-eligible; the pair otherwise null. */
     fun switchCurrent(
         workspaceId: UUID,
         id: UUID,
         version: Int,
         draftEligible: Boolean,
-    ): Int? {
+    ): PointerMove? {
         val params = ids(workspaceId, id) + mapOf("version" to version, "draftEligible" to draftEligible)
         return jdbc
             .query(
                 sql.switch,
                 params,
-            ) { rs, _ -> rs.getInt("current_version") }
+            ) { rs, _ -> pointerOf(rs) }
             .singleOrNull()
             ?.also { jdbc.update(sql.reindex, params) }
     }
@@ -493,6 +494,9 @@ open class ArtifactRepository<B : Any>(
 
     private val detail = RowMapper { rs: ResultSet, _: Int -> detailOf(rs) }
 
+    /** A discard/restore row: the touched version's detail beside the pointer pair its statement answered (#372). */
+    private val moved = RowMapper { rs: ResultSet, _: Int -> movedOf(rs) }
+
     private val versionMapper =
         RowMapper { rs: ResultSet, _: Int ->
             ArtifactVersion(
@@ -530,6 +534,11 @@ open class ArtifactRepository<B : Any>(
             createdVia = rs.getString("created_via"),
             updatedVia = rs.getString("updated_via"),
         )
+
+    /** The pointer pair the discard/restore/switch statements return; NULL reads as null (D60's ∅). */
+    private fun pointerOf(rs: ResultSet) = PointerMove(rs.getObject("pointer_before") as Int?, rs.getObject("pointer_after") as Int?)
+
+    private fun movedOf(rs: ResultSet) = VersionMoved(detailOf(rs), pointerOf(rs))
 
     private fun ResultSet.instant(column: String): Instant? = getObject(column, OffsetDateTime::class.java)?.toInstant()
 

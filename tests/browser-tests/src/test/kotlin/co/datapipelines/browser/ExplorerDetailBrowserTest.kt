@@ -242,6 +242,10 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
 
             // Nothing inside the detail sticks out of it: a table or a chip row that does is
             // exactly what "tables scroll inside their cards, never the page" forbids.
+            // A element inside a SCROLL CONTAINER (.dt-viewport) is clipped by it — its
+            // rect may extend past the edge while the VISIBLE box does not (#349's house
+            // tables scroll inside their frames at phone widths) — so contained
+            // descendants are judged by their scroll container, not their own rect.
             val stickingOut =
                 page
                     .evaluate(
@@ -249,8 +253,17 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
                         () => {
                           const d = document.querySelector('.tplx-detail');
                           const edge = d.getBoundingClientRect().right;
+                          const clipped = (e) => {
+                            let a = e.parentElement;
+                            while (a && a !== d) {
+                              const o = getComputedStyle(a).overflowX;
+                              if ((o === 'auto' || o === 'scroll' || o === 'clip') && a.getBoundingClientRect().right <= edge + 1) return true;
+                              a = a.parentElement;
+                            }
+                            return false;
+                          };
                           return Array.from(d.querySelectorAll('*'))
-                            .filter(e => e.getBoundingClientRect().right > edge + 1)
+                            .filter(e => e.getBoundingClientRect().right > edge + 1 && !clipped(e))
                             .slice(0, 5)
                             .map(e => (e.tagName + (typeof e.className === 'string' && e.className.trim()
                               ? '.' + e.className.trim().split(/\s+/).join('.') : '')))
@@ -479,9 +492,11 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
      * this class passed — the row existed, the text was in the DOM, nothing overflowed — which
      * is exactly the shape a green suite hides.
      *
-     * So the READABLE WIDTH is asserted, not the presence: the meta column takes a real share
-     * of the row and sets on a small number of lines. It goes red on the layout that was in
-     * that screenshot.
+     * So the READABLE WIDTH is asserted, not the presence. #349 composes the versions
+     * surface as the house table (spec §4.4); the row is `tr[data-version-row]` now and the
+     * property under test is the row's FIRST cell — the version link and its marks — which
+     * must still take a real share of the row and set on a small number of lines. It goes
+     * red on the layout that was in that screenshot, in either markup.
      */
     @Test
     fun `a version row's meta column is readable, not one character per line`() {
@@ -493,19 +508,19 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
             page.setViewportSize(width, 900)
             page.navigate("$baseUrl/pipelines")
             selectLeaf()
-            page.locator("#pipeline-tab-versions .tplx-vrow").first().waitFor()
+            page.locator("#pipeline-tab-versions tr[data-version-row]").first().waitFor()
 
             @Suppress("UNCHECKED_CAST")
             val meta =
                 page.evaluate(
                     """
                     () => {
-                      const m = document.querySelector('#pipeline-tab-versions .tplx-vmeta');
-                      const row = m.closest('.tplx-vrow');
-                      const line = parseFloat(getComputedStyle(m).lineHeight) || 16;
-                      return { width: m.getBoundingClientRect().width,
-                               rowWidth: row.getBoundingClientRect().width,
-                               lines: m.getBoundingClientRect().height / line };
+                      const cells = [...document.querySelectorAll('#pipeline-tab-versions tr[data-version-row] td')];
+                      const widest = cells.reduce((a, c) => c.getBoundingClientRect().width > a.getBoundingClientRect().width ? c : a, cells[0]);
+                      const line = parseFloat(getComputedStyle(widest).lineHeight) || 16;
+                      return { width: widest.getBoundingClientRect().width,
+                               rowWidth: widest.closest('tr[data-version-row]').getBoundingClientRect().width,
+                               lines: widest.getBoundingClientRect().height / line };
                     }
                     """.trimIndent(),
                 ) as Map<String, Any?>
@@ -575,7 +590,7 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
         selectLeaf()
 
         // Versions is the FIRST PAINT — no request was needed for it.
-        page.locator("#pipeline-tab-versions .tplx-vrow").first().waitFor()
+        page.locator("#pipeline-tab-versions tr[data-version-row]").first().waitFor()
 
         var runsRequests = 0
         page.onRequest { if (it.url().contains("/runs")) runsRequests++ }
@@ -623,7 +638,7 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
         )
         // The acting column came with it — a stale Versions list beside a new header would be
         // the failure a header-only assertion misses.
-        page.locator("#pipeline-tab-versions .tplx-vrow").first().waitFor()
+        page.locator("#pipeline-tab-versions tr[data-version-row]").first().waitFor()
         page.locator("#pipeline-tab-runs").getAttribute("hidden").shouldBeHiddenAttribute()
     }
 
@@ -642,7 +657,7 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
         page.setViewportSize(1440, 900)
         page.navigate("$baseUrl/pipelines")
         selectLeaf()
-        page.locator("#pipeline-tab-versions .tplx-vrow").first().waitFor()
+        page.locator("#pipeline-tab-versions tr[data-version-row]").first().waitFor()
         page.waitForResponse({ it.url().contains("/usage") }) {
             page.locator("[data-tab-panel='pipeline-tab-usage']").click()
         }
@@ -818,8 +833,12 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
          */
         const val SHELL_FLOOR = 768
 
-        /** A meta column narrower than this cannot set "3 days ago - someone - 7 runs" at all. */
-        const val META_MIN_WIDTH = 120.0
+        // A meta column narrower than this cannot set "3 days ago - someone - 7 runs" at
+        // all. #349: the row is the house table now — six columns in the explorer's
+        // ~524px pane give each cell a real but modest share. The bug this guard exists
+        // for was a ~10px column setting ONE CHARACTER per line; the floor stays an
+        // order of magnitude above it.
+        const val META_MIN_WIDTH = 48.0
 
         /** ...and it must not need more than a few lines to do it. */
         const val META_MAX_LINES = 4.0

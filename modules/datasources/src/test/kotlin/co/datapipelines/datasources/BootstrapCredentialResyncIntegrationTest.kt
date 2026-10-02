@@ -407,13 +407,18 @@ class BootstrapCredentialResyncIntegrationTest {
             false
         }
 
+    /**
+     * The block's result with the log lines it produced, read as a SNAPSHOT (#362): the read runs
+     * while the appender is still attached — background threads of the registrar can still be
+     * logging — so the raw `appender.list` iteration was a latent `ConcurrentModificationException`.
+     */
     private fun <T> capturingLogs(block: () -> T): Pair<T, List<String>> {
+        val appender = co.datapipelines.datasources.SnapshotListAppender()
         val root = LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME) as Logger
-        val appender = ListAppender<ILoggingEvent>().apply { start() }
         root.addAppender(appender)
         try {
             val result = block()
-            return result to appender.list.map { it.formattedMessage + " " + it.argumentArray?.joinToString(" ") }
+            return result to appender.events().map { it.formattedMessage + " " + it.argumentArray?.joinToString(" ") }
         } finally {
             root.detachAppender(appender)
             appender.stop()

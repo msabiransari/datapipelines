@@ -37,7 +37,7 @@ class SqlProbePostgresIntegrationTest {
         )
 
     private val registry = mockk<DatasourceRegistry>()
-    private val probe = SqlProbe(registry)
+    private val probe = SqlProbe(registry, nodeQueryTimeoutSeconds = 60)
 
     @BeforeEach
     fun wire() {

@@ -2,7 +2,8 @@
 # Engine quirks you will meet
 
 (A ledger row or handback citing "rule 14", "rule 15", "rule 16" or "rule 17" means §6.1,
-§6.2, §6.3 and §6.4 respectively; "§6.5" is the materialisation rule.)
+§6.2, §6.3 and §6.4 respectively; "§6.5" is the materialisation rule; §6.6–§6.9 are the authoring
+shapes: a guard node, a literal list in a library, an hour spine, reserved aliases.)
 
 ### 6.1 A bind inside GROUP BY (H2)
 
@@ -62,3 +63,46 @@ The same rule reaches a derived table in the `FROM` clause when it aggregates an
 This is H2's behavior, measured on the pinned driver — other engines materialise differently,
 and a CTE that is not joined to is not this shape; `pipelines-verification`'s rewrite rule
 (reconcile, then measure) is the general one.
+
+### 6.6 A guard node: make the run fail with a message you wrote
+
+tempdb has no `ASSERT`. To stop a run whose precondition is false (a staged table empty, a
+total that does not reconcile, a key that is not unique), stage a node whose SELECT fails on a
+CAST of text only the bad case produces: `SELECT CAST(CASE WHEN n = 0 THEN '0' ELSE 'guard:
+found ' || n END AS INTEGER) AS g FROM (...) t`, where `n` counts the offending rows. The
+CASE must read a COLUMN: `CAST('guard: x' AS INTEGER)` is folded at parse time and fails even
+in a branch that never runs. When it trips, the execution returns `pipeline.node.staging_failed`
+("Pipeline aborted: node <id> failed") and your text is the message of the LAST `caused_by`
+entry (`For input string: "guard: found 1"`). The whole run aborts even if nothing depends on
+the guard, so give it `depends_on` only to order it; a passing guard stages one row you ignore.
+Measured on H2 2.3.232.
+
+### 6.7 A library cannot hold a literal list in a top-level `<#assign>`
+
+A library template (`is_library: true`) is refused with `template.validation.is_library_without_macros`
+("A library must have no output outside its macro/function definitions") when it carries a top-level
+`<#assign hours = [0, 6, 12]>`. Hold the list in a `<#function>` that returns it —
+`<#function hours_of_day><#return [0, 6, 12]></#function>` — and have the library's macros iterate
+`hours_of_day()`. Consumers import the library and call its macros by alias (`templates`).
+Measured on the save: the assign form is refused, the function form is created.
+
+### 6.8 An hour spine: `SYSTEM_RANGE`, with the column named and cast
+
+For a spine of integers (hours 0–23, days 1–31), `FROM SYSTEM_RANGE(0, 23) AS h(hr)` is the
+shortest form in tempdb. Name the column in the alias list: the unnamed column is `X`, in
+upper case, and `SELECT x` fails with `Column "x" not found` (`MODE=PostgreSQL` folds unquoted
+names to lower case). The column is a BIGINTEGER, so cast it where a join or a bind expects an
+INTEGER: `SELECT CAST(h.hr AS INTEGER) AS hr FROM SYSTEM_RANGE(0, 23) AS h(hr)`. It is H2-only —
+the other engines spell a spine differently (the aliased `VALUES` form of §6.3 is the
+portable one).
+
+### 6.9 Reserved words as aliases: `year`, `month`, `day`, `value`, `key`
+
+H2 refuses these as an unquoted `AS` alias — `SELECT 1 AS year` is `Syntax error in SQL
+statement ... expected "identifier"` (SQLState 42001) — and so do `hour`, `user`, `order` and
+`current_date`; `date` and a non-word such as `yr` are accepted. Quoting works but is a trap:
+`AS "year"` keeps the lower-case name, and a later bare `SELECT year` from that staged table
+is a syntax error again. Choose a non-reserved alias (`yr`, `mo`, `dy`, `val`, `k`) in every
+tempdb node and in every table a downstream node reads. Measured on H2 2.3.232 with
+`sql_probe {"name": "tempdb"}`; the nine refused and two accepted words above are the whole
+list measured, not a catalogue of the engine's reserved words.

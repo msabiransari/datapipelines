@@ -7,7 +7,8 @@ import java.sql.SQLTimeoutException
  * The probe statement exceeded its timebox. Carries what the calling surface needs for the
  * error envelope: [wallMs] of query execution before the cancel, and the [plan] captured BEFORE
  * the query ran — the plan is what explains a timeout, so it is deliberately read first and
- * survives one.
+ * survives one. [timeoutSeconds] is the timeout the statement ran under, after the probe's clamp
+ * (#167) — null from a caller that does not clamp one (the selector lease's statement).
  *
  * Module-local with a STATIC message (the [DatasourceUnreachableException] precedent): the
  * driver text stays in the cause, bounded by [SqlExecutionException.boundedMessage] at the
@@ -18,6 +19,7 @@ class SqlProbeTimeoutException(
     val wallMs: Long,
     val plan: ExplainPlanSummary?,
     cause: SQLException,
+    val timeoutSeconds: Int? = null,
 ) : RuntimeException("The probe statement exceeded its timeout against datasource '$datasourceName'.", cause)
 
 /**

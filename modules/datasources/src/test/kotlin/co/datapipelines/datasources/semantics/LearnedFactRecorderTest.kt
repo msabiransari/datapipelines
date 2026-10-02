@@ -65,7 +65,7 @@ class LearnedFactRecorderTest {
             st.execute("INSERT INTO orders VALUES (1, 1250, '2026-01-01 10:00:00'), (2, 300, '2026-01-02 11:00:00')")
         }
         repository = LearnedFactRepository(jdbc)
-        recorder = LearnedFactRecorder(repository, SchemaIntrospector(registry), SqlProbe(registry))
+        recorder = LearnedFactRecorder(repository, SchemaIntrospector(registry), SqlProbe(registry, nodeQueryTimeoutSeconds = 60))
         jdbc.jdbcTemplate.execute("TRUNCATE learned_facts, datasource_workspaces, datasources, workspaces, users CASCADE")
         actor =
             checkNotNull(

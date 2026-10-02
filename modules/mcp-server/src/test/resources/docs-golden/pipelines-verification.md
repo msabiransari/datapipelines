@@ -32,7 +32,11 @@
   the groups that are absent, the window's boundaries. Where the result is small, reconcile
   all of it; where it is not, one winner's total is the weakest possible sample — a winner
   rarely moves, the cutoff does. Compare like with like at the declared precision, and report
-  exactly what was compared: which rows, which quantity, what matched, what did not.
+  exactly what was compared: which rows, which quantity, what matched, what did not. A
+  derivation that scans as much as the node does may ask `sql_probe` for the node's own
+  budget — `timeout_seconds` defaults to 10 and is clamped to the instance's node query
+  timeout for that dialect, which the payload reports — rather than being reshaped to fit the
+  default.
 - **Report what you did not verify.** "Row counts match the previous version" is not "the
   numbers are right". Name the independent check you ran — or that you ran none. A proxy is
   reported as what it proves: a non-empty count for one period and one source shows that

@@ -15,6 +15,7 @@ import co.datapipelines.auth.User
 import co.datapipelines.auth.UserService
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.typesystem.DatapipelinesException
+import co.datapipelines.web.requestlimits.StrictRequestBodies
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
 import io.mockk.every
@@ -72,6 +73,9 @@ class AuthControllerTest {
         SecurityContextHolder.getContext().authentication =
             UsernamePasswordAuthenticationToken(principal, null, emptyList())
     }
+
+    /** The handler reads its body as a tree (#333); these cases speak in the typed request. */
+    private fun createKey(request: CreateApiKeyRequest) = controller.createKey(StrictRequestBodies.MAPPER.valueToTree(request))
 
     private fun key(
         id: String,
@@ -139,7 +143,7 @@ class AuthControllerTest {
             )
         every { userService.snapshot(identity) } returns user(identity).copy(displayName = "ci")
 
-        val data = controller.createKey(CreateApiKeyRequest(name = "ci", kind = "endpoint")).data
+        val data = createKey(CreateApiKeyRequest(name = "ci", kind = "endpoint")).data
         assertAll(
             { data["key"] shouldBe "dpk_new.secret" },
             { data["kind"] shouldBe "endpoint" },
@@ -158,11 +162,11 @@ class AuthControllerTest {
     fun `an absent kind is the not-mintable refusal and user is an unknown kind - no key is issued`() {
         authenticate()
 
-        val defaulted = shouldThrow<DatapipelinesException> { controller.createKey(CreateApiKeyRequest(name = "claude")) }
+        val defaulted = shouldThrow<DatapipelinesException> { createKey(CreateApiKeyRequest(name = "claude")) }
         defaulted.code shouldBe "auth.key_kind_not_mintable"
 
         val explicit =
-            shouldThrow<DatapipelinesException> { controller.createKey(CreateApiKeyRequest(name = "claude", kind = "user")) }
+            shouldThrow<DatapipelinesException> { createKey(CreateApiKeyRequest(name = "claude", kind = "user")) }
         explicit.code shouldBe "endpoint.key_kind_refused"
         verify(exactly = 0) { apiKeyService.issue(any(), any(), any(), any(), any(), any()) }
     }
@@ -173,7 +177,7 @@ class AuthControllerTest {
         authenticate()
 
         val refused =
-            shouldThrow<DatapipelinesException> { controller.createKey(CreateApiKeyRequest(name = "claude", kind = "mcp")) }
+            shouldThrow<DatapipelinesException> { createKey(CreateApiKeyRequest(name = "claude", kind = "mcp")) }
         refused.code shouldBe "endpoint.key_kind_refused"
         verify(exactly = 0) { apiKeyService.issue(any(), any(), any(), any(), any(), any()) }
     }
@@ -185,7 +189,7 @@ class AuthControllerTest {
 
         val error =
             shouldThrow<DatapipelinesException> {
-                controller.createKey(CreateApiKeyRequest(name = "x", kind = "endpoint", scopes = listOf("author")))
+                createKey(CreateApiKeyRequest(name = "x", kind = "endpoint", scopes = listOf("author")))
             }
         error.code shouldBe "pipeline.execution.invalid_parameter_type"
         error.details["field"] shouldBe "scopes"
@@ -198,13 +202,13 @@ class AuthControllerTest {
 
         val unknown =
             shouldThrow<DatapipelinesException> {
-                controller.createKey(CreateApiKeyRequest(name = "x", kind = "endpoint", role = "admin"))
+                createKey(CreateApiKeyRequest(name = "x", kind = "endpoint", role = "admin"))
             }
         unknown.code shouldBe "pipeline.execution.invalid_parameter_type"
 
         val mismatched =
             shouldThrow<DatapipelinesException> {
-                controller.createKey(CreateApiKeyRequest(name = "x", kind = "endpoint", role = "promotion_receiver"))
+                createKey(CreateApiKeyRequest(name = "x", kind = "endpoint", role = "promotion_receiver"))
             }
         mismatched.code shouldBe "endpoint.key_kind_refused"
         verify(exactly = 0) { apiKeyService.issue(any(), any(), any(), any(), any(), any()) }

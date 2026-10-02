@@ -95,8 +95,13 @@ class VisualizationTestCapabilities(
      * request without the right capability — a RUNNING run (352's `no_capability`), a consumed one, a wrong or
      * malformed token — gets the one identical answer; the service verifies again and consumes under its row lock,
      * which stays the replay fence.
+     *
+     * The one documented exception (#373, R1): a presented token that MATCHES an unconsumed capability past its
+     * `upload_expires_at` is `session_expired` / `capability_expired` (410), judged here before any body byte —
+     * the holder of the right token learns only what it already knows, and the body is never buffered for it.
+     * A wrong or consumed token keeps the one 404.
      */
-    @Suppress("ThrowsCount") // every gate is the same named refusal
+    @Suppress("ThrowsCount") // every gate is its own named exit — the one 404, and R1's one 410
     fun authorizeUpload(
         id: UUID,
         sessionId: UUID,
@@ -106,6 +111,8 @@ class VisualizationTestCapabilities(
         val hash = hashOrNull(TestCapability.UPLOAD_PURPOSE, presented) ?: throw notFound()
         val row = runs.findBySessionUnscoped(id, sessionId) ?: throw notFound()
         if (row.uploadTokenHash != hash || row.uploadConsumedAt != null) throw notFound()
+        // R1 — after the hash and consumed checks, so a wrong or consumed token never sees this answer:
+        if (row.uploadExpiresAt != null && !row.uploadExpiresAt.isAfter(now())) throw expired()
         if (!authority.holdsUpdate(row.workspaceId, row.startedBy)) throw notFound()
         return UploadGrant(row.workspaceId, presented)
     }
@@ -171,6 +178,14 @@ class VisualizationTestCapabilities(
             code = VisualizationErrorCodes.TEST_SESSION_NOT_FOUND,
             message = "No such test session for this visualization; its capabilities verify nothing.",
             details = mapOf("reason" to "session_unknown"),
+        )
+
+    /** R1's 410 — byte-for-byte the service's own `sessionExpired("capability_expired")` (#373). */
+    private fun expired() =
+        DatapipelinesException(
+            code = VisualizationErrorCodes.TEST_SESSION_EXPIRED,
+            message = "The test session is expired or revoked.",
+            details = mapOf("reason" to "capability_expired"),
         )
 
     private companion object {

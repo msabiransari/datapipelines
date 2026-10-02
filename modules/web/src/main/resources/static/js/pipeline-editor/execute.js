@@ -35,6 +35,9 @@
     if (editor.handleExecutionStarted) editor.handleExecutionStarted();
 
     if (editor.sseHandler) {
+      // #349: the run's OWN version — the paint gate and the identity strip read it
+      // from the handler; execution_started confirms it from the wire payload.
+      editor.sseHandler.version = pin;
       editor.sseHandler.connect(null, pipelineId);
     }
   }
