@@ -161,54 +161,66 @@ class PipelineImportService(
     private fun callerOutputRecord(tree: ObjectNode): String? {
         val node = tree.get("caller_output") ?: return null
         if (!node.isArray) {
-            throw ApiException(
-                PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE,
+            throw malformedCallerOutput(
                 "'caller_output', when present on an import payload, must be an array of {name, type, nullable} columns.",
-                mapOf("caller_output" to node.toString().take(MAX_ECHOED_ID_CHARS)),
+                "caller_output" to node.toString().take(MAX_ECHOED_ID_CHARS),
             )
         }
         if (node.size() > MAX_RECORDED_SCHEMA_COLUMNS) {
-            throw ApiException(
-                PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE,
+            throw malformedCallerOutput(
                 "'caller_output' carries ${node.size()} columns; at most ${MAX_RECORDED_SCHEMA_COLUMNS} are recorded.",
-                mapOf("count" to node.size(), "max" to MAX_RECORDED_SCHEMA_COLUMNS),
+                "count" to node.size(),
+                "max" to MAX_RECORDED_SCHEMA_COLUMNS,
             )
         }
-        node.forEach { column ->
-            if (!column.isObject) {
-                throw ApiException(
-                    PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE,
-                    "'caller_output' entries must be objects of {name, type, nullable}.",
-                    mapOf("caller_output" to column.toString().take(MAX_ECHOED_ID_CHARS)),
-                )
-            }
-            val name = column.path("name").textValue()
-            if (name.isNullOrBlank() || name.length > MAX_RECORDED_COLUMN_NAME_LENGTH) {
-                throw ApiException(
-                    PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE,
-                    "'caller_output' column names must be 1..${MAX_RECORDED_COLUMN_NAME_LENGTH} characters.",
-                    mapOf("name" to (name ?: "").take(MAX_ECHOED_ID_CHARS)),
-                )
-            }
-            val type = column.path("type").textValue()
-            if (type.isNullOrBlank() || runCatching { LogicalType.fromWire(type) }.getOrNull() == null) {
-                throw ApiException(
-                    PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE,
-                    "'caller_output' column '$name' carries an unknown type; use a LogicalType wire value.",
-                    mapOf("name" to name.take(MAX_ECHOED_ID_CHARS), "type" to (type ?: "").take(MAX_ECHOED_ID_CHARS)),
-                )
-            }
-            val nullable = column.get("nullable")
-            if (nullable != null && !nullable.isNull && !nullable.isBoolean) {
-                throw ApiException(
-                    PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE,
-                    "'caller_output' column '$name' carries a non-boolean 'nullable'.",
-                    mapOf("name" to name.take(MAX_ECHOED_ID_CHARS)),
-                )
-            }
-        }
+        node.forEach(::callerOutputColumn)
         return node.toString()
     }
+
+    /** One `{name, type, nullable}` entry of the payload's `caller_output` record (#328). */
+    private fun callerOutputColumn(column: JsonNode) {
+        columnDefect(column)?.let { throw it }
+    }
+
+    /** The entry's first shape defect, or null when it conforms to the D2 record (#328). */
+    private fun columnDefect(column: JsonNode): ApiException? {
+        if (!column.isObject) {
+            return malformedCallerOutput(
+                "'caller_output' entries must be objects of {name, type, nullable}.",
+                "caller_output" to column.toString().take(MAX_ECHOED_ID_CHARS),
+            )
+        }
+        val name = column.path("name").textValue()
+        if (name.isNullOrBlank() || name.length > MAX_RECORDED_COLUMN_NAME_LENGTH) {
+            return malformedCallerOutput(
+                "'caller_output' column names must be 1..${MAX_RECORDED_COLUMN_NAME_LENGTH} characters.",
+                "name" to (name ?: "").take(MAX_ECHOED_ID_CHARS),
+            )
+        }
+        val type = column.path("type").textValue()
+        if (type.isNullOrBlank() || runCatching { LogicalType.fromWire(type) }.getOrNull() == null) {
+            return malformedCallerOutput(
+                "'caller_output' column '$name' carries an unknown type; use a LogicalType wire value.",
+                "name" to name.take(MAX_ECHOED_ID_CHARS),
+                "type" to (type ?: "").take(MAX_ECHOED_ID_CHARS),
+            )
+        }
+        val nullable = column.get("nullable")
+        return if (nullable != null && !nullable.isNull && !nullable.isBoolean) {
+            malformedCallerOutput(
+                "'caller_output' column '$name' carries a non-boolean 'nullable'.",
+                "name" to name.take(MAX_ECHOED_ID_CHARS),
+            )
+        } else {
+            null
+        }
+    }
+
+    /** The one catalogued shape refusal for a malformed `caller_output` record (#328). */
+    private fun malformedCallerOutput(
+        message: String,
+        vararg details: Pair<String, Any?>,
+    ): ApiException = ApiException(PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE, message, details.toMap())
 
     /** Version-less import — today's allocate-next-local behavior (§9.2: "when absent"). */
     private fun importNextLocal(

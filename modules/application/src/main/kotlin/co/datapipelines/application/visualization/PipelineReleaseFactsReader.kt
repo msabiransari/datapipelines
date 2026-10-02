@@ -28,7 +28,7 @@ import java.util.UUID
  * - **parameters** — the release's declared parameters; one a caller MUST supply is `required` with no default.
  * - **outputColumns** — the caller node's columns, in #328's precedence (§3.3.1): a TRANSFORM caller's pinned
  *   contract names them (DECLARED — the record, when one exists, never overrides the contract); a release with no
-   * caller node returns EMPTY (it returns no rows); any other caller node — a SQL node — answers the version's
+ * caller node returns EMPTY (it returns no rows); any other caller node — a SQL node — answers the version's
  *   RECORDED columns (`caller_output_json`, the D1 record its release copied from the version's latest run),
  *   and null when there is none — the validator skips the save-time input check rather than guess (the runtime
  *   judges real columns, L2). A record's absent-or-null `nullable` reads as `true`: unknown admits.

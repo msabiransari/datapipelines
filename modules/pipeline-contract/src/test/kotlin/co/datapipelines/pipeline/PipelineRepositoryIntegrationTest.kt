@@ -1,15 +1,15 @@
 package co.datapipelines.pipeline
 
-import com.fasterxml.jackson.databind.ObjectMapper
 import co.datapipelines.pipeline.WriteSurface
 import co.datapipelines.typesystem.DatapipelinesException
+import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.nulls.shouldBeNull
-import io.kotest.matchers.shouldBe
 import io.kotest.matchers.nulls.shouldNotBeNull
+import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.types.shouldBeInstanceOf
 import org.junit.jupiter.api.BeforeAll
@@ -1053,7 +1053,12 @@ class PipelineRepositoryIntegrationTest {
                 repository.createDraft(WORKSPACE_ID, record.id, changedBody(v1, "draft"), v1Detail.bodyHash, owner, WriteSurface.SESSION),
             )
         // Started LONG before the draft write (whose updated_at is NOW): ignored at release.
-        insertExecutionRow(record.id, draft.version, startedAt = "2020-01-01T00:00:00Z", resultSchemaJson = """[{"name":"stale","type":"STRING","nullable":true}]""")
+        insertExecutionRow(
+            record.id,
+            draft.version,
+            startedAt = "2020-01-01T00:00:00Z",
+            resultSchemaJson = """[{"name":"stale","type":"STRING","nullable":true}]""",
+        )
         repository.releaseDraft(WORKSPACE_ID, record.id, "test/monthly_revenue", "M", "d", draft.bodyHash, owner)
         repository.findVersionDetail(WORKSPACE_ID, record.id, draft.version)?.callerOutputJson.shouldBeNull()
     }
@@ -1061,8 +1066,16 @@ class PipelineRepositoryIntegrationTest {
     @Test
     fun `a FAILED execution after the last draft write is ignored`() {
         val (record, v1, v1Detail) = createdPipeline()
-        val draft = checkNotNull(repository.createDraft(WORKSPACE_ID, record.id, changedBody(v1, "draft"), v1Detail.bodyHash, owner, WriteSurface.SESSION))
-        insertExecutionRow(record.id, draft.version, status = "FAILED", resultSchemaJson = """[{"name":"x","type":"STRING","nullable":true}]""")
+        val draft =
+            checkNotNull(
+                repository.createDraft(WORKSPACE_ID, record.id, changedBody(v1, "draft"), v1Detail.bodyHash, owner, WriteSurface.SESSION),
+            )
+        insertExecutionRow(
+            record.id,
+            draft.version,
+            status = "FAILED",
+            resultSchemaJson = """[{"name":"x","type":"STRING","nullable":true}]""",
+        )
         repository.releaseDraft(WORKSPACE_ID, record.id, "test/monthly_revenue", "M", "d", draft.bodyHash, owner)
         repository.findVersionDetail(WORKSPACE_ID, record.id, draft.version)?.callerOutputJson.shouldBeNull()
     }
@@ -1074,7 +1087,13 @@ class PipelineRepositoryIntegrationTest {
             checkNotNull(
                 repository.createDraft(WORKSPACE_ID, record.id, changedBody(v1, "draft"), v1Detail.bodyHash, owner, WriteSurface.SESSION),
             )
-        val root = insertExecutionRow(record.id, draft.version, startedAt = "2030-01-01T00:00:00Z", resultSchemaJson = """[{"name":"root","type":"STRING","nullable":true}]""")
+        val root =
+            insertExecutionRow(
+                record.id,
+                draft.version,
+                startedAt = "2030-01-01T00:00:00Z",
+                resultSchemaJson = """[{"name":"root","type":"STRING","nullable":true}]""",
+            )
         // The child ran LAST and carries the newest started_at, but it is a child: never a candidate.
         insertExecutionRow(
             record.id,

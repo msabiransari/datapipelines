@@ -13,7 +13,9 @@ import java.util.UUID
  * row carry. A release is NEVER refused for a missing record — `not_observed` is today's
  * skip-the-check behaviour, recorded honestly.
  */
-enum class ReleaseCallerOutput(val wire: String) {
+enum class ReleaseCallerOutput(
+    val wire: String,
+) {
     /** The flip copied the version's latest qualifying execution's schema (D1 hit). */
     RECORDED("recorded"),
 
@@ -29,7 +31,8 @@ enum class ReleaseCallerOutput(val wire: String) {
 
     companion object {
         /** Strict read of the wire word — an unknown value is corruption, not a default. */
-        fun fromWire(raw: String): ReleaseCallerOutput = entries.firstOrNull { it.wire == raw } ?: error("Unknown caller output word '$raw'")
+        fun fromWire(raw: String): ReleaseCallerOutput =
+            entries.firstOrNull { it.wire == raw } ?: error("Unknown caller output word '$raw'")
     }
 }
 

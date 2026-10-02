@@ -211,19 +211,32 @@ class ExecutionRepositoriesIntegrationTest {
         val oversize = (1..257).map { ColumnSchema("col_$it", LogicalType.INTEGER, nullable = true) }
 
         executions.complete(record.executionId, ExecutionStatus.SUCCESS, Instant.now(), 5, NODE_STATS_JSON)
-        executions.recordResult(record.executionId, 1, 16, listOf(ColumnSchema(longName, LogicalType.STRING, nullable = true)))
+        executions
+            .recordResult(record.executionId, 1, 16, listOf(ColumnSchema(longName, LogicalType.STRING, nullable = true)))
             .shouldBeTrue()
-        executions.findById(WORKSPACE_ID, record.executionId).shouldNotBeNull().resultSchemaJson.shouldBeNull()
+        executions
+            .findById(WORKSPACE_ID, record.executionId)
+            .shouldNotBeNull()
+            .resultSchemaJson
+            .shouldBeNull()
 
         executions.recordResult(record.executionId, 1, 16, oversize).shouldBeTrue()
-        executions.findById(WORKSPACE_ID, record.executionId).shouldNotBeNull().resultSchemaJson.shouldBeNull()
+        executions
+            .findById(WORKSPACE_ID, record.executionId)
+            .shouldNotBeNull()
+            .resultSchemaJson
+            .shouldBeNull()
 
         // At the bounds exactly — 256 columns, one named to the limit — the record lands.
         val atBounds =
             (1..255).map { ColumnSchema("c$it", LogicalType.INTEGER, nullable = true) } +
                 ColumnSchema("n".repeat(128), LogicalType.STRING, nullable = true)
         executions.recordResult(record.executionId, 1, 16, atBounds).shouldBeTrue()
-        executions.findById(WORKSPACE_ID, record.executionId).shouldNotBeNull().resultSchemaJson.shouldNotBeNull()
+        executions
+            .findById(WORKSPACE_ID, record.executionId)
+            .shouldNotBeNull()
+            .resultSchemaJson
+            .shouldNotBeNull()
     }
 
     @Test
