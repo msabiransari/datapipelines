@@ -1373,3 +1373,114 @@ test("closeSearchBand closes the topbar palette, stands the bar down, and focuse
   assert.equal(shell.searchBandOpen(doc), false);
   assert.equal(doc.button.focused, true);
 });
+
+// #364 — the history SHAPE tell names the <main> start tag, never the attribute literal.
+// The old test was `content.indexOf('id="app-main"')`: innerHTML serialisation escapes
+// `<`, `>` and `&` in a text node but NOT the double quote, so user text carrying the
+// literal made a main-shaped entry look body-shaped (one needless reload per Back/Forward).
+test("historyEntryIsBodyShaped: text that carries the id literal is NOT body-shaped (#364)", () => {
+  const shell = loadShell();
+  assert.equal(
+    shell.historyEntryIsBodyShaped('<div class="pe-root"><p>Quarterly roll-up id="app-main"</p></div>'),
+    false,
+  );
+  // `<` in a text node arrives escaped, so text cannot forge the start tag either.
+  assert.equal(
+    shell.historyEntryIsBodyShaped('<p>&lt;main id="app-main"&gt; is what the author typed</p>'),
+    false,
+  );
+});
+
+test("historyEntryIsBodyShaped: the pre-#358 body shape is body-shaped", () => {
+  const shell = loadShell();
+  assert.equal(
+    shell.historyEntryIsBodyShaped('<div>footer</div><main id="app-main"><p>workspace</p></main>'),
+    true,
+  );
+  assert.equal(shell.historyEntryIsBodyShaped('<main id="app-main">'), true);
+  assert.equal(shell.historyEntryIsBodyShaped('<main id="app-main"/>'), true);
+});
+
+test("historyEntryIsBodyShaped: attribute order is tolerated", () => {
+  const shell = loadShell();
+  assert.equal(
+    shell.historyEntryIsBodyShaped('<main class="app-container" id="app-main" hx-boost="true"><p>x</p></main>'),
+    true,
+  );
+  assert.equal(
+    shell.historyEntryIsBodyShaped('<MAIN\n  class="x"\n  id="app-main">'),
+    true,
+    "the tag name is matched case-insensitively and attributes may span lines",
+  );
+});
+
+test("historyEntryIsBodyShaped: it is the <main> ELEMENT with exactly that id, not the id alone", () => {
+  const shell = loadShell();
+  assert.equal(shell.historyEntryIsBodyShaped('<main id="app-main-2"><p>x</p></main>'), false, "a longer id");
+  assert.equal(shell.historyEntryIsBodyShaped('<main id="xapp-main"><p>x</p></main>'), false, "a longer id, prefixed");
+  assert.equal(shell.historyEntryIsBodyShaped('<div id="app-main"><p>x</p></div>'), false, "another element");
+  assert.equal(shell.historyEntryIsBodyShaped('<mainx id="app-main">'), false, "another tag name");
+  assert.equal(shell.historyEntryIsBodyShaped('<main data-id="app-main">'), false, "another attribute");
+  assert.equal(
+    shell.historyEntryIsBodyShaped('<main class="x"></main><div id="app-main">'),
+    false,
+    "the match cannot leave the start tag",
+  );
+});
+
+test("historyEntryIsBodyShaped: content that is not a string is not body-shaped", () => {
+  const shell = loadShell();
+  for (const content of [undefined, null, 0, {}, ["<main id=\"app-main\">"]]) {
+    assert.equal(shell.historyEntryIsBodyShaped(content), false, String(content));
+  }
+});
+
+// The pure function above cannot see whether the guard USES it: an IIFE reverted to its
+// own substring test would pass every case above. This drives the real init() — the
+// one-time purge and the htmx:historyCacheHit veto — over both kinds of entry.
+test("the guard purges and vetoes a body-shaped entry and leaves a text-literal one alone (#364)", () => {
+  const textLiteral = { url: "/pipelines/a?version=2", content: '<div class="pe-root"><p>note id="app-main"</p></div>' };
+  const bodyShaped = { url: "/pipelines/b", content: '<div>stale-footer</div><main id="app-main"><p>stale</p></main>' };
+  const plain = { url: "/pipelines", content: '<div id="pipeline-list-wrapper">list</div>' };
+  const stored = { "htmx-history-cache": JSON.stringify([textLiteral, bodyShaped, plain]) };
+  const listeners = {};
+  let reloads = 0;
+  globalThis.sessionStorage = {
+    getItem: (k) => (k in stored ? stored[k] : null),
+    setItem: (k, v) => {
+      stored[k] = v;
+    },
+  };
+  globalThis.window = {
+    location: { pathname: "/pipelines", reload: () => reloads++ },
+    localStorage: { setItem() {} },
+    addEventListener: () => {},
+  };
+  globalThis.document = {
+    readyState: "complete",
+    body: { addEventListener: (t, fn) => (listeners[t] = fn) },
+    addEventListener: () => {},
+    documentElement: { classList: { toggle: () => {}, contains: () => false } },
+    getElementById: () => null,
+    querySelectorAll: () => [],
+  };
+  try {
+    loadShell(); // init() runs at load: the one-time purge
+    const kept = JSON.parse(stored["htmx-history-cache"]).map((i) => i.url);
+    assert.deepEqual(kept, [textLiteral.url, plain.url], "only the body-shaped entry is purged");
+
+    const hit = (item) => {
+      let prevented = false;
+      listeners["htmx:historyCacheHit"]({ detail: { item }, preventDefault: () => (prevented = true) });
+      return prevented;
+    };
+    assert.equal(hit(textLiteral), false, "a text-literal entry is a plain cache hit");
+    assert.equal(reloads, 0, "…with no reload");
+    assert.equal(hit(bodyShaped), true, "a body-shaped entry that still gets hit is vetoed");
+    assert.equal(reloads, 1, "…and the restore takes a full fetch");
+  } finally {
+    delete globalThis.sessionStorage;
+    delete globalThis.window;
+    delete globalThis.document;
+  }
+});
