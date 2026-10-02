@@ -94,7 +94,14 @@ class RefreshEngine(
                     Ending.ABORTED
                 } else {
                     withTimeout(Duration.ofSeconds(job.deadlineSeconds.toLong()).toMillis()) { run.work() }
-                    if (run.abortRequested.get()) Ending.ABORTED else Ending.DONE
+                    // The ending is ABORTED only when the abort CANCELLED work (#370): the flag's
+                    // timing alone is not the fact — the watcher may set it (and cancel a body that
+                    // has already finished) in the window between the last data frame and the work's
+                    // return. A refresh whose every target delivered Ok/NoData is DONE — the row and
+                    // the last frame agree with the chips the client already rendered; a body the
+                    // cancel caught leaves targets unrecorded, and a refresh whose targets failed was
+                    // "not fully succeeded" — both stay ABORTED.
+                    if (run.abortRequested.get() && !run.bodyCompletedEveryTarget()) Ending.ABORTED else Ending.DONE
                 }
             } catch (e: TimeoutCancellationException) {
                 // A deadline that fired BELOW this line is mine. One that fired above it reaches here as the same class.
@@ -173,13 +180,23 @@ class RefreshEngine(
         /**
          * The abort route cancels the running executions AND raises the flag, and an execution ended that way can finish
          * the work before the watcher's next poll — every target failed, nobody told the engine why, the row closed
-         * FAILED for a refresh its viewer aborted. One last look at the flag settles it, but only for a refresh that did
-         * not fully succeed: an abort that arrives after the last visualization completed changes nothing.
+         * FAILED for a refresh its viewer aborted. One last look at the flag records the request here, after the work
+         * joined; WHAT the request means is the ending's rule alone (`run`'s check at the DONE/ABORTED fork): an abort
+         * that arrives after the last visualization completed changes nothing (#370), while a refresh the abort
+         * actually interrupted — targets unrecorded, or recorded failed — ends ABORTED.
          */
         private fun noticeLateAbort() {
-            if (abortRequested.get() || outcomes.values.all { it is TargetOutcome.Ok || it == TargetOutcome.NoData }) return
+            if (abortRequested.get()) return
             if (ports.abort.requested(job.refreshId)) abortRequested.set(true)
         }
+
+        /**
+         * Whether every planned target completed on its own — [TargetOutcome.Ok] or NoData: the abort then cancelled
+         * nothing, and a flag raised after that point changes nothing (#370). A target the cancel caught is ABSENT
+         * here, and a failed one is an [TargetOutcome.Error] — either breaks the all-completed invariant.
+         */
+        fun bodyCompletedEveryTarget(): Boolean =
+            job.plan.targets.all { outcomes[it]?.let { o -> o is TargetOutcome.Ok || o == TargetOutcome.NoData } == true }
 
         // ---- one execution ------------------------------------------------------------------------------
 

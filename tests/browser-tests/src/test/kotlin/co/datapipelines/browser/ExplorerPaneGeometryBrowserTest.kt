@@ -204,6 +204,36 @@ class ExplorerPaneGeometryBrowserTest : BrowserSuite() {
           const d = a && a['htmx-internal-data']; return !!(d && d.boosted); }
         """.trimIndent()
 
+    /**
+     * The boosted-link readiness chain, each stage named (#347): htmx LOADED, then htmx has BOOSTED
+     * the link — a click before the boost is a full navigation that throws the armed probe's
+     * document away. A timeout names the stage it died on: was htmx on the page, did the link
+     * exist, did its internal data carry `boosted`, and what document was being read.
+     */
+    private fun waitBoosted(link: String) {
+        try {
+            page.waitForFunction("() => typeof window.htmx !== 'undefined' && !!window.htmx.version")
+            page.waitForFunction(linkBoosted, link)
+        } catch (e: com.microsoft.playwright.PlaywrightException) {
+            val htmxLoaded =
+                page.evaluate("() => typeof window.htmx !== 'undefined' && !!window.htmx.version") as Boolean
+            val linkState =
+                page.evaluate(
+                    """(sel) => { const a = document.querySelector(sel);
+                         if (!a) return 'no such link';
+                         const d = a['htmx-internal-data'];
+                         return d ? 'htmx-internal-data: ' + Object.keys(d).join(',') : 'no htmx-internal-data'; }""",
+                    link,
+                ) as String
+            val readyState = page.evaluate("() => document.readyState") as String
+            throw AssertionError(
+                "htmx never boosted $link — htmx loaded: $htmxLoaded; link: $linkState; " +
+                    "url=${page.url()} readyState=$readyState",
+                e,
+            )
+        }
+    }
+
     @Suppress("UNCHECKED_CAST")
     private fun probe(): Map<String, Any?> = page.evaluate(geometryProbe) as Map<String, Any?>
 
@@ -367,7 +397,7 @@ class ExplorerPaneGeometryBrowserTest : BrowserSuite() {
                     )
                     page.waitForLoadState(LoadState.NETWORKIDLE)
                     val link = "a[data-nav-section='$section']"
-                    page.waitForFunction(linkBoosted, link)
+                    waitBoosted(link)
                     val label = "boosted first frame $section at ${width}px rail-collapsed=$collapsed"
                     page.evaluate(armFirstFrame, label)
                     page.click(link)

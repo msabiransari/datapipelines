@@ -1,6 +1,6 @@
 # Dashboards
 
-**Status:** v0.20 — the two documents and their lifecycle (#10, lane L1a); the REST routes, the MCP tools and the
+**Status:** v0.21 — the two documents and their lifecycle (#10, lane L1a); the REST routes, the MCP tools and the
 permissions (§4, lane L1b); the transfer routes and their limits' honest contract (§3.3, lanes L1c/L1c-b/L1c-c: the
 import's atomicity, the RELEASE rules on a landing, the aggregate count ceiling, the wire's per-family arms); the server
 runtime (§5, lane L2; #343's released pins and stream authority); the client runtime (§6, lanes L3a/L3a-b/L3a-c); the
@@ -551,7 +551,10 @@ under the id exactly like any abort and answers the same 202 — and the engine'
 `ABORTED` with `refresh_completed` last before any source runs, the row closed and audited like every other ending.
 No marker, a marker for another dashboard, or a marker for someone else is the same `dashboard.refresh.not_found` as
 every other no — an unknown id, another person's running id, another instance's id and a finished id all answer the
-identical body.
+identical body. A late abort changes nothing on a refresh that delivered (#370): the engine's ending consults the
+work's outcome, not the flag's timing — a flag raised after every target delivered `ok`/no-data leaves the refresh
+DONE (its delivered frames stand; a chip already settled to success stays there), while an abort that actually
+interrupted the work — targets unrecorded or failed — ends it ABORTED as before.
 
 ### 5.7 The record
 
@@ -828,6 +831,7 @@ full navigation).
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-02 | v0.21 | 370 (#370) the late-abort ending | **§5.6:** a late abort changes nothing on a refresh that delivered — the ending consults the work's outcome, not the flag's timing: every target delivered `ok`/no-data ends the refresh DONE with its frames standing, an abort that actually interrupted the work still ends ABORTED. |
 | 2026-10-02 | v0.20 | 373 (#373) the upload gate judges expiry before the body | §3.4.1's confinement sentence names the one exception to the one-answer rule: a presented token matching an UNCONSUMED upload capability past its deadline is 410 `capability_expired`, judged before any byte of the body; a wrong or consumed token keeps the one 404 `session_not_found`. Authority: rest-api §22.2's error ladder. |
 | 2026-10-02 | v0.19 | 344 (#344) the envelope is the artifact's pins | **§3.3:** what the artifact pins travels unlensed — a dashboard's pinned visualizations and each one's templates ride whatever the visualization and template lenses say; only the root is lensed (the owner's ruling of 2026-10-02, auth §11A.1's lens clause). No behaviour changed. |
 | 2026-10-01 | v0.18 | L5 (#367, #10) the `dashboard` key kind | **§4.1: the `dashboard_viewer` column and the binding row are HERE** — the key's one role holds `dashboard.read` + `dashboard.execute`, `bound` in both cells, the bindings ARE the lens (`dashboard_key_bindings`, R-EP2 verbatim: deeper replaces, unbound = the family 404). **§5.8:** the key kind is no longer "not here" — the runtime routes have a non-session caller. **§6.5:** the wire contract gained its implementation — the reference proxy is `examples/dashboard-proxy/proxy.mjs`, its conformance test `dashboard-proxy.test.mjs` (the streaming timing is the buffering detector) and the real-stack E2E; `/refreshes` is deliberately not relayed (owner-scoped by the key; one key = one budget, sized by `max-streams-per-user`); refresh rows carry `principal_key_id`, executions `executed_by_key_kind = 'dashboard'`. |

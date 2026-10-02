@@ -77,15 +77,35 @@ class StagingBudgetTest {
             val source = h2Datasource("budget_src", ddl)
             val nodes = listOf(Fixtures.node("stage", source = "budget_src", output = NodeOutput.Tempdb("staged")))
 
+            // The check reads the WHOLE JVM's used heap after System.gc() (staging §8.2; #142 is the
+            // real fix), so the staged table alone left the refusal to the mercy of what else the
+            // JVM happened to hold at that instant — the CI red answered "no exception was thrown"
+            // with no `node stage failed` line at all. This case HOLDS a measured allocation above
+            // the 1 MB budget across the check: a green run proves the check RAN and refused, and a
+            // red carries the measurement it saw. The budget itself is never raised.
+            val held =
+                ByteArray(HELD_BYTES).also {
+                    it[0] = 1
+                    it[HELD_BYTES - 1] = 1
+                }
             ExecutorHarness(
                 templateEngine = Fixtures.templateEngine(mapOf("stage" to "SELECT n, pad FROM b")),
                 registry = FakeDatasourceRegistry(mapOf("budget_src" to source)),
                 config = ExecutorConfig(stagingMaxMemoryMb = 1),
             ).use { h ->
-                shouldThrow<PipelineExecutionFailed> {
-                    h.executor.execute(Fixtures.request(Fixtures.pipeline(nodes)))
-                }.errorCode shouldBe PipelineErrorCodes.Staging.MEMORY_LIMIT_EXCEEDED
+                try {
+                    shouldThrow<PipelineExecutionFailed> {
+                        h.executor.execute(Fixtures.request(Fixtures.pipeline(nodes)))
+                    }.errorCode shouldBe PipelineErrorCodes.Staging.MEMORY_LIMIT_EXCEEDED
+                } catch (e: Throwable) {
+                    throw AssertionError(
+                        "the stage path did not refuse as asserted (the JVM's own post-GC reading: " +
+                            "${usedKbAfterGc()} KB vs the 1 MB budget; ${held.size / 1024} KB held by this test)",
+                        e,
+                    )
+                }
             }
+            check(held[0] == 1.toByte()) // the held allocation outlives the execution it measured
         }
 
     @Test
@@ -105,15 +125,30 @@ class StagingBudgetTest {
                     "fill" to """INSERT INTO "raw" SELECT "X", RPAD('x', 400, 'x') FROM SYSTEM_RANGE(1, 20000)""",
                     "grow" to """SELECT n, pad FROM "raw"""",
                 )
+            // The same held allocation as the stage path: the check compares a whole-JVM measurement.
+            val held =
+                ByteArray(HELD_BYTES).also {
+                    it[0] = 1
+                    it[HELD_BYTES - 1] = 1
+                }
 
             ExecutorHarness(
                 templateEngine = Fixtures.templateEngine(sql),
                 config = ExecutorConfig(stagingMaxMemoryMb = 1),
             ).use { h ->
-                shouldThrow<PipelineExecutionFailed> {
-                    h.executor.execute(Fixtures.request(Fixtures.pipeline(nodes)))
-                }.errorCode shouldBe PipelineErrorCodes.Staging.MEMORY_LIMIT_EXCEEDED
+                try {
+                    shouldThrow<PipelineExecutionFailed> {
+                        h.executor.execute(Fixtures.request(Fixtures.pipeline(nodes)))
+                    }.errorCode shouldBe PipelineErrorCodes.Staging.MEMORY_LIMIT_EXCEEDED
+                } catch (e: Throwable) {
+                    throw AssertionError(
+                        "the withConnection path did not refuse as asserted (the JVM's own post-GC reading: " +
+                            "${usedKbAfterGc()} KB vs the 1 MB budget; ${held.size / 1024} KB held by this test)",
+                        e,
+                    )
+                }
             }
+            check(held[0] == 1.toByte())
         }
 
     // ------------------------------------------------------------------ helpers
@@ -167,5 +202,16 @@ class StagingBudgetTest {
 
         /** Far past anything an operator would allow — the shape that disabled the ceiling. */
         const val HUGE_MB = 1_000_000
+
+        /** Held across the budget check by the two refusal cases — well above their 1 MB budget. */
+        const val HELD_BYTES = 8 * 1024 * 1024
+
+        /** The measurement the product's check reads: the JVM's used heap after a full GC (staging §8.2, #142). */
+        fun usedKbAfterGc(): Long {
+            @Suppress("ExplicitGarbageCollectionCall")
+            System.gc()
+            val runtime = Runtime.getRuntime()
+            return (runtime.totalMemory() - runtime.freeMemory()) / 1024
+        }
     }
 }
