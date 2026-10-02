@@ -574,16 +574,33 @@ class PipelineBrowseModel(
     ): Map<String, String> {
         val out = LinkedHashMap<String, String>()
         versions.forEach { v ->
-            val bodyJson =
-                pipelines.findVersionBody(workspaceId, view.pipelines, record.id, v.version) ?: return@forEach
-            val body = runCatching { deserializer.readOrThrow(bodyJson) }.getOrNull() ?: return@forEach
-            datasourceNames(body).forEach { name ->
-                if (!out.containsKey(name)) {
-                    datasources.describe(name, workspaceId)?.let { out[name] = it.dialect.name }
-                }
-            }
+            admittedBodyNames(workspaceId, view, record, v).forEach { name -> rememberDialect(out, workspaceId, name) }
         }
         return out
+    }
+
+    /** The datasource names ONE admitted version's body touches, or nothing when the
+     *  body is hidden (the lens), absent, or unparsable. */
+    private fun admittedBodyNames(
+        workspaceId: UUID,
+        view: LensedView,
+        record: PipelineRecord,
+        version: PipelineVersionRecord,
+    ): List<String> {
+        val bodyJson =
+            pipelines.findVersionBody(workspaceId, view.pipelines, record.id, version.version) ?: return emptyList()
+        val body = runCatching { deserializer.readOrThrow(bodyJson) }.getOrNull() ?: return emptyList()
+        return datasourceNames(body)
+    }
+
+    private fun rememberDialect(
+        out: LinkedHashMap<String, String>,
+        workspaceId: UUID,
+        name: String,
+    ) {
+        if (!out.containsKey(name)) {
+            datasources.describe(name, workspaceId)?.let { out[name] = it.dialect.name }
+        }
     }
 
     private fun actorName(actor: UUID): String = actors.lookup(listOf(actor))[actor] ?: ActorNames.fallback(actor)

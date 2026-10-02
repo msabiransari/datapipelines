@@ -119,58 +119,61 @@ class PipelineWorkspaceController(
         // displayed and submitted version (spec §3.4). A malformed block is a refusal, not a
         // default: workspace.js records PEWorkspaceInvalid and the execute path stops with a
         // visible error and zero requests.
-        model.addAttribute(
-            "workspaceJson",
-            ScriptSafeJson.forScriptBlock(
-                mapper.writeValueAsString(
-                    buildMap<String, Any?> {
-                        put("pipelineId", id.toString())
-                        put("viewedVersion", resolved.viewedVersion)
-                        put("hasBody", resolved.hasSelectedBody)
-                        put("canExecute", roles.canExecute && resolved.hasSelectedBody)
-                        // #349 — the composition state the client owns in-page: the admitted
-                        // history (lens-filtered rows; the header selector, the viewed chip and
-                        // the Versions tab's marks all read it), and the Overview's record-level
-                        // facts with the datasource dialect map across every admitted body. All
-                        // of it is the lens's answer already — nothing here names a version or a
-                        // datasource the caller cannot read (the #348-b projection rule, kept).
-                        put(
-                            "versionRows",
-                            resolved.versions.map {
-                                mapOf<String, Any?>(
-                                    "version" to it.version,
-                                    "status" to it.status.name,
-                                    "current" to it.isCurrent,
-                                    "viewed" to it.isViewed,
-                                )
-                            },
-                        )
-                        put(
-                            "pageFacts",
-                            mapOf<String, Any?>(
-                                "createdBy" to facts.createdBy,
-                                "createdVia" to facts.createdVia,
-                                "lastRun" to
-                                    facts.lastRun?.let {
-                                        mapOf<String, Any?>(
-                                            "executionId" to it.executionId.toString(),
-                                            "status" to it.status,
-                                            "durationMs" to it.durationMs,
-                                            "rowCount" to it.rowCount,
-                                            "ago" to it.ago,
-                                            "at" to it.at,
-                                            "by" to it.by,
-                                        )
-                                    },
-                            ),
-                        )
-                        put("datasourceDialects", facts.datasourceDialects)
-                    },
-                ),
-            ),
-        )
+        val workspaceState = ScriptSafeJson.forScriptBlock(mapper.writeValueAsString(workspaceState(resolved, roles, facts)))
+        model.addAttribute("workspaceJson", workspaceState)
         return VIEW
     }
+
+    /**
+     * The workspace block's shape: the pin the execute and SQL paths read, plus (#349)
+     * the composition state the client owns in-page — the admitted history (lens-filtered
+     * rows; the header selector, the viewed chip and the Versions tab's marks all read
+     * it), and the Overview's record-level facts with the datasource dialect map across
+     * every admitted body. All of it is the lens's answer already — nothing here names a
+     * version or a datasource the caller cannot read (the #348-b projection rule, kept).
+     */
+    private fun workspaceState(
+        resolved: PipelineWorkspaceModel.Resolved,
+        roles: RoleModel.Roles,
+        facts: WorkspaceTabFacts,
+    ): Map<String, Any?> =
+        buildMap<String, Any?> {
+            put("pipelineId", resolved.record.id.toString())
+            put("viewedVersion", resolved.viewedVersion)
+            put("hasBody", resolved.hasSelectedBody)
+            put("canExecute", roles.canExecute && resolved.hasSelectedBody)
+            put(
+                "versionRows",
+                resolved.versions.map {
+                    mapOf<String, Any?>(
+                        "version" to it.version,
+                        "status" to it.status.name,
+                        "current" to it.isCurrent,
+                        "viewed" to it.isViewed,
+                    )
+                },
+            )
+            put(
+                "pageFacts",
+                mapOf<String, Any?>(
+                    "createdBy" to facts.createdBy,
+                    "createdVia" to facts.createdVia,
+                    "lastRun" to
+                        facts.lastRun?.let {
+                            mapOf<String, Any?>(
+                                "executionId" to it.executionId.toString(),
+                                "status" to it.status,
+                                "durationMs" to it.durationMs,
+                                "rowCount" to it.rowCount,
+                                "ago" to it.ago,
+                                "at" to it.at,
+                                "by" to it.by,
+                            )
+                        },
+                ),
+            )
+            put("datasourceDialects", facts.datasourceDialects)
+        }
 
     /** The version-state attributes the header, the phone band and the selector read. */
     private fun stampVersionState(
