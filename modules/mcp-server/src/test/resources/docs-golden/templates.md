@@ -40,7 +40,8 @@ definitions, named under `<owner>/lib/` (the core's naming rule). A consumer lis
 like any node's. Before importing a helper, read what it computes — a macro that ROUNDS is a
 presentation helper and changes answers it is reused inside (`pipelines-numbers`). A literal
 list shared by several templates lives in ONE library template that they all import — never
-copied between siblings (`pipelines-dag`).
+copied between siblings (`pipelines-dag`). A library holds such a list in a `<#function>`,
+never a top-level `<#assign>` (refused: `pipelines-engine-quirks` §6.7).
 
 ## Common mistakes
 

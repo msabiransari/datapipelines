@@ -28,7 +28,10 @@ travels through your context and transcript; and key creation is the workspace a
 `api_key.create`, not yours). The admin does it on the `/api-keys` page — create, then "Edit
 associations". The key's role is `api_caller`: it serves the paths bound to it, reads the runs
 it started, and acts as its OWN identity, so its runs are attributed to the key rather than to
-the admin who created it. The plaintext is shown once. The program that holds it then calls:
+the admin who created it. The plaintext is shown once. The call below is the APPLICATION's, not
+yours: REST is for programs and people, an agent never holds an `endpoint` key (role `api_caller`),
+and its own MCP key is refused on every REST route (`endpoint.key_kind_refused`). The program that
+holds the key then calls:
 
 ```bash
 curl -s http://localhost:8080/api/finance/v1/revenue/EMEA -H "DP-API-Key: dpk_..."

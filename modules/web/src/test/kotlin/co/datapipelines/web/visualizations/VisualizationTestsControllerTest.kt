@@ -2,8 +2,10 @@ package co.datapipelines.web.visualizations
 
 import co.datapipelines.application.lens.LensedView
 import co.datapipelines.application.lens.PromoterLens
+import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.ClientAddressResolver
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.ReadLens
@@ -30,6 +32,8 @@ import co.datapipelines.visualization.VisualizationTestSessionService
 import co.datapipelines.web.api.ApiException
 import co.datapipelines.web.requestlimits.RequestBodyCapFilter
 import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.assertions.withClue
+import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldStartWith
@@ -60,6 +64,9 @@ class VisualizationTestsControllerTest {
     private val capabilities = mockk<VisualizationTestCapabilities>()
     private val visualizations = mockk<VisualizationService>()
     private val links = TestSessionLinks("https://dp.example.com/")
+
+    /** A recording sink, not a strict mock: the upload's row is a "must be called" contract (a missing call must go red). */
+    private val audit = RecordingAudit()
     private val controller = controller(co.datapipelines.web.EVERYTHING_LENS)
 
     private val userId = UUID.randomUUID()
@@ -71,7 +78,7 @@ class VisualizationTestsControllerTest {
     init {
         // The upload gate admits by default; the gate's own refusal case overrides it.
         every { capabilities.authorizeUpload(any(), any(), any()) } returns
-            VisualizationTestCapabilities.UploadGrant(UUID.randomUUID(), "granted")
+            VisualizationTestCapabilities.UploadGrant(workspaceId, "granted")
     }
 
     @AfterEach
@@ -96,6 +103,7 @@ class VisualizationTestsControllerTest {
 
         stream.reads shouldBe 0 // the server buffered nothing for an unauthorised caller
         verify(exactly = 0) { capabilities.storeScreenshot(any(), any(), any(), any(), any(), any()) }
+        audit.events.shouldBeEmpty() // a refused upload stores nothing and writes no row
     }
 
     @Test
@@ -186,6 +194,71 @@ class VisualizationTestsControllerTest {
         data["media_type"] shouldBe "image/png"
         data["run_id"] shouldBe runId.toString()
         data.containsKey("uploaded_by") shouldBe false // a session-less caller learns no identity
+    }
+
+    @Test
+    fun `a stored screenshot writes ONE audit row - the run's starter, no key, the source IP, ids size type and case, never the token`() {
+        val bytes = ByteArray(64) { it.toByte() }
+        every { capabilities.storeScreenshot(id, sessionId, "UPLOAD-MATERIAL", "image/png", any(), "twelve months") } returns
+            ScreenshotView(runId, "image/png", "ab".repeat(32), 3, 2, "twelve months", userId, EXPIRES)
+        val request =
+            MockHttpServletRequest("POST", "/").apply {
+                contentType = "image/png"
+                remoteAddr = "203.0.113.9"
+                setContent(bytes)
+            }
+
+        controller.screenshot(id, sessionId, "UPLOAD-MATERIAL", "twelve months", request)
+
+        audit.events.size shouldBe 1 // `expected:<1> but was:<0>` is the red this assertion gives without the log call
+        val row = audit.events.single()
+        row.event shouldBe VisualizationAuditEvents.SCREENSHOT_UPLOADED
+        row.event shouldBe "visualization.test.screenshot_uploaded"
+        row.userId shouldBe userId // the run's STARTER: the route has no principal
+        row.keyId.shouldBeNull() // and no key
+        row.sourceIp shouldBe "203.0.113.9"
+        // Redaction: neither the presented capability nor the image's hash or bytes reach the row, in any value.
+        withClue("the audit row carries the upload capability or the image's hash: ${row.details}") {
+            row.details.values.none { it.toString().contains("UPLOAD-MATERIAL") || it.toString().contains("ab".repeat(32)) } shouldBe true
+        }
+        row.details shouldBe
+            mapOf(
+                "workspace_id" to workspaceId.toString(),
+                "visualization_id" to id.toString(),
+                "run_id" to runId.toString(),
+                "media_type" to "image/png",
+                "size_bytes" to 64,
+                "case" to "twelve months",
+            )
+    }
+
+    @Test
+    fun `an upload that names no case writes a row without a case key`() {
+        every { capabilities.storeScreenshot(id, sessionId, "UPLOAD-MATERIAL", "image/webp", any(), null) } returns
+            ScreenshotView(runId, "image/webp", "cd".repeat(32), 3, 2, null, userId, EXPIRES)
+        val request =
+            MockHttpServletRequest("POST", "/").apply {
+                contentType = "image/webp"
+                setContent(ByteArray(8))
+            }
+
+        controller.screenshot(id, sessionId, "UPLOAD-MATERIAL", null, request)
+
+        audit.events
+            .single()
+            .details
+            .containsKey("case") shouldBe false
+    }
+
+    @Test
+    fun `a refusal by the service after the gate writes no audit row`() {
+        every { capabilities.storeScreenshot(id, sessionId, "UPLOAD-MATERIAL", null, any(), null) } throws
+            DatapipelinesException(VisualizationErrorCodes.TEST_SCREENSHOT_INVALID, "invalid", mapOf("reason" to "already_stored"))
+        val request = MockHttpServletRequest("POST", "/").apply { setContent(ByteArray(8)) }
+
+        shouldThrow<DatapipelinesException> { controller.screenshot(id, sessionId, "UPLOAD-MATERIAL", null, request) }
+
+        audit.events.shouldBeEmpty()
     }
 
     @Test
@@ -295,13 +368,16 @@ class VisualizationTestsControllerTest {
                 visualizations,
                 TestSessionLinks(null),
                 co.datapipelines.web.EVERYTHING_LENS,
+                audit,
+                ClientAddressResolver(emptyList()),
             )
         (relative.start(id).data["preview_url"] as String) shouldStartWith "/visualizations/$id/preview?session="
     }
 
     // ---- fixtures ---------------------------------------------------------------------------------------
 
-    private fun controller(lens: PromoterLens) = VisualizationTestsController(sessions, capabilities, visualizations, links, lens)
+    private fun controller(lens: PromoterLens) =
+        VisualizationTestsController(sessions, capabilities, visualizations, links, lens, audit, ClientAddressResolver(emptyList()))
 
     private fun authenticate() {
         val principal = AuthenticatedPrincipal(userId, "a@b.c", "A", AuthMethod.OIDC, workspace = WorkspaceContext(workspaceId, "acme"))
@@ -388,6 +464,31 @@ class VisualizationTestsControllerTest {
         override fun isReady(): Boolean = true
 
         override fun setReadListener(listener: ReadListener?) = throw UnsupportedOperationException()
+    }
+
+    /** One recorded `audit_log` write: every argument the controller passed, nothing derived. */
+    private data class Recorded(
+        val event: String,
+        val userId: UUID?,
+        val keyId: String?,
+        val sourceIp: String?,
+        val details: Map<String, Any?>,
+    )
+
+    /** An in-memory sink that records each write, so a missing call is observable (rule 14: not a strict mock). */
+    private class RecordingAudit : AuditEventSink {
+        val events = mutableListOf<Recorded>()
+
+        override fun log(
+            event: String,
+            userId: UUID?,
+            keyId: String?,
+            sourceIp: String?,
+            userAgent: String?,
+            details: Map<String, Any?>,
+        ) {
+            events += Recorded(event, userId, keyId, sourceIp, details)
+        }
     }
 
     private companion object {

@@ -1,6 +1,7 @@
 package co.datapipelines.mcp
 
 import com.fasterxml.jackson.databind.JsonNode
+import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.shouldBe
@@ -13,14 +14,21 @@ import org.junit.jupiter.api.assertAll
  * pattern six sibling modules already follow.
  *
  * `ScopeMatrixSpecDriftTest` (in `auth`) guards the tool *names* and their scopes. Nothing guarded
- * the part this module hand-transcribes: §6.2's input schemas — every property, type, enum,
- * default, `required` list and description — plus §7.1's URI forms and §8's prompt names.
- * `McpTools.tool()` takes the schema as a raw string, so without this test a reworded description
- * or a dropped `enum` disagrees with the frozen contract silently, which is exactly how the two
+ * the part this module hand-transcribes: §6.2's tool blocks — each tool's top-level `description`
+ * (the sentence an agent reads first in `tools/list`) and its `inputSchema` (every property, type,
+ * enum, default, `required` list and description) — plus §7.1's URI forms and §8's prompt names.
+ * `McpTools.tool()` takes the schema as a raw string, so without this test a dropped `enum` or a
+ * reworded description disagrees with the frozen contract silently, which is exactly how the two
  * Gate C findings (`templates_render`'s return shape, `datasources_list`'s stray enum) happened.
  *
- * Deliberately a **deep equality** on the whole `inputSchema`, not a structural subset: an agent
- * reads those descriptions to decide what to send, so they are contract too.
+ * Two **deep equalities**, one per half of a block, not structural subsets: an agent reads both
+ * the description and the schema's property descriptions to decide what to send, so both are
+ * contract. Until #235 only the `inputSchema` half was compared — a tool's own `description` could
+ * be reworded in code, or in the doc, with this test green.
+ *
+ * What this test does NOT check: the served manual's tool references are generated from the
+ * shipped descriptions (`DocSetStructureTest`), so they cannot drift from code; and the BODY prose
+ * around each block (the "Returns:" paragraphs) is not parsed at all.
  */
 class McpToolSurfaceSpecDriftTest {
     private val spec = SpecFiles.read(SpecFiles.MCP_SPEC_PATH)
@@ -31,9 +39,10 @@ class McpToolSurfaceSpecDriftTest {
     private val tools = realShippedTools().associateBy { it.name }
 
     /**
-     * The one tool §6.2 documents in prose instead of a JSON block ("Same input as
-     * `pipelines_create` plus required `id`"), so it has no block to compare against. Named here so
-     * the count guard below still covers all 18.
+     * The one tool whose INPUT §6.2 documents in prose ("Same input as `pipelines_create` plus
+     * required `id`") instead of an `inputSchema`, so its block carries `name` and `description`
+     * only and the schema comparison skips it (the description comparison does not). Named here so
+     * a second tool cannot lose its schema unnoticed: every other block must carry one.
      */
     private val documentedInProse = setOf("pipelines_update")
 
@@ -56,16 +65,46 @@ class McpToolSurfaceSpecDriftTest {
 
     @Test
     fun `every §6_2 input schema matches the shipped tool exactly`() {
-        val documented = documentedSchemas()
+        val documented = documentedBlocks()
 
         // Row-count guard: a tool added to §6.2 must be implemented, not silently skipped.
         documented.keys + documentedInProse shouldContainExactlyInAnyOrder tools.keys
 
         assertAll(
-            documented.map { (name, schema) ->
+            documented.map { (name, block) ->
                 {
-                    val shipped = McpJsonDefaults.getMapper().writeValueAsString(tools.getValue(name).definition.inputSchema())
-                    McpTools.readTree(shipped) shouldBe schema
+                    if (name in documentedInProse) {
+                        withClue("§6.2 block `$name` is documented in prose: it carries no inputSchema") {
+                            block.has("inputSchema") shouldBe false
+                        }
+                    } else {
+                        val shipped = McpJsonDefaults.getMapper().writeValueAsString(tools.getValue(name).definition.inputSchema())
+                        McpTools.readTree(shipped) shouldBe block["inputSchema"]
+                    }
+                }
+            },
+        )
+    }
+
+    @Test
+    fun `every §6_2 tool description matches the shipped tool exactly`() {
+        val documented = documentedBlocks()
+
+        // Same row-count guard as the schema test: a block that LOSES its description is a
+        // named failure below, never a silently skipped row.
+        documented.keys + documentedInProse shouldContainExactlyInAnyOrder tools.keys
+
+        assertAll(
+            documented.map { (name, block) ->
+                {
+                    val description = block["description"]
+                    withClue("§6.2 block `$name` has no top-level string `description`") {
+                        (description != null && description.isTextual) shouldBe true
+                    }
+                    // The whole string, whitespace as written — an agent reads it first in tools/list.
+                    withClue("`$name` description: shipped (actual) vs §6.2 block (expected)") {
+                        tools.getValue(name).definition.description() shouldBe description?.asText()
+                    }
                 }
             },
         )
@@ -116,12 +155,12 @@ class McpToolSurfaceSpecDriftTest {
         )
     }
 
-    /** Every §6.2 fenced JSON block, keyed by the tool it defines. */
-    private fun documentedSchemas(): Map<String, JsonNode> =
+    /** Every §6.2 fenced JSON block (`name`, `description`, `inputSchema`), keyed by the tool it defines. */
+    private fun documentedBlocks(): Map<String, JsonNode> =
         Regex("```json\\n(.*?)\\n```", RegexOption.DOT_MATCHES_ALL)
             .findAll(section("### 6.2.1 `pipelines_list`", "### 6.3 Tool result schema"))
             .map { McpTools.readTree(it.groupValues[1]) }
-            .associate { it["name"].asText() to it["inputSchema"] }
+            .associateBy { it["name"].asText() }
 
     private fun section(
         from: String,
