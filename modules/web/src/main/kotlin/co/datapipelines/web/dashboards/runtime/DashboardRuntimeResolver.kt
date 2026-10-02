@@ -22,8 +22,9 @@ import java.util.UUID
 
 /**
  * A served dashboard and everything it pins, resolved against the dependencies' CURRENT state (the implementation
- * spec's §8.1, §9 steps 1–2): the released dashboard version, each occurrence's visualization version, the parameter
- * set version, and each source's executable pipeline release.
+ * spec's §8.1, §9 steps 1–2): the dashboard version (the current RELEASED one, or the DRAFT|RELEASED version the
+ * caller names — #369 R2), each occurrence's visualization version, the parameter set version, and each source's
+ * executable pipeline release. R1 holds on every resolved body: the pin rule below is RELEASED-only, draft or not.
  */
 class ResolvedDashboard(
     val served: ArtifactVersion<DashboardBody>,
@@ -76,8 +77,18 @@ class DashboardRuntimeResolver(
         workspaceId: UUID,
         lens: ReadLens,
         id: UUID,
+        version: Int? = null,
     ): ResolvedDashboard {
-        val served = dashboards.findServed(workspaceId, lens, id) ?: throw ArtifactFamily.DASHBOARD.notFound(id.toString())
+        // Null = today's read: the CURRENT RELEASED version (findServed). A value names a version the caller asked
+        // for — DRAFT or RELEASED under the whole view, RELEASED only under a narrowing lens (#369 R2); an absent,
+        // discarded or lens-hidden version is the family's 404 naming the version they named.
+        val served =
+            if (version == null) {
+                dashboards.findServed(workspaceId, lens, id) ?: throw ArtifactFamily.DASHBOARD.notFound(id.toString())
+            } else {
+                dashboards.findServedVersion(workspaceId, lens, id, version)
+                    ?: throw ArtifactFamily.DASHBOARD.notFound(id.toString(), version)
+            }
         val body = served.body
         val vizByOccurrence =
             body.visualizations.associate { occurrence ->
@@ -150,7 +161,13 @@ class DashboardRuntimeResolver(
         reason: String,
     ) = ApiException(
         DashboardErrorCodes.RUNTIME_DEPENDENCY_MISSING,
-        "A $kind this dashboard pins no longer holds.",
+        if (reason == NOT_RELEASED) {
+            // #369: the draft preview shows this refusal in place, so the not-released case tells the
+            // engineer the way out — the other reasons are a pin gone or unsafe, not one to release.
+            "A $kind this dashboard pins is not released — release it first, then try this board again."
+        } else {
+            "A $kind this dashboard pins no longer holds."
+        },
         mapOf("dependency" to kind, "name" to name, "reason" to reason),
     )
 

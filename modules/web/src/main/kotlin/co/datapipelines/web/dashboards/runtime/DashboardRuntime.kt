@@ -93,7 +93,8 @@ class DashboardRuntime internal constructor(
     fun config(
         principal: AuthenticatedPrincipal,
         id: UUID,
-    ): ObjectNode = RuntimeViews.config(resolve(principal, id), config)
+        version: Int? = null,
+    ): ObjectNode = RuntimeViews.config(resolve(principal, id, version), config)
 
     // ---- POST /runtime/parameters -------------------------------------------------------------------------
 
@@ -101,8 +102,9 @@ class DashboardRuntime internal constructor(
         principal: AuthenticatedPrincipal,
         id: UUID,
         request: ParametersRequest,
+        version: Int? = null,
     ): ObjectNode {
-        val resolved = resolve(principal, id)
+        val resolved = resolve(principal, id, version)
         requireCurrent(resolved, request.configurationId)
         val revision = revisions.next(request.instanceId)
         val set = resolved.set ?: return emptyEvaluation(revision)
@@ -128,14 +130,16 @@ class DashboardRuntime internal constructor(
         principal: AuthenticatedPrincipal,
         id: UUID,
         request: RefreshRequest,
+        version: Int? = null,
     ): SseEmitter {
+        requireSessionForVersion(principal, version)
         if (streams.atStreamLimit(principal.userId)) {
             metrics.refused(DashboardMetrics.REASON_STREAM_LIMIT)
             throw ApiErrors.streamLimitExceeded(streams.maxStreamsPerUser)
         }
         val workspaceId = principal.requireWorkspace().id
         if (refreshes.find(workspaceId, request.refreshId) != null) throw RuntimeRequests.bad("refresh_id", RuntimeRequests.REUSED)
-        val resolved = resolve(principal, id)
+        val resolved = resolve(principal, id, version)
         requireCurrent(resolved, request.configurationId)
         registerStartMarker(principal, workspaceId, resolved, request)
         var opened = false
@@ -347,7 +351,10 @@ class DashboardRuntime internal constructor(
         id: UUID,
         refreshId: UUID,
         request: AbortRequest,
+        version: Int? = null,
     ) {
+        requireSessionForVersion(principal, version)
+        requireServedVersion(principal, id, version)
         val workspaceId = principal.requireWorkspace().id
         val record = refreshes.find(workspaceId, refreshId)
         val mine = record != null && owns(principal, record) && record.instanceId == request.instanceId
@@ -463,7 +470,43 @@ class DashboardRuntime internal constructor(
     private fun resolve(
         principal: AuthenticatedPrincipal,
         id: UUID,
-    ): ResolvedDashboard = resolver.resolve(principal.requireWorkspace().id, lens.viewFor(principal).dashboards, id)
+        version: Int? = null,
+    ): ResolvedDashboard {
+        requireSessionForVersion(principal, version)
+        return resolver.resolve(principal.requireWorkspace().id, lens.viewFor(principal).dashboards, id, version)
+    }
+
+    /**
+     * A version NAMED on a runtime route is the draft preview's context (#369 R2): the page is session-authenticated
+     * (§6.3), and a version parameter would hand a key a second, versioned credential for the same principal — so a
+     * `dashboard` key naming one is refused here, the kind's own code, before anything is looked up.
+     */
+    private fun requireSessionForVersion(
+        principal: AuthenticatedPrincipal,
+        version: Int?,
+    ) {
+        if (version != null && principal.keyId != null) {
+            throw ApiException(
+                DashboardErrorCodes.KEY_KIND_REFUSED,
+                "A dashboard key may not name a dashboard version — the version routes are the preview page's, a session's.",
+                mapOf("reason" to "version_is_session_only"),
+            )
+        }
+    }
+
+    /**
+     * The version a route names must resolve for this caller (#369 R2): absent, DISCARDED, or hidden under a
+     * narrowing lens is the family's 404 naming the version they named. Null names nothing — today's read.
+     */
+    private fun requireServedVersion(
+        principal: AuthenticatedPrincipal,
+        id: UUID,
+        version: Int?,
+    ) {
+        if (version == null) return
+        dashboards.findServedVersion(principal.requireWorkspace().id, lens.viewFor(principal).dashboards, id, version)
+            ?: throw ArtifactFamily.DASHBOARD.notFound(id.toString(), version)
+    }
 
     /** The dashboard exists for the caller — the lens hides a dashboard from the list of its own refreshes too. */
     private fun requireVisible(

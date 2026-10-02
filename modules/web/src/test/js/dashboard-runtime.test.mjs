@@ -436,7 +436,14 @@ test("init refuses a numeric version, bad credentials and a twice-mounted contai
       container,
       adapter: scriptedAdapter(),
     });
-    assert.throws(() => runtime.init({ ...base(), dashboard: { id: "d", version: 3 } }), (e) => e.code === "init.version_unsupported");
+    assert.throws(() => runtime.init({ ...base(), dashboard: { id: "d", version: "3" } }), (e) => e.code === "init.version_unsupported");
+    assert.throws(() => runtime.init({ ...base(), dashboard: { id: "d", version: 0 } }), (e) => e.code === "init.version_unsupported");
+    // #369: a positive INTEGER names the draft preview's version and is admitted — the number
+    // the first refusal here used to refuse.
+    assert.doesNotThrow(() => {
+      const draft = runtime.init({ ...base(), dashboard: { id: "d", version: 3 } });
+      draft.dispose();
+    });
     assert.throws(() => runtime.init({ ...base(), server: { baseUrl: "", credentials: "bearer" } }), (e) => e.code === "init.invalid");
     const instance = runtime.init(base());
     assert.throws(() => runtime.init(base()), (e) => e.name === "DashboardAlreadyMounted");

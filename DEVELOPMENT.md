@@ -766,7 +766,10 @@ cross-cutting guard classes, filtered, with the zero-test guard skipped for thos
 spec-drift tests, the route and read floors, the coverage scans, the page-count and keyword pins,
 the served-manual guards, the config-key drift tests (the list lives in the script; a new guard that
 reads the whole tree or the docs is added there in the same commit). Iterate on its output,
-then run the gate once. It is not the gate: its exit code decides nothing about a merge.
+then run the gate once. It is not the gate: its exit code decides nothing about a merge. Every
+run appends its verdict line — `PRE-GATE PASS|FAIL`, the base, the merge-base, HEAD, the UTC time
+and the five stage exits — to `.pregate-logs/0-verdict.log`, which is where the lander reads a
+delivered lane's verdict (the terminal is the only other place it is printed).
 Measured need (five lanes, 2026-09-19 to 21): 0–3 extra full gates each, all on lint,
 cross-cutting guards or foreign fixtures.
 

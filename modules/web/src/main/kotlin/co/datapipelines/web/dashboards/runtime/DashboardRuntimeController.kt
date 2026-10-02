@@ -2,8 +2,10 @@ package co.datapipelines.web.dashboards.runtime
 
 import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
+import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.visualization.DashboardErrorCodes
+import co.datapipelines.web.api.ApiException
 import co.datapipelines.web.api.ApiResponse
 import co.datapipelines.web.api.PagedData
 import co.datapipelines.web.api.currentPrincipal
@@ -33,6 +35,13 @@ import java.util.UUID
  * the ids to [DashboardRuntime], and shapes the answer. The controller names no repository: every read goes through
  * the runtime, which reads through the caller's lens (a hidden dashboard is the family's 404).
  *
+ * ## The preview's `version` (#369 R2)
+ * The four runtime routes take an optional `version` query parameter naming a DRAFT or RELEASED version of the
+ * dashboard; absent = the current RELEASED version, exactly the behaviour the refreshes routes and every other line
+ * here keep. A value must be a positive integer (the execute route's 400), names a version that must resolve for the
+ * caller (the family's 404 otherwise), and is refused to a `dashboard` key — the version routes are the
+ * session-authenticated preview page's, and a key never names one.
+ *
  * ## The stream
  * `POST …/runtime/visualizations` produces the execution stream's framing (`event:`, `id:`, `data:`, heartbeats).
  * `produces` lists `application/json` beside `text/event-stream` (gate C, B6) so a pre-stream refusal — the 429 with
@@ -52,17 +61,19 @@ class DashboardRuntimeController(
     @RequiredScope(Permission.DASHBOARD_EXECUTE)
     fun config(
         @PathVariable id: UUID,
-    ): ApiResponse<ObjectNode> = ApiResponse.of(runtime.config(currentPrincipal(), id))
+        @RequestParam(required = false) version: Int?,
+    ): ApiResponse<ObjectNode> = ApiResponse.of(runtime.config(currentPrincipal(), id, positiveVersion(version)))
 
     /** §8.2 — evaluate the pinned set against the submitted selections (every parameter, hidden and disabled included). */
     @PostMapping("/{id}/runtime/parameters")
     @RequiredScope(Permission.DASHBOARD_EXECUTE)
     fun parameters(
         @PathVariable id: UUID,
+        @RequestParam(required = false) version: Int?,
         @RequestBody body: String,
     ): ApiResponse<ObjectNode> {
         val request = RuntimeRequests.parameters(body)
-        return ApiResponse.of(runtime.parameters(currentPrincipal(), id, request))
+        return ApiResponse.of(runtime.parameters(currentPrincipal(), id, request, positiveVersion(version)))
     }
 
     /** §8.3 — one refresh, streamed. Admission is decided BEFORE the stream opens: a full instance is a plain 429 with `Retry-After`. */
@@ -73,12 +84,13 @@ class DashboardRuntimeController(
     @RequiredScope(Permission.DASHBOARD_EXECUTE)
     fun refresh(
         @PathVariable id: UUID,
+        @RequestParam(required = false) version: Int?,
         @RequestBody body: String,
         response: HttpServletResponse,
     ): SseEmitter {
         val request = RuntimeRequests.refresh(body)
         try {
-            return runtime.startRefresh(currentPrincipal(), id, request)
+            return runtime.startRefresh(currentPrincipal(), id, request, positiveVersion(version))
         } catch (e: DatapipelinesException) {
             if (e.code ==
                 DashboardErrorCodes.REFRESH_SATURATED
@@ -96,10 +108,11 @@ class DashboardRuntimeController(
     fun abort(
         @PathVariable id: UUID,
         @PathVariable("refresh_id") refreshId: UUID,
+        @RequestParam(required = false) version: Int?,
         @RequestBody body: String,
     ): ApiResponse<Map<String, Any?>> {
         val request = RuntimeRequests.abort(body)
-        runtime.abort(currentPrincipal(), id, refreshId, request)
+        runtime.abort(currentPrincipal(), id, refreshId, request, positiveVersion(version))
         return ApiResponse.of(mapOf("refresh_id" to refreshId.toString(), "status" to "abort_requested"))
     }
 
@@ -118,4 +131,20 @@ class DashboardRuntimeController(
         @PathVariable id: UUID,
         @PathVariable("refresh_id") refreshId: UUID,
     ): ApiResponse<ObjectNode> = ApiResponse.of(runtime.getRefresh(currentPrincipal(), id, refreshId))
+
+    /**
+     * The preview's optional `version` query parameter (#369 R2): absent = the current RELEASED version, exactly
+     * today's behaviour; present, a bounded positive integer — the execute route's rule (`'version' must be a
+     * positive integer`, the same catalogued 400), judged BEFORE anything is looked up.
+     */
+    private fun positiveVersion(version: Int?): Int? {
+        if (version != null && version < 1) {
+            throw ApiException(
+                PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE,
+                "'version' must be a positive integer.",
+                mapOf("version" to version),
+            )
+        }
+        return version
+    }
 }

@@ -151,6 +151,29 @@ class DashboardUiRenderTest {
     }
 
     @Test
+    fun `the draft preview's way back to the released view is an un-boosted link`() {
+        // #369 review F1: preview -> board is board-to-board, the swap the one-bundle rule forbids
+        // (a draft's bundle can differ from the release's); the banner's link is a FULL navigation.
+        val html =
+            engine.process(
+                "dashboards/board",
+                webContext("/dashboards/${board1.id}/preview").apply {
+                    setVariable("dashboardId", board1.id.toString())
+                    setVariable("bundle", "2d")
+                    setVariable("dashboardName", board1.name)
+                    setVariable("previewVersion", 2)
+                    setVariable("previewStatus", "DRAFT")
+                    setVariable("refreshes", emptyList<DashboardBrowseModel.RefreshRowView>())
+                },
+            )
+
+        html shouldContain "data-dp-dashboard-version=\"2\""
+        val back = Regex("<a[^>]*>Back to the released view</a>").find(html)?.value ?: error("no way back in: $html")
+        back shouldContain "href=\"/dashboards/${board1.id}\""
+        back shouldContain "hx-boost=\"false\""
+    }
+
+    @Test
     fun `a board that cannot run renders the refusal state and no bundle at all`() {
         val html =
             engine.process(
