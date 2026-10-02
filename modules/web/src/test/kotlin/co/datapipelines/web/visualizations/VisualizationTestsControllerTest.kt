@@ -99,6 +99,28 @@ class VisualizationTestsControllerTest {
     }
 
     @Test
+    fun `an expired capability is the 410 - judged before a byte of the body is read (#373)`() {
+        every { capabilities.authorizeUpload(id, sessionId, "EXPIRED") } throws
+            DatapipelinesException(
+                VisualizationErrorCodes.TEST_SESSION_EXPIRED,
+                "The test session is expired or revoked.",
+                mapOf("reason" to "capability_expired"),
+            )
+        val stream = CountingStream()
+        val request =
+            object : HttpServletRequestWrapper(MockHttpServletRequest("POST", "/")) {
+                override fun getInputStream(): ServletInputStream = stream
+            }
+
+        val error = shouldThrow<DatapipelinesException> { controller.screenshot(id, sessionId, "EXPIRED", null, request) }
+
+        error.code shouldBe VisualizationErrorCodes.TEST_SESSION_EXPIRED
+        error.details["reason"] shouldBe "capability_expired"
+        stream.reads shouldBe 0 // the body was never buffered for the one answer that names the expiry
+        verify(exactly = 0) { capabilities.storeScreenshot(any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
     fun `start opens the session as the caller and answers the preview URL from the configured origin`() {
         authenticate()
         every { sessions.start(workspaceId, id, userId) } returns started()

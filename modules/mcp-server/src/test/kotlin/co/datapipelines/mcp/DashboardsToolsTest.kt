@@ -33,7 +33,6 @@ import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import io.mockk.every
-import io.mockk.justRun
 import io.mockk.mockk
 import io.mockk.verify
 import org.junit.jupiter.api.Test
@@ -233,7 +232,7 @@ class DashboardsToolsTest {
         ((listed["dashboards"] as List<*>).single() as Map<*, *>)["name"] shouldBe NAME
 
         every { dashboards.findWorking(workspaceId, ReadLens.Everything, id) } returns loaded(PipelineVersionStatus.DRAFT)
-        justRun { dashboards.purgeDraft(workspaceId, id, "hash-1") }
+        every { dashboards.purgeDraft(workspaceId, id, "hash-1") } returns co.datapipelines.visualization.Purged.Version
         DashboardsPurgeDraftTool(dashboards, McpFixtures.EVERYTHING_LENS)
             .call(McpArguments(mapOf("id" to id.toString(), "expected_hash" to "hash-1")), ctx) shouldBe
             mapOf("id" to id.toString(), "purged" to true)

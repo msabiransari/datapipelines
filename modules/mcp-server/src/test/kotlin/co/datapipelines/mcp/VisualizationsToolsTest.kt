@@ -23,7 +23,6 @@ import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import io.mockk.every
-import io.mockk.justRun
 import io.mockk.mockk
 import io.mockk.slot
 import io.mockk.verify
@@ -165,7 +164,7 @@ class VisualizationsToolsTest {
     @Test
     fun `visualizations_purge_draft checks existence through the lensed read, then purges at the hash`() {
         every { visualizations.findWorking(workspaceId, ReadLens.Everything, id) } returns loaded(PipelineVersionStatus.DRAFT)
-        justRun { visualizations.purgeDraft(workspaceId, id, "hash-1") }
+        every { visualizations.purgeDraft(workspaceId, id, "hash-1") } returns co.datapipelines.visualization.Purged.Version
 
         VisualizationsPurgeDraftTool(visualizations, McpFixtures.EVERYTHING_LENS)
             .call(McpArguments(mapOf("id" to id.toString(), "expected_hash" to "hash-1")), ctx) shouldBe
