@@ -2,14 +2,21 @@ package co.datapipelines.parameters
 
 import co.datapipelines.parameters.ParametersTestDb.AUTHOR
 import co.datapipelines.parameters.ParametersTestDb.WORKSPACE
+import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.DashboardPin
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.ReadLens
+import co.datapipelines.pipeline.TemplateReleaser
+import co.datapipelines.pipeline.TemplateVersionStatuses
 import co.datapipelines.typesystem.DatapipelinesException
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
+import io.mockk.mockk
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
+import org.springframework.jdbc.datasource.DataSourceTransactionManager
+import org.springframework.transaction.support.TransactionTemplate
 import java.util.UUID
 
 /**
@@ -79,5 +86,57 @@ class ParameterSetAuditReadBodyFreeIntegrationTest {
         // Free: the purge runs — the sole draft takes the set (scope = entity), still without a body read.
         h.pinnedByDashboards.clear()
         h.service.purgeDraft(WORKSPACE, id, "seed-hash-unreadable") shouldBe Purged.Entity
+    }
+
+    @Test
+    fun `the audit pre-read's statements select no body_json - the stored body moves no bytes (#372 B2)`() {
+        val created = h.create(h.document(ParameterSetFixtures.setJson(ParameterSetFixtures.countryJson(), ParameterSetFixtures.amountJson())))
+        val recording = SqlRecordingDataSource(ParametersTestDb.dataSource)
+        // The same service shape over the recording source: every statement the pre-read makes is captured whole.
+        val service =
+            ParameterSetService(
+                ParameterSetRepository(NamedParameterJdbcTemplate(recording)),
+                mockk<ParameterSetValidator>(),
+                AuthoringGuard(true),
+                TemplateVersionStatuses { _, _, _ -> null },
+                object : ParameterSetConsumers {
+                    override fun liveVersionPins(
+                        workspaceId: UUID,
+                        setName: String,
+                        version: Int,
+                    ) = emptyList<co.datapipelines.pipeline.DashboardPin>()
+
+                    override fun anyVersionPins(
+                        workspaceId: UUID,
+                        setName: String,
+                    ) = emptyList<co.datapipelines.pipeline.DashboardPin>()
+                },
+                TemplateReleaser.NONE,
+                TransactionTemplate(DataSourceTransactionManager(ParametersTestDb.dataSource)),
+            )
+
+        recording.statements.clear()
+        service.auditIdentity(WORKSPACE, ReadLens.Everything, created.record.id) shouldBe (created.record.name to created.detail.version)
+        service.auditVersionIdentity(WORKSPACE, ReadLens.Everything, created.record.id, 1) shouldBe (created.record.name to 1)
+
+        // Non-vacuity: the reads ran; the statement TEXT selects no body_json, so no body byte can move.
+        recording.statements.isEmpty() shouldBe false
+        recording.statements.filter { it.contains("body_json") } shouldBe emptyList()
+    }
+
+    /** Captures every prepared statement's SQL text at the JDBC boundary — the 332 counting-source way. */
+    private class SqlRecordingDataSource(
+        private val target: javax.sql.DataSource,
+    ) : org.springframework.jdbc.datasource.DelegatingDataSource(target) {
+        val statements = mutableListOf<String>()
+
+        override fun getConnection(): java.sql.Connection =
+            java.lang.reflect.Proxy.newProxyInstance(
+                javaClass.classLoader,
+                arrayOf(java.sql.Connection::class.java),
+            ) { _, method, args ->
+                if (method.name == "prepareStatement" && args?.get(0) is String) statements += args[0] as String
+                method.invoke(target.connection, *(args ?: emptyArray()))
+            } as java.sql.Connection
     }
 }
