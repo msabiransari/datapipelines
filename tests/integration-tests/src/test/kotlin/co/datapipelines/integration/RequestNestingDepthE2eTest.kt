@@ -88,6 +88,12 @@ class RequestNestingDepthE2eTest {
             StringRoute("POST", "/api/v1/visualizations/${UUID.randomUUID()}/current", VISUALIZATION_MALFORMED),
             // #10 L1c: the transfer routes read their envelope bodies themselves.
             StringRoute("POST", "/api/v1/visualizations/import", VISUALIZATION_MALFORMED),
+            // #353: the test-session results route reads its body through the same family reader, BEFORE any lookup.
+            StringRoute(
+                "POST",
+                "/api/v1/visualizations/${UUID.randomUUID()}/tests/sessions/${UUID.randomUUID()}/results",
+                VISUALIZATION_MALFORMED,
+            ),
             StringRoute("POST", "/api/v1/dashboards", DASHBOARD_MALFORMED),
             StringRoute("PUT", "/api/v1/dashboards/${UUID.randomUUID()}", DASHBOARD_MALFORMED),
             StringRoute("POST", "/api/v1/dashboards/${UUID.randomUUID()}/current", DASHBOARD_MALFORMED),
@@ -186,12 +192,14 @@ class RequestNestingDepthE2eTest {
                 // #10 L1c: the transfer routes read their envelope bodies themselves.
                 "VisualizationTransferController.kt" to 1,
                 "DashboardTransferController.kt" to 1,
+                // #353: the test-session results submission.
+                "VisualizationTestsController.kt" to 1,
             )
         withClue("files declaring an @RequestBody String parameter, and how many each declares") {
             found.entries.map { it.key to it.value } shouldContainExactlyInAnyOrder
                 (swept + ALLOWLISTED).entries.map { it.key to it.value }
         }
-        stringRoutes.size shouldBe swept.values.sum() // 28 routes sweep themselves: the allowlist is empty (#323, #10 L1c)
+        stringRoutes.size shouldBe swept.values.sum() // 29 routes sweep themselves: the allowlist is empty (#323, #10 L1c, #353)
     }
 
     @Test
