@@ -208,7 +208,7 @@ class RoleModelTest {
      * is a silent un-rendering there (`th:if` on an absent variable is false, not an error).
      */
     @Test
-    fun `stamp puts exactly the nine documented attributes into the model`() {
+    fun `stamp puts exactly the ten documented attributes into the model`() {
         val model = ExtendedModelMap()
 
         RoleModel.stamp(model, session(WorkspaceRole.AUTHOR))
@@ -224,6 +224,7 @@ class RoleModelTest {
                 "canAdminWorkspace",
                 "isSuperAdmin",
                 "roleLabel",
+                "canEvaluateParameterSets",
             )
         model["canAuthor"] shouldBe true
         model["canPromote"] shouldBe false

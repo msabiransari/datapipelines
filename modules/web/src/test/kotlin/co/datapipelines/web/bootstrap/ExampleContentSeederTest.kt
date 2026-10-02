@@ -7,6 +7,7 @@ import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineNameGrammar
 import co.datapipelines.web.TestRepoFiles
 import co.datapipelines.web.api.ApiException
+import co.datapipelines.web.parameters.ParameterSetTransferService
 import co.datapipelines.web.pipelines.PipelineImportService
 import co.datapipelines.web.templates.TemplateImportService
 import com.fasterxml.jackson.databind.ObjectMapper
@@ -41,6 +42,7 @@ class ExampleContentSeederTest {
 
     private val pipelines = mockk<PipelineImportService>(relaxed = true)
     private val templates = mockk<TemplateImportService>(relaxed = true)
+    private val parameterSets = mockk<ParameterSetTransferService>(relaxed = true)
     private val datasources = mockk<DatasourceRegistry>()
     private val mapper = ObjectMapper()
 
@@ -50,7 +52,7 @@ class ExampleContentSeederTest {
     private fun file(json: String): String = tempDir.resolve("examples.json").also { it.writeText(json) }.toString()
 
     private fun seeder(examplesFile: String?) =
-        ExampleContentSeeder(BootstrapProperties(examplesFile = examplesFile), pipelines, templates, datasources)
+        ExampleContentSeeder(BootstrapProperties(examplesFile = examplesFile), pipelines, templates, parameterSets, datasources)
 
     /** The gate's answer per datasource name: these names are registered and visible, nothing else. */
     private fun visibleDatasources(vararg names: String) {
@@ -197,6 +199,93 @@ class ExampleContentSeederTest {
         }
     }
 
+    // ---------------------------------------------------------------- #374: the parameter_sets key
+
+    private val setDocument =
+        """{"name":"nyc/parameters/geo_filters","display_name":"Geo filters","parameters":[""" +
+            """{"name":"year","label":"Year","type":"INTEGER","kind":"INPUT","default_value":2024}]}"""
+
+    private fun withSet(
+        set: String = setDocument,
+        otherFamilies: String = """"templates":[{"id":"t.sql","dialect":"H2","display_name":"T","description":"d","body":"SELECT 1"}],""",
+    ) = file("""{$otherFamilies"parameter_sets":[$set],"pipelines":[{"schema_version":1,"name":"p","display_name":"P","nodes":[]}]}""")
+
+    @Test
+    fun `a parameter set is imported AFTER the templates it pins and BEFORE any pipeline, as the import route's body`() {
+        val setBodies = mutableListOf<String>()
+        every { parameterSets.import(capture(setBodies), workspaceId, userId) } returns mockk()
+
+        seeder(withSet()).seed(workspaceId, userId)
+
+        setBodies shouldHaveSize 1
+        val payload = mapper.readTree(setBodies.single()).get("parameter_set")
+        payload.get("name").asText() shouldBe "nyc/parameters/geo_filters"
+        payload.get("display_name").asText() shouldBe "Geo filters"
+        payload.get("parameters")[0].get("name").asText() shouldBe "year"
+        // The seeder owns identity and hash: an id, a hash, and NO version (the version-less arm lands RELEASED at 1).
+        UUID.fromString(payload.get("id").asText())
+        payload.get("body_hash").asText().length shouldBe 64
+        payload.has("version") shouldBe false
+        verify(ordering = io.mockk.Ordering.ORDERED) {
+            templates.import(any(), workspaceId, userId)
+            parameterSets.import(any(), workspaceId, userId)
+            pipelines.import(any(), workspaceId, userId)
+        }
+    }
+
+    @Test
+    fun `the set's id is unique per workspace and stable within one - a second personal workspace is never id_taken`() {
+        val first = mutableListOf<String>()
+        val other = UUID.randomUUID()
+        val second = mutableListOf<String>()
+        every { parameterSets.import(capture(first), workspaceId, userId) } returns mockk()
+        every { parameterSets.import(capture(second), other, userId) } returns mockk()
+
+        val seeder = seeder(withSet())
+        seeder.seed(workspaceId, userId)
+        seeder.seed(workspaceId, userId)
+        seeder.seed(other, userId)
+
+        val ids =
+            (first + second).map {
+                mapper
+                    .readTree(it)
+                    .get("parameter_set")
+                    .get("id")
+                    .asText()
+            }
+        ids[0] shouldBe ids[1]
+        (ids[0] == ids[2]) shouldBe false
+    }
+
+    @Test
+    fun `a file that carries an id, a version or a body_hash on a set is refused at startup - those are the seeder's`() {
+        listOf("id" to "\"\"", "version" to "1", "body_hash" to "\"x\"").forEach { (key, value) ->
+            val error =
+                shouldThrow<ExampleContentFileException> {
+                    seeder(withSet(setDocument.replaceFirst("{", "{\"$key\":$value,")))
+                }
+            error.message!!.shouldContain("must not carry '$key'")
+        }
+    }
+
+    @Test
+    fun `a set entry that is not an object or has no name is refused at startup`() {
+        shouldThrow<ExampleContentFileException> { seeder(withSet("\"geo\"")) }.message!!.shouldContain("must be an object")
+        shouldThrow<ExampleContentFileException> { seeder(withSet("""{"display_name":"x","parameters":[]}""")) }
+            .message!!
+            .shouldContain("non-blank string 'name'")
+    }
+
+    @Test
+    fun `parameter_sets alone is a valid file, and a failing set import travels - provisioning fails loudly`() {
+        every { parameterSets.import(any(), any(), any()) } throws IllegalStateException("parameter.import.missing_template")
+
+        val alone = file("""{"parameter_sets":[$setDocument]}""")
+        shouldThrow<IllegalStateException> { seeder(alone).seed(workspaceId, userId) }.message shouldBe "parameter.import.missing_template"
+        verify(exactly = 0) { pipelines.import(any(), any(), any()) }
+    }
+
     @Test
     fun `no examples file configured is a no-op, not a failure`() {
         seeder(null).seed(workspaceId, userId)
@@ -227,7 +316,7 @@ class ExampleContentSeederTest {
         shouldThrow<ExampleContentFileException> { seeder(file("{oops")) }.message!!.shouldContain("not valid JSON")
         shouldThrow<ExampleContentFileException> { seeder(file("[]")) }.message!!.shouldContain("must be a JSON object")
         shouldThrow<ExampleContentFileException> { seeder(file("""{"templates":{}}""")) }.message!!.shouldContain("must be an array")
-        shouldThrow<ExampleContentFileException> { seeder(file("""{"other":1}""")) }.message!!.shouldContain("declares neither")
+        shouldThrow<ExampleContentFileException> { seeder(file("""{"other":1}""")) }.message!!.shouldContain("declares none of")
     }
 
     @Test

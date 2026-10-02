@@ -216,6 +216,142 @@
       ],
       "body": "SELECT\n    :run_fiscal_quarter                                                    AS fiscal_quarter,\n    o.pickup_borough                                                       AS borough,\n    MAX(z.zone_count)                                                      AS pickup_zones,\n    SUM(o.trip_count)                                                      AS trip_count,\n    SUM(CASE WHEN o.dropoff_borough = o.pickup_borough THEN o.trip_count ELSE 0 END) AS trips_within_borough,\n    <@met.share_pct part=\"SUM(CASE WHEN o.dropoff_borough = o.pickup_borough THEN o.trip_count ELSE 0 END)\" whole=\"SUM(o.trip_count)\"/> AS pct_within_borough,\n    <@met.per_unit total=\"SUM(o.total_amount)\" qty=\"SUM(o.trip_count)\"/>      AS revenue_per_trip\nFROM stg_od_matrix o\nLEFT JOIN (SELECT borough, COUNT(*) AS zone_count FROM stg_zones GROUP BY borough) z\n       ON z.borough = o.pickup_borough\nGROUP BY o.pickup_borough\nORDER BY SUM(o.trip_count) DESC",
       "is_library": false
+    },
+    {
+      "schema_version": 1,
+      "id": "nyc/parameters/year_options.sql",
+      "engine": "freemarker",
+      "dialect": "POSTGRES",
+      "display_name": "Years with trips (selector)",
+      "description": "A parameter-set selector over the sample-trips Postgres datasource: one option per calendar year the trips_monthly rollup covers (2023 and 2024). Takes no parameters. Returns the three selector columns - value, display_value, is_default - and no option is marked default, so the first (the earliest year) is.",
+      "imports": [],
+      "body": "SELECT\n    to_char(m.month_start, 'YYYY') AS value,\n    to_char(m.month_start, 'YYYY') AS display_value,\n    FALSE                          AS is_default\nFROM trips_monthly m\nGROUP BY to_char(m.month_start, 'YYYY')\nORDER BY 1",
+      "is_library": false
+    },
+    {
+      "schema_version": 1,
+      "id": "nyc/parameters/month_options.sql",
+      "engine": "freemarker",
+      "dialect": "POSTGRES",
+      "display_name": "Months of a year (selector)",
+      "description": "A parameter-set selector over the sample-trips Postgres datasource: one option per month of the chosen year that the trips_monthly rollup covers. Depends on a parameter named year, bound (never interpolated) as :year. Returns the three selector columns, ordered by month number.",
+      "imports": [],
+      "body": "SELECT\n    to_char(m.month_start, 'MM')      AS value,\n    to_char(m.month_start, 'FMMonth') AS display_value,\n    FALSE                             AS is_default\nFROM trips_monthly m\nWHERE to_char(m.month_start, 'YYYY') = :year\nGROUP BY to_char(m.month_start, 'MM'), to_char(m.month_start, 'FMMonth')\nORDER BY 1",
+      "is_library": false
+    },
+    {
+      "schema_version": 1,
+      "id": "nyc/parameters/zone_options.sql",
+      "engine": "freemarker",
+      "dialect": "POSTGRES",
+      "display_name": "Busiest pickup zones of a month (selector)",
+      "description": "A parameter-set selector over the sample-trips Postgres datasource: the 100 busiest pickup zones of the chosen month (the per-selector option cap is 200, and options are never truncated, so the query bounds itself). Depends on parameters named year and month, bound as :year and :month. The value is the TLC location id as text; the label names it. Ordered busiest first, ties by location id.",
+      "imports": [],
+      "body": "SELECT\n    CAST(m.pu_location_id AS VARCHAR)               AS value,\n    'Pickup zone ' || CAST(m.pu_location_id AS VARCHAR) AS display_value,\n    FALSE                                           AS is_default\nFROM trips_monthly m\nWHERE to_char(m.month_start, 'YYYY') = :year\n  AND to_char(m.month_start, 'MM') = :month\nORDER BY m.trip_count DESC, m.pu_location_id\nLIMIT 100",
+      "is_library": false
+    }
+  ],
+  "parameter_sets": [
+    {
+      "name": "nyc/parameters/geo_filters",
+      "display_name": "Where and when - sample trips",
+      "description": "The Parameter Sets demo set over the sample-trips datasource: year -> month -> pickup zone is a three-level cascade (each level's options come from a pinned selector template and depend on the levels above it), measure is a hard-coded choice, and min_trips is a typed input that refuses a negative value. Seeded RELEASED so every role's Parameter Sets page has something to show.",
+      "parameters": [
+        {
+          "name": "year",
+          "label": "Year",
+          "description": "A calendar year the sample covers.",
+          "type": "STRING",
+          "kind": "SELECT",
+          "cardinality": "SINGLE",
+          "required": true,
+          "source": {
+            "template": {
+              "id": "nyc/parameters/year_options.sql",
+              "version": 1
+            },
+            "datasource": "sample-trips"
+          }
+        },
+        {
+          "name": "month",
+          "label": "Month",
+          "description": "A month of the chosen year; changing the year re-resolves it.",
+          "type": "STRING",
+          "kind": "SELECT",
+          "cardinality": "SINGLE",
+          "required": true,
+          "depends_on": [
+            "year"
+          ],
+          "source": {
+            "template": {
+              "id": "nyc/parameters/month_options.sql",
+              "version": 1
+            },
+            "datasource": "sample-trips"
+          }
+        },
+        {
+          "name": "pickup_zone",
+          "label": "Pickup zone",
+          "description": "One of that month's 100 busiest pickup zones; changing the year or the month re-resolves it.",
+          "type": "STRING",
+          "kind": "SELECT",
+          "cardinality": "SINGLE",
+          "required": true,
+          "depends_on": [
+            "year",
+            "month"
+          ],
+          "source": {
+            "template": {
+              "id": "nyc/parameters/zone_options.sql",
+              "version": 1
+            },
+            "datasource": "sample-trips"
+          }
+        },
+        {
+          "name": "measure",
+          "label": "Measure",
+          "description": "What to total - a hard-coded choice, no database behind it.",
+          "type": "STRING",
+          "kind": "SELECT",
+          "cardinality": "SINGLE",
+          "required": true,
+          "source": {
+            "constants": [
+              {
+                "value": "trip_count",
+                "display_value": "Trips",
+                "is_default": true
+              },
+              {
+                "value": "total_revenue",
+                "display_value": "Revenue"
+              },
+              {
+                "value": "total_tips",
+                "display_value": "Tips"
+              }
+            ]
+          }
+        },
+        {
+          "name": "min_trips",
+          "label": "Minimum trips",
+          "description": "Hide anything below this many trips. Typed, never picked; a negative value is refused.",
+          "type": "INTEGER",
+          "kind": "INPUT",
+          "cardinality": "SINGLE",
+          "required": false,
+          "default_value": 0,
+          "constraints": {
+            "min": 0
+          }
+        }
+      ]
     }
   ],
   "pipelines": [

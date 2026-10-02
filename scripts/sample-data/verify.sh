@@ -13,7 +13,9 @@
 #   5. examples.json is STRUCTURALLY what the app's seeder accepts, and carries
 #      no pipeline ids (a pipelines.id is a GLOBAL primary key — an id-carrying
 #      seed lets the first user's login claim it and breaks every later user's
-#      provisioning). STRUCTURAL ONLY, by design: shape, ids, references. The
+#      provisioning), no parameter-set id/version/hash (the seeder's, #374) and
+#      every parameter-set selector pin resolving to a template in the file.
+#      STRUCTURAL ONLY, by design: shape, ids, references. The
 #      SEMANTIC validation — running every template and pipeline through the
 #      app's own save-time validators (TemplateValidator, ReferenceRules, 042's
 #      parameter_interpolated rule) — lives in the build, as the templates
@@ -125,8 +127,8 @@ doc = json.load(open(path, encoding="utf-8"))
 bad = []
 if not isinstance(doc, dict):
     bad.append("top level is not a JSON object (the seeder refuses it at startup)")
-if not doc.get("templates") and not doc.get("pipelines"):
-    bad.append("declares neither 'templates' nor 'pipelines'")
+if not doc.get("templates") and not doc.get("pipelines") and not doc.get("parameter_sets"):
+    bad.append("declares none of 'templates', 'parameter_sets' or 'pipelines'")
 
 UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
 for i, p in enumerate(doc.get("pipelines", [])):
@@ -155,11 +157,28 @@ for i, p in enumerate(doc.get("pipelines", [])):
         if tid and tid not in names:
             bad.append(f"pipelines[{i}].nodes[{j}] references template '{tid}', which this file "
                        "does not define — seeding would fail with pipeline.import.missing_template")
+# A parameter set (#374): the id, version and hash are the SEEDER's — a fixed id would be
+# `id_taken` for the second personal workspace (parameter_sets.id is a GLOBAL primary key) —
+# and every selector pin must name a template this file ships, at the version a fresh import lands.
+for i, ps in enumerate(doc.get("parameter_sets", [])):
+    for f in ("id", "version", "body_hash"):
+        if f in ps:
+            bad.append(f"parameter_sets[{i}] carries '{f}' — the seeder derives the id per workspace "
+                       "and owns the version and hash")
+    for j, prm in enumerate(ps.get("parameters", [])):
+        pin = ((prm.get("source") or {}).get("template")) or {}
+        if pin and pin.get("id") not in names:
+            bad.append(f"parameter_sets[{i}].parameters[{j}] pins template '{pin.get('id')}', which this "
+                       "file does not define — seeding would fail with parameter.validation.template_not_found")
+        if pin and pin.get("version") != 1:
+            bad.append(f"parameter_sets[{i}].parameters[{j}] pins version {pin.get('version')!r}; "
+                       "a fresh import lands every template at version 1")
 if bad:
     for b in bad:
         print(f"verify: FAIL — examples.json: {b}", file=sys.stderr)
     sys.exit(1)
 print(f"verify: ok   — examples.json: {len(doc.get('templates', []))} templates, "
+      f"{len(doc.get('parameter_sets', []))} parameter sets, "
       f"{len(doc.get('pipelines', []))} pipelines, no pipeline ids, every template reference resolves",
       file=sys.stderr)
 PY

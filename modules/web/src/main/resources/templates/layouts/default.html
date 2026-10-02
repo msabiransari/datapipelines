@@ -86,6 +86,9 @@
        injects nothing, the sheet must be present wherever a board can mount. -->
   <link th:href="@{/css/dashboards.css}" rel="stylesheet">
   <link th:href="@{/vendor/plotly/plotly.css}" rel="stylesheet">
+  <!-- #374 — the Parameter Sets workspace's rules (design tokens only). Head-loaded for 090's reason:
+       /parameter-sets/{id} is a boosted route. -->
+  <link th:href="@{/css/parameter-sets.css}" rel="stylesheet">
   <!-- 079 §A — the rail's collapsed state, applied BEFORE the first paint.
 
        Until 188 this was the ONE inline script in the layout — the round's only
@@ -341,6 +344,33 @@
                th:attr="data-nav-workspace=${activeWorkspace},data-nav-root-url=@{/partials/dashboards/tree(scope='nav')}">
             <div class="app-nav-tree-scroll" data-nav-tree-scroll>
               <div class="tpl-level tpl-level-pending" id="dash-tree-nav" data-nav-tree-root>
+                <span class="ds-spinner htmx-indicator" aria-hidden="true"></span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- #374 (the Parameter Sets workspace, #357 S1): the Parameter Sets item — an every-role read
+             (`parameter_set.read`, the promoter through the lens), so like Dashboards it rides no
+             advice boolean. The branch is the same navigating-tree shape as the two above: the item
+             LINK is the flat catalog page, the TOGGLE opens the lazy panel, and a LEAF is a plain
+             link to the canonical workspace /parameter-sets/{id} (hx-boost="false" — a full
+             document load, never a swap into the page). Its fragment is
+             /partials/parameter-sets/tree (scope=nav); it carries no search box because the
+             parameter-set service has no name search to back one. -->
+        <div class="app-nav-branch" data-nav-branch="parameter-sets">
+          <a th:href="@{/parameter-sets}" class="app-nav-link" data-nav-section="/parameter-sets"
+             data-nav-group="Build" data-nav-label="Parameter Sets"
+             th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/parameter-sets')} ? 'active' : null"
+             th:attr="aria-current=${currentPath != null and #strings.startsWith(currentPath, '/parameter-sets')} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#sliders-horizontal"></use></svg><span class="app-rail-label">Parameter Sets</span></a>
+          <button type="button" class="app-nav-branch-toggle app-rail-label" data-nav-tree-toggle
+                  aria-expanded="false" aria-controls="nav-tree-parameter-sets" aria-label="Parameter set folders">
+            <svg class="ds-icon ds-icon-xs tpl-chevron" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#chevron-right"></use></svg>
+          </button>
+          <div class="app-nav-tree app-rail-label" id="nav-tree-parameter-sets" data-nav-tree="parameter-sets" hidden
+               th:attr="data-nav-workspace=${activeWorkspace},data-nav-root-url=@{/partials/parameter-sets/tree(scope='nav')}">
+            <div class="app-nav-tree-scroll" data-nav-tree-scroll>
+              <div class="tpl-level tpl-level-pending" id="params-tree-nav" data-nav-tree-root>
                 <span class="ds-spinner htmx-indicator" aria-hidden="true"></span>
               </div>
             </div>

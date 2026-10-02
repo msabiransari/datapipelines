@@ -4,6 +4,7 @@ import co.datapipelines.auth.WorkspaceContentSeeder
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.Dialect
+import co.datapipelines.web.parameters.ParameterSetTransferService
 import co.datapipelines.web.pipelines.PipelineImportService
 import co.datapipelines.web.templates.TemplateImportService
 import com.fasterxml.jackson.databind.JsonNode
@@ -28,16 +29,20 @@ class ExampleContentFileException(
  *
  * ## File shape (`datapipelines.bootstrap.examples-file`)
  * ```json
- * { "templates": [ <template draft>, ... ], "pipelines": [ <pipeline json>, ... ] }
+ * { "templates": [ <template draft>, ... ], "parameter_sets": [ <set document>, ... ],
+ *   "pipelines": [ <pipeline json>, ... ] }
  * ```
  * `templates` entries are exactly the `POST /api/v1/templates/import` array elements and
- * `pipelines` entries exactly a `POST /api/v1/pipelines/import` body; both arrays are optional.
+ * `pipelines` entries exactly a `POST /api/v1/pipelines/import` body; the three arrays are
+ * optional. A `parameter_sets` entry is the authored set document (`name` + body, #374); the
+ * seeder wraps it into the `POST /api/v1/parameter-sets/import` body per workspace
+ * ([ParameterSetFixture] — the id, version and hash are the seeder's, never the file's).
  *
  * The configured value is a comma-separated LIST of files (one per sample-data family — see
  * [BootstrapProperties]). Every file is read and structurally checked at construction; seeding
- * then runs ALL templates (file by file, in declared order) before ANY pipeline, because a
- * pipeline's node resolves its template at save time and the two families' templates are
- * disjoint by contract.
+ * then runs ALL templates (file by file, in declared order), then ALL parameter sets, then ANY
+ * pipeline: a set's selector pins and a pipeline's node resolve their templates at save time, and
+ * the families' templates are disjoint by contract.
  *
  * ## Two different failure moments, both loud
  * The files are read and structurally checked **in the constructor**, i.e. while the context is
@@ -62,6 +67,7 @@ class ExampleContentSeeder(
     properties: BootstrapProperties,
     private val pipelineImportService: PipelineImportService,
     private val templateImportService: TemplateImportService,
+    private val parameterSetImportService: ParameterSetTransferService,
     private val datasources: DatasourceRegistry,
 ) : WorkspaceContentSeeder {
     private val log = LoggerFactory.getLogger(ExampleContentSeeder::class.java)
@@ -132,6 +138,13 @@ class ExampleContentSeeder(
             }
         }
         eligible.forEach { examples ->
+            examples.parameterSets.forEach { fixture ->
+                reporting(workspaceId, userId, kind = "parameter_set", fixture = fixture.name) {
+                    parameterSetImportService.import(fixture.envelope(workspaceId, mapper), workspaceId, userId)
+                }
+            }
+        }
+        eligible.forEach { examples ->
             examples.pipelines.forEach { fixture ->
                 reporting(workspaceId, userId, kind = "pipeline", fixture = fixture.name) {
                     pipelineImportService.import(fixture.body, workspaceId, userId)
@@ -139,10 +152,11 @@ class ExampleContentSeeder(
             }
         }
         log.info(
-            "event=workspace.examples_seeded workspace_id={} files={} templates={} pipelines={}",
+            "event=workspace.examples_seeded workspace_id={} files={} templates={} parameter_sets={} pipelines={}",
             workspaceId,
             eligible.size,
             eligible.sumOf { it.templateIds.size },
+            eligible.sumOf { it.parameterSets.size },
             eligible.sumOf { it.pipelines.size },
         )
     }
@@ -218,9 +232,10 @@ class ExampleContentSeeder(
         }
         val templates = arrayAt(tree, "templates", path)
         val pipelines = arrayAt(tree, "pipelines", path)
-        if (templates == null && pipelines == null) {
+        val parameterSets = arrayAt(tree, "parameter_sets", path)
+        if (templates == null && pipelines == null && parameterSets == null) {
             throw ExampleContentFileException(
-                "Bootstrap examples file '$path' declares neither 'templates' nor 'pipelines' — unset " +
+                "Bootstrap examples file '$path' declares none of 'templates', 'parameter_sets' or 'pipelines' — unset " +
                     "datapipelines.bootstrap.examples-file to turn example seeding off instead.",
             )
         }
@@ -237,6 +252,7 @@ class ExampleContentSeeder(
                     ?.takeIf { !it.isEmpty }
                     ?.let { mapper.writeValueAsString(mapper.createObjectNode().set<ObjectNode>("templates", it)) },
             templateIds = templates?.map { it.get("id")?.asText() ?: UNNAMED }.orEmpty(),
+            parameterSets = parameterSets?.mapIndexed { index, node -> ParameterSetFixture.parse(node, index, path) }.orEmpty(),
             pipelines =
                 pipelines?.mapIndexed { index, node ->
                     Fixture(name = node.get("name")?.asText() ?: "pipelines[$index]", body = mapper.writeValueAsString(node))
@@ -299,6 +315,7 @@ class ExampleContentSeeder(
         val requiresDatasources: List<String>,
         val templatesBody: String?,
         val templateIds: List<String>,
+        val parameterSets: List<ParameterSetFixture>,
         val pipelines: List<Fixture>,
     )
 

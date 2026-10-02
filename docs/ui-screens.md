@@ -1,9 +1,9 @@
 # UI Screens Inventory
 
-**Status:** v1.103
+**Status:** v1.104
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
-**Last updated:** 2026-10-02 (#386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
+**Last updated:** 2026-10-02 (#374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
 
 ---
 
@@ -235,6 +235,15 @@ lens). The pattern, normative:
   request; a leaf past its level's first page is walked to through the level's pager (bounded).
   Boosted swaps and history restores keep the rail (it is outside `#app-main`) and only re-mark
   the current leaf. Another workspace's key is never read; a workspace switch is a full document.
+- **Parameter Sets (#374) is the pattern's third use** — Build's **Parameter Sets** item (the
+  lucide `sliders-horizontal` glyph, every role: `parameter_set.read`, the promoter through the
+  lens). The link opens the flat catalog (`/parameter-sets`, §4.23); the toggle opens a panel
+  whose tree is the Dashboards branch's shape — `/partials/parameter-sets/tree?scope=nav` under
+  `#params-tree-nav`, **no search box** (the set service has no name search), a leaf a full-document
+  link (`hx-boost="false"`) to the canonical workspace `/parameter-sets/{id}`, the current leaf marked
+  through the workspace page's `[data-nav-current]` hook, the response stamped
+  `DP-Nav-Stamp: <workspace>|<lens>`, the state key `dp-nav:parameter-sets:<workspace>`. Nothing in
+  the engine changed: `nav-tree.js` reads the branch's `data-nav-branch` and root URL.
 
 - **The brand mark (163, #157, "D1").** Three rings converging into an outlined tile with three
   rising bars — the tile is a 4-unit `currentColor` stroke and the bars are `currentColor`
@@ -1910,6 +1919,83 @@ themes under the live CSP with zero violations, the rendered trace count per cas
 start → preview → screenshot → submit → upload → release flow), `PublicPathsTest`,
 `PublicRouteWalkerTest`, `PublicContractE2eTest`.
 
+---
+
+### 4.23 Parameter Sets (the catalog and the workspace page — #374, #357 S1)
+
+**The catalog page.**
+
+| Attribute | Value |
+|---|---|
+| URL | `GET /parameter-sets` (`?offset=` pages it) |
+| Auth required | Yes — `parameter_set.read`, every role (a promoter through the lens: only sets whose current version is RELEASED and admitted; a hidden set is absent — not listed, not counted, not paged) |
+| Purpose | Find a parameter set and open its workspace |
+| Design primitives | The house list: `.ds-empty` for the empty state, the shared §5 pager; `parameter-sets.css` (`ps-*`), head-loaded (§3.0 is normative) |
+| JS | None of its own |
+| htmx | The route's rows are the same read the sidebar's tree is built from; a row is a full-document link (`hx-boost="false"`) |
+
+Content: a flat, server-paged list (25 rows per page) of every set the lens admits — folder-path name,
+display name and the version chip. It is the page `/parameter-sets` always meant to be (owner ruling
+2026-10-02 for the artifact families: the page is a CATALOG, the tree lives in the rail, §3.4). There is no
+search box: the set service reads by path prefix and offers no name search, so the control is not drawn.
+`GET /partials/parameter-sets/tree` serves both presentations — `scope=nav` (or any `prefix`) is the
+sidebar level, anything else the catalog — one route, one permission, one lens.
+
+**The workspace page.**
+
+| Attribute | Value |
+|---|---|
+| URL | `GET /parameter-sets/{id}?version=N&tab=workspace` — one URL names one set, one VIEWED version and one tab |
+| Auth required | Yes — `parameter_set.read`. A set the caller cannot see — absent, another workspace's, lens-hidden — is the family's ONE house 404; so is an explicit `?version=` that does not exist or is not admitted (under a narrowing lens a draft number is the same 404 an unknown number is, so a status cannot be probed by number). A `?version=` that is not a positive integer is the house 400 |
+| Purpose | Read a set's structure at a chosen version and, for a role that may evaluate, drive its live form |
+| Design primitives | `parameter-sets.css`; a Cytoscape + dagre graph on design tokens only (colours resolved through a probe element — the editor graph's recipe); `.ds-badge`, `.ds-empty`, the shared form controls |
+| JS | `static/js/parameter-workspace/{model,graph,inspector,workspace,runtime}.js` and the L3a dashboard runtime's parameters-only entry, `DatapipelinesDashboard.initParameters` (`static/js/datapipelines-dashboard.js`) — files only, no inline script (CSP). The vendors ride an inert `<template id="ps-runtime-scripts">` catalog that `runtime.js` loads in order, once per document; the only executable tag is the guarded bootstrap, so an htmx history restore never re-executes a bare script |
+| htmx | None beyond the shell's boost; the version links are plain links |
+
+**Which version the page shows** — the resolution, in order: (1) an explicit admitted `?version=N` shows ITS
+body, never a nearby one (no clamping); (2) otherwise the set's CURRENT pointer, when the caller's lens
+admits that version; (3) otherwise an accessible DRAFT, labelled as one; (4) otherwise the **choose-a-version**
+state over the admitted history — no graph, no form, no invented pointer. The header chip prints the one
+fact string (`vN · released · current`, `vN · draft`), and the version links (`nav.ps-versions`,
+`aria-current` on the viewed one) are the in-page switch. A promoter's lens admits RELEASED versions only, so
+her page carries no draft pointer and her version list is the released ones. `?tab=` is the closed set
+`workspace | history`; any other value is `workspace`, and `history` resolves to the workspace pane until
+the history surface lands (S3).
+
+**Content.** Two script-safe JSON blocks (`#ps-data`, the set's body through `ScriptSafeJson`; `#ps-workspace`,
+the ONE source of the displayed and the submitted version — a malformed block is a visible refusal with ZERO
+requests, never a default); the **graph** (`#ps-graph`: one node per parameter, an edge per `depends_on`, the
+badge the source kind — static: it shows the set's STRUCTURE and does not animate an evaluation, which is
+#383's) with a text live region for its selection; the **inspector** (`#ps-inspector`: the selected
+parameter's definition and, once evaluated, its state — value, origin, reset, hidden, disabled, options,
+errors — as TEXT only); and the **live form** (`#ps-form-host`).
+
+**The live form — roles.** The form is rendered, and `initParameters` is called, only for a role that may
+evaluate (`parameter_set.evaluate`: viewer, author, workspace admin, super admin). A promoter's page renders
+the structure (graph and inspector) and **no control and no request** — `[data-ps-read-only]` carries the
+hint; the markup is not a CSS-hidden control. The form POSTs the existing `POST /api/v1/parameter-sets/{id}/evaluate`
+with the VIEWED version, the session credential and the `DP-CSRF-Token` double-submit header; the page adds no route, no scope row
+and no permission. A parameter VALUE leaves the form only in that POST body — never a URL, history state,
+storage or log line. A change made while an evaluate is pending SUPERSEDES it — the person's newest selection is the one worth
+answering, so the pending attempt is finished and its late response changes nothing (a dashboard's form keeps the
+refusal instead, `parameters.locked`); a refused evaluate renders the server's code and message in `#ps-form-error`.
+
+Guards: `ParameterSetsWorkspaceModelTest` (the resolution order, never-clamp, the lens-hidden 404, the draft
+arms, the tab set), `ParameterSetsBrowseModelTest`, `ParameterSetsUiControllerTest` (the routes' scopes, the 400/404,
+the evaluate flag per role), `ParameterSetsRenderTest` (the page's markup contract: the blocks, the form only
+for an evaluator, the promoter's page, the draft label, the choose-a-version state, the script-safe
+blocks), `ShellRenderTest` (the Parameter Sets branch), `ReadFloorTest` (the `PARAMETER_SETS` family and
+its floor), `BrowseModelConventionTest`, `MatrixRowReachabilityTest`/`RoleWalkE2eTest` (the §7.6 Surfaces
+cells), `parameter-set-init.test.mjs` (the runtime's parameters-only entry), `SampleDataParameterSetsContentTest`
+and `ExampleContentSeederTest` (the demo set `nyc/parameters/geo_filters` is seeded through the seeder, §4.23's
+demo content), and the browser suite `ParameterSetPagesBrowserTest`.
+
+**Demo content.** Every personal workspace seeded with the NYC demo family gets `nyc/parameters/geo_filters`
+(RELEASED v1): a year → month → pickup-zone cascade over the `sample-trips` Postgres datasource through three
+pinned selector templates, a hard-coded `measure` choice and a typed `min_trips` input. The seeder derives
+the set's id per workspace and states the body's shape hash; the examples file carries neither.
+
+
 ## 5. htmx Usage Pattern
 
 Standard pattern for list/filter/pagination. The page (`GET /pipelines`) renders the shell **and** the initial fragment; every subsequent refresh hits the partial endpoint (`GET /partials/pipelines`) and swaps the fragment only.
@@ -2073,6 +2159,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-02 | v1.104 | #374 the Parameter Sets screens (workspace spec §6.2/§6.3, #357 S1) — renumbered at merge after 386's v1.103 | **§3.4**: Build gains **Parameter Sets**, the navigating-tree pattern's third use (lucide `sliders-horizontal`; link → the catalog, lazy tree beside it with no search box, leaf → the workspace). **New §4.23**: the flat paged catalog `GET /parameter-sets` and the canonical workspace `GET /parameter-sets/{id}?version=N&tab=` — the version-explicit resolve order (explicit admitted version, never clamped → the lens-visible current → an accessible draft, labelled → choose-a-version), the house 404/400, a static Cytoscape graph + inspector and the live parameter form through the dashboard runtime's new parameters-only `initParameters` entry against the EXISTING evaluate route (role-hidden: a promoter's page has no control and no request). The demo family seeds `nyc/parameters/geo_filters`. No permission, scope row or role changed; the routes are listed in auth.md §7.6's `parameter_set.read` Surfaces cell. Guards: the render/controller/model tests, `ReadFloorTest`, `SampleDataParameterSetsContentTest`, `ParameterSetPagesBrowserTest`, the falsifications in the handback. |
 | 2026-10-02 | v1.103 | #386/#387 the board's small slots and its breakpoint | **§4.21's Grid rows row** gains the collapse below `breakpoint_px` (768 px default; every item full width in grid order, the row unit kept, a crossing re-places and resizes) and the 2-row chart's plot-area floor (compact margins + `automargin`, dashboards.md §6.3). |
 | 2026-10-02 | v1.102 | #364 the history shape guard names the `<main>` element | **§3.2** — the #358 shape guard decides "body-shaped" by the serialised OPENING TAG `<main … id="app-main"` (attribute order tolerated), not by the substring `id="app-main"`. The substring test was fooled by user text — innerHTML serialisation escapes `<`, `>` and `&` in a text node but not the double quote — so a page whose text carried the literal (a pipeline description) read as body-shaped and reloaded on every Back/Forward. The test is one module-scope function in `shell.js` (`historyEntryIsBodyShaped`, exposed for `node --test`); `PipelineWorkspaceHistoryBrowserTest` gains the cache-hit-with-no-reload case for a description carrying the literal. No route, scope, template or policy change: a genuinely body-shaped entry is still purged and vetoed. |
 | 2026-10-02 | v1.101 | #350 the pipeline tree in the expanding global sidebar (workspace spec §5, D7/D8) | **§3.4**: Build's Pipelines and Dashboards items are **navigating-tree branches** — one normative pattern (item link + separate toggle + a panel with the lazy server-backed tree in a bounded scroll region), the leaf a full-document link (pipelines → the canonical workspace, current-first), the explorers' keyboard engine in its NAV context, `aria-current` on the viewed page's leaf; the rail FITS an open tree's visible rows between `--app-rail-tree-min` 320px and `--app-rail-tree-max` 400px and the region scrolls sideways past the max with full labels; an icon collapse wins by selector; visible failure + Retry; the generation + `DP-Nav-Stamp` (workspace\|lens) admission guard; per-workspace+family state (paths and offsets only) restored incrementally, `rail.js` painting the remembered width before the first frame. The Dashboards branch adopts the pattern (its `<details>` disclosure retired — one tree engine in the rail). **§3.2**: `template-explorer.js` loads once from the layout; a re-executed page tag re-inits. **§3.6**: the tree-open widths per band (desktop; tablet only when expanded; the phone drawer keeps 232px). **§4.3 rewritten**: `/pipelines` is the flat, paged CATALOG (owner ruling 2026-10-02) — no tree, no detail pane, every row a full-document link into the workspace, `?q=` kept as the deep link; `GET /partials/pipelines` gains `scope` (`nav`; any other value, `page` included, is the catalog — same route, permission and lens). §4.3a/§4.3c now describe the templates explorer only; §4.3b is the record of what moved (its fragment and the explorer lifecycle legs have no page — #401). **§4.3d/§4.3e (#395)**: the workspace's Switch/Discard/Restore never sent their request (their dialogs targeted the explorer's `#pipeline-detail`); they are `from`-aware now and redirect onto the Versions tab with a flash, and the workspace header keeps the one-destructive rule (Purge pipeline in the `{D}` shape). **§4.21**: the sidebar's Dashboards branch is the pattern. No permission or role changed; no new route. Guards: `PipelineSidebarTreeBrowserTest`, `PipelineSidebarTreeStateBrowserTest`, `nav-tree.test.mjs`, `template-explorer.test.mjs`, the controller/render tests, the falsifications in the handback. |
