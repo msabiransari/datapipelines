@@ -101,17 +101,25 @@ class PipelineWorkspaceHistoryBrowserTest : BrowserSuite() {
         nodeId: String,
         templateId: String,
         templateVersion: Int,
-    ): String =
-        """{"name":"p348/sql_pipes","display_name":"SQL Pipes",""" +
+        description: String = "",
+    ): String {
+        // Emitted only when given, so every other case's request body is unchanged.
+        val descriptionField =
+            if (description.isEmpty()) "" else """"description":"${description.replace("\\", "\\\\").replace("\"", "\\\"")}","""
+        return """{"name":"p348/sql_pipes","display_name":"SQL Pipes",""" + descriptionField +
             """"nodes":[{"id":"$nodeId","type":"DQL",""" +
             """"source":"tempdb","template":{"id":"$templateId","version":$templateVersion},"depends_on":[]}]}"""
+    }
 
     /**
      * The SQL lifecycle fixture (the #348-b shape): template v1 ("one") and v2 ("two")
      * both RELEASED; pipeline v1 (sql_v1 → tpl@1) and v2 (sql_v2 → tpl@2) both RELEASED,
      * current switched back to v1; a v3 draft. Distinct nodes AND distinct SQL per version.
      */
-    private fun seedSqlVersions(slug: String): String {
+    private fun seedSqlVersions(
+        slug: String,
+        description: String = "",
+    ): String {
         loginReadyUser(slug)
         // Per-test template id: the suite's database is per JVM, and a fixed id would
         // collide across the class's tests (template.version.conflict).
@@ -121,13 +129,13 @@ class PipelineWorkspaceHistoryBrowserTest : BrowserSuite() {
         val tplV2Hash = hashOf(must("PUT", "/api/v1/templates", templateBody(templateId, "SELECT 2 AS two"), ifMatch = tplV1Hash))
         must("POST", "/api/v1/templates/release", """{"name":"$templateId"}""", ifMatch = tplV2Hash)
 
-        val created = must("POST", "/api/v1/pipelines", sqlBody("sql_v1", templateId, 1))
+        val created = must("POST", "/api/v1/pipelines", sqlBody("sql_v1", templateId, 1, description))
         val uuid = "([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"
         val id = Regex(""""id"\s*:\s*"$uuid"""").find(created)!!.groupValues[1]
         val v1Hash = hashOf(created)
         must("POST", "/api/v1/pipelines/$id/release", null, ifMatch = v1Hash)
 
-        val v2Hash = hashOf(must("PUT", "/api/v1/pipelines/$id", sqlBody("sql_v2", templateId, 2), ifMatch = v1Hash))
+        val v2Hash = hashOf(must("PUT", "/api/v1/pipelines/$id", sqlBody("sql_v2", templateId, 2, description), ifMatch = v1Hash))
         must("POST", "/api/v1/pipelines/$id/release", null, ifMatch = v2Hash)
 
         must(
@@ -439,6 +447,57 @@ class PipelineWorkspaceHistoryBrowserTest : BrowserSuite() {
         stackDepth() shouldBe 1
         sqlPaneCount() shouldBe 0
         openFirstCardSql("SELECT 2 AS two")
+    }
+
+    @Test
+    fun `a main-shaped entry whose TEXT carries the id literal is a cache hit - no reload (#364)`() {
+        // The user-authored text node: the pipeline's description, rendered by the Overview
+        // pane's `x-text` (hidden, but always in the DOM — and so in the cached snapshot).
+        // innerHTML serialisation escapes `<`, `>` and `&` in text and NOT the double quote,
+        // so this is the literal the old substring guard mistook for a body-shaped entry.
+        val literal = "id=\"app-main\""
+        val id = seedSqlVersions("pwsl" + generatedPassword("s").take(6).lowercase(), description = "Quarterly roll-up $literal")
+        val cacheKey = "/pipelines/$id?version=2"
+        page.navigate("$baseUrl$cacheKey")
+        page.waitForSelector(".pe-root")
+        waitActivated()
+
+        // Premise (non-vacuity): the rendered region AND the entry htmx caches carry the literal.
+        page.locator("#pe-pane-overview .tplx-measure").textContent() shouldContain literal
+        (page.evaluate("() => document.querySelector('#app-main').innerHTML") as String) shouldContain literal
+        seedHistoryCounters()
+        leaveThroughTheUi()
+        val cached =
+            page.evaluate(
+                """(url) => {
+                  const cache = JSON.parse(sessionStorage.getItem('htmx-history-cache') || '[]');
+                  const item = cache.find((i) => i.url === url);
+                  return item ? item.content : '';
+                }""",
+                cacheKey,
+            ) as String
+        cached shouldContain literal
+
+        // Any request for the workspace PAGE itself (its navigation, or an htmx cache-miss
+        // fetch) is a re-fetch; the editor's own /api/ reads are not.
+        val refetched = mutableListOf<String>()
+        page.onRequest { request ->
+            if (java.net.URI(request.url()).path == "/pipelines/$id") refetched += request.url()
+        }
+        val hitsBefore = counter("hit")
+        val restoresBefore = counter("restore")
+
+        page.goBack()
+        page.waitForSelector(".pe-root")
+        waitActivated()
+
+        check(refetched.isEmpty()) { "a main-shaped entry must be restored from the cache, but the page was re-fetched: $refetched" }
+        counter("restore") shouldBeGreaterThanOrEqual restoresBefore + 1
+        counter("hit") shouldBeGreaterThanOrEqual hitsBefore + 1
+        counter("miss") shouldBe 0
+        stackDepth() shouldBe 1
+        sqlPaneCount() shouldBe 0
+        (page.evaluate("() => document.querySelector('#app-main').innerHTML") as String) shouldContain literal
     }
 
     @Test
