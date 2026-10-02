@@ -7,5 +7,5 @@ description: >-
   EXTERNAL (operator-managed, §4.1/§4.2) — this chart installs neither.
 type: application
 # Chart version — bump on every chart change. Independent of the app version.
-version: 0.1.0
+version: 0.1.1
 appVersion: "1.0.0"
