@@ -113,9 +113,9 @@ class VisualizationService(
         workspaceId: UUID,
         id: UUID,
         expectedHash: String,
-    ) {
+    ): Purged {
         repository.findDraft(workspaceId, id)?.let { unpinned(workspaceId, id, it.version) }
-        lifecycle.purgeDraft(workspaceId, id, expectedHash)
+        return lifecycle.purgeDraft(workspaceId, id, expectedHash)
     }
 
     /** Purge version [version] — drafts only, and never a pinned one. */
@@ -124,18 +124,18 @@ class VisualizationService(
         id: UUID,
         version: Int,
         expectedHash: String? = null,
-    ) {
+    ): Purged {
         unpinned(workspaceId, id, version)
-        lifecycle.purgeVersion(workspaceId, id, version, expectedHash)
+        return lifecycle.purgeVersion(workspaceId, id, version, expectedHash)
     }
 
     /** Purge the whole visualization — only a draft-only one that no live dashboard version pins at any version. */
     fun purgeEntity(
         workspaceId: UUID,
         id: UUID,
-    ) {
+    ): Purged {
         unpinned(workspaceId, id, null)
-        lifecycle.purgeEntity(workspaceId, id)
+        return lifecycle.purgeEntity(workspaceId, id)
     }
 
     /** Discard RELEASED version [version] — never a pinned one. */
@@ -144,7 +144,7 @@ class VisualizationService(
         id: UUID,
         version: Int,
         actor: UUID,
-    ): ArtifactVersionDetail {
+    ): VersionMoved {
         unpinned(workspaceId, id, version)
         return lifecycle.discardVersion(workspaceId, id, version, actor)
     }
@@ -160,7 +160,7 @@ class VisualizationService(
         workspaceId: UUID,
         id: UUID,
         version: Int,
-    ): ArtifactVersionDetail {
+    ): VersionMoved {
         lifecycle.requireAuthoring()
         val stored = repository.findVersion(workspaceId, id, version)
         if (stored != null && stored.detail.status == PipelineVersionStatus.DISCARDED) refuseDanglingPin(workspaceId, id, stored.body)
@@ -185,7 +185,7 @@ class VisualizationService(
         workspaceId: UUID,
         id: UUID,
         version: Int,
-    ): Int = lifecycle.switchCurrent(workspaceId, id, version)
+    ): Switched = lifecycle.switchCurrent(workspaceId, id, version)
 
     /** Import (§12, versioning §9.2): [validateForImport] then the lifecycle's landing. Not an authoring write. */
     fun import(
@@ -214,6 +214,21 @@ class VisualizationService(
         }
 
     // ---- reads ----------------------------------------------------------------------------------------
+
+    /** The lifecycle audit rows' pre-read — BODY-FREE, [ArtifactLifecycle.auditIdentity]'s lens rule (#372's B2). */
+    fun auditIdentity(
+        workspaceId: UUID,
+        lens: ReadLens,
+        id: UUID,
+    ): Pair<String, Int>? = lifecycle.auditIdentity(workspaceId, lens, id)
+
+    /** A named version's audit pre-read — BODY-FREE, [ArtifactLifecycle.auditVersionIdentity]'s lens rule. */
+    fun auditVersionIdentity(
+        workspaceId: UUID,
+        lens: ReadLens,
+        id: UUID,
+        version: Int,
+    ): Pair<String, Int>? = lifecycle.auditVersionIdentity(workspaceId, lens, id, version)
 
     fun findWorking(
         workspaceId: UUID,

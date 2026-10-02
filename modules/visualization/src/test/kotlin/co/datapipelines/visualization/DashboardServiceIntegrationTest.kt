@@ -31,6 +31,55 @@ class DashboardServiceIntegrationTest {
 
     private fun refusal(block: () -> Unit): DatapipelinesException = shouldThrow<DatapipelinesException>(block)
 
+    @Test
+    fun `the verbs answer the pointer pair and the purge scope from their own results (#372)`() {
+        val viz = h.createVisualization()
+        h.visualizations.release(WORKSPACE, viz.record.id, viz.detail.bodyHash, AUTHOR)
+        val v1 = h.dashboards.create(WORKSPACE, h.dashboardDocument(1), AUTHOR, WriteSurface.MCP)
+        val released1 = h.dashboards.release(WORKSPACE, v1.record.id, v1.detail.bodyHash, AUTHOR).version
+        val v2draft =
+            h.dashboards.write(
+                WORKSPACE,
+                v1.record.id,
+                h.dashboardDocument(1) { it.put("display_name", "Second") },
+                released1.detail.bodyHash,
+                AUTHOR,
+                WriteSurface.MCP,
+            )
+        val v2 = h.dashboards.release(WORKSPACE, v1.record.id, v2draft.detail.bodyHash, AUTHOR).version
+        v2.detail.version shouldBe 2
+        // Discard the CURRENT version: the pair from the result — before = 2, after = 1.
+        h.dashboards.discardVersion(WORKSPACE, v1.record.id, 2, AUTHOR).pointer shouldBe PointerMove(before = 2, after = 1)
+        // Restore moves the pointer only upward (D60): before = 1, after = 2.
+        h.dashboards.restoreVersion(WORKSPACE, v1.record.id, 2).pointer shouldBe PointerMove(before = 1, after = 2)
+        // The switch answers from/to, and the name the service already read for its 404.
+        h.dashboards.switchCurrent(WORKSPACE, v1.record.id, 1) shouldBe
+            Switched(v1.record.name, PointerMove(before = 2, after = 1))
+        // A sole draft takes the dashboard with it: scope = entity, from the result.
+        val sole = h.dashboards.create(WORKSPACE, h.dashboardDocument(1, name = "acme/dashboards/sole"), AUTHOR, WriteSurface.MCP)
+        h.dashboards.purgeDraft(WORKSPACE, sole.record.id, sole.detail.bodyHash).scope shouldBe "entity"
+        // A draft beside a release purges alone: scope = version.
+        val beside =
+            h.dashboards.write(
+                WORKSPACE,
+                v1.record.id,
+                h.dashboardDocument(1) { it.put("display_name", "Beside") },
+                v1.detail.bodyHash,
+                AUTHOR,
+                WriteSurface.MCP,
+            )
+        h.dashboards.purgeDraft(WORKSPACE, v1.record.id, beside.detail.bodyHash).scope shouldBe "version"
+        // The entity purge is entity by definition — the only version is a DRAFT.
+        val onlyDraft =
+            h.dashboards.create(
+                WORKSPACE,
+                h.dashboardDocument(1, name = "acme/dashboards/only_draft"),
+                AUTHOR,
+                WriteSurface.MCP,
+            )
+        h.dashboards.purgeEntity(WORKSPACE, onlyDraft.record.id) shouldBe Purged.Entity
+    }
+
     private fun vizStatus(harness: LifecycleHarness = h): PipelineVersionStatus =
         checkNotNull(harness.visualizationRepository.findRecordByName(WORKSPACE, DocumentFixtures.VISUALIZATION_NAME)).let {
             checkNotNull(harness.visualizationRepository.findVersionDetail(WORKSPACE, it.id, 1)).status

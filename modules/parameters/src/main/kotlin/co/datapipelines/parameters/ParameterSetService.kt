@@ -191,12 +191,12 @@ class ParameterSetService(
         workspaceId: UUID,
         id: UUID,
         expectedHash: String,
-    ) {
+    ): Purged {
         requireAuthoring()
         val draft = repository.findDraft(workspaceId, id) ?: throw notDraft(id)
         refuseIfDraftPinned(workspaceId, id, draft.version)
-        val purged = transactions.execute { repository.purgeDraft(workspaceId, id, expectedHash, authoring.developmentPosture) } == true
-        if (!purged) throw staleBase(workspaceId, id)
+        return transactions.execute { repository.purgeDraft(workspaceId, id, expectedHash, authoring.developmentPosture) }
+            ?: throw staleBase(workspaceId, id)
     }
 
     /** Purge version [version] — drafts only (a release is discarded, never purged: `last_release`). */
@@ -205,26 +205,27 @@ class ParameterSetService(
         id: UUID,
         version: Int,
         expectedHash: String? = null,
-    ) {
+    ): Purged {
         requireAuthoring()
         val detail = repository.findVersionDetail(workspaceId, id, version) ?: throw notFound(id, version)
         if (detail.status != PipelineVersionStatus.DRAFT) throw lastRelease(id, version)
         refuseIfDraftPinned(workspaceId, id, version)
-        val purged = transactions.execute { repository.purgeDraft(workspaceId, id, expectedHash, authoring.developmentPosture) } == true
-        if (!purged) throw staleBase(workspaceId, id)
+        return transactions.execute { repository.purgeDraft(workspaceId, id, expectedHash, authoring.developmentPosture) }
+            ?: throw staleBase(workspaceId, id)
     }
 
-    /** Purge the whole set — only when its only version is a DRAFT (versioning §3.2, graph rule 3). */
+    /** Purge the whole set — only when its only version is a DRAFT (versioning §3.2, graph rule 3). Entity by definition. */
     fun purgeEntity(
         workspaceId: UUID,
         id: UUID,
-    ) {
+    ): Purged {
         requireAuthoring()
         repository.findRecord(workspaceId, id) ?: throw notFound(id)
         val versions = repository.listVersions(workspaceId, id)
         versions.firstOrNull { it.status != PipelineVersionStatus.DRAFT }?.let { throw lastRelease(id, it.version) }
         refuseIfPinned(workspaceId, id, version = null)
         transactions.execute { repository.purgeDraft(workspaceId, id, null, authoring.developmentPosture) }
+        return Purged.Entity
     }
 
     /** Discard RELEASED version [version] (versioning §3.1); the pointer falls back when it named it (D60). */
@@ -233,7 +234,7 @@ class ParameterSetService(
         id: UUID,
         version: Int,
         actor: UUID,
-    ): ParameterSetVersionDetail {
+    ): VersionMoved {
         requireAuthoring()
         val detail = repository.findVersionDetail(workspaceId, id, version) ?: throw notFound(id, version)
         if (detail.status !=
@@ -251,7 +252,7 @@ class ParameterSetService(
         workspaceId: UUID,
         id: UUID,
         version: Int,
-    ): ParameterSetVersionDetail {
+    ): VersionMoved {
         requireAuthoring()
         val detail = repository.findVersionDetail(workspaceId, id, version) ?: throw notFound(id, version)
         if (detail.status !=
@@ -262,20 +263,22 @@ class ParameterSetService(
         return transactions.execute { repository.restoreVersion(workspaceId, id, version) } ?: throw staleBase(workspaceId, id)
     }
 
-    /** Point the set at [version] (D60) — the receiver's verb, never an authoring write. Answers the new current version. */
+    /** Point the set at [version] (D60) — the receiver's verb, never an authoring write. Answers the move and the name. */
     fun switchCurrent(
         workspaceId: UUID,
         id: UUID,
         version: Int,
-    ): Int {
-        repository.findRecord(workspaceId, id) ?: throw notFound(id)
+    ): Switched {
+        val record = repository.findRecord(workspaceId, id) ?: throw notFound(id)
         repository.findVersionDetail(workspaceId, id, version) ?: throw notFound(id, version)
-        return transactions.execute { repository.switchCurrent(workspaceId, id, version, authoring.developmentPosture) }
-            ?: throw DatapipelinesException(
-                ParameterErrorCodes.VERSION_NOT_ELIGIBLE,
-                "Version $version is not live and eligible for this deployment's pointer.",
-                mapOf("id" to id.toString(), "version" to version),
-            )
+        val pointer =
+            transactions.execute { repository.switchCurrent(workspaceId, id, version, authoring.developmentPosture) }
+                ?: throw DatapipelinesException(
+                    ParameterErrorCodes.VERSION_NOT_ELIGIBLE,
+                    "Version $version is not live and eligible for this deployment's pointer.",
+                    mapOf("id" to id.toString(), "version" to version),
+                )
+        return Switched(record.name, pointer)
     }
 
     /**
@@ -371,6 +374,65 @@ class ParameterSetService(
     }
 
     // ---- reads (the working-version rule; the lens) ----------------------------------------------------
+
+    /**
+     * The working version's (name, number) for a lifecycle audit row (#332's shape; #372's B2): the SAME
+     * lens rule [findWorking] applies, read from the record and the version DETAIL alone — never a body,
+     * so a body the model cannot read (the 332 gate's finding) or a large one never surfaces here.
+     */
+    fun auditIdentity(
+        workspaceId: UUID,
+        lens: ReadLens,
+        id: UUID,
+    ): Pair<String, Int>? {
+        val record = repository.findRecord(workspaceId, id) ?: return null
+        return if (lens.isEverything) {
+            workingIdentity(record, workspaceId, id)
+        } else {
+            currentIdentity(record, lens, workspaceId, id)
+        }
+    }
+
+    /** The Everything arm: the draft, else the pointer — (name, number) from record + detail alone. */
+    private fun workingIdentity(
+        record: ParameterSetRecord,
+        workspaceId: UUID,
+        id: UUID,
+    ): Pair<String, Int>? =
+        repository.findDraft(workspaceId, id)?.version?.let { record.name to it }
+            ?: record.currentVersion?.let { record.name to it }
+
+    /** The narrowing arm: the current version, admitted and RELEASED — [findWorking]'s rule, body-free. */
+    private fun currentIdentity(
+        record: ParameterSetRecord,
+        lens: ReadLens,
+        workspaceId: UUID,
+        id: UUID,
+    ): Pair<String, Int>? {
+        if (!lens.admits(record.name)) return null
+        val current = record.currentVersion ?: return null
+        repository
+            .findVersionDetail(workspaceId, id, current)
+            ?.takeIf { it.status == PipelineVersionStatus.RELEASED } ?: return null
+        return record.name to current
+    }
+
+    /** A named version's (name, number) for a lifecycle audit row — BODY-FREE, [findVersion]'s lens rule. */
+    fun auditVersionIdentity(
+        workspaceId: UUID,
+        lens: ReadLens,
+        id: UUID,
+        version: Int,
+    ): Pair<String, Int>? =
+        repository
+            .findRecord(workspaceId, id)
+            ?.takeIf { lens.admits(it.name) }
+            ?.let { record ->
+                repository
+                    .findVersionDetail(workspaceId, id, version)
+                    ?.takeIf { lens.isEverything || it.status == PipelineVersionStatus.RELEASED }
+                    ?.let { record.name to version }
+            }
 
     /** The working version — the draft, else the current version — or null (absent, discarded, or hidden by the lens). */
     fun findWorking(

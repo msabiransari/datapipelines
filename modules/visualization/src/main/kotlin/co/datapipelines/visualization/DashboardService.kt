@@ -103,26 +103,26 @@ class DashboardService(
         workspaceId: UUID,
         id: UUID,
         expectedHash: String,
-    ) = lifecycle.purgeDraft(workspaceId, id, expectedHash)
+    ): Purged = lifecycle.purgeDraft(workspaceId, id, expectedHash)
 
     fun purgeVersion(
         workspaceId: UUID,
         id: UUID,
         version: Int,
         expectedHash: String? = null,
-    ) = lifecycle.purgeVersion(workspaceId, id, version, expectedHash)
+    ): Purged = lifecycle.purgeVersion(workspaceId, id, version, expectedHash)
 
     fun purgeEntity(
         workspaceId: UUID,
         id: UUID,
-    ) = lifecycle.purgeEntity(workspaceId, id)
+    ): Purged = lifecycle.purgeEntity(workspaceId, id)
 
     fun discardVersion(
         workspaceId: UUID,
         id: UUID,
         version: Int,
         actor: UUID,
-    ): ArtifactVersionDetail = lifecycle.discardVersion(workspaceId, id, version, actor)
+    ): VersionMoved = lifecycle.discardVersion(workspaceId, id, version, actor)
 
     /**
      * Restore DISCARDED version [version] — after its DEPENDENCIES are judged against today's state (#320, D7). While a
@@ -136,7 +136,7 @@ class DashboardService(
         workspaceId: UUID,
         id: UUID,
         version: Int,
-    ): ArtifactVersionDetail {
+    ): VersionMoved {
         lifecycle.requireAuthoring()
         val stored = repository.findVersion(workspaceId, id, version)
         if (stored != null && stored.detail.status == PipelineVersionStatus.DISCARDED) refuseDanglingPins(workspaceId, id, stored.body)
@@ -158,7 +158,7 @@ class DashboardService(
         workspaceId: UUID,
         id: UUID,
         version: Int,
-    ): Int = lifecycle.switchCurrent(workspaceId, id, version)
+    ): Switched = lifecycle.switchCurrent(workspaceId, id, version)
 
     /** Import (§12): [validateForImport] then the lifecycle's landing. Not an authoring write. */
     fun import(
@@ -187,6 +187,21 @@ class DashboardService(
         }
 
     // ---- reads ----------------------------------------------------------------------------------------
+
+    /** The lifecycle audit rows' pre-read — BODY-FREE, [ArtifactLifecycle.auditIdentity]'s lens rule (#372's B2). */
+    fun auditIdentity(
+        workspaceId: UUID,
+        lens: ReadLens,
+        id: UUID,
+    ): Pair<String, Int>? = lifecycle.auditIdentity(workspaceId, lens, id)
+
+    /** A named version's audit pre-read — BODY-FREE, [ArtifactLifecycle.auditVersionIdentity]'s lens rule. */
+    fun auditVersionIdentity(
+        workspaceId: UUID,
+        lens: ReadLens,
+        id: UUID,
+        version: Int,
+    ): Pair<String, Int>? = lifecycle.auditVersionIdentity(workspaceId, lens, id, version)
 
     fun findWorking(
         workspaceId: UUID,

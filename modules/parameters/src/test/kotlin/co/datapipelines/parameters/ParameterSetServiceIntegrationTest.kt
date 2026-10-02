@@ -155,11 +155,15 @@ class ParameterSetServiceIntegrationTest {
             val v2draft = h.service.write(WORKSPACE, v1.record.id, edited(), v1.detail.bodyHash, AUTHOR, WriteSurface.SESSION)
             val v2 = h.service.release(WORKSPACE, v1.record.id, v2draft.detail.bodyHash, AUTHOR).version
             v2.record.currentVersion shouldBe 2
-            h.service.discardVersion(WORKSPACE, v1.record.id, 2, AUTHOR).status shouldBe PipelineVersionStatus.DISCARDED
+            h.service
+                .discardVersion(WORKSPACE, v1.record.id, 2, AUTHOR)
+                .detail.status shouldBe PipelineVersionStatus.DISCARDED
             h.repository.findRecord(WORKSPACE, v1.record.id)!!.currentVersion shouldBe 1
             h.service.restoreVersion(WORKSPACE, v1.record.id, 2)
             h.repository.findRecord(WORKSPACE, v1.record.id)!!.currentVersion shouldBe 2
-            h.service.switchCurrent(WORKSPACE, v1.record.id, 1) shouldBe 1
+            h.service
+                .switchCurrent(WORKSPACE, v1.record.id, 1)
+                .pointer.after shouldBe 1
             h.service.discardVersion(WORKSPACE, v1.record.id, 2, AUTHOR)
             refusal { h.service.switchCurrent(WORKSPACE, v1.record.id, 2) }.code shouldBe ParameterErrorCodes.VERSION_NOT_ELIGIBLE
             refusal { h.service.discardVersion(WORKSPACE, v1.record.id, 2, AUTHOR) }.code shouldBe ParameterErrorCodes.VERSION_NOT_RELEASED
@@ -169,6 +173,30 @@ class ParameterSetServiceIntegrationTest {
             h.repository.findRecord(WORKSPACE, v1.record.id)!!.currentVersion shouldBe null
             h.repository.isLive(WORKSPACE, v1.record.id) shouldBe false
             h.service.findWorking(WORKSPACE, ReadLens.Everything, v1.record.id) shouldBe null
+        }
+
+        @Test
+        fun `the verbs answer the pointer pair and the purge scope from their own results (#372)`() {
+            val v1 = released()
+            val v2draft = h.service.write(WORKSPACE, v1.record.id, edited(), v1.detail.bodyHash, AUTHOR, WriteSurface.SESSION)
+            val v2 = h.service.release(WORKSPACE, v1.record.id, v2draft.detail.bodyHash, AUTHOR).version
+            v2.record.currentVersion shouldBe 2
+            // Discard the CURRENT version: the pair from the result — before = 2, after = 1.
+            h.service.discardVersion(WORKSPACE, v1.record.id, 2, AUTHOR).pointer shouldBe PointerMove(before = 2, after = 1)
+            // Restore moves the pointer only upward (D60): before = 1, after = 2.
+            h.service.restoreVersion(WORKSPACE, v1.record.id, 2).pointer shouldBe PointerMove(before = 1, after = 2)
+            // The switch answers from/to, and the name the service already read for its 404.
+            h.service.switchCurrent(WORKSPACE, v1.record.id, 1) shouldBe
+                Switched(v1.record.name, PointerMove(before = 2, after = 1))
+            // A sole draft takes the set with it: scope = entity, from the result.
+            val sole = h.create(constants("acme/sales/sole"))
+            h.service.purgeDraft(WORKSPACE, sole.record.id, sole.detail.bodyHash).scope shouldBe "entity"
+            // A draft beside a release purges alone: scope = version.
+            val beside = h.service.write(WORKSPACE, v1.record.id, edited(), v1.detail.bodyHash, AUTHOR, WriteSurface.SESSION)
+            h.service.purgeDraft(WORKSPACE, v1.record.id, beside.detail.bodyHash).scope shouldBe "version"
+            // The entity purge is entity by definition — the only version is a DRAFT.
+            val onlyDraft = h.create(constants("acme/sales/only_draft"))
+            h.service.purgeEntity(WORKSPACE, onlyDraft.record.id) shouldBe Purged.Entity
         }
 
         @Test
@@ -202,7 +230,9 @@ class ParameterSetServiceIntegrationTest {
                 ParameterErrorCodes.AUTHORING_DISABLED
             refusal { receiver.service.discardVersion(WORKSPACE, v1.record.id, 1, AUTHOR) }.code shouldBe
                 ParameterErrorCodes.AUTHORING_DISABLED
-            receiver.service.switchCurrent(WORKSPACE, v1.record.id, 1) shouldBe 1
+            receiver.service
+                .switchCurrent(WORKSPACE, v1.record.id, 1)
+                .pointer.after shouldBe 1
         }
     }
 
@@ -249,7 +279,7 @@ class ParameterSetServiceIntegrationTest {
             ) shouldBe
                 null
             h.repository.releaseDraft(OTHER_WORKSPACE, draft.record.id, draft.detail.bodyHash, AUTHOR) shouldBe null
-            h.repository.purgeDraft(OTHER_WORKSPACE, draft.record.id, null, draftEligible = true) shouldBe false
+            h.repository.purgeDraft(OTHER_WORKSPACE, draft.record.id, null, draftEligible = true) shouldBe null
             h.repository.deleteEntity(OTHER_WORKSPACE, draft.record.id) shouldBe false
             h.repository
                 .findWorking(WORKSPACE, draft.record.id)!!

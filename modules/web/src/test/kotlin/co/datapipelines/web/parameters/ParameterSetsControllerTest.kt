@@ -14,6 +14,10 @@ import co.datapipelines.parameters.ParameterSetService
 import co.datapipelines.parameters.ParameterSetVersion
 import co.datapipelines.parameters.ParameterSetVersionDetail
 import co.datapipelines.parameters.ParametersConfig
+import co.datapipelines.parameters.PointerMove
+import co.datapipelines.parameters.Purged
+import co.datapipelines.parameters.Switched
+import co.datapipelines.parameters.VersionMoved
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.pipeline.TemplateRef
@@ -198,6 +202,65 @@ class ParameterSetsControllerTest {
         audit.details.first()["cascade_from_parameter_set_id"] shouldBe setId.toString()
         audit.details.last()["templates_released"] shouldBe listOf(mapOf("template_id" to "acme/templates/t", "version" to 2))
         audit.details.last()["parameter_set_name"] shouldBe record.name
+    }
+
+    @Test
+    fun `a session reaches every human verb through the service`() {
+        authenticate()
+        // #372 — the audit rows' pre-reads are BODY-FREE and ride the caller's lens (Everything for this principal).
+        every { sets.auditIdentity(workspaceId, co.datapipelines.pipeline.ReadLens.Everything, setId) } returns (record.name to 1)
+        every { sets.auditVersionIdentity(workspaceId, co.datapipelines.pipeline.ReadLens.Everything, setId, 1) } returns
+            (record.name to 1)
+        every { sets.auditVersionIdentity(workspaceId, co.datapipelines.pipeline.ReadLens.Everything, setId, 2) } returns
+            (record.name to 2)
+        every { sets.purgeDraft(workspaceId, setId, "hash-v1") } returns Purged.Version
+        every { sets.discardVersion(workspaceId, setId, 1, userId) } returns
+            VersionMoved(draftDetail.copy(status = PipelineVersionStatus.DISCARDED), PointerMove(before = 1, after = null))
+        every { sets.restoreVersion(workspaceId, setId, 1) } returns
+            VersionMoved(draftDetail.copy(status = PipelineVersionStatus.RELEASED), PointerMove(before = null, after = 1))
+        every { sets.purgeVersion(workspaceId, setId, 2) } returns Purged.Version
+        every { sets.purgeEntity(workspaceId, setId) } returns Purged.Entity
+        every { sets.switchCurrent(workspaceId, setId, 1) } returns Switched(record.name, PointerMove(before = 2, after = 1))
+
+        controller.purgeDraft(setId, "hash-v1")
+        controller.discardVersion(setId, 1).data["status"] shouldBe "DISCARDED"
+        controller.restoreVersion(setId, 1).data["status"] shouldBe "RELEASED"
+        controller.purgeVersion(setId, 2)
+        controller.delete(setId)
+        controller.switchCurrent(setId, ParameterSetJson.mapper.readTree("""{"version": 1}""")).data["current_version"] shouldBe 1
+
+        verify(exactly = 1) { sets.purgeEntity(workspaceId, setId) }
+        // #332 — every verb audited, in the order they ran, the pipelines mould's event per verb.
+        audit.events shouldBe
+            listOf(
+                "parameter_set.version.purged",
+                "parameter_set.version.discarded",
+                "parameter_set.version.restored",
+                "parameter_set.version.purged",
+                "parameter_set.purged",
+                "parameter_set.current_switched",
+            )
+        // #372 — the rows carry the pipelines mould's full shape; the exact key SET of each row is pinned,
+        // so a missing key cannot pass, and the values come from the verb's result, not a re-read.
+        val names = listOf(record.name, record.name, record.name, record.name, record.name, record.name)
+        audit.details.map { it["parameter_set_name"] } shouldBe names
+        audit.details.map { it["version"] } shouldBe listOf(1, 1, 1, 2, 1, null)
+        audit.details.map { it["scope"] } shouldBe listOf("version", null, null, "version", "entity", null)
+        audit.details.map { it["current_version_before"] } shouldBe listOf(null, 1, null, null, null, null)
+        audit.details.map { it["current_version_after"] } shouldBe listOf(null, null, 1, null, null, null)
+        audit.details.map { it["from"] } shouldBe listOf(null, null, null, null, null, 2)
+        audit.details.map { it["to"] } shouldBe listOf(null, null, null, null, null, 1)
+        val withPointer =
+            setOf("parameter_set_id", "parameter_set_name", "version", "workspace_id", "current_version_before", "current_version_after")
+        audit.details.map { it.keys } shouldBe
+            listOf(
+                setOf("parameter_set_id", "parameter_set_name", "version", "workspace_id", "scope"),
+                withPointer,
+                withPointer,
+                setOf("parameter_set_id", "parameter_set_name", "version", "workspace_id", "scope"),
+                setOf("parameter_set_id", "parameter_set_name", "version", "workspace_id", "scope"),
+                setOf("parameter_set_id", "parameter_set_name", "workspace_id", "from", "to"),
+            )
     }
 
     @Test

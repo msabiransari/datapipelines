@@ -52,7 +52,9 @@ class RestoreDependenciesIntegrationTest {
     fun `control - a discarded dashboard whose dependencies are alive restores`() {
         val id = discardedDashboard()
 
-        h.dashboards.restoreVersion(WORKSPACE, id, 1).status shouldBe PipelineVersionStatus.RELEASED
+        h.dashboards
+            .restoreVersion(WORKSPACE, id, 1)
+            .detail.status shouldBe PipelineVersionStatus.RELEASED
     }
 
     @Test
@@ -90,7 +92,9 @@ class RestoreDependenciesIntegrationTest {
         val id = discardedDashboard()
         val visualization = checkNotNull(h.visualizationRepository.findRecordByName(WORKSPACE, DocumentFixtures.VISUALIZATION_NAME))
         // The window this guard exists for: nothing live pins the visualization while the dashboard is DISCARDED.
-        h.visualizations.discardVersion(WORKSPACE, visualization.id, 1, AUTHOR).status shouldBe PipelineVersionStatus.DISCARDED
+        h.visualizations
+            .discardVersion(WORKSPACE, visualization.id, 1, AUTHOR)
+            .detail.status shouldBe PipelineVersionStatus.DISCARDED
 
         val error = refusal { h.dashboards.restoreVersion(WORKSPACE, id, 1) }
 
@@ -108,7 +112,9 @@ class RestoreDependenciesIntegrationTest {
                 .getValue(ValidatorFakes.PIPELINE_REF)
                 .copy(readOnly = false)
 
-        h.dashboards.restoreVersion(WORKSPACE, id, 1).status shouldBe PipelineVersionStatus.RELEASED
+        h.dashboards
+            .restoreVersion(WORKSPACE, id, 1)
+            .detail.status shouldBe PipelineVersionStatus.RELEASED
     }
 
     @Test
@@ -133,7 +139,9 @@ class RestoreDependenciesIntegrationTest {
     fun `control - a discarded visualization whose template is alive restores`() {
         val id = discardedVisualization()
 
-        h.visualizations.restoreVersion(WORKSPACE, id, 1).status shouldBe PipelineVersionStatus.RELEASED
+        h.visualizations
+            .restoreVersion(WORKSPACE, id, 1)
+            .detail.status shouldBe PipelineVersionStatus.RELEASED
     }
 
     @Test

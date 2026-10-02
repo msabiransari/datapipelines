@@ -24,6 +24,10 @@ import co.datapipelines.visualization.DashboardErrorCodes
 import co.datapipelines.visualization.DashboardReader
 import co.datapipelines.visualization.DashboardReleased
 import co.datapipelines.visualization.DashboardService
+import co.datapipelines.visualization.PointerMove
+import co.datapipelines.visualization.Purged
+import co.datapipelines.visualization.Switched
+import co.datapipelines.visualization.VersionMoved
 import co.datapipelines.web.api.ApiErrorCatalog
 import co.datapipelines.web.api.ApiErrors
 import co.datapipelines.web.api.ApiException
@@ -193,16 +197,18 @@ class DashboardsControllerTest {
             PipelineErrorCodes.Auth.SESSION_REQUIRED
 
         authenticate()
-        // #332 — the audit rows' pre-reads ride the caller's lens (Everything for this principal).
-        every { service.findWorking(workspaceId, ReadLens.Everything, id) } returns draft()
-        every { service.findVersion(workspaceId, ReadLens.Everything, id, 1) } returns released()
-        every { service.findVersion(workspaceId, ReadLens.Everything, id, 2) } returns draft()
-        every { service.purgeEntity(workspaceId, id) } returns Unit
-        every { service.purgeDraft(workspaceId, id, "hash-v1") } returns Unit
-        every { service.discardVersion(workspaceId, id, 1, userId) } returns detail(1, PipelineVersionStatus.DISCARDED)
-        every { service.restoreVersion(workspaceId, id, 1) } returns detail(1, PipelineVersionStatus.RELEASED)
-        every { service.purgeVersion(workspaceId, id, 2) } returns Unit
-        every { service.switchCurrent(workspaceId, id, 1) } returns 1
+        // #372 — the audit rows' pre-reads are BODY-FREE and ride the caller's lens (Everything for this principal).
+        every { service.auditIdentity(workspaceId, ReadLens.Everything, id) } returns (NAME to 1)
+        every { service.auditVersionIdentity(workspaceId, ReadLens.Everything, id, 1) } returns (NAME to 1)
+        every { service.auditVersionIdentity(workspaceId, ReadLens.Everything, id, 2) } returns (NAME to 2)
+        every { service.purgeEntity(workspaceId, id) } returns Purged.Entity
+        every { service.purgeDraft(workspaceId, id, "hash-v1") } returns Purged.Version
+        every { service.discardVersion(workspaceId, id, 1, userId) } returns
+            VersionMoved(detail(1, PipelineVersionStatus.DISCARDED), PointerMove(before = 1, after = null))
+        every { service.restoreVersion(workspaceId, id, 1) } returns
+            VersionMoved(detail(1, PipelineVersionStatus.RELEASED), PointerMove(before = null, after = 1))
+        every { service.purgeVersion(workspaceId, id, 2) } returns Purged.Version
+        every { service.switchCurrent(workspaceId, id, 1) } returns Switched(NAME, PointerMove(before = 2, after = 1))
         controller.delete(id)
         controller.purgeDraft(id, "hash-v1")
         controller.discardVersion(id, 1).data["status"] shouldBe "DISCARDED"
@@ -221,9 +227,26 @@ class DashboardsControllerTest {
                 "dashboard.version.purged",
                 "dashboard.current_switched",
             )
-        // The purge rows name the artifact and its version (ids and versions only, never a body).
+        // #372 — the rows carry the pipelines mould's full shape; the exact key SET of each row is pinned,
+        // so a missing key cannot pass, and the values come from the verb's result, not a re-read.
         audit.details.map { it["dashboard_name"] } shouldBe listOf(NAME, NAME, NAME, NAME, NAME, NAME)
         audit.details.map { it["version"] } shouldBe listOf(1, 1, 1, 1, 2, null)
+        audit.details.map { it["scope"] } shouldBe listOf("entity", "version", null, null, "version", null)
+        audit.details.map { it["current_version_before"] } shouldBe listOf(null, null, 1, null, null, null)
+        audit.details.map { it["current_version_after"] } shouldBe listOf(null, null, null, 1, null, null)
+        audit.details.map { it["from"] } shouldBe listOf(null, null, null, null, null, 2)
+        audit.details.map { it["to"] } shouldBe listOf(null, null, null, null, null, 1)
+        val withPointer =
+            setOf("dashboard_id", "dashboard_name", "version", "workspace_id", "current_version_before", "current_version_after")
+        audit.details.map { it.keys } shouldBe
+            listOf(
+                setOf("dashboard_id", "dashboard_name", "version", "workspace_id", "scope"),
+                setOf("dashboard_id", "dashboard_name", "version", "workspace_id", "scope"),
+                withPointer,
+                withPointer,
+                setOf("dashboard_id", "dashboard_name", "version", "workspace_id", "scope"),
+                setOf("dashboard_id", "dashboard_name", "workspace_id", "from", "to"),
+            )
     }
 
     @Test
