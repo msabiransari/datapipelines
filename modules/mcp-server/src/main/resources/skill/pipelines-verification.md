@@ -90,7 +90,10 @@ purpose: Step 5 judgment — the two check shapes, the independent reconciliatio
 - **Exercise the door, then say what it accepts.** Before you hand back, run the draft with a
   valid input other than the defaults, and with an input the data does not cover or the
   pipeline should refuse — an empty answer with the policy stated is the pipeline working; a
-  quietly plausible number is not. A period the question names is exactly that period in
+  quietly plausible number is not. Running the draft is also what gives the future RELEASE its
+  record: a release copies the columns of the version's latest successful run, so a draft that
+  never ran releases with nothing for a dashboard's save-time check to judge (`not_observed`).
+  A period the question names is exactly that period in
   every node: a two-period comparison reads each period as asked, never one period as
   "everything up to" the other (which folds intervening periods into one side) and never the
   same period twice; when two sources read the window differently, make the formulas agree or

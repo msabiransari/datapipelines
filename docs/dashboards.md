@@ -1,6 +1,6 @@
 # Dashboards
 
-**Status:** v0.20 — the two documents and their lifecycle (#10, lane L1a); the REST routes, the MCP tools and the
+**Status:** v0.21 — a SQL source is judged against the release's record (#328, §4.3); the two documents and their lifecycle (#10, lane L1a); the REST routes, the MCP tools and the
 permissions (§4, lane L1b); the transfer routes and their limits' honest contract (§3.3, lanes L1c/L1c-b/L1c-c: the
 import's atomicity, the RELEASE rules on a landing, the aggregate count ceiling, the wire's per-family arms); the server
 runtime (§5, lane L2; #343's released pins and stream authority); the client runtime (§6, lanes L3a/L3a-b/L3a-c); the
@@ -408,11 +408,20 @@ state of a pin the caller could not otherwise see; the verb therefore sits on `d
 ### 4.3 What a source must declare
 
 A dashboard source's release is judged at save by its status, its read-only verdict (the published-endpoint rule,
-through child pipelines) and its parameters. Its OUTPUT columns are judged against the visualization input it feeds
-(`dashboard.validation.input_contract_mismatch`) only when the release DECLARES them — when its caller node is a
-transform whose contract names a table output. A release with no caller node declares an empty output (every mapped
-input is refused); a SQL caller node declares nothing, and the check is left to the runtime, which judges the real
-columns (L2) — a guess would refuse or admit on nothing.
+through child pipelines) and its parameters. Its OUTPUT columns are the release's own answer, in #328's precedence
+(pipeline-contract §3.3.1):
+
+- A **transform** caller node's pinned contract names the columns — the declared answer, and it outranks everything
+  else.
+- Any other (SQL) caller node's columns are **the release's record**: what the release copied from the version's
+  latest run when the checks ran (`caller_output_json`; D1). A release with no qualifying run records nothing, and
+  answers `caller_output = not_observed` — **the one remaining skip**: the save-time
+  `dashboard.validation.input_contract_mismatch` check is left to the runtime (L2), which judges the real columns.
+- A release with **no caller node** answers an empty output (every mapped input is refused).
+
+The record outlives the datasource: it is read from the release, never from the live schema, so an `ALTER TABLE`
+after the release does not change what save-time validation judges (the runtime still fails on the real columns —
+that contrast is the point of the record).
 
 ### 4.4 The tools
 
@@ -828,6 +837,7 @@ full navigation).
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-02 | v0.21 | 328 (#328) a SQL source is judged against the release's record | **§4.3 rewritten:** a SQL caller node's columns are the release's RECORD (`caller_output_json`, pipeline-contract §3.3.1) — judged at save like a declared contract; `not_observed` (no qualifying run at release) is the one remaining skip, left to the runtime (L2). The record outlives the datasource: read from the release, never from the live schema. No tool, route, permission or error-shape change (`dashboards_validate`'s input is unchanged). NEXT: renumber at the final merge of main. |
 | 2026-10-02 | v0.20 | 373 (#373) the upload gate judges expiry before the body | §3.4.1's confinement sentence names the one exception to the one-answer rule: a presented token matching an UNCONSUMED upload capability past its deadline is 410 `capability_expired`, judged before any byte of the body; a wrong or consumed token keeps the one 404 `session_not_found`. Authority: rest-api §22.2's error ladder. |
 | 2026-10-02 | v0.19 | 344 (#344) the envelope is the artifact's pins | **§3.3:** what the artifact pins travels unlensed — a dashboard's pinned visualizations and each one's templates ride whatever the visualization and template lenses say; only the root is lensed (the owner's ruling of 2026-10-02, auth §11A.1's lens clause). No behaviour changed. |
 | 2026-10-01 | v0.18 | L5 (#367, #10) the `dashboard` key kind | **§4.1: the `dashboard_viewer` column and the binding row are HERE** — the key's one role holds `dashboard.read` + `dashboard.execute`, `bound` in both cells, the bindings ARE the lens (`dashboard_key_bindings`, R-EP2 verbatim: deeper replaces, unbound = the family 404). **§5.8:** the key kind is no longer "not here" — the runtime routes have a non-session caller. **§6.5:** the wire contract gained its implementation — the reference proxy is `examples/dashboard-proxy/proxy.mjs`, its conformance test `dashboard-proxy.test.mjs` (the streaming timing is the buffering detector) and the real-stack E2E; `/refreshes` is deliberately not relayed (owner-scoped by the key; one key = one budget, sized by `max-streams-per-user`); refresh rows carry `principal_key_id`, executions `executed_by_key_kind = 'dashboard'`. |

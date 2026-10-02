@@ -67,4 +67,12 @@ data class PipelineVersionDetail(
     val updatedAt: Instant? = null,
     val createdVia: String = WriteSurface.SESSION.wire,
     val updatedVia: String = WriteSurface.SESSION.wire,
+    /**
+     * #328 — the release's record of its caller node's result columns (pipeline-contract
+     * §3.3.1): the D2 `{name, type, nullable}` array the flip copied from the version's latest
+     * qualifying execution. Null for every draft (the flip writes it), a never-run release
+     * (`not_observed`), and a release whose caller node declares a contract (the contract is
+     * the answer; the record never overrides it). Outside `body_hash`.
+     */
+    val callerOutputJson: String? = null,
 )

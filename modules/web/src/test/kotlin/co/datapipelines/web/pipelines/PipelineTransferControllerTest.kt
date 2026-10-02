@@ -20,6 +20,7 @@ import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.mockk.every
+import io.mockk.slot
 import io.mockk.mockk
 import io.mockk.verify
 import org.junit.jupiter.api.AfterEach
@@ -107,6 +108,71 @@ class PipelineTransferControllerTest {
 
         val withId = body.replace("\"nodes\":[]", "\"nodes\":[],\"id\":\"$pipelineId\"")
         controller.import(withId).statusCode.value() shouldBe 200
+    }
+
+    /**
+     * #328 F (D5) — a preserved-version payload's `caller_output` rides the import: VALIDATED
+     * (shape, `LogicalType` wire values, the shared bounds) and stored on the imported release
+     * row; a malformed record refuses with the payload's existing shape error and stores
+     * nothing. On promotion this same refusal is the batch's (the import runs inside the
+     * receiver's one transaction); the sender's side is `PromotionServiceTest`'s.
+     */
+    @Test
+    fun `a preserved import stores a valid caller_output record on the imported release`() {
+        authenticate()
+        val recordJson = """[{"name":"month","type":"DATE","nullable":false},{"name":"amount","type":"DECIMAL","nullable":null}]"""
+        val preserved =
+            body.replace(
+                """"nodes":[]""",
+                """"nodes":[],"version":2,"body_hash":"hash-x","caller_output":$recordJson""",
+            )
+        every { validator.validate(any(), any()) } returns ValidationResult.VALID
+        every { pipelines.computeBodyHash(any()) } returns "hash-x"
+        every { pipelines.findById(any(), any()) } returns null
+        val stored = slot<String>()
+        every { pipelines.importPipelineVersion(any(), any(), any(), any(), any(), any(), userId, capture(stored)) } returns record
+
+        val response = controller.import(preserved)
+
+        response.statusCode.value() shouldBe 201
+        stored.captured shouldBe recordJson
+    }
+
+    @Test
+    fun `a caller_output record with an unknown type refuses the import and stores nothing`() {
+        authenticate()
+        val preserved =
+            body.replace(
+                """"nodes":[]""",
+                """"nodes":[],"version":2,"body_hash":"hash-x","caller_output":[{"name":"month","type":"NOSUCHTYPE","nullable":true}]""",
+            )
+        every { validator.validate(any(), any()) } returns ValidationResult.VALID
+        every { pipelines.computeBodyHash(any()) } returns "hash-x"
+        every { pipelines.findById(any(), any()) } returns null
+
+        val error = shouldThrow<ApiException> { controller.import(preserved) }
+
+        error.code shouldBe PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE
+        verify(exactly = 0) { pipelines.importPipelineVersion(any(), any(), any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `an oversize caller_output record refuses the import - the shared bound`() {
+        authenticate()
+        val columns = (1..257).joinToString(",", prefix = "[", postfix = "]") { """{"name":"c$it","type":"STRING","nullable":true}""" }
+        val preserved =
+            body.replace(
+                """"nodes":[]""",
+                """"nodes":[],"version":2,"body_hash":"hash-x","caller_output":$columns""",
+            )
+        every { validator.validate(any(), any()) } returns ValidationResult.VALID
+        every { pipelines.computeBodyHash(any()) } returns "hash-x"
+        every { pipelines.findById(any(), any()) } returns null
+
+        val error = shouldThrow<ApiException> { controller.import(preserved) }
+
+        error.code shouldBe PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE
+        verify(exactly = 0) { pipelines.importPipelineVersion(any(), any(), any(), any(), any(), any(), any(), any()) }
     }
 
     @Test

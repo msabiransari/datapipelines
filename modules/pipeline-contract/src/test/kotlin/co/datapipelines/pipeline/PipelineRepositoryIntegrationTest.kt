@@ -1,5 +1,6 @@
 package co.datapipelines.pipeline
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import co.datapipelines.pipeline.WriteSurface
 import co.datapipelines.typesystem.DatapipelinesException
 import io.kotest.assertions.throwables.shouldThrow
@@ -8,6 +9,7 @@ import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.types.shouldBeInstanceOf
 import org.junit.jupiter.api.BeforeAll
@@ -945,6 +947,148 @@ class PipelineRepositoryIntegrationTest {
             listOf(PipelineVersionStatus.RELEASED, PipelineVersionStatus.RELEASED)
     }
 
+    // ---- #328 B: the flip records the caller output (D1, in the same statement) -------------------
+
+    /**
+     * Inserts an execution row with the D1 inputs under test: [status], [startedAt] (default the
+     * clock), [parentExecutionId] (root when null) and [resultSchemaJson] (the D2 array).
+     */
+    private fun insertExecutionRow(
+        pipelineId: UUID,
+        version: Int,
+        status: String = "SUCCESS",
+        startedAt: String? = null,
+        parentExecutionId: UUID? = null,
+        resultSchemaJson: String? = null,
+    ): UUID =
+        checkNotNull(
+            jdbc.queryForObject(
+                """
+                INSERT INTO pipeline_executions
+                    (pipeline_id, pipeline_version, status, executed_by, triggered_via, root_execution_id,
+                     started_at, parent_execution_id, result_schema_json)
+                VALUES (:pipelineId, :version, :status, :actor, 'REST', gen_random_uuid(),
+                        COALESCE(CAST(:startedAt AS timestamptz), NOW()), :parentExecutionId,
+                        CAST(:resultSchemaJson AS jsonb))
+                RETURNING execution_id
+                """.trimIndent(),
+                mapOf(
+                    "pipelineId" to pipelineId,
+                    "version" to version,
+                    "status" to status,
+                    "actor" to owner,
+                    "startedAt" to startedAt,
+                    "parentExecutionId" to parentExecutionId,
+                    "resultSchemaJson" to resultSchemaJson,
+                ),
+                UUID::class.java,
+            ),
+        )
+
+    /** Releases a draft of [body] and answers the released row's caller-output record (null when none). */
+    private fun releasedCallerOutputOf(
+        record: PipelineRecord,
+        v1Detail: PipelineVersionDetail,
+        body: Pipeline,
+    ): String? {
+        val draft =
+            checkNotNull(
+                repository.createDraft(WORKSPACE_ID, record.id, changedBody(body, "draft"), v1Detail.bodyHash, owner, WriteSurface.SESSION),
+            )
+        val released =
+            checkNotNull(
+                repository.releaseDraft(WORKSPACE_ID, record.id, "test/monthly_revenue", "M", "d", draft.bodyHash, owner),
+            )
+        return repository.findVersionDetail(WORKSPACE_ID, record.id, released.version.version)?.callerOutputJson
+    }
+
+    @Test
+    fun `the flip records the caller output of the latest SUCCESS root execution after the last draft write`() {
+        val (record, v1, v1Detail) = createdPipeline()
+        // The v2 draft exists first (the FK requires it); the stale run carries a started_at
+        // BEFORE the draft write, the fresh one AFTER it (explicit timestamps — the D1
+        // predicate is a timestamp comparison, so the fixtures pin both sides of it).
+        val draft =
+            checkNotNull(
+                repository.createDraft(WORKSPACE_ID, record.id, changedBody(v1, "draft"), v1Detail.bodyHash, owner, WriteSurface.SESSION),
+            )
+        insertExecutionRow(
+            record.id,
+            draft.version,
+            startedAt = "2020-01-01T00:00:00Z",
+            resultSchemaJson = """[{"name":"old","type":"STRING","nullable":true}]""",
+        )
+        insertExecutionRow(
+            record.id,
+            draft.version,
+            startedAt = "2030-01-01T00:00:00Z",
+            resultSchemaJson = """[{"name":"month","type":"DATE","nullable":false}]""",
+        )
+
+        val flipped =
+            checkNotNull(
+                repository.releaseDraft(WORKSPACE_ID, record.id, "test/monthly_revenue", "M", "d", draft.bodyHash, owner),
+            )
+        val stored = flipped.version.callerOutputJson.shouldNotBeNull()
+        // Non-vacuity: the record is the FRESH execution's schema, element by element.
+        val array = ObjectMapper().readTree(stored)
+        array.size() shouldBe 1
+        array[0].get("name").asText() shouldBe "month"
+        array[0].get("type").asText() shouldBe "DATE"
+        array[0].get("nullable").asBoolean() shouldBe false
+        repository.findVersionDetail(WORKSPACE_ID, record.id, flipped.version.version)?.callerOutputJson shouldBe stored
+    }
+
+    @Test
+    fun `a never-executed draft releases with a NULL record - never refused`() {
+        val (record, v1, v1Detail) = createdPipeline()
+        releasedCallerOutputOf(record, v1Detail, v1).shouldBeNull()
+    }
+
+    @Test
+    fun `an execution started before a later draft write is ignored - the ordering rule`() {
+        val (record, v1, v1Detail) = createdPipeline()
+        val draft =
+            checkNotNull(
+                repository.createDraft(WORKSPACE_ID, record.id, changedBody(v1, "draft"), v1Detail.bodyHash, owner, WriteSurface.SESSION),
+            )
+        // Started LONG before the draft write (whose updated_at is NOW): ignored at release.
+        insertExecutionRow(record.id, draft.version, startedAt = "2020-01-01T00:00:00Z", resultSchemaJson = """[{"name":"stale","type":"STRING","nullable":true}]""")
+        repository.releaseDraft(WORKSPACE_ID, record.id, "test/monthly_revenue", "M", "d", draft.bodyHash, owner)
+        repository.findVersionDetail(WORKSPACE_ID, record.id, draft.version)?.callerOutputJson.shouldBeNull()
+    }
+
+    @Test
+    fun `a FAILED execution after the last draft write is ignored`() {
+        val (record, v1, v1Detail) = createdPipeline()
+        val draft = checkNotNull(repository.createDraft(WORKSPACE_ID, record.id, changedBody(v1, "draft"), v1Detail.bodyHash, owner, WriteSurface.SESSION))
+        insertExecutionRow(record.id, draft.version, status = "FAILED", resultSchemaJson = """[{"name":"x","type":"STRING","nullable":true}]""")
+        repository.releaseDraft(WORKSPACE_ID, record.id, "test/monthly_revenue", "M", "d", draft.bodyHash, owner)
+        repository.findVersionDetail(WORKSPACE_ID, record.id, draft.version)?.callerOutputJson.shouldBeNull()
+    }
+
+    @Test
+    fun `a child execution never qualifies - the root's own run is the record`() {
+        val (record, v1, v1Detail) = createdPipeline()
+        val draft =
+            checkNotNull(
+                repository.createDraft(WORKSPACE_ID, record.id, changedBody(v1, "draft"), v1Detail.bodyHash, owner, WriteSurface.SESSION),
+            )
+        val root = insertExecutionRow(record.id, draft.version, startedAt = "2030-01-01T00:00:00Z", resultSchemaJson = """[{"name":"root","type":"STRING","nullable":true}]""")
+        // The child ran LAST and carries the newest started_at, but it is a child: never a candidate.
+        insertExecutionRow(
+            record.id,
+            draft.version,
+            startedAt = "2030-01-02T00:00:00Z",
+            parentExecutionId = root,
+            resultSchemaJson = """[{"name":"child","type":"STRING","nullable":true}]""",
+        )
+        repository.releaseDraft(WORKSPACE_ID, record.id, "test/monthly_revenue", "M", "d", draft.bodyHash, owner)
+
+        val stored = repository.findVersionDetail(WORKSPACE_ID, record.id, draft.version)?.callerOutputJson.shouldNotBeNull()
+        ObjectMapper().readTree(stored)[0].get("name").asText() shouldBe "root"
+    }
+
     @Test
     fun `purging a never-executed draft hard-deletes it and returns the number to the pool`() {
         val (record, v1, v1Detail) = createdPipeline()
@@ -1358,6 +1502,47 @@ class PipelineRepositoryIntegrationTest {
         detail.bodyHash shouldBe "declared-hash"
         detail.releasedAt shouldBe Instant.parse("2026-08-31T14:03:11Z")
         detail.releasedBy shouldBe owner
+    }
+
+    /**
+     * #328 F (D5) — a pushed release's record lands on the imported row through BOTH §9.2
+     * insert paths, and reads back through the detail read the save-time resolver uses.
+     */
+    @Test
+    fun `a preserved import stores the pushed caller_output record on the imported release`() {
+        val recordJson = """[{"name":"month","type":"DATE","nullable":false}]"""
+        val body = Fixtures.pipeline(name = "pushed_pipeline")
+        val record =
+            repository.importPipelineVersion(
+                WORKSPACE_ID,
+                NewPipeline.from(body, owner, id = UUID.randomUUID()),
+                version = 4,
+                bodyJson = serializer.write(body),
+                bodyHash = "declared-hash",
+                releasedAt = Instant.EPOCH,
+                actor = owner,
+                callerOutputJson = recordJson,
+            )
+        // JSONB normalizes the stored text — compare parsed, element by element.
+        val storedV4 = checkNotNull(repository.findVersionDetail(WORKSPACE_ID, record.id, 4)).callerOutputJson.shouldNotBeNull()
+        ObjectMapper().readTree(storedV4) shouldBe ObjectMapper().readTree(recordJson)
+
+        val v5 = body.copy(description = "v5 body")
+        repository.insertReleasedVersion(
+            WORKSPACE_ID,
+            record.id,
+            5,
+            v5.name,
+            v5.displayName,
+            v5.description,
+            serializer.write(v5),
+            "hash-v5",
+            Instant.EPOCH,
+            owner,
+            recordJson,
+        )
+        val storedV5 = checkNotNull(repository.findVersionDetail(WORKSPACE_ID, record.id, 5)).callerOutputJson.shouldNotBeNull()
+        ObjectMapper().readTree(storedV5) shouldBe ObjectMapper().readTree(recordJson)
     }
 
     @Test

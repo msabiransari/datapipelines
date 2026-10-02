@@ -79,9 +79,12 @@ object PipelineResponses {
      * version just released plus `warnings` — ALWAYS present, `[]` on a clean release, one
      * `{code, message, template, version}` per pin that reads `needs_review` (7e, transform-nodes
      * design §8.2). A warning describes what was released; the status is still the release's.
+     * #328 — plus `caller_output` (D3): `recorded` | `declared` | `none` | `not_observed`, the
+     * one word about what the release did about its caller node's result columns. Additive only.
      */
     fun released(released: co.datapipelines.pipeline.PipelineReleaseService.Released): JsonNode {
         val body = full(released.record, released.bodyJson, released.version) as ObjectNode
+        body.put("caller_output", released.callerOutput.wire)
         val warnings = body.putArray("warnings")
         released.warnings.forEach { warning ->
             warnings

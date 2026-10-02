@@ -1,0 +1,22 @@
+-- #328 (lane 328): a release records its caller node's result columns.
+--
+-- A dashboard save-time input-contract check had to skip every SQL-sourced source: the caller
+-- node's columns existed only while the result lived in Redis (`StoredResultView.schema`), and
+-- a release could not answer them. #328's option 2 (owner ruling 2026-10-02): record the SQL
+-- caller node's result columns when the release's checks run, and answer them from the release.
+--
+-- Two nullable columns, one migration (D2 of the lane's design record):
+-- - `pipeline_executions.result_schema_json` — every execution's caller-output schema, written
+--   by `recordResult` beside `result_row_count` from the same `StoredResultView`. History like
+--   its siblings: durable after the Redis TTL expires.
+-- - `pipeline_versions.caller_output_json` — the release's record, written by the release flip
+--   itself (the D1 subselect in `RELEASE_DRAFT_SQL`: the latest SUCCESS root execution of this
+--   version started after the last draft write). NULL is legal and expected: a never-run draft
+--   still releases (`not_observed`), a transform caller keeps its declared contract, a pipeline
+--   with no caller node has nothing to record. Outside `body_hash` — recording changes no hash.
+--
+-- Both are `NULL`-able with no backfill: past releases keep today's behaviour (the validator
+-- skips, `dashboards.md` §4.3). The up-and-down rehearsal on the shared test container:
+-- ALTER, ALTER, DROP, DROP, ALTER, ALTER.
+ALTER TABLE pipeline_executions ADD COLUMN result_schema_json JSONB NULL;
+ALTER TABLE pipeline_versions ADD COLUMN caller_output_json JSONB NULL;
