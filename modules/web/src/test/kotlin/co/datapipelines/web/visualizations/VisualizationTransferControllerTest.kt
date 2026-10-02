@@ -4,16 +4,26 @@ import co.datapipelines.application.lens.LensedView
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.WorkspaceContext
+import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.ReadLens
+import co.datapipelines.templates.Template
+import co.datapipelines.templates.TemplateImport
+import co.datapipelines.templates.TemplateRepository
+import co.datapipelines.templates.TemplateVersion
+import co.datapipelines.visualization.ArtifactKind
 import co.datapipelines.visualization.ArtifactImported
 import co.datapipelines.visualization.ArtifactJson
 import co.datapipelines.visualization.ArtifactRecord
 import co.datapipelines.visualization.ArtifactTransferService
 import co.datapipelines.visualization.ArtifactVersion
 import co.datapipelines.visualization.ArtifactVersionDetail
+import co.datapipelines.visualization.DashboardReader
+import co.datapipelines.visualization.DashboardRepository
+import co.datapipelines.visualization.DashboardService
 import co.datapipelines.visualization.VisualizationErrorCodes
 import co.datapipelines.visualization.VisualizationReader
+import co.datapipelines.visualization.VisualizationRepository
 import co.datapipelines.visualization.VisualizationService
 import co.datapipelines.web.EVERYTHING_LENS
 import co.datapipelines.web.api.ApiErrorCatalog
@@ -21,6 +31,7 @@ import co.datapipelines.web.api.ApiErrors
 import co.datapipelines.web.api.ApiException
 import com.fasterxml.jackson.databind.JsonNode
 import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import io.mockk.every
 import io.mockk.mockk
@@ -53,6 +64,26 @@ class VisualizationTransferControllerTest {
             transfer,
             visualizations,
             { LensedView(LensedView.EVERYTHING.pipelines, LensedView.EVERYTHING.templates, visualizations = narrowingLens) },
+            recorder,
+        )
+
+    /**
+     * #344's controller: the REAL export path ([RealExportPath]) under a view whose visualization arm admits the
+     * artifact and whose TEMPLATE arm admits only [RealExportPath.UNPINNED] — never the transform pin or its import.
+     */
+    private val exportPath = RealExportPath()
+    private val admitsArtifact = ReadLens.Only(setOf(NAME))
+    private val hidingTemplates =
+        VisualizationTransferController(
+            exportPath.transfer,
+            visualizations,
+            {
+                LensedView(
+                    ReadLens.Everything,
+                    ReadLens.Only(setOf(RealExportPath.UNPINNED)),
+                    visualizations = admitsArtifact,
+                )
+            },
             recorder,
         )
 
@@ -127,6 +158,24 @@ class VisualizationTransferControllerTest {
         )
     }
 
+    /**
+     * #344, the owner's ruling of 2026-10-02: the envelope carries what the visualization PINS — its transform pin and
+     * that pin's `imports` closure, exactly — read without the template lens; only the root is lensed. Driven through
+     * the REAL transfer and adapter: a lens planted in the closure, or a pinned version dropped, is red here.
+     */
+    @Test
+    fun `export still bundles the pinned transform template the template lens hides (#344)`() {
+        authenticate()
+        every { visualizations.findWorking(workspaceId, admitsArtifact, id) } returns released()
+        exportPath.stubRelease(released())
+        exportPath.stubTransformClosure()
+
+        val envelope = hidingTemplates.export(id).data
+
+        envelope.path("templates").map { it.path("id").asText() to it.path("version").asInt() } shouldContainExactly
+            RealExportPath.PINNED_CLOSURE
+    }
+
     @Test
     fun `import reads the envelope through the request mapper - a malformed body is the family's 400, the transfer never asked`() {
         authenticate()
@@ -190,7 +239,7 @@ class VisualizationTransferControllerTest {
         ArtifactVersion(
             ArtifactRecord(id, workspaceId, NAME, "Monthly revenue", "", 1, CREATED, CREATED, userId),
             ArtifactVersionDetail(id, 1, PipelineVersionStatus.RELEASED, "hash-v1", CREATED, userId),
-            VisualizationReader().readOrThrow(ArtifactJson.mapper.readTree(DOCUMENT)).body,
+            VisualizationReader().readOrThrow(ArtifactJson.mapper.readTree(VISUALIZATION_DOCUMENT)).body,
         )
 
     /** The §12 envelope: the artifact node, an empty bundle, the manifest — `evidence: null` until L4. */
@@ -202,7 +251,7 @@ class VisualizationTransferControllerTest {
             .put("name", NAME)
             .put("version", 1)
             .put("body_hash", "hash-v1")
-        payload.set<JsonNode>("body", ArtifactJson.mapper.readTree(DOCUMENT))
+        payload.set<JsonNode>("body", ArtifactJson.mapper.readTree(VISUALIZATION_DOCUMENT))
         root.putArray("templates")
         root.putObject("manifest").put("visualization_version", 1).putNull("evidence")
         return root
@@ -247,20 +296,105 @@ class VisualizationTransferControllerTest {
         val CREATED: Instant = Instant.parse("2026-09-29T00:00:00Z")
         val AUDIT_EXPORTED = VisualizationAuditEvents.EXPORTED
         val AUDIT_IMPORTED = VisualizationAuditEvents.IMPORTED
+    }
+}
 
-        /** The §3.1 worked document — the same fixture the lifecycle controller test binds. */
-        val DOCUMENT =
-            """
-            {"name": "$NAME", "display_name": "Monthly revenue", "description": "",
-             "renderer": {"kind": "plotly", "version": "4"},
-             "inputs": {"revenue": {"columns": [{"name": "month", "type": "DATE", "nullable": false},
-                                                {"name": "amount", "type": "DECIMAL", "nullable": false}]}},
-             "transform": {"template": {"name": "finance/transforms/revenue_bars", "version": 2}, "inputs": {"rows": "revenue"}},
-             "config": {"data": [{"type": "bar", "x": "${'$'}.x", "y": "${'$'}.y"}], "layout": {"title": {"text": "Revenue"}}},
-             "bindings": {"data[0].x": "month_labels", "data[0].y": "amounts"},
-             "presentation": {"title": "Monthly revenue", "tokens": {"series": "categorical"}},
-             "tests": {"cases": [{"name": "twelve months", "fixtures": {"revenue": [{"month": "2026-01-01", "amount": 10.5}]},
-                                  "assertions": [{"kind": "rendered"}, {"kind": "trace_count", "equals": 1}]}]}}
-            """.trimIndent()
+/**
+ * The §3.1 worked document — the same fixture the lifecycle controller test binds; top-level so the dashboard
+ * transfer test's #344 case exports the SAME visualization its board pins.
+ */
+internal val VISUALIZATION_DOCUMENT =
+    """
+    {"name": "finance/visualizations/monthly_revenue", "display_name": "Monthly revenue", "description": "",
+     "renderer": {"kind": "plotly", "version": "4"},
+     "inputs": {"revenue": {"columns": [{"name": "month", "type": "DATE", "nullable": false},
+                                        {"name": "amount", "type": "DECIMAL", "nullable": false}]}},
+     "transform": {"template": {"name": "finance/transforms/revenue_bars", "version": 2}, "inputs": {"rows": "revenue"}},
+     "config": {"data": [{"type": "bar", "x": "${'$'}.x", "y": "${'$'}.y"}], "layout": {"title": {"text": "Revenue"}}},
+     "bindings": {"data[0].x": "month_labels", "data[0].y": "amounts"},
+     "presentation": {"title": "Monthly revenue", "tokens": {"series": "categorical"}},
+     "tests": {"cases": [{"name": "twelve months", "fixtures": {"revenue": [{"month": "2026-01-01", "amount": 10.5}]},
+                          "assertions": [{"kind": "rendered"}, {"kind": "trace_count", "equals": 1}]}]}}
+    """.trimIndent()
+
+/**
+ * #344 — the REAL export path over mocked repositories: [ArtifactTransferService] over a real [TemplateBundleAdapter],
+ * the real visualization and dashboard services over mocked repositories. The transfer controller tests mock the
+ * transfer for their REST-edge cases, and a mocked transfer returning a canned envelope cannot go red on a lens
+ * planted in the closure; this one walks the pins exactly as production does. Shared with the dashboard twin.
+ */
+internal class RealExportPath {
+    val templates = mockk<TemplateRepository>()
+    val visualizationRepository = mockk<VisualizationRepository>().also { every { it.kind } returns ArtifactKind.VISUALIZATION }
+    val dashboardRepository = mockk<DashboardRepository>().also { every { it.kind } returns ArtifactKind.DASHBOARD }
+    private val visualizations =
+        VisualizationService(visualizationRepository, mockk(), dashboardRepository, AuthoringGuard(true), mockk())
+    val transfer =
+        ArtifactTransferService(
+            visualizations,
+            DashboardService(dashboardRepository, mockk(), visualizations, { _, _ -> null }, AuthoringGuard(true)),
+            TemplateBundleAdapter(templates, mockk()),
+            VisualizationReader(),
+            DashboardReader(),
+            releaseRules = mockk(),
+        )
+
+    /** [version] as its visualization's current RELEASE, found by id and by name. */
+    fun stubRelease(version: ArtifactVersion<co.datapipelines.visualization.VisualizationBody>) {
+        val (workspaceId, id) = version.record.workspaceId to version.record.id
+        every { visualizationRepository.findRecord(workspaceId, id) } returns version.record
+        every { visualizationRepository.findRecordByName(workspaceId, version.record.name) } returns version.record
+        every { visualizationRepository.findVersion(workspaceId, id, version.detail.version) } returns version
+    }
+
+    /**
+     * The transform pin of [VISUALIZATION_DOCUMENT] importing [LIBRARY], and [UNPINNED] beside them: stored, but
+     * pinned by nothing — the one name the #344 cases' template lens admits, and never part of a bundle.
+     */
+    fun stubTransformClosure() {
+        stubTemplate(TRANSFORM, 2, listOf(TemplateImport(LIBRARY, 1, "lib")))
+        stubTemplate(LIBRARY, 1)
+        stubTemplate(UNPINNED, 1)
+    }
+
+    private fun stubTemplate(
+        id: String,
+        version: Int,
+        imports: List<TemplateImport> = emptyList(),
+    ) {
+        every { templates.lookupVersion(any(), id, version) } returns
+            TemplateVersion(
+                id = id,
+                version = version,
+                isLibrary = id == LIBRARY,
+                imports = imports,
+                body = "{}",
+                createdAt = STAMP,
+                createdBy = ACTOR,
+            )
+        every { templates.findVersion(any(), id, version) } returns
+            Template(
+                id = id,
+                version = version,
+                dialect = null,
+                displayName = id,
+                description = "",
+                imports = imports,
+                body = "{}",
+                isLibrary = id == LIBRARY,
+                createdAt = STAMP,
+                createdBy = ACTOR,
+            )
+    }
+
+    companion object {
+        const val TRANSFORM = "finance/transforms/revenue_bars"
+        const val LIBRARY = "finance/transforms/bar_helpers"
+        const val UNPINNED = "finance/transforms/not_pinned"
+
+        /** What the bundle must be: the pin, then its import — exactly, in the closure walk's order. */
+        val PINNED_CLOSURE = listOf(TRANSFORM to 2, LIBRARY to 1)
+        private val STAMP: Instant = Instant.parse("2026-09-29T00:00:00Z")
+        private val ACTOR: UUID = UUID.fromString("00000000-0000-0000-0000-000000000344")
     }
 }

@@ -411,6 +411,44 @@ class PromotionServiceTest {
         batch.templates.map { it.get("id").asText() } shouldContainExactly listOf("test/base.sql", "test/importer.sql")
     }
 
+    /**
+     * #344, the owner's ruling of 2026-10-02: the batch's templates are what the pushed artifacts PIN, read without
+     * the promoter's template lens — §10.4's skip rule is the only thing that leaves a pinned template out. The root
+     * pins `test/behind.sql@2`, which imports `test/on_target_same.sql@1`; the target holds `behind` AHEAD (v5,
+     * another hash) and `on_target_same` at the identical version and hash, so §10.2's view hides BOTH. `behind`
+     * must ride (a lens filter drops it — red); `on_target_same` must be omitted (so "carry everything" is red too).
+     */
+    @Test
+    fun `the batch still carries the pinned template the template lens hides, and skips only the identical one (#344)`() {
+        val root = record("root", version = 1)
+        stubReleased(root, bodyOf("root", template = BEHIND to 2))
+        every { templates.findCurrentVersions(workspaceId) } returns
+            listOf(
+                co.datapipelines.templates.CurrentTemplateVersion(BEHIND, BEHIND, 2, "hash-$BEHIND"),
+                co.datapipelines.templates.CurrentTemplateVersion(ON_TARGET_SAME, ON_TARGET_SAME, 1, "hash-$ON_TARGET_SAME"),
+            )
+        val target =
+            inventory(templates = listOf(entry(BEHIND, 5, "hash-theirs"), entry(ON_TARGET_SAME, 1, "hash-$ON_TARGET_SAME")))
+        every { client.inventory(workspace) } returns target
+        every { templates.lookupVersion(workspaceId, BEHIND, 2) } returns
+            templateVersion(BEHIND, 2, imports = listOf(TemplateImport(ON_TARGET_SAME, 1, "same")))
+        every { templates.lookupVersion(workspaceId, ON_TARGET_SAME, 1) } returns templateVersion(ON_TARGET_SAME, 1)
+        every { templates.findVersion(workspaceId, BEHIND, 2) } returns storedTemplate(BEHIND, 2)
+        every { templates.findVersion(workspaceId, ON_TARGET_SAME, 1) } returns storedTemplate(ON_TARGET_SAME, 1)
+
+        val batch = capturePush { service.promote(workspaceId, workspace, listOf("root")) }
+
+        val lens = views.compute(workspaceId, target).templateLens
+        assertAll(
+            {
+                withClue("non-vacuity: the promoter's template lens hides both pins") {
+                    listOf(BEHIND, ON_TARGET_SAME).filter(lens::admits) shouldBe emptyList()
+                }
+            },
+            { batch.templates.map { it.get("id").asText() to it.get("version").asInt() } shouldContainExactly listOf(BEHIND to 2) },
+        )
+    }
+
     @Test
     fun `a dependency already on the target at the same version and hash is left out of the batch`() {
         val parent = record("parent", version = 2)
@@ -646,6 +684,8 @@ class PromotionServiceTest {
 
     private companion object {
         const val TARGET_URL = "https://uat.example.com"
+        const val BEHIND = "test/behind.sql"
+        const val ON_TARGET_SAME = "test/on_target_same.sql"
         val EPOCH: Instant = Instant.parse("2026-01-01T00:00:00Z")
     }
 }

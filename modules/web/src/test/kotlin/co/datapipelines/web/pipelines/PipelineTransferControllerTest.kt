@@ -14,6 +14,7 @@ import co.datapipelines.pipeline.WriteSurface
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.web.api.ApiException
 import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.mockk.every
@@ -21,6 +22,7 @@ import io.mockk.mockk
 import io.mockk.verify
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertAll
 import org.springframework.dao.DuplicateKeyException
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
 import org.springframework.security.core.context.SecurityContextHolder
@@ -220,9 +222,8 @@ class PipelineTransferControllerTest {
         verify(exactly = 0) { pipelines.findVersionBody(any(), any(), any()) }
     }
 
-    @Test
-    fun `export bundles the pipeline and the referenced template closure with a manifest`() {
-        authenticate()
+    /** The released v3 whose one node pins `test/t.sql@2`, and that template stored — the export cases' fixture. */
+    private fun stubExportPinningTemplate() {
         val withNodes =
             body.replace(
                 "\"nodes\":[]",
@@ -239,28 +240,36 @@ class PipelineTransferControllerTest {
                 createdAt = Instant.EPOCH,
                 createdBy = userId,
             )
-        every { templates.lookupVersion(any(), "test/t.sql", 2) } returns
-            co.datapipelines.templates.TemplateVersion(
-                id = "test/t.sql",
-                version = 2,
-                dialect = co.datapipelines.typesystem.Dialect.POSTGRES,
-                isLibrary = false,
-                imports = emptyList(),
-                body = "SELECT 1",
-                createdAt = Instant.EPOCH,
-                createdBy = userId,
-            )
-        every { templates.findVersion(any(), "test/t.sql", 2) } returns
-            co.datapipelines.templates.Template(
-                id = "test/t.sql",
-                version = 2,
-                dialect = co.datapipelines.typesystem.Dialect.POSTGRES,
-                displayName = "T",
-                description = "d",
-                body = "SELECT 1",
-                createdAt = Instant.EPOCH,
-                createdBy = userId,
-            )
+        listOf("test/t.sql" to 2, OTHER_TEMPLATE to 1).forEach { (id, version) ->
+            every { templates.lookupVersion(any(), id, version) } returns
+                co.datapipelines.templates.TemplateVersion(
+                    id = id,
+                    version = version,
+                    dialect = co.datapipelines.typesystem.Dialect.POSTGRES,
+                    isLibrary = false,
+                    imports = emptyList(),
+                    body = "SELECT 1",
+                    createdAt = Instant.EPOCH,
+                    createdBy = userId,
+                )
+            every { templates.findVersion(any(), id, version) } returns
+                co.datapipelines.templates.Template(
+                    id = id,
+                    version = version,
+                    dialect = co.datapipelines.typesystem.Dialect.POSTGRES,
+                    displayName = "T",
+                    description = "d",
+                    body = "SELECT 1",
+                    createdAt = Instant.EPOCH,
+                    createdBy = userId,
+                )
+        }
+    }
+
+    @Test
+    fun `export bundles the pipeline and the referenced template closure with a manifest`() {
+        authenticate()
+        stubExportPinningTemplate()
 
         val data = controller.export(pipelineId, includeTemplates = true).data
 
@@ -273,6 +282,39 @@ class PipelineTransferControllerTest {
 
         val without = controller.export(pipelineId, includeTemplates = false).data
         (without["templates"] as List<*>).size shouldBe 0
+    }
+
+    /**
+     * #344, the owner's ruling of 2026-10-02: the bundle carries what the pipeline PINS, read without the
+     * template lens — only the root is lensed. The caller's view admits the pipeline and hides its pinned
+     * template (the template arm admits [OTHER_TEMPLATE] alone, which the repository also holds), so a bundle
+     * filtered through the template lens drops `test/t.sql` and a bundle built as a listing gains the other.
+     */
+    @Test
+    fun `export still bundles the pinned template the template lens hides (#344)`() {
+        authenticate()
+        stubExportPinningTemplate()
+        val hidingTemplates =
+            PipelineTransferController(
+                pipelines,
+                templates,
+                PipelineImportService(pipelines, validator),
+                {
+                    co.datapipelines.application.lens.LensedView(
+                        pipelines = co.datapipelines.pipeline.ReadLens.Only(setOf(record.name)),
+                        templates = co.datapipelines.pipeline.ReadLens.Only(setOf(OTHER_TEMPLATE)),
+                    )
+                },
+            )
+
+        val data = hidingTemplates.export(pipelineId, includeTemplates = true).data
+
+        @Suppress("UNCHECKED_CAST")
+        val bundled = data["templates"] as List<co.datapipelines.templates.Template>
+        assertAll(
+            { bundled.map { it.id to it.version } shouldContainExactly listOf("test/t.sql" to 2) },
+            { (data["manifest"] as Map<*, *>)["template_count"] shouldBe 1 },
+        )
     }
 
     // =============================================================================================
@@ -418,5 +460,10 @@ class PipelineTransferControllerTest {
         every { pipelines.appendReleasedVersion(any(), pipelineId, any(), any(), userId) } returns record.copy(currentVersion = 4)
 
         controller.import(body.replace("\"nodes\":[]", "\"nodes\":[],\"id\":\"$pipelineId\"")).statusCode.value() shouldBe 200
+    }
+
+    private companion object {
+        /** A template the repository holds and the pipeline does NOT pin — the one name #344's hiding lens admits. */
+        const val OTHER_TEMPLATE = "other/t.sql"
     }
 }
