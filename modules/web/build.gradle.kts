@@ -1,3 +1,5 @@
+import java.util.concurrent.TimeUnit
+
 // module-structure.md §5.9 — the aggregation layer. Lists every module it touches
 // EXPLICITLY (§4.2): it could reach most of them transitively through mcp-server,
 // and declaring them is what makes the table checkable.
@@ -180,11 +182,17 @@ tasks.register("editorJsTest") {
         }
         val testFiles = editorJsTests.files.sortedBy { it.name }
         if (testFiles.isEmpty()) throw GradleException("editorJsTest found no *.test.mjs under src/test/js — the guard ran vacuously")
-        logger.lifecycle("editorJsTest: {} on {}", node.absolutePath, nodeVersion(node))
+        val version = nodeVersion(node)
+        logger.lifecycle("editorJsTest: {} on {}", node.absolutePath, version)
         val argv =
             buildList {
                 add(node.absolutePath)
                 add("--test")
+                // Exit when the files are done even if a file's event loop is still alive. On
+                // gate-825ab754 (2026-10-02) the dashboard-proxy file's child finished its tests and
+                // then sat in ep_poll for an hour with the runner waiting on it; nothing was printed.
+                // The flag exists from Node 22; older runners keep today's behaviour.
+                if (nodeMajor(version) >= EDITOR_JS_FORCE_EXIT_NODE_MAJOR) add("--test-force-exit")
                 addAll(testFiles.map { it.absolutePath })
             }
         val proc =
@@ -192,9 +200,28 @@ tasks.register("editorJsTest") {
                 .redirectOutput(ProcessBuilder.Redirect.INHERIT)
                 .redirectError(ProcessBuilder.Redirect.INHERIT)
                 .start()
-        if (proc.waitFor() != 0) throw GradleException("editorJsTest FAILED (node --test exited ${proc.exitValue()})")
+        // The second fence, independent of node: a runner that neither exits nor prints is killed
+        // and reported, never waited on — a hung gate stage looks exactly like a slow one.
+        if (!proc.waitFor(EDITOR_JS_TEST_BOUND_MINUTES, TimeUnit.MINUTES)) {
+            // The runner forks one child per file: kill the tree, or the orphans keep the ports.
+            proc.descendants().forEach { it.destroyForcibly() }
+            proc.destroyForcibly()
+            throw GradleException(
+                "editorJsTest HUNG — node --test did not exit within $EDITOR_JS_TEST_BOUND_MINUTES min; killed",
+            )
+        }
+        if (proc.exitValue() != 0) throw GradleException("editorJsTest FAILED (node --test exited ${proc.exitValue()})")
     }
 }
+
+/** `node --test-force-exit` is accepted from this major (Node 22.0); the task adds it only there. */
+val EDITOR_JS_FORCE_EXIT_NODE_MAJOR = 22
+
+/** How long editorJsTest waits for `node --test` before killing it: the 57 files take seconds. */
+val EDITOR_JS_TEST_BOUND_MINUTES = 10L
+
+/** The major of a `node --version` string (`v24.21.0` -> 24); 0 when it does not parse. */
+fun nodeMajor(version: String): Int = version.removePrefix("v").substringBefore('.').toIntOrNull() ?: 0
 
 fun nodeVersion(node: File): String =
     ProcessBuilder(node.absolutePath, "--version")
