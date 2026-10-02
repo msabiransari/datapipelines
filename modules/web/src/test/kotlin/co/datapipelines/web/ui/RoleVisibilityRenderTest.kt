@@ -389,6 +389,131 @@ class RoleVisibilityRenderTest {
         }
     }
 
+    // ------------------------------------------------------------------ #400: the dashboard workspace's ladder
+
+    /**
+     * The dashboard workspace's affordances are PERMISSION checks stamped by the controller
+     * (no RoleModel flag exists for dashboards — the brief's derive-don't-add rule), so the
+     * ladder renders them directly: a viewer and a promoter draw NO lifecycle verb at all
+     * (their routes would refuse), an author draws the verbs their rows admit and no Keys
+     * tab, and the Keys pane exists only for a caller with the binding permission. The
+     * browser never authors (#396): no create or update control exists in any rung.
+     */
+    @Test
+    fun `the dashboard versions tab draws no lifecycle verb for a viewer or a promoter, and the verbs for an author`() {
+        val viewer =
+            render("partials/dashboard-versions") {
+                dashboardVersionsModel()
+                setVariable("canRelease", false)
+                setVariable("canManageVersions", false)
+                setVariable("canSwitch", false)
+                setVariable("canDelete", false)
+            }
+        viewer shouldNotContain "data-verb="
+        viewer shouldNotContain "dp-danger-zone"
+
+        val author =
+            render("partials/dashboard-versions") {
+                dashboardVersionsModel()
+                setVariable("canRelease", true)
+                setVariable("canManageVersions", true)
+                setVariable("canSwitch", true)
+                setVariable("canDelete", true)
+            }
+        author shouldContain "data-verb=\"dashboard-release\""
+        author shouldContain "data-verb=\"dashboard-discard\""
+        author shouldContain "data-verb=\"dashboard-switch\""
+        author shouldContain "data-verb=\"dashboard-purge\""
+        author shouldContain "data-verb=\"dashboard-purge-version\""
+        author shouldContain "data-verb=\"dashboard-purge-entity\""
+        // A discarded version restores; a served one is never discardable in the markup.
+        author shouldContain "data-verb=\"dashboard-restore\""
+    }
+
+    @Test
+    fun `the dashboard workspace renders the Keys pane only for a caller with the binding permission`() {
+        val author =
+            render("dashboards/board") {
+                dashboardWorkspaceModel()
+                setVariable("canBindKeys", false)
+            }
+        author shouldNotContain "data-dp-tab=\"keys\""
+
+        val admin =
+            render("dashboards/board") {
+                dashboardWorkspaceModel()
+                setVariable("canBindKeys", true)
+            }
+        admin shouldContain "data-dp-tab=\"keys\""
+    }
+
+    /** The dashboard workspace's page model — a resolved draft, the chip and the strip's facts. */
+    private fun WebContext.dashboardWorkspaceModel() {
+        chrome()
+        setVariable("currentPath", "/dashboards/x")
+        setVariable("dashboardId", "00000000-0000-0000-0000-000000000001")
+        setVariable("dashboardName", "finance/dashboards/revenue")
+        setVariable("navCurrentPath", "finance/dashboards/revenue")
+        setVariable("hasSelected", true)
+        setVariable("viewedVersion", 2)
+        setVariable("viewedLabel", "v2 · draft")
+        setVariable("viewedIsDraft", true)
+        setVariable("viewedIsCurrent", false)
+        setVariable("servedVersion", 1)
+        setVariable("hasDraft", true)
+        setVariable("draftVersion", 2)
+        setVariable("boardVersion", 2)
+        setVariable("activeTab", "board")
+        setVariable("bundle", "2d")
+        setVariable("refusalCode", null)
+        setVariable("refusalMessage", null)
+        setVariable(
+            "versions",
+            listOf(
+                DashboardWorkspaceController.VersionRow(1, "RELEASED", isServed = true, isSelected = false),
+                DashboardWorkspaceController.VersionRow(2, "DRAFT", isServed = false, isSelected = true),
+            ),
+        )
+    }
+
+    /** The dashboard Versions tab's model — three rows, one of each live status. */
+    private fun WebContext.dashboardVersionsModel() {
+        setVariable("dashboardId", "00000000-0000-0000-0000-000000000001")
+        setVariable("servedVersion", 1)
+        setVariable(
+            "versions",
+            listOf(
+                DashboardBrowseModel.VersionDetailView(
+                    1,
+                    "RELEASED",
+                    "2026-10-01T09:00:00Z",
+                    "2026-10-01T10:00:00Z",
+                    isServed = true,
+                    isDraft = false,
+                    isDiscarded = false,
+                ),
+                DashboardBrowseModel.VersionDetailView(
+                    2,
+                    "DRAFT",
+                    "2026-10-02T09:00:00Z",
+                    null,
+                    isServed = false,
+                    isDraft = true,
+                    isDiscarded = false,
+                ),
+                DashboardBrowseModel.VersionDetailView(
+                    0,
+                    "DISCARDED",
+                    "2026-09-30T09:00:00Z",
+                    "2026-09-30T10:00:00Z",
+                    isServed = false,
+                    isDraft = false,
+                    isDiscarded = true,
+                ),
+            ),
+        )
+    }
+
     // ------------------------------------------------------------------ 179: keys
 
     /**
@@ -804,6 +929,15 @@ class RoleVisibilityRenderTest {
                 "isSuperAdmin",
                 "canCancel",
                 "canCreate",
+                // #400 — the dashboard workspace's affordances: computed from the caller's
+                // PERMISSION checks in DashboardWorkspaceController (no RoleModel flag exists
+                // for dashboards — the brief's derive-don't-add rule), and named here so the
+                // sweep reads the workspace's verbs like every other screen's.
+                "canRelease",
+                "canManageVersions",
+                "canSwitch",
+                "canDelete",
+                "canBindKeys",
                 // 179 (D16) — the top-bar chip's copy/delete are EVERY role's on their OWN key
                 // (VIEW_OWN_MCP_KEY), so the guard is not a role boolean but the key's
                 // existence: `mcpKey` is non-null exactly when a live login-minted key is in

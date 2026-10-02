@@ -1,0 +1,19 @@
+<!-- The dashboards surfaces' swap ROOT — a dispatcher, not an element of its own (067;
+     partials/pipelines.html's shape, one family over). The catalog and the sidebar's branch
+     are two presentations of the same flat-list fragment:
+       - scope=page  — the /dashboards CATALOG (any other wire value is the page): every
+                       dashboard the caller may read when `q` is empty, the matches otherwise,
+                       rooted at id="dash-list-wrapper".
+       - scope=nav   — the SIDEBAR's Dashboards branch: an empty `q` is the tree's root level
+                       (the same one-level-per-request fragment the branch loads), a non-empty
+                       one the flat search, rooted at id="dash-tree-nav" — so clearing the box
+                       returns to the tree by construction.
+     DashboardBrowseModel.fillWrapper decides; this th:block contributes no element and MUST
+     NOT carry the id — th:replace removes the host, so an id written here would never reach
+     the DOM. -->
+<th:block xmlns:th="http://www.thymeleaf.org" th:fragment="fragment"
+          th:replace="${searching} ? ~{partials/dashboard-search :: results} : ~{partials/dashboard-tree-level :: level}">
+  <!-- ONE conditional fragment expression, not two blocks each carrying th:if + th:replace:
+       th:replace has HIGHER attribute precedence than th:if, so the pair-of-blocks form
+       renders BOTH presentations and the condition never runs. -->
+</th:block>

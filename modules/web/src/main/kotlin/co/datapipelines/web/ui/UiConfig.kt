@@ -120,7 +120,12 @@ class UiConfig {
     fun dashboardBrowseModel(
         dashboards: co.datapipelines.visualization.DashboardService,
         runtime: co.datapipelines.web.dashboards.runtime.DashboardRuntime,
-    ): DashboardBrowseModel = DashboardBrowseModel(dashboards, runtime)
+        pipelines: co.datapipelines.visualization.PipelineReleaseFacts,
+        sets: co.datapipelines.visualization.ParameterSetFacts,
+        visualizations: co.datapipelines.visualization.VisualizationRepository,
+        apiKeys: co.datapipelines.auth.ApiKeyRepository,
+        dashboardBindings: co.datapipelines.application.dashboards.DashboardKeyBindingRepository,
+    ): DashboardBrowseModel = DashboardBrowseModel(dashboards, runtime, pipelines, sets, visualizations.pins, apiKeys, dashboardBindings)
 
     /** #374: the Parameter Sets screens' browse model — the rail tree's levels and the catalog's flat list. */
     @Bean
@@ -149,6 +154,23 @@ class UiConfig {
     @Bean
     fun pipelineWorkspaceModel(pipelines: co.datapipelines.pipeline.PipelineService): PipelineWorkspaceModel =
         PipelineWorkspaceModel(pipelines)
+
+    /** #400: the canonical dashboard workspace read page's version-resolution model. */
+    @Bean
+    fun dashboardWorkspaceModel(dashboards: co.datapipelines.visualization.DashboardService): DashboardWorkspaceModel =
+        DashboardWorkspaceModel(dashboards)
+
+    /** #400: the dashboard lifecycle dialogs' facts — the same dependency reads the release guard runs. */
+    @Bean
+    fun dashboardLifecycleDialogModel(
+        dashboards: co.datapipelines.visualization.DashboardService,
+        pipelines: co.datapipelines.visualization.PipelineReleaseFacts,
+        sets: co.datapipelines.visualization.ParameterSetFacts,
+        visualizations: co.datapipelines.visualization.VisualizationRepository,
+        actorNames: ActorNames,
+        authoring: co.datapipelines.pipeline.AuthoringGuard,
+    ): DashboardLifecycleDialogModel =
+        DashboardLifecycleDialogModel(dashboards, pipelines, sets, visualizations.pins, actorNames, authoring)
 
     /** 067: the pipelines explorer's one model, shared by the page and the partial controllers. */
     @Bean
