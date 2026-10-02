@@ -1,11 +1,12 @@
-<!-- The acting column's USAGE tab (106) — what depends on this pipeline, which is the same
-     thing as "what the server will refuse a discard over".
+<!-- The USAGE tab (#349 house-table composition; the fragment the 106 explorer detail and
+     the pipeline workspace both compose) — what depends on this pipeline, which is the
+     same thing as "what the server will refuse a discard over".
 
      The parent half runs the SAME query 101's refusal runs
      (`PipelineRepository.findLiveParentsPinningVersion`, the evidence behind
      `pipeline.version.pinned`), asked once per version. So the list a user reads before
-     pressing Discard is the list the server decides on — not a second implementation of the
-     rule that can drift from it.
+     pressing Discard is the list the server decides on — not a second implementation of
+     the rule that can drift from it.
 
      SCHEDULES (#259) are the list's third heading: the live schedules whose target names
      this pipeline, read through the scheduler's lensed by-target read. A discard does not
@@ -13,9 +14,16 @@
      (pointer_null / target_not_found) at its next occurrence, which is exactly the
      consequence a reader is weighing. A schedule the lens hides is not on the list.
 
-     DASHBOARDS (#320) are refusal evidence like the parents: a live dashboard version whose source pins a
-     version of this pipeline is `pipeline.version.pinned`'s `referencing_dashboards`, so a pinned version's
-     discard is refused, and the row names which dashboard and which pinned version. -->
+     DASHBOARDS (#320) are refusal evidence like the parents: a live dashboard version
+     whose source pins a version of this pipeline is `pipeline.version.pinned`'s
+     `referencing_dashboards`, so a pinned version's discard is refused, and the row
+     names which dashboard and which pinned version.
+
+     HOUSE TABLE (ui-screens §3.7, spec §4.4 "Usage: page-flow, automatically bounded
+     horizontally when necessary"): each dependency half is its own page-flow table —
+     `dt-frame > dt-viewport > table.ds-table`, the actual component, no second renderer.
+     The parent links name the CANONICAL workspace (#348-b: a link names its destination;
+     the old /editor URL survives only as a redirect). -->
 <div xmlns:th="http://www.thymeleaf.org" th:fragment="usage" class="tplx-usage">
   <p class="ds-empty-description" th:if="${usage.total == 0 and #lists.isEmpty(usage.schedules)}">
     Nothing depends on this pipeline — no published endpoint serves it, no live pipeline or dashboard pins it and no schedule runs it.
@@ -23,45 +31,85 @@
 
   <th:block th:if="${!#lists.isEmpty(usage.endpoints)}">
     <h4 class="tplx-usage-h">Published endpoints</h4>
-    <div class="tplx-vrow" th:each="e : ${usage.endpoints}">
-      <span class="u-mono" th:text="${'/api' + e.path}">/api/rideshare/v1/daily</span>
-      <span class="ds-badge" th:classappend="${e.enabled} ? 'ds-badge-success' : 'ds-badge-default'"
-            th:text="${e.enabled} ? 'enabled' : 'disabled'">enabled</span>
-      <span class="tplx-vmeta" th:text="${e.description}">Serves the borough report.</span>
+    <div class="dt-frame dt-fit">
+      <div class="dt-viewport" tabindex="-1">
+        <table class="ds-table">
+          <thead>
+            <tr><th>Endpoint</th><th>State</th><th>Serves</th></tr>
+          </thead>
+          <tbody>
+            <tr th:each="e : ${usage.endpoints}">
+              <td class="u-mono" th:text="${'/api' + e.path}">/api/rideshare/v1/daily</td>
+              <td><span class="ds-badge" th:classappend="${e.enabled} ? 'ds-badge-success' : 'ds-badge-default'"
+                        th:text="${e.enabled} ? 'enabled' : 'disabled'">enabled</span></td>
+              <td th:text="${e.description}">Serves the borough report.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
   </th:block>
 
   <th:block th:if="${!#lists.isEmpty(usage.parents)}">
     <h4 class="tplx-usage-h">Pipelines invoking it</h4>
-    <div class="tplx-vrow" th:each="p : ${usage.parents}">
-      <a class="u-mono" hx-boost="false" th:href="@{'/pipelines/' + ${p.pipelineId} + '/editor'}"
-         th:text="${p.pipelineName}">nyc/rollup</a>
-      <span class="ds-badge ds-badge-default app-chip-mono" th:text="${'v' + p.pipelineVersion}">v2</span>
-      <span class="tplx-vmeta">
-        <span th:text="'node ' + ${p.nodeId}">node child</span>
-        <span> · </span><span th:text="'pins v' + ${p.pinnedVersion}">pins v1</span>
-      </span>
+    <div class="dt-frame dt-fit">
+      <div class="dt-viewport" tabindex="-1">
+        <table class="ds-table">
+          <thead>
+            <tr><th>Pipeline</th><th>Version</th><th>Node</th><th>Pin</th></tr>
+          </thead>
+          <tbody>
+            <tr th:each="p : ${usage.parents}">
+              <td class="u-mono"><a class="u-mono" hx-boost="false" th:href="@{'/pipelines/' + ${p.pipelineId}}"
+                     th:text="${p.pipelineName}">nyc/rollup</a></td>
+              <td class="u-mono" th:text="${'v' + p.pipelineVersion}">v2</td>
+              <td class="u-mono" th:text="'node ' + ${p.nodeId}">node child</td>
+              <td class="u-mono" th:text="'pins v' + ${p.pinnedVersion}">pins v1</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
   </th:block>
 
   <th:block th:if="${!#lists.isEmpty(usage.dashboards)}">
     <h4 class="tplx-usage-h">Dashboards pinning it</h4>
-    <div class="tplx-vrow" data-usage-dashboard th:each="d : ${usage.dashboards}">
-      <span class="u-mono" th:text="${d.name}">acme/boards/revenue</span>
-      <span class="ds-badge ds-badge-default app-chip-mono" th:text="${'v' + d.version}">v2</span>
-      <span class="tplx-vmeta">
-        <span th:text="'source pins v' + ${d.pinnedVersion}">source pins v1</span>
-        <span> · </span><span th:text="${d.status}">RELEASED</span>
-      </span>
+    <div class="dt-frame dt-fit" data-usage-dashboard>
+      <div class="dt-viewport" tabindex="-1">
+        <table class="ds-table">
+          <thead>
+            <tr><th>Dashboard</th><th>Version</th><th>Source pin</th><th>Status</th></tr>
+          </thead>
+          <tbody>
+            <tr th:each="d : ${usage.dashboards}">
+              <td class="u-mono" th:text="${d.name}">acme/boards/revenue</td>
+              <td class="u-mono" th:text="${'v' + d.version}">v2</td>
+              <td class="u-mono" th:text="'pins v' + ${d.pinnedVersion}">source pins v1</td>
+              <td class="u-mono" th:text="${d.status}">RELEASED</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
   </th:block>
 
   <th:block th:if="${!#lists.isEmpty(usage.schedules)}">
     <h4 class="tplx-usage-h">Schedules running it</h4>
-    <div class="tplx-vrow" th:each="s : ${usage.schedules}">
-      <a class="u-mono" hx-boost="false" th:href="@{'/schedules?id=' + ${s.id}}" th:text="${s.name}">reports/nightly</a>
-      <span class="ds-badge" th:classappend="${s.state == 'enabled'} ? 'ds-badge-success' : (${s.state == 'blocked'} ? 'ds-badge-danger' : 'ds-badge-default')"
-            th:text="${s.state}">enabled</span>
+    <div class="dt-frame dt-fit">
+      <div class="dt-viewport" tabindex="-1">
+        <table class="ds-table">
+          <thead>
+            <tr><th>Schedule</th><th>State</th></tr>
+          </thead>
+          <tbody>
+            <tr th:each="s : ${usage.schedules}">
+              <td class="u-mono"><a class="u-mono" hx-boost="false" th:href="@{'/schedules?id=' + ${s.id}}" th:text="${s.name}">reports/nightly</a></td>
+              <td><span class="ds-badge" th:classappend="${s.state == 'enabled'} ? 'ds-badge-success' : (${s.state == 'blocked'} ? 'ds-badge-danger' : 'ds-badge-default')"
+                        th:text="${s.state}">enabled</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
   </th:block>
 </div>

@@ -90,5 +90,71 @@
   }
 
   window.PEWorkspaceRead = read;
-  window.PEWorkspaceLogic = { executeVersion: executeVersion };
+  window.PEWorkspaceLogic = {
+    executeVersion: executeVersion,
+
+    /**
+     * #349 — the run-input drafts' PER-VERSION store within the page (spec §4.3:
+     * "Run input drafts are per pipeline/version within the page. Changing schema
+     * cannot reuse another version's fields. Revisit restores compatible overrides").
+     * `save(version, overrides)` snapshots one version's bag; `load(version,
+     * schemaKeys)` rebuilds the working bag for a version's OWN schema — a key the
+     * stored bag knew but the new schema does not declare is DROPPED (an incompatible
+     * field never leaks across a version change), and a key the schema declares that
+     * the bag never saw is the empty (unsupplied) string. Values never leave the page:
+     * no localStorage, no navigation URL, no history.
+     */
+    createOverrideStore: function () {
+      var maps = {};
+      return {
+        save: function (version, overrides) {
+          if (version === null || version === undefined) return;
+          var copy = {};
+          Object.keys(overrides || {}).forEach(function (k) {
+            copy[k] = overrides[k];
+          });
+          maps[version] = copy;
+        },
+        load: function (version, schemaKeys) {
+          var stored = maps[version] || {};
+          var out = {};
+          (schemaKeys || []).forEach(function (k) {
+            out[k] = Object.prototype.hasOwnProperty.call(stored, k) ? stored[k] : "";
+          });
+          return out;
+        },
+      };
+    },
+
+    /**
+     * #349 — the page/view state key's staleness rule (spec §4.3: "Page/view state
+     * key: workspace + pipeline + viewed version + request generation. Per-tab requests
+     * and selected node belong to it. Changing any key invalidates pending completions
+     * and stale errors/toasts as well as successes"). A response whose stamp disagrees
+     * with the CURRENT state on any key the request carried is stale and must not be
+     * applied — including A→B→A (the second A is a NEW generation; the first A's late
+     * response is still stale). A key the request did not stamp is not compared, so an
+     * entity-wide tab read (runs/usage — no version of their own) guards on pipeline
+     * and generation alone.
+     */
+    stale: function (stamp, current) {
+      if (!stamp || !current) return true;
+      if (stamp.pipelineId !== undefined && stamp.pipelineId !== current.pipelineId) return true;
+      if (stamp.version !== undefined && stamp.version !== current.version) return true;
+      if (stamp.generation !== undefined && stamp.generation !== current.generation) return true;
+      return false;
+    },
+
+    /**
+     * The sink-token rule for the pane reads that arrive as htmx swaps (node SQL,
+     * checks, runs, usage): the request stamps its sink with the token it was issued
+     * under; a response is swapped only when the sink STILL carries the token the
+     * component currently expects. A newer request for the same sink replaces both
+     * stamps, so the older response — success or failure — is cancelled before it can
+     * paint (A8: hold A's response, select B, release A: no B overwrite, no A error).
+     */
+    tokenMatches: function (recorded, current) {
+      return typeof recorded === "string" && recorded !== "" && recorded === current;
+    },
+  };
 })();

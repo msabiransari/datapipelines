@@ -139,7 +139,14 @@ class LifecycleDialogBrowserTest : BrowserSuite() {
     }
 
     private fun rowMenu(versionBadge: String): Locator {
-        val row = page.locator(".tplx-vrow").filter(Locator.FilterOptions().setHasText(versionBadge)).first()
+        // The PIPELINE versions row is the house table (tr[data-version-row], #349); the
+        // TEMPLATE versions row is still the compact grid row (.tplx-vrow). The menu
+        // inside either is the same ⋯ + popover shape.
+        val row =
+            page
+                .locator("tr[data-version-row], .tplx-vrow")
+                .filter(Locator.FilterOptions().setHasText(versionBadge))
+                .first()
         row.locator("details.tplx-vmenu summary").click()
         return row.locator(".tplx-vmenu-list")
     }

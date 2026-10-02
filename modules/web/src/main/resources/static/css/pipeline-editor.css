@@ -7,15 +7,9 @@
  * the one geometry the vendored scale does not carry). */
 
 :root {
-  /* 141 §B: the sidebar's width is the USER's now — splitter.js writes --pe-sidebar-w onto
-     the ROOT (an inline custom property, which outranks this declaration), remembers it under
-     `dp.pane.editor-sidebar`, and restores it before first paint. The 280px is therefore the
-     DEFAULT, and double-clicking the handle removes the root's property to come back to it.
-     The bounds are named here so the stylesheet and splitter.js share the two numbers (the
-     --pe-dock-min-h precedent); the browser suite measures both sides. */
-  --pe-sidebar-width: var(--pe-sidebar-w, 280px);
-  --pe-sidebar-min-w: 220px;
-  --pe-sidebar-max-w: 50vw;
+  /* #349: the settings sidebar is gone (its content lives in the Overview and
+     Parameters tabs); the workspace's own geometry is the topbar, the tab strip,
+     the stage and the dock. */
   --pe-topbar-height: 52px;
   --pe-gap: var(--gap-md, 16px);
   --pe-transition: 200ms ease;
@@ -250,79 +244,136 @@
   line-height: 1;
 }
 
-/* ---- Body: sidebar + stage ---- */
+/* ---- The workspace's six tabs (#349, spec §4.1) ----
+ * One strip under the topbar, the dock's tab idiom at page scale: plain buttons, the
+ * active one carrying the brand underline-and-ink, aria-selected bound from tabs.js.
+ * Runs renders only for a caller with the execution read (server th:if) — the strip
+ * shows five tabs there, not a disabled sixth. */
+.pe-tabs {
+  display: flex;
+  align-items: stretch;
+  gap: var(--gap-xs, 4px);
+  padding: 0 var(--pe-gap);
+  border-bottom: 1px solid var(--border-faint, #e6e9ee);
+  background: var(--surface-default, #fff);
+  overflow-x: auto;
+}
+
+.pe-tab {
+  appearance: none;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text-secondary, #334155);
+  padding: var(--gap-sm, 8px) var(--gap-sm, 8px) calc(var(--gap-sm, 8px) - 1px);
+  border-bottom: 2px solid transparent;
+  white-space: nowrap;
+}
+
+.pe-tab:hover {
+  color: var(--text-primary, #0f172a);
+}
+
+.pe-tab[aria-selected="true"] {
+  color: var(--text-primary, #0f172a);
+  font-weight: var(--weight-semibold, 600);
+  border-bottom-color: var(--brand, #2563eb);
+}
+
+/* ---- The tab panels (#349) ----
+ * Exactly one visible, chosen by the `hidden` ATTRIBUTE (bound from tabs.js) — never an
+ * inline style, and the flow pane is never cloaked: Cytoscape needs it laid out. */
+.pe-panes {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.pe-pane {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+}
+
+.pe-pane-flow {
+  overflow: hidden;
+}
+
+/* ---- Body: the stage (#349 — the settings sidebar is gone; its content moved to
+   the Overview and Parameters tabs, and the graph owns the available width) ---- */
 .pe-body {
-  display: grid;
-  /* 141 §B: the first track is the user's width, clamped so even a remembered value beyond
-     the bounds (written onto the root pre-paint, before any JS bound can run) cannot push
-     the stage off the screen. The ≤1024px collapse below (`0 1fr`) sits LATER in the
-     cascade, so a remembered 600px never reopens the collapsed sidebar at phone widths. */
-  grid-template-columns: clamp(var(--pe-sidebar-min-w), var(--pe-sidebar-width), var(--pe-sidebar-max-w)) 1fr;
+  display: flex;
+  flex-direction: column;
   flex: 1;
   min-height: 0;
   overflow: hidden;
   position: relative;
 }
 
-/* ---- The sidebar's resize handle (141 §B) ----
- * The `.tplx-splitter` shape (104 §C), on the sidebar's right border — the pane boundary.
- * 12px of hit area centred on the 1px border, absolute so it is not a third grid column.
- * The grip is a visible pill AT REST (141 §C): a resize nobody can see is a resize nobody
- * uses. `var(--border-default)` is the design system's 3:1 interactive-boundary token; the
- * brand colour stays the hover/focus/drag signal. The handle's x reads the same clamped
- * track the grid does, so it can never sit off the boundary it resizes. */
-.pe-sidebar-splitter {
-  position: absolute;
-  user-select: none;
-  top: 0;
-  bottom: 0;
-  left: calc(clamp(var(--pe-sidebar-min-w), var(--pe-sidebar-width), var(--pe-sidebar-max-w)) - 6px);
-  width: 12px;
-  z-index: 3;
-  display: grid;
-  place-items: center;
-  padding: 0;
-  border: none;
-  background: none;
-  cursor: col-resize;
-  touch-action: none;
+.pe-body > .pe-stage {
+  flex: 1;
+  min-height: 0;
 }
 
-.pe-sidebar-splitter::after {
-  content: "";
-  width: 3px;
-  height: 40px;
-  border-radius: var(--radius-pill, 999px);
-  background: var(--border-default, #d1d5db);
-  transition: background var(--pe-transition);
-}
-
-.pe-sidebar-splitter:hover::after,
-.pe-sidebar-splitter:focus-visible::after,
-.pe-body.is-dragging .pe-sidebar-splitter::after {
-  background: var(--brand, #2563eb);
-}
-
-/* ---- Left sidebar: settings + parameters (real machinery the mock omits; the
-   type scale and the faint border are the mock's) ---- */
-.pe-sidebar {
-  border-right: 1px solid var(--border-faint, #e6e9ee);
-  overflow-y: auto;
+/* ---- The reading panes (#349): Overview and Parameters render as page documents in
+   cards; the lazy Runs/Usage containers carry the explorer fragments' own frames. ---- */
+.pe-doc {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-md, 16px);
   padding: var(--pe-gap);
-  background: var(--surface-default, #fff);
+  width: 100%;
+  max-width: var(--app-content-max, 1600px);
 }
 
-.pe-sidebar-section {
-  margin-bottom: var(--gap-lg, 24px);
+.pe-inline-ref {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--gap-2xs, 2px);
+  margin-right: var(--gap-sm, 8px);
+  white-space: nowrap;
 }
 
-.pe-sidebar-heading {
+.pe-tab-note {
+  padding: var(--pe-gap);
+  color: var(--text-muted, #64748b);
+  font-size: var(--text-sm, 0.875rem);
+}
+
+.pe-tab-lazy {
+  padding: 0 var(--pe-gap) var(--pe-gap);
+}
+
+/* ---- The execution identity strip (#349, spec §4.2): the one line that names the
+   run the execution tabs belong to — version, status, id, effective parameters —
+   with the way back to the run's version when the page is viewing another. ---- */
+.pe-run-strip {
+  grid-row: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm, 8px);
+  padding: var(--gap-2xs, 2px) var(--pe-gap);
+  border-bottom: 1px solid var(--border-faint, #e6e9ee);
+  background: var(--surface-inset, #f8fafc);
+  font-size: var(--text-xs, 0.75rem);
+  color: var(--text-secondary, #334155);
+}
+
+.pe-run-strip-label {
   font-size: 11px;
   font-weight: var(--weight-semibold, 600);
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--text-muted, #64748b);
-  margin-bottom: var(--gap-sm, 8px);
+}
+
+.pe-run-strip-status {
+  font-weight: var(--weight-semibold, 600);
 }
 
 .pe-field {
@@ -1460,7 +1511,12 @@
  * 2026-09-05), so the dock is always present — there is no hidden state. */
 .pe-dock {
   display: grid;
-  grid-template-rows: var(--pe-dock-tabs-h) var(--pe-dock-pane-h);
+  /* #349: the run strip is the dock's first row for a caller with the execution read.
+     The children are PINNED to their tracks below — a display:none child (the strip
+     before a run, the hidden panes) leaves the grid entirely, and without the pins
+     every sibling would shift up a row (the tabs wearing the pane's 232px, the pane
+     clipped to the tabs' 38px — measured on the lane instance). */
+  grid-template-rows: auto var(--pe-dock-tabs-h) var(--pe-dock-pane-h);
   flex: 0 0 auto;
   min-height: 0;
   background: var(--surface-default, #fff);
@@ -1555,6 +1611,7 @@ html.dp-splitting-y * {
 }
 
 .pe-dock-tabs {
+  grid-row: 2;
   display: flex;
   align-items: center;
   gap: 2px;
@@ -1654,6 +1711,7 @@ html.dp-splitting-y * {
 }
 
 .pe-dock-body {
+  grid-row: 3;
   min-height: 0;
   overflow: auto;
 }
@@ -2218,33 +2276,6 @@ html.dp-splitting-y * {
 
 /* ---- Responsive ---- */
 @media (max-width: 1024px) {
-  .pe-body {
-    grid-template-columns: 0 1fr;
-  }
-
-  /* 141 §B: the handle has no boundary to sit on once the sidebar is a drawer, and this
-     rule sits AFTER the property-sized column above — a remembered width never reopens
-     the collapse (PipelineEditorSidebarResizeBrowserTest's 390px arm asserts exactly that). */
-  .pe-sidebar-splitter {
-    display: none;
-  }
-
-  .pe-sidebar {
-    position: absolute;
-    top: 0;
-    left: 0;
-    bottom: 0;
-    width: var(--pe-sidebar-width);
-    z-index: var(--z-drawer, 400);
-    transform: translateX(-100%);
-    transition: transform var(--pe-transition);
-    box-shadow: var(--shadow-md, 0 4px 10px -2px rgb(15 23 42 / 0.1));
-  }
-
-  .pe-sidebar.open {
-    transform: translateX(0);
-  }
-
   .pe-details {
     grid-template-columns: 1fr;
   }
@@ -2256,11 +2287,13 @@ html.dp-splitting-y * {
 }
 
 @media (max-width: 768px) {
-  .pe-sidebar {
-    width: 100%;
-  }
-
   .pe-minimap {
     display: none;
+  }
+
+  /* #349: the dock strip and the execution strip stay reachable; the run strip wraps
+     instead of pushing its View button off the pane. */
+  .pe-run-strip {
+    flex-wrap: wrap;
   }
 }

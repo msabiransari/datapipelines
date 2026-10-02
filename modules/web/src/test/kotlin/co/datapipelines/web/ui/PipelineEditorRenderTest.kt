@@ -222,17 +222,20 @@ class PipelineEditorRenderTest {
      * against a stale document (ui-screens §4.4).
      */
     @Test
-    fun `the version selector renders admitted history as full-document links`() {
+    fun `the version selector is client-rendered read navigation over the admitted history (349)`() {
+        // #348 rendered the rows server-side as full-document links; #349's in-page
+        // switching (spec §4.3: never reload the document to update the dropdown) renders
+        // them from the workspace block's admitted history — the template carries the
+        // hooks, the hrefs stay the canonical deep links for middle-click and no-JS.
         val html = render(versions = listOf(vr(1, "RELEASED", isCurrent = true, isViewed = true), vr(2, "RELEASED"), vr(3, "DRAFT")))
 
         html shouldContain "aria-label=\"View another version\""
-        html shouldContain "href=\"/pipelines/$LEAF_ID?version=1\""
-        html shouldContain "href=\"/pipelines/$LEAF_ID?version=2\""
-        html shouldContain "href=\"/pipelines/$LEAF_ID?version=3\""
+        html shouldContain "data-pe-version-link"
         html shouldContain "hx-boost=\"false\""
-        html shouldContain "aria-current=\"page\""
-        html shouldContain "· current"
-        html shouldContain "· draft"
+        html shouldContain "x-bind:href=\"row.href\""
+        html shouldContain "x-bind:aria-current=\"row.ariaCurrent\""
+        // The rows the selector renders from — the ONE admitted history the page JSON carries.
+        html shouldContain "selectorRows"
     }
 
     /**
@@ -272,6 +275,19 @@ class PipelineEditorRenderTest {
         mapOf(
             "version" to version,
             "status" to PipelineVersionStatus.valueOf(status),
+            // #349: the versions rows feed the Versions TAB fragment too — the full
+            // shape the browse model's VersionRowView carries (the tab formats the
+            // created stamp and renders the role-gated verb menus).
+            "createdAt" to java.time.Instant.parse("2026-09-01T00:00:00Z"),
+            "createdAgo" to "just now",
+            "actor" to "Browser User",
+            "via" to "session",
+            "usageLabel" to "0 runs",
+            "canRelease" to (status == "DRAFT"),
+            "canPurge" to (status == "DRAFT"),
+            "canDiscard" to (status == "RELEASED"),
+            "canRestore" to false,
+            "canSwitch" to (status == "RELEASED" && !isCurrent),
             "isCurrent" to isCurrent,
             "isViewed" to isViewed,
         )
@@ -291,6 +307,8 @@ class PipelineEditorRenderTest {
                 setVariable("authenticated", true)
                 setVariable("currentPath", "/pipelines")
                 setVariable("pipelineId", LEAF_ID)
+                // #349: the Versions tab composes the explorer fragment, whose rows read `pipeline.id`.
+                setVariable("pipeline", mapOf("id" to LEAF_ID))
                 setVariable("pipelineName", "p")
                 setVariable("hasSelectedBody", hasSelectedBody)
                 setVariable("viewedVersion", if (hasSelectedBody) 1 else null)

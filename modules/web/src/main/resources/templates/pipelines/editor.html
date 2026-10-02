@@ -30,6 +30,9 @@
     <!-- 195: the Parameters sidebar's field view models — pure, node-tested, read
          by init.js and the template's paths. -->
     <script th:src="@{/js/pipeline-editor/param-fields.js}"></script>
+    <!-- #349: the workspace's six-tab state machine (pure, node-tested) — Flow is the
+         graph tab; Runs is admitted only with the execution read. Loaded before init.js. -->
+    <script th:src="@{/js/pipeline-editor/tabs.js}"></script>
     <!-- #348: the workspace version context (pure, node-tested) — every execute POST and
          node-SQL request reads the viewed version from it. Loaded before init.js. -->
     <script th:src="@{/js/pipeline-editor/workspace.js}"></script>
@@ -82,12 +85,15 @@
          omission: below 768px the band renders above the workspace (which stays on the
          page, rendered and scrollable underneath) and says so, with the entity's name
          and the viewed-version chip — the same viewedLabel the topbar reads. Hidden at
-         every width by app.css except < 768px. */-->
+         every width by app.css except < 768px. The chip carries data-pe-viewed-label
+         (#349): an in-page version switch updates every such chip by textContent, so
+         the band never names a version the page stopped showing. */-->
   <div class="ds-empty app-wide-screen-note">
     <p class="ds-empty-title">Open on a wider screen to inspect the graph</p>
     <p class="ds-empty-description">
       <span th:text="${pipelineName}">Pipeline</span>
-      <span class="ds-badge" th:classappend="${viewedIsDraft} ? 'ds-badge-warning' : 'ds-badge-default'"
+      <span class="ds-badge" data-pe-viewed-label
+            th:classappend="${viewedIsDraft} ? 'ds-badge-warning' : 'ds-badge-default'"
             th:text="${viewedLabel}">v1 · released · current</span>
       — the pipeline graph needs a canvas this screen does not have.
     </p>
@@ -129,7 +135,11 @@
        runtime owns activation exclusively: it removes the attribute inside its one
        `mutateDom` init and re-arms it before every history save (the cached snapshot
        carries it back). -->
-  <div x-data="pipelineEditor" x-ignore class="pe-root" th:if="${hasSelectedBody}" th:attr="data-can-execute=${canExecute == true}">
+  <div x-data="pipelineEditor" x-ignore class="pe-root" th:if="${hasSelectedBody}"
+       th:attr="data-can-execute=${canExecute == true},
+                data-active-tab=${activeTab},
+                data-can-read-executions=${canReadExecutions == true},
+                data-has-draft=${hasDraft == true}">
 
     <!-- Top bar (080 §D — the mock's 52px bar): back, crumb (folder muted + name
          bold), viewed-version chip, version selector, run status, Execute. -->
@@ -139,26 +149,31 @@
         <span class="pe-crumb-path" x-show="crumbPath" x-text="crumbPath"></span>
         <span class="pe-crumb-name" x-text="crumbName"></span>
         <!-- #348: the chip names the VIEWED version and its own status — never the
-             working version, never "latest release" (versioning §3.4: the current
-             pointer is sticky and event-driven, and this page displays the row it
-             resolved, which the selector below chose). -->
-        <span class="pe-vchip" th:classappend="${viewedIsDraft} ? 'pe-vchip-draft'"
+              working version, never "latest release" (versioning §3.4: the current
+              pointer is sticky and event-driven, and this page displays the row it
+              resolved). data-pe-viewed-label (#349): an in-page version switch updates
+              every such chip by textContent. -->
+        <span class="pe-vchip" data-pe-viewed-label th:classappend="${viewedIsDraft} ? 'pe-vchip-draft'"
               th:text="${viewedLabel}">v1 · released · current</span>
       </div>
       <!-- #348 — the version selector: READ navigation over the admitted history (D5).
-           Each link enters this page with its exact version; the viewed row is marked,
-           not hidden, and the current row is labelled. Full document loads — the same
-           entry rule every link into this page follows (ui-screens §4.4). -->
-      <nav class="pe-versions" aria-label="View another version" th:if="${!#lists.isEmpty(versions)}">
-        <a th:each="v : ${versions}" class="ds-button ds-button-ghost ds-button-sm" hx-boost="false"
-           th:href="@{/pipelines/{id}(id=${pipelineId}, version=${v.version})}"
-           th:attr="data-version=${v.version}"
-           th:aria-current="${v.isViewed} ? 'page' : null"
-           th:title="${v.status.name().toLowerCase()} + (${v.isCurrent} ? ' · current' : '')">
-          <span th:text="'v' + ${v.version}">v1</span>
-          <span th:if="${v.isCurrent}" class="u-muted">· current</span>
-          <span th:if="${v.status.name() == 'DRAFT'}" class="u-muted">· draft</span>
-        </a>
+           #349: the rows are the workspace block's admitted history (one lens-filtered
+           source the client also re-reads on an in-page switch — the selector never
+           reloads the document to change the viewed version, because a reload would
+           detach the page from an active run, spec §4.3). The row's href is still the
+           canonical deep link (middle-click, no-JS); the client intercepts a plain
+           click and applies the version in place. -->
+      <nav class="pe-versions" aria-label="View another version" x-show="selectorRows.length">
+        <template x-for="row in selectorRows" :key="row.version">
+          <a class="ds-button ds-button-ghost ds-button-sm" data-pe-version-link hx-boost="false"
+             x-bind:href="row.href"
+             x-bind:data-version="row.version"
+             x-bind:aria-current="row.ariaCurrent"
+             x-bind:title="row.titleText">
+            <span x-text="row.label"></span>
+            <span class="u-muted" x-show="row.currentSuffix" x-text="row.currentSuffix"></span>
+          </a>
+        </template>
       </nav>
       <!-- 114 §A — a viewer's editor is READ-ONLY: it loads (canRead), the mutating verbs
            are absent, and the line below says so once, quietly. No toast: nothing failed. -->
@@ -187,6 +202,12 @@
         </button>
       </div>
       <div class="pe-spacer"></div>
+      <!-- #349 — run overrides reachable BESIDE Execute as well as in the Parameters tab
+           (spec §4.1): the button is tab navigation only — it opens the Parameters tab,
+           it never touches the run state. Rendered beside Execute, so a reader who may
+           run sees the override affordance where the run is. -->
+      <button th:if="${canExecute}" type="button" class="ds-button ds-button-ghost ds-button-sm"
+              @click="openRunParameters" aria-label="Run parameters">Run parameters</button>
       <div class="pe-status" x-bind:class="statusClass" role="status">
         <span class="pe-status-dot"></span><span x-text="runStatus.text">Idle</span>
       </div>
@@ -209,67 +230,40 @@
       <button class="pe-banner-dismiss" @click="dismissBanner" aria-label="Dismiss"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#x"></use></svg></button>
     </div>
 
-    <div class="pe-body">
-      <!-- Left sidebar: Settings + Parameters (real machinery the mock omits; kept,
-           restyled to the 080 type scale — see the handback). -->
-      <aside class="pe-sidebar" aria-label="Pipeline settings">
-        <div class="pe-sidebar-section">
-          <h2 class="pe-sidebar-heading">Settings</h2>
-          <div class="pe-field">
-            <label class="pe-label">Name</label>
-            <div class="pe-value" x-text="pipeline.name"></div>
-          </div>
-          <div class="pe-field">
-            <label class="pe-label">Display Name</label>
-            <div class="pe-value" x-text="pipeline.display_name"></div>
-          </div>
-          <div class="pe-field">
-            <label class="pe-label">Description</label>
-            <div class="pe-value u-pre-line" x-text="pipelineDescriptionText"></div>
-          </div>
-          <div class="pe-field">
-            <label class="pe-label">Version</label>
-            <div class="pe-value" x-text="pipeline.version"></div>
-          </div>
-          <template x-if="hasCustomStagingEngine">
-            <div class="pe-field">
-              <label class="pe-label">Staging Engine</label>
-              <div class="pe-value" x-text="stagingEngineText"></div>
-            </div>
-          </template>
-        </div>
+    <!-- #349 — the workspace's six tabs (spec §4.1, D2): Flow is the graph tab and the
+         default; Overview, Parameters, Runs, Usage and Versions are the pipeline's
+         reading surfaces. A tab change is NAVIGATION ONLY — it swaps no execution state
+         and cancels no run (§4.3). The tab set is closed server-side
+         (PipelineWorkspaceTab); Runs renders — and loads — only for a caller with the
+         execution read, and its absence costs nothing (no lazy fetch, no pane). The
+         panels hide through the `hidden` ATTRIBUTE bound from the tab state (never an
+         inline style, and nothing is cloaked: the flow pane must be laid out when
+         Cytoscape initialises, 090's lesson). -->
+    <nav class="pe-tabs" role="tablist" aria-label="Pipeline workspace tabs">
+      <button type="button" class="pe-tab" role="tab" id="pe-tab-flow" aria-controls="pe-pane-flow"
+              x-bind:aria-selected="tabs.flowAria" @click="selectFlowTab">Flow</button>
+      <button type="button" class="pe-tab" role="tab" id="pe-tab-overview" aria-controls="pe-pane-overview"
+              x-bind:aria-selected="tabs.overviewAria" @click="selectOverviewTab">Overview</button>
+      <button type="button" class="pe-tab" role="tab" id="pe-tab-parameters" aria-controls="pe-pane-parameters"
+              x-bind:aria-selected="tabs.parametersAria" @click="selectParametersTab">Parameters</button>
+      <button th:if="${canReadExecutions}" type="button" class="pe-tab" role="tab" id="pe-tab-runs"
+              aria-controls="pe-pane-runs"
+              x-bind:aria-selected="tabs.runsAria" @click="selectRunsTab">Runs</button>
+      <button type="button" class="pe-tab" role="tab" id="pe-tab-usage" aria-controls="pe-pane-usage"
+              x-bind:aria-selected="tabs.usageAria" @click="selectUsageTab">Usage</button>
+      <button type="button" class="pe-tab" role="tab" id="pe-tab-versions" aria-controls="pe-pane-versions"
+              x-bind:aria-selected="tabs.versionsAria" @click="selectVersionsTab">Versions</button>
+    </nav>
 
-        <div class="pe-sidebar-section" x-show="paramKeys.length">
-          <h2 class="pe-sidebar-heading">Parameters</h2>
-          <!-- 195: one view model per key (param-fields.js) — placeholder, description,
-               type and the override branch are precomputed there; the input's value is
-               bound (not x-model — the CSP build's setter is a synthesized expression
-               the path evaluator cannot resolve) and @input lands it on the component. -->
-          <template x-for="field in paramFields" :key="field.key">
-            <div class="pe-field">
-              <label class="pe-label" x-text="field.key"></label>
-              <template x-if="field.hasOverride">
-                <input type="text" class="pe-input" x-bind:value="field.override"
-                  x-bind:data-key="field.key"
-                  @input="onParameterInput"
-                  x-bind:placeholder="field.placeholderText" />
-              </template>
-              <template x-if="field.hasNoOverride">
-                <div class="pe-value pe-value-muted" x-text="field.descriptionText"></div>
-              </template>
-              <span class="pe-type-badge" x-text="field.type"></span>
-            </div>
-          </template>
-        </div>
-      </aside>
-
-      <!-- 141 §B — the sidebar's resize handle, on the sidebar's right border. The
-           `.tplx-splitter` contract (104 §C): `role="separator"` with the orientation set
-           here so the control is correct in the DOM the moment it exists; splitter.js keeps
-           aria-valuemin/max/now moving and sets the shared drag/reset hint. Hidden below
-           1024px, where the sidebar is a drawer and there is no boundary to sit on. -->
-      <div class="pe-sidebar-splitter" data-splitter="editor-sidebar" role="separator"
-           aria-orientation="vertical" tabindex="0" aria-label="Resize settings sidebar"></div>
+    <div class="pe-panes">
+      <!-- FLOW — the graph owns the available width, and the dock (Node Details beside
+           Results, Errors, Events) belongs to this view: the graph and its run
+           visualization are one surface (spec §4.1/§4.2). The settings sidebar is GONE —
+           its description and parameters moved to Overview and Parameters, and a
+           duplicate sidebar would make the workspace lie about where the facts live. -->
+      <div class="pe-pane pe-pane-flow" id="pe-pane-flow" role="tabpanel" aria-labelledby="pe-tab-flow"
+           x-bind:hidden="tabs.flowHidden">
+        <div class="pe-body">
 
       <!-- The stage (080 §A): dotted grid, cards, bezier edges, minimap, controls,
            legend, keyboard hint. -->
@@ -332,26 +326,53 @@
       </section>
     </div>
 
-    <!-- 080 §B — the dock: Details | Results | Errors | Events. Always present
-         (Details is its landing tab — the 065 inspector overlay moved here), one
-         chevron collapse, no close. State lives in dock.js, the events log in
-         events.js; both pure so node --test owns the transition tables. -->
-    <section class="pe-dock" x-bind:class="dock.collapsedClass"
-             aria-label="Node details, execution results, errors and events">
+      <!-- #349 — the sink reads' one requester (A8): the node SQL and checks reads are
+           issued FROM this element, whose `hx-sync="this:replace"` makes a new read
+           ABORT the in-flight one and issue in its place (htmx's default drops the new
+           request while one is in flight, and this build's "abort" mode aborts without
+           issuing — only "replace" aborts AND issues). Select B while A's SQL is still
+           loading: B's request fires, A's never lands. -->
+      <span id="pe-sql-requester" hx-sync="this:replace" class="sr-only" aria-hidden="true"></span>
+
+        <!-- 080 §B — the dock: Node Details | Results | Errors | Events (#349, spec
+             §4.2: Node Details stays IN the bottom dock, beside Results, Errors and
+             Events; there is no right inspector). Always present — Node Details is its
+             landing tab — one chevron collapse, no close. The execution tabs (Results,
+             Errors, Events) and their panes render only for a caller with the execution
+             read; a promoter keeps Node Details alone. State lives in dock.js, the
+             events log in events.js; both pure so node --test owns the transition
+             tables. -->
+        <section class="pe-dock" x-bind:class="dock.collapsedClass"
+                 aria-label="Node details, execution results, errors and events">
       <!-- 104 §B — the height handle, on the dock's top edge. The owner could min/max the
            dock but not size it; this is the drag. `role="separator"` with the value pair is
            set here rather than only in JS so the control is correct in the DOM the moment it
            exists; splitter.js keeps aria-valuenow moving. -->
       <div class="pe-dock-splitter" data-splitter="editor-dock" role="separator"
            aria-orientation="horizontal" tabindex="0" aria-label="Resize results panel"></div>
+      <!-- #349 — the execution identity strip (spec §4.2): the execution tabs show ONE
+           captured run, and this strip names it — pipeline, version, status, the
+           effective submitted parameters — so a run started at v1 is never mistaken for
+           the v2 body the page may now be viewing. When the versions differ the strip
+           says so and offers the way back to the run's version. -->
+      <div class="pe-run-strip" th:if="${canReadExecutions}" x-show="runStripVisible" role="status">
+        <span class="pe-run-strip-label">Run</span>
+        <span x-text="runStripVersionText"></span>
+        <span class="pe-run-strip-status" x-text="runStripStatusText"></span>
+        <span class="u-muted" x-text="runStripExecText"></span>
+        <span class="u-muted" x-show="runStripParamsText" x-text="runStripParamsText"></span>
+        <span class="pe-grow"></span>
+        <button type="button" class="ds-button ds-button-ghost ds-button-sm" x-show="runVersionDiffers"
+                @click="viewRunVersion">View run's version</button>
+      </div>
       <div class="pe-dock-tabs" role="tablist" aria-label="Editor dock">
         <button type="button" class="pe-dock-tab" role="tab" id="pe-dock-tab-details"
                 aria-controls="pe-pane-details"
                 x-bind:aria-selected="dock.detailsAria"
                 @click="selectDetailsTab">
-          Details
+          Node Details
         </button>
-        <button type="button" class="pe-dock-tab" role="tab" id="pe-dock-tab-results"
+        <button th:if="${canReadExecutions}" type="button" class="pe-dock-tab" role="tab" id="pe-dock-tab-results"
                 aria-controls="pe-pane-results"
                 x-bind:aria-selected="dock.resultsAria"
                 @click="selectResultsTab">
@@ -360,7 +381,7 @@
                 x-text="resultsBadgeText"></span>
           <span class="pe-dock-stale" x-show="dock.resultsStale">previous run</span>
         </button>
-        <button type="button" class="pe-dock-tab" role="tab" id="pe-dock-tab-errors"
+        <button th:if="${canReadExecutions}" type="button" class="pe-dock-tab" role="tab" id="pe-dock-tab-errors"
                 aria-controls="pe-pane-errors"
                 x-bind:aria-selected="dock.errorsAria"
                 @click="selectErrorsTab">
@@ -368,7 +389,7 @@
           <span class="pe-dock-count" x-bind:class="errorsBadgeClass"
                 x-text="dock.errors.length"></span>
         </button>
-        <button type="button" class="pe-dock-tab" role="tab" id="pe-dock-tab-events"
+        <button th:if="${canReadExecutions}" type="button" class="pe-dock-tab" role="tab" id="pe-dock-tab-events"
                 aria-controls="pe-pane-events"
                 x-bind:aria-selected="dock.eventsAria"
                 @click="selectEventsTab">
@@ -395,16 +416,9 @@
       <div class="pe-dock-body" id="pe-pane-details" role="tabpanel" x-cloak
            aria-labelledby="pe-dock-tab-details"
            x-show="dock.detailsActive">
-        <!-- 140: the loaded body's release checks. The count is read off the client-side body
-             JSON; the latest verdicts lazy-load from the read-only checks partial (init.js
-             fires the GET only when the body declares any). -->
-        <div class="pe-field" x-show="checksPresent">
-          <label class="pe-label">Checks</label>
-          <div class="pe-value"
-               x-text="checksCountText"></div>
-          <div id="pe-checks-latest"
-               th:attr="data-checks-url=@{'/partials/pipelines/{id}/versions/{version}/checks'(id=${pipelineId}, version=${viewedVersion})}"></div>
-        </div>
+        <!-- #349: the checks line moved to the Overview tab (spec §4.1 — Overview owns
+             the viewed version's release checks); Node Details keeps every node-type
+             field, the source, the mappings and the run facts. -->
         <div class="pe-empty" x-show="noSelection">Select a node to see its source, template, output and last run.</div>
         <template x-if="selectedNode">
           <div class="pe-details" x-bind:data-type="selectedDetailsTypeToken">
@@ -451,8 +465,9 @@
       </div>
 
       <!-- Results: the 065 body, unchanged — TTL line, expired card, .ds-table,
-           the 027b-frozen paging row and the downloads. -->
-      <div class="pe-dock-body" id="pe-pane-results" role="tabpanel" x-cloak
+           the 027b-frozen paging row and the downloads. Execution-owned (#349): the
+           identity strip above the panes names the run these belong to. -->
+      <div th:if="${canReadExecutions}" class="pe-dock-body" id="pe-pane-results" role="tabpanel" x-cloak
            aria-labelledby="pe-dock-tab-results"
            x-show="dock.resultsActive">
         <div class="pe-empty" x-show="resultsEmpty">Run the pipeline to see the caller output here.</div>
@@ -511,7 +526,7 @@
 
       <!-- Errors: one entry per failed node of this run, newest LAST. The 057
            markup, driven by the same failureView(record) — same record, read-only. -->
-      <div class="pe-dock-body" id="pe-pane-errors" role="tabpanel" x-cloak
+      <div th:if="${canReadExecutions}" class="pe-dock-body" id="pe-pane-errors" role="tabpanel" x-cloak
            aria-labelledby="pe-dock-tab-errors"
            x-show="dock.errorsActive">
         <div class="pe-empty" x-show="dock.noErrors">No failures in this run.</div>
@@ -566,15 +581,218 @@
       </div>
 
       <!-- Events (080 §B): every SSE event in arrival order — the toast only ever
-           announces the terminal one. Rows are appended by init.js; the badge is
-           the log's live count. -->
-      <div class="pe-dock-body" id="pe-pane-events" role="tabpanel" x-cloak
+            announces the terminal one. Rows are appended by init.js; the badge is
+            the log's live count. -->
+      <div th:if="${canReadExecutions}" class="pe-dock-body" id="pe-pane-events" role="tabpanel" x-cloak
            aria-labelledby="pe-dock-tab-events"
            x-show="dock.eventsActive">
         <div class="pe-empty" x-show="noEvents">Every event the execution stream emits lands here, in order — the toast only ever announces the terminal one.</div>
         <div class="pe-events" id="pe-event-list"></div>
       </div>
     </section>
+      </div>
+
+      <!-- OVERVIEW (#349, spec §4.1) — the full safely rendered description, the
+           version's counts, staging engine, datasource and template references, the
+           record's created actor/surface/time, the last visible run, and the viewed
+           version's release checks. Client-rendered from the page's own JSON so an
+           in-page version switch re-renders it without a round trip; every dynamic
+           value is an x-text (a DOM text sink), every href server-prebuilt. -->
+      <div class="pe-pane pe-pane-overview" id="pe-pane-overview" role="tabpanel"
+           aria-labelledby="pe-tab-overview" hidden x-bind:hidden="tabs.overviewHidden">
+        <div class="pe-doc">
+          <section class="ds-card">
+            <div class="app-card-h">
+              <h3>Overview</h3>
+              <span class="app-card-note" data-pe-viewed-label th:text="${viewedLabel}">v1 · released · current</span>
+            </div>
+            <div class="app-card-b">
+              <div class="app-chips">
+                <span class="ds-badge ds-badge-default app-chip-mono" x-text="viewedChipText"></span>
+                <span x-show="pageHasDraft" class="ds-badge ds-badge-warning"
+                      title="A draft exists; release it to publish.">draft · pending release</span>
+                <span x-show="viewedIsReleasedCurrent" class="ds-badge ds-badge-success">released · current</span>
+                <span class="ds-badge ds-badge-default" x-text="overviewNodeCountText"></span>
+                <span x-show="hasCustomStagingEngine" class="ds-badge ds-badge-default app-chip-mono"
+                      x-text="stagingEngineText"></span>
+                <span class="ds-badge ds-badge-default" x-text="overviewDatasourceCountText"></span>
+              </div>
+
+              <p class="tplx-measure u-pre-line" x-text="overviewDescriptionText"></p>
+
+              <dl class="tplx-kv">
+                <dt>Datasources</dt>
+                <dd>
+                  <span x-show="overviewNoDatasources">—</span>
+                  <template x-for="row in overviewDatasources" :key="row.name">
+                    <span class="pe-inline-ref"><a class="u-mono" hx-boost="false" x-bind:href="row.href" x-text="row.name"></a><span class="u-muted" x-show="row.dialectText" x-text="row.dialectText"></span></span>
+                  </template>
+                </dd>
+                <dt>Templates</dt>
+                <dd>
+                  <span x-show="overviewNoTemplates">—</span>
+                  <template x-for="row in overviewTemplatePins" :key="row.label">
+                    <span class="pe-inline-ref"><a class="u-mono" hx-boost="false" x-bind:href="row.href" x-text="row.label"></a></span>
+                  </template>
+                </dd>
+                <dt>Created</dt>
+                <dd>
+                  <span x-text="overviewCreatedText"></span>
+                  <span class="u-muted"> · by </span><span x-text="overviewCreatedByText"></span>
+                  <span class="u-muted" x-show="overviewCreatedViaText" x-text="overviewCreatedViaText"></span>
+                </dd>
+                <dt>Last run</dt>
+                <dd>
+                  <span class="u-muted" x-show="overviewNoLastRun">never run</span>
+                  <a x-show="overviewHasLastRun" class="tplx-lastrun" hx-boost="false"
+                     x-bind:href="overviewLastRunHref">
+                    <span class="app-chip" x-bind:data-status="overviewLastRunStatus"
+                          x-bind:class="overviewLastRunChipClass"><i class="ds-status"></i><span x-text="overviewLastRunStatusWord"></span></span>
+                    <span x-text="overviewLastRunDurationText"></span>
+                    <span class="u-muted"> · </span>
+                    <span x-text="overviewLastRunRowsText"></span>
+                    <span class="u-muted"> · </span>
+                    <span x-text="overviewLastRunAgoText" x-bind:title="overviewLastRunAtText"></span>
+                  </a>
+                </dd>
+              </dl>
+
+              <!-- 140 — the VIEWED version's release checks (spec §4.1: Overview owns
+                   them). The shell renders only when the viewed body DECLARES checks; the
+                   list lazy-loads the read-only checks partial for the viewed version,
+                   and Run checks commissions a fresh ui run into the same container. -->
+              <div x-show="checksPresent" class="u-mt-md">
+                <div class="app-card-h">
+                  <h3>Checks</h3>
+                  <span class="app-card-note" x-text="checksCountText"></span>
+                  <button type="button" class="ds-button ds-button-secondary ds-button-sm"
+                          x-show="canExecute" @click="runChecks">Run checks</button>
+                </div>
+                <div id="pe-checks-latest"
+                     th:attr="data-checks-url=@{'/partials/pipelines/{id}/versions/{version}/checks'(id=${pipelineId}, version=${viewedVersion})}">
+                  <p class="u-secondary u-text-sm">Loading checks…</p>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <!-- PARAMETERS (#349, spec §4.1) — the viewed version's declared input schema in
+           the house table (the §3.7 contract: fixed frame, content fit), and beneath it
+           the RUN OVERRIDES — the same typed inputs that were the sidebar's, clearly a
+           separate section from the read-only declaration, and reachable beside Execute
+           through the topbar's Run parameters button. Definition values and temporary
+           run overrides stay distinct. -->
+      <div class="pe-pane pe-pane-parameters" id="pe-pane-parameters" role="tabpanel"
+           aria-labelledby="pe-tab-parameters" hidden x-bind:hidden="tabs.parametersHidden">
+        <div class="pe-doc">
+          <section class="ds-card">
+            <div class="app-card-h">
+              <h3>Parameters</h3>
+              <span class="app-card-note" x-text="parametersCountText"></span>
+            </div>
+            <p class="ds-empty-description app-card-b" x-show="noParameters">This pipeline declares no parameters.</p>
+            <div class="dt-frame dt-scroll dt-h-sm dt-fit" x-show="hasParameters">
+              <div class="dt-viewport" tabindex="-1">
+                <table class="ds-table">
+                  <thead>
+                    <tr><th>Name</th><th>Type</th><th>Default</th><th>Description</th></tr>
+                  </thead>
+                  <tbody>
+                    <template x-for="row in parameterRows" :key="row.name">
+                      <tr>
+                        <td class="u-mono">
+                          <span x-text="row.name"></span>
+                          <span class="ds-badge ds-badge-warning" x-show="row.required">required</span>
+                        </td>
+                        <td class="u-mono" x-text="row.type"></td>
+                        <td class="u-mono" x-text="row.defaultText"></td>
+                        <td x-text="row.descriptionText"></td>
+                      </tr>
+                    </template>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+
+          <section class="ds-card" x-show="paramKeys.length">
+            <div class="app-card-h">
+              <h3>Run overrides</h3>
+              <span class="app-card-note">applied to the next run of v<span th:text="${viewedVersion}"></span> — never stored</span>
+            </div>
+            <div class="app-card-b">
+              <!-- 195: one view model per key (param-fields.js) — placeholder, description,
+                   type and the override branch are precomputed there; the input's value is
+                   bound (not x-model — the CSP build's setter is a synthesized expression
+                   the path evaluator cannot resolve) and @input lands it on the component.
+                   #349: the overrides are PER VERSION within the page — switching the
+                   viewed version swaps this section to the other version's own fields. -->
+              <template x-for="field in paramFields" :key="field.key">
+                <div class="pe-field">
+                  <label class="pe-label" x-text="field.key"></label>
+                  <template x-if="field.hasOverride">
+                    <input type="text" class="pe-input" x-bind:value="field.override"
+                      x-bind:data-key="field.key"
+                      @input="onParameterInput"
+                      x-bind:placeholder="field.placeholderText" />
+                  </template>
+                  <template x-if="field.hasNoOverride">
+                    <div class="pe-value pe-value-muted" x-text="field.descriptionText"></div>
+                  </template>
+                  <span class="pe-type-badge" x-text="field.type"></span>
+                </div>
+              </template>
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <!-- RUNS (#349) — the entity's visible history ACROSS versions, the explorer
+           Runs tab's own fragment (partials/pipeline-runs, the execution-history
+           visibility rules unchanged), lazy-loaded on the tab's first open and
+           generation-stamped like every other read the page makes. Omitted — pane and
+           fetch alike — for a caller without the execution read. -->
+      <div class="pe-pane pe-pane-runs" id="pe-pane-runs" role="tabpanel"
+           aria-labelledby="pe-tab-runs" th:if="${canReadExecutions}"
+           hidden x-bind:hidden="tabs.runsHidden">
+        <div class="pe-tab-note" x-show="runsLoading">Loading runs…</div>
+        <div class="pe-tab-note" x-show="runsLoadFailed">The runs list could not be loaded. Reopen the tab to retry.</div>
+        <div id="pe-runs-body" class="pe-tab-lazy"></div>
+      </div>
+
+      <!-- USAGE (#349) — the entity-wide dependents (the explorer Usage tab's own
+           fragment: endpoints, parent pipelines, dashboards, schedules, both halves of
+           the lens), lazy-loaded the same way. -->
+      <div class="pe-pane pe-pane-usage" id="pe-pane-usage" role="tabpanel"
+           aria-labelledby="pe-tab-usage" hidden x-bind:hidden="tabs.usageHidden">
+        <div class="pe-tab-note" x-show="usageLoading">Loading usage…</div>
+        <div class="pe-tab-note" x-show="usageLoadFailed">The usage list could not be loaded. Reopen the tab to retry.</div>
+        <div id="pe-usage-body" class="pe-tab-lazy"></div>
+      </div>
+
+      <!-- VERSIONS (#349) — the admitted history with provenance, run counts, current
+           and viewed marks, and the per-row lifecycle verbs (the explorer fragment's
+           own shapes; the dialogs open into #pe-dialog with from=editor, so a success
+           reloads the whole workspace — a lifecycle change moves the version set). A
+           row's Open switches the viewed version IN PAGE, like the header selector. -->
+      <div class="pe-pane pe-pane-versions" id="pe-pane-versions" role="tabpanel"
+           aria-labelledby="pe-tab-versions" hidden x-bind:hidden="tabs.versionsHidden">
+        <div class="pe-doc"
+             th:with="dialogTarget='#pe-dialog', dialogFrom='editor'">
+          <section class="ds-card">
+            <div class="app-card-h">
+              <h3>Versions</h3>
+              <span class="app-card-note" th:text="${#lists.size(versions)} + (${#lists.size(versions)} == 1 ? ' version' : ' versions')">3 versions</span>
+            </div>
+            <div class="app-card-b">
+              <div th:replace="~{partials/pipeline-versions :: versions}"></div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
 
     <!-- Error modal -->
     <div x-show="errorModal.visible" class="pe-modal-backdrop" @click.self="hideErrorModal" x-cloak>

@@ -623,6 +623,8 @@ class RoleVisibilityRenderTest {
         chrome()
         setVariable("currentPath", "/pipelines")
         setVariable("pipelineId", "00000000-0000-0000-0000-000000000001")
+        // #349: the Versions tab composes the explorer fragment, whose rows read `pipeline.id`.
+        setVariable("pipeline", mapOf("id" to "00000000-0000-0000-0000-000000000001"))
         setVariable("pipelineName", "revenue_by_borough")
         setVariable("hasSelectedBody", true)
         setVariable("viewedVersion", 2)

@@ -1,6 +1,6 @@
 # Pipeline Editor UI Specification
 
-**Status:** v1.22 (revised — see Change Log)
+**Status:** v1.23 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Contract](pipeline-contract.md), [REST API + SSE](rest-api.md), [Type System](type-system.md), [Enums](enums.md), [Auth](auth.md), [Configuration](configuration.md), [@acme/design-tokens Design System](https://github.com/msabir/design-system-starter)
 **Last updated:** 2026-10-01
@@ -32,7 +32,7 @@ Graph **authoring** is out of scope: v1 pipelines are authored by LLMs via MCP o
 2. **Graceful degradation, stated honestly.** The editor **requires JavaScript for its core function.** Without JS the server-rendered shell still shows pipeline metadata (name, version, settings, parameters) and a plain `<ul>` of node ids with their declared type, source, template and `dependsOn` — the same list §14 renders for assistive technology. There is **no graph** (Cytoscape draws to a `<canvas>`), no execution, no result panel, no error modal. A `<noscript>` block states this. We do not claim the page "works without JavaScript".
 3. **No CDN, no build step.** All JS libraries (Cytoscape.js, cytoscape-dagre, Alpine.js) and the design system CSS vendored as static files under `/vendor/`. Per the project's no-CDN rule.
 4. **Design system is the styling foundation.** All colors, spacing, typography, shadows, and radii come from `@acme/design-tokens`. No hardcoded hex values anywhere — not in CSS, not in Cytoscape styles, not in Thymeleaf templates. The design system's semantic tokens (`--surface-*`, `--text-*`, `--accent-*`, etc.) are the single source of truth. See §3.4.
-5. **One page, three panels.** Left sidebar (settings + parameters), center (graph), right panel (node details — slides in on node click).
+5. **One page, the workspace composition (#349).** Six tabs — Flow (the graph + the bottom dock, the default), Overview, Parameters, Runs, Usage, Versions. Node Details lives IN the bottom dock beside Results, Errors and Events; there is no right inspector and no settings sidebar (its content is Overview's and the Parameters tab's).
 6. **SSE drives the graph.** When the user clicks Execute, the page opens an SSE connection. Every event updates the graph in real-time. No polling.
 7. **Cytoscape's class-based styling is the status mechanism.** Adding/removing CSS classes on nodes (`running`, `success`, `failed`, `aborted`) drives all visual state changes. No manual style manipulation.
 8. **Readable identifiers everywhere.** Node IDs in the graph match node IDs in the pipeline JSON (`fetch_orders`, not `node_1`). Users can correlate graph ↔ JSON ↔ logs.
@@ -162,7 +162,9 @@ current draft shows as the draft it is), then an accessible draft, then a choose
 state over the admitted history — never "latest release". `tab` is the closed set above;
 anything else resolves to `flow`, and `runs` resolves to `flow` for a caller without the
 execution read. Selecting a version is read navigation (D5): it never moves the current
-pointer. The old `/editor` URL redirects here — preserving a valid explicit `version` and a
+pointer, and since #349 it never reloads the document either — the selector and the
+Versions tab apply the version IN PAGE (§10.8), so an active run keeps its stream and
+identity. The old `/editor` URL redirects here — preserving a valid explicit `version` and a
 supported `tab` — so every historical link keeps working; its floor is `read` (see below).
 
 Authentication: session cookie carrying the internal JWT (browser flow). See [Auth §6](auth.md#6-session-tokens-internal-jwt). Required scope per the authoritative matrix in [Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative): `read` to view (`pipeline.read` — every admitted role, the promoter through the lens), `execute` to run, `execute` to cancel.
@@ -390,7 +392,7 @@ The three panes' dimensions, all in one place:
 |---|---|---|
 | Page | no max-width; `padding-inline: var(--gap-md)` | `.app-main-bleed` (§4.3 above) |
 | `.pe-root` height | `calc(100dvh - var(--header-height) - var(--space-px) - (var(--gap-lg) * 2))`, floor 540px | unchanged since 041/059 |
-| Left sidebar | `--pe-sidebar-width: 280px` | unchanged |
+| Left sidebar | — | withdrawn by #349 (the owner's workspace ruling): the graph owns the available width; the description and the declared parameters live in the Overview and Parameters tabs |
 | Canvas | `1fr` — the layout is a **two**-track grid (sidebar + stage); the inspector's third track died with the 065 overlay, and the overlay itself died with 080 | `.pe-body` |
 | Dock, open | the mock's geometry: a 38px tab strip over a 232px pane (`--pe-dock-tabs-h` / `--pe-dock-pane-h`) | `.pe-dock` |
 | Dock, collapsed | the tab strip's own height — one row, tokens only | `.pe-dock-collapsed` |
@@ -401,9 +403,9 @@ is the whole mechanism behind "the canvas reclaims the rest": `.pe-body` is `fle
 so whatever the dock stops using, the graph gets. A fixed overlay can only ever cover the
 canvas — it can never give the space back.
 
-Responsive: below `--breakpoint-lg` (1024px) the sidebar collapses to a drawer and its
+Responsive: below `--breakpoint-lg` (1024px) the workspace keeps every action reachable and
 grid track goes to 0, and the Details pane's two columns stack. Below `--breakpoint-md`
-(768px) the sidebar drawer is full-width and the minimap hides.
+(768px) the minimap hides and the execution identity strip wraps (§10.9).
 
 Layout dimensions come from design system tokens wherever a token exists. The pane
 heights and the card box are the geometry itself, declared once as custom properties —
@@ -1052,7 +1054,7 @@ The native `EventSource` API only supports GET requests. Our execute endpoint is
 
 ---
 
-## 8. The dock's Details tab (was: the node inspector overlay)
+## 8. The dock's Node Details tab (was: the node inspector overlay)
 
 **Details is a TAB of the bottom dock** (080 §B, owner ruling 2026-09-05: "move that
 pane in the bottom along with Result and Errors, minimizable"). The 065 overlay —
@@ -1235,7 +1237,7 @@ The running-progress banner stays at the toolbar for the `running` state.
 
 ---
 
-## 10. The bottom dock: Details | Results | Errors | Events
+## 10. The bottom dock: Node Details | Results | Errors | Events
 
 **One dock, four tabs, two states, no close** (080 §B; the 065 rule stands — the old
 panel's `×` set `resultPanel.visible = false` and left no way back short of re-running
@@ -1248,6 +1250,16 @@ fetch — so `node --test` drives every row of the table below (`dock.test.mjs`)
 events log is a second pure module (`events.js`, §10.6). The template binds the fields
 directly (`state`, `tab`, `errors.length`, `resultsRows`, `detailsNodeId`); there are no
 derived getters to drift from what the browser renders.
+
+#349 adds two rules. **The tab strip is Node Details | Results | Errors | Events, and the
+three execution tabs render only for a caller with the execution read** — a promoter keeps
+Node Details alone, and the dock stays the landing surface for node inspection. **The
+execution tabs belong to ONE captured run**, named by the identity strip (§10.9); Node
+Details follows the VIEWED version, and its run-derived rows (Last run, the measured
+operation, the calculator Context resolutions, the child-execution link) attach only when
+the run's pipeline AND version match the viewed body (§10.8). The dock lives inside the
+Flow tab's pane — the graph and its run visualization are one surface — and the
+workspace's own tab strip stays reachable while the dock is collapsed.
 
 - `dock.state ∈ {open, collapsed}`
 - `dock.tab ∈ {details, results, errors, events}`
@@ -1413,6 +1425,56 @@ labels — `stateLabel`, `destinationText`, `countsText`, `phaseText` (the per-s
 5.3 s"). Since 151 this view model is also what the output port renders (`describe().port`,
 §5.3a) — the dependency arrows carry no count and nothing moves along them (#127); the Start/End
 markers (§5.3b) read the run status and the lifecycle events, never this reducer (#126, #144).
+
+### 10.8 In-page version switching and the state keys (#349, spec §4.3)
+
+The page/view state key is **workspace + pipeline + viewed version + request generation**;
+the execution state key is **workspace + execution id**, carrying the submitted
+pipeline/version/parameter snapshot. Switching the viewed version — the header selector or
+the Versions tab's Open — fetches the version's body through the admitted REST read
+(`GET /api/v1/pipelines/{id}/versions/{n}`, the same lens the page resolved with) and
+applies it as ONE view transition: the graph rebuilds, the parameter schema and the
+per-version overrides swap, the checks URL re-stamps and re-issues, the selector and
+Versions-tab marks move, and the canonical URL updates via `history.replaceState` (no
+history entries are minted outside the shell's own).
+
+- **The active run is untouched.** The stream, the run facts and the result panel are
+  execution-owned; the version switch moves the view under them. Every graph-paint
+  decision (`sse.js` `paintsGraph`) compares the run's own version (the pin the execute
+  POST carried, confirmed by `execution_started`'s `pipeline_version`) with the page's
+  VIEWED version — a v1 run's progress never wears the v2 body, and returning to v1
+  (`View run's version`, §10.9) replays the recorded states onto its own graph.
+- **Stale never paints.** Each in-page read (node SQL, checks, runs, usage) carries the
+  generation-token it was issued under as the `DP-PE-Sink-Token` request header; the
+  `htmx:beforeSwap` guard compares it against the component's current token and cancels a
+  stale response — success or refusal — before it can paint (A8, A→B→A included). The
+  token rides the REQUEST because a newer request re-stamps any sink-carried copy. Reads
+  issue from the one `hx-sync="this:replace"` requester: htmx's default DROPS a request
+  on a target with one in flight, and this build's `abort` mode aborts without issuing —
+  only `replace` aborts the old AND issues the new (verified in the vendored 2.0.10).
+- **Run input drafts are per pipeline/version within the page.** Switching versions saves
+  this version's overrides and loads the other version's own bag filtered to its schema —
+  an incompatible field never leaks; revisit restores the compatible overrides. Overrides
+  never enter localStorage, navigation URLs or history.
+- **A refused switch moves nothing.** An absent, foreign or lens-hidden version answers
+  with a visible banner refusal; the page stays on the version it resolved (never a
+  silent fallback, never a clamp).
+- **Leaving the page** (boosted navigation, history save) disposes the stream without
+  cancelling (§7.3's rule); the restored or re-entered page re-attaches through the
+  live-run record — which names the run's VERSION too, so a page restored at another
+  version adopts the strip, never the paint.
+
+### 10.9 The execution identity strip (#349, spec §4.2)
+
+The Results/Errors/Events tabs show ONE captured run; the strip above them names it —
+**Run vN · status · execution id · the effective submitted parameters** — armed by the
+run's own `execution_started` (the pinned version, the parameters as bound) and settled
+by the terminal event. The parameters shown are the pipeline's DECLARED keys as the run
+resolved them, never the whole Context (the org/platform tiers ride the same payload and
+stay off the strip). When the viewed version differs from the run's, the strip says so
+and offers **View run's version** — the same in-page switch (§10.8), which replays the
+run's states onto its own graph. The strip is not rendered for a caller without the
+execution read: no execution tabs, no strip.
 
 ## 11. Editing Scope
 
@@ -1945,8 +2007,10 @@ Themes shipped by the design system — `saas` (modern indigo, devtool-oriented)
 
 ## Appendix B: Change Log
 
+
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-01 | v1.23 | #349 — the workspace composition. **§5** principle 5: six tabs (Flow the graph + dock, Overview, Parameters, Runs, Usage, Versions); the settings sidebar withdrawn, the graph owns the width (§4.3's row updated; the 1024px drawer and the sidebar resize contract die with the pane). **§4.1**: the selector is IN-PAGE read navigation — a version switch never reloads the document (an active run keeps its stream; §10.8). **§10**: the dock is Node Details beside Results/Errors/Events; the execution tabs render only with the execution read, belong to ONE captured run named by the identity strip (§10.9), and the Details pane's run-derived rows attach only when run version = viewed version. **§10.8** (new): the state keys, the generation/token discipline over every in-page read (the token rides the request; stale never paints; the `hx-sync="this:replace"` requester supersedes an in-flight read — the default drops it and `abort` aborts without issuing, both verified in the vendored 2.0.10), per-version run-input drafts (never persisted), refused switches move nothing. No route, permission or role changed. |
 | 2026-10-01 | v1.22 | #358 the restore lifecycle, by lane 348-c | **§3.2**: the editor's vendors and modules load through `pipeline-editor/runtime.js` — an inert `<template id="pe-runtime-scripts">` catalog, Alpine LAST — and the `.pe-root` is served and cached with `x-ignore`; the runtime's single `mutateDom` activation (destroy-before-bind, context read first) is the ONE initializer a restored or swapped-in root can get, so a cached history restore cannot stack Alpine components (the 080 afterSettle rescue is GONE — init.js wires no afterSettle initializer; §10.6's exactly-once toast contract unchanged, its mechanism superseded). **§7.1 step 8**: navigating during a run DETACHES the stream without cancelling (`dispose()` — no DELETE; the run continues server-side) and a restored page re-attaches through the §10.3 replay stream — the terminal event is delivered, and toasted, exactly once; the live-run record clears at the terminal. Layout-scoped history (`hx-history-elt` on `#app-main`) and the old-cache shape guard are UI Screens v1.94's. Tests: `runtime-activation.test.mjs`, `sse-disposal.test.mjs`, `PipelineWorkspaceHistoryBrowserTest` (real cache-hit restores: one component, one pane, one version-pinned POST, zero CSP violations), `editor-teardown`/`editor-toast-once` rewritten to the ownership shape. |
 | 2026-09-30 | v1.21 | 348-b (#348) the workspace's version-context corrections | **§8.3**: the workspace page is not a legacy caller — a page whose validated version context cannot produce a pin refuses the preview visibly with ZERO requests (the working-version default stays with callers that omit the parameter). The page's context has ONE validated initialization path (`workspace.js`: positive bounded integer, body presence, pipeline identity) shared by full load, boost and cached history restoration — the restore re-reads the restored block and clears stale refusal flags. **§4.1's projection**: the page's script JSON states only the LENS-VISIBLE current pointer (a development-posture current draft's number cannot leak into `current_version` for a promoter); PipelineResponses' REST shape untouched. |
 | 2026-09-30 | v1.20 | 348 (#348) the version-explicit workspace | **§4.1** is the canonical read page `GET /pipelines/{id}?version=N&tab=…` at the `pipeline.read` floor — explicit version or 404, never clamped; current-pointer-first default; choose-a-version/empty states; `/editor` is a compatibility redirect (§4.1's `/versions/{version}/editor` line named a route that never shipped; both are superseded). **§7.1/§7.2**: every execute POST pins the VIEWED version (`body.version`, released included); a missing or malformed version context refuses with a visible error and ZERO POSTs (the `#pipeline-workspace` block and `workspace.js` replace the lifecycle draft pin and `draft.js`). **§8.3**: the node-SQL GET takes an optional `version` — the workspace always sends it; the omission keeps the resolver's working-version default. Layout, dock and table behavior are #349's. |

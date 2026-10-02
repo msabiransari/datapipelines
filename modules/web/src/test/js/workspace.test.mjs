@@ -164,3 +164,79 @@ test("JSON null on reread clears the old pin without throwing", () => {
   assert.equal(page.PEWorkspace, null);
   assert.equal(page.PEWorkspaceInvalid, true);
 });
+
+/* ============================================================ #349 — the composition
+ * helpers on the same pure module: the per-version override store, the page/view
+ * staleness rule, and the sink-token comparison the beforeSwap guard runs. */
+
+function logic() {
+  // Re-load the ACTUAL module into the fresh window, as loadWith does.
+  delete require.cache[require.resolve(workspacePath)];
+  require(workspacePath);
+  return globalThis.window.PEWorkspaceLogic;
+}
+
+test("#349 override store: save/load round-trips one version's bag", () => {
+  freshWindow();
+  const store = logic().createOverrideStore();
+  store.save(1, { region: "nyc", day: "mon" });
+  assert.deepEqual(store.load(1, ["region", "day"]), { region: "nyc", day: "mon" });
+});
+
+test("#349 override store: a key the new schema does not declare is DROPPED, never leaked", () => {
+  freshWindow();
+  const store = logic().createOverrideStore();
+  store.save(1, { region: "nyc", legacy_only: "keep me out" });
+  assert.deepEqual(
+    store.load(1, ["region", "fresh"]),
+    { region: "nyc", fresh: "" },
+    "changing schema cannot reuse another version's fields; unknown keys arrive empty",
+  );
+});
+
+test("#349 override store: revisit restores the compatible overrides (A→B→A)", () => {
+  freshWindow();
+  const store = logic().createOverrideStore();
+  store.save(1, { region: "nyc" });
+  store.save(2, { region: "ldn" });
+  assert.equal(store.load(1, ["region"]).region, "nyc");
+  assert.equal(store.load(2, ["region"]).region, "ldn");
+});
+
+test("#349 stale: any carried key that disagrees with the current state is stale", () => {
+  freshWindow();
+  const stale = logic().stale;
+  const current = { pipelineId: "p1", version: 2, generation: 7 };
+  assert.equal(stale({ pipelineId: "p1", version: 2, generation: 7 }, current), false);
+  assert.equal(stale({ pipelineId: "p1", version: 1, generation: 7 }, current), true, "older version");
+  assert.equal(stale({ pipelineId: "p1", version: 2, generation: 6 }, current), true, "older generation");
+  assert.equal(stale({ pipelineId: "other", version: 2, generation: 7 }, current), true, "other pipeline");
+  assert.equal(stale(null, current), true);
+});
+
+test("#349 stale: A→B→A — the second A is a NEW generation, the first A's late response is stale", () => {
+  freshWindow();
+  const stale = logic().stale;
+  // v1 requested under generation 1; the user moved to v2 (generation 2) and back to
+  // v1 (generation 3). The first v1 response carries generation 1.
+  assert.equal(stale({ pipelineId: "p1", version: 1, generation: 1 }, { pipelineId: "p1", version: 1, generation: 3 }), true);
+  assert.equal(stale({ pipelineId: "p1", version: 1, generation: 3 }, { pipelineId: "p1", version: 1, generation: 3 }), false);
+});
+
+test("#349 stale: an entity-wide read (no version stamp) guards on pipeline and generation", () => {
+  freshWindow();
+  const stale = logic().stale;
+  const current = { pipelineId: "p1", version: 5, generation: 9 };
+  assert.equal(stale({ pipelineId: "p1", generation: 9 }, current), false);
+  assert.equal(stale({ pipelineId: "p1", generation: 8 }, current), true);
+});
+
+test("#349 tokenMatches: a non-empty string equality, nothing else", () => {
+  freshWindow();
+  const matches = logic().tokenMatches;
+  assert.equal(matches("t3", "t3"), true);
+  assert.equal(matches("t2", "t3"), false);
+  assert.equal(matches("", "t3"), false, "an unstamped sink cancels");
+  assert.equal(matches(null, "t3"), false);
+  assert.equal(matches(undefined, undefined), false, "absent on both sides is not a match");
+});
