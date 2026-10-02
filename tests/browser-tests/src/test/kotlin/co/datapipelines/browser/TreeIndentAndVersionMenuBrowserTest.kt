@@ -78,20 +78,24 @@ class TreeIndentAndVersionMenuBrowserTest : BrowserSuite() {
                 """"inputs":{"date":"${'$'}current_date","fiscal_start":"${'$'}org_fiscal_start_date"}}]}""",
         )
 
-    /** The root level shows FOLDERS; the `test` folder must be open before its leaf exists. */
-    private fun openTestFolder() {
-        page.waitForSelector("summary.tpl-summary")
-        if (page.locator("details.tpl-folder[open]").count() == 0) {
+    /**
+     * The root level shows FOLDERS; the `test` folder must be open before its leaf exists.
+     * #350: [root] scopes the tree — the templates explorer's pane, or the SIDEBAR's Pipelines
+     * tree (whose leaves are links: `.tpl-leaf`, either element).
+     */
+    private fun openTestFolder(root: String = TEMPLATES) {
+        page.waitForSelector("$root summary.tpl-summary")
+        if (page.locator("$root details.tpl-folder[open]").count() == 0) {
             page.waitForResponse({ it.url().contains("prefix=test") }) {
-                page.locator("summary.tpl-summary").first().click()
+                page.locator("$root summary.tpl-summary").first().click()
             }
         }
-        page.waitForSelector("button.tpl-leaf")
+        page.waitForSelector("$root .tpl-leaf")
     }
 
     private fun selectLeaf(leafSegment: String) {
         openTestFolder()
-        val leaf = page.locator("button.tpl-leaf", Page.LocatorOptions().setHasText(leafSegment)).first()
+        val leaf = page.locator("$TEMPLATES button.tpl-leaf", Page.LocatorOptions().setHasText(leafSegment)).first()
         page.waitForResponse({ it.url().contains("/detail") || it.url().contains("/versions") }) { leaf.click() }
         page.waitForSelector(".tplx-detail-header")
     }
@@ -114,7 +118,7 @@ class TreeIndentAndVersionMenuBrowserTest : BrowserSuite() {
     ) = withClue("$what: $this vs $other") { abs(this - other) shouldBeLessThanOrEqual 1.0 }
 
     @Test
-    fun `a leaf indents one step under its folder, level with a sibling folder, in both explorers`() {
+    fun `a leaf indents one step under its folder, level with a sibling folder, in the sidebar tree and the templates explorer`() {
         startTrace()
         ready()
         page.navigate("$baseUrl/dashboard")
@@ -123,20 +127,26 @@ class TreeIndentAndVersionMenuBrowserTest : BrowserSuite() {
         seedPipeline("test/indent_leaf")
         seedPipeline("test/sub/indent_nested")
 
-        for (screen in listOf("pipelines", "templates")) {
+        // #350: the pipeline tree is the SIDEBAR's — the same rows, measured there.
+        for ((screen, root) in listOf("pipelines" to PIPELINES, "templates" to TEMPLATES)) {
             page.setViewportSize(1280, 900)
-            page.navigate("$baseUrl/$screen")
-            page.waitForSelector(".tplx-tree")
+            if (screen == "pipelines") {
+                page.navigate("$baseUrl/dashboard")
+                page.click("[data-nav-branch='pipelines'] [data-nav-tree-toggle]")
+            } else {
+                page.navigate("$baseUrl/$screen")
+                page.waitForSelector(".tplx-tree")
+            }
             page.waitForLoadState(LoadState.NETWORKIDLE)
-            openTestFolder()
+            openTestFolder(root)
             shot("$screen-tree-1280")
 
             val m =
                 measure(
                     """() => {
-                      const parent = document.querySelector('details.tpl-folder[open] > summary.tpl-summary');
+                      const parent = document.querySelector('$root details.tpl-folder[open] > summary.tpl-summary');
                       const level = parent.nextElementSibling;
-                      const leaf = level.querySelector(':scope > .tpl-tree > .tpl-node > button.tpl-leaf');
+                      const leaf = level.querySelector(':scope > .tpl-tree > .tpl-node > .tpl-leaf');
                       const sibling = level.querySelector(':scope > .tpl-tree > .tpl-node > details > summary.tpl-summary');
                       const left = (el, sel) => el.querySelector(sel).getBoundingClientRect().left;
                       return {
@@ -161,21 +171,31 @@ class TreeIndentAndVersionMenuBrowserTest : BrowserSuite() {
     }
 
     @Test
-    fun `the version row's overflow menu is fully visible when the list is one row tall, in both explorers`() {
+    fun `the version row's overflow menu is fully visible when the list is one row tall, on the workspace and in the templates explorer`() {
         startTrace()
         ready()
         page.navigate("$baseUrl/dashboard")
         seedTemplate("test/menu_probe")
         seedPipeline("test/menu_probe")
 
-        for ((screen, panel) in listOf("pipelines" to "#pipeline-tab-versions", "templates" to "#template-tab-versions")) {
+        // #350: the pipeline's version rows are its WORKSPACE's Versions tab (the same fragment).
+        for ((screen, panel) in listOf("pipelines" to "#pe-pane-versions", "templates" to "#template-tab-versions")) {
             // 700 tall, so the versions card sits BELOW the fold and the click on its ⋯ must
             // scroll it into view first — the exact shape that closed the menu before the fix.
             page.setViewportSize(1280, 700)
-            page.navigate("$baseUrl/$screen")
-            page.waitForSelector(".tplx-tree")
-            page.waitForLoadState(LoadState.NETWORKIDLE)
-            selectLeaf("menu_probe")
+            if (screen == "pipelines") {
+                page.navigate("$baseUrl/pipelines?q=menu_probe")
+                page.locator("#pipeline-list-wrapper a.tpl-result").first().click()
+                page.waitForURL(PipelineWorkspaceUrl.PATTERN)
+                page.waitForSelector(".pe-root")
+                page.locator("#pe-tab-versions").click()
+                page.waitForSelector("$panel tr[data-version-row]")
+            } else {
+                page.navigate("$baseUrl/$screen")
+                page.waitForSelector(".tplx-tree")
+                page.waitForLoadState(LoadState.NETWORKIDLE)
+                selectLeaf("menu_probe")
+            }
 
             page.locator("$panel details.tplx-vmenu summary").first().click()
             page.locator("$panel .tplx-vmenu-list").first().waitFor()
@@ -209,7 +229,10 @@ class TreeIndentAndVersionMenuBrowserTest : BrowserSuite() {
                 m.px("right") shouldBeLessThanOrEqual m.px("vw")
             }
 
-            assertMenuFollowsScroll(screen, panel)
+            // The follow-the-scroll arm asks the shell's <main> scroller to move — the explorer's
+            // layout. The workspace's Versions pane fills the page and, one row tall, has nothing
+            // to scroll (#350: measured scrolled=0), so the arm stays the templates explorer's.
+            if (screen == "templates") assertMenuFollowsScroll(screen, panel)
         }
     }
 
@@ -255,5 +278,10 @@ class TreeIndentAndVersionMenuBrowserTest : BrowserSuite() {
             after["shown"] shouldBe true
             after.px("listMoved").shouldBeWithinOnePxOf(after.px("anchorMoved"), "$screen: menu follows the anchor")
         }
+    }
+
+    private companion object {
+        const val TEMPLATES = "[data-explorer-pane]"
+        const val PIPELINES = "#nav-tree-pipelines"
     }
 }

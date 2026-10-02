@@ -37,6 +37,15 @@ import java.nio.file.Paths
  * is the second instrument rather than the only one.
  *
  * The screenshots at the bottom are the handback's evidence, light and dark, at all seven.
+ *
+ * ## #350 — one page explorer left
+ *
+ * The pipelines page is the flat CATALOG since #350 (its tree is the sidebar's, its detail the
+ * workspace's), so the pane's shared mechanics are asked of the TEMPLATES explorer — the same
+ * 106 fragment shapes (`.tplx-read`/`.tplx-act`, the tab card, the drawer) — and the catalog joins
+ * the width walks with no selection to make. The two pipeline-only facts this class pinned moved
+ * WITH their content to the workspace: the readable version row (its Versions tab, the same house
+ * table) and the description's paragraph break (its Overview tab); the Usage tab's schedules too.
  */
 class ExplorerDetailBrowserTest : BrowserSuite() {
     private fun ready() {
@@ -63,6 +72,11 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
             "/api/v1/templates",
             """{"id":"test/detail_probe","type":"sql","dialect":"POSTGRES",""" +
                 """"display_name":"detail_probe","description":"106 detail fixture","body":"SELECT 1"}""",
+        )
+        postJson(
+            "/api/v1/templates",
+            """{"id":"test/second_probe","type":"sql","dialect":"POSTGRES",""" +
+                """"display_name":"second_probe","description":"a second leaf to select","body":"SELECT 2"}""",
         )
         postJson(
             "/api/v1/pipelines",
@@ -101,15 +115,15 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
     /** Opens the tree's one folder and SELECTS its leaf — the state every assertion is about. */
     private fun selectLeaf(open: Boolean = true) {
         if (open) openDrawerIfPresent()
-        page.waitForSelector("summary.tpl-summary")
-        if (page.locator("details.tpl-folder[open]").count() == 0) {
+        page.waitForSelector("[data-explorer-pane] summary.tpl-summary")
+        if (page.locator("[data-explorer-pane] details.tpl-folder[open]").count() == 0) {
             page.waitForResponse({ it.url().contains("prefix=test") }) {
-                page.locator("summary.tpl-summary").first().click()
+                page.locator("[data-explorer-pane] summary.tpl-summary").first().click()
             }
         }
-        page.waitForSelector("button.tpl-leaf")
+        page.waitForSelector("[data-explorer-pane] button.tpl-leaf")
         page.waitForResponse({ it.url().contains("/detail") || it.url().contains("/versions") }) {
-            page.locator("button.tpl-leaf").first().click()
+            page.locator("[data-explorer-pane] button.tpl-leaf").first().click()
         }
         page.waitForSelector(".tplx-detail-header")
     }
@@ -134,6 +148,14 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
             }
             """.trimIndent(),
         )
+    }
+
+    /** #350: the probe pipeline's workspace, reached the way a reader does — a catalog row. */
+    private fun openProbeWorkspace() {
+        page.navigate("$baseUrl/pipelines?q=detail_probe")
+        page.locator("#pipeline-list-wrapper a.tpl-result").first().click()
+        page.waitForURL(PipelineWorkspaceUrl.PATTERN)
+        page.waitForSelector(".pe-root")
     }
 
     /** Below 1100px the tree is behind the Browse button; above it, the button is not rendered. */
@@ -193,7 +215,8 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
                 page.setViewportSize(w, h)
                 page.navigate("$baseUrl$route")
                 page.waitForLoadState(LoadState.NETWORKIDLE)
-                selectLeaf()
+                // #350: the pipelines page is the flat catalog — nothing to select there.
+                if (route == "/templates") selectLeaf()
                 page.waitForLoadState(LoadState.NETWORKIDLE)
                 val extra = overflow()
                 if (extra > 0) offenders += "$route at ${w}x$h overflows by ${extra}px — ${culprits()}"
@@ -224,7 +247,7 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
         seed()
 
         page.setViewportSize(390, 844)
-        listOf("/pipelines", "/templates").forEach { route ->
+        listOf("/templates").forEach { route -> // #350: the one page explorer left
             page.navigate("$baseUrl$route")
             page.waitForLoadState(LoadState.NETWORKIDLE)
             selectLeaf()
@@ -282,7 +305,7 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
         seed()
 
         page.setViewportSize(1100, 900)
-        page.navigate("$baseUrl/pipelines")
+        page.navigate("$baseUrl/templates")
         selectLeaf()
         val stacked = columns()
         // STACKED: the acting column starts on the reading column's left edge, below it.
@@ -291,7 +314,7 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
 
         listOf(1440, 1920, 2560, 3491).forEach { width ->
             page.setViewportSize(width, 900)
-            page.navigate("$baseUrl/pipelines")
+            page.navigate("$baseUrl/templates")
             selectLeaf()
             val side = columns()
             // SIDE BY SIDE: acting begins past reading's right edge, on the same top line.
@@ -434,7 +457,7 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
         seed()
 
         page.setViewportSize(768, 900)
-        page.navigate("$baseUrl/pipelines")
+        page.navigate("$baseUrl/templates")
         page.waitForLoadState(LoadState.NETWORKIDLE)
 
         // Closed by default: the detail owns the width, and the Browse button is the way in.
@@ -455,7 +478,7 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
 
         // …and above the breakpoint the button is not rendered at all: the tree is a column.
         page.setViewportSize(1440, 900)
-        page.navigate("$baseUrl/pipelines")
+        page.navigate("$baseUrl/templates")
         page.waitForLoadState(LoadState.NETWORKIDLE)
         page.locator("[data-explorer-drawer-open]").first().isVisible shouldBe false
     }
@@ -475,7 +498,7 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
                   if (!e.hadRecentInput) window.__cls += e.value; }).observe({type: 'layout-shift', buffered: true});
                 """.trimIndent(),
             )
-            page.navigate("$baseUrl/pipelines")
+            page.navigate("$baseUrl/templates")
             page.waitForLoadState(LoadState.NETWORKIDLE)
             page.evaluate("() => { window.__cls = 0; }")
             selectLeaf()
@@ -505,17 +528,19 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
         seed()
 
         listOf(1440, 1920, 2560).forEach { width ->
+            // #350: the pipeline's versions table is the WORKSPACE's Versions tab now (the same
+            // house-table fragment #349 shares).
             page.setViewportSize(width, 900)
-            page.navigate("$baseUrl/pipelines")
-            selectLeaf()
-            page.locator("#pipeline-tab-versions tr[data-version-row]").first().waitFor()
+            openProbeWorkspace()
+            page.locator("#pe-tab-versions").click()
+            page.locator("#pe-pane-versions tr[data-version-row]").first().waitFor()
 
             @Suppress("UNCHECKED_CAST")
             val meta =
                 page.evaluate(
                     """
                     () => {
-                      const cells = [...document.querySelectorAll('#pipeline-tab-versions tr[data-version-row] td')];
+                      const cells = [...document.querySelectorAll('#pe-pane-versions tr[data-version-row] td')];
                       const widest = cells.reduce((a, c) => c.getBoundingClientRect().width > a.getBoundingClientRect().width ? c : a, cells[0]);
                       const line = parseFloat(getComputedStyle(widest).lineHeight) || 16;
                       return { width: widest.getBoundingClientRect().width,
@@ -548,17 +573,18 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
         startTrace()
         ready()
         seed()
+        // #350: the description reads in the WORKSPACE's Overview tab now.
         page.setViewportSize(1440, 900)
-        page.navigate("$baseUrl/pipelines")
-        selectLeaf()
-        page.locator("#pipeline-detail .tplx-measure").first().waitFor()
+        openProbeWorkspace()
+        page.locator("#pe-tab-overview").click()
+        page.waitForFunction("() => (document.querySelector('#pe-pane-overview .tplx-measure') || {}).textContent?.includes('Window and door')")
 
         @Suppress("UNCHECKED_CAST")
         val blocks =
             page.evaluate(
                 """
                 () => {
-                  const p = document.querySelector('#pipeline-detail .tplx-measure');
+                  const p = document.querySelector('#pe-pane-overview .tplx-measure');
                   const text = p.firstChild;
                   const top = (label) => {
                     const r = document.createRange();
@@ -580,57 +606,52 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
     }
 
     @Test
-    fun `the tabs load once and swap - Runs and Usage arrive on the first click and not again`() {
+    fun `the tabs load once and swap - Runs arrives on the first click and not again`() {
+        // #350: the detail pane's tab card is the TEMPLATES explorer's now (the pipeline's tabs
+        // are the workspace's — PipelineWorkspaceTabsBrowserTest owns their lazy-once rule).
         startTrace()
         ready()
         seed()
 
         page.setViewportSize(1440, 900)
-        page.navigate("$baseUrl/pipelines")
+        page.navigate("$baseUrl/templates")
         selectLeaf()
 
         // Versions is the FIRST PAINT — no request was needed for it.
-        page.locator("#pipeline-tab-versions tr[data-version-row]").first().waitFor()
+        page.waitForSelector("#template-tab-versions")
 
         var runsRequests = 0
-        page.onRequest { if (it.url().contains("/runs")) runsRequests++ }
-        page.waitForResponse({ it.url().contains("/runs") }) {
-            page.locator("[data-tab-panel='pipeline-tab-runs']").click()
+        page.onRequest { if (it.url().contains("/partials/templates/runs")) runsRequests++ }
+        page.waitForResponse({ it.url().contains("/partials/templates/runs") }) {
+            page.locator("[data-tab-panel='template-tab-runs']").click()
         }
-        page.waitForFunction("() => !document.getElementById('pipeline-tab-runs').hidden")
+        page.waitForFunction("() => !document.getElementById('template-tab-runs').hidden")
 
         // A second click swaps back to a panel that is already loaded: no second request.
-        page.locator("[data-tab-panel='pipeline-tab-versions']").click()
-        page.locator("[data-tab-panel='pipeline-tab-runs']").click()
+        page.locator("[data-tab-panel='template-tab-versions']").click()
+        page.locator("[data-tab-panel='template-tab-runs']").click()
         page.waitForTimeout(200.0)
         runsRequests shouldBe 1
 
-        page.waitForResponse({ it.url().contains("/usage") }) {
-            page.locator("[data-tab-panel='pipeline-tab-usage']").click()
-        }
-        page.waitForFunction("() => !document.getElementById('pipeline-tab-usage').hidden")
+        // Source is local: a swap with no request at all.
+        page.locator("[data-tab-panel='template-tab-source']").click()
+        page.waitForFunction("() => !document.getElementById('template-tab-source').hidden")
+        runsRequests shouldBe 1
     }
 
     @Test
     fun `selecting another leaf replaces all three regions`() {
         startTrace()
         ready()
-        seed()
-        page.navigate("$baseUrl/dashboard")
-        postJson(
-            "/api/v1/pipelines",
-            """{"name":"test/second_probe","display_name":"second_probe","nodes":[{"id":"fq",""" +
-                """"type":"CALCULATOR","kind":"fiscal_quarter","context_key":"run_fiscal_quarter",""" +
-                """"inputs":{"date":"${'$'}current_date","fiscal_start":"${'$'}org_fiscal_start_date"}}]}""",
-        )
+        seed() // two templates in test/ — #350: the templates explorer is the one with a detail pane
 
         page.setViewportSize(1440, 900)
-        page.navigate("$baseUrl/pipelines")
+        page.navigate("$baseUrl/templates")
         selectLeaf()
         val first = page.locator(".tplx-detail-title").innerText()
 
-        page.waitForResponse({ it.url().contains("/partials/pipelines/detail") }) {
-            page.locator("button.tpl-leaf").nth(1).click()
+        page.waitForResponse({ it.url().contains("/partials/templates/versions") }) {
+            page.locator("[data-explorer-pane] button.tpl-leaf").nth(1).click()
         }
         page.waitForFunction(
             "(previous) => document.querySelector('.tplx-detail-title').innerText !== previous",
@@ -638,8 +659,8 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
         )
         // The acting column came with it — a stale Versions list beside a new header would be
         // the failure a header-only assertion misses.
-        page.locator("#pipeline-tab-versions tr[data-version-row]").first().waitFor()
-        page.locator("#pipeline-tab-runs").getAttribute("hidden").shouldBeHiddenAttribute()
+        page.waitForSelector("#template-tab-versions")
+        page.locator("#template-tab-runs").getAttribute("hidden").shouldBeHiddenAttribute()
     }
 
     @Test
@@ -654,16 +675,16 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
         seed()
         seedSchedule(wsName, email, "test/nightly-usage", "pipeline:test/detail_probe")
 
+        // #350: the Usage tab is the WORKSPACE's (the same fragment the explorer pane loaded).
         page.setViewportSize(1440, 900)
-        page.navigate("$baseUrl/pipelines")
-        selectLeaf()
-        page.locator("#pipeline-tab-versions tr[data-version-row]").first().waitFor()
+        openProbeWorkspace()
         page.waitForResponse({ it.url().contains("/usage") }) {
-            page.locator("[data-tab-panel='pipeline-tab-usage']").click()
+            page.locator("#pe-tab-usage").click()
         }
-        page.waitForFunction("() => !document.getElementById('pipeline-tab-usage').hidden")
+        page.waitForFunction("() => !document.getElementById('pe-pane-usage').hidden")
+        page.waitForFunction("() => (document.getElementById('pe-usage-body').innerText || '').includes('test/nightly-usage')")
 
-        val usage = page.locator("#pipeline-tab-usage").innerText()
+        val usage = page.locator("#pe-usage-body").innerText()
         // The heading is CSS-uppercased on the page (innerText returns the transformed text).
         usage.lowercase().shouldContain("schedules running it")
         usage.shouldContain("test/nightly-usage")
@@ -712,8 +733,10 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
         startTrace()
         ready()
         seed()
+        // #350: the explorer that still renders a detail header is the templates one (the
+        // pipeline's Release is the workspace's — LifecycleDialogBrowserTest drives it).
         page.setViewportSize(1440, 900)
-        page.navigate("$baseUrl/pipelines")
+        page.navigate("$baseUrl/templates")
         selectLeaf()
 
         val release =
@@ -724,12 +747,12 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
                     .setHasText("Release v1"),
             )
         release.isVisible shouldBe true
-        page.waitForResponse("**/lifecycle/release*") { release.click() }
-        page.locator("#px-dialog [data-lifecycle-dialog='pipeline-release']").waitFor()
+        page.waitForResponse({ it.url().contains("/lifecycle/release") }) { release.click() }
+        page.locator("#tx-dialog [data-lifecycle-dialog='template-release']").waitFor()
         // No verb attributes anywhere on the pane — the fetch path is gone.
-        page.locator("#pipeline-detail [data-verb-url]").count() shouldBe 0
+        page.locator("#template-detail [data-verb-url]").count() shouldBe 0
         page.keyboard().press("Escape")
-        page.locator("#px-dialog [data-lifecycle-dialog]").count() shouldBe 0
+        page.locator("#tx-dialog [data-lifecycle-dialog]").count() shouldBe 0
     }
 
     // ---------------------------------------------------------- the evidence
@@ -740,11 +763,11 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
         ready()
         seed()
 
-        page.navigate("$baseUrl/pipelines")
+        page.navigate("$baseUrl/templates")
         ensureTheme("light") // the deployment default is dark; the light walk asks for light
         walk("light")
         page.setViewportSize(1440, 900)
-        page.navigate("$baseUrl/pipelines")
+        page.navigate("$baseUrl/templates")
         page.waitForLoadState(LoadState.NETWORKIDLE)
         // The deployment default is dark: a blind toggle would flip to LIGHT and the wait
         // for dark would match only by racing the swap (it did, on laptops; not on CI).
@@ -758,11 +781,14 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
                 page.setViewportSize(w, h)
                 page.navigate("$baseUrl/$screen")
                 page.waitForLoadState(LoadState.NETWORKIDLE)
-                selectLeaf()
-                page.waitForLoadState(LoadState.NETWORKIDLE)
-                // The drawer closes on the selection; photographing mid-transition would show a
-                // state the user never rests in.
-                waitForDrawerClosed()
+                // #350: the pipelines page is the flat catalog — photographed as it rests.
+                if (screen == "templates") {
+                    selectLeaf()
+                    page.waitForLoadState(LoadState.NETWORKIDLE)
+                    // The drawer closes on the selection; photographing mid-transition would show a
+                    // state the user never rests in.
+                    waitForDrawerClosed()
+                }
                 // The 390px shell overflows horizontally on every screen in the app (see the
                 // 390 test's KDoc), so a click can leave the document scrolled right and the
                 // shot would show the page cropped. Back to the origin before photographing.

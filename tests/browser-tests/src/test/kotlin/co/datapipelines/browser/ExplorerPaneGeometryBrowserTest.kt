@@ -110,14 +110,15 @@ class ExplorerPaneGeometryBrowserTest : BrowserSuite() {
      * The root level shows FOLDERS, and a folder must be OPEN before its leaf exists (§9.1 —
      * one request per level). Opening it is also what puts a real name in the pane.
      */
+    /** The TEMPLATES explorer's first folder (#350: the one page explorer left). */
     private fun openFirstFolder() {
-        page.waitForSelector("summary.tpl-summary")
-        if (page.locator("details.tpl-folder[open]").count() == 0) {
+        page.waitForSelector("[data-explorer-pane] summary.tpl-summary")
+        if (page.locator("[data-explorer-pane] details.tpl-folder[open]").count() == 0) {
             page.waitForResponse({ it.url().contains("prefix=test") }) {
-                page.locator("summary.tpl-summary").first().click()
+                page.locator("[data-explorer-pane] summary.tpl-summary").first().click()
             }
         }
-        page.waitForSelector("button.tpl-leaf")
+        page.waitForSelector("[data-explorer-pane] button.tpl-leaf")
     }
 
     /**
@@ -293,13 +294,17 @@ class ExplorerPaneGeometryBrowserTest : BrowserSuite() {
         ready()
         seedBothTrees()
 
+        // #350: the pipeline tree is the SIDEBAR's — its leaf carries the same badges.
         page.setViewportSize(WIDTHS.first(), 900)
-        page.navigate("$baseUrl/pipelines")
-        page.waitForSelector(".tplx-tree")
-        page.waitForLoadState(LoadState.NETWORKIDLE)
-        openFirstFolder()
+        page.navigate("$baseUrl/dashboard")
+        page.click("[data-nav-branch='pipelines'] [data-nav-tree-toggle]")
+        page.waitForSelector("#nav-tree-pipelines summary.tpl-summary")
+        page.waitForResponse({ it.url().contains("prefix=test") }) {
+            page.locator("#nav-tree-pipelines summary.tpl-summary").first().click()
+        }
+        page.waitForSelector("#nav-tree-pipelines .tpl-leaf")
 
-        val leaf = page.locator("button.tpl-leaf").first()
+        val leaf = page.locator("#nav-tree-pipelines .tpl-leaf").first()
         withClue("the version badge", "a never-released pipeline names its DRAFT's version, not 'vnull'") {
             leaf
                 .locator(".ds-badge-default")
@@ -318,7 +323,7 @@ class ExplorerPaneGeometryBrowserTest : BrowserSuite() {
     }
 
     @Test
-    fun `both explorers keep the pane contract at three widths and both rail states`() {
+    fun `the templates explorer keeps the pane contract at three widths and both rail states`() {
         startTrace()
         ready()
         seedBothTrees()
@@ -326,7 +331,8 @@ class ExplorerPaneGeometryBrowserTest : BrowserSuite() {
         for (width in WIDTHS) {
             for (collapsed in listOf(false, true)) {
                 page.setViewportSize(width, 900)
-                for (route in listOf("/templates", "/pipelines")) {
+                // #350: the pipelines page is the flat catalog — no pane left to hold a contract.
+                for (route in listOf("/templates")) {
                     page.navigate("$baseUrl$route")
                     page.evaluate(
                         "(c) => { document.documentElement.classList.toggle('rail-collapsed', c);" +
@@ -356,7 +362,7 @@ class ExplorerPaneGeometryBrowserTest : BrowserSuite() {
         for (width in WIDTHS) {
             for (collapsed in listOf(false, true)) {
                 page.setViewportSize(width, 900)
-                for (section in listOf("/templates", "/pipelines")) {
+                for (section in listOf("/templates")) { // #350: the one page explorer left
                     // Always start from a screen that is NOT an explorer, so the swap really
                     // introduces the explorer's markup rather than replacing like with like.
                     page.navigate("$baseUrl/dashboard")
@@ -456,7 +462,10 @@ class ExplorerPaneGeometryBrowserTest : BrowserSuite() {
      * would make them two components that merely look alike.
      */
     @Test
-    fun `the width the user set in one explorer is the width the other opens at`() {
+    fun `the width the user set survives a round trip through the pipelines catalog`() {
+        // #350: the pipelines page has no pane any more (its tree is the sidebar's), so the
+        // shared key's cross-explorer case became a round trip: the catalog must not clobber the
+        // remembered width, and the explorer must open at it again.
         startTrace()
         ready()
         seedBothTrees()
@@ -467,16 +476,19 @@ class ExplorerPaneGeometryBrowserTest : BrowserSuite() {
         openFirstFolder()
 
         dragTreeBy(200.0)
-        val templates = probe()
+        val before = probe()
 
         page.navigate("$baseUrl/pipelines")
+        page.waitForSelector("#pipeline-list-wrapper")
+        page.locator(".tplx-tree").count() shouldBe 0
+        page.navigate("$baseUrl/templates")
         page.waitForSelector(".tplx-tree")
         page.waitForLoadState(LoadState.NETWORKIDLE)
-        val pipelines = probe()
+        val after = probe()
 
-        withClue("the shared key", "the width did not follow the user to the other explorer: $pipelines") {
-            (pipelines.d("treeWidth") - templates.d("treeWidth")) shouldBeLessThanOrEqual 1.0
-            (templates.d("treeWidth") - pipelines.d("treeWidth")) shouldBeLessThanOrEqual 1.0
+        withClue("the shared key", "the width did not survive the catalog round trip: $after") {
+            (after.d("treeWidth") - before.d("treeWidth")) shouldBeLessThanOrEqual 1.0
+            (before.d("treeWidth") - after.d("treeWidth")) shouldBeLessThanOrEqual 1.0
         }
     }
 

@@ -309,6 +309,55 @@ class PipelineWorkspacePromoterAdmittedBrowserTest : BrowserSuite() {
         promoter.close()
     }
 
+    /**
+     * #350 (A3 repeated, A11's lensed catalog) — the promoter's SIDEBAR tree is the lens's answer:
+     * the admitted released pipeline is a leaf (and the current page's), a draft-only sibling the
+     * lens does not admit is absent from the rows AND from the wire (a direct read of the same
+     * level carries no trace of it — no route returns hidden rows for CSS to hide), the folder's
+     * count is the lensed count, and every sidebar answer is stamped `<workspace>|lens`.
+     */
+    @Test
+    fun `#350 - an admitted promoter's sidebar tree lists only the admitted pipeline, stamped with the lens`() {
+        val workspaceName = "p350ws-" + generatedPassword("w").take(8).lowercase()
+        val id = seedThreeVersions("p350l" + generatedPassword("s").take(6).lowercase(), workspaceName)
+        // A draft-only sibling in the same folder: nothing to promote, so the lens never admits it.
+        must(
+            "POST",
+            "/api/v1/pipelines",
+            """{"name":"p348/hidden_draft","display_name":"Hidden","nodes":[{"id":"h1","type":"CALCULATOR",""" +
+                """"kind":"fiscal_quarter","context_key":"run_q_h1",""" +
+                """"inputs":{"date":"${'$'}current_date","fiscal_start":"${'$'}org_fiscal_start_date"}}]}""",
+        )
+
+        val promoter = openPromoterSession(workspaceName)
+        val stamps = mutableListOf<String>()
+        promoter.page.onResponse { response ->
+            if (response.url().contains("/partials/pipelines?")) stamps += (response.headers()["dp-nav-stamp"] ?: "none")
+        }
+        promoter.page.navigate("$baseUrl/pipelines/$id")
+        promoter.page.waitForSelector(".pe-root")
+        promoter.page.click("[data-nav-branch='pipelines'] [data-nav-tree-toggle]")
+        promoter.page.waitForSelector("#nav-tree-pipelines a.tpl-leaf[aria-current='page']")
+
+        val titles =
+            (promoter.page.evaluate("() => [...document.querySelectorAll('#nav-tree-pipelines .tpl-label[title]')].map(e => e.getAttribute('title'))") as List<*>)
+                .map { it.toString() }
+        titles.contains("p348/promoted") shouldBe true
+        (titles.contains("p348/hidden_draft")) shouldBe false
+        promoter.page.locator("#nav-tree-pipelines details.tpl-folder:has(> summary span[title='p348']) .tpl-count").first().innerText() shouldBe "1"
+
+        // The wire: the same level, read directly, carries no trace of the hidden row.
+        val level =
+            promoter.page.evaluate(
+                "async () => (await fetch('/partials/pipelines?prefix=p348', { credentials: 'same-origin', headers: { 'HX-Request': 'true' } })).text()",
+            ).toString()
+        level shouldContain "p348/promoted"
+        level shouldNotContain "hidden_draft"
+        (stamps.isNotEmpty()) shouldBe true
+        stamps.all { it == "$workspaceName|lens" } shouldBe true
+        promoter.close()
+    }
+
     private companion object {
         const val SERVER_KEY = "p348-browser-server-key"
 

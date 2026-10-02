@@ -37,16 +37,13 @@ class DiscardDialogSchedulesBrowserTest : BrowserSuite() {
         seedSchedule(wsName, email, "dd273/backfill", pipelineName, enabled = false, dueInHours = null)
 
         page.setViewportSize(1440, 900)
-        page.navigate("$baseUrl/pipelines")
-        selectLeafOf(page, pipelineName)
+        openVersionsTab(page, pipelineName)
         // Both themes BEFORE the dialog opens — the mode toggle sits in the top bar, behind
         // the open dialog's backdrop. Light first (the deployment default is dark), then dark;
-        // each shot re-opens the same dialog from the same button.
+        // each shot re-opens the same dialog from the same row verb.
         ensureTheme("light")
-        page.waitForResponse("**/lifecycle/discard*") {
-            page.locator(".tplx-detail-actions button", Page.LocatorOptions().setHasText("Discard v1")).click()
-        }
-        val dialog = page.locator("#px-dialog [data-lifecycle-dialog='pipeline-discard']")
+        page.waitForResponse("**/lifecycle/discard*") { discardV1(page) }
+        val dialog = page.locator("#pe-dialog [data-lifecycle-dialog='pipeline-discard']")
         dialog.waitFor()
 
         val text = dialog.innerText()
@@ -63,16 +60,15 @@ class DiscardDialogSchedulesBrowserTest : BrowserSuite() {
 
         shot("discard-schedules-1440-light")
         page.keyboard().press("Escape")
-        page.locator("#px-dialog [data-lifecycle-dialog]").waitFor(
+        page.locator("#pe-dialog [data-lifecycle-dialog]").waitFor(
             com.microsoft.playwright.Locator
                 .WaitForOptions()
                 .setState(com.microsoft.playwright.options.WaitForSelectorState.DETACHED),
         )
         ensureTheme("dark")
-        page.waitForResponse("**/lifecycle/discard*") {
-            page.locator(".tplx-detail-actions button", Page.LocatorOptions().setHasText("Discard v1")).click()
-        }
-        page.locator("#px-dialog [data-lifecycle-dialog='pipeline-discard']").waitFor()
+        page.waitForSelector("#pe-pane-versions tr[data-version-row]")
+        page.waitForResponse("**/lifecycle/discard*") { discardV1(page) }
+        page.locator("#pe-dialog [data-lifecycle-dialog='pipeline-discard']").waitFor()
         shot("discard-schedules-1440-dark")
     }
 
@@ -121,7 +117,7 @@ class DiscardDialogSchedulesBrowserTest : BrowserSuite() {
             main shouldContain "no_target_configured"
         }
         ppage.locator("#app-main [data-verb='pipeline-discard']").count() shouldBe 0
-        ppage.locator("#px-dialog [data-lifecycle-dialog='pipeline-discard']").count() shouldBe 0
+        ppage.locator("[data-lifecycle-dialog='pipeline-discard']").count() shouldBe 0
     }
 
     // ------------------------------------------------------------------ fixtures
@@ -235,31 +231,31 @@ class DiscardDialogSchedulesBrowserTest : BrowserSuite() {
             }
     }
 
-    private fun selectLeafOf(
+    /**
+     * #350: the pipeline's Versions tab on its WORKSPACE — reached from a catalog row, the way a
+     * reader does (the explorer's detail pane and its header Discard are gone).
+     */
+    private fun openVersionsTab(
         on: Page,
         name: String,
     ) {
-        val browse = on.locator("[data-explorer-drawer-open]")
-        if (browse.count() > 0 && browse.first().isVisible) {
-            browse.first().click()
-            on.locator(".tplx-body.is-drawer-open").waitFor()
-        }
-        try {
-            on.waitForSelector("summary.tpl-summary")
-        } catch (e: Exception) {
-            val mainRegion = on.locator("#app-main").first()
-            val main = mainRegion.innerText().take(500)
-            throw AssertionError("no pipelines tree at ${on.url()} — main reads: $main", e)
-        }
-        if (on.locator("details.tpl-folder[open]").count() == 0) {
-            on.waitForResponse({ it.url().contains("prefix=test") }) {
-                on.locator("summary.tpl-summary").first().click()
-            }
-        }
-        on.waitForSelector("button.tpl-leaf")
-        val leaf = on.locator("button.tpl-leaf", Page.LocatorOptions().setHasText(name.substringAfterLast('/'))).first()
-        on.waitForResponse({ it.url().contains("/detail") || it.url().contains("/versions") }) { leaf.click() }
-        on.waitForSelector(".tplx-detail-header")
+        on.navigate("$baseUrl/pipelines?q=" + name.substringAfterLast('/'))
+        on.locator("#pipeline-list-wrapper a.tpl-result").first().click()
+        on.waitForURL(PipelineWorkspaceUrl.PATTERN)
+        on.waitForSelector(".pe-root")
+        on.locator("#pe-tab-versions").click()
+        on.waitForSelector("#pe-pane-versions tr[data-version-row]")
+    }
+
+    /** The v1 row's ⋯ menu → Discard v1 (the row verb, `from=editor`). */
+    private fun discardV1(on: Page) {
+        val row =
+            on
+                .locator("#pe-pane-versions tr[data-version-row]")
+                .filter(com.microsoft.playwright.Locator.FilterOptions().setHasText("v1"))
+                .first()
+        row.locator("details.tplx-vmenu summary").click()
+        row.locator(".tplx-vmenu-list button", com.microsoft.playwright.Locator.LocatorOptions().setHasText("Discard v1")).click()
     }
 
     private fun shot(name: String) {

@@ -287,12 +287,10 @@ class PipelineEditorDetailsBrowserTest : BrowserSuite() {
         val name = "test/browser_ped_" + generatedPassword("p").take(6).lowercase()
         seedCalculatorPipeline(name) shouldBe 201
 
-        // The explorer: find the pipeline, select it (search mode renders a FLAT
-        // list of `tpl-result` rows; the tree presentation uses `tpl-leaf`), its
-        // detail swaps into #pipeline-detail, then open the editor — a FULL
-        // document load (hx-boost="false", 87c20d4), so this is a plain navigation wait.
+        // The catalog: find the pipeline (a FLAT list of `tpl-result` rows) and follow its
+        // row into the workspace — a FULL document load (hx-boost="false", 87c20d4), so this
+        // is a plain navigation wait. (#350: the explorer's detail pane and its Open are gone.)
         page.navigate("$baseUrl/pipelines?q=$name")
-        // #350: the catalog row IS the link into the workspace (the detail pane and its Open are gone).
         page.locator("#pipeline-list-wrapper a.tpl-result").first().click()
         page.waitForURL(PipelineWorkspaceUrl.PATTERN)
 
