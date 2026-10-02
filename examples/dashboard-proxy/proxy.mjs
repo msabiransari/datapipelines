@@ -111,5 +111,6 @@ function respond(
 }
 
 server.listen(PORT, () => {
-  console.log(`dashboard-proxy listening on :${PORT} -> ${DP_BASE_URL} (four runtime routes, key in env)`);
+  // The port actually bound: with PORT=0 the OS picks a free one, and this line is where a caller reads it.
+  console.log(`dashboard-proxy listening on :${server.address().port} -> ${DP_BASE_URL} (four runtime routes, key in env)`);
 });
