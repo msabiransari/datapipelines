@@ -53,7 +53,9 @@ const upstream = http.createServer((req, res) => {
 function startProxy() {
   const child = spawn(process.execPath, [PROXY_SCRIPT], {
     env: { ...process.env, DP_BASE_URL: UPSTREAM_BASE, DASHBOARD_KEY: KEY, PORT: String(PROXY_PORT) },
-    stdio: ["ignore", "pipe", "pipe"],
+    // stdout is not read (the port is fixed here, so the proxy's "listening" line is noise);
+    // an unread pipe is one more handle to keep a finished file alive.
+    stdio: ["ignore", "ignore", "pipe"],
   });
   child.stderr.on("data", (d) => process.stderr.write(`[proxy] ${d}`));
   return child;
@@ -79,9 +81,18 @@ before(async () => {
   test.dashboardProxyChild = proxy;
 });
 
-after(() => {
-  test.dashboardProxyChild?.kill();
-  upstream.close();
+after(async () => {
+  // Awaited teardown: the file ends only once the proxy has EXITED and the upstream has CLOSED,
+  // so no child, socket or pipe outlives the tests (gate-825ab754, 2026-10-02: this file's runner
+  // child stayed alive for an hour after its last test).
+  const proxy = test.dashboardProxyChild;
+  if (proxy && proxy.exitCode === null && proxy.signalCode === null) {
+    await new Promise((resolve) => {
+      proxy.once("exit", resolve);
+      proxy.kill();
+    });
+  }
+  await new Promise((resolve) => upstream.close(() => resolve()));
 });
 
 function reset() {
