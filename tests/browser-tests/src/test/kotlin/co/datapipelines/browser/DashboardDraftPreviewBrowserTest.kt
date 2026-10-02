@@ -69,6 +69,22 @@ class DashboardDraftPreviewBrowserTest : DashboardBrowserSuite() {
 
     @Test
     @Order(3)
+    fun `the released view is unchanged - no version attribute, and the glue still boots it`() {
+        startTrace()
+        val root = ready("dprel")
+        val board = seedBoardWithGrid(root)
+
+        page.navigate("$baseUrl/dashboards/$board")
+        page.waitForFunction("() => window.__dpPage && window.__dpPage.ready === true")
+        // The released page writes NO version attribute; the glue must not mistake its absence
+        // for a refusal to boot (the merged suite's #371 case caught exactly that).
+        (page.evaluate("() => document.getElementById('dp-board').getAttribute('data-dp-dashboard-version')") as String?) shouldBe null
+        (page.evaluate("() => window.__dpPage.instance === null") as Boolean) shouldBe false
+        page.locator(".dp-board-preview-banner").count() shouldBe 0
+    }
+
+    @Test
+    @Order(4)
     fun `light and dark - the handback screenshots of the preview page`() {
         startTrace()
         val root = ready("dpshot")

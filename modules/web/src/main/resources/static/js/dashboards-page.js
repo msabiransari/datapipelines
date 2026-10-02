@@ -45,8 +45,12 @@
   // (an integer attribute, never a script body); the released view writes none and stays on
   // "released", the only value the first-party page may pass beside a number.
   var versionAttribute = container.getAttribute("data-dp-dashboard-version");
-  var version = versionAttribute === null || versionAttribute === "" ? "released" : parseInt(versionAttribute, 10);
-  if (typeof version !== "number" || !isFinite(version)) return;
+  var version = "released";
+  if (versionAttribute !== null && versionAttribute !== "") {
+    version = parseInt(versionAttribute, 10);
+    // A version attribute that is not an integer is the server's defect, never a bootable page.
+    if (!isFinite(version)) return;
+  }
 
   var runtime = window.DatapipelinesDashboard;
   if (!runtime) return;
