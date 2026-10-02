@@ -47,6 +47,7 @@ import java.util.UUID
 class ExecutionStreamLauncherTest {
     private val idempotencyStore = mockk<IdempotencyStore>()
     private val streamer = mockk<SseLogStreamer>()
+    private val executionRepository = mockk<co.datapipelines.executor.ExecutionRepository>()
     private val userId = UUID.randomUUID()
     private val pipelineId = UUID.randomUUID()
     private val correlationId = UUID.randomUUID()
@@ -89,7 +90,7 @@ class ExecutionStreamLauncherTest {
             streamer = streamer,
             authority = mockk(relaxed = true),
             eventRepository = mockk(relaxed = true),
-            executionRepository = mockk(relaxed = true),
+            executionRepository = executionRepository,
             launcher =
                 co.datapipelines.application.ExecutionLauncher(
                     idempotencyStore = idempotencyStore,
@@ -196,13 +197,73 @@ class ExecutionStreamLauncherTest {
         result shouldBe followEmitter
     }
 
+    /** #324 — the row decides when the log has no entry yet: terminal keeps the 410, else follow. */
+    private fun rowRecord(
+        executionId: UUID,
+        completedAt: Instant?,
+    ) = co.datapipelines.executor.ExecutionRecord(
+        executionId = executionId,
+        pipelineId = pipelineId,
+        pipelineVersion = 1,
+        status =
+            if (completedAt == null) {
+                co.datapipelines.executor.ExecutionStatus.RUNNING
+            } else {
+                co.datapipelines.executor.ExecutionStatus.SUCCESS
+            },
+        parametersJson = "{}",
+        executedBy = userId,
+        triggeredVia = co.datapipelines.executor.ExecutionTrigger.REST,
+        completedAt = completedAt,
+    )
+
     @Test
-    fun `a retry whose original event log has expired is a 410`() {
+    fun `a retry whose original finished and its log expired keeps the 410 with the id and reason`() {
         val executionId = UUID.randomUUID()
         every { idempotencyStore.reserve(any(), "key-1", any(), any(), any()) } returns IdempotencyOutcome.Existing(executionId)
         every { streamer.hasLog(executionId) } returns false
+        // A relaxed mock's findById answer is NOT a null — stub the terminal row explicitly.
+        every { executionRepository.findById(workspaceId, executionId) } returns rowRecord(executionId, Instant.now())
 
         val error = shouldThrow<ApiException> { launcher(mockk()).launch(launchRequest(key = "key-1")) }
         error.code shouldBe PipelineErrorCodes.Result.EXPIRED
+        // The details are the assertion: a stub wrong in either direction fails here by name.
+        error.details["execution_id"] shouldBe executionId.toString()
+        error.details["reason"] shouldBe "event_log_expired"
+        verify(exactly = 0) { streamer.follow(any(), any()) }
+    }
+
+    @Test
+    fun `a retry whose original has no row yet waits by following it`() {
+        val executionId = UUID.randomUUID()
+        every { idempotencyStore.reserve(any(), "key-1", any(), any(), any()) } returns IdempotencyOutcome.Existing(executionId)
+        every { streamer.hasLog(executionId) } returns false
+        every { executionRepository.findById(workspaceId, executionId) } returns null
+        val followEmitter =
+            org.springframework.web.servlet.mvc.method.annotation
+                .SseEmitter(0L)
+        every { streamer.follow(executionId, any()) } returns followEmitter
+
+        val result = launcher { error("must not start a fresh execution") }.launch(launchRequest(key = "key-1"))
+
+        result shouldBe followEmitter
+        verify(exactly = 1) { streamer.follow(executionId, any()) }
+    }
+
+    @Test
+    fun `a retry whose original is still running follows it instead of answering 410`() {
+        val executionId = UUID.randomUUID()
+        every { idempotencyStore.reserve(any(), "key-1", any(), any(), any()) } returns IdempotencyOutcome.Existing(executionId)
+        every { streamer.hasLog(executionId) } returns false
+        every { executionRepository.findById(workspaceId, executionId) } returns rowRecord(executionId, null)
+        val followEmitter =
+            org.springframework.web.servlet.mvc.method.annotation
+                .SseEmitter(0L)
+        every { streamer.follow(executionId, any()) } returns followEmitter
+
+        val result = launcher { error("must not start a fresh execution") }.launch(launchRequest(key = "key-1"))
+
+        result shouldBe followEmitter
+        verify(exactly = 1) { streamer.follow(executionId, any()) }
     }
 }
