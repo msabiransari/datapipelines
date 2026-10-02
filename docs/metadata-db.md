@@ -1,6 +1,6 @@
 # Metadata Database Schema Specification
 
-**Status:** v1.38 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
+**Status:** v1.39 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
 **Owner:** datapipelines.co core
 **Depends on:** all specs (this is the physical schema for every logical model)
 **Last updated:** 2026-09-29
@@ -147,15 +147,16 @@ CREATE TABLE api_keys (
     expires_at            TIMESTAMPTZ,
     last_used_ip          INET,
     last_used_user_agent  TEXT,
-    kind                  TEXT        NOT NULL DEFAULT 'mcp',    -- 'mcp' (V37, renamed from 'user') | 'endpoint' (V11) | 'server' (V17)
+    kind                  TEXT        NOT NULL DEFAULT 'mcp',    -- 'mcp' (V37, renamed from 'user') | 'endpoint' (V11) | 'server' (V17) | 'dashboard' (V45)
     secret_sealed         BYTEA,                       -- V31: the full key, sealed (D16); NULL pre-R3, and NULL again from the first Copy on (#213 show-once; V32 cleared every pre-amendment copy)
-    role                  TEXT,                        -- V37 (keys v2 A13/A14): the CHOSEN role — author|promoter|workspace_admin on mcp, api_caller on endpoint, promotion_receiver on server; NULL only on a revoked pre-v2 row
-    CONSTRAINT chk_api_keys_kind CHECK (kind IN ('mcp', 'endpoint', 'server')),
+    role                  TEXT,                        -- V37 (keys v2 A13/A14): the CHOSEN role — author|promoter|workspace_admin on mcp, api_caller on endpoint, promotion_receiver on server, dashboard_viewer on dashboard (V45); NULL only on a revoked pre-v2 row
+    CONSTRAINT chk_api_keys_kind CHECK (kind IN ('mcp', 'endpoint', 'server', 'dashboard')),
     CONSTRAINT chk_api_keys_role CHECK (
         (kind = 'mcp' AND role IS NOT NULL AND role IN ('author', 'promoter', 'workspace_admin'))
         OR (kind = 'mcp' AND role IS NULL AND is_revoked)
         OR (kind = 'endpoint' AND role IS NOT NULL AND role = 'api_caller')
-        OR (kind = 'server' AND role IS NOT NULL AND role = 'promotion_receiver'))
+        OR (kind = 'server' AND role IS NOT NULL AND role = 'promotion_receiver')
+        OR (kind = 'dashboard' AND role IS NOT NULL AND role = 'dashboard_viewer'))
 );
 
 CREATE INDEX idx_api_keys_user ON api_keys(user_id) WHERE is_revoked = FALSE;
@@ -176,7 +177,7 @@ CREATE INDEX idx_api_keys_created_by ON api_keys(created_by);   -- V34: the crea
 - `is_revoked` and `expires_at` are both re-checked on every request through the 60s cache in [Auth §11.4](auth.md#114-api-key-validation-cache) (D13), so revocation takes effect within ~1 minute.
 - Revocation is a soft flag, not a DELETE: `audit_log.key_id` must keep resolving to something meaningful. The retention sweep's purge hard-deletes a revoked key and its identity only once NOTHING references them (A17/B5).
 - `secret_sealed` (V31, [Auth §7.4](auth.md#74-issuance), D16): a created key's plaintext is sealed with the deployment's credential-encryption key (AAD = the key id) so the Keys page's show-once can open it — ONCE (#213, D16 amended 2026-09-23): the open and the clear are one owner-scoped statement, the key is hash-only from its first read on, and V32 nulled every pre-amendment copy fleet-wide. V37 (A15) dropped `minted_at_login` and its per-(user, workspace) unique index with the login mint: the Keys page is the one creation path.
-- `kind` (V11, renamed V37 A19) is the key's KIND ([Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings)): `mcp` (renamed from `user` — kind is the transport and the word says which) reaches `/mcp` and only `/mcp`; `endpoint` is a credential for published endpoints only. An `endpoint` key serves exactly the paths its rows in [`endpoint_key_bindings`](#414-endpoint_key_bindings) cover, and one with no binding on any ancestor of the path it presents at authorises **nothing**. `DEFAULT 'mcp'` follows the rename.
+- `kind` (V11, renamed V37 A19) is the key's KIND ([Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings)): `mcp` (renamed from `user` — kind is the transport and the word says which) reaches `/mcp` and only `/mcp`; `endpoint` is a credential for published endpoints only; `dashboard` (V45) serves the dashboard runtime under its `dashboard_key_bindings` folders ([§4.36](#436-dashboard_key_bindings)). An `endpoint` key serves exactly the paths its rows in [`endpoint_key_bindings`](#414-endpoint_key_bindings) cover, and one with no binding on any ancestor of the path it presents at authorises **nothing** — the `dashboard` kind's binding rule is the same sentence over the name space. `DEFAULT 'mcp'` follows the rename.
 - No `updated_at` — the only mutations are `last_used_*` (written on use), `is_revoked` (written once) and `kind` (written once, at issuance), and all are self-timestamping or immutable.
 
 ### 4.3 `audit_log`
@@ -301,7 +302,7 @@ CREATE TABLE pipeline_executions (
     status              TEXT        NOT NULL,        -- 'RUNNING' | 'SUCCESS' | 'FAILED' | 'ABORTED'
     parameters_json     JSONB       NOT NULL DEFAULT '{}', -- the FULLY RESOLVED Context (see below)
     executed_by         UUID        NOT NULL REFERENCES users(id), -- the run's user: the session's, or who the key ACTS AS — the member for an MCP key, the key's own identity for an endpoint/server key since V34 (was triggered_by; renamed by V30, D11)
-    executed_by_key_kind TEXT,                       -- 'user' | 'endpoint' | 'server' when a key started it; NULL = a signed-in session (V30)
+    executed_by_key_kind TEXT,                       -- 'user' | 'mcp' (V37) | 'endpoint' | 'server' | 'dashboard' (V45) when a key started it; NULL = a signed-in session (V30)
     triggered_via       TEXT        NOT NULL,        -- 'UI' | 'REST' | 'MCP' | 'PIPELINE' | 'ENDPOINT' | 'SCHEDULE' | 'DASHBOARD'
     correlation_id      UUID,
     started_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -318,7 +319,7 @@ CREATE TABLE pipeline_executions (
     heartbeat_at        TIMESTAMPTZ,                 -- the owning instance's liveness stamp while RUNNING; NULL on a pre-V21 row (V21, §8.3)
     CONSTRAINT chk_status CHECK (status IN ('RUNNING', 'SUCCESS', 'FAILED', 'ABORTED')),
     CONSTRAINT chk_triggered_via CHECK (triggered_via IN ('UI', 'REST', 'MCP', 'PIPELINE', 'ENDPOINT', 'SCHEDULE', 'DASHBOARD')),  -- 'PIPELINE' added by V3, 'ENDPOINT' by V11, 'SCHEDULE' by V38, 'DASHBOARD' by V43
-    CONSTRAINT chk_executions_executed_by_key_kind CHECK (executed_by_key_kind IS NULL OR executed_by_key_kind IN ('user', 'endpoint', 'server')),  -- V30
+    CONSTRAINT chk_executions_executed_by_key_kind CHECK (executed_by_key_kind IS NULL OR executed_by_key_kind IN ('user', 'mcp', 'endpoint', 'server', 'dashboard')),  -- V30; 'mcp' added by V37, 'dashboard' by V45
     CONSTRAINT fk_executions_pipeline_version
         FOREIGN KEY (pipeline_id, pipeline_version)
         REFERENCES pipeline_versions (pipeline_id, version)
@@ -1384,6 +1385,30 @@ CREATE INDEX idx_dashboard_refresh_executions_execution ON dashboard_refresh_exe
 
 **Notes:** the execution reference has NO cascade — the execution rows are the durable history and outlive their refresh's link (§8.1). A dashboard run writes no stored result (`directSink`): the execution has no `result_row_count` and `GET /api/v1/executions/{id}/result` answers the family's `not_found`; the per-source byte and row counts are in the refresh's `summary_json`.
 
+### 4.36 `dashboard_key_bindings`
+
+Which `dashboard` keys serve which part of the dashboard NAME space (V45, L5 #367) — [`endpoint_key_bindings`](#414-endpoint_key_bindings)' twin for the `dashboard` key kind. See [Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings) and [Dashboards §6.5](dashboards.md#65-credentials-session-and-proxy).
+
+```sql
+CREATE TABLE dashboard_key_bindings (
+    name_prefix      TEXT        NOT NULL,   -- a FOLDER of the name space: 'finance/dashboards' binds every dashboard beneath it; '/' binds the tree
+    api_key_id       TEXT        NOT NULL REFERENCES api_keys(id) ON DELETE CASCADE,
+    workspace_id     UUID        NOT NULL REFERENCES workspaces(id),
+    created_by       UUID        NOT NULL REFERENCES users(id),
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (name_prefix, api_key_id)
+);
+
+CREATE INDEX idx_dashboard_key_bindings_key ON dashboard_key_bindings(api_key_id);
+```
+
+**Notes:**
+- `name_prefix` is a **folder** of the dashboard NAME space, not a pattern: `finance/dashboards` serves every dashboard whose name begins `finance/dashboards/`, and the root `/` serves the workspace's whole dashboard tree. Resolution walks the dashboard name's ancestors from the most specific, and the FIRST folder carrying any binding decides — a deeper binding **replaces** an inherited one (R-EP2 verbatim), and a dashboard with no binding on any ancestor is served to NO key.
+- `api_key_id` is `TEXT` because [`api_keys.id`](#42-api_keys) is the `dpk_…` id itself, not a UUID. The key retention purge refuses to delete a key this table names, exactly as it does for [`endpoint_key_bindings`](#414-endpoint_key_bindings).
+- `ON DELETE CASCADE`: a key that no longer exists cannot serve anything, and an orphaned binding would show on the Keys page as a binding to nothing.
+- The primary key `(name_prefix, api_key_id)` says one key binds a folder once and several keys may bind the same folder.
+- No `updated_at`: a binding is inserted and deleted, never edited.
+
 ## 5. Index Strategy Summary
 
 **This table is generated from §4 and must contain nothing §4 does not create.** Two kinds of entry appear:
@@ -1443,6 +1468,8 @@ CREATE INDEX idx_dashboard_refresh_executions_execution ON dashboard_refresh_exe
 | `published_endpoints` | `idx_published_endpoints_pipeline` | explicit | "Does any endpoint publish this pipeline?" — what a pipeline delete and the read-only re-check ask |
 | `endpoint_key_bindings` | `endpoint_key_bindings_pkey` | via PK | `(path_prefix, api_key_id)` — one key binds a node once |
 | `endpoint_key_bindings` | `idx_endpoint_key_bindings_key` | explicit | Which nodes a key binds — the key detail view and a revoke's blast radius |
+| `dashboard_key_bindings` | `dashboard_key_bindings_pkey` | via PK | `(name_prefix, api_key_id)` — one key binds a folder once (§4.36) |
+| `dashboard_key_bindings` | `idx_dashboard_key_bindings_key` | explicit | Which folders a key binds — the Keys page's editor and a revoke's blast radius |
 | `lake_tables` | `lake_tables_pkey` | via PK | Lookup by surrogate id |
 | `lake_tables` | `uq_lake_tables_datasource_namespace_name` | via UNIQUE | One registration per (datasource, namespace, name); doubles as the list-by-datasource access path ([§4.15](#415-lake_tables)) |
 | `learned_facts` | `learned_facts_pkey` | via PK | Lookup by id (`semantics_retire`, `supersedes`) |
@@ -1538,6 +1565,7 @@ table and the test's expected-table list in the same commit.
 | `audit_log` | derived | AuditEvent | — | — | Records local activity; not authored, not transferable |
 | `published_endpoints` | promotable | PublishedEndpoint | — (follows the pipeline it publishes) | `path_pattern` | The URL contract is authored, and an endpoint that exists in dev and not in prod is the whole point of promoting it. The row references its pipeline by NAME in the batch, like everything promoted; `workspace_id`, `created_by` and the timestamps are resolved locally on the target |
 | `endpoint_key_bindings` | promotable | EndpointKeyBinding | — | `(path_prefix, api key name)` | Which node a key authorises is authored topology, not local state, so it travels. It is carried by key NAME because [`api_keys`](#42-api_keys) itself is environment-local — a target missing that key name refuses the batch with `endpoint.promotion.key_missing` before anything is pushed, rather than importing a binding to nothing |
+| `dashboard_key_bindings` | promotable | DashboardKeyBinding | — | — | The `endpoint_key_bindings` twin's OWN class, by the same reasoning (L5 #367's lane decision, recorded in the handback): a folder binding is authored topology. TODAY it has no promotion carrier (no batch row, no entity registered with the transfer) — the class states what it WOULD travel as; when a batch carries it, it travels by key NAME exactly like its twin |
 | `learned_facts` | environment-local | LearnedFact | — | — | A fact is about an environment-local [`datasources`](#410-datasources) row and was validated against THAT database's live schema (§4.18); the target environment's data may have a different shape, and a fact that has not been checked against it is exactly what the store refuses to start with. Round 2 may export facts as OSI; nothing promotes them |
 | `mail_sends` | derived | MailSend | — | — | The claim rows behind the notices THIS deployment sent about ITS users (§4.19) — a record of local sends, not authored, and meaningless beside another environment's `users` |
 | `pipeline_check_runs` | derived | CheckRun | — | `(pipeline, version, check_id)` | Produced by THIS deployment's server running the checks a pipeline body declares (§4.20): the observed value is only truthful against this environment's datasource data, which is the whole point of a check. The runs of a promoted pipeline are re-produced by the target's own runs, never transferred |
@@ -1854,6 +1882,7 @@ Three pieces of execution state that a reader might reasonably expect to find he
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-01 | v1.39 | V45 (#367, L5 — the key kind; the number 352's `V44__visualization_test_capabilities` holds) | **§4.2 `api_keys`: `chk_api_keys_kind` gains `'dashboard'`, `chk_api_keys_role` gains the arm `(kind = 'dashboard' AND role IS NOT NULL AND role = 'dashboard_viewer')`** — the `IS NOT NULL` is the V37 lesson spelled again; **§4.6 `pipeline_executions.executed_by_key_kind`'s CHECK gains `'dashboard'`** (the column comment also gains the `'mcp'` V37 had added and this table omitted). **§4.36 `dashboard_key_bindings`** — the `endpoint_key_bindings` twin: a folder `name_prefix` of the dashboard name space (the root `/` allowed), the key by TEXT id, cascading on delete; §5 gains its two indexes; §5A classifies it **promotable** — the twin's own class and reason, the lane's recorded decision (no promotion carrier today; a batch would carry it by key NAME exactly like its twin). |
 | 2026-10-01 | v1.38 | L4b (#353) a key name | **§4.32, no DDL change:** the preview token's TTL names the shipped key `datapipelines.visualization.session-ttl-minutes` (the spec's `tests.session-ttl-minutes` has no YAML form — configuration.md §3.33). |
 | 2026-10-01 | v1.37 | 332 (#332, #330, #331) | **V46 `idx_dashboard_versions_pins`**: the GIN index on `dashboard_versions (body_json -> 'visualizations')` — the exact expression `livePinsOf`'s containment probe reads (the visualization purge/discard/restore guards and `visualizations_get`'s `used_by`), a bitmap index scan where a whole-table scan ran (measured 5.3 ms → 0.9 ms at 4 000 dashboards; the up-and-down rehearsal on a copy of the demo-shaped database is the lane's evidence). §4.31 carries the index row. No other DDL: #330's projection and #331's batched page answer are statements over the existing tables. |
 | 2026-10-01 | v1.36 | V44 (#10 L4a, the test capabilities) | **§4.32 `visualization_test_runs` gains the screenshot upload capability** (`upload_token_hash`, `upload_expires_at`, `upload_consumed_at` + `chk_visualization_test_runs_upload`): the three columns are one capability — hash-only at rest, the consumption stamp strictly before the deadline — and the hash's `IS NOT NULL` is load-bearing (`NULL ~ regex` is NULL, and a CHECK passes on NULL; caught by the behavioral probe). The notes carry the single-use consumption's guarded-UPDATE fence. |

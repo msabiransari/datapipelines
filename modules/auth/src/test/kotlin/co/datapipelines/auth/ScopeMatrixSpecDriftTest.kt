@@ -86,6 +86,8 @@ class ScopeMatrixSpecDriftTest {
             setOf(Permission.ENDPOINT_SERVE, Permission.EXECUTION_READ, Permission.EXECUTION_RESULT_READ)
         rows.filter { KeyRole.PROMOTION_RECEIVER in it.keyRoles }.mapNotNull { it.permission }.toSet() shouldBe
             setOf(Permission.PROMOTION_INVENTORY_READ, Permission.PROMOTION_PUSH)
+        rows.filter { KeyRole.DASHBOARD_VIEWER in it.keyRoles }.mapNotNull { it.permission }.toSet() shouldBe
+            setOf(Permission.DASHBOARD_READ, Permission.DASHBOARD_EXECUTE)
     }
 
     private fun cellMismatch(
@@ -101,9 +103,10 @@ class ScopeMatrixSpecDriftTest {
          * (#9: `schedule.read`, `.create`, `.update`, `.pause`, `.delete`, `.run`) + the parameter
          * engine's nine (#194 lane D, the record's §9.3 table verbatim) + the dashboards' fourteen lifecycle rows
          * (#10 L1b: `visualization.*` and `dashboard.*` — read, create, update, version.manage, delete, release,
-         * switch_version; the two imports landed with L1c and `dashboard.execute` with L2; `dashboard.key.bind` lands with L5), re-derived.
+         * switch_version; the two imports landed with L1c, `dashboard.execute` with L2 and `dashboard.key.bind`
+         * with L5), re-derived.
          */
-        const val PERMISSION_COUNT = 99
+        const val PERMISSION_COUNT = 100
 
         /** Documented rows with no code behind them yet — each one a decision the record made ahead of a surface. */
         val RESERVED_ROWS = listOf("Read the audit log — **reserved** (D12)")

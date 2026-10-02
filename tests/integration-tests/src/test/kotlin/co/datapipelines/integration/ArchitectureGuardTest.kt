@@ -337,10 +337,15 @@ class ArchitectureGuardTest {
                 "ApiConsoleController → ApiKeyRepository",
                 "ApiConsoleController → EndpointKeyBindingRepository",
                 "ApiKeysAdminController → ApiKeyRepository",
+                // L5 (#367) — the dashboard bindings' own table and service: the SAME reviewed shape
+                // as the endpoint pairs beside these (the page's binding editor reads the key's rows;
+                // the twin route resolves its key by id through the key store).
+                "ApiKeysAdminController → DashboardKeyBindingRepository",
                 "ApiKeysAdminController → EndpointKeyBindingRepository",
                 "ApiKeysAdminController → UserRepository",
                 "AppShellAdvice → UserRepository",
                 "AuthController → ApiKeyRepository",
+                "DashboardKeyBindingsController → ApiKeyRepository",
                 "DashboardPartialController → ExecutionRepository",
                 "DatasourceGrantsController → DatasourceGrantRepository",
                 "DatasourceGrantsPartialController → DatasourceGrantRepository",

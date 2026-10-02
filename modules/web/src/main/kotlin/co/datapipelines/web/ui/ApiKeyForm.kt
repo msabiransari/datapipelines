@@ -71,7 +71,11 @@ object ApiKeyForm {
      * - an `endpoint` card when [mayCreateApiKeys] (`api_key.create`) — the server check is the
      *   guard, and rendering an option the server will refuse is a worse answer than not
      *   rendering it;
-     * - a `server` card when [isSuperAdmin] (`server_key.create`).
+     * - a `server` card when [isSuperAdmin] (`server_key.create`);
+     * - a `dashboard` card (L5) under the same [mayCreateApiKeys] floor — the lane's decision:
+     *   a dashboard key is a transport key like the endpoint key, minted by the same holders.
+     *   It takes NO bindings at create (they are `dashboard.key.bind`'s verb, edited on the
+     *   key's card), so a hand-crafted create carrying any is refused by the service.
      */
     fun kindChoices(
         mcpRoles: List<WorkspaceRole>,
@@ -105,6 +109,15 @@ object ApiKeyForm {
                         "receiver role, no bindings — it opens the promotion routes and nothing else.",
                 takesBindings = false,
             ).takeIf { isSuperAdmin },
+            KindChoice(
+                wire = ApiKeyKind.DASHBOARD.wire,
+                label = "Dashboard key",
+                summary =
+                    "Serves your dashboards to an external application through its backend: the folders you " +
+                        "bind it to (on its card, after creating) are the dashboards it may render and refresh — " +
+                        "nothing else. An unbound key serves nothing.",
+                takesBindings = false,
+            ).takeIf { mayCreateApiKeys },
         )
 
     /**
@@ -129,6 +142,29 @@ object ApiKeyForm {
             }
         }
         return listOf(ROOT) + nodes
+    }
+
+    /**
+     * The dashboard binding picker's folders (L5), derived from the workspace's dashboard FQN
+     * names — `bindingNodes`' twin for the NAME space: every folder prefix of every dashboard
+     * (a name's own spelling included — a folder may share a dashboard's name, the endpoint
+     * tree's rule), rendered without a leading slash because dashboard names have none. The
+     * root `/` is always offered and always first: binding there authorises the workspace's
+     * whole dashboard tree.
+     *
+     * The posted values are validated server-side by `DashboardKeyService` (the grammar and the
+     * #191 rule) — the picker is convenience, the service is the guard, the same split as the
+     * endpoint picker's.
+     */
+    fun dashboardFolders(dashboardNames: Collection<String>): List<String> {
+        val folders = sortedSetOf<String>()
+        dashboardNames.forEach { name ->
+            val segments = name.trim('/').split('/').filter { it.isNotEmpty() }
+            for (depth in 1..segments.size) {
+                folders += segments.take(depth).joinToString("/")
+            }
+        }
+        return listOf(ROOT) + folders
     }
 
     /**

@@ -14,7 +14,10 @@ class DashboardErrorCodesTest {
     }
 
     private companion object {
-        /** §13.23's rows — the spec's 24, the ten L1a added (pipeline-contract v1.44) and L2's `too_many_invocations` (v1.45). */
-        const val EXPECTED_DASHBOARD_CODES = 35
+        /**
+         * §13.23's rows — the spec's 24, the ten L1a added (pipeline-contract v1.44), L2's
+         * `too_many_invocations` (v1.45) and L5's `binding.path_invalid` (v1.49).
+         */
+        const val EXPECTED_DASHBOARD_CODES = 36
     }
 }

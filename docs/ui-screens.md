@@ -826,7 +826,7 @@ Each boolean narrows for an API-key principal by the key's SCOPE as well as its 
 | Datasources (§4.5) | Register, Edit, Delete | `canAdminWorkspace` | `datasource.manage` |
 | Datasources | **Test** | `canExecute` — the connection test **follows execute** (ratified 2026-09-20) | `datasource.test` |
 | Datasource grants (§4.5a) | Grants, Grant, Revoke | `isSuperAdmin` | `datasource.grant` |
-| API keys (§4.19) | New API key / Delete / Edit associations — a `server` key's Delete: `isSuperAdmin` only (#215) | `canAdminWorkspace` or `isSuperAdmin` | `api_key.create` / `api_key.revoke` (+ `server_key.revoke` for a server key) / `api_key.bind` (179, D17) |
+| API keys (§4.19) | New API key / Delete / Edit associations / Edit dashboard folders (L5) — a `server` key's Delete: `isSuperAdmin` only (#215) | `canAdminWorkspace` or `isSuperAdmin` | `api_key.create` / `api_key.revoke` (+ `server_key.revoke` for a server key) / `api_key.bind` (179, D17) / `dashboard.key.bind` (L5) |
 | Top bar (§4.3e) | MCP key copy / delete-to-rotate | every role, own key (`mcpKey != null`) | `mcp_key.own` (179, D16) |
 | Promotion (§4.17) | the page itself | `canReadPromotion` — author, promoter, admins (owner rule 13) | `promotion.read` |
 | Promotion (§4.17) | Promote — and, since 143, the whole submission form (Send column, selection boxes) | `canPromote` in the SOURCE workspace; an author gets the plan as a plain table | `promotion.promote` |
@@ -1635,17 +1635,17 @@ Two cards.
 |---|---|
 | URL | `GET /api-keys` |
 | Auth required | Yes — any authenticated principal; the page lists keys the caller CREATED (`mcp_key.own`), and its verbs are `mcp_key.create` (create), `mcp_key.revoke_own` (a creator's delete — the service checks `created_by`) / `api_key.revoke` + `server_key.revoke` (any key of the workspace), `api_key.bind` (associations) |
-| Purpose | Create, delete and associate keys of every kind — the `mcp` key an agent presents at `/mcp`, the `endpoint` keys programs call published endpoints with, the promotion peer's `server` key |
+| Purpose | Create, delete and associate keys of every kind — the `mcp` key an agent presents at `/mcp`, the `endpoint` keys programs call published endpoints with, the promotion peer's `server` key, and (L5, #367) the `dashboard` keys an external application's backend presents at the runtime routes |
 | Design primitives | `.ds-card`, the data table (§3.7), `.app-chip`, `.app-picker`, `.app-modal` |
 | JS | The create modal, the kind-conditional role/associations fields, and the select-the-secret reveal |
-| htmx | `hx-post="/partials/api-keys"` (create, into `#keyCreated`); `hx-delete="/partials/api-keys/{id}"` (delete, into `#keys-table-body`); `hx-post="/partials/api-keys/{id}/bindings"` (save an association SET) — each with a §5.1 Shape A out-of-band piece |
+| htmx | `hx-post="/partials/api-keys"` (create, into `#keyCreated`); `hx-delete="/partials/api-keys/{id}"` (delete, into `#keys-table-body`); `hx-post="/partials/api-keys/{id}/bindings"` (save an association SET); `hx-post="/partials/api-keys/{id}/dashboard-bindings"` (L5 — save a dashboard key's FOLDER set) — each with a §5.1 Shape A out-of-band piece |
 
 The table lists the keys the signed-in person CREATED in this workspace: name + `dpk_…` prefix
 (12 characters, D16's length), kind, **role** (the role CHOSEN at creation — keys v2 A13/A14: a
 member role on an `mcp` key, `api caller` on an `endpoint` key, `promotion receiver` on a `server`
-key), **acts as** (the key's own identity, rendered "<key name> (API key)" — what its runs and
+key, `dashboard viewer` on a `dashboard` key), **acts as** (the key's own identity, rendered "<key name> (API key)" — what its runs and
 received versions are attributed to, [Auth §4.7](auth.md#47-key-identities)), **created by** (the
-person, `api_keys.created_by`), associated endpoints (`/nyc/**` form; the root reads as the
+person, `api_keys.created_by`), associated endpoints (`/nyc/**` form; a `dashboard` key's FOLDERS, `finance/dashboards/**` form; the root reads as the
 whole-tree wildcard), created, expires, last used — relative in the cell, absolute (UTC) on
 hover, like every table here. Deleted and expired keys keep their row and lose their verbs.
 
@@ -1659,7 +1659,10 @@ hover, like every table here. Deleted and expired keys keep their row and lose t
   `super_admin` — B1); **API key** (`endpoint`, the api caller role — "the paths you bind it to
   are its whole reach"; `api_key.create`, workspace admins and super admins) and, to a super
   admin only, **Server key** (`server`, the promotion receiver role, no bindings;
-  `server_key.create`). The service re-checks both the per-kind permission and the subset rule
+  `server_key.create`), and — to the same holders as the API key — **Dashboard key** (`dashboard`,
+  the `dashboard_viewer` role, L5 #367: "the folders you bind it to are the dashboards it may
+  render and refresh; an unbound key serves nothing"; `api_key.create`). It takes NO bindings at
+  create — they are the card's own editor. The service re-checks both the per-kind permission and the subset rule
   (`WorkspaceService.requireIssuancePermission`, `RolePermissions.offerable`), so a forged
   request meets the same refusals the dialog never offers.
   Expiry is the same server-resolved select §4.18 used to host (a custom date expires at the
@@ -1679,7 +1682,10 @@ hover, like every table here. Deleted and expired keys keep their row and lose t
   row then reads "created by <name> (removed)".
 - **Edit associations** — a per-row disclosure with the picker pre-checked to the key's
   current bindings; Save posts the whole SET and the service writes the delta (add/remove),
-  so a checkbox never maps to "add" or "remove" by itself.
+  so a checkbox never maps to "add" or "remove" by itself. A `dashboard` key's row (L5) has
+  its OWN disclosure — **Edit dashboard folders** — posting to its own route with the FOLDER
+  picker (the workspace's dashboard-name folders, root first), never a branch inside the
+  endpoint form; the route is `dashboard.key.bind`.
 
 **One fragment, three renders.** The page, the post-create refresh and the rows a delete or
 association save swaps in all render `api/keys :: keysTable` / `:: keyRows` from one row model

@@ -100,7 +100,7 @@ frames and records are plain data. The migration lands in `modules/app/src/main/
 ## 2. Data model — one migration, two tables
 
 The migration is **the next free `V__` at the build lane's dispatch, recorded in its handback**
-(on this base the latest applied is V43 `dashboard_refreshes`; main now carries V44 (353) and V46 (332), V45 is L5's (367), unmerged;
+(on this base the latest applied is V43 `dashboard_refreshes`; main now carries V44 (353), V45 (367, L5) and V46 (332);
 the residue lane may take one — a lane never guesses, it reads `db/migration/` at dispatch). The
 mould is V39 (`parameter_sets.sql`) for the constraint style; the principal/identity columns copy
 V43's `dashboard_refreshes` (metadata-db §4.34, `:1304`).

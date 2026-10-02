@@ -58,6 +58,9 @@ data class ApiKey(
 
     /** True when this key is an `mcp` key — a member-role credential over `/mcp` only (A13). */
     val isMcpKey: Boolean get() = kind == ApiKeyKind.MCP
+
+    /** True when this key serves the dashboard runtime under its folder bindings (L5, §7.7). */
+    val isDashboardKey: Boolean get() = kind == ApiKeyKind.DASHBOARD
 }
 
 /**

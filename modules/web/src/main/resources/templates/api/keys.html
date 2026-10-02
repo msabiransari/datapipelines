@@ -76,12 +76,15 @@
           <td><span th:text="${k.createdBy}">Alice</span></td>
           <td>
             <!-- The root binding reads as the whole-tree wildcard, not a doubled slash: it
-                 authorises everything beneath the root. -->
+                 authorises everything beneath the root. Endpoint kinds show their paths, a
+                 `dashboard` key (L5) its FOLDERS of the dashboard name space (no leading
+                 slash — dashboard names have none). -->
             <span class="app-chips" th:if="${not #lists.isEmpty(k.boundPaths)}">
               <span class="app-chip app-chip-mono" th:each="p : ${k.boundPaths}"
                     th:text="${p == '/'} ? '/**' : ${p} + '/**'">/nyc/**</span>
             </span>
             <span class="app-card-note" th:if="${#lists.isEmpty(k.boundPaths) and k.kind == 'endpoint'}">none — authorises nothing</span>
+            <span class="app-card-note" th:if="${#lists.isEmpty(k.boundPaths) and k.kind == 'dashboard'}">none — serves nothing</span>
             <span class="app-card-note" th:if="${k.kind == 'server'}">promotion routes</span>
           </td>
           <!-- 282: a relative age sorts by its absolute instant (the title it shows); "never"
@@ -111,6 +114,23 @@
                   <span class="ds-mono" th:text="${node == '/'} ? '/** (everything)' : ${node} + '/**'">/nyc/**</span>
                 </label>
                 <button type="submit" class="ds-button ds-button-secondary ds-button-sm">Save associations</button>
+              </form>
+            </details>
+            <!-- L5 — the dashboard key's own binding editor: its own route, its own picker
+                 (the FOLDERS of the workspace's dashboard name space), never a branch inside
+                 the endpoint form. -->
+            <details class="app-assoc" th:if="${k.isLive and k.kind == 'dashboard' and (canAdminWorkspace == true or isSuperAdmin == true)}">
+              <summary class="ds-button ds-button-ghost ds-button-sm">Edit dashboard folders</summary>
+              <form class="app-assoc-form" th:if="${canAdminWorkspace == true or isSuperAdmin == true}"
+                    th:attr="hx-post=@{/partials/api-keys/{id}/dashboard-bindings(id=${k.id})}"
+                    hx-target="#keys-table-body" hx-swap="innerHTML">
+                <label class="app-picker-row" th:each="folder : ${dashboardFolders}">
+                  <input type="checkbox" name="bindings" th:value="${folder}"
+                         th:checked="${#lists.contains(k.boundPaths, folder)}"
+                         data-verb="key-bind">
+                  <span class="ds-mono" th:text="${folder == '/'} ? '/** (every dashboard)' : ${folder} + '/**'">finance/dashboards/**</span>
+                </label>
+                <button type="submit" class="ds-button ds-button-secondary ds-button-sm">Save dashboard folders</button>
               </form>
             </details>
             <button th:if="${k.isLive and (canAuthor == true or canAdminWorkspace == true or isSuperAdmin == true) and (k.kind != 'server' or isSuperAdmin == true)}" data-verb="key-revoke"

@@ -1,6 +1,6 @@
 # Dashboards
 
-**Status:** v0.17 — the two documents and their lifecycle (#10, lane L1a); the REST routes, the MCP tools and the
+**Status:** v0.18 — the two documents and their lifecycle (#10, lane L1a); the REST routes, the MCP tools and the
 permissions (§4, lane L1b); the transfer routes and their limits' honest contract (§3.3, lanes L1c/L1c-b/L1c-c: the
 import's atomicity, the RELEASE rules on a landing, the aggregate count ceiling, the wire's per-family arms); the server
 runtime (§5, lane L2; #343's released pins and stream authority); the client runtime (§6, lanes L3a/L3a-b/L3a-c); the
@@ -381,7 +381,13 @@ The two transport key roles (`api_caller`, `promotion_receiver`) hold none of th
 RELEASED dashboard newer than the promotion target's whose EVERY source pipeline her pipeline lens admits — so her
 dashboards never outrun her pipelines — and the visualizations those dashboards pin; anything else answers as an absent
 id. The two import rows landed with the transfer routes (L1c — the workspace-admin verb, the ruling above), the execute
-row lands with the runtime (L2), and the key-binding row and the `dashboard_viewer` key column with the key kind (L5).
+row with the runtime (L2), and the key-binding row and the `dashboard_viewer` key column with the key kind (L5, #367):
+a `dashboard` key's ONE role is `dashboard_viewer`, holding exactly `dashboard.read` and `dashboard.execute` —
+`bound` in both cells, because the BINDINGS ARE THE LENS. The key's bindings are folders of the dashboard NAME space
+(`dashboard_key_bindings`, the `endpoint_key_bindings` twin): a folder prefix binds every dashboard beneath it, a
+deeper binding REPLACES an inherited one (R-EP2 verbatim), and an unbound key serves NOTHING — the family's ordinary
+404. The kind reaches the runtime and refreshes routes only; every other family refuses it centrally
+([Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings)).
 
 ### 4.2 Validate is an author verb
 
@@ -552,7 +558,10 @@ dashboard she can read but holds no `execution.read`, so her refresh names no ex
 
 ### 5.8 What is not here
 
-The dashboard draft preview (#369, unowned after the L4 split) and the `dashboard` key kind and its confinement (L5): until L5, only signed-in sessions reach these routes and no MCP tool refreshes a dashboard. The first-party pages are §7 (L3b).
+The dashboard draft preview (#369, unowned after the L4 split) and the visualization tests (L4). The `dashboard` key kind IS here now (L5, #367): an external
+application's backend holds a `dashboard` key and proxies the runtime routes — §6.5 is the wire contract and
+[Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings) the kind's specification. No MCP tool refreshes a
+dashboard. The first-party pages are §7 (L3b).
 
 ## 6. The client runtime (L3a)
 
@@ -672,7 +681,7 @@ boost); the first-party pages apply that (L3b), and the runtime's two-bundle ref
 - **`"session"`** — the signed-in app: every request carries the session cookie (`credentials:
   "same-origin"`) and every POST carries the `DP-CSRF-Token` double-submit header read from the
   `dp_csrf` cookie, exactly like the app's own scripts.
-- **`{ proxyBaseUrl }`** — an external application's backend holds a `dashboard` key (L5) and proxies
+- **`{ proxyBaseUrl }`** — an external application's backend holds a `dashboard` key (L5, #367) and proxies
   the SAME FOUR runtime paths under its base. The runtime sends the same request bodies and Accept
   headers to `{proxyBaseUrl}/api/v1/dashboards/{id}/runtime/…` with `credentials: "omit"` and NO CSRF
   header — the key never reaches the browser, and the browser offers it nothing. THE PROXY WIRE
@@ -687,6 +696,19 @@ boost); the first-party pages apply that (L3b), and the runtime's two-bundle ref
   judges them unchanged, and an abort answers at once. The runtime issues NO `fetch` in this mode, and `init` refuses
   `fixtures` beside a `baseUrl` or `credentials`; the lifecycle, the adapters, the renderers and the layout are the
   same code a board runs.
+- **The reference proxy is `examples/dashboard-proxy/proxy.mjs`** (dependency-free Node >= 18; `DP_BASE_URL` and
+  `DASHBOARD_KEY` from env; `node proxy.mjs` — the README beside it). Its conformance test is
+  `modules/web/src/test/js/dashboard-proxy.test.mjs` (a stub upstream proving the byte-for-byte relay, the header
+  stripping, the four-route fence, the streaming timing and the envelope pass-through — it FAILS on a buffered
+  proxy), and `tests/integration-tests/.../DashboardKeyE2eTest.kt` runs the script against the real application
+  with a real key. `/refreshes` is deliberately NOT relayed: the refreshes routes are owner-scoped by the key, so
+  a host relaying them would let one end user read (and abort) another's refresh of the shared key — the fence is
+  the proxy (a fifth path answers the proxy's own 404), and the host may build its own per-user history.
+- **One key = one budget.** The SSE stream cap (`datapipelines.sse.max-streams-per-user`,
+  [Configuration §3.6](configuration.md)) and the rate limit are keyed on the key's identity, so every end user
+  behind one proxy shares that key's budget. Size `max-streams-per-user` for the host's expected concurrency; the
+  refresh records of a key principal carry `principal_key_id` (never a person), and its executions are attributed
+  `executed_by_key_kind = 'dashboard'`.
 
 ### 6.6 The states, notifications and the CSP
 
@@ -798,6 +820,7 @@ full navigation).
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-01 | v0.18 | L5 (#367, #10) the `dashboard` key kind | **§4.1: the `dashboard_viewer` column and the binding row are HERE** — the key's one role holds `dashboard.read` + `dashboard.execute`, `bound` in both cells, the bindings ARE the lens (`dashboard_key_bindings`, R-EP2 verbatim: deeper replaces, unbound = the family 404). **§5.8:** the key kind is no longer "not here" — the runtime routes have a non-session caller. **§6.5:** the wire contract gained its implementation — the reference proxy is `examples/dashboard-proxy/proxy.mjs`, its conformance test `dashboard-proxy.test.mjs` (the streaming timing is the buffering detector) and the real-stack E2E; `/refreshes` is deliberately not relayed (owner-scoped by the key; one key = one budget, sized by `max-streams-per-user`); refresh rows carry `principal_key_id`, executions `executed_by_key_kind = 'dashboard'`. |
 | 2026-10-01 | v0.17 | L4b (#353) the test workflow on the wire | **New §3.4.1** — the five-step workflow over REST and MCP (start, the session-less preview page, submit, the single-use screenshot upload, the human release), the confinement (each capability opens one route for one run; the starter re-judged at the moment of use; one indistinguishable answer for every capability failure) and the lensed evidence reads; §3.4's retention bullet gains the UI sentence (an author who re-tests keeps only the last screenshot). **§6.5:** the runtime's fixture mode (the transport swapped, nothing else; no `fetch`). §4.4 names the two test tools; §5.8 no longer lists the test surfaces. |
 | 2026-10-01 | v0.16 | 332 (#332, #330, #331) the lifecycle audit + the pins projection | **§3:** the five human verbs and the release audit (the `dashboard.*` events, the cascaded visualization releases named with `cascade_from_dashboard_id`) — the pipelines mould, ids/names/versions/counts only. |
 | 2026-10-01 | v0.15 | L4a (#352) the test sessions and the release gate — renumbered at merge after #356's v0.14 | **New §3.4 The test sessions and the evidence** — the durable run per session over the exact draft hash, the two hash-only capabilities (preview; the single-use screenshot upload minted at submit), the mechanical check (the reduced vendored 4.1.1 plot-schema at save AND release, binding type rules, the real fixture evaluation, static assertion feasibility, `not_available` rendered state), the screenshot's detected-type validation and retention (D35), and the release gate's installed verdicts (§3.1). §2.1.2's Plotly schema is the deep one now; §4.4's test tools and §5.8's test surfaces are explicitly L4b's (#353), the dashboard draft preview is #369's and marked unavailable until then. No new route, tool or permission row. **At merge (the orchestrator's follow-up):** an OPEN latest session refuses `tests_missing`/`run_open` and a RUNNING row past its deadline is `run_expired` without a sweep (F1/F6); the mechanical report keeps its first 100 failures and COUNTS the rest (`failures_dropped`, F2); the upload consume stamps the app clock (F3); a 12-byte or top-bit RIFF WebP is `truncated`, not a 500 (F4); the gate's draft lock is `FOR NO KEY UPDATE` so two releases serialize (F5). |

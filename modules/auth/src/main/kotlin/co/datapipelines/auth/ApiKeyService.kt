@@ -211,6 +211,13 @@ open class ApiKeyService(
                     else -> throw IllegalArgumentException("A server key's role is promotion_receiver.")
                 }
             }
+
+            ApiKeyKind.DASHBOARD -> {
+                when (requested) {
+                    null, KeyRole.DASHBOARD_VIEWER -> KeyRole.DASHBOARD_VIEWER
+                    else -> throw IllegalArgumentException("A dashboard key's role is dashboard_viewer.")
+                }
+            }
         }
 
     /**

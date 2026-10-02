@@ -20,6 +20,7 @@
     <span class="app-chip app-chip-mono" th:each="b : ${keyBindings}"
           th:text="${b == '/'} ? '/**' : ${b} + '/**'">/nyc/**</span>
     <span class="app-chip app-chip-mono" th:if="${keyKind == 'server'}">promotion routes</span>
+    <span class="app-chip app-chip-mono" th:if="${keyKind == 'dashboard'}">bind dashboard folders on its card</span>
     <span class="app-chip app-chip-mono" th:text="${keyExpires != null} ? 'expires ' + ${keyExpires} : 'never expires'">never expires</span>
   </div>
   <p class="u-secondary u-text-sm u-m0"><span th:text="${keyName}">name</span> created.</p>

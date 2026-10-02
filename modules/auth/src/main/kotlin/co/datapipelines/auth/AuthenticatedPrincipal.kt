@@ -139,6 +139,14 @@ data class AuthenticatedPrincipal(
     val isServerKey: Boolean get() = keyKind == ApiKeyKind.SERVER
 
     /**
+     * True when this principal is a `dashboard` key (L5, §7.7): its authority is
+     * [KeyRole.DASHBOARD_VIEWER] on the runtime routes of the dashboards its folder bindings
+     * cover. Refused everywhere the runtime surface does not reach — centrally, in
+     * [ScopeInterceptor] before any handler and in `McpAuthFilter` on `/mcp`.
+     */
+    val isDashboardKey: Boolean get() = keyKind == ApiKeyKind.DASHBOARD
+
+    /**
      * Instance super admin (D-R1/D-R8): an implicit member of every workspace, with every
      * capability, and every action taken outside an explicit membership is audited with
      * `acting_via=super_admin`.
