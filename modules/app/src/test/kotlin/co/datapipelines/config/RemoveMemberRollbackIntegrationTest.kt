@@ -368,8 +368,9 @@ class RemoveMemberRollbackIntegrationTest {
         displayName: String,
         superAdmin: Boolean,
     ): Any {
-        val constructor = Class.forName(PRINCIPAL_CLASS).kotlin.primaryConstructor
-            ?: error("AuthenticatedPrincipal must have a primary constructor")
+        val constructor =
+            Class.forName(PRINCIPAL_CLASS).kotlin.primaryConstructor
+                ?: error("AuthenticatedPrincipal must have a primary constructor")
         val byName = constructor.parameters.associateBy { it.name }
         return constructor.callBy(
             buildMap {
