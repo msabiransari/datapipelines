@@ -17,7 +17,9 @@ import co.datapipelines.web.api.ApiErrors
 import co.datapipelines.web.api.ApiException
 import co.datapipelines.web.api.ApiResponse
 import co.datapipelines.web.api.currentPrincipal
+import co.datapipelines.web.requestlimits.StrictRequestBodies
 import com.fasterxml.jackson.annotation.JsonProperty
+import com.fasterxml.jackson.databind.JsonNode
 import org.springframework.http.HttpStatus
 import org.springframework.transaction.annotation.Transactional
 import org.springframework.web.bind.annotation.DeleteMapping
@@ -91,9 +93,11 @@ class EndpointsController(
     @RequiredScope(Permission.ENDPOINT_PUBLISH)
     @Transactional("metadataTransactionManager")
     fun create(
-        @RequestBody body: CreateEndpointRequest,
-    ): ApiResponse<Map<String, Any?>> =
-        ApiResponse.of(
+        @RequestBody tree: JsonNode,
+    ): ApiResponse<Map<String, Any?>> {
+        // #333: the strict read - see StrictRequestBodies.
+        val body = StrictRequestBodies.bind<CreateEndpointRequest>(tree)
+        return ApiResponse.of(
             publishing
                 .publish(
                     principal = currentPrincipal(),
@@ -103,6 +107,7 @@ class EndpointsController(
                     description = body.description.orEmpty(),
                 ).toResponse(),
         )
+    }
 
     /**
      * §19.5 — the workspace's endpoints, or one of them with `?path=`.
@@ -157,8 +162,9 @@ class EndpointsController(
     @RequiredScope(Permission.API_KEY_BIND)
     @Transactional("metadataTransactionManager")
     fun bind(
-        @RequestBody body: BindEndpointKeyRequest,
+        @RequestBody tree: JsonNode,
     ): ApiResponse<Map<String, Any?>> {
+        val body = StrictRequestBodies.bind<BindEndpointKeyRequest>(tree)
         val principal = currentPrincipal()
         val key = resolveKey(body.apiKeyId, body.apiKeyName)
         endpointKeys.bind(principal, key.id, body.pathPrefix)

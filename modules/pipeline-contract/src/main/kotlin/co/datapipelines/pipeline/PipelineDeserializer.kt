@@ -5,6 +5,11 @@ import co.datapipelines.typesystem.ParameterCardinality
 import co.datapipelines.typesystem.ParameterConstraints
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.databind.exc.InvalidNullException
+import com.fasterxml.jackson.databind.exc.MismatchedInputException
+import com.fasterxml.jackson.databind.exc.UnrecognizedPropertyException
+import java.math.BigDecimal
+import java.math.BigInteger
 
 /**
  * Reads pipeline JSON into the typed model, applying the D1 omitted-`output` default
@@ -26,10 +31,18 @@ import com.fasterxml.jackson.databind.ObjectMapper
  *
  * ## Malformed JSON is not this class's error
  *
- * A syntax error, or a `nodes` that is a string rather than an array, propagates as
- * Jackson's own exception. §13 has no code for "this is not pipeline JSON" — that is a
- * transport-level concern the REST layer answers (rest-api §10.2), and inventing a code here
- * would put a second, drifting catalog in the codebase.
+ * A syntax error, an unknown key, or a required key that is missing propagates as Jackson's own
+ * exception. §13 has no code for "this is not pipeline JSON" — that is a transport-level concern
+ * the REST layer answers (rest-api §10.2), and inventing a code here would put a second,
+ * drifting catalog in the codebase.
+ *
+ * ## A value of the wrong JSON type IS this class's refusal (#333)
+ *
+ * A number or a boolean where the model declares a `String` is a different failure: Jackson
+ * binds it as text unless the mapper's coercion config refuses it ([PipelineJson] does), and its
+ * own message QUOTES the value. [WrongTypeRefusal] turns it into a [DeserializationOutcome.Rejected]
+ * naming the path and the expected shape — never the value — under the family's existing
+ * malformed-body stand-in, `schema_version_unsupported`, with `details.reason` `wrong_type`.
  */
 class PipelineDeserializer(
     private val mapper: ObjectMapper = PipelineJson.objectMapper(),
@@ -47,7 +60,11 @@ class PipelineDeserializer(
     fun fromTree(tree: JsonNode): DeserializationOutcome {
         val failures = WireValueScan(tree).run()
         return if (failures.isEmpty()) {
-            DeserializationOutcome.Parsed(mapper.treeToValue(tree, Pipeline::class.java))
+            try {
+                DeserializationOutcome.Parsed(mapper.treeToValue(tree, Pipeline::class.java))
+            } catch (err: MismatchedInputException) {
+                WrongTypeRefusal.of(err)?.let { DeserializationOutcome.Rejected(ValidationResult(listOf(it))) } ?: throw err
+            }
         } else {
             DeserializationOutcome.Rejected(ValidationResult(failures))
         }
@@ -317,4 +334,54 @@ private class WireValueScan(
     ) {
         failures += validationFailure(code, path, message, details)
     }
+}
+
+/**
+ * The refusal for a document whose JSON value has the wrong shape for its declared field (#333).
+ *
+ * The path is spelled the way the validator's paths are (`nodes[0].description`), from the field
+ * names and indexes Jackson recorded, and clipped as reflected input; the message names the
+ * expected shape and never Jackson's text, which contains the offending value. A failure that is
+ * not a wrong type (an unknown key, a missing required key) is not this class's: [of] is null.
+ */
+private object WrongTypeRefusal {
+    fun of(err: MismatchedInputException): ValidationFailure? {
+        if (err is UnrecognizedPropertyException || err is InvalidNullException) return null
+        val path = pathOf(err)
+        val expected = expectedShape(err.targetType)
+        val subject = if (path.isEmpty()) "The pipeline document" else "'$path'"
+        return validationFailure(
+            PipelineErrorCodes.Validation.SCHEMA_VERSION_UNSUPPORTED,
+            path,
+            "$subject has the wrong JSON type: expected $expected.",
+            mapOf("reason" to "wrong_type", "expected" to expected),
+        )
+    }
+
+    private fun pathOf(err: MismatchedInputException): String =
+        err.path
+            .fold("") { acc, ref ->
+                when {
+                    ref.fieldName != null -> if (acc.isEmpty()) ref.fieldName else "$acc.${ref.fieldName}"
+                    ref.index >= 0 -> "$acc[${ref.index}]"
+                    else -> acc
+                }
+            }.truncateForErrorPath()
+
+    private fun expectedShape(target: Class<*>?): String =
+        when {
+            target == null -> "a value of the declared type"
+            CharSequence::class.java.isAssignableFrom(target) -> "a string"
+            target == Boolean::class.javaObjectType || target == Boolean::class.javaPrimitiveType -> "a boolean"
+            target in INTEGERS || target == BigInteger::class.java -> "an integer"
+            target in DECIMALS || target == BigDecimal::class.java || target == Number::class.java -> "a number"
+            target.isArray || Collection::class.java.isAssignableFrom(target) -> "an array"
+            else -> "an object"
+        }
+
+    private val INTEGERS: Set<Class<*>> =
+        setOf(Int::class, Long::class, Short::class, Byte::class).flatMap { listOf(it.javaPrimitiveType!!, it.javaObjectType) }.toSet()
+
+    private val DECIMALS: Set<Class<*>> =
+        setOf(Double::class, Float::class).flatMap { listOf(it.javaPrimitiveType!!, it.javaObjectType) }.toSet()
 }

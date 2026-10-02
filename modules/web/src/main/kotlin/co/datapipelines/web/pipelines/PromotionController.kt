@@ -4,6 +4,8 @@ import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.web.api.ApiResponse
 import co.datapipelines.web.api.currentPrincipal
+import co.datapipelines.web.requestlimits.StrictRequestBodies
+import com.fasterxml.jackson.databind.JsonNode
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
@@ -57,6 +59,9 @@ class PromotionController(
     @PostMapping("/push")
     @RequiredScope(Permission.PROMOTION_PUSH)
     fun push(
-        @RequestBody batch: PromotionWire.Batch,
-    ): ApiResponse<PromotionWire.Applied> = ApiResponse.of(receiveService.apply(batch, currentPrincipal()))
+        @RequestBody tree: JsonNode,
+    ): ApiResponse<PromotionWire.Applied> =
+        // #333: the strict read. The batch keeps `ignoreUnknown` (a cross-version wire), so only the
+        // coercion half applies to it - a number where a string is declared is refused.
+        ApiResponse.of(receiveService.apply(StrictRequestBodies.bind<PromotionWire.Batch>(tree), currentPrincipal()))
 }

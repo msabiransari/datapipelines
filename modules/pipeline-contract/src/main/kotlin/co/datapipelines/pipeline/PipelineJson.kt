@@ -1,8 +1,14 @@
 package co.datapipelines.pipeline
 
+import com.fasterxml.jackson.databind.DeserializationFeature
+import com.fasterxml.jackson.databind.MapperFeature
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.databind.cfg.CoercionAction
+import com.fasterxml.jackson.databind.cfg.CoercionInputShape
 import com.fasterxml.jackson.databind.json.JsonMapper
+import com.fasterxml.jackson.databind.type.LogicalType.Textual
 import com.fasterxml.jackson.module.kotlin.KotlinModule
+import com.fasterxml.jackson.databind.type.LogicalType.Boolean as JacksonBoolean
 
 /**
  * The `ObjectMapper` the pipeline contract is bound with.
@@ -32,6 +38,13 @@ object PipelineJson {
             .builder()
             .addModule(KotlinModule.Builder().build())
             .addModule(NodeOutputModule.create())
+            .disable(MapperFeature.ALLOW_COERCION_OF_SCALARS)
+            .disable(DeserializationFeature.ACCEPT_FLOAT_AS_INT)
+            .withCoercionConfig(Textual) { config ->
+                listOf(CoercionInputShape.Integer, CoercionInputShape.Float, CoercionInputShape.Boolean).forEach {
+                    config.setCoercion(it, CoercionAction.Fail)
+                }
+            }.withCoercionConfig(JacksonBoolean) { it.setCoercion(CoercionInputShape.Integer, CoercionAction.Fail) }
             .build()
 }
 

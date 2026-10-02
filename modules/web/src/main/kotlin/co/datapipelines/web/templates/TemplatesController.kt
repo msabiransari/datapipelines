@@ -8,6 +8,7 @@ import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.RequestLimits
 import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.pipeline.TemplateType
+import co.datapipelines.templates.BindFailure
 import co.datapipelines.templates.Template
 import co.datapipelines.templates.TemplateDeserializationOutcome
 import co.datapipelines.templates.TemplateDeserializer
@@ -613,11 +614,14 @@ class TemplatesController(
             } catch (
                 @Suppress("SwallowedException") err: com.fasterxml.jackson.databind.JsonMappingException,
             ) {
-                // The catalogued refusal names the failure; the original is a mapping detail.
+                // The catalogued refusal names the failure; the original is a mapping detail - and
+                // quotes the caller's value, so BindFailure words it from the path and the expected
+                // shape and clips whatever it reflects (#333).
+                val failure = BindFailure.of(err)
                 throw ApiException(
                     PipelineErrorCodes.Template.CONTRACT_INVALID,
-                    "The 'input' object does not bind: ${err.originalMessage}.",
-                    mapOf("rule" to "unknown_field", "path" to err.pathReference),
+                    failure.messageFor("The 'input' object does not bind"),
+                    mapOf("rule" to failure.rule, "path" to failure.path),
                 )
             }
         val now =
