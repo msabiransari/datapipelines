@@ -838,7 +838,8 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
                 }
             }
         throw AssertionError(
-            "the abort was not acknowledged: acked=$acked | row status=${row["status"]} finished=${row["finished"]} | client=$client | $path",
+            "the abort was not acknowledged: acked=$acked" +
+                " | row status=${row["status"]} finished=${row["finished"]} | client=$client | $path",
         )
     }
 

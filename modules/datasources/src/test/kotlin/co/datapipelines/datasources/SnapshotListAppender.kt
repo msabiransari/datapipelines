@@ -14,6 +14,12 @@ import org.slf4j.LoggerFactory
  * Logback's own; nothing here filters or formats beyond [messages]' `formattedMessage`.
  */
 class SnapshotListAppender : ListAppender<ILoggingEvent>() {
+    init {
+        // An appender Logback has not started swallows every event (AppenderBase's started guard):
+        // every use of this class captures, so it starts itself.
+        start()
+    }
+
     override fun append(eventObject: ILoggingEvent) {
         synchronized(list) { super.append(eventObject) }
     }

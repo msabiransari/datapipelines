@@ -22,6 +22,10 @@ import org.junit.jupiter.api.TestMethodOrder
  * `the positive CSP measurement is red when the stylesheet is removed`.
  */
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
+// LargeClass: the conformance cases share the host-page fixtures and the chip/abort harnesses
+// (the DashboardBrowserSuite mould's own reason) — a split would thread all three through helpers
+// for no reader's benefit.
+@Suppress("LargeClass")
 class DashboardConformanceBrowserTest : DashboardBrowserSuite() {
     @Test
     @Order(1)

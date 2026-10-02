@@ -163,7 +163,8 @@ class DashboardPageConformanceBrowserTest : DashboardBrowserSuite() {
         val refreshId =
             page.evaluate("() => window.__dpPage.instance.refresh({ scope: 'targets', targets: ['slowchart'] })") as String
         page.waitForFunction(
-            "() => window.__dpPage.notifications.some(function (n) { return n.code === 'refresh.completed' && n.refreshId === '$refreshId'; })",
+            "() => window.__dpPage.notifications.some(function (n) { return n.code === 'refresh.completed' &&" +
+                " n.refreshId === '$refreshId'; })",
         )
         chipStateIsNot("slowchart", "abort")
         val delivered =
