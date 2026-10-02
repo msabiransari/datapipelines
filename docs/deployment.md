@@ -1,9 +1,9 @@
 # Deployment & Packaging Specification
 
-**Status:** v1.39
+**Status:** v1.40
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
-**Last updated:** 2026-09-28
+**Last updated:** 2026-10-02
 
 ---
 
@@ -446,6 +446,16 @@ Each pod has its own volume; Kubernetes removes it with the pod. Size it for con
 queries and see [Configuration §3.24](configuration.md#324-lake-datasource-engine-limits-dp-lake)
 for explicit paths and cleanup after a process crash. Docker Compose uses the image's writable
 `/tmp`; custom read-only deployments must mount a writable temporary directory too.
+
+The two DuckDB operator keys (configuration.md §3.25) are named chart values:
+`duckdb.extensionDirectory` (env `DATAPIPELINES_DUCKDB_EXTENSION_DIRECTORY`) and
+`duckdb.memoryLimit` (env `DATAPIPELINES_DUCKDB_MEMORY_LIMIT`). Both default to empty, and an
+empty value renders NO env entry — the image's own bundled extension directory stays in force, so
+LAKE datasources keep their zero-egress `LOAD` behavior; a rendered `""` would override the
+image's `ENV` and push every LAKE pool back to `INSTALL`+`LOAD`, which needs egress and a
+writable home the read-only root filesystem does not provide. Every other non-secret env key goes
+through `extraEnv`; an `extraEnv` key that double-maps either DuckDB key fails `helm template`,
+because Kubernetes does not reject duplicate `env` names and would silently honor the last one.
 
 No sticky session affinity needed. Standard `ClusterIP` service with round-robin or random load balancing.
 
@@ -1153,6 +1163,7 @@ operator.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-02 | v1.40 | 140 (#140) the Helm chart maps the DuckDB operator keys | §6.4: the reference chart gains a `duckdb` values block — `duckdb.extensionDirectory` and `duckdb.memoryLimit` (configuration.md §3.25's two env vars) — each rendered as an env entry ONLY when non-empty: an empty default inherits the image's bundled extension directory, and a rendered `""` would override the image's `ENV` and break zero-egress LAKE under the read-only root filesystem. `extraEnv` stays the escape hatch for every other non-secret key; an `extraEnv` double mapping of either DuckDB key is refused at render time. Chart version 0.1.0 → 0.1.1. `HelmDuckDbValuesSpecDriftTest` pins doc = chart values = env entries. |
 | 2026-09-30 | v1.39 | L3a (#10) the dashboards client runtime — renumbered at merge after 337's v1.38 | **New §6.2A Vendored browser assets** — where the vendor manifest and its audit tests live, and the Plotly 4.1.1 provenance: the two custom bundles' exact rebuild recipe (clone the pinned tag, `npm run custom-bundle` per trace list, commit the outputs), the sizes and the npm tarball sha1, and the plotly.css design-around that keeps `style-src` at `'self'` plus Cytoscape's one hash. No code, route or policy change. |
 | 2026-09-30 | v1.38 | 337 (#337) structured local logging | **§5.2 gains "Log output format — turning JSON on"**: what each deploy path resolves today (`app.sh`/VPS `console` from `defaults.env`, raw compose and bare jar `json`), the operator recipe for turning JSON on (set the env in `secrets.env`, redeploy), the startup refusal on an unknown value, and the statement that redaction runs under both values. No deploy file changed — the declared env var just works now. |
 | 2026-09-29 | v1.37 | the 316 merge's review (#316, #266) | §6's Deployment bullet and §8.3.2: the grace is **60 s** (chart and compose) — the sum had left out 266's persistence drain (`shutdown-drain-ms`, 10 s), so at the configured maxima the runtime could kill mid-drain; §8.3.1 step 4 names the persistence drain and the scheduled jobs' scheduler stop (#316), which sits after every drain and outside the sum. `ShutdownGraceArithmeticTest` carries the new term (red at 50 s: compose needed 55, Helm 60). |
