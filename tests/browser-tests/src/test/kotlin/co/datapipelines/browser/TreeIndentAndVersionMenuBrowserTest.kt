@@ -125,7 +125,9 @@ class TreeIndentAndVersionMenuBrowserTest : BrowserSuite() {
 
         for (screen in listOf("pipelines", "templates")) {
             page.setViewportSize(1280, 900)
-            page.navigate("$baseUrl/$screen")
+            named(page, "the explorer navigation to $baseUrl/$screen") {
+                page.navigate("$baseUrl/$screen")
+            }
             page.waitForSelector(".tplx-tree")
             page.waitForLoadState(LoadState.NETWORKIDLE)
             openTestFolder()
