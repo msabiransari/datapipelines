@@ -29,6 +29,9 @@ import kotlin.concurrent.withLock
  *   store accepted the item; nothing is acknowledged from memory. The only non-awaited entry
  *   point is [submit], whose items are lost if the process dies before they are written (the
  *   documented loss window) — it has no production caller yet (the dashboard refresh event, D27).
+ * - **The commit hook precedes the caller's release** (#363): `hooks.onCommitted` runs before
+ *   `record` answers, so a metric a caller reads once the call has returned already counts this
+ *   commit. Hooks are cheap and never throw by contract ([BatchingContract]).
  * - **Per-key order.** One key, one partition, one writer, FIFO, one batch at a time; a failed
  *   batch is retried one item at a time IN ORDER.
  * - **A bad item costs itself only.** A batch that throws is retried as singles: the item the
@@ -419,13 +422,23 @@ class BatchingWriter<T : Any>(
         return Outcome.Indeterminate
     }
 
+    /**
+     * Ends one entry. The commit hook fires BEFORE the caller is released (#363): a metric a caller
+     * reads after [record] has returned already counts this commit. Capacity is freed before the
+     * answer, so a caller that immediately records again sees the freed slot. [Entry.finishOnce]
+     * keeps the old `complete()` boolean's gate — a second [finish] is a no-op: it cannot fire the
+     * hook twice and cannot double-release the entry's capacity.
+     */
     private fun finish(
         entry: Entry<T>,
         outcome: Outcome,
         now: Long,
     ) {
-        release(entry)
-        if (entry.done.complete(outcome) && outcome == Outcome.Committed) hooks.onCommitted(now - entry.enqueuedAt)
+        if (entry.finishOnce()) {
+            if (outcome == Outcome.Committed) hooks.onCommitted(now - entry.enqueuedAt)
+            release(entry)
+            entry.done.complete(outcome)
+        }
     }
 
     // ------------------------------------------------------------------ the writers
@@ -621,11 +634,15 @@ class BatchingWriter<T : Any>(
         val enqueuedAt: Long,
     ) {
         private val state = AtomicInteger(QUEUED)
+        private val finished = AtomicBoolean(false)
         val done = CompletableFuture<Outcome>()
 
         fun take(): Boolean = state.compareAndSet(QUEUED, TAKEN)
 
         fun claim(): Boolean = state.compareAndSet(QUEUED, CLAIMED)
+
+        /** The one-completion gate: exactly one [BatchingWriter.finish] fires the hook and answers the caller. */
+        fun finishOnce(): Boolean = finished.compareAndSet(false, true)
     }
 
     /** A WARN at most once per interval — saturation is a state, not an event per item. */

@@ -116,15 +116,27 @@ class DashboardPageConformanceBrowserTest : DashboardBrowserSuite() {
     fun `abort through the page ends durably ABORTED and the acknowledged chip flips`() {
         startTrace()
         val root = ready("dpcabort")
-        val board = seedBoard(root)
+        // The 60 s hang source: the refresh is RUNNING BY CONSTRUCTION when the page aborts it —
+        // the old 3 s board let the abort lose the race against the sleep's end on a loaded runner,
+        // and the then-optimistic chip never matched the server's word (#370's CI red).
+        val board = seedHungBoard(root)
         openBoard(board)
-        page.waitForFunction("() => window.__dpPage.notifications.some(function (n) { return n.code === 'refresh.completed'; })")
         val refreshId =
-            page.evaluate("() => window.__dpPage.instance.refresh({ scope: 'targets', targets: ['slowchart'] })") as String
-        page.waitForSelector("[data-dp-viz='slowchart'] .dp-dashboard-status[data-dp-state='in-progress']")
-        val acked = page.evaluate("() => window.__dpPage.instance.abort('$refreshId')") as Map<*, *>
-        acked["abort_requested"] shouldBe true
-        page.waitForSelector("[data-dp-viz='slowchart'] .dp-dashboard-status[data-dp-state='abort']")
+            page.evaluate("() => window.__dpPage.instance.refresh({ scope: 'targets', targets: ['hungcells'] })") as String
+        page.waitForSelector("[data-dp-viz='hungcells'] .dp-dashboard-status[data-dp-state='in-progress']")
+        // The RUNNING row before the abort, as the host half's case has always done: the abort's
+        // acknowledgement is only meaningful for a refresh the read route just reported RUNNING.
+        page.waitForFunction(
+            """async () => {
+              const res = await fetch('/api/v1/dashboards/$board/refreshes/$refreshId', { credentials: 'same-origin' });
+              if (!res.ok) return false;
+              const doc = await res.json();
+              return doc.data && doc.data.status === 'RUNNING';
+            }""",
+        )
+        // A false ack names the row's status and the client path that answered, not a bare boolean (#366 red 2).
+        abortAndNameAck("window.__dpPage.instance", board, refreshId)
+        page.waitForSelector("[data-dp-viz='hungcells'] .dp-dashboard-status[data-dp-state='abort']")
         // The DURABLE outcome, read off the real route.
         page.waitForFunction(
             """async () => {
@@ -132,6 +144,48 @@ class DashboardPageConformanceBrowserTest : DashboardBrowserSuite() {
               if (!res.ok) return false;
               const doc = await res.json();
               return doc.data && doc.data.status === 'ABORTED';
+            }""",
+        )
+    }
+
+    @Test
+    @Order(8)
+    fun `a late abort of a delivered refresh ends DONE - the page's chip settles and the row stays COMPLETED`() {
+        startTrace()
+        val root = ready("dpclate")
+        // The OLD 3 s case, kept as its own truth (#370 + the #356 terminal frame): the abort lands
+        // AFTER the refresh delivered. The page's chip was settled by the terminal frame's word, the
+        // client's abort() short-circuits on its ended record — nothing turns the refresh into an
+        // abort: the chip never reads abort and the row stays COMPLETED.
+        val board = seedBoard(root)
+        openBoard(board)
+        page.waitForFunction("() => window.__dpPage.notifications.some(function (n) { return n.code === 'refresh.completed'; })")
+        val refreshId =
+            page.evaluate("() => window.__dpPage.instance.refresh({ scope: 'targets', targets: ['slowchart'] })") as String
+        page.waitForFunction(
+            "() => window.__dpPage.notifications.some(function (n) { return n.code === 'refresh.completed' &&" +
+                " n.refreshId === '$refreshId'; })",
+        )
+        chipStateIsNot("slowchart", "abort")
+        val delivered =
+            page.evaluate(
+                "() => document.querySelector('[data-dp-viz=\\'slowchart\\'] .dp-dashboard-status').getAttribute('data-dp-state')",
+            ) as String
+        (delivered == "success" || delivered == "ready") shouldBe true
+
+        // The late abort, its expected shape named: the client's record has the refresh ended, so
+        // abort() answers false without a POST — the page shows the delivered truth, never a click.
+        val acked = page.evaluate("() => window.__dpPage.instance.abort('$refreshId')") as Map<*, *>
+        val client = readClientRefresh("window.__dpPage.instance", refreshId)
+        client["ended"] shouldBe true
+        acked["abort_requested"] shouldBe false
+        chipStateIsNot("slowchart", "abort")
+        page.waitForFunction(
+            """async () => {
+              const res = await fetch('/api/v1/dashboards/$board/refreshes/$refreshId', { credentials: 'same-origin' });
+              if (!res.ok) return false;
+              const doc = await res.json();
+              return doc.data && doc.data.status === 'COMPLETED';
             }""",
         )
     }

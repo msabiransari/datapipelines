@@ -66,6 +66,52 @@ class DatasourceFileRootsTest {
     }
 
     @Test
+    fun `a symlink as the final path component whose target leaves every root is refused`() {
+        // The escape the parent-only resolution missed: toRealPath on the PARENT follows the
+        // directory links, so a file-level symlink (/roots/ok/data.duckdb -> /etc/secret.db)
+        // passed as "under the root". The FILE itself must resolve. The refusal names the rule
+        // and the path the caller wrote — never the target's name.
+        val outside = Files.createTempDirectory("dp-roots-outside")
+        val target = outside.resolve("secret.db").also { it.toFile().writeText("x") }
+        Files.createSymbolicLink(root.resolve("data.duckdb"), target)
+        val roots = DatasourceFileRoots(listOf(root))
+
+        val refusal = roots.refusalFor(root.resolve("data.duckdb").absolutePathString())
+
+        refusal shouldContain "not under any declared datasource file root"
+        refusal shouldContain DatasourceFileRootsProperties.CONFIG_KEY
+        org.junit.jupiter.api.Assertions
+            .assertFalse(refusal!!.contains("secret.db")) { refusal }
+    }
+
+    @Test
+    fun `a symlink as the final path component whose target stays under a root is admitted`() {
+        val target = root.resolve("real-data.duckdb").also { it.toFile().writeText("x") }
+        Files.createSymbolicLink(root.resolve("linked.duckdb"), target)
+        val roots = DatasourceFileRoots(listOf(root))
+
+        roots.refusalFor(root.resolve("linked.duckdb").absolutePathString()) shouldBe null
+    }
+
+    @Test
+    fun `a broken symlink as the final path component is refused - the driver would create the target outside any checkable root`() {
+        // Found while writing the symlink cases: a symlink whose target does not exist fails
+        // toRealPath AND reads as "missing" through a following exists(), so the creation-path
+        // fallback would admit it — and the driver's open then CREATES the file wherever the
+        // dangling link points, outside every root. Fail closed: an entry that exists but cannot
+        // be followed to a real location is refused, not resolved through its parent.
+        val target = Files.createTempDirectory("dp-roots-gone").resolve("gone.db").also { Files.deleteIfExists(it) }
+        Files.createSymbolicLink(root.resolve("dangling.duckdb"), target)
+        val roots = DatasourceFileRoots(listOf(root))
+
+        val refusal = roots.refusalFor(root.resolve("dangling.duckdb").absolutePathString())
+
+        refusal shouldContain DatasourceFileRootsProperties.CONFIG_KEY
+        org.junit.jupiter.api.Assertions
+            .assertFalse(refusal!!.contains("gone.db")) { refusal }
+    }
+
+    @Test
     fun `the binding half refuses a bad root at boot, naming the key`() {
         val missing = root.resolve("not-there")
 

@@ -22,6 +22,10 @@ import org.junit.jupiter.api.TestMethodOrder
  * `the positive CSP measurement is red when the stylesheet is removed`.
  */
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
+// LargeClass: the conformance cases share the host-page fixtures and the chip/abort harnesses
+// (the DashboardBrowserSuite mould's own reason) — a split would thread all three through helpers
+// for no reader's benefit.
+@Suppress("LargeClass")
 class DashboardConformanceBrowserTest : DashboardBrowserSuite() {
     @Test
     @Order(1)
@@ -55,6 +59,18 @@ class DashboardConformanceBrowserTest : DashboardBrowserSuite() {
         // POSITIVE: Plotly's own stylesheet governs the chart root — the "Open Sans" font stack is a
         // rule ONLY plotly.css (or the injection the design-around skipped) could supply; the CSS
         // initial value of font-family is theme-dependent and never this.
+        // The measurement syncs on the FACT it asserts — the chart ROOT's presence (#366 red 1):
+        // the render counter counts every renderer's render, so `renders.length >= 1` has been true
+        // while no plotly root existed yet (a table or KPI drew first) and the evaluate below read
+        // `getComputedStyle(null)` — the CI red's face. ATTACHED, not visible: the container div is
+        // a real, styled element the moment it is attached (computed style needs no box).
+        page.waitForSelector(
+            "#board .js-plotly-plot .plotly",
+            com.microsoft.playwright.Page
+                .WaitForSelectorOptions()
+                .setState(com.microsoft.playwright.options.WaitForSelectorState.ATTACHED),
+        )
+        page.waitForFunction("() => window.__dp.renders.length >= 1")
         val fontFamily =
             page.evaluate(
                 "() => getComputedStyle(document.querySelector('.js-plotly-plot .plotly')).fontFamily",
@@ -99,15 +115,17 @@ class DashboardConformanceBrowserTest : DashboardBrowserSuite() {
     @Order(4)
     fun `abort is acknowledged by the real handler, ends durably ABORTED, and a finished refresh is a genuine 404`() {
         val root = ready("dpabort")
+        // The 60 s hang source: the refresh is RUNNING BY CONSTRUCTION while the abort lands —
+        // the old 3 s source made the abort race the sleep's end, and on a loaded runner the
+        // acknowledgement described a refresh the server had already finished (#370's face).
         installHostPage()
-        val board = seedBoard(root)
+        val board = seedHungBoard(root)
         openHost(board)
-        page.waitForFunction("() => window.__dp.renders.length >= 3")
 
-        // A slow refresh (the 3 s sleep source), targeted at the slow chart.
+        // A hung refresh, targeted at the board's one occurrence.
         val refreshId =
-            page.evaluate("() => window.__dp.instance.refresh({ scope: 'targets', targets: ['slowchart'] })") as String
-        chipStateIs("slowchart", "in-progress")
+            page.evaluate("() => window.__dp.instance.refresh({ scope: 'targets', targets: ['hungcells'] })") as String
+        chipStateIs("hungcells", "in-progress")
         // The abort needs the server's row to exist: an abort that outruns the stream POST's row
         // write is 404 not_found (the finding recorded on #10) — wait for the row, deterministically.
         page.waitForFunction(
@@ -119,13 +137,10 @@ class DashboardConformanceBrowserTest : DashboardBrowserSuite() {
             }""",
         )
         // Abort it; the chip flips to abort locally and the REAL handler answers 202 (the runtime's
-        // own abort promise resolving is the acknowledgement, not a stub's).
-        val acked =
-            page.evaluate(
-                "() => window.__dp.instance.abort('$refreshId')",
-            ) as Map<*, *>
-        acked["abort_requested"] shouldBe true
-        chipStateIs("slowchart", "abort")
+        // own abort promise resolving is the acknowledgement, not a stub's). A false ack names the
+        // row's status and the client path that answered instead of a bare boolean (#366 red 2).
+        abortAndNameAck("window.__dp.instance", board, refreshId)
+        chipStateIs("hungcells", "abort")
         // The DURABLE outcome: the refresh row the server owns reads ABORTED (poll the real read route).
         page.waitForFunction(
             """async () => {
@@ -135,12 +150,6 @@ class DashboardConformanceBrowserTest : DashboardBrowserSuite() {
               return doc.data && doc.data.status === 'ABORTED';
             }""",
         )
-        // The fast occurrences' state was untouched by the abort of another refresh.
-        val revenueState =
-            page.evaluate(
-                "() => document.querySelector('[data-dp-viz=\\'revenue\\'] .dp-dashboard-status').getAttribute('data-dp-state')",
-            ) as String
-        (revenueState == "ready" || revenueState == "success") shouldBe true
         // A genuine ALREADY-FINISHED abort against the real route: the finished refresh is the 404
         // idempotence — no substring stub answers for the handler here.
         val finished =
@@ -157,6 +166,68 @@ class DashboardConformanceBrowserTest : DashboardBrowserSuite() {
             ) as Map<*, *>
         (finished["status"] as Number).toInt() shouldBe 404
         finished["code"] shouldBe "dashboard.refresh.not_found"
+        drainCspViolations().filter { !it.contains("'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='") } shouldBe emptyList()
+    }
+
+    @Test
+    @Order(16)
+    fun `a late abort of a delivered refresh ends DONE - the chip settles, the row stays COMPLETED`() {
+        val root = ready("dplate")
+        // The OLD 3 s case, kept as its own truth (#370 + the #356 terminal frame): the abort lands
+        // AFTER the refresh delivered every frame. The refresh is DONE — the engine's ending rule
+        // consults the body's outcome, the client's abort() short-circuits on its ended record, and
+        // nothing turns a delivered refresh into an abort: the chip never shows abort, the row stays
+        // COMPLETED. (An abort of a still-RUNNING refresh is order 4's case, on the hang source.)
+        installHostPage()
+        val board = seedBoard(root)
+        openHost(board)
+        page.waitForFunction("() => window.__dp.renders.length >= 3")
+
+        val refreshId =
+            page.evaluate("() => window.__dp.instance.refresh({ scope: 'targets', targets: ['slowchart'] })") as String
+        page.waitForFunction(
+            """async () => {
+              const res = await fetch('/api/v1/dashboards/$board/refreshes/$refreshId', { credentials: 'same-origin' });
+              if (!res.ok) return false;
+              const doc = await res.json();
+              return doc.data && doc.data.status === 'COMPLETED';
+            }""",
+        )
+        // The slow chart delivered: the completion notification is the client's own processing
+        // signal — its data frame set success (the settle timer may have moved it on to ready);
+        // both are the delivered truth, and neither is abort.
+        page.waitForFunction(
+            "() => window.__dp.notifications.some(function (n) { return n.code === 'refresh.completed' && n.refreshId === '$refreshId'; })",
+        )
+        chipStateIsNot("slowchart", "abort")
+        val delivered =
+            page.evaluate(
+                "() => document.querySelector('[data-dp-viz=\\'slowchart\\'] .dp-dashboard-status').getAttribute('data-dp-state')",
+            ) as String
+        (delivered == "success" || delivered == "ready") shouldBe true
+
+        // The LATE abort: the client's own record has the refresh ended, so abort() answers without
+        // a POST — expected here, and named by the record read through the page, not assumed.
+        val acked = page.evaluate("() => window.__dp.instance.abort('$refreshId')") as Map<*, *>
+        val client = readClientRefresh("window.__dp.instance", refreshId)
+        client["ended"] shouldBe true
+        acked["abort_requested"] shouldBe false
+        // Nothing changed: no abort chip, the row is still COMPLETED, the other occurrences untouched.
+        chipStateIsNot("slowchart", "abort")
+        page.waitForFunction(
+            """async () => {
+              const res = await fetch('/api/v1/dashboards/$board/refreshes/$refreshId', { credentials: 'same-origin' });
+              if (!res.ok) return false;
+              const doc = await res.json();
+              return doc.data && doc.data.status === 'COMPLETED';
+            }""",
+        )
+        val revenueState =
+            page.evaluate(
+                "() => document.querySelector('[data-dp-viz=\\'revenue\\'] .dp-dashboard-status').getAttribute('data-dp-state')",
+            ) as String
+        (revenueState == "ready" || revenueState == "success") shouldBe true
+        drainCspViolations().filter { !it.contains("'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='") } shouldBe emptyList()
     }
 
     @Test
@@ -479,19 +550,6 @@ class DashboardConformanceBrowserTest : DashboardBrowserSuite() {
                     java.nio.file.Paths
                         .get("build", "reports", "dashboards-parameterized-dark.png"),
                 ),
-        )
-    }
-
-    /** The slow chart's status chip has reached [state]; the wait synchronises on the chip, never on time. */
-    private fun chipStateIs(
-        occurrence: String,
-        state: String,
-    ) {
-        page.waitForFunction(
-            """() => (function () {
-              const el = document.querySelector('[data-dp-viz="$occurrence"] .dp-dashboard-status');
-              return el ? el.getAttribute('data-dp-state') : null;
-            })() === "$state"""",
         )
     }
 

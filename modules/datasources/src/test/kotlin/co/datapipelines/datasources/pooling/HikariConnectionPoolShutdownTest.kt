@@ -1,7 +1,5 @@
 package co.datapipelines.datasources.pooling
 
-import ch.qos.logback.classic.spi.ILoggingEvent
-import ch.qos.logback.core.read.ListAppender
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import com.zaxxer.hikari.util.DriverDataSource
@@ -11,8 +9,6 @@ import io.kotest.matchers.ints.shouldBeGreaterThan
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertAll
-import org.slf4j.Logger
-import org.slf4j.LoggerFactory
 import java.sql.Connection
 import java.sql.SQLException
 import java.util.Properties
@@ -380,25 +376,15 @@ class HikariConnectionPoolShutdownTest {
 
     // ------------------------------------------------------------------ helpers
 
-    private val appender = ListAppender<ILoggingEvent>()
+    /** The shared capture (#362): [waitUntil] polls the SAME appender [capturingLogs] writes — snapshot reads, no CME. */
+    private val appender = co.datapipelines.datasources.SnapshotListAppender()
 
-    private fun capturingLogs(block: () -> Unit): List<String> {
-        val root = LoggerFactory.getLogger(Logger.ROOT_LOGGER_NAME) as ch.qos.logback.classic.Logger
-        appender.start()
-        root.addAppender(appender)
-        try {
-            block()
-        } finally {
-            root.detachAppender(appender)
-            appender.stop()
-        }
-        return appender.list.map { it.formattedMessage }
-    }
+    private fun capturingLogs(block: () -> Unit): List<String> = co.datapipelines.datasources.capturingLogs(appender, block)
 
     /** Polls the live log capture until [condition] holds — synchronised on the event, never on a fixed sleep. */
     private fun waitUntil(condition: (List<String>) -> Boolean) {
         val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(WAIT_S)
-        while (!condition(appender.list.map { it.formattedMessage })) {
+        while (!condition(appender.messages())) {
             withClue("condition not met within ${WAIT_S}s") { (System.nanoTime() < deadline) shouldBe true }
             Thread.sleep(POLL_MS)
         }

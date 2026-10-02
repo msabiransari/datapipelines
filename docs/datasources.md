@@ -1,9 +1,9 @@
 # Datasources Specification
 
-**Status:** v2.49 (frozen contract — additive-only changes after this point)
+**Status:** v2.50 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md) · [Enums](enums.md) · [Configuration](configuration.md) · [Metadata DB](metadata-db.md) · [Pipeline Contract](pipeline-contract.md)
-**Last updated:** 2026-09-27
+**Last updated:** 2026-10-02
 
 ---
 
@@ -344,6 +344,19 @@ against the URL with them stripped (#186b — before it, only `DB_CLOSE_DELAY` w
 datasource carrying any other admin-gated setting could not open a pooled connection); and a
 rotation over a pre-existing file database clears the ADMIN flag a stored `DP_H2_RESTRICTED` may
 carry (`ALTER USER … ADMIN FALSE`), not merely re-passwords it.
+
+The file-roots rule is a fact of the pool's whole life, not only of registration (#204): every
+pool build re-checks the declared roots against the URL's path — the FILE itself resolved, so a
+symlink as the final path component whose target leaves every root is refused, as is a file that
+moved after its save, or a root later removed from configuration. The refusal carries the
+catalogued `datasource.validation.workspace_forbidden` (the in-process gate's code — the
+validator's own save-time roots refusal is `jdbc_url_malformed` on `jdbc_url`, §9); nothing is
+poisoned, and the next build with the file back under a root succeeds. A restricted password rotated
+outside this pool — a second instance building the same file, a restore, a hand edit — repairs by
+the same door: the warm connections keep serving, the first post-build connection creation fails
+with H2's `28000`, the pool's lease carries that SQLState to the manager, which evicts the pool,
+and the next acquisition rebuilds it through the bootstrap above, rotating the password again.
+Until that rebuild connections fail; the error surfaces unchanged — no retry loop, no masking.
 
 ### 4.3 Type mapper integration
 
@@ -1513,6 +1526,8 @@ Every rule below runs on **create and update**, before the row is written (§2 p
 
 `datasource.in_use` (delete blocked by referencing pipelines, §6.2) is a lifecycle error rather than a save-time rule, and is likewise catalogued in §13.8.
 
+`DP_H2_RESTRICTED` bounds ONE thing: the SQL the app runs inside that one H2 file on an author's behalf (#204). It does not bound what the owner-password holder — the application itself — can do to the file, nor a process that opens the file with its own H2; against those the boundary is the file system, and the file system's answer is the declared roots ([`datapipelines.datasources.file-roots`](configuration.md#326-datasource-pools)): what the deployment declares is what the product will open.
+
 ---
 
 ## 10. JDBC Driver Packaging
@@ -1718,6 +1733,7 @@ fixture) get their Testcontainers twin.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-02 | v2.50 | lane 204 (#204 L2/L4/L5/L6) | **§4.2A:** the in-process boundaries keep their promises at the pool build — the file-roots rule re-runs on every build with the file itself resolved (a final-component symlink aimed outside every root, a moved file, or a narrowed/removed root refuses the build with the catalogued `datasource.validation.workspace_forbidden`; nothing poisoned — a clean path builds again), and a restricted password rotated outside the pool (a second instance, a restore, a hand edit) is repaired at the next pool-growth failure: H2's `28000` rides the lease failure, the pool is evicted, and the next acquisition rebuilds through the bootstrap, which re-rotates. **§9:** the restricted user bounds one H2 file's author-facing SQL — not the owner credential's own powers, nor another process opening the file; that boundary is the declared roots. Code: `DatasourceFileRoots.underRootRefusal`, `ConnectionPoolManager.buildHikariPool`, `HikariConnectionPool.leaseConnection`, `H2InProcessPool.build`, `DefaultDatasourceRegistry` (the second gate's wiring). |
 | 2026-09-30 | v2.49 | lane 336 (#336 D3) | **§7A:** the current-namespace read's three-family classification now covers the OUTER-catalog read on a two-level shape — a capability statement keeps the fallback, any other failure raises (the old `runCatching` read "no catalog" for a failing `getCatalog()`, which is the merge shape 087 measured). Stats (§7C) shares the rule. Code: `CurrentNamespace.currentNamespace`. |
 | 2026-09-30 | v2.48 | lane 336 (#336 D2) | **§5.3 gains "The selector lease's cleanup endings":** a close/cancel refusal under a primary failure is `addSuppressed` to it; a refused cancel or close is one WARN (`datasource.lease_cleanup_failed`, class + SQLState — observability §3.4L); a connection whose `close()` failed is DISCARDED, never returned to service. The gate, the classification and the two endings' exclusivity are unchanged. |
 | 2026-09-29 | v2.47 | 265 (#265) the probe's parameters judged by the shared coercion | **§7D: `sql_probe`'s named parameters are judged by the ONE strict coercion in `typesystem`** (`ParameterCoercion` through `ParameterLift`), not the datasources-local copy — whose `trim()` (and lowercase booleans) made the probe the last surface accepting padded values. `" 12 "` for an `INTEGER`/`BIGINTEGER`/`DECIMAL`/`BIGDECIMAL` and `"TRUE"` for a `BOOLEAN` are refused now (`-32602`, the static message naming the parameter, never the value); `BIGINTEGER` binds as `BigInteger` and a `TIMESTAMP` binds through the `ReadOnlyStatementLease` jdbc-form rule (an `Instant` binds as UTC `OffsetDateTime` — pgjdbc cannot infer an `Instant`, and a Postgres TIMESTAMP probe parameter failed before this change; reproduced, then green). The §6.3 digit cap (#278) refuses oversized numeric text before any parse. The private conversion copy is deleted; the typed-string parameter shape and every null/refusal rule are unchanged. |

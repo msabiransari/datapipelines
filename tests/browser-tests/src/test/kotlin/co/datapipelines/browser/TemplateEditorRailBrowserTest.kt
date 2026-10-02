@@ -191,7 +191,9 @@ class TemplateEditorRailBrowserTest : BrowserSuite() {
         session.page.navigate("$baseUrl/login")
         session.page.fill("#login-email", user.email)
         session.page.fill("#login-password", user.oneTimePassword)
-        session.page.click("form button[type=submit]")
+        named(session.page, "the login form's submit button on the seed session ($baseUrl/login)") {
+            session.page.click("form button[type=submit]")
+        }
         session.page.waitForURL("**/dashboard")
         return session
     }

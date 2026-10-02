@@ -312,6 +312,9 @@ class DomainConfiguration {
             // #186: the declared file roots for in-process file-backed URLs — an empty list
             // (the default) refuses every file-backed registration at the save boundary.
             validator = DatasourceValidator(fileRoots = fileRootsProperties.toFileRoots()),
+            // #204 L4: the SAME roots instance re-checks every in-process file-backed pool build
+            // (the second gate beside the validator's registration-time one).
+            fileRoots = fileRootsProperties.toFileRoots(),
             references = references,
             auditSink = DatasourceAuditSink.NONE,
             cache = DatasourceMetadataCache(),

@@ -545,9 +545,9 @@ class RefreshEngineTest {
     @Test
     fun `an abort flag raised while the work ran does not turn a refresh whose every target succeeded into an abort`() {
         runTest {
-            // The flag lands mid-work (t=10) but the source's rows are delivered at t=30, the last poll never fires
-            // before the work joins, and noticeLateAbort deliberately skips a refresh that fully succeeded: the
-            // refresh is COMPLETED — the abort that arrives after the last visualization completed changes nothing.
+            // The flag lands mid-work (t=10) but the source's rows are delivered at t=30 and the
+            // watcher's poll never fires: the abort cancelled nothing, so the refresh is COMPLETED —
+            // the ending consults the BODY's outcome, not the flag's timing (#370).
             val body = dashboard(listOf(source("s1")), listOf(occurrence("v", inputs = mapOf("main" to "s1"))))
             scripts = { Script.After(30, Script.Rows(columns("x" to LogicalType.INTEGER), listOf(listOf(1)))) }
             launch {
@@ -556,6 +556,53 @@ class RefreshEngineTest {
             }
 
             engine().run(RefreshFixtures.job(body), ports).status shouldBe RefreshStatus.COMPLETED
+        }
+    }
+
+    @Test
+    fun `an abort the engine reads only after the work joined - every target delivered - ends DONE and the notice records the request`() {
+        runTest {
+            // The #370 CI face, deterministically: the request is recorded at the same instant the
+            // last rows deliver (this task is queued before the source's continuation), the watcher's
+            // poll never fires, and noticeLateAbort reads the port AFTER every target completed. The
+            // old unconditional flag read at the DONE/ABORTED fork ended this ABORTED under chips the
+            // client had already settled to success; the rule is the body's outcome.
+            val body = dashboard(listOf(source("s1")), listOf(occurrence("v", inputs = mapOf("main" to "s1"))))
+            scripts = { Script.After(30, Script.Rows(columns("x" to LogicalType.INTEGER), listOf(listOf(1)))) }
+            launch {
+                delay(30)
+                abortFlag.set(true)
+            }
+
+            val result = engine().run(RefreshFixtures.job(body), ports)
+
+            result.status shouldBe RefreshStatus.COMPLETED
+            result.targets.getValue("v").shouldBeInstanceOf<TargetOutcome.Ok>()
+            finishes.single().status shouldBe RefreshStatus.COMPLETED
+            audited.single().status shouldBe RefreshStatus.COMPLETED
+            events.filterIsInstance<RefreshEvent.VisualizationData>().map { it.name } shouldBe listOf("v")
+            events.last().shouldBeInstanceOf<RefreshEvent.Completed>().status shouldBe "COMPLETED"
+        }
+    }
+
+    @Test
+    fun `an abort flag raised late does not rescue a refresh whose target failed - it still ends ABORTED`() {
+        runTest {
+            // The "did not fully succeed" half of the #370 rule: the target failed at the abort
+            // stage on its own (the execution was aborted by the route's cancellation), the flag
+            // rides along — the row says ABORTED, as every viewer's abort of a failing refresh did.
+            val body = dashboard(listOf(source("s1")), listOf(occurrence("v", inputs = mapOf("main" to "s1"))))
+            scripts = { Script.After(30, Script.Aborted) }
+            launch {
+                delay(30)
+                abortFlag.set(true)
+            }
+
+            val result = engine().run(RefreshFixtures.job(body), ports)
+
+            result.status shouldBe RefreshStatus.ABORTED
+            result.targets.getValue("v") shouldBe TargetOutcome.Error("abort", PipelineErrorCodes.Execution.ABORTED)
+            finishes.single().status shouldBe RefreshStatus.ABORTED
         }
     }
 

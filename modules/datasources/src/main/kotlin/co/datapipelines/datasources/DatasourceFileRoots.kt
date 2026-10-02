@@ -2,6 +2,7 @@ package co.datapipelines.datasources
 
 import org.springframework.boot.context.properties.ConfigurationProperties
 import java.io.IOException
+import java.nio.file.LinkOption
 import java.nio.file.Path
 import kotlin.io.path.exists
 import kotlin.io.path.isDirectory
@@ -108,21 +109,52 @@ class DatasourceFileRoots(
             null
         }
 
-    /** The parent must EXIST (its symlinks are resolved); the resolved file must sit under a root. */
+    /**
+     * The parent must EXIST (its symlinks are resolved); the resolved file must sit under a root.
+     *
+     * The FILE is resolved too, not only the parent (#204 L5): a symlink as the final path
+     * component (`/roots/ok/data.duckdb -> /etc/secret.db`) passes a parent-only check, and the
+     * driver's open would then read or create the target outside every declared root. When a
+     * filesystem entry exists at the path it is followed with `toRealPath`; a MISSING path keeps
+     * the parent-resolution fallback (H2/SQLite/DuckDB create the file on first connect — a new
+     * database under a real root must still be registrable). An entry that exists but cannot be
+     * followed to a real location — a symlink whose target is gone — is refused fail-closed: the
+     * driver would CREATE the file wherever the dangling link points, outside any checkable root.
+     */
     private fun underRootRefusal(
         path: Path,
         parent: Path,
         rawPath: String,
     ): String? {
         val realParent =
-            try {
-                parent.toRealPath()
-            } catch (_: IOException) {
-                return "the directory of '$rawPath' does not exist"
-            } catch (_: SecurityException) {
-                return "the directory of '$rawPath' is not readable"
+            runCatching { parent.toRealPath() }.getOrElse {
+                return when (it) {
+                    is SecurityException -> {
+                        "the directory of '$rawPath' is not readable"
+                    }
+
+                    else -> {
+                        "the directory of '$rawPath' does not exist"
+                    }
+                }
             }
-        val resolved = realParent.resolve(path.fileName.toString())
+        val resolved =
+            if (path.exists(LinkOption.NOFOLLOW_LINKS)) {
+                runCatching { path.toRealPath() }.getOrElse {
+                    return when (it) {
+                        is SecurityException -> {
+                            "the path '$rawPath' is not readable"
+                        }
+
+                        else -> {
+                            "the path '$rawPath' cannot be followed to a real file under a declared " +
+                                "datasource file root (${DatasourceFileRootsProperties.CONFIG_KEY})"
+                        }
+                    }
+                }
+            } else {
+                realParent.resolve(path.fileName.toString())
+            }
         if (roots.none { resolved.startsWith(it) }) {
             return "the path '$rawPath' is not under any declared datasource file root (${DatasourceFileRootsProperties.CONFIG_KEY})"
         }

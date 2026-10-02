@@ -18,6 +18,7 @@ import java.util.Collections
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
@@ -579,6 +580,40 @@ class BatchingWriterTest {
         hooks.batchBytes.sum() shouldBe 50L
         hooks.committed.get() shouldBe 5
         w.queueDepth() shouldBe 0
+    }
+
+    @Test
+    fun `a commit's hook runs before the caller is released - the caller cannot return while the hook holds the gate`() {
+        // #363, forced interleaving, not luck: the hook itself blocks on a latch, so the writer
+        // thread sits INSIDE onCommitted with the gate held. On the old order (release → complete →
+        // hook) the caller was let go BEFORE the hook ran and returned while the gate was held —
+        // the CI red (committed=4 of 5). On the shipped order the hook precedes the answer, so a
+        // return during the gate is impossible.
+        val sink = RecordingSink()
+        val hookStarted = CountDownLatch(1)
+        val releaseHook = CountDownLatch(1)
+        val hooks =
+            object : BatchingHooks {
+                override fun onCommitted(lagNanos: Long) {
+                    hookStarted.countDown()
+                    releaseHook.await(TEN_SECONDS, TimeUnit.SECONDS)
+                }
+            }
+        val w = BatchingWriter("test", BatchingConfig(writers = 1, lingerMillis = 0), sink, hooks).also { closeables += it }
+        val callerReturned = AtomicBoolean(false)
+        val caller =
+            Thread {
+                w.record(Item("k", 0)) shouldBe Outcome.Committed
+                callerReturned.set(true)
+            }.also { it.start() }
+        hookStarted.await(TEN_SECONDS, TimeUnit.SECONDS) shouldBe true
+        // The hook is inside its gate; give the caller every chance to (wrongly) return.
+        Thread.sleep(200)
+        callerReturned.get() shouldBe false
+        releaseHook.countDown()
+        caller.join(TimeUnit.SECONDS.toMillis(TEN_SECONDS))
+        callerReturned.get() shouldBe true
+        sink.committed().map { it.seq } shouldBe listOf(0)
     }
 
     @Test
