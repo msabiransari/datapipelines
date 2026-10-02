@@ -94,10 +94,13 @@ data class PipelineReleaseFact(
     val readOnly: Boolean,
     val parameters: List<PipelineParameterFact>,
     /**
-     * The caller output columns of this release — what a visualization input can be fed. EMPTY when the release has
-     * no caller node (it returns no rows); NULL when the release returns rows whose columns it does not DECLARE (a
-     * SQL caller node — only a transform caller node's contract names its columns): the save-time
-     * `input_contract_mismatch` check is then skipped, never guessed, and the runtime judges the real columns (L2).
+     * The caller output columns of this release — what a visualization input can be fed, in #328's precedence
+     * (pipeline-contract §3.3.1): a TRANSFORM caller's DECLARED contract columns; any other (SQL) caller node's
+     * RECORDED columns — the release's `caller_output_json`, copied from the version's latest run (D1); EMPTY
+     * when the release has no caller node (it returns no rows); NULL only when a SQL caller node has no record —
+     * the save-time `input_contract_mismatch` check is then skipped, never guessed, and the runtime judges the
+     * real columns (L2). The record never overrides a declared contract, and it outlives the datasource: it is
+     * read from the release, not the live schema.
      */
     val outputColumns: List<OutputColumn>?,
 )

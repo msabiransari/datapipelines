@@ -340,6 +340,33 @@ class PipelinesControllerTest {
     }
 
     /**
+     * #328 (D3/D6) — the release response carries `caller_output` (additive) and the audit
+     * row carries the SAME word and nothing more: ids, name, version, via, caller_output,
+     * templates_released. The word here is `recorded` — the service's answer for a SQL caller
+     * whose latest run was observed; the response echoes the service's word verbatim.
+     */
+    @Test
+    fun `release answers caller_output and the audit row carries the word - its exact key set`() {
+        authenticate()
+        val draftBody = """{"schema_version":1,"name":"monthly_revenue"}"""
+        every { releases.release(any(), pipelineId, "hash-v2", userId) } returns
+            PipelineReleaseService.Released(
+                record.copy(currentVersion = 2),
+                releasedDetail.copy(version = 2),
+                draftBody,
+                callerOutput = co.datapipelines.pipeline.ReleaseCallerOutput.RECORDED,
+            )
+
+        val data = controller.release(pipelineId, "hash-v2").data
+
+        data.get("caller_output").asText() shouldBe "recorded"
+        audited.single().second["caller_output"] shouldBe "recorded"
+        // enums.md §15 — the exact key SET (the shared sink adds workspace_id): the word, never the column list.
+        audited.single().second.keys shouldBe
+            setOf("workspace_id", "pipeline_id", "pipeline_name", "version", "via", "caller_output", "templates_released")
+    }
+
+    /**
      * 7e (transform-nodes design §8.2, rest-api §5.10) — the release body ALWAYS carries
      * `warnings`: `[]` on a clean release, and the service's `template_needs_review` entries
      * verbatim otherwise; the status stays the release's.

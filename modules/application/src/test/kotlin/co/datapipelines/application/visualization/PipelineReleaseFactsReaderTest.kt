@@ -25,7 +25,8 @@ import java.util.UUID
 
 /**
  * The production pipeline-release port the dashboard validator reads (L1b): the status off the resolver, the
- * read-only rule's verdict, the parameters a caller must supply, and the caller columns — DECLARED ones only.
+ * read-only rule's verdict, the parameters a caller must supply, and the caller columns — in #328's precedence:
+ * a transform caller's DECLARED contract, a SQL caller's RECORDED release record, null only when neither exists.
  * The `outputColumns` cases are the decision the lane records: a transform caller node's table contract is the
  * only declaration; no caller node is an empty output; a SQL caller node (or a non-table contract) is null — the
  * validator's cue to skip rather than guess.
@@ -117,6 +118,49 @@ class PipelineReleaseFactsReaderTest {
         )
     }
 
+    /**
+     * #328 C (D4) — a non-transform (SQL) caller answers its release's RECORDED columns: the
+     * D2 array read back name by name, type by type — and an absent-or-null `nullable` reads
+     * as `true` (unknown admits). This is the acceptance's "answered from the release".
+     */
+    @Test
+    fun `a SQL caller node answers the release's recorded columns`() {
+        val pipeline = pipeline(dql("report", NodeOutput.Caller))
+        val record =
+            """[{"name":"month","type":"DATE","nullable":false},""" +
+                """{"name":"amount","type":"DECIMAL","nullable":null},""" +
+                """{"name":"note","type":"STRING"}]"""
+        val fact = checkNotNull(reader(mapOf(REF to resolved(pipeline, callerOutputJson = record))).releaseOf(WORKSPACE, REF))
+
+        fact.outputColumns shouldBe
+            listOf(
+                OutputColumn("month", LogicalType.DATE, nullable = false),
+                OutputColumn("amount", LogicalType.DECIMAL, nullable = true),
+                OutputColumn("note", LogicalType.STRING, nullable = true),
+            )
+    }
+
+    /** #328 C (D4) — the same caller without a record stays null: never a guess. */
+    @Test
+    fun `a SQL caller node whose release recorded nothing is still null`() {
+        val pipeline = pipeline(dql("report", NodeOutput.Caller))
+        checkNotNull(reader(mapOf(REF to resolved(pipeline, callerOutputJson = null))).releaseOf(WORKSPACE, REF))
+            .outputColumns
+            .shouldBeNull()
+    }
+
+    /** #328 C (D4) — the record never overrides a declared contract: a transform caller ignores it. */
+    @Test
+    fun `a recorded column list never overrides a transform caller's contract`() {
+        val pipeline = pipeline(node("shape", NodeType.TRANSFORM, NodeOutput.Caller))
+        val columns = listOf(TransformContractView.Column("month", LogicalType.DATE, nullable = false))
+        val table = contract(TransformContractView.Output.Table(columns))
+        val record = """[{"name":"other","type":"STRING","nullable":true}]"""
+        val fact = checkNotNull(reader(mapOf(REF to resolved(pipeline, callerOutputJson = record)), table).releaseOf(WORKSPACE, REF))
+
+        fact.outputColumns shouldBe listOf(OutputColumn("month", LogicalType.DATE, nullable = false))
+    }
+
     // ---- fixtures -------------------------------------------------------------------------------------
 
     private fun reader(
@@ -133,7 +177,8 @@ class PipelineReleaseFactsReaderTest {
     private fun resolved(
         pipeline: Pipeline,
         status: PipelineVersionStatus = PipelineVersionStatus.RELEASED,
-    ) = ResolvedPipeline(pipeline, entityDiscarded = false, versionStatus = status)
+        callerOutputJson: String? = null,
+    ) = ResolvedPipeline(pipeline, entityDiscarded = false, versionStatus = status, callerOutputJson = callerOutputJson)
 
     private fun pipeline(
         vararg nodes: Node,

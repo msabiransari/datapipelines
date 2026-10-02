@@ -379,6 +379,8 @@ class PromotionService(
             val bodyHash: String,
             val body: String,
             val parsed: Pipeline,
+            /** #328 — the version's caller-output record, read with the detail in [addPipeline]. */
+            val callerOutputJson: String?,
         )
 
         /**
@@ -447,7 +449,7 @@ class PromotionService(
             }
             parsed.nodes.forEach { node -> addTemplate(node.template) }
 
-            pipelineOrder[key] = PinnedPipeline(id, name, version, detail.bodyHash, body, parsed)
+            pipelineOrder[key] = PinnedPipeline(id, name, version, detail.bodyHash, body, parsed, detail.callerOutputJson)
         }
 
         /**
@@ -561,6 +563,10 @@ class PromotionService(
             node.put("version", pinned.version)
             node.put("body_hash", pinned.bodyHash)
             releasedAt[pinned.id to pinned.version]?.let { node.put("released_at", it.toString()) }
+            // #328 — the record rides beside `version`/`body_hash`, OUTSIDE the hash (like a
+            // transform's `implements`): the receiver's hash recompute reads the BODY only, and
+            // the receiver validates the record's shape before storing it (never unchecked).
+            pinned.callerOutputJson?.let { node.set<JsonNode>("caller_output", MAPPER.readTree(it)) }
             return node
         }
     }

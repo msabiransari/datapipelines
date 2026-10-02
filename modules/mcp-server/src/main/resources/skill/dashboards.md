@@ -25,6 +25,8 @@ Build in this order — each step's refusal names the path to fix.
    person and pass `confirm_new_root: true`. `test/` never needs it.
 2. **Read the sources' schemas.** A dashboard source pins a RELEASED, read-only pipeline release; its
    parameters must all be bound (to a set parameter, or to a literal). Read the pipeline before you pin it.
+   A SQL source's columns are what its release RECORDED from its last run — `dashboards_validate` judges
+   your visualization inputs against that record at save, so run the draft before handing back for release.
 3. **Create the visualization** with `visualizations_create`: `renderer`, `inputs` (the columns you will
    feed it), `config` with every path you bind already present (`"x": []`), `bindings` from a path to a
    column of the single input (or of the transform's output), and at least one test case. It lands as a
@@ -37,7 +39,10 @@ Build in this order — each step's refusal names the path to fix.
    `*.version.conflict` — re-read and rebase; never retry blindly.
 6. **Validate** with `dashboards_validate` whenever a pinned pipeline, set or visualization may have
    changed: it judges the working version against the dependencies as they are now and answers `valid`
-   with every failure. `dashboards_get` shows each pin's status and each source's read-only verdict, and
+   with every failure. A SQL source is judged against the columns its release recorded from its last
+   run; a release whose pipeline never ran records nothing (`not_observed`) and the input check is
+   left to the runtime — execute the draft before relying on the verdict. `dashboards_get` shows each
+   pin's status and each source's read-only verdict, and
    `last_refresh` — the latest refresh made under YOUR identity, which for a key is null today: no tool refreshes a
    dashboard (people do, in the UI, as themselves).
 7. **Test every visualization you wrote** — the loop in "Proving a visualization" below. A
