@@ -31,6 +31,11 @@ internal class TemplateBundleAdapter(
     private val templates: TemplateRepository,
     private val templateImport: TemplateImportService,
 ) : TemplateBundle {
+    /**
+     * The pins are the artifact's PINNED dependencies and ride with it whatever the template lens says (#344, the
+     * owner's ruling of 2026-10-02) — the same rule the push closure follows — so only the root is lensed, by the
+     * transfer controllers.
+     */
     override fun export(
         workspaceId: UUID,
         pins: List<TemplateRef>,

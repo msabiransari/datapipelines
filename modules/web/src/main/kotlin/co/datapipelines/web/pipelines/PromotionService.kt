@@ -450,7 +450,11 @@ class PromotionService(
             pipelineOrder[key] = PinnedPipeline(id, name, version, detail.bodyHash, body, parsed)
         }
 
-        /** A template version and the transitive `imports_json` closure beneath it. */
+        /**
+         * A template version and the transitive `imports_json` closure beneath it. A pinned template rides whatever
+         * the template lens says (#344, the owner's ruling of 2026-10-02; §10.4: a dependency is what the parent runs,
+         * not a listing) — only the roots are lensed.
+         */
         fun addTemplate(ref: TemplateRef) {
             if (ref.id.isBlank()) return
             if (!visitedTemplates.add(ref.key)) return
@@ -468,7 +472,8 @@ class PromotionService(
 
         /**
          * §10.4's skip rule for templates: already present at the same version AND the same
-         * hash is a no-op, so it is left out of the batch entirely.
+         * hash is a no-op, so it is left out of the batch entirely. That is the ONLY reason a
+         * pinned template is left out — never the template lens (#344).
          */
         fun templatePayloads(inventory: PromotionWire.Inventory): List<JsonNode> {
             val onTarget = inventory.templateById()

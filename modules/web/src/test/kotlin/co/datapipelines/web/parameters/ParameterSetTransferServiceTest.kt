@@ -1,5 +1,9 @@
 package co.datapipelines.web.parameters
 
+import co.datapipelines.application.lens.LensedView
+import co.datapipelines.auth.AuthMethod
+import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.parameters.ParameterErrorCodes
 import co.datapipelines.parameters.ParameterSetDocument
 import co.datapipelines.parameters.ParameterSetExport
@@ -11,7 +15,9 @@ import co.datapipelines.parameters.ParameterSetRepository
 import co.datapipelines.parameters.ParameterSetService
 import co.datapipelines.parameters.ParameterSetVersion
 import co.datapipelines.parameters.ParameterSetVersionDetail
+import co.datapipelines.parameters.ParametersConfig
 import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.templates.Template
 import co.datapipelines.templates.TemplateVersion
 import co.datapipelines.typesystem.Dialect
@@ -22,6 +28,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.SerializationFeature
 import com.fasterxml.jackson.databind.node.ObjectNode
 import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import io.mockk.Called
 import io.mockk.every
@@ -29,6 +36,8 @@ import io.mockk.mockk
 import io.mockk.verify
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertAll
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
+import org.springframework.security.core.context.SecurityContextHolder
 import java.time.Instant
 import java.util.UUID
 
@@ -184,6 +193,80 @@ class ParameterSetTransferServiceTest {
         bundled["templates"][0]["id"].asText() shouldBe TEMPLATE_ID
     }
 
+    /**
+     * #344, the owner's ruling of 2026-10-02: the bundle is what the set PINS — the pin and its transitive `imports`
+     * closure, exactly — read without the template lens; only the ROOT is lensed. Driven through the REAL controller
+     * over this REAL service (the controller test mocks the transfer, so it cannot see a lens threaded into the
+     * bundle): the caller's view admits the set and its template arm admits only [UNPINNED_ID], which the repository
+     * also holds. A bundle filtered through that arm, one that drops a pinned version, or one that lists instead of
+     * walking the pins is red.
+     */
+    @Test
+    fun `export still bundles every pinned template the template lens hides, and its imports closure (#344)`() {
+        every { templates.lookupVersion(workspaceId, TEMPLATE_ID, 1) } returns
+            templateVersion(TEMPLATE_ID, imports = listOf(co.datapipelines.templates.TemplateImport(LIBRARY_ID, 1, "lib")))
+        listOf(LIBRARY_ID, UNPINNED_ID).forEach { id ->
+            every { templates.lookupVersion(workspaceId, id, 1) } returns templateVersion(id)
+            every { templates.findVersion(workspaceId, id, 1) } returns storedTemplate(id)
+        }
+        val hidingTemplates =
+            ParameterSetsController(
+                sets,
+                repository,
+                mockk(),
+                service,
+                ParametersConfig(),
+                {
+                    LensedView(
+                        ReadLens.Everything,
+                        ReadLens.Only(setOf(UNPINNED_ID)),
+                        parameterSets = ReadLens.Only(setOf(SET_NAME)),
+                    )
+                },
+                mockk(),
+            )
+        SecurityContextHolder.getContext().authentication =
+            UsernamePasswordAuthenticationToken(
+                AuthenticatedPrincipal(actor, "a@b.c", "A", AuthMethod.OIDC, workspace = WorkspaceContext(workspaceId, "acme")),
+                null,
+                emptyList(),
+            )
+
+        val bundled =
+            try {
+                hidingTemplates.export(setId).data["templates"] as List<*>
+            } finally {
+                SecurityContextHolder.clearContext()
+            }
+
+        bundled.map { (it as Template).id to it.version } shouldContainExactly listOf(TEMPLATE_ID to 1, LIBRARY_ID to 1)
+    }
+
+    private fun templateVersion(
+        id: String,
+        imports: List<co.datapipelines.templates.TemplateImport> = emptyList(),
+    ) = TemplateVersion(
+        id = id,
+        version = 1,
+        isLibrary = id == LIBRARY_ID,
+        imports = imports,
+        body = TEMPLATE_BODY,
+        createdAt = now,
+        createdBy = actor,
+    )
+
+    private fun storedTemplate(id: String) =
+        Template(
+            id = id,
+            version = 1,
+            dialect = Dialect.H2,
+            displayName = id,
+            description = "",
+            body = TEMPLATE_BODY,
+            createdAt = now,
+            createdBy = actor,
+        )
+
     @Test
     fun `an envelope without a parameter_set node refuses before any template lands`() {
         val envelope = ParameterSetJson.mapper.createObjectNode()
@@ -200,6 +283,8 @@ class ParameterSetTransferServiceTest {
     private companion object {
         const val SET_NAME = "acme/sales/region_filters"
         const val TEMPLATE_ID = "acme/sales/states_of_country.sql"
+        const val LIBRARY_ID = "acme/sales/region_macros.sql"
+        const val UNPINNED_ID = "acme/sales/not_pinned.sql"
         const val BODY_HASH = "b3a6e0dad1f5b9f0e2a1c9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f4a3b2c1d0e9f8a"
         const val TEMPLATE_BODY = "SELECT state_code AS \"value\", state_name AS \"display_value\" FROM dim_state"
 

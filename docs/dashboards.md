@@ -1,6 +1,6 @@
 # Dashboards
 
-**Status:** v0.18 — the two documents and their lifecycle (#10, lane L1a); the REST routes, the MCP tools and the
+**Status:** v0.19 — the two documents and their lifecycle (#10, lane L1a); the REST routes, the MCP tools and the
 permissions (§4, lane L1b); the transfer routes and their limits' honest contract (§3.3, lanes L1c/L1c-b/L1c-c: the
 import's atomicity, the RELEASE rules on a landing, the aggregate count ceiling, the wire's per-family arms); the server
 runtime (§5, lane L2; #343's released pins and stream authority); the client runtime (§6, lanes L3a/L3a-b/L3a-c); the
@@ -234,7 +234,7 @@ reach a visualization's own draft transform pin, which needs that visualization'
 ### 3.3 Export and import
 
 An export is the CURRENT release's envelope: `{"visualization": …, "templates": […], "manifest": {…}}` — the transform
-pin's templates travel with it — and `{"dashboard": …, "visualizations": [each pinned visualization's envelope],
+pin's templates travel with it, read without the template lens — and `{"dashboard": …, "visualizations": [each pinned visualization's envelope],
 "manifest": {…}}`, whose manifest names the pinned pipelines and set by reference: a dashboard assumes they were
 promoted first (D61's order: templates, parameter sets, pipelines, visualizations, dashboards). The manifest carries
 `evidence: null` until the test sessions land (L4) — the exported release's evidence summary rides it from then on,
@@ -244,6 +244,11 @@ envelope's shape is judged before anything lands, the lifecycle fields beside a 
 other unknown key refuses; the same version with the same hash is a no-op; a pin the target lacks is
 `visualization.import.missing_template` or `dashboard.import.missing_dependency`; an id another artifact on the
 server holds is `*.import.id_taken` — never re-issued (C29).
+
+**What the artifact pins travels unlensed** (the owner's ruling of 2026-10-02, #344; [Auth §11A.1](auth.md#11a1-the-404-rule)'s lens
+clause): the promoter lens decides whether a visualization or dashboard exports at all — a hidden one is the absent
+`404` — never what its envelope carries. A dashboard's pinned visualizations ride whatever the visualization lens says,
+and each one's templates whatever the template lens says; the same holds for a promotion batch.
 
 **The import is ONE transaction for a dashboard** (the L1c-b round, F1): templates → bundled visualizations → the
 dashboard inside one transaction, so a refused dashboard leaves NOTHING landed — the visualization import keeps the
@@ -820,6 +825,7 @@ full navigation).
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-02 | v0.19 | 344 (#344) the envelope is the artifact's pins | **§3.3:** what the artifact pins travels unlensed — a dashboard's pinned visualizations and each one's templates ride whatever the visualization and template lenses say; only the root is lensed (the owner's ruling of 2026-10-02, auth §11A.1's lens clause). No behaviour changed. |
 | 2026-10-01 | v0.18 | L5 (#367, #10) the `dashboard` key kind | **§4.1: the `dashboard_viewer` column and the binding row are HERE** — the key's one role holds `dashboard.read` + `dashboard.execute`, `bound` in both cells, the bindings ARE the lens (`dashboard_key_bindings`, R-EP2 verbatim: deeper replaces, unbound = the family 404). **§5.8:** the key kind is no longer "not here" — the runtime routes have a non-session caller. **§6.5:** the wire contract gained its implementation — the reference proxy is `examples/dashboard-proxy/proxy.mjs`, its conformance test `dashboard-proxy.test.mjs` (the streaming timing is the buffering detector) and the real-stack E2E; `/refreshes` is deliberately not relayed (owner-scoped by the key; one key = one budget, sized by `max-streams-per-user`); refresh rows carry `principal_key_id`, executions `executed_by_key_kind = 'dashboard'`. |
 | 2026-10-01 | v0.17 | L4b (#353) the test workflow on the wire | **New §3.4.1** — the five-step workflow over REST and MCP (start, the session-less preview page, submit, the single-use screenshot upload, the human release), the confinement (each capability opens one route for one run; the starter re-judged at the moment of use; one indistinguishable answer for every capability failure) and the lensed evidence reads; §3.4's retention bullet gains the UI sentence (an author who re-tests keeps only the last screenshot). **§6.5:** the runtime's fixture mode (the transport swapped, nothing else; no `fetch`). §4.4 names the two test tools; §5.8 no longer lists the test surfaces. |
 | 2026-10-01 | v0.16 | 332 (#332, #330, #331) the lifecycle audit + the pins projection | **§3:** the five human verbs and the release audit (the `dashboard.*` events, the cascaded visualization releases named with `cascade_from_dashboard_id`) — the pipelines mould, ids/names/versions/counts only. |
