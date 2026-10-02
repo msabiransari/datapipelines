@@ -1,6 +1,7 @@
 # Dashboards
 
-**Status:** v0.25 — the board's small-slot margins and its breakpoint collapse (§6.2, §6.3, #386/#387) beside the dashboard draft preview (§5.2's `version`, §7's page, #369) beside 328's release-record judgement (§4.3); the two documents and their lifecycle (#10, lane L1a); the REST routes, the MCP tools and the
+**Status:** v0.26 — the dashboards workspace (§5.2's `version`, §7's workspace, #400; #409 closes with it) beside the
+board's small-slot margins and its breakpoint collapse (§6.2, §6.3, #386/#387), 328's release-record judgement (§4.3)
 permissions (§4, lane L1b); the transfer routes and their limits' honest contract (§3.3, lanes L1c/L1c-b/L1c-c: the
 import's atomicity, the RELEASE rules on a landing, the aggregate count ceiling, the wire's per-family arms); the server
 runtime (§5, lane L2; #343's released pins and stream authority); the client runtime (§6, lanes L3a/L3a-b/L3a-c); the
@@ -482,7 +483,7 @@ The dashboard served is its CURRENT RELEASED version — and since #369 the four
 `version` query parameter naming a DRAFT or RELEASED version (a bounded positive integer, the execute route's 400
 otherwise); absent means exactly today's read. The named version must resolve for the caller — absent, DISCARDED, or
 hidden under a narrowing lens is the family 404 naming the version they named — and a `dashboard` key never names one:
-the version routes are the session-authenticated preview page's ([§7](#7-the-first-party-pages-l3b)), and a version
+the version routes are the session-authenticated workspace's ([§7](#7-the-first-party-pages-l3b)), and a version
 parameter would be a second credential for the same principal (refused `dashboard.key.kind_refused` before anything is
 looked up). The pin rule does not move (R1, the owner's ruling on #369): every pinned visualization, its transform
 template, the parameter set and each source pipeline release must be RELEASED — a draft pinning a DRAFT pin is the
@@ -589,8 +590,8 @@ dashboard she can read but holds no `execution.read`, so her refresh names no ex
 The visualization tests' remaining human surfaces (L4). The `dashboard` key kind IS here now (L5, #367): an external
 application's backend holds a `dashboard` key and proxies the runtime routes — §6.5 is the wire contract and
 [Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings) the kind's specification. No MCP tool refreshes a
-dashboard. The first-party pages are §7 (L3b); the dashboard draft preview IS here now (#369, §5.2's `version`
-parameter and §7's preview page).
+dashboard. The first-party pages are §7 (L3b, since #400 the workspace); the dashboard draft preview IS here now (#369, §5.2's
+`version` parameter — since #400 a 303 redirect onto the workspace's named-version view).
 
 ## 6. The client runtime (L3a)
 
@@ -619,9 +620,9 @@ instance.resize(); instance.dispose();
 instance.recover("retry" | "reload"); instance.on("edit" | "commit" | "action", listener);
 ```
 
-`version` is `"released"` — the current release and the first-party page's own value — or, since #369, a positive
-INTEGER naming the version a preview is looking at (§5.2; the server refuses a version the caller may not see, and a
-`dashboard` key never names one). Anything else is refused with `init.version_unsupported`. Re-initialising
+`version` is `"released"` — the current release and the first-party page's own DEFAULT (the workspace writes no
+version attribute unless the URL named one) — or, since #369, a positive INTEGER naming the version a named-version
+view is looking at (§5.2; the server refuses a version the caller may not see, and a `dashboard` key never names one). Anything else is refused with `init.version_unsupported`. Re-initialising
 a container that already mounts an instance throws `DashboardAlreadyMounted`; after `dispose()` the
 container is unmarked and a fresh `init` is legitimate.
 
@@ -792,87 +793,94 @@ the conformance suite proves the rules APPLY and is red when the stylesheet is r
 
 ## 7. The first-party pages (L3b)
 
-The app's own surfaces over the runtime: the tree page (`GET /dashboards`), the board page
-(`GET /dashboards/{id}`), the sidebar's Dashboards branch and the events pane. Every handler is
-a session-authenticated GET declaring `dashboard.read` — D50 makes every reader an executor, and
-the pages must not declare `dashboard.execute` to "simplify" — except the events pane's
-fragment, which floors at `dashboard.execute` with the refreshes route it mirrors (auth §7.6's
-Surfaces cells carry the routes).
+The app's own surfaces over the runtime: the flat catalog (`GET /dashboards`), the tabbed,
+version-explicit workspace (`GET /dashboards/{id}?version=&tab=`), the sidebar's Dashboards
+branch and the events pane. Every handler is a session-authenticated GET declaring
+`dashboard.read` — D50 makes every reader an executor, and the pages must not declare
+`dashboard.execute` to "simplify" — except the events pane's fragment, which floors at
+`dashboard.execute` with the refreshes route it mirrors, the Keys tab's fragment, which
+floors at `dashboard.key.bind` (the lowest row whose cells match the tab's visibility), and
+the lifecycle dialogs, which floor at their verbs' own permissions
+([Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative)'s Surfaces cells carry the routes).
 
-**The tree page and the sidebar branch (D58).** The landing item is RENAMED Home — the route
-`/dashboard` and its exact-match nav section are unchanged. Build's last rail item is
-**Dashboards**: the link to the tree page, and beside it a chevron disclosure that expands IN
-PLACE into the hierarchy — lazy (the summary's first click fetches ONE level), collapsible,
-hidden with the collapsed rail. Both the page's tree and the branch render the SAME
-one-level-per-request fragment (`GET /partials/dashboards/tree?prefix=&scope=`), the pipelines
-explorer's shape: virtual folders, server-side prefix queries through the dashboards service's
-LENSED reads (a hidden dashboard is absent from the tree and its counts; nothing is filtered in
-a template), the root level listing folders only. Level ids are derived per scope (`page`,
-`nav`) because the two instances can coexist in one document. A leaf opens the board page as a
-FULL navigation — `hx-boost="false"`, §6.4's rule: the two bundles must never travel between
-pages, and the layout's logout/members links are the precedent.
+**The catalog and the sidebar branch (D58, #400).** `/dashboards` is the flat CATALOG — the
+pipelines catalog's shape, one row per dashboard the caller may read (or the matches of
+`?q=`), each row linking the workspace. The L3b tree page is retired: the folder tree is the
+SIDEBAR's navigating-tree branch (the link to the catalog, a separate toggle, the lazy panel)
+— and since #400 the branch carries the search box in the Pipelines branch's exact markup: a
+non-empty query swaps the flat results into the same nav root, clearing returns the tree by
+construction, and the shared engine (`nav-tree.js`) serves it with no JS change. Both the
+branch's tree and the catalog render server-side through the dashboards service's LENSED
+reads (a hidden dashboard is absent from the tree, its counts and the catalog; nothing is
+filtered in a template), the root level listing folders only. A row — catalog or tree leaf —
+opens the workspace as a FULL navigation (`hx-boost="false"`, §6.4's rule: the bundles must
+never travel between pages). A draft-only dashboard's row says so (`draft v1 pending
+release`): the list page's promise, kept as a ROW state.
 
-**The board page.** The server resolves the runtime configuration ONCE at render to learn the
-ONE bundle (`renderer.bundle`, §6.4) and writes the script tag with its
-`data-dp-plotly-bundle` declaration — the same read the client's bootstrap performs, so the
-declaration and the judged pair cannot disagree; the runtime's two-bundle refusal is the
-backstop. The glue (`static/js/dashboards-page.js`, a file — the CSP allows no inline script)
-reads exactly two data attributes (the dashboard id on the container; the bundle name on the
-script tag), inits the runtime with `credentials: "session"` and `version: "released"`, and
-owns the notification/refusal regions. A dashboard the caller cannot see is the family's 404; a
-dashboard that exists for the caller but cannot run (no release yet, a purged pin, a source no
-longer read-only) renders the page's REFUSAL state — the code and sentence the runtime's read
-refused with, and the `onNotification` sink's region for a later boot failure — never a blank
-pane, and a refusal page loads no bundle at all. `dashboards.css` and the vendored
-`plotly.css` (§6.6's design-around) load from the LAYOUT head: ui-screens §3.0 is normative —
-no page template carries its own stylesheet link, and a page-scoped sheet on any route paints
-an unstyled first frame.
+**The workspace.** One URL names one dashboard, one viewed version and one tab. The
+resolution is the family's: the working-version read through the lens first (absent,
+foreign or lens-hidden is the family's 404); `?version=N` through
+`findServedVersion` (#369's rule — a DRAFT only to the everything-lens, DISCARDED to
+nobody, anything else the family's 404 NAMING the version); the default is the current
+RELEASED version. A version that resolves but cannot run (a pin that does not hold, a
+source no longer read-only) is the Board pane's REFUSAL state — the code and sentence the
+runtime's read refused with, the NAME still in the `h1`, never a blank pane, and no bundle
+loads. **No served release and none named is NOT an error (#409): the choose-a-version
+state** — the heading shows the dashboard's name, the draft (when the caller's lens shows
+one) is offered with its own link, and the sentence says there is no release yet. The old
+board page answered an empty `h1` and "Dashboard '<uuid>' not found." for a dashboard the
+tree had just linked; it does not any more. The five tabs:
 
-**The draft preview page (#369).** `GET /dashboards/{id}/preview?version=N` renders the SAME
-board template for a NAMED version — the draft the engineer is perfecting before releasing it,
-or a released one. The declared permission stays `dashboard.read` (the record's §6.3 sentence:
-a `dashboard.read` holder with `dashboard.execute` — the page on the read row, the runtime it
-mounts on the execute rows, D50's unchanged half), the visibility oracle is the same
-working-version read as the board's, and the runtime's config read carries the version through
-§5.2's rule: a version that does not resolve, or a pin that does not hold (R1), is the refusal
-state IN PLACE — this dashboard exists in the caller's tree, so the refusal names the code
-where the person is looking. What the page adds is the truth about what is on screen: the
-banner naming the previewed version with the way back to the released view, and the version
-riding `data-dp-dashboard-version` — the SAME data-attribute channel the id rides, an integer,
-never a script body — which the glue passes to `init` as the named version. A promoter's lens
-hides the draft: the family's 404, never a hidden row; a `dashboard` key never reaches the page
-(session-only surface, §5.2's key rule). The preview is a read: no audit event, and the
-refreshes pane beside the board is the dashboard's own, version-independent.
+- **Board** — today's board page exactly: the ONE bundle the server chose for the VIEWED
+  version declared on its script tag (§6.4; the same read the client's bootstrap performs),
+  the glue (`static/js/dashboards-page.js`) UNCHANGED — it reads the dashboard id and, when
+  the URL named a version, the integer on `data-dp-dashboard-version` (the default writes
+  none, so its `init` stays `version: "released"`) — the refusal region, and the events pane
+  beside the board. Navigation onto it is never boosted; disposal stays the
+  `htmx:beforeHistorySave` hook.
+- **Overview** — the viewed version's definition, read-only: the sources with their pinned
+  pipeline releases and statuses, the parameter set, the pinned visualizations with each
+  pin's status (RELEASED, or DRAFT with the release hint — R1, the same judge the validator
+  and the release guard run), the layout summary. No authoring control anywhere: the browser
+  never authors a dashboard (#396) — agents author over MCP, and a person releases from the
+  Versions tab.
+- **Refreshes** — the events pane full width; the board pane keeps its own beside the board.
+- **Versions** — the admitted history (newest first, served/draft/discarded markers) and the
+  lifecycle verbs' dialogs in the pipeline dialogs' shape: Release (the ONE D61 consent —
+  "Also release these N draft visualizations" — cascading a DRAFT visualization pin through
+  its own gate in the dashboard's transaction; the set and the sources have no cascade and
+  refuse as before; #397's generic dependency-aware dialog is HELD and is NOT this), Purge
+  draft, Discard (naming where the pointer falls back, D60), Restore, Purge version, Switch
+  (make current), Purge dashboard (typed confirm, sole-draft only). Every dialog's POST
+  calls the SAME service the REST route wires, is session-only, is audited exactly as the
+  REST route audits it (#332: each cascaded visualization's own event first, then the
+  dashboard's own), and answers `HX-Redirect` back onto this tab with a flash toast — a
+  lifecycle change moves the version set the whole page reads. The typed confirm is checked
+  BEFORE the service; refusals ride the family's real 4xx.
+- **Keys** — the `dashboard` keys bound to this dashboard (the folder itself or an
+  ancestor), read-only, each row linking the Keys page's binding editor. Rendered — and
+  fetched — only for a caller with `dashboard.key.bind`.
 
-**Navigation onto the route is never boosted; disposal is the `htmx:beforeHistorySave` hook.**
-Every link TO a board carries `hx-boost="false"` — §6.4's rule: the two bundles must never
-travel between pages, and a boosted board-to-board swap would run one page's bundle under the
-other's document. But LEAVING the board can still be boosted (the layout's nav links are), and
-htmx saves a history snapshot of the current document when it goes — a snapshot that would
-carry the container WITH its mounted marker, making the restored page's fresh `init` refuse
-`DashboardAlreadyMounted` (found by the pages' browser suite on its first run: the Back button
-showed the refusal state where the board was). So the glue disposes on
-`htmx:beforeHistorySave` — the instance is torn down and the container unmarked BEFORE the
-snapshot is taken (dispose also removes the mounted DOM, so the cached markup is the page's
-shell). The pages' browser suite proves exactly one mount across a back/forward pass.
-
-**The events pane.** The caller's refreshes of the open dashboard, newest first
-(`GET /partials/dashboards/{id}/refreshes` — the REST refreshes route's own read through the
-runtime, so the lens and the own/`execution.read_all` visibility are the route's), beside the
-board. Each row shows status, scope and age and links its executions to `/executions/{id}` —
-shown only to a reader of executions; a promoter's refresh names none (§5.7, rest-api §23.3).
-Updates are a BOUNDED POLL (`load delay:15s`, then `every 15s`; the pane re-fetches itself),
-deliberately not §6's notification hooks: the pane's source of truth is the DURABLE record
-(including the `execution.read_all` reader's wider view), the hooks fire only for refreshes
-this browser started and would need a second client-side row renderer duplicating the server's
-markup, and the poll keeps working when the instance failed to boot. The first re-fetch is
-delayed because the server just rendered the rows; the poll dies with the page (leaving is a
-full navigation).
+Tab state is IN-PAGE (`static/js/dashboards/workspace.js` over the SHARED tab core
+`static/js/workspace/tabs.js` — pipeline-editor's tabs run the same machine; one admission
+and transition rule, never a copy): a tab switch swaps no version and cancels no poll, the
+URL's `?tab=` is replaceState'd so Back/Forward re-select, and lazy tabs (Overview,
+Refreshes, Versions, Keys) load their fragment once, on the tab's first activation — a
+hidden tab causes no fetch. The Board pane's reveal runs the runtime instance's OWN
+`resize()`, so a chart that booted while the pane was hidden (a `?tab=versions` deep link, a
+lifecycle redirect) re-fits its slot. EVERY version switch is a FULL navigation
+(`hx-boost="false"` — a draft's bundle can differ from the release's; #369 review F1), and
+the version selector over the admitted history renders those deep links. **The draft
+preview is the named-version view**: `/dashboards/{id}/preview?version=N` answers 303 onto
+`/dashboards/{id}?version=N&tab=board`, so #369's deep links land in the workspace's Board
+tab viewing exactly that version — the banner became the viewed-version chip the top bar
+prints (the truth about what is on screen, "v2 · draft", never "latest release").
 
 ## Appendix A: Change Log
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-02 | v0.26 | #400 the dashboards workspace (#409 closes with it) | **§5.2:** the version routes' page is the session workspace (the preview route a 303 redirect onto it). **§5.8:** the draft preview named where it lives now. **§6.1:** `init`'s `"released"` is the workspace's DEFAULT (no version attribute unless the URL named one). **§7 rewritten:** the flat catalog (`GET /dashboards`, the tree retired to the sidebar, the branch gaining the Pipelines branch's search), the tabbed version-explicit workspace (`?version=&tab=`; Board = the L3b page exactly with the glue unchanged; Overview read-only with the pins' statuses and the R1 hint; Refreshes; Versions with the seven lifecycle dialogs — the ONE D61 consent, no #397; Keys on `dashboard.key.bind`), #409's choose-a-version state (the name, the draft, "no release yet" — never the empty `h1` and the "not found"), the 303 preview redirect, in-page tab state over the shared `workspace/tabs.js` core, full-navigation version switches (the one-bundle rule). No MCP tool, no migration, no new permission row. |
 | 2026-10-02 | v0.25 | 386 (#386, #387) the small-slot margins and the breakpoint collapse | **§6.3:** the Plotly adapter's size defaults — a compact margin (`t` opens for a title only) and `automargin` on the axes, UNDER the author's stored `margin`/`automargin` key by key, beside the theme's colours OVER the author (both precedences side by side); a 2-row slot keeps a plot area of at least half its height (measured by `DashboardGridRowUnitBrowserTest`). **§6.2:** the first-party adapter implements §2.2's promise — below `breakpoint_px` (768 when absent) every item spans the 12 columns in grid order with its own row span, the row unit kept; a viewport crossing re-places and resizes; the grid gap is the `--space-4` token. §2.2 is unchanged: its sentence is now true. |
 | 2026-10-02 | v0.24 | #369 the dashboard draft preview — renumbered at merge (main sat at v0.23) | **§5.2:** the four runtime routes take an optional `version` query parameter naming a DRAFT or RELEASED version (R2, owner-confirmed): absent = the current RELEASED version unchanged; a value is a bounded positive integer, must resolve for the caller (the family 404 naming it), and is refused to a `dashboard` key (`dashboard.key.kind_refused` — the version routes are the session page's). R1 (owner-confirmed): the pin rule is RELEASED-only on a draft exactly as on a release — a draft pinning a DRAFT pin is `dashboard.runtime.dependency_missing`/`not_released` naming the pin, the message carrying the release hint. **§6.1:** `init` admits `"released"` or a positive integer; the integer rides `?version=N` on every runtime path the instance builds. **§7:** the draft preview page (`GET /dashboards/{id}/preview?version=N`) — the board template for a named version, the banner with the way back to the released view, the version on the `data-dp-dashboard-version` attribute channel, refusals in place, the promoter's 404, session-only. No MCP tool, no migration, no new permission row. |
 | 2026-10-02 | v0.23 | 328 (#328) a SQL source is judged against the release's record | **§4.3 rewritten:** a SQL caller node's columns are the release's RECORD (`caller_output_json`, pipeline-contract §3.3.1) — judged at save like a declared contract; `not_observed` (no qualifying run at release) is the one remaining skip, left to the runtime (L2). The record outlives the datasource: read from the release, never from the live schema. No tool, route, permission or error-shape change (`dashboards_validate`'s input is unchanged). |

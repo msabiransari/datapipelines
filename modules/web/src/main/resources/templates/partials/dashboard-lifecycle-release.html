@@ -1,0 +1,105 @@
+<!-- The Release dialog for a dashboard (#400) — the pipeline release dialog's shape over the
+     family's EXISTING rule (dashboards.md §3.2; #397's generic dependency-aware dialog is
+     HELD on an owner question and is NOT this). The 094 §B shape: the pins are answered
+     BEFORE the button — a pin the release can neither pass nor cascade past (a non-RELEASED
+     parameter set, a source not RELEASED, DISCARDED or MISSING anything) renders in the
+     refused colour with "release it first" and the button does not exist, which is §3.2
+     pre-read, not a copy of the guard: the POST re-runs it in the service.
+
+     D61: a DRAFT visualization pin is no longer a dead end. It renders inside ONE consent
+     group — "Also release these N draft visualizations", CHECKED by default — one row per
+     pinned version. Checked, the form posts releasePinnedVisualizations=true and the service
+     releases those versions in the SAME transaction as the dashboard flip, visualizations
+     first (each through its OWN gate). Unchecked, the rows fall back to the refused wording
+     and the submit is withheld by lifecycle-dialog.js's consent arm; the server re-runs the
+     guard on the POST regardless — an unchecked box that reaches it refuses
+     dashboard.release.dependency_not_released as before. The set and the sources have NO
+     cascade: their pins must be RELEASED, full stop. -->
+<div xmlns:th="http://www.thymeleaf.org" class="u-backdrop" data-lifecycle-dialog="dashboard-release">
+  <div class="ds-card app-modal app-modal-md dp-release" role="dialog" aria-modal="true" aria-labelledby="dp-release-title">
+    <button type="button" class="ds-button ds-button-ghost ds-button-sm app-modal-close u-text-xl"
+            aria-label="Close" data-lifecycle-close>
+      <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#x"></use></svg>
+    </button>
+    <h2 class="ds-title u-m0 u-mb-md" id="dp-release-title"
+        th:text="'Release v' + ${dlg.version} + '?'">Release v2?</h2>
+
+    <th:block th:if="${dlg.refusal != null}">
+      <p class="u-secondary u-text-sm" th:text="${dlg.refusal.message}">No draft.</p>
+    </th:block>
+
+    <th:block th:if="${dlg.refusal == null}">
+      <p class="u-secondary u-text-sm">
+        Last written <span th:title="${#temporals.format(dlg.updatedAt, 'yyyy-MM-dd HH:mm')}" th:text="${dlg.updatedAgo}">2 hours ago</span>
+        by <span th:text="${dlg.updatedBy}">Muhammad</span>.
+      </p>
+
+      <!-- The branch without the button: a pin the release can neither pass nor cascade past —
+           every pin renders in the refused shape, because nothing the caller can consent to
+           here would let the release through (the set and the sources have no cascade). -->
+      <th:block th:if="${!#lists.isEmpty(dlg.blockingPins)}">
+        <p class="u-text-sm u-mb-xs">Dependencies this release locks:</p>
+        <ul class="u-text-sm u-mb-md" data-release-pins>
+          <li th:each="p : ${dlg.blockingPins}">
+            <span class="u-muted" th:text="${p.kind}">source</span>
+            <span class="u-mono" th:text="${p.label}">finance/pipelines/revenue@3</span>
+            <span class="ds-badge ds-badge-danger" th:text="${p.statusLabel}">DRAFT</span>
+            <span class="tplx-danger u-text-sm"> — release it first</span>
+          </li>
+        </ul>
+        <p class="u-secondary u-text-sm">
+          Releasing makes v<span th:text="${dlg.version}">2</span> the served version and locks it.
+        </p>
+      </th:block>
+
+      <form th:if="${#lists.isEmpty(dlg.blockingPins)}"
+            th:attr="hx-post=@{'/partials/dashboards/{id}/lifecycle/release'(id=${dlg.id})},
+                     hx-swap='none'">
+
+        <th:block th:if="${!#lists.isEmpty(dlg.pins)}">
+          <p class="u-text-sm u-mb-xs">Dependencies this release locks:</p>
+          <ul class="u-text-sm u-mb-xs" data-release-pins th:if="${!#lists.isEmpty(dlg.otherPins)}">
+            <li th:each="p : ${dlg.otherPins}">
+              <span class="u-muted" th:text="${p.kind}">source</span>
+              <span class="u-mono" th:text="${p.label}">finance/pipelines/revenue@3</span>
+              <span class="ds-badge ds-badge-default" th:text="${p.statusLabel}">RELEASED</span>
+            </li>
+          </ul>
+
+          <!-- D61: the ONE consent group. The checkbox is the consent; its name is the flag
+               the service reads. The rows carry BOTH wordings and CSS shows the one the box
+               selects (.dp-release:has(unchecked) — dashboards.css). -->
+          <div class="dp-cascade u-text-sm u-mb-md" data-release-cascade th:if="${!#lists.isEmpty(dlg.draftPins)}">
+            <label class="dp-cascade-consent">
+              <input type="checkbox" name="releasePinnedVisualizations" value="true" checked data-consent-input>
+              <span th:if="${#lists.size(dlg.draftPins) == 1}">Also release this draft visualization with the dashboard</span>
+              <span th:if="${#lists.size(dlg.draftPins) != 1}"
+                    th:text="'Also release these ' + ${#lists.size(dlg.draftPins)} + ' draft visualizations with the dashboard'">Also release these 2 draft visualizations with the dashboard</span>
+            </label>
+            <ul class="dp-cascade-pins" data-cascade-pins>
+              <li th:each="p : ${dlg.draftPins}" th:attr="data-cascade-pin=${p.label}">
+                <span class="u-mono" th:text="${p.label}">finance/visualizations/cells@1</span>
+                <span class="dp-cascade-on">
+                  <span class="ds-badge ds-badge-default" th:text="${p.statusLabel}">DRAFT</span>
+                  <span class="u-secondary"> — released with this dashboard</span>
+                </span>
+                <span class="dp-cascade-off">
+                  <span class="ds-badge ds-badge-danger" th:text="${p.statusLabel}">DRAFT</span>
+                  <span class="tplx-danger"> — release the visualization first</span>
+                </span>
+              </li>
+            </ul>
+          </div>
+        </th:block>
+
+        <p class="u-secondary u-text-sm u-mb-md">
+          Releasing makes v<span th:text="${dlg.version}">2</span> the served version and locks it.
+        </p>
+
+        <button th:if="${canAuthor == true}" type="submit" data-verb="dashboard-release-confirm" data-consent-submit
+                class="ds-button ds-button-primary u-full" hx-disabled-elt="this"
+                th:text="'Release v' + ${dlg.version}">Release v2</button>
+      </form>
+    </th:block>
+  </div>
+</div>
