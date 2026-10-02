@@ -25,7 +25,7 @@ internal data class EvaluationFrame(
  * `ABORTED` projects to NO frame. It happens when the client is gone past the disconnect grace (the owner's §11.7 ruling)
  * or the process is stopping; the table has no aborted frame and the catalogue no aborted code (an abort is a history
  * outcome and a log event). A client still reading at shutdown sees its stream end without a terminal frame — the
- * dashboards §5.3 transport-failure path, which is the truth.
+ * dashboards §6.6 transport-failure path, which is the truth.
  */
 internal object ParameterEvaluationEventProjection {
     /**
