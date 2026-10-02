@@ -48,9 +48,16 @@ class PipelineWorkspaceRunOwnershipBrowserTest : BrowserSuite() {
             """async ([id]) => {
               const csrf = document.cookie.match(/(?:^|;\s*)dp_csrf=([^;]*)/);
               const cur = await (await fetch('/api/v1/pipelines/' + id, { credentials: 'same-origin' })).json();
-              const rel = await fetch('/api/v1/pipelines/' + id + '/release?release_pinned_templates=true', { method: 'POST', credentials: 'same-origin',
-                headers: { 'Content-Type': 'application/json', 'DP-CSRF-Token': csrf ? decodeURIComponent(csrf[1]) : '', 'If-Match': cur.data.body_hash },
-                body: '{}' });
+              const rel =
+                await fetch('/api/v1/pipelines/' + id + '/release?release_pinned_templates=true', {
+                  method: 'POST', credentials: 'same-origin',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'DP-CSRF-Token': csrf ? decodeURIComponent(csrf[1]) : '',
+                    'If-Match': cur.data.body_hash,
+                  },
+                  body: '{}',
+                });
               if (!rel.ok) throw new Error('v1 release ' + rel.status + ' body=' + (await rel.text()).slice(0, 200));
             }""",
             arrayOf(id),
@@ -97,6 +104,9 @@ class PipelineWorkspaceRunOwnershipBrowserTest : BrowserSuite() {
         page.locator(".pe-card").first().waitFor()
     }
 
+    // One scenario walker: the hold-select-release walk cannot split without a second
+    // 400k-row fixture boot per fragment.
+    @Suppress("LongMethod")
     @Test
     fun `a held stale SQL response never paints - select A, move on, release A (A8)`() {
         loginReadyUser()
@@ -136,7 +146,8 @@ class PipelineWorkspaceRunOwnershipBrowserTest : BrowserSuite() {
         page.locator("#pe-node-list li[data-node-id='pairs_a']").evaluate("el => el.click()")
         try {
             page.waitForFunction(
-                "() => window.__peInstance && window.__peInstance.sqlToken !== null && document.querySelectorAll('#pe-node-sql .pe-sql-block, #pe-node-sql .ds-empty').length > 0",
+                "() => window.__peInstance && window.__peInstance.sqlToken !== null && " +
+                    "document.querySelectorAll('#pe-node-sql .pe-sql-block, #pe-node-sql .ds-empty').length > 0",
                 12000.0,
             )
         } catch (e: Throwable) {
@@ -174,6 +185,9 @@ class PipelineWorkspaceRunOwnershipBrowserTest : BrowserSuite() {
         drainCspViolations().shouldBeEmpty()
     }
 
+    // One scenario walker: seed, run, switch mid-run, return — splitting it would boot
+    // the heavy fixture (a released stage chain over a 400k source) per fragment.
+    @Suppress("LongMethod")
     @Test
     fun `a v1 run keeps its identity and stream while the page browses v2 - nothing paints the wrong body`() {
         loginReadyUser()
@@ -216,7 +230,8 @@ class PipelineWorkspaceRunOwnershipBrowserTest : BrowserSuite() {
         // views v2, with the way back beside it.
         page.locator("#pe-dock-tab-results").click()
         page.waitForFunction(
-            "() => { const s = document.querySelector('.pe-run-strip'); return s && getComputedStyle(s).display !== 'none' && s.textContent.includes('v1'); }",
+            "() => { const s = document.querySelector('.pe-run-strip'); " +
+                "return s && getComputedStyle(s).display !== 'none' && s.textContent.includes('v1'); }",
         )
         val stripText = page.locator(".pe-run-strip").innerText()
         stripText shouldContain "v1"
@@ -240,7 +255,8 @@ class PipelineWorkspaceRunOwnershipBrowserTest : BrowserSuite() {
         )
         val v2CardState =
             page.evaluate(
-                "() => { const i = window.__peInstance; const n = i.cy && i.cy.getElementById('stage_calendar'); return n && n.length ? n.data('state') || 'idle' : 'absent'; }",
+                "() => { const i = window.__peInstance; const n = i.cy && i.cy.getElementById('stage_calendar'); " +
+                    "return n && n.length ? n.data('state') || 'idle' : 'absent'; }",
             )
         withClue("the v2 graph's shared-id card while the v1 run runs: $v2CardState") {
             v2CardState shouldBe "idle"

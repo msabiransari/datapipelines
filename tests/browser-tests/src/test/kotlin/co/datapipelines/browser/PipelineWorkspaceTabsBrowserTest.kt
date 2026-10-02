@@ -55,7 +55,6 @@ class PipelineWorkspaceTabsBrowserTest : BrowserSuite() {
     private fun seedThreeVersions(
         name: String,
         v1NodeId: String,
-        v2NodeId: String,
     ): String {
         // POST creates the pipeline's FIRST version as its DRAFT; releasing twice gives
         // v1 and v2 (both released, v2 current), and the last PUT re-opens the draft as
@@ -138,7 +137,11 @@ class PipelineWorkspaceTabsBrowserTest : BrowserSuite() {
                   b.display_name = displayName;
                   b.parameters = JSON.parse('{' + params + '}');
                   const res = await fetch('/api/v1/pipelines/' + id, { method: 'PUT', credentials: 'same-origin',
-                    headers: { 'Content-Type': 'application/json', 'DP-CSRF-Token': csrf ? decodeURIComponent(csrf[1]) : '', 'If-Match': hash },
+                    headers: {
+                      'Content-Type': 'application/json',
+                      'DP-CSRF-Token': csrf ? decodeURIComponent(csrf[1]) : '',
+                      'If-Match': hash,
+                    },
                     body: JSON.stringify(b) });
                   const text = await res.text();
                   let outHash = null; let status = null;
@@ -160,7 +163,11 @@ class PipelineWorkspaceTabsBrowserTest : BrowserSuite() {
                 """async ([id, hash]) => {
                   const csrf = document.cookie.match(/(?:^|;\s*)dp_csrf=([^;]*)/);
                   const res = await fetch('/api/v1/pipelines/' + id + '/release', { method: 'POST', credentials: 'same-origin',
-                    headers: { 'Content-Type': 'application/json', 'DP-CSRF-Token': csrf ? decodeURIComponent(csrf[1]) : '', 'If-Match': hash },
+                    headers: {
+                      'Content-Type': 'application/json',
+                      'DP-CSRF-Token': csrf ? decodeURIComponent(csrf[1]) : '',
+                      'If-Match': hash,
+                    },
                     body: '{}' });
                   return res.status;
                 }""",
@@ -176,7 +183,8 @@ class PipelineWorkspaceTabsBrowserTest : BrowserSuite() {
         // The selector renders from the workspace block's admitted history — wait for the
         // CLIENT render (Alpine's x-for), not just the root's markup.
         page.waitForFunction(
-            "() => (document.querySelectorAll('.pe-versions a').length === (JSON.parse(document.getElementById('pipeline-workspace').textContent).versionRows || []).length)",
+            "() => document.querySelectorAll('.pe-versions a').length === " +
+                "(JSON.parse(document.getElementById('pipeline-workspace').textContent).versionRows || []).length",
         )
     }
 
@@ -203,7 +211,7 @@ class PipelineWorkspaceTabsBrowserTest : BrowserSuite() {
     @Test
     fun `six tabs, Flow the default - a tab change is navigation only and the lazy tabs load once`() {
         loginReadyUser("pwst")
-        val id = seedThreeVersions("pwstabs/flow/" + generatedPassword("p").take(8).lowercase(), "n_v1", "n_v2")
+        val id = seedThreeVersions("pwstabs/flow/" + generatedPassword("p").take(8).lowercase(), "n_v1")
         openWorkspace(id)
 
         // Flow default: the graph pane is the visible one, the URL has no tab.
@@ -254,7 +262,7 @@ class PipelineWorkspaceTabsBrowserTest : BrowserSuite() {
     @Test
     fun `Run parameters opens the Parameters tab beside Execute, declaration table and overrides composed`() {
         loginReadyUser("pwsp")
-        val id = seedThreeVersions("pwstabs/params/" + generatedPassword("p").take(8).lowercase(), "p_v1", "p_v2")
+        val id = seedThreeVersions("pwstabs/params/" + generatedPassword("p").take(8).lowercase(), "p_v1")
         openWorkspace(id)
 
         // Beside Execute: the topbar's Run parameters affordance opens the SAME tab.
@@ -280,7 +288,7 @@ class PipelineWorkspaceTabsBrowserTest : BrowserSuite() {
     @Test
     fun `the selector and the Versions tab move the viewed version IN PAGE - url, chip, body, marks, schema`() {
         loginReadyUser("pwsv")
-        val id = seedThreeVersions("pwstabs/switch/" + generatedPassword("p").take(8).lowercase(), "s_v1", "s_v2")
+        val id = seedThreeVersions("pwstabs/switch/" + generatedPassword("p").take(8).lowercase(), "s_v1")
         withClue("the seed must leave three versions") {
             versionsOf(id).sorted() shouldBe listOf("1", "2", "3")
         }
@@ -326,7 +334,7 @@ class PipelineWorkspaceTabsBrowserTest : BrowserSuite() {
     @Test
     fun `run input drafts are per version - an override survives v1 to v2 to v1 and never leaks`() {
         loginReadyUser("pwso")
-        val id = seedThreeVersions("pwstabs/over/" + generatedPassword("p").take(8).lowercase(), "o_v1", "o_v2")
+        val id = seedThreeVersions("pwstabs/over/" + generatedPassword("p").take(8).lowercase(), "o_v1")
         openWorkspace(id)
 
         // The arrival is v2 (the current pointer); the schema the override is typed on
@@ -345,7 +353,8 @@ class PipelineWorkspaceTabsBrowserTest : BrowserSuite() {
         page.waitForTimeout(300.0)
         val v2Inputs =
             page.evaluate(
-                "() => [...document.querySelectorAll('#pe-pane-parameters .pe-input')].map(i => i.getAttribute('data-key') + '=' + i.value)",
+                "() => [...document.querySelectorAll('#pe-pane-parameters .pe-input')]" +
+                    ".map(i => i.getAttribute('data-key') + '=' + i.value)",
             ) as List<String>
         withClue("v2's own bag after the switch: $v2Inputs") {
             v2Inputs.any { it.startsWith("region=") } shouldBe true
@@ -371,9 +380,9 @@ class PipelineWorkspaceTabsBrowserTest : BrowserSuite() {
         page.evaluate("() => document.querySelector('#pe-dock-tab-details').getAttribute('aria-selected')") shouldBe "true"
         page.evaluate("() => document.querySelector('#pe-dock-tab-details').textContent.trim()") shouldBe "Node Details"
         page.evaluate(
-            "() => !!document.querySelector('#pe-dock-tab-results') && !!document.querySelector('#pe-dock-tab-errors') && !!document.querySelector('#pe-dock-tab-events')",
-        ) shouldBe
-            true
+            "() => ['pe-dock-tab-results', 'pe-dock-tab-errors', 'pe-dock-tab-events']" +
+                ".every(id => !!document.getElementById(id))",
+        ) shouldBe true
 
         // Selecting a node opens Node Details and the graph keeps its width (no right
         // inspector ever appears).
@@ -405,7 +414,7 @@ class PipelineWorkspaceTabsBrowserTest : BrowserSuite() {
     @Test
     fun `the whole composition walk is clean in both themes - through the user's own theme select`() {
         loginReadyUser("pwst2")
-        val id = seedThreeVersions("pwstabs/theme/" + generatedPassword("p").take(8).lowercase(), "t_v1", "t_v2")
+        val id = seedThreeVersions("pwstabs/theme/" + generatedPassword("p").take(8).lowercase(), "t_v1")
         for (theme in listOf("dark", "light")) {
             // The SAME control a user drives (settings/index.html's select#themeSelect);
             // prefers-color-scheme emulation changes nothing on this app's class-based theme.
