@@ -37,7 +37,7 @@ class DashboardGridRowUnitBrowserTest : DashboardBrowserSuite() {
             page.navigate("$baseUrl/dashboards/$board")
             ensureTheme(theme)
             page.waitForFunction("() => window.__dpPage && window.__dpPage.ready === true")
-            assertFiguresFillTheirSlots(page, BOARD_SCOPE, BOARD_SLOTS, "board/$theme")
+            assertFiguresFillTheirSlots(page, BOARD_SCOPE, BOARD_SLOTS, BOARD_ROWS, "board/desktop/$theme")
         }
     }
 
@@ -49,7 +49,8 @@ class DashboardGridRowUnitBrowserTest : DashboardBrowserSuite() {
         page.setViewportSize(NARROW_WIDTH_PX, NARROW_HEIGHT_PX)
         page.navigate("$baseUrl/dashboards/$board")
         page.waitForFunction("() => window.__dpPage && window.__dpPage.ready === true")
-        assertFiguresFillTheirSlots(page, BOARD_SCOPE, BOARD_SLOTS, "board/$NARROW_WIDTH_PX")
+        val theme = page.evaluate("() => document.documentElement.getAttribute('data-theme')") as String
+        assertFiguresFillTheirSlots(page, BOARD_SCOPE, BOARD_SLOTS, BOARD_ROWS, "board/$NARROW_WIDTH_PX/$theme")
     }
 
     @Test
@@ -63,8 +64,12 @@ class DashboardGridRowUnitBrowserTest : DashboardBrowserSuite() {
             for (theme in THEMES) {
                 agentPage.navigate("$baseUrl$previewUrl&theme=$theme")
                 agentPage.waitForSelector("$PREVIEW_SCOPE[data-dp-ready='true']")
-                assertFiguresFillTheirSlots(agentPage, PREVIEW_SCOPE, PREVIEW_SLOTS, "preview/$theme")
+                assertFiguresFillTheirSlots(agentPage, PREVIEW_SCOPE, PREVIEW_SLOTS, PREVIEW_ROWS, "preview/desktop/$theme")
             }
+            agentPage.setViewportSize(NARROW_WIDTH_PX, NARROW_HEIGHT_PX)
+            agentPage.navigate("$baseUrl$previewUrl&theme=light")
+            agentPage.waitForSelector("$PREVIEW_SCOPE[data-dp-ready='true']")
+            assertFiguresFillTheirSlots(agentPage, PREVIEW_SCOPE, PREVIEW_SLOTS, PREVIEW_ROWS, "preview/$NARROW_WIDTH_PX/light")
         } finally {
             agent.close()
         }
@@ -75,6 +80,7 @@ class DashboardGridRowUnitBrowserTest : DashboardBrowserSuite() {
         target: Page,
         scope: String,
         slots: Map<String, Int>,
+        gridRows: Int,
         label: String,
     ) {
         val args = mapOf("scope" to scope, "slots" to slots.keys.toList())
@@ -84,9 +90,15 @@ class DashboardGridRowUnitBrowserTest : DashboardBrowserSuite() {
         val gap = (measured["gap"] as Number).toDouble()
         val report = "$label token='${measured["token"]}' unit=${unit}px gap=${gap}px slots=${measured["slots"]}"
         record(report)
+        shoot(target, label)
 
         withClue("the page declares a positive --dashboard-row-unit; with none every bound below is vacuous: $report") {
             (unit > 0.0) shouldBe true
+        }
+        val boardHeight = (measured["board"] as Number).toDouble()
+        val expectedBoard = gridRows * unit + (gridRows - 1) * gap
+        withClue("the board is $gridRows rows tall ($expectedBoard) - no trailing row for the empty default slot: $report board=$boardHeight") {
+            (Math.abs(boardHeight - expectedBoard) <= TOLERANCE_PX) shouldBe true
         }
         val figures = measured["slots"] as Map<*, *>
         for ((name, rows) in slots) {
@@ -116,6 +128,15 @@ class DashboardGridRowUnitBrowserTest : DashboardBrowserSuite() {
     }
 
     private fun Map<*, *>.heightOf(name: String): Double = ((this[name] as Map<*, *>)["figure"] as Number).toDouble()
+
+    /** The page as a person sees it, named by page, viewport and theme, beside the measurements. */
+    private fun shoot(
+        target: Page,
+        label: String,
+    ) {
+        Files.createDirectories(REPORT.parent)
+        target.screenshot(Page.ScreenshotOptions().setFullPage(true).setPath(REPORT.parent.resolve(label.replace('/', '-') + ".png")))
+    }
 
     /** One line per measurement into the build's reports, for the handback's record of the heights. */
     private fun record(line: String) {
@@ -180,9 +201,13 @@ class DashboardGridRowUnitBrowserTest : DashboardBrowserSuite() {
         const val BOARD_SCOPE = "#dp-board"
         val BOARD_SLOTS = mapOf("revenue" to 4, "slowchart" to 2)
 
+        /** The seeded grid's last row: total and slowchart sit at y 4 with h 2. */
+        const val BOARD_ROWS = 6
+
         /** The preview's first case: ONE occurrence named `preview`, 12 wide, 4 rows. */
         const val PREVIEW_SCOPE = "section[data-dp-case-index='0']"
         val PREVIEW_SLOTS = mapOf("preview" to 4)
+        const val PREVIEW_ROWS = 4
 
         const val NARROW_WIDTH_PX = 767
         const val NARROW_HEIGHT_PX = 900
@@ -215,6 +240,7 @@ class DashboardGridRowUnitBrowserTest : DashboardBrowserSuite() {
               var out = {
                 token: getComputedStyle(document.documentElement).getPropertyValue('--dashboard-row-unit').trim(),
                 unit: unit,
+                board: board.getBoundingClientRect().height,
                 gap: parseFloat(getComputedStyle(board).rowGap) || 0,
                 slots: {}
               };

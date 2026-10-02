@@ -315,6 +315,13 @@ a.tpl-leaf {
   overflow: auto;
 }
 
+/* The adapter always appends a default slot for occurrences and controls with no grid entry; empty,
+   it would take a whole row of the unit (and a gap) at the foot of every board. Named slots carry
+   `data-dp-slot` and are never hidden: an unmounted one still holds its place. */
+.dp-dashboard-slot:not([data-dp-slot]):empty {
+  display: none;
+}
+
 .dp-dashboard-viz {
   flex: 1 1 auto;
   min-height: 0;
