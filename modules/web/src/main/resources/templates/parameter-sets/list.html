@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{layouts/default :: page(~{::content})}">
+<th:block th:fragment="content">
+  <!-- #374 — the Parameter Sets CATALOG (ui-screens.md §4.23). The folder tree lives in the global sidebar,
+       beneath Parameter Sets; a leaf there opens the set's workspace. What stays here is the catalog
+       landing: one flat, server-paged list of full paths — every set the caller may read — each row a
+       link into /parameter-sets/{id}. There is no second tree and no detail pane: the workspace is the
+       one place a set is read and tried. -->
+  <div class="app-page-h">
+    <div>
+      <h1 class="ds-headline">Parameter Sets</h1>
+      <p class="app-page-sub">
+        Parameter sets are authored through agents over the
+        <a th:href="@{/docs/mcp-server}">MCP server</a> — ask your agent to create one, giving it a
+        folder path like <code>finance/parameters/geo_filters</code>. Browse the folders in the
+        sidebar's Parameter Sets tree, or page through the catalog here; a set opens in its workspace.
+      </p>
+    </div>
+    <div class="app-page-actions">
+      <button type="button" class="ds-button ds-button-secondary"
+              data-nav-tree-reveal="parameter-sets" aria-controls="nav-tree-parameter-sets">Browse folders</button>
+    </div>
+  </div>
+
+  <div class="app-catalog-list">
+    <!-- The fragment's own root carries id="parameter-set-list-wrapper", so the pager's swap target
+         survives every refresh — this div is only a placeholder. -->
+    <div th:replace="~{partials/parameter-set-list :: results}"></div>
+  </div>
+</th:block>
+</html>

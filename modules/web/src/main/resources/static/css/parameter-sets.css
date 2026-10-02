@@ -1,0 +1,178 @@
+/* The Parameter Sets workspace (#374, ui-screens §4.23). Every colour, radius, space and font is a design-system
+ * or app token — nothing lands as a literal. The only numbers declared here are LAYOUT geometry (the graph's
+ * height and the form column's width), declared once as custom properties the way pipeline-editor.css does. */
+
+:root {
+  --ps-graph-h: 22rem;
+  --ps-form-w: 26rem;
+}
+
+.ps-root {
+  display: grid;
+  gap: var(--space-4);
+  font-size: var(--text-sm);
+}
+
+.ps-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+}
+
+.ps-path {
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.ps-versions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.ps-body {
+  display: grid;
+  grid-template-columns: minmax(0, var(--ps-form-w)) minmax(0, 1fr);
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.ps-stack {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.ps-card {
+  background: var(--surface-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+  min-width: 0;
+}
+
+.ps-card-title {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-base);
+  color: var(--text-primary);
+}
+
+.ps-graph {
+  height: var(--ps-graph-h);
+  border-radius: var(--radius-md);
+  background: var(--surface-inset);
+}
+
+.ps-graph:focus-visible,
+.ps-card:focus-within {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+
+.ps-hint,
+.ps-form-status {
+  color: var(--text-secondary);
+  margin: var(--space-2) 0 0;
+}
+
+.ps-form-error {
+  border: 1px solid var(--border-danger);
+  border-radius: var(--radius-md);
+  color: var(--text-danger);
+  padding: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.ps-form-error code {
+  font-family: var(--font-mono);
+}
+
+/* The runtime's emitted parameter rows, laid out for a form column. */
+.ps-form-host .dp-dashboard-parameter {
+  display: grid;
+  gap: var(--space-1);
+  margin-bottom: var(--space-3);
+}
+
+.ps-form-host .dp-dashboard-parameter-origin,
+.ps-form-host .dp-dashboard-parameter-reset {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.ps-form-host .dp-dashboard-parameter-reset {
+  color: var(--text-warning);
+}
+
+.ps-insp-title {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-base);
+}
+
+.ps-insp-list {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.ps-insp-row {
+  display: grid;
+  grid-template-columns: minmax(0, 11rem) minmax(0, 1fr);
+  gap: var(--space-3);
+}
+
+.ps-insp-label {
+  color: var(--text-secondary);
+}
+
+.ps-insp-value {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.ps-insp-code {
+  margin: 0;
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--surface-inset);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  white-space: pre-wrap;
+}
+
+.ps-insp-table {
+  border-collapse: collapse;
+}
+
+.ps-insp-table th,
+.ps-insp-table td {
+  text-align: left;
+  padding: var(--space-1) var(--space-2);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.ps-insp-link {
+  display: block;
+  color: var(--text-link);
+}
+
+.ps-insp-empty {
+  color: var(--text-secondary);
+}
+
+.ps-visually-hidden {
+  position: absolute;
+  width: var(--space-px);
+  height: var(--space-px);
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@media (max-width: 64rem) {
+  .ps-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

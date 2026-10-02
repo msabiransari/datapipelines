@@ -12,6 +12,7 @@ import co.datapipelines.web.bootstrap.BootstrapProperties
 import co.datapipelines.web.bootstrap.DemoEndpointSeeder
 import co.datapipelines.web.bootstrap.ExampleContentSeeder
 import co.datapipelines.web.bootstrap.LakeBootstrapSeeder
+import co.datapipelines.web.parameters.ParameterSetTransferService
 import co.datapipelines.web.pipelines.PipelineImportService
 import co.datapipelines.web.templates.TemplateImportService
 import org.springframework.boot.context.properties.EnableConfigurationProperties
@@ -60,8 +61,10 @@ class BootstrapConfiguration {
         properties: BootstrapProperties,
         pipelineImportService: PipelineImportService,
         templateImportService: TemplateImportService,
+        parameterSetImportService: ParameterSetTransferService,
         datasources: DatasourceRegistry,
-    ): WorkspaceContentSeeder = ExampleContentSeeder(properties, pipelineImportService, templateImportService, datasources)
+    ): WorkspaceContentSeeder =
+        ExampleContentSeeder(properties, pipelineImportService, templateImportService, parameterSetImportService, datasources)
 
     /**
      * #224 — the demo workspace's public API: one endpoint per seeded pipeline, one configured

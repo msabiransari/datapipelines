@@ -1,0 +1,85 @@
+<!-- ONE level of the parameter-set tree (#374), rendered in the sidebar's lazy Parameter Sets branch.
+     Deliberately the same shape as partials/dashboard-tree-level.html, down to the class names: one
+     stylesheet (template-tree.css) dresses every tree, and a reader who knows one tree knows the others.
+
+     The tree is backed by server-side prefix queries: this fragment renders the direct sub-folders and the
+     direct set children of one prefix, and expanding a folder issues ONE more request for ONE more level.
+     Folders are virtual — a name prefix, no table, no id, no CRUD; there is deliberately no New folder /
+     rename / move / delete control anywhere in this file. Parameter sets are authored through the REST API
+     and the MCP server, so the empty state says so instead of offering a button that does not exist.
+
+     A leaf NAVIGATES to the canonical workspace /parameter-sets/{id} as a full document load
+     (hx-boost="false", the pipelines tree's rule): a set the caller's lens hides is never rendered here —
+     not disabled, not hidden by CSS — because the service never returned it.
+
+     Root ids are derived per prefix (ParameterSetsBrowseModel.levelId) so a folder's placeholder and the
+     fragment that replaces it cannot disagree. ARIA: the ROOT level's list is role=tree; a NESTED level's
+     container is role=group under its folder's treeitem. -->
+<div xmlns:th="http://www.thymeleaf.org" th:fragment="level"
+     th:id="${levelId}" class="tpl-level"
+     th:attr="role=${#strings.isEmpty(prefix)} ? null : 'group'">
+
+  <th:block th:if="${lensUnavailable != null and #lists.isEmpty(folders) and #lists.isEmpty(parameterSets)}">
+    <div th:replace="~{partials/lens-unavailable :: notice(${lensUnavailable})}"></div>
+  </th:block>
+  <th:block th:if="${lensUnavailable == null and #lists.isEmpty(folders) and #lists.isEmpty(parameterSets)}">
+    <div class="ds-empty">
+      <p class="ds-empty-title">No parameter sets yet</p>
+      <p class="ds-empty-description">
+        Parameter sets are authored through the MCP server — ask your agent to create one. Give it a
+        folder path like <code>finance/parameters/geo_filters</code> — a folder is required, and the
+        folders appear here on their own.
+      </p>
+    </div>
+  </th:block>
+
+  <ul class="tpl-tree"
+      th:unless="${#lists.isEmpty(folders) and #lists.isEmpty(parameterSets)}"
+      th:attr="role=${#strings.isEmpty(prefix)} ? 'tree' : null,
+               aria-label=${#strings.isEmpty(prefix)} ? 'Parameter sets' : null">
+
+    <li class="tpl-node" role="none" th:each="f : ${folders}">
+      <details class="tpl-folder">
+        <summary class="tpl-summary" role="treeitem" aria-expanded="false"
+                 th:attr="hx-get=@{/partials/parameter-sets/tree(prefix=${f.path}, scope=${scope})}"
+                 hx-trigger="click once"
+                 hx-target="next .tpl-level" hx-swap="outerHTML">
+          <svg class="ds-icon ds-icon-xs tpl-chevron" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#chevron-right"></use></svg>
+          <svg class="ds-icon ds-icon-sm tpl-row-icon tpl-icon-folder" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#folder"></use></svg>
+          <svg class="ds-icon ds-icon-sm tpl-row-icon tpl-icon-folder-open" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#folder-open"></use></svg>
+          <span class="tpl-label" th:text="${f.segment}" th:title="${f.path}">parameters</span>
+          <span class="ds-badge ds-badge-default tpl-count" th:text="${f.count}">3</span>
+        </summary>
+        <div class="tpl-level tpl-level-pending" th:id="${f.levelId}">
+          <span class="ds-spinner htmx-indicator" aria-hidden="true"></span>
+        </div>
+      </details>
+    </li>
+
+    <!-- LEAVES. The label is the leaf's own segment; the full path always rides on `title`. The version
+         badge names the WORKING version; a set whose working version is a draft carries the draft badge —
+         versioning §7 keeps unreleased edits visible in the list. -->
+    <li class="tpl-node" role="none" th:each="p : ${parameterSets}">
+      <a th:href="@{/parameter-sets/{id}(id=${p.id})}" class="tpl-leaf" role="treeitem" aria-selected="false"
+         hx-boost="false"
+         th:attr="data-leaf-id=${p.id}">
+        <svg class="ds-icon ds-icon-sm tpl-row-icon" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#sliders-horizontal"></use></svg>
+        <span class="tpl-label" th:text="${p.segment}" th:title="${p.name}">geo_filters</span>
+        <span class="ds-badge ds-badge-default tpl-leaf-version"
+              th:text="${'v' + p.version}">v1</span>
+        <span th:if="${!p.released}" class="ds-badge ds-badge-warning tpl-leaf-draft"
+              th:title="'v' + ${p.version} + ' is a draft — release it to publish.'">draft</span>
+      </a>
+    </li>
+  </ul>
+
+  <p class="tpl-overflow" th:if="${folders.size() > 200}">
+    Only the first 200 sub-folders of this level are shown.
+  </p>
+
+  <th:block th:if="${!#lists.isEmpty(parameterSets) and (offset > 0 or hasMore)}"
+            th:with="prevUrl=@{/partials/parameter-sets/tree(prefix=${prefix}, scope=${scope}, offset=${offset - 25})},
+                     nextUrl=@{/partials/parameter-sets/tree(prefix=${prefix}, scope=${scope}, offset=${offset + 25})}">
+    <div th:replace="~{partials/pager :: pager('#' + ${levelId}, ${prevUrl}, ${nextUrl}, ${offset}, ${hasMore}, ${parameterSets.size()}, ${total})}"></div>
+  </th:block>
+</div>

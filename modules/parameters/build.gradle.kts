@@ -38,3 +38,12 @@ dependencies {
     testImplementation(libs.testcontainers.postgresql)
     testImplementation(libs.postgresql)
 }
+
+// SampleDataParameterSetsContentTest reads repo files at RUNTIME — invisible to Gradle's up-to-date
+// checking, so a stale test result would survive an examples.json edit (the silence 049 named for the
+// templates twin of this suite). Declaring them as test inputs makes the guard re-run when the content
+// it guards changes; the exit gate's --rerun-tasks remains the belt to this braces.
+tasks.test {
+    inputs.file(rootProject.layout.projectDirectory.file("scripts/sample-data/content/examples.json"))
+    inputs.file(rootProject.layout.projectDirectory.file("deploy/sample-data/bootstrap-datasources-nyc.yml"))
+}

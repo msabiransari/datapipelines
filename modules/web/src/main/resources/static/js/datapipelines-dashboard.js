@@ -67,6 +67,15 @@
     "dispose",
   ];
 
+  /** #374 — the value-origin words the parameter form shows (record P26's `state.origin` wire values). */
+  var ORIGIN_LABELS = {
+    client: "your selection",
+    default: "default",
+    first: "first option",
+    source: "from source",
+    none: "no value",
+  };
+
   function isPlainObject(value) {
     return !!value && typeof value === "object" && !Array.isArray(value);
   }
@@ -228,6 +237,10 @@
     this._parameters = null;
     this._baseline = null;
     this._lock = null;
+    // #374 — the parameters-only entry (initParameters): a parameter SET is evaluated by id and version, with no
+    // dashboard configuration behind it. `_generation` numbers every attempt so a superseded one is nameable.
+    this._parametersOnly = false;
+    this._generation = 0;
     this._refreshes = {};
     this._streams = {};
     this._occurrences = {};
@@ -275,7 +288,13 @@
   };
 
   DashboardInstance.prototype._parametersPath = function () {
+    if (this._parametersOnly) return this._parameterSetEvaluatePath();
     return this._runtimePath("parameters");
+  };
+
+  /** #374 — the parameters-only entry's ONE route: the FROZEN evaluate, by id (the version rides the body, always). */
+  DashboardInstance.prototype._parameterSetEvaluatePath = function () {
+    return "/api/v1/parameter-sets/" + encodeURIComponent(this._init.parameterSet.id) + "/evaluate";
   };
 
   DashboardInstance.prototype._streamPath = function () {
@@ -583,6 +602,52 @@
     return this._ready;
   };
 
+  /**
+   * #374 — the parameters-only barrier: the same ordered steps minus the dashboard's (no configuration read, no
+   * renderer judgement, no occurrences, no actions). The layout is mounted (the composite builds `container` there), then
+   * the FIRST evaluation — selections `{}` — is awaited and rendered. Resolves `ready`; a failure is published
+   * VERBATIM (the server's code and message) and disposes the instance, exactly as the board's bootstrap does.
+   */
+  DashboardInstance.prototype._bootstrapParameters = function () {
+    var self = this;
+    var steps = [];
+    this._readySteps = steps;
+    // The lock window a parameter attempt is given: the option, else the dashboard runtime's own default.
+    var lockSeconds = this._options.parameterLockSeconds;
+    this._config = {
+      timeouts: { parameter_lock_seconds: typeof lockSeconds === "number" && lockSeconds > 0 ? lockSeconds : 30 },
+      parameter_set: { name: this._init.parameterSet.id },
+      layout: {},
+      visualizations: [],
+      actions: [],
+    };
+    this._ready = (async function () {
+      steps.push("adapter_validated");
+      await withDeadline(Promise.resolve(self._adapter.mountLayout({})), self._renderTimeoutMs(), function () {
+        return self._fail("render.layout_timeout", "the host did not mount the layout in time");
+      });
+      steps.push("layout_mounted");
+      var evaluated = await self._evaluateParameters("bootstrap");
+      steps.push("parameters_rendered");
+      self._parameters = evaluated;
+      self._baseline = { selections: self._snapshotSelections(evaluated), revision: evaluated.parameter_revision };
+      self._bootstrapped = true;
+      return undefined;
+    })();
+    this._ready.catch(function (error) {
+      self._publishNotification({
+        scope: "bootstrap",
+        severity: "error",
+        code: isDashboardError(error) ? error.code : "bootstrap.failed",
+        message: isDashboardError(error) && error.message ? error.message : "the parameter set could not be evaluated",
+        retryable: !!(isDashboardError(error) && error.retryable),
+        recover: isDashboardError(error) && error.retryable ? "retry" : null,
+      });
+      self._dispose("bootstrap_failed");
+    });
+    return this._ready;
+  };
+
   /** Adapter validation (§10.3): a missing function is refused at registration — synchronously, in init. */
   function validateAdapter(adapter) {
     if (!isPlainObject(adapter)) {
@@ -690,7 +755,16 @@
    */
   DashboardInstance.prototype._evaluateParameters = function (intent) {
     if (this._lock) {
-      return Promise.reject(this._fail("parameters.locked", "a parameter evaluation is already pending"));
+      // #374 — a parameter SET's form SUPERSEDES: the person's newest selection is the one worth answering, and a
+      // refused change would be a lost one. The pending attempt is finished here, so its response (n) arriving after
+      // this one (n+1) was minted passes neither admission point and changes nothing. A dashboard keeps the refusal.
+      if (!this._parametersOnly) {
+        return Promise.reject(this._fail("parameters.locked", "a parameter evaluation is already pending"));
+      }
+      var prior = this._lock;
+      prior.finished = true;
+      this._clearLockTimer(prior);
+      this._lock = null;
     }
     var self = this;
     var startedAt = this._env.now();
@@ -700,6 +774,7 @@
         : 30;
     var attempt = {
       intent: intent,
+      generation: ++this._generation,
       startedAt: startedAt,
       deadline: startedAt + lockSeconds * 1000,
       finished: false,
@@ -710,12 +785,17 @@
       self._lockExpired(attempt);
     }, attempt.deadline - startedAt);
 
-    return this._call(this._parametersPath(), {
-      configuration_id: this._config.configuration_id,
-      instance_id: this._instanceId,
-      selections: this._committedSelections(),
-      intent: intent,
-    }).then(function (evaluated) {
+    var request = this._parametersOnly
+      ? // The frozen evaluate's body: `version` ALWAYS present (never the served-default fallback) and the WHOLE
+        // selection set, hidden and disabled included (P27). The first render submits `{}`.
+        { version: this._init.parameterSet.version, selections: this._committedSelections() }
+      : {
+          configuration_id: this._config.configuration_id,
+          instance_id: this._instanceId,
+          selections: this._committedSelections(),
+          intent: intent,
+        };
+    return this._call(this._parametersPath(), request).then(function (evaluated) {
       // A response arriving after its attempt expired (or was superseded) changes nothing (§5.6).
       if (attempt.finished) {
         throw self._fail("parameters.superseded", "a late parameter response after its deadline changes nothing");
@@ -787,6 +867,9 @@
         self._lock = null;
         self._parameters = evaluated;
         self._baseline = { selections: self._snapshotSelections(evaluated), revision: evaluated.parameter_revision };
+        // #374 — the form's failure notice is a STATE, not an event: an applied response retires it, so the same
+        // failure twice in a row (with a success between) is shown twice rather than deduplicated into silence.
+        if (self._parametersOnly) self._notifications = {};
         self._publishNotification({
           scope: "parameters",
           severity: "info",
@@ -1327,6 +1410,12 @@
     // An invalid state is also a reason to re-evaluate: the commit's fresh selections are the way
     // back to a valid state (§5.6 — submission stays blocked until then).
     var invalid = this._parameters.valid === false;
+    // #374 — a parameter SET re-evaluates on EVERY commit: the whole selection set goes to the server whatever
+    // changed (P27), and an INPUT's own validation answer arrives the same way a parent's re-resolution does.
+    if (this._parametersOnly) {
+      this._safeEvaluate(null, "parent_change");
+      return;
+    }
     if (parents.indexOf(name) !== -1 || bound || invalid) {
       this._safeEvaluate(bound && !invalid ? bound.action : null, invalid ? "retry" : "parent_change");
       return;
@@ -1353,7 +1442,8 @@
           scope: "parameters",
           severity: "error",
           code: error && error.code ? error.code : "parameters.failed",
-          message: "the parameter evaluation failed",
+          // #374 — the form shows the SERVER's code and message as received; the dashboard's generic sentence stays.
+          message: self._parametersOnly && error && error.message ? error.message : "the parameter evaluation failed",
           retryable: !!(error && error.retryable),
           recover: "retry",
           configurationStale: !!(error && error.configurationStale),
@@ -1713,6 +1803,58 @@
     return instance;
   }
 
+  /**
+   * #374 — `initParameters` (the parameter-set workspace's entry, workspace spec §6.3): the SAME instance machinery
+   * (adapter contract, attempt generation, lock, absolute deadline, supersede-by-newest) pointed at a parameter SET
+   * instead of a dashboard, so there is one renderer and one copy of the attempt logic. Differences from `init`,
+   * all of them narrowings: `parameterSet: { id, version }` replaces `dashboard` (the version is a positive integer,
+   * ALWAYS — a form never relies on the server's served-version default), there is no configuration, no
+   * visualization, no action and no stream, and the one call is `POST /api/v1/parameter-sets/{id}/evaluate` with
+   * `{ version, selections }`. Credentials are the session's, exactly as `init` carries them (the double-submit CSRF
+   * cookie read by `_callEvenDisposed`); a proxy or fixture transport is refused — S1 has neither. Re-initialising an
+   * OWNED container is refused (`DashboardAlreadyMounted`).
+   */
+  function initParameters(options) {
+    if (!isPlainObject(options)) throw DashboardError("init.invalid", "initParameters requires an options object");
+    if (!isPlainObject(options.server)) throw DashboardError("init.invalid", "initParameters requires server");
+    if (!isPlainObject(options.parameterSet) || typeof options.parameterSet.id !== "string" || options.parameterSet.id === "") {
+      throw DashboardError("init.invalid", "initParameters requires parameterSet.id");
+    }
+    var version = options.parameterSet.version;
+    if (typeof version !== "number" || !isFinite(version) || version < 1 || version % 1 !== 0) {
+      throw DashboardError("init.version_unsupported", "initParameters requires a positive integer parameterSet.version", {
+        requested: String(version),
+      });
+    }
+    if (!options.container || typeof options.container.setAttribute !== "function") {
+      throw DashboardError("init.invalid", "initParameters requires a container element");
+    }
+    if (options.container.getAttribute(MOUNTED_ATTRIBUTE)) {
+      var mounted = new Error("the container already mounts a dashboard instance");
+      mounted.name = "DashboardAlreadyMounted";
+      throw mounted;
+    }
+    if (options.server.credentials !== "session" || options.server.fixtures !== undefined) {
+      throw DashboardError("init.invalid", 'initParameters takes credentials: "session" and no fixtures');
+    }
+    validateAdapter(options.adapter);
+    var env = {
+      uuid: randomUuid,
+      now: nowMillis,
+      fetchImpl: typeof fetch === "function" ? function (url, init) { return fetch(url, init); } : null,
+      setTimeout: function (fn, ms) { return setTimeout(fn, ms); },
+      clearTimeout: function (id) { clearTimeout(id); },
+      renderers: REGISTERED_RENDERERS,
+      declaredPlotlyBundles: declaredPlotlyBundles,
+    };
+    var instance = new DashboardInstance(options, env);
+    instance._parametersOnly = true;
+    options.container.setAttribute(MOUNTED_ATTRIBUTE, instance._instanceId);
+    instance._wrapCallbacks();
+    instance._bootstrapParameters();
+    return instance;
+  }
+
   /** The `<script data-dp-plotly-bundle="2d|3d">` declarations — the host names the bundle it loaded. */
   function declaredPlotlyBundles() {
     if (typeof document === "undefined" || !document.querySelectorAll) return [];
@@ -1751,7 +1893,10 @@
    * layout, parameters, callbacks and notifications are the composite's own (a grid host for the
    * layout, text-only controls for the parameters, `textContent` everywhere).
    */
-  function adapters(container) {
+  function adapters(container, adapterOptions) {
+    // #374 — `provenance: true` (the parameter-set workspace's form) adds each row's value ORIGIN and RESET marks;
+    // absent, the board's rows render exactly as before.
+    var provenance = !!(adapterOptions && adapterOptions.provenance === true);
     if (typeof document === "undefined") {
       throw DashboardError("adapter.no_dom", "the first-party adapter needs a DOM");
     }
@@ -1999,6 +2144,25 @@
             row.appendChild(free);
           }
           if (hidden) row.style.display = "none";
+          if (provenance) {
+            // #374 — where the shown value came from (P26) and whether the walk dropped the person's own value.
+            // Both are the response's facts, rendered as text and a data attribute — never invented client-side.
+            if (definitionState.origin) {
+              let origin = document.createElement("span");
+              origin.className = "dp-dashboard-parameter-origin";
+              origin.setAttribute("data-dp-origin", String(definitionState.origin));
+              origin.textContent = ORIGIN_LABELS[definitionState.origin] || String(definitionState.origin);
+              row.appendChild(origin);
+            }
+            if (definitionState.reset === true) {
+              let reset = document.createElement("span");
+              reset.className = "dp-dashboard-parameter-reset";
+              reset.setAttribute("data-dp-reset", "true");
+              reset.setAttribute("role", "status");
+              reset.textContent = "reset — the previous selection is no longer valid";
+              row.appendChild(reset);
+            }
+          }
           if (definitionState.errors && definitionState.errors.length) {
             let problem = document.createElement("div");
             problem.className = "dp-dashboard-parameter-error";
@@ -2105,6 +2269,7 @@
 
   var api = {
     init: init,
+    initParameters: initParameters,
     registerRenderer: registerRenderer,
     adapters: adapters,
     DashboardError: DashboardError,

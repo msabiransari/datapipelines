@@ -67,6 +67,9 @@ class ReadFloorTest {
         // …and the sharp ones by name, so the classifier has to get the DIRECTION right.
         familyOf("/api/v1/parameter-sets") shouldBeFamily Family.PARAMETER_SETS
         familyOf("/api/v1/parameter-sets/{id}/versions/{version}") shouldBeFamily Family.PARAMETER_SETS
+        familyOf("/parameter-sets") shouldBeFamily Family.PARAMETER_SETS
+        familyOf("/parameter-sets/{id}") shouldBeFamily Family.PARAMETER_SETS
+        familyOf("/partials/parameter-sets/tree") shouldBeFamily Family.PARAMETER_SETS
         familyOf("/api/v1/visualizations") shouldBeFamily Family.VISUALIZATIONS
         familyOf("/api/v1/visualizations/{id}/versions/{version}") shouldBeFamily Family.VISUALIZATIONS
         familyOf("/api/v1/dashboards") shouldBeFamily Family.DASHBOARDS
@@ -236,11 +239,17 @@ class ReadFloorTest {
             matches = { path -> path.startsWith("/api/{") },
         ),
 
-        /** #194 lane D: the parameter sets — an every-role read (the lens aside, one row shape). */
+        /** #194 lane D: the parameter sets — an every-role read (the lens aside, one row shape). #374 added the
+         * three pages (catalog, workspace, tree partial): the family's reads, never an evaluate declaration. */
         PARAMETER_SETS(
-            floor = 4,
+            floor = 7,
             permissions = setOf(Permission.PARAMETER_SET_READ),
-            matches = { path -> path.startsWith("/api/v1/parameter-sets") },
+            matches = { path ->
+                path.startsWith("/api/v1/parameter-sets") ||
+                    path == "/parameter-sets" ||
+                    path.startsWith("/parameter-sets/") ||
+                    path == "/partials/parameter-sets/tree"
+            },
         ),
 
         /** #10 L1b: the visualizations — an every-role read (the lens aside); floor = the family's six GET handlers
