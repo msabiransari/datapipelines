@@ -496,7 +496,7 @@ class DependencyGuardsE2eTest {
         template: String,
     ) {
         val body =
-            """{"display_name":"S","parameters":[{"name":"p","source":{"template":{"id":"$template","version":1}}}]}"""
+            """{"display_name":"S","parameters":[{"name":"p","label":"P","type":"STRING","kind":"SELECT","source":{"template":{"id":"$template","version":1}}}]}"""
         sql(
             "INSERT INTO parameter_sets (id, workspace_id, name, display_name, current_version, created_by) " +
                 "VALUES ('$id', '$WORKSPACE_ID', '$name', 'S', ${if (status == "RELEASED") "1" else "NULL"}, '$ADMIN_ID')",
