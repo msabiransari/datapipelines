@@ -11,9 +11,9 @@ import co.datapipelines.templates.Template
 import co.datapipelines.templates.TemplateImport
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateVersion
-import co.datapipelines.visualization.ArtifactKind
 import co.datapipelines.visualization.ArtifactImported
 import co.datapipelines.visualization.ArtifactJson
+import co.datapipelines.visualization.ArtifactKind
 import co.datapipelines.visualization.ArtifactRecord
 import co.datapipelines.visualization.ArtifactTransferService
 import co.datapipelines.visualization.ArtifactVersion

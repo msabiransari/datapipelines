@@ -1,5 +1,6 @@
 package co.datapipelines.web.pipelines
 
+import co.datapipelines.application.lens.LensedView
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.WorkspaceContext
@@ -8,6 +9,7 @@ import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineRecord
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineValidator
+import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.pipeline.ValidationFailure
 import co.datapipelines.pipeline.ValidationResult
 import co.datapipelines.pipeline.WriteSurface
@@ -300,9 +302,9 @@ class PipelineTransferControllerTest {
                 templates,
                 PipelineImportService(pipelines, validator),
                 {
-                    co.datapipelines.application.lens.LensedView(
-                        pipelines = co.datapipelines.pipeline.ReadLens.Only(setOf(record.name)),
-                        templates = co.datapipelines.pipeline.ReadLens.Only(setOf(OTHER_TEMPLATE)),
+                    LensedView(
+                        pipelines = ReadLens.Only(setOf(record.name)),
+                        templates = ReadLens.Only(setOf(OTHER_TEMPLATE)),
                     )
                 },
             )
