@@ -7,10 +7,16 @@ import com.fasterxml.jackson.annotation.JsonProperty
 import com.fasterxml.jackson.annotation.JsonSubTypes
 import com.fasterxml.jackson.annotation.JsonTypeInfo
 import com.fasterxml.jackson.annotation.JsonValue
+import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.databind.JsonNode
+import com.fasterxml.jackson.databind.MapperFeature
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.databind.cfg.CoercionAction
+import com.fasterxml.jackson.databind.cfg.CoercionInputShape
 import com.fasterxml.jackson.databind.json.JsonMapper
+import com.fasterxml.jackson.databind.type.LogicalType.Textual
 import com.fasterxml.jackson.module.kotlin.KotlinModule
+import com.fasterxml.jackson.databind.type.LogicalType.Boolean as JacksonBoolean
 
 /*
  * The transform-nodes design's §2.2 model: the three blocks a transform template version
@@ -248,12 +254,24 @@ data class TransformTestCase(
  * (`TemplateRepository.TEMPLATE_HASH_EXPR`) is computed in Postgres over the stored jsonb —
  * never in Kotlin — so two spellings of the same value cannot hash differently on the two
  * sides of a comparison.
+ *
+ * Strict about scalar shapes too (#333): Jackson binds a JSON number or boolean into a declared
+ * `String` as its text unless the `Textual` coercion config refuses it, and turning
+ * `ALLOW_COERCION_OF_SCALARS` off never reaches that bind. The same lines `ParameterSetJson` and
+ * `ArtifactJson` carry make `"now": 12` a refusal here, not the string "12".
  */
 object TransformBlocks {
     val mapper: ObjectMapper =
         JsonMapper
             .builder()
             .addModule(KotlinModule.Builder().build())
+            .disable(MapperFeature.ALLOW_COERCION_OF_SCALARS)
+            .disable(DeserializationFeature.ACCEPT_FLOAT_AS_INT)
+            .withCoercionConfig(Textual) { config ->
+                listOf(CoercionInputShape.Integer, CoercionInputShape.Float, CoercionInputShape.Boolean).forEach {
+                    config.setCoercion(it, CoercionAction.Fail)
+                }
+            }.withCoercionConfig(JacksonBoolean) { it.setCoercion(CoercionInputShape.Integer, CoercionAction.Fail) }
             .build()
 
     /** Serializes one contract block to the stored jsonb text, or null through. */

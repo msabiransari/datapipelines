@@ -4,6 +4,7 @@ import co.datapipelines.auth.ApiKeyKind
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.KeyRole
+import co.datapipelines.web.requestlimits.StrictRequestBodies
 import io.kotest.matchers.shouldBe
 import io.mockk.every
 import io.mockk.mockk
@@ -76,7 +77,7 @@ class PromotionControllerTest {
         every { receiveService.apply(batch, peer) } returns applied
         SecurityContextHolder.getContext().authentication = UsernamePasswordAuthenticationToken(peer, null, emptyList())
 
-        val response = controller.push(batch)
+        val response = controller.push(StrictRequestBodies.MAPPER.valueToTree(batch))
 
         response.data shouldBe applied
         // #215 C4: the batch is applied AS the authenticated peer — its identity is what the

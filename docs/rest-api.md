@@ -1,6 +1,6 @@
 # REST API + SSE Specification
 
-**Status:** v2.71 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
+**Status:** v2.72 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
 **Last updated:** 2026-10-02
@@ -135,6 +135,8 @@ Every 4xx and 5xx response uses this shape:
 One envelope answers **before any handler**: a request body over the platform cap ([Configuration §3.31](configuration.md#331-web-request-limits)) is refused at a servlet filter with `413 request.body_too_large` (`details.limit_bytes`) on `/api/v1` and `/mcp` alike — the pre-handler 413 (the parameter engine's evaluate response budget answers 413 too — pipeline-contract §13.20), carried before authentication and before any parser reads the body (pipeline-contract §13.21).
 
 A body **within** the cap that cannot be read — not JSON, or nested past §13.21's stated depth of 100 — is the route family's malformed-body `400` with `details.reason: malformed_json` on EVERY route, including the ones that take their body as text and parse it themselves (#291): the templates routes (create, update, the lifecycle verbs, render, evaluate, import), pipelines create, update and import, execute, and the parameter-set routes (create, update, evaluate, import — #323; the family's code is `parameter.validation.body_invalid`). Until #291 a malformed body on templates create/update/import and pipelines create/update/import reached the `500` backstop, and those routes parsed under Jackson's inherited depth of 1000; the parameter-set routes did the same until #323.
+
+**Scalar shapes (#333).** A body that reads but carries a JSON value of the wrong SHAPE — a number or boolean where the contract declares a string, a string or float where it declares an integer — is refused with the path and the expected shape, never bound as text and never echoing the value (`"name": 12` is no longer the key named "12"). The answer is each family's own: `pipeline.validation.schema_version_unsupported` with `details.reason: "wrong_type"` on a pipeline body, `template.contract_invalid` with `details.rule: "wrong_type"` on a template body or a transform block (including the `input` of `…/evaluate`), and `pipeline.execution.invalid_parameter_type` with `details.reason` `wrong_type` / `unknown_key` / `missing` and `details.path` on the four routes that bind a typed request body (`POST /auth/api-keys` §16.1, `POST /endpoints` and `POST /endpoints/bindings` §19.5, `POST /promotion/push` §18.2). Every echoed path or key is clipped to 160 characters. The status stays `400`; see [Pipeline Contract §13.21](pipeline-contract.md#1321-request-limits).
 
 ### 4.3 Pagination envelope
 
@@ -1796,6 +1798,8 @@ The ONE creation path for every kind (keys v2 A15 — the login mint is retired;
 
 **`scopes` is refused by name** (`400 pipeline.execution.invalid_parameter_type`, `details.field = "scopes"`): scopes were removed (#215, PK8), and a caller who still sends them believes the key will carry them. An unknown `role` token is the same 400 with `details.supported`. **A name already taken by a live key in the workspace is `409 auth.key_name_taken`** (keys v2 A18; revoking the old key frees the name). **An unbound published path is unservable until a key is bound to it** (#215 B3) — a session is refused on the published tree, and no other key kind reaches it.
 
+**Body shape (#333).** The body is read through the strict request mapper: a number or boolean for `name`, `role`, `kind` or a `bindings` entry is `400 pipeline.execution.invalid_parameter_type` (`details.reason: "wrong_type"`, `details.path`, `details.expected`), an unknown key is the same code with `reason: "unknown_key"` (the key, clipped, in `path`), and an absent or null `name` is `reason: "missing"` — never the key named "12" and never a silently dropped field. Before #333 an unreadable body here answered the pipeline family's `schema_version_unsupported` stand-in.
+
 An unknown `kind` is `403 endpoint.key_kind_refused`, naming the supported values. A `server` key is the credential a SENDING deployment presents as `DP-Promotion-Key` (§18); it authenticates nothing on this API — presented as `DP-API-Key` it is refused on every route with `403 endpoint.key_kind_refused` and `details.reason = "server_key_off_surface"`.
 
 ```
@@ -2009,7 +2013,7 @@ Workspaces are addressed by **name**, because names are a global namespace and i
 POST /promotion/push
 ```
 
-Apply one batch. **All of it, or none of it** ([§10.4](versioning.md#104-push-order-dependency-closure)): the receiver applies the batch in a single transaction, so a mid-batch failure cannot leave pipelines whose template pins or child pipelines do not resolve.
+Apply one batch. **All of it, or none of it** ([§10.4](versioning.md#104-push-order-dependency-closure)): the receiver applies the batch in a single transaction, so a mid-batch failure cannot leave pipelines whose template pins or child pipelines do not resolve. The batch is read through the strict request mapper (#333): a number or boolean where it declares a string (`source_env`, `key_fingerprint`, `workspace`, an endpoint entry's `path`, `pipeline`, `description` or `bindings` entry) is `400 pipeline.execution.invalid_parameter_type` (`details.reason: "wrong_type"`, `details.path`). Unknown keys stay tolerated — the batch is a cross-version wire, so a newer sender's additive field is ignored, not refused.
 
 ```json
 {
@@ -2192,6 +2196,8 @@ the pinned Tomcat (the measured reason §8 moved templates to query addressing).
 answers a **promoter** through the lens (178, [Auth §11A.1](auth.md#11a1-the-404-rule)): an endpoint is
 listed iff its pipeline is visible to that principal, so a hidden pipeline never leaks through
 the endpoint that publishes it.
+
+Both bodies (publish, and the binding in `POST /endpoints/bindings`) are read through the strict request mapper (#333): a number or boolean where a string is declared (`path`, `pipeline`, `description`, `path_prefix`, `api_key_name`, `api_key_id`) or a string or float for `timeout_seconds` is `400 pipeline.execution.invalid_parameter_type` with `details.reason: "wrong_type"` and `details.path`; an unknown key is `reason: "unknown_key"`; a missing required key is `reason: "missing"`. Before #333 a missing `path` answered `endpoint.path_invalid` with `reason: malformed_json`.
 
 **Legacy rows (#274).** A stored row whose `path_pattern` predates the current grammar — fewer
 than three segments, saved before R-EP5 — is **retired, never fatal**: it cannot boot-refuse the
@@ -2700,6 +2706,7 @@ window. A dashboard execution has no stored result: `GET /api/v1/executions/{id}
 
 ## Appendix A: Change Log
 
+| 2026-10-02 | v2.72 | 333 (#333) the strict contract readers | **§4.2 gains the scalar-shapes paragraph**: a JSON number or boolean where a body declares a string (a string or float where it declares an integer) is refused with the path and the expected shape, never bound as text, on the pipeline and template bodies, the transform blocks and the four typed-DTO routes (§16.1 `POST /auth/api-keys`, §18.2 `POST /promotion/push`, §19.5 `POST /endpoints` and `/endpoints/bindings`). Those four now answer `pipeline.execution.invalid_parameter_type` with `details.reason` `wrong_type` / `unknown_key` / `missing` and `details.path` — **behaviour change** on the two request DTOs: an unknown key is refused (it was dropped) and a missing required key answers this code (it answered the unreadable-body stand-in). Template-body refusals gain `details.rule: "wrong_type"`. No route, scope or status change. |
 | 2026-10-02 | v2.71 | S2 (#375) the observed parameter-set evaluation | Additive. **§21.5 (new): `POST /api/v1/parameter-sets/{id}/evaluations`**, the observed evaluation (the parameter-set workspace spec §4, R1; the owner's rulings §11.3, §11.4 and §11.7) — the §21.3 act on `parameter_set.evaluate`, its cascade streamed as Server-Sent Events: `version` REQUIRED, a client-minted v4 `evaluation_id` (`reused` when already open on this instance), the refusal order, the eight FROZEN events, the terminal and coverage rules (on `evaluation_failed` the unfinished parameters carry no per-parameter frame — #375 D3), the per-write authority re-judgement, and the abort of an evaluation whose client stayed away past `disconnect-grace-seconds` (no frame; with the defaults the 30 s deadline usually ends it first). `evaluation_failed` is code-only. **§21.3 is unchanged byte for byte** (a golden pins it). **§12.1, §23.3:** the per-user stream cap counts observed-evaluation streams beside execution and refresh streams. No new code, no new key. |
 | 2026-10-02 | v2.70 | 373 (#373) the upload gate judges expiry before the body | §22.2: the screenshot route names the pre-read expiry judgement (a past-deadline capability is the 410 before any byte of the body); the `session_expired` error row states its order — 410 only for a presented token whose hash matches an unconsumed capability, wrong or consumed keeps the one 404. Additive clarifications; no status or route changes. |
 | 2026-10-02 | v2.69 | 344 (#344) the bundle is the artifact's pins | **§5.9 and the three export rows (§21.2's set, §22.2's visualization, §23.2's dashboard)** say what the routes already did: the bundled closure is the artifact's pins, read without the promoter lens; only the root is lensed (the owner's ruling of 2026-10-02, auth §11A.1's lens clause). No route, status code, permission or wire shape changed. |

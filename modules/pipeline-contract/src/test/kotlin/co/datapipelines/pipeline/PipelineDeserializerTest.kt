@@ -1,13 +1,18 @@
 package co.datapipelines.pipeline
 
 import co.datapipelines.pipeline.PipelineErrorCodes.Validation
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.databind.exc.MismatchedInputException
+import com.fasterxml.jackson.databind.node.ObjectNode
 import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldHaveMaxLength
+import io.kotest.matchers.string.shouldNotContain
 import io.kotest.matchers.types.shouldBeInstanceOf
 import org.junit.jupiter.api.Test
 
@@ -243,9 +248,102 @@ class PipelineDeserializerTest {
         thrown.result.failures.size shouldBe 1
     }
 
+    /**
+     * #333 — a JSON number or boolean where the contract declares a STRING is refused, never bound as text.
+     *
+     * `WireValueScan` type-checks only the enum-like wire values (engine, parameter type, output target and
+     * mode, node type); every free-text field reached the bind unchecked, and Jackson's `StringDeserializer`
+     * takes a number or a boolean as text unless the coercion config refuses it — `"display_name": 987654321`
+     * bound as "987654321". The refusal is the family's malformed-body answer with `details.reason`
+     * `wrong_type`, naming the PATH and never the value (a 9-digit sentinel is asserted ABSENT).
+     */
+    @Test
+    fun `a number or a boolean where a string is declared is refused with its path, never bound as text`() {
+        val base = pipelineJson(NODE_NO_OUTPUT, parameters = """{"p":{"type":"STRING","description":"d"}}""")
+        val cases =
+            listOf<Pair<String, (ObjectNode) -> ObjectNode>>(
+                "display_name" to { it.also { t -> t.put("display_name", SENTINEL) } },
+                "description" to { it.also { t -> t.put("description", SENTINEL) } },
+                "name" to { it.also { t -> t.put("name", SENTINEL) } },
+                "nodes[0].description" to { it.also { t -> (t.path("nodes").get(0) as ObjectNode).put("description", SENTINEL) } },
+                "nodes[0].id" to { it.also { t -> (t.path("nodes").get(0) as ObjectNode).put("id", SENTINEL) } },
+                "nodes[0].source" to { it.also { t -> (t.path("nodes").get(0) as ObjectNode).put("source", SENTINEL) } },
+                "parameters.p.description" to {
+                    it.also { t -> (t.path("parameters").get("p") as ObjectNode).put("description", SENTINEL) }
+                },
+            )
+
+        cases.forEach { (path, mutate) ->
+            withClue("a number at $path") {
+                val outcome = deserializer.fromTree(mutate(JSON.readTree(base) as ObjectNode))
+
+                outcome.shouldBeInstanceOf<DeserializationOutcome.Rejected>()
+                val failure = outcome.result.failures.single()
+                failure.code shouldBe Validation.SCHEMA_VERSION_UNSUPPORTED
+                failure.path shouldBe path
+                failure.details.keys shouldContainExactlyInAnyOrder setOf("reason", "expected")
+                failure.details["reason"] shouldBe "wrong_type"
+                failure.details["expected"] shouldBe "a string"
+                failure.message shouldNotContain SENTINEL.toString()
+            }
+        }
+        withClue("a boolean at display_name") {
+            val outcome = deserializer.fromTree(JSON.readTree(base).also { (it as ObjectNode).put("display_name", true) })
+
+            outcome.shouldBeInstanceOf<DeserializationOutcome.Rejected>()
+            outcome.result.failures
+                .single()
+                .path shouldBe "display_name"
+        }
+    }
+
+    @Test
+    fun `a string or a float where an integer is declared is refused with its path, never coerced`() {
+        val base = pipelineJson(NODE_NO_OUTPUT)
+
+        listOf("1" to "schema_version", 1.5 to "schema_version").forEach { (value, path) ->
+            withClue("$value at $path") {
+                val tree = JSON.readTree(base) as ObjectNode
+                when (value) {
+                    is String -> tree.put(path, value)
+                    is Double -> tree.put(path, value)
+                }
+
+                val outcome = deserializer.fromTree(tree)
+
+                outcome.shouldBeInstanceOf<DeserializationOutcome.Rejected>()
+                val failure = outcome.result.failures.single()
+                failure.path shouldBe path
+                failure.details["reason"] shouldBe "wrong_type"
+                failure.details["expected"] shouldBe "an integer"
+            }
+        }
+    }
+
+    /**
+     * The mapper alone — the belt under the reader's braces. Every caller that binds with
+     * `PipelineJson.objectMapper()` WITHOUT the deserializer (a stored body read back, a peer's response)
+     * meets the same refusal; [DerivedInputs] and the promotion client read trusted bodies through it.
+     */
+    @Test
+    fun `the pipeline mapper alone refuses a number where a string is declared`() {
+        val thrown =
+            shouldThrow<MismatchedInputException> {
+                PipelineJson.objectMapper().readValue("""{"name":$SENTINEL}""", Pipeline::class.java)
+            }
+
+        thrown.path.single().fieldName shouldBe "name"
+        thrown.originalMessage shouldContain "Cannot coerce"
+    }
+
     private fun parse(json: String): Pipeline = deserializer.readOrThrow(json)
 
     private companion object {
+        /** A 9-digit value no refusal message may contain. */
+        const val SENTINEL = 987654321
+
+        val JSON = ObjectMapper()
+
         const val NODE_NO_OUTPUT =
             """{"id":"active_users","description":"d","type":"DQL","source":"pg-prod",
                "template":{"id":"test/t.sql","version":1},"depends_on":[]}"""

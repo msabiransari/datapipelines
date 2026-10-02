@@ -18,7 +18,9 @@ import co.datapipelines.web.api.ApiResponse
 import co.datapipelines.web.api.PagedData
 import co.datapipelines.web.api.Pagination
 import co.datapipelines.web.api.currentPrincipal
+import co.datapipelines.web.requestlimits.StrictRequestBodies
 import com.fasterxml.jackson.annotation.JsonProperty
+import com.fasterxml.jackson.databind.JsonNode
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.DeleteMapping
@@ -123,8 +125,11 @@ class AuthController(
     @RequiredScope(Permission.MCP_KEY_CREATE)
     @Suppress("ThrowsCount") // each refusal is its own catalogued code with its own details — merging hides which one fired
     fun createKey(
-        @RequestBody body: CreateApiKeyRequest,
+        @RequestBody tree: JsonNode,
     ): ApiResponse<Map<String, Any?>> {
+        // #333: read through the strict mapper - a number where a string is declared, or an unknown
+        // key, is a refusal naming its path, never the key named "12" or a silently dropped field.
+        val body = StrictRequestBodies.bind<CreateApiKeyRequest>(tree)
         val principal = currentPrincipal()
         if (body.scopes != null) {
             throw ApiException(
