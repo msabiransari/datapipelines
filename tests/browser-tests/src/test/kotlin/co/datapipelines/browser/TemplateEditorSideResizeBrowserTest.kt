@@ -10,8 +10,10 @@ import org.junit.jupiter.api.Test
 /**
  * 141 §B — the template editor's context rail is the user's width, in a real browser.
  *
- * The pipeline editor's twin ([PipelineEditorSidebarResizeBrowserTest]) owns the shared
- * mechanics (the drag travel, the first-paint restore, the grip visibility); this suite owns
+ * The pipeline editor's sidebar twin was withdrawn with its pane by #349 —
+ * [PipelineWorkspaceLayoutBrowserTest] pins that no settings sidebar renders there — and the
+ * shared mechanics (the drag travel, the first-paint restore, the grip visibility) are
+ * [PipelineEditorDockResizeBrowserTest]'s; this suite owns
  * what is different here: the pane is `.te-body`'s first track (a `--app-detail-width` rail,
  * not a 280px sidebar), the key is its OWN (`dp.pane.template-editor-side` — the width does
  * not follow the user from the pipeline editor, the content is different), and there is NO
