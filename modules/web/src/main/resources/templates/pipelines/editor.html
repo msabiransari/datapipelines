@@ -202,7 +202,17 @@
                          hx-target='#pe-dialog', hx-swap='innerHTML'">
           Release v<span th:text="${draftVersion}"></span>…
         </button>
-        <button th:if="${hasDraft == true and canAuthor == true}" data-verb="pipeline-purge" class="ds-button ds-button-secondary ds-button-sm"
+        <!-- #395 — ONE destructive in the header (the explorer's 102 §B.1 rule, kept now that the
+             explorer's detail pane is gone, #350): a draft-only pipeline (the {D} shape) offers the
+             ENTITY purge — its own dialog, with the exclusive draft templates and #335's kept list —
+             and every other draft the version purge below. -->
+        <button th:if="${canDelete == true and canAuthor == true}" data-verb="pipeline-purge-entity" class="ds-button ds-button-secondary ds-button-sm"
+                id="pe-purge-entity"
+                th:attr="hx-get=@{'/partials/pipelines/{id}/lifecycle/purge-entity'(id=${pipelineId}, from='editor')},
+                         hx-target='#pe-dialog', hx-swap='innerHTML'">
+          Purge pipeline…
+        </button>
+        <button th:if="${hasDraft == true and canAuthor == true and canDelete != true}" data-verb="pipeline-purge" class="ds-button ds-button-secondary ds-button-sm"
                 id="pe-discard-draft"
                 th:attr="hx-get=@{'/partials/pipelines/{id}/lifecycle/purge'(id=${pipelineId}, version=${draftVersion}, from='editor')},
                          hx-target='#pe-dialog', hx-swap='innerHTML'">

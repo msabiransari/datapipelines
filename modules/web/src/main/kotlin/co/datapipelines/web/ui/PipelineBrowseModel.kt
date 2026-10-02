@@ -386,6 +386,10 @@ class PipelineBrowseModel(
     ): WorkspaceTabFacts {
         model.addAttribute("pipeline", record)
         model.addAttribute("versions", versionRows(record, versions, viewedVersion))
+        // #395 — the {D} shape (one version, a draft) is the entity purge's, exactly the explorer
+        // header's `canDelete` rule (fillActing): the workspace header offers Purge pipeline… (the
+        // entity dialog — exclusive draft templates, #335's kept list) in place of Purge draft….
+        model.addAttribute("canDelete", versions.size == 1 && versions.single().status == PipelineVersionStatus.DRAFT)
         return WorkspaceTabFacts(
             createdBy = actorName(record.ownerId),
             createdVia = versions.minByOrNull { it.version }?.createdVia,

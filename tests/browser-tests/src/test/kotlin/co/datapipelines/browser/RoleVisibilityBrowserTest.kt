@@ -141,15 +141,12 @@ class RoleVisibilityBrowserTest : BrowserSuite() {
             }
         }
 
-        // Explorer → leaf → detail → editor, the app's own links the whole way.
+        // Catalog → row → workspace, the app's own links the whole way (#350: the catalog row IS
+        // the link; the explorer's detail pane and its Open are gone).
         viewer.page.navigate("$baseUrl/pipelines?q=$name")
         viewer.page.waitForSelector("[data-role]")
         viewer.roleBadge() shouldBe "viewer"
-        viewer.page
-            .locator("button.tpl-result, button.tpl-leaf")
-            .first()
-            .click()
-        val open = viewer.page.locator("a.tplx-detail-open").first()
+        val open = viewer.page.locator("#pipeline-list-wrapper a.tpl-result").first()
         open.waitFor()
         badResponses shouldBe emptyList()
 

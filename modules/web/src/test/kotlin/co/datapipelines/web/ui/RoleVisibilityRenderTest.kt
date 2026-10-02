@@ -101,6 +101,42 @@ class RoleVisibilityRenderTest {
     }
 
     /**
+     * #395 — the workspace header keeps the explorer's ONE-destructive rule (102 §B.1): a
+     * draft-only pipeline (the {D} shape, `canDelete`) offers the ENTITY purge — its own dialog,
+     * opened into the workspace's #pe-dialog — in place of the version purge; any other draft keeps
+     * Purge draft. A promoter gets neither.
+     */
+    @Test
+    fun `#395 - a draft-only pipeline's workspace offers Purge pipeline in place of Purge draft`() {
+        val entity =
+            render("pipelines/editor") {
+                editorModel()
+                setVariable("canDelete", true)
+                withRoles(canPromote = false, canAdminWorkspace = false, isSuperAdmin = false, roleLabel = "author")
+            }
+        entity shouldContain "data-verb=\"pipeline-purge-entity\""
+        entity shouldContain "lifecycle/purge-entity?from=editor"
+        entity shouldNotContain "data-verb=\"pipeline-purge\""
+
+        val versioned =
+            render("pipelines/editor") {
+                editorModel()
+                setVariable("canDelete", false)
+                withRoles(canPromote = false, canAdminWorkspace = false, isSuperAdmin = false, roleLabel = "author")
+            }
+        versioned shouldContain "data-verb=\"pipeline-purge\""
+        versioned shouldNotContain "data-verb=\"pipeline-purge-entity\""
+
+        val promoter =
+            render("pipelines/editor") {
+                editorModel()
+                setVariable("canDelete", true)
+                withRoles(canExecute = false, canAuthor = false, canAdminWorkspace = false, isSuperAdmin = false, roleLabel = "promoter")
+            }
+        promoter shouldNotContain "data-verb=\"pipeline-purge-entity\""
+    }
+
+    /**
      * D5 (2026-09-20): the promoter authors nothing and releases nothing. The route itself
      * refuses a promoter the pipeline editor (`EXECUTE_PIPELINE`); this pins the template
      * contract for a principal with the promoter's booleans — read-only, no verb.

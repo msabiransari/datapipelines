@@ -640,6 +640,11 @@
              these codes; the toast lands after the navigation, from this bin (§4.3d). -->
         <th:block th:if="${code == 'released'}"><div th:replace="~{partials/toast :: toast('success', 'Released', 'The draft is now the current version and is locked.')}"></div></th:block>
         <th:block th:if="${code == 'released_with_templates'}"><div th:replace="~{partials/toast :: toast('success', 'Released', 'The draft is now the current version and is locked, and the draft templates it pinned were released with it.')}"></div></th:block>
+        <!-- #395 — the workspace's Versions-tab verbs answer HX-Redirect onto that tab (the editor
+             surface's shape); the toast says what happened and the tab shows the new pointer. -->
+        <th:block th:if="${code == 'discarded'}"><div th:replace="~{partials/toast :: toast('success', 'Version discarded', 'It no longer serves. The Versions tab shows which version is current now.')}"></div></th:block>
+        <th:block th:if="${code == 'restored'}"><div th:replace="~{partials/toast :: toast('success', 'Version restored', 'It is released again. The Versions tab shows which version is current.')}"></div></th:block>
+        <th:block th:if="${code == 'switched'}"><div th:replace="~{partials/toast :: toast('success', 'Current version switched', 'Endpoints published on this pipeline serve the new current version.')}"></div></th:block>
         <th:block th:if="${code == 'draft_purged'}"><div th:replace="~{partials/toast :: toast('success', 'Draft purged', 'The draft and its runs are gone. This cannot be undone.')}"></div></th:block>
         <th:block th:if="${code == 'entity_purged'}"><div th:replace="~{partials/toast :: toast('success', 'Pipeline purged', 'The pipeline, its draft and its runs are gone.')}"></div></th:block>
         <th:block th:if="${code == 'template_purged'}"><div th:replace="~{partials/toast :: toast('success', 'Template purged', 'The template and its draft are gone.')}"></div></th:block></th:block>
