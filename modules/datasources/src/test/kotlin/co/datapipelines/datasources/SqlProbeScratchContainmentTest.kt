@@ -27,7 +27,7 @@ import java.util.UUID
  * the target is a file the test owns).
  */
 class SqlProbeScratchContainmentTest {
-    private val probe = SqlProbe(mockk<DatasourceRegistry>())
+    private val probe = SqlProbe(mockk<DatasourceRegistry>(), nodeQueryTimeoutSeconds = 60)
 
     @Test
     fun `FILE_READ of a host file is refused as not-permitted, and the content never reaches the error`() {

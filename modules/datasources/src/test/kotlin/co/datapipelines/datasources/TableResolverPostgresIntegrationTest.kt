@@ -60,7 +60,7 @@ class TableResolverPostgresIntegrationTest {
 
     private val registry = mockk<DatasourceRegistry>()
     private val introspector = SchemaIntrospector(registry)
-    private val probe = SqlProbe(registry)
+    private val probe = SqlProbe(registry, nodeQueryTimeoutSeconds = 60)
     private val runner = SqlRunner(registry)
 
     /** Every datasource this suite uses gets a fresh-connection anonymous pool. */

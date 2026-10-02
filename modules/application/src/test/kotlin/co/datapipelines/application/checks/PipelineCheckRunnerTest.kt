@@ -206,7 +206,12 @@ class PipelineCheckRunnerTest {
         datasources.register("main")
         probeBehavior = { call ->
             if (call.sql.contains("count")) {
-                SqlProbeResult(QueryRows(SCHEMA, listOf(cellRow(1), cellRow(2)), truncated = false), wallMs = 1, plan = null)
+                SqlProbeResult(
+                    QueryRows(SCHEMA, listOf(cellRow(1), cellRow(2)), truncated = false),
+                    wallMs = 1,
+                    plan = null,
+                    timeoutSeconds = 10,
+                )
             } else {
                 probeResult(BigDecimal("74.62"))
             }
@@ -367,7 +372,7 @@ class PipelineCheckRunnerTest {
                 ),
             )
         datasources.register("main")
-        probeBehavior = { SqlProbeResult(QueryRows(SCHEMA, emptyList(), truncated = false), wallMs = 1, plan = null) }
+        probeBehavior = { SqlProbeResult(QueryRows(SCHEMA, emptyList(), truncated = false), wallMs = 1, plan = null, timeoutSeconds = 10) }
 
         runner
             .run(WORKSPACE, PIPELINE_ID, VERSION, pipeline, emptyMap(), CheckRunVia.RELEASE, ACTOR)
@@ -419,7 +424,7 @@ class PipelineCheckRunnerTest {
     private fun supplied(json: String): Map<String, JsonNode> = MAPPER.readTree(json).properties().associate { it.key to it.value }
 
     private fun probeResult(cell: Any?) =
-        SqlProbeResult(QueryRows(SCHEMA, listOf(cellRow(cell)), truncated = false), wallMs = 1, plan = null)
+        SqlProbeResult(QueryRows(SCHEMA, listOf(cellRow(cell)), truncated = false), wallMs = 1, plan = null, timeoutSeconds = 10)
 
     private fun cellRow(value: Any?): Map<String, Any?> = mapOf("n" to value)
 

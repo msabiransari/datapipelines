@@ -42,11 +42,47 @@ import java.util.concurrent.TimeUnit
  *
  * [limit] is CLAMPED to [MAX_LIMIT] rather than refused — a probe asking for more rows than the
  * cap is a sizing error, not a defect, and the truncated flag already says the rest exists;
- * [timeoutSeconds] clamps likewise to [MAX_TIMEOUT_SECONDS].
+ * [timeoutSeconds] clamps likewise, to the datasource dialect's ceiling ([maxTimeoutSecondsFor]),
+ * and the result reports the timeout the statement actually ran under.
+ *
+ * ## The timeout ceiling is the node's (#167)
+ *
+ * The ceiling is not a constant of its own: it is the executor's statement timeout for a node on
+ * the same dialect — `datapipelines.executor.node-query-timeout-seconds-by-dialect.<dialect>` when
+ * the operator set one (LAKE ships 180), else `node-query-timeout-seconds` (60). A probe exists to
+ * verify what a node is about to run; a ceiling below the node's own budget refused exactly the
+ * verification scans the node itself completes (#167's acceptance run: a percentile probe over
+ * the lake table timed out at the old static 30 s while the same scan ran as a node). A
+ * datasource's own `query_timeout_seconds` is deliberately NOT consulted: `0` there means "no
+ * limit", and a probe is never unbounded. Every constructor passes the executor's two values —
+ * there is no fallback default, so a new construction site cannot silently take a ceiling nobody
+ * configured.
+ *
+ * @param nodeQueryTimeoutSeconds the executor's `nodeQueryTimeoutSeconds` — the ceiling for any
+ *   dialect without its own entry.
+ * @param nodeQueryTimeoutSecondsByDialect the executor's `nodeQueryTimeoutSecondsByDialect`.
  */
 class SqlProbe(
     private val registry: DatasourceRegistry,
+    private val nodeQueryTimeoutSeconds: Int,
+    private val nodeQueryTimeoutSecondsByDialect: Map<Dialect, Int> = emptyMap(),
 ) {
+    init {
+        require(nodeQueryTimeoutSeconds > 0) { "nodeQueryTimeoutSeconds must be positive, was $nodeQueryTimeoutSeconds" }
+        nodeQueryTimeoutSecondsByDialect.forEach { (dialect, seconds) ->
+            require(seconds > 0) { "nodeQueryTimeoutSecondsByDialect[$dialect] must be positive, was $seconds" }
+        }
+    }
+
+    /**
+     * The highest ceiling any dialect's probe gets — the bound an argument parser may apply before
+     * it knows which datasource the probe is for. [probe] narrows it to the dialect's own.
+     */
+    val maxTimeoutSeconds: Int = (nodeQueryTimeoutSecondsByDialect.values + nodeQueryTimeoutSeconds).max()
+
+    /** The statement-timeout ceiling for a probe on [dialect]: the node's, as the class KDoc derives it. */
+    fun maxTimeoutSecondsFor(dialect: Dialect): Int = nodeQueryTimeoutSecondsByDialect[dialect] ?: nodeQueryTimeoutSeconds
+
     /**
      * Runs [sql] against [datasource] (already visibility-gated by the caller) with named
      * `:name` parameters, returning at most [limit] rows.
@@ -66,7 +102,7 @@ class SqlProbe(
     ): SqlProbeResult {
         val statement = SqlStatementClassifier.classify(sql, datasource.dialect)
         val rowCap = limit.coerceIn(1, MAX_LIMIT)
-        val timeout = timeoutSeconds.coerceIn(1, MAX_TIMEOUT_SECONDS)
+        val timeout = timeoutSeconds.coerceIn(1, maxTimeoutSecondsFor(datasource.dialect))
         val values = parameters.mapValues { (name, parameter) -> parameter.toJdbcValue(name) }
         val (positionalSql, bindValues) = translateBinds(statement, values)
         val explainSql = DialectAdapters.forDialect(datasource.dialect).explainSelectSql(positionalSql)
@@ -130,7 +166,7 @@ class SqlProbe(
     ): ScratchProbeOutcome {
         val statement = SqlStatementClassifier.classify(sql, Dialect.H2)
         val rowCap = limit.coerceIn(1, MAX_LIMIT)
-        val timeout = timeoutSeconds.coerceIn(1, MAX_TIMEOUT_SECONDS)
+        val timeout = timeoutSeconds.coerceIn(1, maxTimeoutSecondsFor(Dialect.H2))
         val values = parameters.mapValues { (name, parameter) -> parameter.toJdbcValue(name) }
         val (positionalSql, bindValues) = translateBinds(statement, values)
         val scratch =
@@ -151,7 +187,8 @@ class SqlProbe(
                         prepared.queryTimeout = timeout
                         prepared.maxRows = rowCap + 1
                         bind(prepared, bindValues)
-                        return ScratchProbeOutcome.Rows(SqlProbeResult(readRows(prepared, scratch, rowCap), wallMs(startedAt), null))
+                        val rows = readRows(prepared, scratch, rowCap)
+                        return ScratchProbeOutcome.Rows(SqlProbeResult(rows, wallMs(startedAt), null, timeout))
                     }
                 } catch (e: SQLException) {
                     if (e.errorCode in H2_TABLE_NOT_FOUND_CODES) {
@@ -279,10 +316,12 @@ class SqlProbe(
                 statement.fetchSize = limit
                 statement.maxRows = limit + 1
                 bind(statement, bindValues)
-                return SqlProbeResult(readRows(statement, datasource, limit), wallMs(startedAt), plan)
+                return SqlProbeResult(readRows(statement, datasource, limit), wallMs(startedAt), plan, timeoutSeconds)
             }
         } catch (e: SQLException) {
-            if (e.isStatementTimeout()) throw SqlProbeTimeoutException(datasource.name, wallMs(startedAt), plan, e)
+            if (e.isStatementTimeout()) {
+                throw SqlProbeTimeoutException(datasource.name, wallMs(startedAt), plan, e, timeoutSeconds = timeoutSeconds)
+            }
             throw SqlProbeExecutionException(datasource.name, e)
         }
     }
@@ -341,10 +380,8 @@ class SqlProbe(
         /** The hard row cap — a probe is a debug read, not an export. */
         const val MAX_LIMIT = 500
 
+        /** The default timebox — a probe is a sketch, not a run; the ceiling is the node's (#167). */
         const val DEFAULT_TIMEOUT_SECONDS = 10
-
-        /** The hard timebox. */
-        const val MAX_TIMEOUT_SECONDS = 30
 
         /** The [ExplainPlanSummary.raw] cap. */
         const val EXPLAIN_RAW_MAX_CHARS = 4096
