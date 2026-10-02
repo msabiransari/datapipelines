@@ -129,7 +129,8 @@ own formula; declaring the window three different ways.
 - **`pipelines-numbers`** — the measurement contract before the arithmetic; aggregation.
 - **`pipelines-verification`** — step 5: the check shapes, the recipe, exercising the door.
 - **`pipelines-engine-quirks`** — a tempdb statement failed oddly, or before the first tempdb
-  node: the H2 and dialect traps, cited elsewhere as rules 14–17.
+  node: the H2 and dialect traps, cited elsewhere as rules 14–17, and the guard node, hour spine and
+  reserved-alias shapes.
 - **`pipelines-do-dont`** — the mistakes, one screen, before you start and when you review.
 - **`pipelines-schema`** — writing or reading a pipeline body: parameter fields, a minimal copy.
 - **`pipelines-node-types`** — wiring the DAG: what a node declares, where a DQL node's rows go.
