@@ -116,4 +116,5 @@ test("the current page's leaf id comes from the item's own path prefix only", ()
   assert.equal(nav.currentIdFor("/pipelines", "/pipelinesx/" + id), null);
   assert.equal(nav.currentIdFor("/dashboards", "/dashboards/" + id), id);
   assert.equal(nav.currentIdFor(null, "/pipelines/" + id), null);
+  assert.equal(nav.currentIdFor("/pipelines", "/pipelines/%E0"), null); // malformed escape: no leaf, no URIError
 });

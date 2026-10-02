@@ -168,11 +168,17 @@
     return fit > 0 && fit <= MAX_FIT ? fit : 0;
   }
 
-  /* "/pipelines/<id>/..." under the item link "/pipelines" -> "<id>"; anything else -> null. */
+  /* "/pipelines/<id>/..." under the item link "/pipelines" -> "<id>"; anything else -> null
+     (a malformed escape such as "%E0" included: it names no leaf, and must not throw). */
   function currentIdFor(sectionHref, pathname) {
     if (!sectionHref || !pathname || pathname.indexOf(sectionHref + "/") !== 0) return null;
     var rest = pathname.slice(sectionHref.length + 1).split("/")[0];
-    return rest ? decodeURIComponent(rest) : null;
+    if (!rest) return null;
+    try {
+      return decodeURIComponent(rest);
+    } catch (e) {
+      return null;
+    }
   }
 
   // ------------------------------------------------------------------ DOM glue
