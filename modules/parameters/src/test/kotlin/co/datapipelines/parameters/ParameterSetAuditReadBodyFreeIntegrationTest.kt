@@ -90,7 +90,8 @@ class ParameterSetAuditReadBodyFreeIntegrationTest {
 
     @Test
     fun `the audit pre-read's statements select no body_json - the stored body moves no bytes (#372 B2)`() {
-        val created = h.create(h.document(ParameterSetFixtures.setJson(ParameterSetFixtures.countryJson(), ParameterSetFixtures.amountJson())))
+        val document = h.document(ParameterSetFixtures.setJson(ParameterSetFixtures.countryJson(), ParameterSetFixtures.amountJson()))
+        val created = h.create(document)
         val recording = SqlRecordingDataSource(ParametersTestDb.dataSource)
         // The same service shape over the recording source: every statement the pre-read makes is captured whole.
         val service =
