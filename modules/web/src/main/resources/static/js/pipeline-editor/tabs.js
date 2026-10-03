@@ -2,30 +2,29 @@
   "use strict";
 
   /*
-   * #349 — the pipeline workspace's six-tab state machine (spec §4.1, D2): Flow | Overview |
-   * Parameters | Runs | Usage | Versions, Flow the default. #400: the admission and
-   * transition rules are the SHARED CORE's — static/js/workspace/tabs.js, the same machine
-   * the dashboard workspace runs (the reuse is the point: one admission and transition rule
-   * per workspace shape, never a copy; the core's own tests own the rule). What remains here
-   * is this page's vocabulary: the closed six, the Runs admission question, and the named
-   * getters the CSP template binds as property paths (the Alpine build evaluates names, not
-   * calls).
+   * #349 — the workspace's six-tab state machine (spec §4.1, D2): Flow | Overview |
+   * Parameters | Runs | Usage | Versions, Flow the default. PURE — no DOM, no Alpine,
+   * no fetch — so `node --test` owns the admission and transition tables (tabs.test.mjs),
+   * the same harness decision dock.js and events.js get.
    *
-   * The server's PipelineWorkspaceTab enum resolves the page's tab by the SAME rule — the
-   * two must never disagree, so this drives the mirror the client enforces on every change.
-   * PURE — no DOM, no Alpine, no fetch — so `node --test` owns the tables (tabs.test.mjs).
+   * What the module decides:
    *
-   * What does NOT live here: the lazy tab reads and their generation stamps (init.js), the
-   * URL (init.js replaceState), and every DOM effect.
+   *  - The closed tab set and its wire names — the mirror of the server's
+   *    PipelineWorkspaceTab enum. The server already resolves the page's tab (unknown →
+   *    flow, runs without the execution read → flow BEFORE any runs read); this module
+   *    enforces the same rule on every CLIENT-side tab change, so a hidden tab is inert
+   *    twice over.
+   *  - Admission: Runs is execution-owned (spec §4.2's promoter rule — "a promoter
+   *    retains Node Details without execution tabs", and §4.3 — hidden tabs cause no
+   *    fetch). A caller without the execution read never selects it; the pane is not
+   *    even rendered for them.
+   *  - Transitions: selecting a tab moves `active`; re-selecting the active tab is
+   *    inert (no lazy refetch, no history noise). There is no "off" state — one tab is
+   *    always active, exactly one panel visible.
+   *
+   * What does NOT live here: the lazy tab reads and their generation stamps (init.js),
+   * the URL (init.js replaceState), and every DOM effect.
    */
-
-  // The shared core: a sibling require under node --test (the IIFE publishes there too), the
-  // window global in the browser (loaded first — the runtime catalogs order it before this).
-  var core =
-    (typeof module !== "undefined" && module.exports && typeof require === "function"
-      ? require("../workspace/tabs.js")
-      : null) ||
-    (typeof window !== "undefined" ? window.WorkspaceTabs : null);
 
   var FLOW = "flow";
   var OVERVIEW = "overview";
@@ -35,18 +34,91 @@
   var VERSIONS = "versions";
   var TABS = [FLOW, OVERVIEW, PARAMETERS, RUNS, USAGE, VERSIONS];
 
-  /** This page's admission question: Runs needs the execution read; every other tab admits. */
-  function admitted(tab, canReadExecutions) {
-    return tab !== RUNS || canReadExecutions === true;
+  function createTabs(canReadExecutions, initial) {
+    var start = resolve(initial, canReadExecutions === true);
+    return {
+      canReadExecutions: canReadExecutions === true,
+      active: start,
+
+      /** A tab change. Unknown names and unadmitted tabs are inert (Flow stays). */
+      select: function (tab) {
+        var next = resolve(tab, this.canReadExecutions);
+        this.active = next;
+        return this.active;
+      },
+
+      /** True when the tab's panel is the visible one. */
+      isActive: function (tab) {
+        return this.active === tab;
+      },
+
+      /* --- derived state the template reads as paths (the dock.js convention) ----- */
+
+      get flowActive() {
+        return this.active === FLOW;
+      },
+      get overviewActive() {
+        return this.active === OVERVIEW;
+      },
+      get parametersActive() {
+        return this.active === PARAMETERS;
+      },
+      get runsActive() {
+        return this.active === RUNS;
+      },
+      get usageActive() {
+        return this.active === USAGE;
+      },
+      get versionsActive() {
+        return this.active === VERSIONS;
+      },
+
+      /* The panels hide through the `hidden` ATTRIBUTE — a boolean false removes it
+         (bind()'s falsy rule), so exactly one panel is in the DOM's visible set. No
+         inline style is ever written. */
+      get flowHidden() {
+        return this.active !== FLOW;
+      },
+      get overviewHidden() {
+        return this.active !== OVERVIEW;
+      },
+      get parametersHidden() {
+        return this.active !== PARAMETERS;
+      },
+      get runsHidden() {
+        return this.active !== RUNS;
+      },
+      get usageHidden() {
+        return this.active !== USAGE;
+      },
+      get versionsHidden() {
+        return this.active !== VERSIONS;
+      },
+
+      /* aria-selected needs the STRING form (the dock's rule, kept). */
+      get flowAria() {
+        return this.active === FLOW ? "true" : "false";
+      },
+      get overviewAria() {
+        return this.active === OVERVIEW ? "true" : "false";
+      },
+      get parametersAria() {
+        return this.active === PARAMETERS ? "true" : "false";
+      },
+      get runsAria() {
+        return this.active === RUNS ? "true" : "false";
+      },
+      get usageAria() {
+        return this.active === USAGE ? "true" : "false";
+      },
+      get versionsAria() {
+        return this.active === VERSIONS ? "true" : "false";
+      },
+    };
   }
 
-  /** The server enum's rule, mirrored: unknown → Flow, and Runs without the read → Flow. */
+  /** The admission rule, shared by the server enum and this mirror: unknown → flow. */
   function resolve(raw, canReadExecutions) {
-    if (core) {
-      return core.resolve(raw, TABS, FLOW, function (tab) {
-        return admitted(tab, canReadExecutions);
-      });
-    }
     var tab = null;
     for (var i = 0; i < TABS.length; i++) {
       if (TABS[i] === raw) {
@@ -56,54 +128,6 @@
     }
     if (tab === RUNS && canReadExecutions !== true) return FLOW;
     return tab || FLOW;
-  }
-
-  function createTabs(canReadExecutions, initial) {
-    var readExecutions = canReadExecutions === true;
-    var start = resolve(initial, readExecutions);
-
-    var state = {
-      canReadExecutions: readExecutions,
-      active: start,
-      tabs: TABS.slice(),
-      defaultTab: FLOW,
-
-      /** A tab change. Unknown names and unadmitted tabs are inert (Flow stays). */
-      select: function (tab) {
-        this.active = resolve(tab, this.canReadExecutions);
-        return this.active;
-      },
-
-      /** True when the tab's panel is the visible one. */
-      isActive: function (tab) {
-        return this.active === tab;
-      },
-    };
-
-    /* --- this page's derived state: the named getters the CSP template reads as paths -----
-       (delegating to the same active the core's rules move — one state, two vocabularies). */
-    Object.defineProperties(state, {
-      flowActive: { get: function () { return state.active === FLOW; } },
-      overviewActive: { get: function () { return state.active === OVERVIEW; } },
-      parametersActive: { get: function () { return state.active === PARAMETERS; } },
-      runsActive: { get: function () { return state.active === RUNS; } },
-      usageActive: { get: function () { return state.active === USAGE; } },
-      versionsActive: { get: function () { return state.active === VERSIONS; } },
-      flowHidden: { get: function () { return state.active !== FLOW; } },
-      overviewHidden: { get: function () { return state.active !== OVERVIEW; } },
-      parametersHidden: { get: function () { return state.active !== PARAMETERS; } },
-      runsHidden: { get: function () { return state.active !== RUNS; } },
-      usageHidden: { get: function () { return state.active !== USAGE; } },
-      versionsHidden: { get: function () { return state.active !== VERSIONS; } },
-      flowAria: { get: function () { return state.active === FLOW ? "true" : "false"; } },
-      overviewAria: { get: function () { return state.active === OVERVIEW ? "true" : "false"; } },
-      parametersAria: { get: function () { return state.active === PARAMETERS ? "true" : "false"; } },
-      runsAria: { get: function () { return state.active === RUNS ? "true" : "false"; } },
-      usageAria: { get: function () { return state.active === USAGE ? "true" : "false"; } },
-      versionsAria: { get: function () { return state.active === VERSIONS ? "true" : "false"; } },
-    });
-
-    return state;
   }
 
   var api = {

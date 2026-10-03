@@ -862,8 +862,8 @@ tree had just linked; it does not any more. The five tabs:
   fetched — only for a caller with `dashboard.key.bind`.
 
 Tab state is IN-PAGE (`static/js/dashboards/workspace.js` over the SHARED tab core
-`static/js/workspace/tabs.js` — pipeline-editor's tabs run the same machine; one admission
-and transition rule, never a copy): a tab switch swaps no version and cancels no poll, the
+`static/js/workspace/tabs.js`, built to be the one admission and transition rule; the pipeline
+editor keeps its own `pipeline-editor/tabs.js` until #420 adopts the core): a tab switch swaps no version and cancels no poll, the
 URL's `?tab=` is replaceState'd so Back/Forward re-select, and lazy tabs (Overview,
 Refreshes, Versions, Keys) load their fragment once, on the tab's first activation — a
 hidden tab causes no fetch. The Board pane's reveal runs the runtime instance's OWN

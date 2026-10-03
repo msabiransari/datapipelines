@@ -2,11 +2,11 @@
   "use strict";
 
   /*
-   * #400 — the workspace tab machine's SHARED CORE (pipeline-editor/tabs.js and
-   * dashboards/workspace.js are both clients of it — the reuse is the point: one admission
-   * and transition rule per workspace shape, never a copy). PURE — no DOM, no Alpine, no
-   * fetch — so `node --test` owns the admission and transition tables for every family that
-   * adopts it.
+   * #400 — the workspace tab machine's SHARED CORE (dashboards/workspace.js is its client;
+   * pipeline-editor/tabs.js adopts it under #420 — its first adapter was reverted at the #400
+   * merge, when the pipeline workspace's browser suites went red). One admission and
+   * transition rule, never a copy. PURE — no DOM, no Alpine, no fetch — so `node --test` owns
+   * the admission and transition tables for every family that adopts it.
    *
    * What the core decides:
    *
