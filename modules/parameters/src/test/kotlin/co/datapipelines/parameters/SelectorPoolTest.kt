@@ -20,6 +20,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
@@ -155,19 +156,37 @@ class SelectorPoolTest {
 
     @Test
     fun `the abandonment is ONE error line naming the set, the parameter and the datasource - never the SQL`() {
-        val appender = ListAppender<ILoggingEvent>().apply { start() }
-        val logger = LoggerFactory.getLogger(SelectorPool::class.java) as Logger
-        logger.addAppender(appender)
-        try {
-            underDeadline(SelectorPool(1, 0), jdbc.task()).shouldBeTimeout()
-        } finally {
-            logger.detachAppender(appender)
-        }
+        val lines = capturedLog { underDeadline(SelectorPool(1, 0), jdbc.task()).shouldBeTimeout() }
 
-        val line = appender.list.single()
+        val line = lines.single()
         line.level shouldBe Level.ERROR
-        line.formattedMessage shouldContain "set=acme/sales/region_filters parameter=state datasource=warehouse"
+        line.throwableProxy shouldBe null
+        line.formattedMessage shouldContain "event=parameter.selector_statement_abandoned "
+        line.formattedMessage shouldContain "set=acme/sales/region_filters parameter=state datasource=warehouse cause=deadline"
         line.formattedMessage shouldNotContain "SELECT"
+        line.formattedMessage shouldNotContain "deadline passed"
+    }
+
+    @Test
+    fun `a caller that cancels the await is abandoned with cause=caller - the line never claims a deadline passed (#385)`() {
+        val pool = SelectorPool(1, 0)
+
+        val lines =
+            capturedLog {
+                val call = scope.launch { pool.run(label, jdbc.task()) }
+                waitUntil("the statement runs") { jdbc.started() == 1 }
+                call.cancel()
+                runBlocking { withTimeout(COMPLETES_MS) { call.join() } }
+            }
+
+        val line = lines.single()
+        line.level shouldBe Level.ERROR
+        line.throwableProxy shouldBe null
+        line.formattedMessage shouldContain "event=parameter.selector_statement_abandoned "
+        line.formattedMessage shouldContain "set=acme/sales/region_filters parameter=state datasource=warehouse cause=caller"
+        line.formattedMessage shouldNotContain "deadline passed"
+        line.formattedMessage shouldNotContain "SELECT"
+        pool.abandoned.sum() shouldBe 1L
     }
 
     @Test
@@ -215,6 +234,19 @@ class SelectorPoolTest {
         withClue("the slot came back: the next submission is admitted, not Saturated") {
             bounded { pool.run(label, quick.task()) }.shouldBeInstanceOf<SelectorAdmission.Completed>()
         }
+    }
+
+    /** Every line [SelectorPool] logs while [block] runs. */
+    private fun capturedLog(block: () -> Unit): List<ILoggingEvent> {
+        val appender = ListAppender<ILoggingEvent>().apply { start() }
+        val logger = LoggerFactory.getLogger(SelectorPool::class.java) as Logger
+        logger.addAppender(appender)
+        try {
+            block()
+        } finally {
+            logger.detachAppender(appender)
+        }
+        return appender.list.toList()
     }
 
     /**
