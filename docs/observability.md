@@ -1,6 +1,6 @@
 # Observability Specification
 
-**Status:** v1.32 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
+**Status:** v1.33 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-10-03
@@ -294,6 +294,7 @@ The parameter-set evaluation history ([REST API §21.5](rest-api.md#215-the-obse
 | INFO | `parameter.evaluations_purged` | The retention step deleted finished evaluation records (nothing is logged for an empty tick); the plural twin of `dashboard.refreshes_purged` | `count`, `retention_days` |
 | WARN | `parameter.evaluation_retention_failed` | The retention DELETE threw; the next tick retries | `error`, `sql_state` |
 | WARN | `parameter.evaluation_retention_incomplete` | A retention batch came back full (a backlog): records older than the cutoff remain and the next tick takes the next batch | `count`, `message` |
+| ERROR | `parameter.selector_statement_abandoned` | The evaluate's await was cancelled (its `withTimeout` deadline, or the caller — #375's disconnect-grace abort, a shutdown) while the selector statement still ran; the statement is cancelled best-effort, its connection discarded, the worker keeps its slot until the driver returns (`parameters.selectors.abandoned` counts it). One line, no stack trace, never the SQL or a bind | `set`, `parameter`, `datasource`, `cause` (`deadline`/`caller`) |
 
 ### 3.5 Log destination
 
@@ -586,6 +587,7 @@ This is a construction rule, not a filter — the redacting encoder covers logs,
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-03 | v1.33 | 425 (#425, #385) the selector abandon event namespaced and worded | §3.4M gains its 19th row: `parameter.selector_statement_abandoned` (the bare `event=selector_statement_abandoned` of `SelectorPool.abandon`, which the audit's namespaced extraction could not catalogue). The line gains `cause` (`deadline` when the cancellation is the evaluate's own `withTimeout`, `caller` otherwise — #375's disconnect-grace abort, a shutdown) and no longer says "the evaluate's deadline passed" for a cancellation that was not one; it stays ONE error line with no throwable and no SQL or bind. |
 | 2026-10-03 | v1.32 | 418 (#418) the parameter evaluation events catalogued | New **§3.4M**: the 18 `event=parameter.*` names the code logs (#376's history writes, the sweep and retention, the observed stream and its grace), each with its level, trigger and fields; a failed history write is ERROR and the evaluation continues unrecorded. The docs audit's §3.4 event extraction admits the `parameter` namespace in the same commit (`scripts/docs-audit.sh`; the `execution`/`dashboard` precedent) — without it every backticked name fails check C against the error-code catalog. metadata-db §8.1/§8.5 cite the rows. |
 | 2026-10-02 | v1.31 | 235 (#164) the audit boundary stated | **§7** states the rule: the audit log records authentication, administration, lifecycle verbs and MCP tool calls; REST reads produce no audit row by design (an MCP key is refused on REST); the one agent write over REST, the screenshot upload, is audited as `visualization.test.screenshot_uploaded`. |
 | 2026-09-30 | v1.30 | 337-c (#337) redaction composed on the original text | **§9.2**: the rendered-text layer is ONE left-to-right recognizer over the original text, shared by the JSON `message`/`stack_trace` members and the console format — not an assignment pass followed by a JSON pass (and, on the console, two nested `%replace` calls). The delivered composition let the first pass rewrite text inside a quoted value (consuming an escape with it), so the second pass read an orphaned quote as the end of the outer value and a secret tail survived (`{"password":"x secret=abc\"tail"}`); a secret-shaped fragment inside a value is now part of that value, and overlapping spans merge into one masked region (a nested match that outruns its container extends the mask). A failed match is no longer rescanned from every later key start (a repeated `password_…` token with no value was quadratic, measured 4 s at 72 KB); the bound is a counted-step test. The console pattern's redaction word `%dpRedact` is a house logback converter registered by the encoder. The sensitive-key list, the never-redacted set, `***`-keeps-key, the redact-before-bound order and the no-disable rule are unchanged (drift-tested); the known limits are unchanged. |
