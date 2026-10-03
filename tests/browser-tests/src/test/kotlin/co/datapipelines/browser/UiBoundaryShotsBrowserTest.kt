@@ -191,8 +191,10 @@ class UiBoundaryShotsBrowserTest : BrowserSuite() {
         // `#tx-dialog` (a window.confirm would be auto-dismissed by Playwright and the draft
         // would be gone by the next line); closing it leaves the draft untouched.
         purgeDialogShot()
-        // Nothing was purged: the draft's own affordances are still there.
-        page.locator("[data-verb='template-release']").isVisible shouldBe true
+        // Nothing was purged: the draft's own affordances are still there. The header's Release
+        // is the locator — the Versions tab's row menu carries its own `template-release` item
+        // (the pipelines workspace has the same pair), so the bare attribute names two controls.
+        page.locator(".tw-topbar [data-verb='template-release']").isVisible shouldBe true
     }
 
     /** The {D} shape's version purge, from its row's ⋯ menu on the Versions tab, photographed. */
