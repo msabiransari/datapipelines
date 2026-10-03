@@ -82,6 +82,14 @@ class ViewerEditorRenderTest {
     }
 
     @Test
+    fun `the topbar's Release label is ONE text node - a span inside the flex button spreads it apart`() {
+        // 398b live walk: `Release v<span>3</span>…` inside `.ds-button` (inline-flex with a gap)
+        // painted "Release v  3  …". The sibling verbs build their label with th:text.
+        val html = render("templates/workspace") { page(viewedEditable = true, hasDraft = true) }
+        html shouldContain ">Release v2…</button>"
+    }
+
+    @Test
     fun `a viewer's workspace carries exactly its tab strip and nothing else`() {
         val html =
             render("templates/workspace") {

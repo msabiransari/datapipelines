@@ -124,9 +124,8 @@
              flash. The name travels in the query (§9.6). -->
         <button th:if="${hasDraft == true and canAuthor == true}" data-verb="template-release" class="ds-button ds-button-primary ds-button-sm"
                 th:attr="hx-get=@{/partials/templates/lifecycle/release(name=${templateName}, from='editor')},
-                         hx-target='#tx-dialog', hx-swap='innerHTML'">
-          Release v<span th:text="${draftVersion}"></span>…
-        </button>
+                         hx-target='#tx-dialog', hx-swap='innerHTML'"
+                th:text="'Release v' + ${draftVersion} + '…'">Release v2…</button>
         <button th:if="${canDelete == true and canAuthor == true}" data-verb="template-purge-entity" class="ds-button ds-button-secondary ds-button-sm"
                 th:attr="hx-get=@{/partials/templates/lifecycle/purge-entity(name=${templateName}, from='editor')},
                          hx-target='#tx-dialog', hx-swap='innerHTML'">
