@@ -158,7 +158,7 @@ class ApiExceptionHandler {
             )
     }
 
-    /** A query/path parameter that is missing or the wrong type (rest-api §4.3, §7.2). */
+    /** A query/path parameter that is missing or the wrong type — 400 in the §4.2 error envelope (rest-api.md). */
     @ExceptionHandler(MethodArgumentTypeMismatchException::class, MissingServletRequestParameterException::class)
     fun onBadParameter(
         error: Exception,

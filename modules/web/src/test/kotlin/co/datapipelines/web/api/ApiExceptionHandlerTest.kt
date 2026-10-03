@@ -19,9 +19,13 @@ import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPat
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import org.springframework.test.web.servlet.setup.MockMvcBuilders
 import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
+import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
+import java.net.URI
+import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
@@ -104,6 +108,13 @@ class ApiExceptionHandlerTest {
             @RequestBody body: JsonNode,
         ): JsonNode = body
 
+        /** #408's REST half: a typed path variable and a typed query parameter, as `GET /api/v1/dashboards/{id}` binds them. */
+        @GetMapping("/probe/typed/{id}")
+        fun typed(
+            @PathVariable id: UUID,
+            @RequestParam(defaultValue = "1") version: Int,
+        ): Map<String, Any> = mapOf("id" to id, "version" to version)
+
         @GetMapping("/probe/query-failed")
         fun queryFailed(): Nothing =
             throw co.datapipelines.typesystem.DatapipelinesException(
@@ -180,6 +191,33 @@ class ApiExceptionHandlerTest {
             // Both failures still travel, in the order they were found.
             .andExpect(jsonPath("$.error.details.failures[0].code").value(PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE))
             .andExpect(jsonPath("$.error.details.failures[1].code").value(PipelineErrorCodes.Execution.PARAMETER_DECLARATION_INVALID))
+    }
+
+    /**
+     * `onBadParameter`'s type-mismatch half, which had no test (#408 found it): a malformed typed
+     * path or query value is 400 `invalid_parameter_type` naming the PARAMETER in the message and
+     * in `details.parameter` — the value, a markup payload here, appears nowhere in the body.
+     * The UI advice answers the query case with this same code and message (#408).
+     */
+    @Test
+    fun `a malformed typed path or query value is 400 invalid_parameter_type naming the parameter, never the value (#408)`() {
+        listOf(
+            get(URI.create("/probe/typed/%3Cscript%3Ealert(1)%3C%2Fscript%3E")) to "id",
+            get("/probe/typed/{id}", UUID.randomUUID()).param("version", "<script>alert(1)</script>") to "version",
+        ).forEach { (request, parameter) ->
+            val result =
+                mvc
+                    .perform(request)
+                    .andExpect(status().isBadRequest)
+                    .andExpect(jsonPath("$.error.code").value(PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE))
+                    .andExpect(jsonPath("$.error.message").value("Parameter '$parameter' is missing or not of the expected type."))
+                    .andExpect(jsonPath("$.error.details.parameter").value(parameter))
+                    .andReturn()
+            result.response.contentAsString.contains("script") shouldBe false
+        }
+
+        // Unchanged: well-formed values reach the handler.
+        mvc.perform(get("/probe/typed/{id}", UUID.randomUUID()).param("version", "2")).andExpect(status().isOk)
     }
 
     @Test
