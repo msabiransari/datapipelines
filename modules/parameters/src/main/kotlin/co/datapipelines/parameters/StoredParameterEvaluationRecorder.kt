@@ -71,10 +71,17 @@ class StoredParameterEvaluationRecorder(
         const val WRITE_END = "end"
         const val WRITE_ABANDONED = "abandoned_queries"
 
-        /** The first SQLState in the cause chain — `persistence`'s `FailureShape` is not reachable from this module. */
-        fun sqlState(e: Throwable): String? =
+        /**
+         * What [sqlState] answers when no `SQLException` in the chain carries one — the spelling of
+         * `FailureShape.NO_SQL_STATE`, which this module cannot import (it does not depend on `persistence`), so the
+         * line never logs the string `null`.
+         */
+        const val NO_SQL_STATE = "none"
+
+        /** The first SQLState in the cause chain, else [NO_SQL_STATE] — the `FailureShape` rule, restated here. */
+        fun sqlState(e: Throwable): String =
             generateSequence(e) { it.cause }
                 .filterIsInstance<SQLException>()
-                .firstNotNullOfOrNull { it.sqlState }
+                .firstNotNullOfOrNull { it.sqlState } ?: NO_SQL_STATE
     }
 }
