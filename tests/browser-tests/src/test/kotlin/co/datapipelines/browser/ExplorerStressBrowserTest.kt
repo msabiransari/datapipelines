@@ -257,8 +257,22 @@ class ExplorerStressBrowserTest : BrowserSuite() {
                 .locator(":scope > .tpl-level:not(.tpl-level-pending)")
                 .count() > 0
         if (!open) {
-            page.waitForRequest({ req -> req.url().contains("/partials/") && req.url().contains("prefix=") }) {
-                page.click(folderSummary(path))
+            try {
+                page.waitForRequest({ req -> req.url().contains("/partials/") && req.url().contains("prefix=") }) {
+                    page.click(folderSummary(path))
+                }
+            } catch (e: com.microsoft.playwright.PlaywrightException) {
+                val state =
+                    page.evaluate(
+                        """(sel) => {
+                          const d = document.querySelector(sel);
+                          return { found: !!d, open: !!d && d.open,
+                                   pending: !!d && !!d.querySelector(':scope > .tpl-level-pending'),
+                                   level: !!d && !!d.querySelector(':scope > .tpl-level:not(.tpl-level-pending)') };
+                        }""",
+                        "details.tpl-folder:has(> summary.tpl-summary:has(span.tpl-label[title='$path']))",
+                    )
+                error("expandFolder($path): the level request never fired - $state")
             }
         }
     }
