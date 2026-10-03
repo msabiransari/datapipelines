@@ -1,6 +1,7 @@
 package co.datapipelines.browser
 
 import com.microsoft.playwright.Page
+import com.microsoft.playwright.options.WaitForSelectorState
 import io.kotest.matchers.doubles.shouldBeGreaterThan
 import io.kotest.matchers.doubles.shouldBeLessThan
 import io.kotest.matchers.shouldBe
@@ -111,23 +112,30 @@ class TemplateSidebarTreeBrowserTest : BrowserSuite() {
 
     private fun folder(path: String) = "$panel details.tpl-folder:has(> summary > span.tpl-label[title='$path'])"
 
-    /** Expands the sidebar folder whose FULL path is [path], waiting for its level to land.
-     * Idempotent: a folder the tree's restore already opened has its level in place — the
-     * summary click would CLOSE it (the toggle), so it is skipped. */
+    /** Expands the sidebar folder whose FULL path is [path] and waits for its level to be
+     * VISIBLE. The tree's own restore clicks the same summaries asynchronously, so a blind
+     * click races it (the restore opens what my click just closed) — the click is retried
+     * until the level is VISIBLE, which is the only state the assertions below mean. */
     private fun expand(path: String) {
-        val open =
-            page.evaluate(
-                """(sel) => {
-                  const d = document.querySelector(sel);
-                  return !!d && d.open && !!d.querySelector(':scope > .tpl-level:not(.tpl-level-pending)');
-                }""",
-                folder(path),
-            ) as Boolean
-        if (!open) {
-            page.click("${folder(path)} > summary")
-            page.waitForSelector("${folder(path)} > .tpl-level:not(.tpl-level-pending)")
+        val sel = "${folder(path)} > .tpl-level:not(.tpl-level-pending)"
+        for (attempt in 1..3) {
+            val open =
+                page.evaluate(
+                    """(s) => {
+                      const d = document.querySelector(s);
+                      return !!d && d.open;
+                    }""",
+                    folder(path),
+                ) as Boolean
+            if (!open) page.click("${folder(path)} > summary")
+            try {
+                page.waitForSelector(sel, Page.WaitForSelectorOptions().setState(WaitForSelectorState.VISIBLE))
+                settle()
+                return
+            } catch (e: com.microsoft.playwright.PlaywrightException) {
+                if (attempt == 3) throw e
+            }
         }
-        settle()
     }
 
     private fun leaf(path: String) = "$panel a.tpl-leaf:has(span.tpl-label[title='$path'])"
@@ -218,16 +226,24 @@ class TemplateSidebarTreeBrowserTest : BrowserSuite() {
         page.locator(leaf("test/nav_probe.sql")).click()
         page.waitForURL("**/templates/test/nav_probe.sql")
         page.waitForSelector(".tw-root")
-        // The workspace names itself to the rail (the [data-nav-current] hook) — a boosted
-        // arrival or a fresh document re-marks the leaf either way.
-        page.waitForFunction(
-            "() => document.querySelector('[data-nav-current]').getAttribute('data-nav-current-path') === 'test/nav_probe.sql'",
-        )
-        page.navigate("$baseUrl/dashboard")
+        // The workspace names itself to the rail (the [data-nav-current] hook). The tree's
+        // restore marks the leaf aria-current once its level lands — the hook page is where
+        // that is true; a page WITHOUT the hook (the dashboard) marks nothing by design.
         openTree()
         expand("test")
-        page.waitForSelector(leaf("test/nav_probe.sql"))
-        page.locator(leaf("test/nav_probe.sql")).getAttribute("aria-current") shouldBe "page"
+        page.waitForFunction(
+            "(sel) => document.querySelector(sel)?.getAttribute('aria-current') === 'page'",
+            leaf("test/nav_probe.sql"),
+        )
+        // A full navigation back to the workspace re-marks it the same way.
+        page.navigate("$baseUrl/templates/test/nav_probe.sql")
+        page.waitForSelector(".tw-root")
+        openTree()
+        expand("test")
+        page.waitForFunction(
+            "(sel) => document.querySelector(sel)?.getAttribute('aria-current') === 'page'",
+            leaf("test/nav_probe.sql"),
+        )
 
         consoleErrors shouldBe emptyList()
     }
