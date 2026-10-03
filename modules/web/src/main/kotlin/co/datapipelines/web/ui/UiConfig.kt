@@ -140,6 +140,14 @@ class UiConfig {
     fun pipelineWorkspaceModel(pipelines: co.datapipelines.pipeline.PipelineService): PipelineWorkspaceModel =
         PipelineWorkspaceModel(pipelines)
 
+    /** #398: the canonical template workspace read page's version-resolution model. */
+    @Bean
+    fun templateWorkspaceModel(
+        reads: co.datapipelines.templates.TemplateService,
+        usage: co.datapipelines.application.templates.TemplateUsage,
+        actors: ActorNames,
+    ): TemplateWorkspaceModel = TemplateWorkspaceModel(reads, usage, actors)
+
     /** 067: the pipelines explorer's one model, shared by the page and the partial controllers. */
     @Bean
     @Suppress("LongParameterList") // 106: the detail's three regions in one call need their sources
