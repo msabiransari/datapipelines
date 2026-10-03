@@ -164,11 +164,12 @@ class ParameterSetsBrowseModelTest {
 
     @Test
     fun `the search needle is trimmed and length-bounded before it reaches the service (#415)`() {
-        every { sets.search(ws, ReadLens.Everything, "x".repeat(ParameterSetsBrowseModel.MAX_QUERY_LENGTH), 0, PAGE_SIZE) } returns emptyList()
-        every { sets.countSearch(ws, ReadLens.Everything, "x".repeat(ParameterSetsBrowseModel.MAX_QUERY_LENGTH)) } returns 0
+        val bounded = "x".repeat(ParameterSetsBrowseModel.MAX_QUERY_LENGTH)
+        every { sets.search(ws, ReadLens.Everything, bounded, 0, PAGE_SIZE) } returns emptyList()
+        every { sets.countSearch(ws, ReadLens.Everything, bounded) } returns 0
         val m = ExtendedModelMap()
         browse.fillSearch(m, ws, everything, "  " + "x".repeat(500) + "  ", 0, ParameterSetsBrowseModel.SCOPE_PAGE)
-        m["q"] shouldBe "x".repeat(ParameterSetsBrowseModel.MAX_QUERY_LENGTH)
+        m["q"] shouldBe bounded
     }
 
     @Test

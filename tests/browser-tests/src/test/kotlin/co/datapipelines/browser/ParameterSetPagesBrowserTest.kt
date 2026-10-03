@@ -130,7 +130,7 @@ class ParameterSetPagesBrowserTest : ParameterSetBrowserSuite() {
     }
 
     @Test
-    fun `the branch's search swaps the flat results into the tree's root, the keyboard reaches them, and clearing returns the tree (#415)`() {
+    fun `the branch's search swaps the flat results into the tree's root and clearing returns the tree (#415)`() {
         startTrace()
         val root = ready("psnavsearch")
         val (id, _) = createSet(setBody("$root/parameters/nav_search_me", "[${constants("kind", listOf("a"))}]"))

@@ -53,7 +53,12 @@ class ParameterSetsPartialController(
         return if (prefix != null) {
             browse.fillLevel(model, workspace.id, view, prefix, offset ?: 0)
         } else {
-            browse.fillWrapper(model, workspace.id, view, q, offset ?: 0,
+            browse.fillWrapper(
+                model,
+                workspace.id,
+                view,
+                q,
+                offset ?: 0,
                 if (nav) ParameterSetsBrowseModel.SCOPE_NAV else ParameterSetsBrowseModel.SCOPE_PAGE,
             )
         }

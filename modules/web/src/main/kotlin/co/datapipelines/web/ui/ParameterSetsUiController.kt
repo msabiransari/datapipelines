@@ -57,7 +57,12 @@ class ParameterSetsUiController(
         model.addAttribute("activeTheme", themeResolver.resolve(request))
         RoleModel.stamp(model)
         val principal = currentPrincipal()
-        browse.fillWrapper(model, principal.requireWorkspace().id, lens.viewFor(principal), q, offset ?: 0,
+        browse.fillWrapper(
+            model,
+            principal.requireWorkspace().id,
+            lens.viewFor(principal),
+            q,
+            offset ?: 0,
             ParameterSetsBrowseModel.SCOPE_PAGE,
         )
         return LIST_VIEW
