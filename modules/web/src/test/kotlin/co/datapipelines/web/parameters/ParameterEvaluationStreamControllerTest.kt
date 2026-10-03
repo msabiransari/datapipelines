@@ -66,6 +66,7 @@ class ParameterEvaluationStreamControllerTest {
             scheduler = mockk<ScheduledExecutorService>(relaxed = true),
         )
     private val scope = ExecutionCoroutineScope()
+
     // The history, as a fake keyed by (workspace, id) — a wrong workspace passed by the controller reads as unused, as in the table.
     private val recorded = mutableSetOf<Pair<UUID, UUID>>()
     private val history =
@@ -208,7 +209,7 @@ class ParameterEvaluationStreamControllerTest {
     }
 
     @Test
-    fun `an evaluation id the workspace's history already holds is refused reused - its stream closed long ago, no stream, no evaluation (417)`() {
+    fun `an id the workspace's history already holds is refused reused - its stream long closed, no stream, no evaluation (417)`() {
         authenticate()
         every { sets.findVersion(workspaceId, any(), setId, 4) } returns set
         recorded += workspaceId to UUID.fromString(evaluationId)
