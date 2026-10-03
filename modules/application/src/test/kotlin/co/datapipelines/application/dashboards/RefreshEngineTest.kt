@@ -17,6 +17,7 @@ import co.datapipelines.visualization.InputColumn
 import co.datapipelines.visualization.RefreshStatus
 import co.datapipelines.visualization.TransformBinding
 import com.fasterxml.jackson.databind.node.ObjectNode
+import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
@@ -63,6 +64,9 @@ class RefreshEngineTest {
     private var scripts: (String) -> Script = { Script.Rows(columns("x" to LogicalType.INTEGER), listOf(listOf(1), listOf(2))) }
     private var transform: (Map<String, List<Map<String, Any?>>>) -> TransformOutcome = { TransformOutcome.Rows(listOf(mapOf("x" to 99))) }
     private var finishThrows = false
+
+    /** Runs as each frame is emitted, before the next engine step — lets a case raise the abort flag at a named frame (#435). */
+    private var onEvent: (RefreshEvent) -> Unit = {}
 
     private data class Link(
         val source: String,
@@ -155,6 +159,7 @@ class RefreshEngineTest {
             events =
                 RefreshEvents { event ->
                     events += event
+                    onEvent(event)
                     log += "event:${event.eventName}:${sourceOf(event)}"
                     true
                 },
@@ -192,6 +197,16 @@ class RefreshEngineTest {
             is RefreshEvent.SourceFailed -> event.source
             else -> null
         }
+
+    private fun lastStatusOf(name: String): String? =
+        events.filterIsInstance<RefreshEvent.VisualizationStatus>().lastOrNull { it.name == name }?.state
+
+    private fun completedOutcomeOf(name: String): Any? =
+        events
+            .filterIsInstance<RefreshEvent.Completed>()
+            .single()
+            .targets
+            .getValue(name)["outcome"]
 
     private fun TestScope.engine(config: DashboardRuntimeConfig = DashboardRuntimeConfig()) =
         RefreshEngine(
@@ -522,10 +537,11 @@ class RefreshEngineTest {
     @Test
     fun `an abort requested while its own cancellation ends the execution first is still an ABORT, not a failure`() {
         runTest {
-            // The abort route cancels the execution AND raises the refresh flag; the execution can end before the
-            // watcher's next poll, so the work finishes with every target failed and nobody yet told the engine why.
-            // The flag is raised WHILE the refresh runs (#356's start check only owns a flag already there at job
-            // start), the execution ends aborted 20 ms later, still before the first poll.
+            // The abort route cancels the execution AND raises the refresh flag (flag first); the execution can end
+            // before the watcher's next poll, so the work finishes with the target's execution aborted and nobody yet
+            // told the engine why. The flag is raised WHILE the refresh runs (#356's start check only owns a flag
+            // already there at job start), the execution ends aborted 20 ms later, still before the first poll.
+            // #435: the target its OWN refresh's abort cancelled reports `abort` — whichever side of the race wins.
             val body = dashboard(listOf(source("s1")), listOf(occurrence("v", inputs = mapOf("main" to "s1"))))
             scripts = { Script.After(30, Script.Aborted) }
             launch {
@@ -535,10 +551,74 @@ class RefreshEngineTest {
 
             val result = engine().run(RefreshFixtures.job(body), ports)
 
-            result.status shouldBe RefreshStatus.ABORTED
-            // The target had already failed at the abort stage when the execution ended; the row and the last frame say ABORTED.
-            result.targets.getValue("v") shouldBe TargetOutcome.Error("abort", PipelineErrorCodes.Execution.ABORTED)
+            withClue("target=${result.targets["v"]} lastStatus=${lastStatusOf("v")} completed=${completedOutcomeOf("v")}") {
+                result.status shouldBe RefreshStatus.ABORTED
+                result.targets.getValue("v") shouldBe TargetOutcome.Aborted
+                lastStatusOf("v") shouldBe "abort"
+                completedOutcomeOf("v") shouldBe "abort"
+            }
             finishes.single().status shouldBe RefreshStatus.ABORTED
+        }
+    }
+
+    @Test
+    fun `an abort readable only after the execution ended - the cross-instance case - is reported abort by the terminal frame`() {
+        runTest {
+            // The flag is NOT readable when the target records (another instance's request, cached per remote poll):
+            // the status frame already said `error`. The flag becomes readable the moment that frame is emitted — before
+            // the work's end — so noticeLateAbort records the request, the ending is ABORTED, and the terminal frame (and
+            // the row's targets) say `abort`: the terminal frame is the truth (dashboards.md), whichever read came first.
+            val body = dashboard(listOf(source("s1")), listOf(occurrence("v", inputs = mapOf("main" to "s1"))))
+            scripts = { Script.After(30, Script.Aborted) }
+            onEvent = { event ->
+                if (event is RefreshEvent.VisualizationStatus && event.state == "error") abortFlag.set(true)
+            }
+
+            val result = engine().run(RefreshFixtures.job(body), ports)
+
+            withClue("target=${result.targets["v"]} lastStatus=${lastStatusOf("v")} completed=${completedOutcomeOf("v")}") {
+                result.status shouldBe RefreshStatus.ABORTED
+                result.targets.getValue("v") shouldBe TargetOutcome.Aborted
+                completedOutcomeOf("v") shouldBe "abort"
+            }
+            finishes.single().status shouldBe RefreshStatus.ABORTED
+            finishes
+                .single()
+                .summary
+                .path("targets")
+                .path("v")
+                .path("outcome")
+                .asText() shouldBe "abort"
+            audited.single().targets.getValue("v") shouldBe TargetOutcome.Aborted
+        }
+    }
+
+    @Test
+    fun `an abort rewrites only what it cancelled - a target delivered Ok before the abort stays Ok`() {
+        runTest {
+            // Two targets: v1's rows deliver at once, v2's execution ends aborted at t=30 after the flag (t=10). The
+            // delivered one is NEVER rewritten; the cancelled one is the abort's; the refresh ends ABORTED.
+            val body =
+                dashboard(
+                    listOf(source("s1"), source("s2")),
+                    listOf(occurrence("v1", inputs = mapOf("main" to "s1")), occurrence("v2", inputs = mapOf("main" to "s2"))),
+                )
+            scripts = {
+                if (it == "s1") Script.Rows(columns("x" to LogicalType.INTEGER), listOf(listOf(1))) else Script.After(30, Script.Aborted)
+            }
+            launch {
+                delay(10)
+                abortFlag.set(true)
+            }
+
+            val result = engine().run(RefreshFixtures.job(body), ports)
+
+            result.status shouldBe RefreshStatus.ABORTED
+            result.targets.getValue("v1").shouldBeInstanceOf<TargetOutcome.Ok>()
+            result.targets.getValue("v2") shouldBe TargetOutcome.Aborted
+            completedOutcomeOf("v1") shouldBe "ok"
+            completedOutcomeOf("v2") shouldBe "abort"
+            lastStatusOf("v2") shouldBe "abort"
         }
     }
 
@@ -588,9 +668,10 @@ class RefreshEngineTest {
     @Test
     fun `an abort flag raised late does not rescue a refresh whose target failed - it still ends ABORTED`() {
         runTest {
-            // The "did not fully succeed" half of the #370 rule: the target failed at the abort
-            // stage on its own (the execution was aborted by the route's cancellation), the flag
-            // rides along — the row says ABORTED, as every viewer's abort of a failing refresh did.
+            // The "did not fully succeed" half of the #370 rule: the target's execution ended aborted (the
+            // route's cancellation) and the flag rides along — the row says ABORTED, as every viewer's abort
+            // of a failing refresh did. The flag is readable at the target's record (it is raised first), so
+            // the target is the abort's too (#435): `abort`, not the error the cancel's side effect would record.
             val body = dashboard(listOf(source("s1")), listOf(occurrence("v", inputs = mapOf("main" to "s1"))))
             scripts = { Script.After(30, Script.Aborted) }
             launch {
@@ -601,7 +682,7 @@ class RefreshEngineTest {
             val result = engine().run(RefreshFixtures.job(body), ports)
 
             result.status shouldBe RefreshStatus.ABORTED
-            result.targets.getValue("v") shouldBe TargetOutcome.Error("abort", PipelineErrorCodes.Execution.ABORTED)
+            result.targets.getValue("v") shouldBe TargetOutcome.Aborted
             finishes.single().status shouldBe RefreshStatus.ABORTED
         }
     }
@@ -662,6 +743,26 @@ class RefreshEngineTest {
             result.status shouldBe RefreshStatus.FAILED
             finishes.single().status shouldBe RefreshStatus.FAILED
             launches.shouldBeEmpty()
+            events.last().shouldBeInstanceOf<RefreshEvent.Completed>().status shouldBe "FAILED"
+        }
+
+    @Test
+    fun `a fault in the abort read at a cancelled target's record ends the refresh FAILED - the row is closed, nothing escapes`() =
+        runTest {
+            // #435's record-time read sits in the target's own coroutine: the store going away between the job-start
+            // check and the execution's end is a bug in the work, ended FAILED at the one boundary — never a target left
+            // unrecorded under a RUNNING row. The finish's own records read nothing, so the row still closes.
+            val body = dashboard(listOf(source("s1")), listOf(occurrence("v", inputs = mapOf("main" to "s1"))))
+            scripts = { Script.After(30, Script.Aborted) }
+            launch {
+                delay(10)
+                abortThrows = true
+            }
+
+            val result = engine().run(RefreshFixtures.job(body), ports)
+
+            result.status shouldBe RefreshStatus.FAILED
+            finishes.single().status shouldBe RefreshStatus.FAILED
             events.last().shouldBeInstanceOf<RefreshEvent.Completed>().status shouldBe "FAILED"
         }
 

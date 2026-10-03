@@ -184,6 +184,9 @@ class RefreshEngine(
          * joined; WHAT the request means is the ending's rule alone (`run`'s check at the DONE/ABORTED fork): an abort
          * that arrives after the last visualization completed changes nothing (#370), while a refresh the abort
          * actually interrupted — targets unrecorded, or recorded failed — ends ABORTED.
+         *
+         * What the request means for a TARGET is `record`'s and `finish`'s rule (#435): the target the refresh's own
+         * abort cancelled reports `abort`, on whichever side of this race the flag is read.
          */
         private fun noticeLateAbort() {
             if (abortRequested.get()) return
@@ -197,6 +200,10 @@ class RefreshEngine(
          */
         fun bodyCompletedEveryTarget(): Boolean =
             job.plan.targets.all { outcomes[it]?.let { o -> o is TargetOutcome.Ok || o == TargetOutcome.NoData } == true }
+
+        /** The outcome an execution that ended ABORTED leaves a target: an error at the abort stage. */
+        private fun TargetOutcome.cancelledByAbort(): Boolean =
+            this is TargetOutcome.Error && stage == ABORT_STAGE && code == PipelineErrorCodes.Execution.ABORTED
 
         // ---- one execution ------------------------------------------------------------------------------
 
@@ -398,10 +405,20 @@ class RefreshEngine(
             return contract.columns.firstOrNull { have[it.name]?.type != it.type }?.name
         }
 
+        /**
+         * Records [outcome] unless the target already has one — the first outcome wins, and the status frame goes out
+         * at record time. One rule decides WHICH outcome is first (#435): an execution that ended aborted
+         * ([cancelledByAbort]) while the refresh's OWN abort is requested was cancelled by that abort, so the target
+         * reports `abort`, not the error the cancel's side effect would otherwise record — the outcome must not depend
+         * on whether the execution's end or the watcher's flag read came first (#370's principle). The route raises the
+         * flag before it cancels, so on the owning instance the flag is readable here by construction; an execution
+         * aborted with no request (the executor's own abort) stays an error at the abort stage.
+         */
         private fun record(
             name: String,
-            outcome: TargetOutcome,
+            reported: TargetOutcome,
         ) {
+            val outcome = if (reported.cancelledByAbort() && ports.abort.requested(job.refreshId)) TargetOutcome.Aborted else reported
             if (outcomes.putIfAbsent(name, outcome) != null) return
             val status =
                 when (outcome) {
@@ -438,6 +455,11 @@ class RefreshEngine(
 
         /** Terminal bookkeeping — runs under `NonCancellable`; every step is isolated so one failure cannot skip the rest. */
         suspend fun finish(ending: Ending): RefreshResult {
+            // The cross-instance half of record's rule (#435): the flag was not yet readable when a cancelled execution's
+            // target recorded, so it stands as the abort-stage error — and the refresh now ends ABORTED, whose terminal
+            // frame is the truth. Only that ending rewrites, and only the cancelled-by-abort error: a delivered outcome
+            // is never touched, and a FAILED/DONE/TIMED_OUT refresh reports the error it recorded.
+            if (ending == Ending.ABORTED) outcomes.replaceAll { _, o -> if (o.cancelledByAbort()) TargetOutcome.Aborted else o }
             job.plan.targets.forEach { name ->
                 record(
                     name,
