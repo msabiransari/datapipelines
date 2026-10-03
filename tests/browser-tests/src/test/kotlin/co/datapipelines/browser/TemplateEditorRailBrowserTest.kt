@@ -41,20 +41,29 @@ class TemplateEditorRailBrowserTest : BrowserSuite() {
         viewer.close()
     }
 
+    /**
+     * The promoter arm, NARROWED by #398 and disclosed: without a configured promotion
+     * target the lens admits NOTHING (178, fail closed — ViewerAccessBrowserTest's promoter
+     * arm), so the promoter's workspace answer is the family 404 and there is no page on
+     * which a Render tab could exist, let alone render. The old case passed vacuously (the
+     * old editor page rendered "Unknown Template" for any name); the honest assertion is
+     * the 404 itself — the Render tab's author-only rule is pinned on the viewer arms above
+     * and on the author's positive case.
+     */
     @Test
-    fun `a pure promoter on an imports-less template gets NO Render tab either - the panel is author-only`() {
+    fun `a pure promoter with no promotion target is lensed out of the workspace entirely - the family 404`() {
         startTrace()
         val maker = seedAndLogin("railmk", role = "author")
         val name = "test/rail_promo_" + suffix()
-        val hash = seedTemplate(maker, name)
-        // The promoter's LENS hides drafts (178): the fixture releases v1 so the promoter
-        // reaches the workspace at all — the case is about the TAB absence, not the lens.
-        release(maker, name, hash) shouldBe 200
+        seedTemplate(maker, name)
         maker.close()
 
         val promoter = seedAndLogin("railpr", role = "promoter")
-        openWorkspace(promoter.page, name)
-        assertNoRenderTab(promoter.page, "promoter")
+        promoter.page.navigate("$baseUrl/templates/$name")
+        promoter.page.locator(".app-error, #app-main").waitFor()
+        // No workspace chrome to mistake for a page: no tab strip, no Render tab.
+        promoter.page.locator("#tw-tab-render").count() shouldBe 0
+        promoter.page.locator(".tw-tabs").count() shouldBe 0
         promoter.close()
     }
 

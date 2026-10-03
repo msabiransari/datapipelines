@@ -285,16 +285,28 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
                 () => {
                   const pre = document.getElementById('versionBody');
                   if (!pre) return { missing: true };
-                  return { missing: false, scrollWidth: pre.scrollWidth, clientWidth: pre.clientWidth,
+                  // The pane WRAPS (`.te-readonly` is pre-wrap — the reading surface's own
+                  // decision), so "never sizes the layout" is measured as: the pane's box stays
+                  // inside the document while its longest line, measured WITHOUT wrapping,
+                  // would have overflowed it (the non-vacuity half).
+                  const probe = pre.cloneNode(true);
+                  probe.style.whiteSpace = 'pre';
+                  probe.style.wordBreak = 'normal';
+                  probe.style.position = 'absolute';
+                  probe.style.visibility = 'hidden';
+                  document.body.appendChild(probe);
+                  const unwrapped = probe.scrollWidth;
+                  probe.remove();
+                  return { missing: false, unwrapped, clientWidth: pre.clientWidth,
                            docOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth };
                 }
                 """.trimIndent(),
             ) as Map<String, Any?>
         check(edges["missing"] != true) { "$where: no read-only source pane on the workspace" }
-        // Non-vacuity: the fixture must genuinely overflow its pane at this width, or a green
-        // containment assertion is a line that happened to fit.
-        withClue({ "$where: the pane needs no scroll (${edges["scrollWidth"]} <= ${edges["clientWidth"]}) — the fixture must not fit" }) {
-            (edges["scrollWidth"] as Number).toDouble() shouldBeGreaterThan (edges["clientWidth"] as Number).toDouble()
+        // Non-vacuity: the fixture's longest line must genuinely exceed the pane's width, or
+        // a green containment assertion is a line that happened to fit.
+        withClue({ "$where: the line needs no more room than the pane (${edges["unwrapped"]} <= ${edges["clientWidth"]}) — the fixture must not fit" }) {
+            (edges["unwrapped"] as Number).toDouble() shouldBeGreaterThan (edges["clientWidth"] as Number).toDouble()
         }
         val offenders = mutableListOf<String>()
         if ((edges["docOverflow"] as Number).toLong() > 0) {
