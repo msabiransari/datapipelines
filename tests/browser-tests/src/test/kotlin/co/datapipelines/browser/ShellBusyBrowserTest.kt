@@ -465,4 +465,9 @@ class ShellBusyBrowserTest : BrowserSuite() {
             throttle.releaseAll()
         }
     }
+
+    private companion object {
+        /** awaitCaptured's hard deadline — a capture that never comes is a test bug, named. */
+        const val AWAIT_CAPTURED_TIMEOUT_MILLIS = 10_000L
+    }
 }
