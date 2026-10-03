@@ -323,14 +323,15 @@
            th:attr="aria-current=${currentPath != null and #strings.startsWith(currentPath, '/datasources')} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#database"></use></svg><span class="app-rail-label">Datasources</span></a>
         <!-- D58 (#10 L3b): the Dashboards item — every role (dashboard.read is an every-role
              read, the promoter through the lens), so unlike Executions/Promotion it rides no
-             advice boolean. The PARENT item is the link to the tree page; BESIDE it, the
+             advice boolean. The PARENT item is the link to the catalog; BESIDE it, the
              disclosure expands IN PLACE into the hierarchy (D58), lazy: the first open fetches
-             ONE level (the same /partials/dashboards/tree fragment the page's tree renders,
-             scope=nav) into the placeholder below. #350: the branch adopts the sidebar's ONE
-             navigating-tree pattern above (toggle + panel, nav-tree.js + the explorer keyboard's
-             nav context) instead of its own <details> — two tree engines in one rail is what
-             the workspace spec forbids. Its fragment, route and full-navigation leaves are
-             unchanged; it has no search route, so its panel carries no search box. -->
+             ONE level (the same /partials/dashboards/tree fragment, scope=nav) into the
+             placeholder below. #350: the branch adopts the sidebar's ONE navigating-tree
+             pattern above (toggle + panel, nav-tree.js + the explorer keyboard's nav context)
+             instead of its own <details> — two tree engines in one rail is what the workspace
+             spec forbids. #400: the branch gains the search input in the Pipelines branch's
+             exact markup — the shared engine serves it with no JS change (a non-empty `q`
+             renders the flat results into this panel's root; clearing returns to the tree). -->
         <div class="app-nav-branch" data-nav-branch="dashboards">
           <a th:href="@{/dashboards}" class="app-nav-link" data-nav-section="/dashboards"
              data-nav-group="Build" data-nav-label="Dashboards"
@@ -342,6 +343,14 @@
           </button>
           <div class="app-nav-tree app-rail-label" id="nav-tree-dashboards" data-nav-tree="dashboards" hidden
                th:attr="data-nav-workspace=${activeWorkspace},data-nav-root-url=@{/partials/dashboards/tree(scope='nav')}">
+            <div class="app-nav-tree-search">
+              <input type="search" name="q" class="ds-input app-nav-tree-input" autocomplete="off"
+                     placeholder="Search dashboards…" aria-label="Search dashboards in the tree"
+                     data-nav-tree-search
+                     th:attr="hx-get=@{/partials/dashboards/tree(scope='nav')}"
+                     hx-target="#dash-tree-nav" hx-swap="outerHTML"
+                     hx-trigger="input changed delay:300ms, search" hx-sync="this:replace">
+            </div>
             <div class="app-nav-tree-scroll" data-nav-tree-scroll>
               <div class="tpl-level tpl-level-pending" id="dash-tree-nav" data-nav-tree-root>
                 <span class="ds-spinner htmx-indicator" aria-hidden="true"></span>
@@ -670,6 +679,13 @@
              these codes; the toast lands after the navigation, from this bin (§4.3d). -->
         <th:block th:if="${code == 'released'}"><div th:replace="~{partials/toast :: toast('success', 'Released', 'The draft is now the current version and is locked.')}"></div></th:block>
         <th:block th:if="${code == 'released_with_templates'}"><div th:replace="~{partials/toast :: toast('success', 'Released', 'The draft is now the current version and is locked, and the draft templates it pinned were released with it.')}"></div></th:block>
+        <!-- #400 — the dashboard lifecycle verbs' redirects land on these codes (the
+             pipelines' `released_with_templates`/`entity_purged`/`draft_purged` wordings name
+             the wrong family for a dashboard). The version-generic codes above
+             (discarded/restored/switched) serve both families unchanged. -->
+        <th:block th:if="${code == 'released_with_visualizations'}"><div th:replace="~{partials/toast :: toast('success', 'Released', 'The draft is now the served version and is locked, and the draft visualizations it pinned were released with it.')}"></div></th:block>
+        <th:block th:if="${code == 'dashboard_draft_purged'}"><div th:replace="~{partials/toast :: toast('success', 'Draft purged', 'The draft is gone. This cannot be undone.')}"></div></th:block>
+        <th:block th:if="${code == 'dashboard_purged'}"><div th:replace="~{partials/toast :: toast('success', 'Dashboard purged', 'The dashboard and its draft are gone.')}"></div></th:block>
         <!-- #395 — the workspace's Versions-tab verbs answer HX-Redirect onto that tab (the editor
              surface's shape); the toast says what happened and the tab shows the new pointer. -->
         <th:block th:if="${code == 'discarded'}"><div th:replace="~{partials/toast :: toast('success', 'Version discarded', 'It no longer serves. The Versions tab shows which version is current now.')}"></div></th:block>
