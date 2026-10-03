@@ -2,6 +2,7 @@ package co.datapipelines.parameters
 
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.sync.Semaphore
 import org.slf4j.LoggerFactory
 import java.util.concurrent.ConcurrentHashMap
@@ -60,8 +61,8 @@ sealed interface SelectorAdmission {
  *    [SelectorTask.abandon] (`Statement.cancel()`, best effort, then `ConnectionPool.discard`) runs on
  *    a detached `selector-abandon-N` thread — a driver's cancel may itself block on the network, and
  *    the caller answers `timeout` WITHOUT waiting — [abandoned] is incremented, and ONE error line
- *    names the set, the parameter and the datasource. The worker thread lives on, detached, and frees
- *    its slot when the driver returns.
+ *    names the set, the parameter, the datasource and the cause (`deadline` or `caller`, #425). The
+ *    worker thread lives on, detached, and frees its slot when the driver returns.
  *  - **No Micrometer here.** [abandoned] is the `LongAdder` the assembling layer scrapes into the
  *    `parameters.selectors.abandoned` gauge (record §11 — lane D's bean, the
  *    `transform.evaluations.abandoned` shape).
@@ -83,7 +84,10 @@ class SelectorPool(
     /** The admission capacity — running plus waiting. */
     val queue: Int = size + waiting
 
-    /** Statements abandoned at their evaluate's deadline — scrape into the `parameters.selectors.abandoned` gauge. */
+    /**
+     * Statements abandoned when their evaluate's await was cancelled (its deadline or its caller) — scrape
+     * into the `parameters.selectors.abandoned` gauge.
+     */
     val abandoned = LongAdder()
 
     private val admission = java.util.concurrent.Semaphore(queue)
@@ -148,7 +152,7 @@ class SelectorPool(
             try {
                 result.await()
             } catch (e: CancellationException) {
-                if (!result.isCompleted) abandon(label, task, worker)
+                if (!result.isCompleted) abandon(label, task, worker, AbandonCause.of(e))
                 throw e
             } catch (
                 @Suppress("TooGenericExceptionCaught") failure: Throwable,
@@ -229,21 +233,27 @@ class SelectorPool(
         return thread
     }
 
-    /** The deadline passed while [task] ran: count it, say so once, and stop it off the caller's thread. */
+    /**
+     * The await was cancelled while [task] ran: count it, say so once, and stop it off the caller's thread.
+     * [cause] says WHICH cancellation it was — the evaluate's own deadline, or its caller stopping it
+     * (#375's disconnect grace, a shutdown) — because the line must not claim a deadline that did not pass.
+     */
     private fun abandon(
         label: SelectorLabel,
         task: SelectorTask,
         worker: Thread,
+        cause: AbandonCause,
     ) {
         abandoned.increment()
         abandonedThreads.add(worker)
         log.error(
-            "event=selector_statement_abandoned set={} parameter={} datasource={} - the evaluate's deadline passed; " +
-                "the statement is cancelled (best effort) and its connection discarded, and the worker keeps its " +
-                "slot until the driver returns",
+            "event=parameter.selector_statement_abandoned set={} parameter={} datasource={} cause={} - the evaluate " +
+                "was cancelled; the statement is cancelled (best effort) and its connection discarded, and the " +
+                "worker keeps its slot until the driver returns",
             label.set.safeEcho(MAX_LABEL_CHARS),
             label.parameter.safeEcho(MAX_LABEL_CHARS),
             label.datasource.safeEcho(MAX_LABEL_CHARS),
+            cause.wire,
         )
         Thread(
             // #337 (observability §3.3): the abandon work belongs to the evaluate that gave up —
@@ -252,6 +262,20 @@ class SelectorPool(
             "selector-abandon-${cancellers.incrementAndGet()}",
         ).apply { isDaemon = true }
             .start()
+    }
+
+    /** Which cancellation reached the await: the evaluate's `withTimeout`, or anything else stopping the caller. */
+    private enum class AbandonCause(
+        val wire: String,
+    ) {
+        DEADLINE("deadline"),
+        CALLER("caller"),
+        ;
+
+        companion object {
+            fun of(cancellation: CancellationException): AbandonCause =
+                if (cancellation is TimeoutCancellationException) DEADLINE else CALLER
+        }
     }
 
     private companion object {

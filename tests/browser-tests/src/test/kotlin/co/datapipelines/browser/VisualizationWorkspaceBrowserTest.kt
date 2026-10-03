@@ -8,6 +8,7 @@ import io.kotest.matchers.collections.shouldNotBeEmpty
 import io.kotest.matchers.ints.shouldBeGreaterThan
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.MethodOrderer
 import org.junit.jupiter.api.Order
 import org.junit.jupiter.api.Test
@@ -21,6 +22,9 @@ import java.nio.file.Paths
  * page and carries `?tab=`; Evidence shows a run's screenshot only once one was stored; the Release dialog lists its
  * refusals before the button and its POST releases through the service; a viewer's and a promoter's pages issue no
  * lifecycle request; the 3d bundle; every tab ZERO-CSP in both themes (the suite's after-each), at three widths.
+ *
+ * #426 — the strip's tab switches ride the shared history helper (workspace/history.js, family `visualizations`):
+ * Back/Forward re-select in page, a restored root wires once, and another family's entry runs none of this glue.
  */
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
 class VisualizationWorkspaceBrowserTest : VisualizationBrowserSuite() {
@@ -228,6 +232,126 @@ class VisualizationWorkspaceBrowserTest : VisualizationBrowserSuite() {
         shot("workspace-preview-3d")
         drainCspViolations().shouldBeEmpty()
         ensureTheme("light")
+    }
+
+    @Test
+    @Order(5)
+    fun `#426 - Back and Forward re-select in-page tab switches, and a boosted leave and Back wires once`() {
+        startTrace()
+        page.setViewportSize(DESKTOP_W, DESKTOP_H)
+        val root = ready("vhist")
+        val (id, _) = createVisualization("$root/charts/units")
+
+        // A blocked inline style or script on any walk below fails the class's after-each (zero CSP):
+        // the in-page walk runs light, the leave-and-restore dark.
+        ensureTheme("light")
+        page.navigate("$baseUrl/visualizations/$id?version=1")
+        awaitPane(page, "preview")
+        val length = historyLength()
+
+        // Preview → Overview → Versions: two entries of the workspace's own (tab only).
+        page.click("#viz-tab-overview")
+        expectTab("overview")
+        page.click("#viz-tab-versions")
+        expectTab("versions")
+        historyLength() shouldBe length + 2
+        page.url() shouldContain "version=1"
+
+        // Back ×2, Forward ×2 — IN PAGE: the same document, no entry minted.
+        val marker = page.evaluate("() => (window.__p426Doc = Math.random().toString(36).slice(2))")
+        for ((back, tab) in listOf(true to "overview", true to "preview", false to "overview", false to "versions")) {
+            if (back) page.goBack() else page.goForward()
+            expectTab(tab)
+            historyLength() shouldBe length + 2
+            page.evaluate("() => window.__p426Doc") shouldBe marker
+        }
+        historyStat("replayed.visualizations") shouldBe 4
+        historyStat("listeners") shouldBe 1
+
+        ensureTheme("dark")
+        page.navigate("$baseUrl/visualizations/$id?version=1&tab=versions")
+        awaitPane(page, "versions")
+        // A boosted leave and Back: htmx restores the page; it is wired ONCE (one root marker,
+        // one window listener) and its strip still switches and replays.
+        page.click(".app-nav-link[data-nav-section='/templates']")
+        page.waitForSelector("[data-explorer-pane] .tpl-tree, [data-explorer-pane] .ds-empty")
+        page.goBack()
+        page.waitForSelector("#viz-pane-versions:not([hidden])")
+        page.waitForFunction("() => document.querySelectorAll('.dp-ws-root[data-dp-ws-wired=\"1\"]').length === 1")
+        historyStat("listeners") shouldBe 1
+        page.click("#viz-tab-overview")
+        expectTab("overview")
+        page.goBack()
+        expectTab("versions")
+        page.evaluate("() => document.querySelectorAll('.dp-ws-root').length") shouldBe 1
+        ensureTheme("light")
+    }
+
+    @Test
+    @Order(6)
+    fun `#426 - another family's entry popping beside a live visualizations root runs no visualizations code`() {
+        startTrace()
+        page.setViewportSize(DESKTOP_W, DESKTOP_H)
+        val root = ready("vfam")
+        val (id, _) = createVisualization("$root/charts/units")
+
+        // Every link ONTO a workspace is a full navigation (hx-boost="false"), so a `pipelines` entry never shares a
+        // document with a visualizations root by the UI: the foreign entries are minted through the helper's OWN push,
+        // and a stand-in answers for the pipelines (a family registers its replay the same way, history.js `listen`).
+        ensureTheme("light")
+        page.navigate("$baseUrl/visualizations/$id?tab=versions")
+        awaitPane(page, "versions")
+        val lazyPrefix = page.locator("#viz-pane-overview").getAttribute("data-lazy-url").substringBeforeLast("/")
+        lazyPrefix shouldContain "/partials/visualizations/$id"
+        page.evaluate(
+            "() => { window.__p426Doc = 'one'; window.__p426Foreign = 0;" +
+                " window.WorkspaceHistory.listen('pipelines', () => { window.__p426Foreign++; return true; }); }",
+        )
+        val requested = java.util.concurrent.CopyOnWriteArrayList<String>()
+        page.onRequest { requested += it.method() + " " + it.url() }
+        val length = historyLength()
+
+        // The foreign switch: converts the arrival entry to a pipelines one and pushes the next (URL moves to Overview
+        // while the strip, which no one told, stays on Versions — the state a per-root URL listener would "repair").
+        page.evaluate("() => window.WorkspaceHistory.push('pipelines', { version: 1, tab: 'flow' }, { version: 1, tab: 'overview' })")
+        page.url() shouldContain "tab=overview"
+        historyLength() shouldBe length + 1
+        for ((back, urlTab) in listOf(true to "versions", false to "overview")) {
+            if (back) page.goBack() else page.goForward()
+            page.waitForFunction("() => window.__p426Foreign >= ${if (back) 1 else 2}")
+            page.url() shouldContain "tab=$urlTab"
+            // The strip is the VISUALIZATIONS' and never moved: Versions, one pane, no pane loaded by this walk.
+            page.locator("#viz-tab-versions").getAttribute("aria-selected") shouldBe "true"
+            page.locator("#viz-pane-overview").getAttribute("hidden") shouldBe "hidden"
+            page.evaluate("() => window.__p426Doc") shouldBe "one"
+        }
+        historyStat("replayed.pipelines") shouldBe 2
+        historyStat("replayed.visualizations") shouldBe 0
+        historyStat("listeners") shouldBe 1
+        val leaked = requested.filter { it.contains(lazyPrefix) }
+        withClue("a visualizations partial was requested by a foreign entry: $leaked") { leaked.shouldBeEmpty() }
+    }
+
+    private fun historyLength(): Int = (page.evaluate("() => history.length") as Number).toInt()
+
+    private fun historyStat(path: String): Int =
+        (
+            page.evaluate(
+                "p => p.split('.').reduce((o, k) => (o == null ? o : o[k]), window.WorkspaceHistory.stats()) || 0",
+                path,
+            ) as Number
+        ).toInt()
+
+    /**
+     * One tab, asserted whole: the strip, the ONE visible pane, and the URL's `tab` — the arrival
+     * entry keeps its own URL (no `tab=` when the page was entered on Preview).
+     */
+    private fun expectTab(tab: String) {
+        page.waitForSelector("#viz-pane-$tab:not([hidden])")
+        page.locator("#viz-tab-$tab").getAttribute("aria-selected") shouldBe "true"
+        page.evaluate("() => document.querySelectorAll('.dp-ws-tab[aria-selected=\"true\"]').length") shouldBe 1
+        page.evaluate("() => document.querySelectorAll('[data-dp-pane]:not([hidden])').length") shouldBe 1
+        if (tab == "preview") page.url() shouldNotContain "tab=" else page.url() shouldContain "tab=$tab"
     }
 
     /** One tab opened by URL at the current viewport: rendered, no sideways scroll, zero CSP; two tabs are photographed. */
