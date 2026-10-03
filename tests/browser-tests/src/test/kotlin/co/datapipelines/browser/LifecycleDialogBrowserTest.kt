@@ -5,6 +5,7 @@ import com.microsoft.playwright.Page
 import com.microsoft.playwright.options.LoadState
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
 import java.nio.file.Files
 import java.nio.file.Paths
@@ -343,8 +344,13 @@ class LifecycleDialogBrowserTest : BrowserSuite() {
         val releaseDialog = openDialog(page.locator(".tw-topbar button", Page.LocatorOptions().setHasText("Release v1")))
         releaseDialog.innerText() shouldContain "pin without a number"
         // #398: the redirect flash uses the layout's released toast (title "Released"; the
-        // body carries the "current version and locked" sentence).
-        successToastAfter { releaseDialog.locator("button[type=submit]").click() } shouldContain "Released"
+        // body carries the "current version and locked" sentence). A template release never
+        // shows a pipeline's held names: the generic sentence is the whole body (#407's
+        // ReleaseFlash is bound to a pipeline id the template route does not carry).
+        releaseDialog.locator("button[type=submit]").click()
+        page.waitForURL("**/templates/test/lifecycle_probe.sql?tab=versions&ok=released")
+        flashToast() shouldContain "Released"
+        flashToast() shouldNotContain "Also released"
 
         // A draft over the release, then Discard the resolved release: the twin's fallback.
         // #398: every success lands back on ?tab=versions, so the tab is where the walk is.
@@ -354,19 +360,32 @@ class LifecycleDialogBrowserTest : BrowserSuite() {
         page.waitForSelector("#tw-pane-versions tr[data-version-row]")
         val discardDialog = openDialog(page.locator(".tw-topbar button", Page.LocatorOptions().setHasText("Discard v1")))
         shot("templates-discard-1280-light")
-        successToastAfter { discardDialog.locator("button[type=submit]").click() } shouldContain "v2 is the resolved version now."
+        discardDialog.locator("button[type=submit]").click()
+        page.waitForURL("**/templates/test/lifecycle_probe.sql?tab=versions&ok=discarded")
+        flashToast() shouldContain "Version discarded"
+        // The flash is generic by design (the layout's `discarded` code serves every family; the
+        // old Shape A toast named "v2 is the resolved version now"). That fact is the Versions
+        // tab's now — the page the redirect lands on marks v2 as the version that resolves.
+        page.waitForSelector("#tw-pane-versions tr[data-version-row='2'] .tplx-current")
+        page.locator("#tw-pane-versions tr[data-version-row='1'] td:nth-child(2) .ds-badge").innerText() shouldBe "DISCARDED"
 
         rowMenu("v1").locator("button", Locator.LocatorOptions().setHasText("Restore v1")).click()
-        successToastAfter {
-            page.locator("#tx-dialog [data-lifecycle-dialog='template-restore'] button[type=submit]").click()
-        } shouldContain "Restored v1"
+        page.locator("#tx-dialog [data-lifecycle-dialog='template-restore'] button[type=submit]").click()
+        page.waitForURL("**/templates/test/lifecycle_probe.sql?tab=versions&ok=restored")
+        flashToast() shouldContain "Version restored"
+        page.waitForSelector("#tw-pane-versions tr[data-version-row='1']")
+        page.locator("#tw-pane-versions tr[data-version-row='1'] td:nth-child(2) .ds-badge").innerText() shouldBe "RELEASED"
 
         // The version purge through its typed confirm; the template stays (v1 remains).
         rowMenu("v2").locator("button", Locator.LocatorOptions().setHasText("Purge v2")).click()
         val purgeDialog = page.locator("#tx-dialog [data-lifecycle-dialog='template-purge']")
         purgeDialog.waitFor()
         purgeDialog.locator("[data-confirm-input]").fill("v2")
-        successToastAfter { purgeDialog.locator("button[data-typed-confirm]").click() } shouldContain "Purged v2"
+        purgeDialog.locator("button[data-typed-confirm]").click()
+        page.waitForURL("**/templates/test/lifecycle_probe.sql?tab=versions&ok=draft_purged")
+        flashToast() shouldContain "Draft purged"
+        page.waitForSelector("#tw-pane-versions tr[data-version-row='1']")
+        page.locator("#tw-pane-versions tr[data-version-row='2']").count() shouldBe 0
 
         // The entity purge on a fresh {D} template: typed NAME, redirect to the CATALOG
         // (the tree must lose the leaf), the leaf gone from the sidebar tree.
