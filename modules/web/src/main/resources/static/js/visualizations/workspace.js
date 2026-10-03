@@ -84,6 +84,7 @@
   function wire() {
     if (!window.WorkspacePanes) return;
     var wired = window.WorkspacePanes.wireWorkspace({
+      family: "visualizations",
       tabs: TABS,
       defaultTab: DEFAULT_TAB,
       onReveal: function (tab, pane) {
