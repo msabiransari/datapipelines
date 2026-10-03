@@ -127,7 +127,9 @@ class TemplateEditorContextRowBrowserTest : BrowserSuite() {
         page: Page,
         name: String,
     ) {
-        page.navigate("$baseUrl/templates/" + java.net.URLEncoder.encode(name, "UTF-8"))
+        // The name's segments are path segments (the workspace's capture variable) — a
+        // percent-encoded slash is refused 400 below routing (§9.6).
+        page.navigate("$baseUrl/templates/$name")
         page.waitForSelector(".tw-root")
         // The Render tab is where the context rows live (#398); a fresh draft-only template
         // is the seed here, so the tab is on the page.

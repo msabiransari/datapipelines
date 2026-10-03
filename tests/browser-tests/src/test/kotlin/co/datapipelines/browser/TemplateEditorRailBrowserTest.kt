@@ -173,9 +173,18 @@ class TemplateEditorRailBrowserTest : BrowserSuite() {
         page: Page,
         name: String,
     ) {
-        page.navigate("$baseUrl/templates/" + java.net.URLEncoder.encode(name, "UTF-8"))
-        // The source pane renders whether or not the Render tab does — the stable landmark.
-        page.waitForSelector(".tw-root")
+        // The name's segments are path segments (the workspace's capture variable) — a
+        // percent-encoded slash is refused 400 below routing (§9.6).
+        page.navigate("$baseUrl/templates/$name")
+        try {
+            // The source pane renders whether or not the Render tab does — the stable landmark.
+            page.waitForSelector(".tw-root")
+        } catch (e: com.microsoft.playwright.PlaywrightException) {
+            // Name the page the browser actually has: the honest 404 of a lens-hidden or
+            // failed seed names itself, and a vacuous timeout does not.
+            val body = page.evaluate("() => document.body ? document.body.innerText.slice(0, 300) : '(no body)'")
+            error("openWorkspace($name) landed on ${page.url()}\n$body")
+        }
         page.waitForLoadState(com.microsoft.playwright.options.LoadState.NETWORKIDLE)
     }
 

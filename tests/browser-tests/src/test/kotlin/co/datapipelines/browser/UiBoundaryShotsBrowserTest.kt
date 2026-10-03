@@ -153,7 +153,7 @@ class UiBoundaryShotsBrowserTest : BrowserSuite() {
                 page.click("#create-template-modal button[type=submit]")
             }.status() shouldBe 200
 
-        page.navigate("$baseUrl/templates/" + java.net.URLEncoder.encode(name, "UTF-8"))
+        page.navigate("$baseUrl/templates/$name")
         page.waitForSelector(".tw-root")
 
         // §D: the page's own scripts are FILES — since 188 (#188) the layout's rail-collapse

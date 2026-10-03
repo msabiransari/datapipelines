@@ -178,14 +178,18 @@ class TemplateWorkspaceBrowserTest : BrowserSuite() {
         val name = "test/ws_bad_${generatedPassword("n").take(6).lowercase()}.sql"
         must("POST", "/api/v1/templates", templateJson(name, sqlBody("v1")))
 
-        // Absent version: the family 404, never a silent fallback to the release.
+        // Absent version: the family 404, never a silent fallback to the release. (The
+        // browser logs the document's own 404 as a console error by design — asserted on the
+        // page shape, not on console silence.)
+        consoleErrors.clear()
         page.navigate("$baseUrl/templates/$name?version=9")
-        page.waitForSelector(".app-error, [data-test-error], body")
         page.locator("#tw-root").count() shouldBe 0
+        consoleErrors.clear()
 
         // Malformed version: the house 400.
         page.navigate("$baseUrl/templates/$name?version=two")
         page.locator("#tw-root").count() shouldBe 0
+        consoleErrors.clear()
 
         // The compatibility redirect: the version (and a supported tab) survives.
         page.navigate("$baseUrl/templates/editor?name=$name&version=1&tab=versions")
@@ -207,7 +211,9 @@ class TemplateWorkspaceBrowserTest : BrowserSuite() {
         page.waitForSelector(".tw-root")
         page.locator("#versionBody").waitFor()
         page.locator("#templateBody").count() shouldBe 0
-        page.locator("textarea").count() shouldBe 0
+        // The hidden Render tab's context JSON textarea is IN THE DOM for an author; the
+        // read-only rule is about the SOURCE column.
+        page.locator("#template-source textarea").count() shouldBe 0
         page.locator("[data-verb='template-edit']").waitFor()
 
         // Edit copies the release into a draft and lands on the workspace WITH the draft
@@ -219,8 +225,9 @@ class TemplateWorkspaceBrowserTest : BrowserSuite() {
             url.contains("/templates/") && url.contains("version=") && url.contains("tab=source")
         }
         page.waitForSelector("#templateBody")
-        // The editable surface is the DRAFT: its body differs from the release's.
-        viewedVersion() shouldBe "4"
+        // The editable surface is the EXISTING draft (Edit opened it and wrote nothing — the
+        // lifecycle rule 035/039): v3, never a second draft.
+        viewedVersion() shouldBe "3"
         consoleErrors shouldBe emptyList()
     }
 
@@ -231,9 +238,24 @@ class TemplateWorkspaceBrowserTest : BrowserSuite() {
         val name = "test/ws_from_${generatedPassword("n").take(6).lowercase()}.sql"
         seedThreeVersions(name)
 
-        // The header's one destructive on a {R,D} shape: Purge draft — its typed confirm.
+        // The {R,D} shape: the header's one destructive is DISCARD; the draft's purge is its
+        // row's ⋯ menu on the Versions tab (102 §B.1). The redirect contract is the same.
         openWorkspace(name, query = "v2")
-        page.locator("[data-verb='template-purge']").click()
+        page.locator("#tw-tab-versions").click()
+        val draftRow =
+            page
+                .locator("#tw-pane-versions tr[data-version-row]")
+                .filter(com.microsoft.playwright.Locator.FilterOptions().setHasText("v3"))
+                .first()
+        draftRow.locator("details.tplx-vmenu summary").click()
+        page
+            .locator(
+                "#tw-pane-versions .tplx-vmenu-list button",
+                com.microsoft.playwright.Page
+                    .LocatorOptions()
+                    .setHasText("Purge v3"),
+            ).first()
+            .click()
         page.waitForSelector("#tx-dialog [data-lifecycle-dialog='template-purge']")
         page.locator("#tx-dialog [data-confirm-input]").fill("v3")
         page.locator("#tx-dialog button[data-typed-confirm]").click()
