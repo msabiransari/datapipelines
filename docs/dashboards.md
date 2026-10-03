@@ -1,6 +1,6 @@
 # Dashboards
 
-**Status:** v0.36 — the read-only rule is stated as declarative (§5.1, #463), then draft dashboard dependencies (#459), then the Release dialogs post the draft hash they read (§7, #416) beside numeric bound-value assertion feasibility (§3.4, #377) beside the visualizations workspace's tab switches on the shared history helper, the parameter-set decision (§7, #426) beside the pipeline editor runs the shared tab core (§7, #420) beside the Versions tables' created/released relative with the UTC stamp on hover (§7, #422) beside Back/Forward across the dashboards workspace's tab switches (§7, #402) beside the visualizations workspace (§7, #399) beside the dashboards workspace (§5.2's `version`, §7's workspace, #400; #409 closes with it) beside the
+**Status:** v0.37 — the board-width breakpoint on the composite host, with a 640 px default (#412) beside the read-only rule is stated as declarative (§5.1, #463), then draft dashboard dependencies (#459), then the Release dialogs post the draft hash they read (§7, #416) beside numeric bound-value assertion feasibility (§3.4, #377) beside the visualizations workspace's tab switches on the shared history helper, the parameter-set decision (§7, #426) beside the pipeline editor runs the shared tab core (§7, #420) beside the Versions tables' created/released relative with the UTC stamp on hover (§7, #422) beside Back/Forward across the dashboards workspace's tab switches (§7, #402) beside the visualizations workspace (§7, #399) beside the dashboards workspace (§5.2's `version`, §7's workspace, #400; #409 closes with it) beside the
 board's small-slot margins and its breakpoint collapse (§6.2, §6.3, #386/#387), 328's release-record judgement (§4.3)
 permissions (§4, lane L1b); the transfer routes and their limits' honest contract (§3.3, lanes L1c/L1c-b/L1c-c: the
 import's atomicity, the RELEASE rules on a landing, the aggregate count ceiling, the wire's per-family arms); the server
@@ -15,7 +15,7 @@ page, the screenshot upload and the two test tools — §3.4.1 (lane L4b, #353).
 [MCP Server](mcp-server.md) (§6.2.50–§6.2.62 — the tools), [Auth](auth.md) (§7.6 — the permissions)
 **Design:** the [dashboard implementation spec](superpowers/specs/2026-09-28-dashboard-implementation-spec.md) and
 the [design record](superpowers/specs/2026-09-25-dashboard-authoring-design-draft.md) (decisions D1–D63)
-**Last updated:** 2026-10-06
+**Last updated:** 2026-10-09
 
 A dashboard presents pipeline results. Draft development admits draft dependencies; published boards require released dependencies. It is built from two versioned artifacts: **visualizations** —
 a chart, table or KPI bound to named inputs, reusable across dashboards — and **dashboards**, which pin exact pipeline versions as sources, map their results onto visualization inputs, and arrange visualizations, groups, actions and
@@ -161,7 +161,7 @@ the case runs; a `DECIMAL` is a JSON number on the wire (type-system §3), so wr
 | `parameter_scopes` | Parameter → the groups its change makes stale (D41). A declared scope must include every group that consumes the parameter — directly, or through a parameter that depends on it (`dashboard.validation.scope_omits_consumer`); an absent parameter is unscoped |
 | `parameter_state` | Hide/show and enable/disable overrides, dashboard-wide and per parameter: `inherit`, `force_true`, `force_false` ([Enumerations §36](enums.md), D20). A forced-hidden parameter's value is still submitted (D23) |
 | `outgoing_overrides` | Per source, per pipeline parameter, the literal the pipeline receives whatever the control showed (D23) |
-| `layout` | The whole set's region (`left`, `right`, `top`, `bottom`), per-parameter placements into a group or a region, and the `grid` in 12-column units: every occurrence has exactly one grid item; an action control is placed exactly once — a grid item or a group membership; a group at most once; each item fits the 12 columns. Below `breakpoint_px` (768 when absent) every item spans the full width in grid order (`dashboard.validation.layout_invalid`) |
+| `layout` | The whole set's region (`left`, `right`, `top`, `bottom`), per-parameter placements into a group or a region, and the `grid` in 12-column units: every occurrence has exactly one grid item; an action control is placed exactly once — a grid item or a group membership; a group at most once; each item fits the 12 columns. Below `breakpoint_px` (640 when absent), measured on the board's own host width, every item spans the full width in grid order; a 0-wide host holds the stored grid until it is laid out (`dashboard.validation.layout_invalid`) |
 | `timeouts.refresh_seconds` | 1–900 — the executor tier's cap (the spec's §9.6) |
 
 A reference that names nothing — a member, a target, a control's action, a placement, a scope's group, an
@@ -647,7 +647,7 @@ of them, and a no-op is not conformant (the conformance suite drives real behavi
 
 | Function | The host does | The runtime guarantees |
 |---|---|---|
-| `mountLayout(layout) → Promise` | build the grid from the system layout; the first-party adapter's rows are each one `--dashboard-row-unit` (app.css, default `var(--space-20)` = 5rem), so a slot of `h` rows is `h` units plus the gaps between them tall and a figure's height is its slot's; the empty default slot takes no row (`dashboards.css`); below `layout.breakpoint_px` (768 when absent; clamped to the server's 1–10 000, a non-number is the default) the first-party adapter places every item across all 12 columns, stacked in grid order (by `y`, then `x`) with its own row span — the row unit unchanged — through `matchMedia("not all and (min-width: <breakpoint>px)")`, so 767 px collapses and 768 px holds the stored grid; a viewport crossing re-places the slots and resizes every mounted renderer, the listener removed by `dispose`; the gap is the `--space-4` token | awaited before anything mounts |
+| `mountLayout(layout) → Promise` | build the grid from the system layout; the first-party adapter's rows are each one `--dashboard-row-unit` (app.css, default `var(--space-20)` = 5rem), so a slot of `h` rows is `h` units plus the gaps between them tall and a figure's height is its slot's; the empty default slot takes no row (`dashboards.css`); below `layout.breakpoint_px` (640 when absent; clamped to the server's 1–10 000, a non-number is the default), measured on the composite host's content width, the adapter places every item across all 12 columns, stacked in grid order (by `y`, then `x`) with its own row span — the row unit unchanged. A 0-wide host holds the stored grid until layout; the host's `ResizeObserver` re-places on reveal and at a narrow/wide crossing, resizing mounted renderers on crossings, and disconnects on `dispose`; without `ResizeObserver` the stored grid holds. The gap is the `--space-4` token | awaited before anything mounts |
 | `mountVisualization(occurrence, renderer) → Promise<handle>` | create the placeholder and its renderer | the handle's `renderData` is the ONLY data path |
 | `renderParameters(state) → Promise` | render the FULL server state, hidden and disabled included | awaited INSIDE the parameter gate — the lock releases only after the render resolves |
 | `readSelections() → {name: value}` | return every current committed value, in the wire's type | merged over the server state at each evaluation; hidden and disabled values included (D23) |
@@ -880,9 +880,9 @@ Back/Forward re-select the tab in page (a cached restore re-wires the strip once
 tab it left), and lazy tabs (Overview,
 Refreshes, Versions, Keys) load their fragment once, on the tab's first activation — a
 hidden tab causes no fetch. The Board pane's reveal runs the runtime instance's OWN
-`resize()`, so a chart that booted while the pane was hidden (a `?tab=versions` deep link, a
-lifecycle redirect) re-fits its slot. Every version switch preserves the rail through prepared
-main-content navigation (#460, the compatible superset bundle), and
+`resize()`, and the composite host observer places the grid when a `?tab=versions` deep link
+reveals its 0-wide board, so a chart that booted while hidden re-fits its slot.
+Every version switch preserves the rail through prepared main-content navigation (#460, the compatible superset bundle), and
 the version selector over the admitted history renders those deep links. **The draft
 preview is the named-version view**: `/dashboards/{id}/preview?version=N` answers 303 onto
 `/dashboards/{id}?version=N&tab=board`, so #369's deep links land in the workspace's Board
@@ -934,6 +934,7 @@ change (#426). The templates workspace adopts the helper after #398's rework lan
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-09 | v0.37 | #412 the layout breakpoint measures the composite host, default 640 — renumbered in recovery after #460's v0.36 | **§2.2 and §6.2:** `breakpoint_px` is judged against the composite host's width; a zero-width host holds its stored grid until layout, and the `ResizeObserver` re-places on reveal or a crossing. The default is 640 so a 694 px board at a 1280 px viewport keeps its grid, while opening the Pipelines tree can narrow the board below the threshold. The client, KDoc and implementation spec use the same rule. |
 | 2026-10-06 | v0.36 | #460 reusable REST navigation | §6.4/§7: one lazy compatible bundle in the signed-in shell, explicit per-container mounts and prepared navigation; standalone bundle choice and refresh cancellation preserved. |
 | 2026-10-06 | v0.35 | 459 merge follow-up | "Sources are read-only" now says what the rule checks: declared node types, output targets and sources, enforced at the listed points. It is not a read-only database connection, and with draft previews running unreviewed source bodies that difference matters. Database-enforced read-only is #463. "Last updated" brought current (the lane's v0.34 row left it at 2026-10-04). |
 | 2026-10-05 | v0.34 | #459 draft dashboard dependencies | Draft save and explicitly selected draft runtime admit live draft dependencies transitively. Released runtime, release and import remain strict. Configuration identity includes mutable nested pipeline and template/import content; each loaded source/child is admitted for lifecycle and read-only execution. Overview explains draft availability and release requirements. Supersedes #369 R1 for draft development. |

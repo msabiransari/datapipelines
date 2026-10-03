@@ -2064,10 +2064,10 @@
     return api;
   }
 
-  // ------------------------------------------------------------- the composite's viewport rule (#387)
+  // ------------------------------------------------------------- the composite's host-width rule (#412)
 
   /** The spec's §3.2: below `layout.breakpoint_px` every item spans the full width in grid order. */
-  var DEFAULT_BREAKPOINT_PX = 768;
+  var DEFAULT_BREAKPOINT_PX = 640;
 
   /** The server's range (DashboardRules: 1..MAX_BREAKPOINT_PX); a value outside it never reaches a query. */
   var MIN_BREAKPOINT_PX = 1;
@@ -2087,13 +2087,15 @@
   }
 
   /**
-   * "Below N px", exactly: `not all and (min-width: N px)` matches every viewport narrower than N,
-   * a fractional one (767.5 under a zoom) included, and never N itself. Null without `matchMedia`
-   * (a non-browser host): the stored grid then always holds.
+   * Defers ResizeObserver work to a frame: changing the observed host's layout inside the callback
+   * can cause another observation. Hosts without requestAnimationFrame use a task instead.
    */
-  function narrowViewportQuery(breakpointPx) {
-    if (typeof window === "undefined" || !window || typeof window.matchMedia !== "function") return null;
-    return window.matchMedia("not all and (min-width: " + breakpointPx + "px)");
+  function scheduleResize(callback) {
+    if (typeof window !== "undefined" && window && typeof window.requestAnimationFrame === "function") {
+      window.requestAnimationFrame(callback);
+      return;
+    }
+    setTimeout(callback, 0);
   }
 
   /**
@@ -2171,13 +2173,14 @@
       return implementation;
     }
 
-    // The viewport listener mountLayout added (#387); removed by dispose, replaced by a second mountLayout.
-    var viewport = null;
+    // The host observer mountLayout added (#412); disconnected by dispose or a subsequent mountLayout.
+    var resizeObservation = null;
 
-    function stopViewport() {
-      if (!viewport) return;
-      viewport.query.removeEventListener("change", viewport.listener);
-      viewport = null;
+    function stopResizeObservation() {
+      if (!resizeObservation) return;
+      resizeObservation.active = false;
+      resizeObservation.observer.disconnect();
+      resizeObservation = null;
     }
 
     /** Every mounted handle re-measures its host, each isolated — one renderer's throw stops no other. */
@@ -2198,9 +2201,10 @@
     return {
       /**
        * The layout: a CSS grid container from the system layout (columns, breakpoint §3.2). Below
-       * `breakpoint_px` (768 when absent) every item spans the full width in grid order (#387); a
-       * viewport crossing the breakpoint re-places the slots and resizes every mounted renderer — the
-       * listener is the composite's, removed by its `dispose`.
+       * `breakpoint_px` (640 when absent) every item spans the full width in grid order (#412); the
+       * composite host's width decides, and a crossing re-places the slots and resizes mounted renderers.
+       * A zero-width host keeps its stored grid until it is laid out. Without ResizeObserver the stored
+       * grid always holds; the observer is disconnected by `dispose`.
        */
       mountLayout: function (layout) {
         this.root = document.createElement("div");
@@ -2226,21 +2230,52 @@
         defaultSlot.className = "dp-dashboard-slot";
         this.root.appendChild(defaultSlot);
         this.defaultSlot = defaultSlot;
-        stopViewport();
-        var narrow = narrowViewportQuery(layoutBreakpointPx(layout));
-        placeGridSlots(items, slots, defaultSlot, columns, !!(narrow && narrow.matches));
-        if (narrow && typeof narrow.addEventListener === "function") {
-          var onViewport = function () {
-            placeGridSlots(items, slots, defaultSlot, columns, narrow.matches);
-            // The slots changed width: each renderer re-measures its host (Plotly's Plots.resize) —
-            // the same handles the instance's resize walks; the composite holds no instance.
-            resizeMounted();
-          };
-          narrow.addEventListener("change", onViewport);
-          viewport = { query: narrow, listener: onViewport };
-        }
+        stopResizeObservation();
         this.container = container;
         container.appendChild(this.root);
+        var ResizeObserverType = typeof window !== "undefined" && window ? window.ResizeObserver : null;
+        var breakpointPx = layoutBreakpointPx(layout);
+        var initialWidth = Number(container.clientWidth) || 0;
+        var collapsed = typeof ResizeObserverType === "function" && initialWidth > 0 && initialWidth < breakpointPx;
+        placeGridSlots(items, slots, defaultSlot, columns, collapsed);
+        if (typeof ResizeObserverType === "function") {
+          var observation = {
+            active: true,
+            observer: null,
+            frameQueued: false,
+            pendingWidth: initialWidth,
+            laidOut: initialWidth > 0,
+            collapsed: collapsed,
+          };
+          observation.observer = new ResizeObserverType(function (entries) {
+            if (!observation.active) return;
+            for (var i = 0; i < entries.length; i++) {
+              if (entries[i].target === container) observation.pendingWidth = entries[i].contentRect.width;
+            }
+            if (observation.frameQueued) return;
+            observation.frameQueued = true;
+            scheduleResize(function () {
+              observation.frameQueued = false;
+              if (!observation.active) return;
+              var width = Number(observation.pendingWidth) || 0;
+              if (width <= 0) return;
+              var nextCollapsed = width < breakpointPx;
+              if (!observation.laidOut) {
+                observation.laidOut = true;
+                observation.collapsed = nextCollapsed;
+                if (nextCollapsed) placeGridSlots(items, slots, defaultSlot, columns, true);
+                return;
+              }
+              if (nextCollapsed === observation.collapsed) return;
+              observation.collapsed = nextCollapsed;
+              placeGridSlots(items, slots, defaultSlot, columns, nextCollapsed);
+              // Only a narrow/wide crossing changes slot widths. Plotly does not re-fit on host resize.
+              resizeMounted();
+            });
+          });
+          observation.observer.observe(container);
+          resizeObservation = observation;
+        }
         return Promise.resolve(undefined);
       },
       mountVisualization: function (occurrence, renderer) {
@@ -2540,11 +2575,10 @@
       notify: function (notification) {
         notifications.push(notification);
       },
-      // The instance's resize walks the renderers itself and then calls this; the grid's placement is
-      // the viewport listener's (mountLayout), so the composite has nothing more to re-measure here.
+      // The instance's resize walks the renderers itself; the host observer owns breakpoint placement.
       resize: function () {},
       dispose: function () {
-        stopViewport();
+        stopResizeObservation();
         for (var name in implemented) {
           if (Object.prototype.hasOwnProperty.call(implemented, name)) {
             var handle = implemented[name];

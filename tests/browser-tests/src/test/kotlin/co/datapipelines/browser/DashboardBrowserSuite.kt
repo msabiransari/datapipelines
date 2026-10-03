@@ -288,15 +288,22 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
      * unpinned occurrences into single 12th-width cells, which is true to the wire and wrong
      * for a picture). One named method, so the pages' lane does not edit L3a's helpers.
      */
-    protected fun seedBoardWithGrid(root: String): String {
+    protected fun seedBoardWithGrid(
+        root: String,
+        breakpointPx: Int? = null,
+    ): String {
         val board = seedBoard(root)
         val grid =
             """[{"name":"revenue","x":0,"y":0,"w":6,"h":4},{"name":"cells","x":6,"y":0,"w":6,"h":4},""" +
                 """{"name":"total","x":0,"y":4,"w":3,"h":2},{"name":"slowchart","x":3,"y":4,"w":9,"h":2}]"""
-        sql(
-            "UPDATE dashboard_versions SET body_json = jsonb_set(body_json, '{layout,grid}', '$grid'::jsonb) " +
-                "WHERE dashboard_id = '$board'::uuid",
-        )
+        val layout =
+            if (breakpointPx == null) {
+                "jsonb_set(body_json, '{layout,grid}', '$grid'::jsonb)"
+            } else {
+                "jsonb_set(jsonb_set(body_json, '{layout,grid}', '$grid'::jsonb), " +
+                    "'{layout,breakpoint_px}', '$breakpointPx'::jsonb)"
+            }
+        sql("UPDATE dashboard_versions SET body_json = $layout WHERE dashboard_id = '$board'::uuid")
         return board
     }
 
