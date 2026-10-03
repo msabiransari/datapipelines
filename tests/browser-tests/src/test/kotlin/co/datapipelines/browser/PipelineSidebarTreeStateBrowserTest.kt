@@ -453,7 +453,7 @@ class PipelineSidebarTreeStateBrowserTest : BrowserSuite() {
 
     @Test
     @Suppress("LongMethod") // one session on purpose: the listener counts are only meaningful across ONE document
-    fun `A12 - boosted and history navigation keep ONE set of tree handlers and re-mark the leaf - templates keep their keyboard`() {
+    fun `A12 - boosted and history navigation keep ONE set of tree handlers and re-mark the leaf - the templates tree keeps its keyboard`() {
         page.setViewportSize(1440, 900)
         loginReadyUser("p350hist")
         val id = seedPipeline("acme/hist/current")
@@ -489,39 +489,47 @@ class PipelineSidebarTreeStateBrowserTest : BrowserSuite() {
         page.waitForSelector("${leaf("acme/hist/current")}[aria-current='page']")
         val initial = listeners()
 
-        // Boosted: Templates (its own explorer tag re-executes the engine file), the catalog, Templates.
+        // Boosted: the Templates catalog (a page with no tree of its own since #398), the
+        // Pipelines catalog, the Templates catalog again. The Templates sidebar branch is the
+        // keyboard's surface now: open it and drive it with the keys (the nav context's arrows
+        // move FOCUS only — it selects nothing, so the assertion is where focus lands).
         page.click(".app-nav-link[data-nav-section='/templates']")
-        page.waitForSelector("[data-explorer-pane] .tpl-tree")
+        page.waitForSelector("#template-list-wrapper")
         noCurrentLeaf() // not a pipeline page: the re-mark (settle, then the next task) clears it
         page.click(".app-nav-link[data-nav-section='/pipelines']")
         page.waitForSelector("#pipeline-list-wrapper")
         page.click(".app-nav-link[data-nav-section='/templates']")
-        page.waitForSelector("[data-explorer-pane] .tpl-tree")
-        // The templates explorer's own keyboard (the PAGE context) still selects on ArrowDown —
-        // once the boosted page's pane is wired (its own tag re-inits the one engine).
-        page.waitForFunction("() => document.querySelector('[data-explorer-pane]').__tplxWired === true")
-        // …and htmx has processed the swapped-in summary (its `click once` is bound a beat after
-        // the swap — the window nav-tree.js's restore defers past; a person cannot hit it).
+        page.waitForSelector("#template-list-wrapper")
+        page.click("[data-nav-branch='templates'] [data-nav-tree-toggle]")
+        page.waitForSelector("#template-nav-root .tpl-tree .tpl-summary")
+        // The templates tree's keyboard (its context is wired once, by the one engine) still
+        // moves through it after the boosted swaps — and htmx has processed the swapped-in
+        // summary (its `click once` is bound a beat after the swap — the window nav-tree.js's
+        // restore defers past; a person cannot hit it).
+        page.waitForFunction("() => document.querySelector('#nav-tree-templates').__tplxWired === true")
         page.waitForFunction(
-            "() => { const s = document.querySelector('[data-explorer-pane] .tpl-summary'); " +
+            "() => { const s = document.querySelector('#template-nav-root .tpl-summary'); " +
                 "const d = s && s['htmx-internal-data']; return !!(d && d.initHash); }",
         )
-        page.focus("[data-explorer-pane] .tpl-summary")
+        page.focus("#template-nav-root .tpl-summary")
         page.keyboard().press("ArrowRight")
-        page.waitForSelector("[data-explorer-pane] details.tpl-folder[open] .tpl-level:not(.tpl-level-pending)")
+        page.waitForSelector("#template-nav-root details.tpl-folder[open] .tpl-level:not(.tpl-level-pending)")
         page.keyboard().press("ArrowDown")
-        page.waitForFunction("() => !!document.querySelector('[data-explorer-pane] [aria-selected=\"true\"]')")
+        page.waitForFunction(
+            "() => !!document.activeElement?.matches('#template-nav-root .tpl-summary, #template-nav-root .tpl-leaf') " +
+                "&& document.activeElement !== document.querySelector('#template-nav-root .tpl-summary')",
+        )
 
-        // History: back to the catalog, back to Templates, back to the workspace (a restore).
+        // History: back to the Pipelines catalog, back to the Templates catalog, back to the workspace (a restore).
         page.goBack()
         page.waitForSelector("#pipeline-list-wrapper")
         page.goBack()
-        page.waitForSelector("[data-explorer-pane]")
+        page.waitForSelector("#template-list-wrapper")
         page.goBack()
         page.waitForURL("**/pipelines/$id")
         page.waitForSelector("${leaf("acme/hist/current")}[aria-current='page']")
         page.goForward()
-        page.waitForSelector("[data-explorer-pane]")
+        page.waitForSelector("#template-list-wrapper")
         noCurrentLeaf()
 
         // Not one tree listener more than the document started with.
