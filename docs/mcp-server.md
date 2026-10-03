@@ -1,9 +1,9 @@
 # MCP Server Specification
 
-**Status:** v1.71 (frozen contract — additive-only changes after this point)
+**Status:** v1.72 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [REST API spec](rest-api.md), [Auth spec](auth.md), [Templates spec](templates.md)
-**Last updated:** 2026-10-05
+**Last updated:** 2026-10-08
 
 ---
 
@@ -1789,23 +1789,24 @@ Evaluate a transform template over a caller-supplied input object (7b, transform
 
 #### 6.2.44 `parameter_sets_list`
 
-List the key's pinned workspace's parameter sets, or browse ONE level of the name tree (`prefix` — the pipelines listing's shape; names are folder paths, P24). Every row carries the set's `id` (what the other five tools take), `name`, `display_name`, `version`, `status` and `current_version`. A promoter's key sees only RELEASED sets newer than the promotion target's (the lens); every other set is absent for it.
+List the key's pinned workspace's parameter sets, or browse ONE level of the name tree (`prefix` — the pipelines listing's shape; names are folder paths, P24). Every row carries the set's `id` (what the other five tools take), `name`, `display_name`, `version`, `status` and `current_version`. With a non-blank `q` (and no `prefix`) it instead SEARCHES name, display name and description case-insensitively — the same lensed read the pages search through — and a `q` is ignored while `prefix` is present (browse and search are different presentations). A promoter's key sees only RELEASED sets newer than the promotion target's (the lens); every other set is absent for it.
 
 ```json
 {
   "name": "parameter_sets_list",
-  "description": "List the parameter sets of the key's pinned workspace, or BROWSE one level of the name tree. Parameter sets are versioned definitions of form controls (selectors, inputs) that a client evaluates server-side; every row carries the id you pass to the other parameter_sets_* tools. Names are FOLDER PATHS (acme/sales/region_filters): pass prefix to browse one level — prefix:\"\" lists the roots, prefix:\"acme\" what is directly under acme — and the response separates folders from sets at that level. A promoter's key sees only RELEASED sets newer than the promotion target's (the promoter lens); every other set is absent for it.",
+  "description": "List the parameter sets of the key's pinned workspace, or BROWSE one level of the name tree. Parameter sets are versioned definitions of form controls (selectors, inputs) that a client evaluates server-side; every row carries the id you pass to the other parameter_sets_* tools. Names are FOLDER PATHS (acme/sales/region_filters): pass prefix to browse one level — prefix:\"\" lists the roots, prefix:\"acme\" what is directly under acme — and the response separates folders from sets at that level. Pass q to SEARCH name, display name and description case-insensitively; q is ignored while prefix is present. A promoter's key sees only RELEASED sets newer than the promotion target's (the promoter lens); every other set is absent for it.",
   "inputSchema": {
                   "type": "object",
                   "properties": {
                     "prefix": {"type": "string", "description": "Browse ONE level of the name tree at this prefix. Empty string browses the roots."},
+                    "q": {"type": "string", "description": "Case-insensitive substring search over name, display name and description (the whole path counts as the name); ignored when prefix is present — pass prefix to browse, q to search."},
                     "limit": {"type": "integer", "default": 50, "maximum": 200}
                   }
                 }
 }
 ```
 
-**Permission:** `parameter_set.read` — every role (the promoter lensed). **Returns:** `{prefix, folders: [{path, segment, parameter_set_count}], parameter_sets: [{id, name, display_name, version, status, current_version}], returned}`.
+**Permission:** `parameter_set.read` — every role (the promoter lensed). **Returns:** `{prefix, folders: [{path, segment, parameter_set_count}], parameter_sets: [{id, name, display_name, version, status, current_version}], returned}`. With `q` (no `prefix`) the search shape is `{q, parameter_sets: [the same rows], returned, total}` — no `folders` (a search is not a level), and `total` is the full match count so a truncated `limit` is visible.
 
 #### 6.2.45 `parameter_sets_get`
 
@@ -3117,6 +3118,7 @@ the audit green over the exported set.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-08 | v1.72 | 419 (#419) the `parameter_sets_list` `q` search | **§6.2.44 `parameter_sets_list` gains the optional `q`**: with no `prefix` and a non-blank `q` it searches name, display name and description case-insensitively through the same lensed `ParameterSetService.search` the first-party pages use, answering `{q, parameter_sets, returned, total}` — no `folders` (a search is not a level), and `total` is the full match count so an agent sees a truncated `limit`. A present `prefix` (including `""`) still browses and `q` is ignored — the branch switch is `has("prefix")`, not `string`, so an absent prefix with a blank/absent `q` keeps today's root browse byte-identically. No tool, argument name, count or permission changed; the `inputSchema` gains one property ([REST §21.2](rest-api.md#212-routes) v2.87). |
 | 2026-10-05 | v1.71 | #459 draft dashboard dependencies | Dashboard list/get/create descriptions and source schemas name exact live DRAFT or RELEASED versions during authoring and explicit draft preview. Publication and imports retain released dependencies. No tool, argument, permission or role change. |
 | 2026-10-03 | v1.70 | 405 (#405) a datasource's own timeout tightens the probe | **§6.2.34 `sql_probe`: a datasource's own `query_timeout_seconds` tightens the dialect ceiling, never loosens it** — the bound is `min(ceiling, query_timeout_seconds)`, so a probe on a datasource set below the ceiling runs no longer than that datasource's nodes; v1.69's "not consulted" is replaced. The payload's `timeout_seconds` reports the tightened value. No tool, argument, `inputSchema`, count or permission changed ([Datasources §7D](datasources.md#7d-the-sql-probe) v2.52). |
 | 2026-10-02 | v1.69 | 167 (#167) the probe's timeout ceiling follows the node's | **§6.2.34 `sql_probe`: `timeout_seconds` is clamped to the instance's node query timeout for the datasource's dialect** (`node-query-timeout-seconds-by-dialect.<dialect>` when set, else `node-query-timeout-seconds` — Configuration §3.2), no longer to a static 30 s: an acceptance run's verification probe over the lake table timed out at 30 s while the same scan completed as a node. The `inputSchema` drops `"maximum": 30` for `timeout_seconds` (the ceiling is configuration, so a static schema cannot state it; `minimum` 1 and `default` 10 unchanged, drift-pinned as before). The success payload gains **`timeout_seconds`** (the timeout the statement ran under) and a timeout's `details` carry it too. A request above the ceiling is still clamped, never refused. No tool, argument name, count or permission changed ([Datasources §7D](datasources.md#7d-the-sql-probe)). |

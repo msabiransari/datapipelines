@@ -17,6 +17,7 @@ import co.datapipelines.parameters.ParameterSetService
 import co.datapipelines.parameters.ParameterSetVersion
 import co.datapipelines.parameters.ParametersConfig
 import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.typesystem.DatapipelinesException
 import com.fasterxml.jackson.databind.JsonNode
 import io.modelcontextprotocol.spec.McpSchema
@@ -28,9 +29,20 @@ private const val MAX_ECHOED_ID_CHARS = 64
 
 /**
  * `parameter_sets_list` (mcp-server.md §6.2.44, the record's §9.1) — the `pipelines_list` browse
- * by name/prefix, P24's addressing. Permission: `parameter_set.read` (it returns no customer row
- * data — only which sets exist, which any workspace reader may already see). A promoter's key is
- * lensed; every other key sees the workspace's sets.
+ * and search by name/prefix, P24's addressing. Permission: `parameter_set.read` (it returns no
+ * customer row data — only which sets exist, which any workspace reader may already see). A
+ * promoter's key is lensed; every other key sees the workspace's sets.
+ *
+ * ## Two presentations, chosen by `prefix` (067's rule, #419)
+ *
+ * - **`prefix` present** (`""` is the ROOT) → ONE level of the name tree: its direct sub-folders
+ *   with their subtree counts and its direct sets. Never a subtree, never the whole list.
+ * - **`prefix` absent, `q` non-blank** → the flat search over name, display name and description
+ *   ([ParameterSetService.search]) — the same lensed read the first-party pages search through.
+ * - **neither** → today's root browse.
+ *
+ * A present `prefix` wins over `q`: browse and search are different presentations and a folder
+ * listing is unambiguously a browse ([PipelinesListTool]'s rule).
  */
 class ParameterSetsListTool(
     private val sets: ParameterSetService,
@@ -46,7 +58,8 @@ class ParameterSetsListTool(
                     "evaluates server-side; every row carries the id you pass to the other parameter_sets_* tools. " +
                     "Names are FOLDER PATHS (acme/sales/region_filters): pass prefix to browse one level — prefix:\"\" " +
                     "lists the roots, prefix:\"acme\" what is directly under acme — and the response separates folders " +
-                    "from sets at that level." +
+                    "from sets at that level. Pass q to SEARCH name, display name and description case-insensitively; " +
+                    "q is ignored while prefix is present." +
                     " A promoter's key sees only RELEASED sets newer than the promotion target's (the promoter lens); " +
                     "every other set is absent for it.",
             schema =
@@ -55,6 +68,7 @@ class ParameterSetsListTool(
                   "type": "object",
                   "properties": {
                     "prefix": {"type": "string", "description": "Browse ONE level of the name tree at this prefix. Empty string browses the roots."},
+                    "q": {"type": "string", "description": "Case-insensitive substring search over name, display name and description (the whole path counts as the name); ignored when prefix is present — pass prefix to browse, q to search."},
                     "limit": {"type": "integer", "default": 50, "maximum": 200}
                   }
                 }
@@ -68,26 +82,61 @@ class ParameterSetsListTool(
         val workspaceId = ctx.principal.requireWorkspace().id
         val view = lens.viewFor(ctx.principal)
         val limit = args.int("limit", default = DEFAULT_LIMIT, min = 1, max = MAX_LIMIT)
-        val prefix = args.string("prefix")
-        val folders = sets.listChildFolders(workspaceId, view.parameterSets, prefix)
-        val loaded = sets.listChildSets(workspaceId, view.parameterSets, prefix, 0, limit)
+        // `has` and not `string`: `prefix: ""` is PRESENT and means the roots, while
+        // `string("prefix")` normalizes blank to null. A present prefix is a BROWSE, so it also
+        // wins over `q`: browse and search are different presentations (`PipelinesListTool`'s rule).
+        if (args.has("prefix")) return browse(workspaceId, view.parameterSets, args.string("prefix"), limit)
+        val q = args.string("q")
+        if (q != null) return search(workspaceId, view.parameterSets, q, limit)
+        return browse(workspaceId, view.parameterSets, null, limit)
+    }
+
+    /** ONE level of the name tree — the shape `parameter_sets_list {prefix}` has always answered. */
+    private fun browse(
+        workspaceId: UUID,
+        view: ReadLens,
+        prefix: String?,
+        limit: Int,
+    ): Map<String, Any?> {
+        val folders = sets.listChildFolders(workspaceId, view, prefix)
+        val loaded = sets.listChildSets(workspaceId, view, prefix, 0, limit)
         return mapOf(
             "prefix" to (prefix ?: ""),
             "folders" to folders.map { mapOf("path" to it.path, "segment" to it.segment, "parameter_set_count" to it.setCount) },
-            "parameter_sets" to
-                loaded.map {
-                    mapOf(
-                        "id" to it.record.id.toString(),
-                        "name" to it.record.name,
-                        "display_name" to it.record.displayName,
-                        "version" to it.detail.version,
-                        "status" to it.detail.status.name,
-                        "current_version" to it.record.currentVersion,
-                    )
-                },
+            "parameter_sets" to loaded.map(::row),
             "returned" to (folders.size + loaded.size),
         )
     }
+
+    /**
+     * The flat search (#419) — the same lensed [ParameterSetService.search] the pages use, with the
+     * FULL match count as `total` so an agent sees when `limit` truncated. No `folders` key: a
+     * search is not a level.
+     */
+    private fun search(
+        workspaceId: UUID,
+        view: ReadLens,
+        q: String,
+        limit: Int,
+    ): Map<String, Any?> {
+        val loaded = sets.search(workspaceId, view, q, 0, limit)
+        return mapOf(
+            "q" to q,
+            "parameter_sets" to loaded.map(::row),
+            "returned" to loaded.size,
+            "total" to sets.countSearch(workspaceId, view, q),
+        )
+    }
+
+    private fun row(it: ParameterSetVersion): Map<String, Any?> =
+        mapOf(
+            "id" to it.record.id.toString(),
+            "name" to it.record.name,
+            "display_name" to it.record.displayName,
+            "version" to it.detail.version,
+            "status" to it.detail.status.name,
+            "current_version" to it.record.currentVersion,
+        )
 
     private companion object {
         const val DEFAULT_LIMIT = 50

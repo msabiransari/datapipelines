@@ -1,9 +1,9 @@
 # REST API + SSE Specification
 
-**Status:** v2.86 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
+**Status:** v2.87 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
-**Last updated:** 2026-10-06
+**Last updated:** 2026-10-08
 
 ---
 
@@ -2469,7 +2469,7 @@ Reads follow the working-version rule ([Versioning §7.1](versioning.md#71-autho
 | Route | Permission | What |
 |---|---|---|
 | `POST /api/v1/parameter-sets` | `parameter_set.create` | Create: validate the §3 document in full (the record's §4, including the metadata execution of every source template — a set whose datasource is down is not saved), land version 1 **DRAFT** with a server-assigned id. `201`. |
-| `GET /api/v1/parameter-sets` | `parameter_set.read` | The flat listing (offset/limit) — EVERY set of the workspace the caller's lens admits, at its listed version, paged against a lens-true `total` (#312: a flat read, never the tree's ROOT level, which the folder grammar keeps empty) — or, with `?prefix=`, ONE level of the set tree: `folders` with their subtree counts and the level's sets (the pipelines §5.7 shape; `parameter_set_count` per folder). `total` counts the parameter **sets** the caller's lens admits — on the flat listing the workspace's admitted sets, on the browse the level's — never the folders (folders are navigation; the sets are what `has_more` pages) and never sets outside the lens. `has_more` is `offset + page size < total` — truthful on both listings. `?prefix=` (empty) is the ROOT and is a different request from an absent `prefix`. |
+| `GET /api/v1/parameter-sets` | `parameter_set.read` | The flat listing (offset/limit) — EVERY set of the workspace the caller's lens admits, at its listed version, paged against a lens-true `total` (#312: a flat read, never the tree's ROOT level, which the folder grammar keeps empty) — or, with `?prefix=`, ONE level of the set tree: `folders` with their subtree counts and the level's sets (the pipelines §5.7 shape; `parameter_set_count` per folder). `total` counts the parameter **sets** the caller's lens admits — on the flat listing the workspace's admitted sets, on the browse the level's — never the folders (folders are navigation; the sets are what `has_more` pages) and never sets outside the lens. `has_more` is `offset + page size < total` — truthful on both listings. `?prefix=` (empty) is the ROOT and is a different request from an absent `prefix`. An optional `q` limits the flat listing to the sets whose name, display name or description contains it, case-insensitively (names are paths, so `q` matches across the **full path**); blank/absent `q` is the plain listing, and `q` is ignored while `?prefix=` is present (browse and search are different presentations). |
 | `GET /api/v1/parameter-sets/{id}` | `parameter_set.read` | The working version's full JSON (the document + `id`, `version`, `status`, `body_hash`, `current_version`, `draft`). |
 | `GET /api/v1/parameter-sets/{id}/versions` | `parameter_set.read` | Version metadata, newest first; no bodies. |
 | `GET /api/v1/parameter-sets/{id}/versions/{version}` | `parameter_set.read` | One version. A version other than RELEASED is 404 under a narrowing lens (the promoter's). |
@@ -2750,6 +2750,7 @@ window. A dashboard execution has no stored result: `GET /api/v1/executions/{id}
 
 ## Appendix A: Change Log
 
+| 2026-10-08 | v2.87 | 419 (#419) the parameter-sets flat listing takes `q` — renumbered at recovery after #417 took v2.79 while the lane sat | **§21.2's `GET /api/v1/parameter-sets` row**: the existing flat handler gains an optional `q` — additive only, blank/absent `q` is today's listing byte for byte. A non-blank `q` limits the listing to the lensed sets whose name, display name or description contains it, case-insensitively (names are paths, so `q` matches the full path) through the same `ParameterSetService.search` the pages use, and the `total` stays lens-true. A `q` under `?prefix=` is ignored — the §5.7 pipelines rule; no new route, handler, field, status code or permission ([MCP §6.2.44](mcp-server.md) v1.72). |
 | 2026-10-06 | v2.86 | 459 merge follow-up | §23's runtime error table, the `dashboard.runtime.dependency_missing` row (additive, no code or status change): it names the lifecycle per mode (released dashboard RELEASED-only; an explicitly selected draft admits DRAFT or RELEASED), the `.reason` values, the draft walk's reach (nested pipelines, templates, imports), and the stream-side admission before execution, which fails a source with this code or `dashboard.validation.source_not_read_only`. |
 | 2026-10-05 | v2.85 | #459 draft dashboard dependencies | §23.3: explicitly selected draft runtime admits live draft dependencies transitively, with nested content in configuration identity. Released views, release/import, permissions and key restrictions remain strict. No new route or wire field. |
 | 2026-10-04 | v2.84 | 442a (#442) — renumbered at merge after 403's v2.83 (the lane's row sat atop the older second table) | Saved schedule notification settings: recipients and five event choices, validated and shown by role; omitted PUT settings preserved; mail remains off pending part b. Merge follow-up (review F2): §20.2's refusal is a sentence, not a lone table row. |

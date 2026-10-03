@@ -26,6 +26,7 @@ import io.kotest.matchers.shouldBe
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
+import io.modelcontextprotocol.spec.McpError
 import org.junit.jupiter.api.Test
 import java.time.Instant
 import java.util.UUID
@@ -128,6 +129,86 @@ class ParameterSetsToolsTest {
             it["status"] shouldBe "RELEASED"
             it["current_version"] shouldBe 1
         }
+    }
+
+    @Test
+    fun `parameter_sets_list searches name, display name and description when q is given`() {
+        every { sets.search(workspaceId, any(), "region", 0, 50) } returns listOf(ParameterSetVersion(record, released, body))
+        every { sets.countSearch(workspaceId, any(), "region") } returns 12
+
+        val answer =
+            ParameterSetsListTool(sets, McpFixtures.EVERYTHING_LENS)
+                .call(McpArguments(mapOf("q" to "region")), ctx) as Map<*, *>
+
+        answer["q"] shouldBe "region"
+        answer["returned"] shouldBe 1
+        // `total` is the full match count, so an agent sees that `limit` truncated (a search has no offset).
+        answer["total"] shouldBe 12
+        // A search is not a level: the browse-only `folders`/`prefix` keys are absent.
+        answer.containsKey("folders") shouldBe false
+        answer.containsKey("prefix") shouldBe false
+        val hits = answer["parameter_sets"] as List<*>
+        (hits.single() as Map<*, *>).let {
+            it["id"] shouldBe setId.toString()
+            it["name"] shouldBe record.name
+            it["version"] shouldBe 1
+            it["status"] shouldBe "RELEASED"
+            it["current_version"] shouldBe 1
+        }
+        verify(exactly = 0) { sets.listChildFolders(any(), any(), any()) }
+        verify(exactly = 0) { sets.listChildSets(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `parameter_sets_list browses and ignores q while prefix is present`() {
+        // `prefix: ""` is the root, and the browse value stays the existing `string("prefix")`
+        // (null for empty) — what the `has` switch changes is that this is a BROWSE, never a search.
+        every { sets.listChildFolders(workspaceId, any(), null) } returns listOf(ParameterSetFolder("nyc", "nyc", 2))
+        every { sets.listChildSets(workspaceId, any(), null, 0, 50) } returns listOf(ParameterSetVersion(record, released, body))
+
+        val answer =
+            ParameterSetsListTool(sets, McpFixtures.EVERYTHING_LENS)
+                .call(McpArguments(mapOf("prefix" to "", "q" to "region")), ctx) as Map<*, *>
+
+        answer["prefix"] shouldBe ""
+        (answer["folders"] as List<*>).size shouldBe 1
+        verify(exactly = 0) { sets.search(any(), any(), any(), any(), any()) }
+        verify(exactly = 0) { sets.countSearch(any(), any(), any()) }
+    }
+
+    @Test
+    fun `parameter_sets_list treats a blank q as no search and browses the roots`() {
+        every { sets.listChildFolders(workspaceId, any(), null) } returns emptyList()
+        every { sets.listChildSets(workspaceId, any(), null, 0, 50) } returns emptyList()
+
+        val answer =
+            ParameterSetsListTool(sets, McpFixtures.EVERYTHING_LENS)
+                .call(McpArguments(mapOf("q" to "   ")), ctx) as Map<*, *>
+
+        answer["prefix"] shouldBe ""
+        answer.containsKey("q") shouldBe false
+        verify(exactly = 0) { sets.search(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `parameter_sets_list hands its limit to the search page`() {
+        every { sets.search(workspaceId, any(), "region", 0, 5) } returns emptyList()
+        every { sets.countSearch(workspaceId, any(), "region") } returns 0
+
+        ParameterSetsListTool(sets, McpFixtures.EVERYTHING_LENS)
+            .call(McpArguments(mapOf("q" to "region", "limit" to 5)), ctx)
+
+        verify(exactly = 1) { sets.search(workspaceId, any(), "region", 0, 5) }
+    }
+
+    @Test
+    fun `parameter_sets_list refuses a non-string q as invalid params`() {
+        val refusal =
+            shouldThrow<McpError> {
+                ParameterSetsListTool(sets, McpFixtures.EVERYTHING_LENS)
+                    .call(McpArguments(mapOf("q" to 5)), ctx)
+            }
+        refusal.jsonRpcError.code() shouldBe McpArguments.INVALID_PARAMS
     }
 
     @Test

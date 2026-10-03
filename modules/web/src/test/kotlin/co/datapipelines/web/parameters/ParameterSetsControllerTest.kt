@@ -444,8 +444,10 @@ class ParameterSetsControllerTest {
     @Test
     fun `the flat listing paginates against the whole workspace's total, not the page size`() {
         authenticate()
-        every { sets.listAll(workspaceId, any(), 0, 2) } returns listOf(loaded, loaded)
-        every { sets.countAll(workspaceId, any()) } returns 3
+        // A blank/absent q IS the listing: the surface calls the service's search with a null
+        // needle, and the service delegates to listAll (its contract, not the mock's).
+        every { sets.search(workspaceId, any(), null, 0, 2) } returns listOf(loaded, loaded)
+        every { sets.countSearch(workspaceId, any(), null) } returns 3
 
         val response = controller.list(offset = null, limit = 2)
 
@@ -455,7 +457,7 @@ class ParameterSetsControllerTest {
             { response.data.pagination.hasMore shouldBe true },
         )
 
-        every { sets.listAll(workspaceId, any(), 2, 2) } returns listOf(loaded)
+        every { sets.search(workspaceId, any(), null, 2, 2) } returns listOf(loaded)
 
         val lastPage = controller.list(offset = 2, limit = 2).data
 
@@ -469,11 +471,11 @@ class ParameterSetsControllerTest {
     @Test
     fun `the flat listing under a narrowing lens reports the lens-admitted total - never the workspace's size`() {
         authenticate()
-        every { sets.listAll(workspaceId, any(), 0, 50) } returns listOf(loaded, loaded)
+        every { sets.search(workspaceId, any(), null, 0, 50) } returns listOf(loaded, loaded)
         // Lens-truth is the SERVICE's contract, integration-proven over real tables
         // (ParameterSetServiceIntegrationTest); the controller reports what the lensed service
         // counted — here 2, not the workspace's 3.
-        every { sets.countAll(workspaceId, any()) } returns 2
+        every { sets.countSearch(workspaceId, any(), null) } returns 2
 
         val page = narrowed("acme/sales/a").list(offset = null, limit = null).data
 
@@ -482,6 +484,27 @@ class ParameterSetsControllerTest {
             { page.pagination.total shouldBe 2L },
             { page.pagination.hasMore shouldBe false },
         )
+    }
+
+    @Test
+    fun `the flat listing passes q verbatim to the search and reports the search total`() {
+        authenticate()
+        // Verbatim: the controller neither trims nor case-folds — the service owns the needle
+        // rule, so a raw term reaches both the page and the total unchanged.
+        every { sets.search(workspaceId, any(), "  Region  ", 0, 50) } returns listOf(loaded)
+        every { sets.countSearch(workspaceId, any(), "  Region  ") } returns 7
+
+        val response = controller.list(q = "  Region  ", offset = null, limit = null)
+
+        assertAll(
+            { response.data.items.size shouldBe 1 },
+            { response.data.pagination.total shouldBe 7L },
+        )
+        verify(exactly = 1) { sets.search(workspaceId, any(), "  Region  ", 0, 50) }
+        verify(exactly = 1) { sets.countSearch(workspaceId, any(), "  Region  ") }
+        // The unfiltered listing is never consulted for a search: the two are one call apart.
+        verify(exactly = 0) { sets.listAll(any(), any(), any(), any()) }
+        verify(exactly = 0) { sets.countAll(any(), any()) }
     }
 
     /** The recording fake the #332 assertions read: the events in order, and the details beside each. */
