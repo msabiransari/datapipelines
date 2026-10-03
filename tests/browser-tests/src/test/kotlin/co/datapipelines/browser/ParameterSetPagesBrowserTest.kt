@@ -167,6 +167,38 @@ class ParameterSetPagesBrowserTest : ParameterSetBrowserSuite() {
     }
 
     @Test
+    fun `a promoter's search answers only her lens - the released set is a hit, the draft-only one is absent everywhere (#415)`() {
+        startTrace()
+        val root = ready("pspromsearch")
+        val workspaceName = activeWorkspace()
+        val (id, v1Hash) = createSet(setBody("$root/parameters/released_hit", "[${constants("kind", listOf("a"))}]"))
+        release(id, v1Hash)
+        val (draftOnly, _) = createSet(setBody("$root/parameters/draft_miss", "[${constants("kind", listOf("a"))}]"))
+
+        val promoter = openPromoterSession(workspaceName)
+        promoter.page.navigate("$baseUrl/dashboard")
+        promoter.page.waitForSelector("[data-nav-branch='parameter-sets']")
+        promoter.page.click("[data-nav-branch='parameter-sets'] [data-nav-tree-toggle]")
+        promoter.page.waitForSelector("#params-tree-nav .tpl-summary")
+
+        // One term that matches BOTH names; her search returns the released one only — the
+        // draft-only set is filtered in the service, never hidden by CSS in the panel.
+        promoter.page.fill("[data-nav-branch='parameter-sets'] [data-nav-tree-search]", "_")
+        promoter.page.waitForSelector("#params-tree-nav a.tpl-result")
+        promoter.page.locator("#params-tree-nav a.tpl-result").count() shouldBe 1
+        (promoter.page.locator("#params-tree-nav").innerText().contains("draft_miss")) shouldBe false
+
+        // The catalog's search agrees with the branch's.
+        promoter.page.navigate("$baseUrl/parameter-sets")
+        promoter.page.waitForSelector("#parameter-set-list-wrapper .tpl-result")
+        promoter.page.fill("#parameter-set-filter-q", "_")
+        promoter.page.waitForFunction("() => document.querySelectorAll('#parameter-set-list-wrapper .tpl-result').length === 1")
+        promoter.page.locator("#parameter-set-list-wrapper").innerText() shouldContain "Showing 1 of 1"
+        (promoter.page.locator("#parameter-set-list-wrapper").innerText().contains("draft_miss")) shouldBe false
+        promoter.close()
+    }
+
+    @Test
     fun `the sidebar branch expands lazily to a leaf that opens the workspace, and a workspace switch shows the other workspace's sets`() {
         startTrace()
         val root = ready("pssb")
