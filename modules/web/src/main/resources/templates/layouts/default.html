@@ -729,7 +729,14 @@
         <!-- 102 — the lifecycle dialogs' editor/entity legs answer HX-Redirect with one of
              these codes; the toast lands after the navigation, from this bin (§4.3d). -->
         <th:block th:if="${code == 'released'}"><div th:replace="~{partials/toast :: toast('success', 'Released', 'The draft is now the current version and is locked.')}"></div></th:block>
-        <th:block th:if="${code == 'released_with_templates'}"><div th:replace="~{partials/toast :: toast('success', 'Released', 'The draft is now the current version and is locked, and the draft templates it pinned were released with it.')}"></div></th:block>
+        <!-- #407 — a cascade names its templates, SERVER-DERIVED: `releasedFlashMessage` is
+             ReleaseFlashAdvice's one-shot consume of the list the release POST held in the
+             actor's session (ReleaseFlash). Nothing held — a crafted ?ok=, another page,
+             another actor, a minute gone by — renders the generic sentence only. -->
+        <th:block th:if="${code == 'released_with_templates'}">
+          <th:block th:if="${releasedFlashMessage != null}"><div th:replace="~{partials/toast :: toast('success', 'Released', ${releasedFlashMessage})}"></div></th:block>
+          <th:block th:if="${releasedFlashMessage == null}"><div th:replace="~{partials/toast :: toast('success', 'Released', 'The draft is now the current version and is locked, and the draft templates it pinned were released with it.')}"></div></th:block>
+        </th:block>
         <!-- #400 — the dashboard lifecycle verbs' redirects land on these codes (the
              pipelines' `released_with_templates`/`entity_purged`/`draft_purged` wordings name
              the wrong family for a dashboard). The version-generic codes above

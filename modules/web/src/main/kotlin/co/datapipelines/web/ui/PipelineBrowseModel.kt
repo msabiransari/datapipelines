@@ -230,142 +230,15 @@ class PipelineBrowseModel(
         return WRAPPER_VIEW
     }
 
-    // -------------------------------------------------------------------------------------
-    // 106 — the detail pane's three regions, in ONE call
-    // -------------------------------------------------------------------------------------
-
-    /**
-     * Fills [model] for the SELECTED pipeline's detail — header, reading column, acting
-     * column — and returns the view name.
-     *
-     * **One call, every region.** The header's verbs, the overview's key/value strip and the
-     * Versions tab's rows are three views of the same lifecycle state; computing them in three
-     * places is how a button appears for a version the server would refuse. Runs and Usage are
-     * the two exceptions and they are deliberate: each is a tab the user may never open, so
-     * each is its own cheap fragment ([fillRuns], [fillUsage]) rather than work every selection
-     * pays for.
-     *
-     * A `pipeline` of null (deleted in another tab, a stale pane) fills nothing else: the
-     * partial renders its quiet not-found state.
-     */
-    fun fillDetail(
-        model: Model,
-        workspaceId: UUID,
-        view: LensedView,
-        id: UUID,
-    ): String {
-        // 114 — the verbs this fragment renders are role-gated, so the ROLE arrives in the SAME
-        // model call the facts do. Stamped here rather than at each caller because there are
-        // three of them — the selection partial, the explorer page, and the lifecycle dialogs'
-        // Shape A re-render — and the third one forgot: after a Release the re-rendered detail
-        // came back with no role attributes at all, so every verb on it silently vanished until
-        // the next selection re-fetched the pane. One model call, one answer.
-        RoleModel.stamp(model)
-        val record = pipelines.findRecord(workspaceId, view.pipelines, id)
-        model.addAttribute("pipelineId", id)
-        model.addAttribute("pipeline", record)
-        if (record == null) return DETAIL_VIEW
-
-        // The WORKING body (versioning §7): the draft when one exists, else the current
-        // release — the same rule the editor's load follows, so opening the editor from here
-        // shows what this pane just showed. A body that fails to parse renders as no chips and
-        // no parameters rather than as an error page: the pane reads someone else's authored
-        // content and the editor is where a malformed body is repaired.
-        val working = pipelines.findWorking(workspaceId, view.pipelines, id)
-        val body = working?.bodyJson?.let { runCatching { deserializer.readOrThrow(it) }.getOrNull() }
-        val versions = pipelines.listVersions(workspaceId, view.pipelines, id)
-
-        model.addAttribute("draftHash", working?.draft?.bodyHash)
-        fillIdentity(model, record)
-        fillOverview(model, workspaceId, record, body, working?.version?.version ?: record.currentVersion, working?.draft?.version)
-        fillActing(model, workspaceId, view, record, versions)
-        return DETAIL_VIEW
-    }
-
-    /** The header: the folder path as an eyebrow, the leaf as the title. */
-    private fun fillIdentity(
-        model: Model,
-        record: PipelineRecord,
-    ) {
-        val cut = record.name.lastIndexOf('/')
-        model.addAttribute("folderPath", if (cut < 0) "" else record.name.substring(0, cut + 1))
-        model.addAttribute("leafName", if (cut < 0) record.name else record.name.substring(cut + 1))
-    }
-
-    private fun fillOverview(
-        model: Model,
-        workspaceId: UUID,
-        record: PipelineRecord,
-        body: Pipeline?,
-        workingVersion: Int?,
-        draftVersion: Int?,
-    ) {
-        model.addAttribute("workingVersion", workingVersion)
-        model.addAttribute("draftVersion", draftVersion)
-        model.addAttribute("parameters", body?.parameters ?: emptyMap<String, Any>())
-        model.addAttribute("nodeCount", body?.nodes?.size ?: 0)
-        // 140: the working body's release checks — the overview's Checks section renders its
-        // shell only when there are any; definitions and runs lazy-load from the checks partial.
-        model.addAttribute("checksCount", body?.checks?.size ?: 0)
-        // The "Settings" table is gone (106): the staging engine is a chip, because one row of
-        // one column was a table pretending to be a section.
-        model.addAttribute("stagingEngine", body?.settings?.tempdb?.engine)
-        model.addAttribute("datasourceRows", datasourceRows(body, workspaceId))
-        model.addAttribute("templatePins", templatePins(body))
-        model.addAttribute("createdBy", actorName(record.ownerId))
-        // "via UI / MCP / API" is NOT rendered: nothing audits pipeline CREATE with the surface
-        // it arrived on (there is no `pipeline.created` event and `pipelines` carries no
-        // `triggered_via`), and the 106 prompt says to omit the chip rather than infer one.
-        val last = lastRun(workspaceId, record.id)
-        model.addAttribute("lastRun", last)
-        model.addAttribute("lastRunAgo", last?.let { RelativeTime.since(it.startedAt, Instant.now()) })
-        model.addAttribute("lastRunBy", last?.let { actorName(it.executedBy) })
-    }
-
-    private fun fillActing(
-        model: Model,
-        workspaceId: UUID,
-        view: LensedView,
-        record: PipelineRecord,
-        versions: List<PipelineVersionRecord>,
-    ) {
-        model.addAttribute("versions", versionRows(record, versions))
-        // The HEADER's verbs (101 §7, reshaped by 102 §B.1's one-destructive rule): a draft
-        // is what Release acts on; Purge pipeline is the ENTITY purge, which 101 allows only
-        // while the only version is a draft; otherwise the destructive verb on offer is
-        // Discard of a RELEASED current — a pointer that named a draft (the D60 development
-        // fallback) is NOT a discard target, so it must not offer the button.
-        model.addAttribute("releasableVersion", versions.firstOrNull { it.status == PipelineVersionStatus.DRAFT }?.version)
-        model.addAttribute("canDelete", versions.size == 1 && versions.single().status == PipelineVersionStatus.DRAFT)
-        val currentRow = versions.firstOrNull { it.version == record.currentVersion }
-        model.addAttribute("canDiscardCurrent", record.currentVersion != null && currentRow?.status == PipelineVersionStatus.RELEASED)
-        // Purge draft joins the header only when neither other destructive is there (§4.3d).
-        model.addAttribute(
-            "canPurgeDraftInHeader",
-            versions.any { it.status == PipelineVersionStatus.DRAFT } &&
-                !(versions.size == 1 && versions.single().status == PipelineVersionStatus.DRAFT) &&
-                !(record.currentVersion != null && currentRow?.status == PipelineVersionStatus.RELEASED),
-        )
-        // Switch needs >= 2 live, posture-eligible versions (§3.4) — the dialog's own rule.
-        model.addAttribute(
-            "canSwitchHeader",
-            versions.count { PipelineVersionStatus.eligibleForPointer(it.status, authoring.developmentPosture) } >= 2,
-        )
-        model.addAttribute("versionCount", versions.size)
-        model.addAttribute("runCount", runStats.totalRuns(record.id))
-        model.addAttribute("usageCount", usage(workspaceId, view, record).total)
-        // The reading column's Created line chip (V20): the FIRST version's surface.
-        model.addAttribute("createdVia", versions.minByOrNull { it.version }?.createdVia)
-    }
-
     /**
      * #349 — the pipeline workspace's composition facts, filled for the canonical page's
      * Versions tab and Overview pane in ONE call from [PipelineWorkspaceController].
      *
-     * The Versions tab is the explorer's fragment (`partials/pipeline-versions :: versions`)
-     * composed into the workspace page, so the model carries the SAME row shapes the explorer
-     * fills ([versionRows]) — visibility, per-row verbs and run counts are the explorer's
-     * unchanged contract — plus the viewed-version mark the workspace adds to every row. The
+     * The Versions tab composes `partials/pipeline-versions :: versions` — the fragment the
+     * explorer's detail pane rendered until #401 removed the pane, so the model carries the
+     * SAME row shapes that pane filled ([versionRows]) — visibility, per-row verbs and run
+     * counts are the unchanged contract — plus the viewed-version mark the workspace adds to
+     * every row. The
      * returned facts are the Overview's record-level and registry-resolved halves
      * ([WorkspaceTabFacts]): who created the pipeline and on what surface, its last visible
      * run, and the datasource→dialect map across EVERY ADMITTED version's body — the
@@ -374,7 +247,7 @@ class PipelineBrowseModel(
      * admission per body exactly as the page's own resolution did.
      *
      * Everything here is a read; nothing here changes a verb, a flag or a visibility rule the
-     * explorer didn't already state.
+     * pane didn't already state.
      */
     fun fillWorkspaceTabs(
         model: Model,
@@ -386,8 +259,8 @@ class PipelineBrowseModel(
     ): WorkspaceTabFacts {
         model.addAttribute("pipeline", record)
         model.addAttribute("versions", versionRows(record, versions, viewedVersion))
-        // #395 — the {D} shape (one version, a draft) is the entity purge's, exactly the explorer
-        // header's `canDelete` rule (fillActing): the workspace header offers Purge pipeline… (the
+        // #395 — the {D} shape (one version, a draft) is the entity purge's, exactly the
+        // workspace header's `canDelete` rule: the workspace header offers Purge pipeline… (the
         // entity dialog — exclusive draft templates, #335's kept list) in place of Purge draft….
         model.addAttribute("canDelete", versions.size == 1 && versions.single().status == PipelineVersionStatus.DRAFT)
         return WorkspaceTabFacts(
@@ -398,7 +271,7 @@ class PipelineBrowseModel(
         )
     }
 
-    /** The version rows one tab renders — the explorer's and the workspace's one mapping. */
+    /** The version rows the Versions tab renders — one mapping, shared since the pane. */
     private fun versionRows(
         record: PipelineRecord,
         versions: List<PipelineVersionRecord>,
@@ -586,7 +459,7 @@ class PipelineBrowseModel(
      * version switch fetches another admitted body client-side and must relabel its
      * datasources without a second round trip. Admission is the lens's own — a body the
      * caller cannot read contributes nothing — and a name the registry cannot resolve from
-     * this workspace is left out, exactly as [datasourceRows] leaves it out.
+     * this workspace is left out, exactly as the detail pane's old datasource rows left it out.
      */
     private fun workspaceDialects(
         workspaceId: UUID,
@@ -626,34 +499,6 @@ class PipelineBrowseModel(
     }
 
     private fun actorName(actor: UUID): String = actors.lookup(listOf(actor))[actor] ?: ActorNames.fallback(actor)
-
-    /**
-     * The datasources the working body touches, with the dialect each speaks.
-     *
-     * The REGISTRY decides what is a datasource: `tempdb` is the reserved literal and never a
-     * registered name (§4.8), and a name the registry cannot resolve FROM THIS WORKSPACE is
-     * left out rather than rendered as a link to nothing (§11.2 — a body is portable, a
-     * registry is per-environment; visibility is per-workspace, design §5.3, and the page's
-     * workspace is passed rather than read off the thread — 134).
-     */
-    private fun datasourceRows(
-        body: Pipeline?,
-        workspaceId: UUID,
-    ): List<DatasourceRowView> {
-        if (body == null) return emptyList()
-        return datasourceNames(body)
-            .mapNotNull { name -> datasources.describe(name, workspaceId)?.let { DatasourceRowView(name, it.dialect) } }
-    }
-
-    /** The template versions the working body pins — `id@version`, deduplicated, in body order. */
-    private fun templatePins(body: Pipeline?): List<TemplatePinView> =
-        body
-            ?.nodes
-            ?.map { it.template }
-            ?.filter { it.id.isNotEmpty() }
-            ?.map { TemplatePinView(it.id, it.version) }
-            ?.distinct()
-            .orEmpty()
 
     companion object {
         /** The pipelines screen's page size — the value the flat list has always used. */
@@ -696,7 +541,6 @@ class PipelineBrowseModel(
         const val WRAPPER_VIEW = "partials/pipelines"
         const val LEVEL_VIEW = "partials/pipeline-tree-level"
         const val SEARCH_VIEW = "partials/pipeline-search"
-        const val DETAIL_VIEW = "partials/pipeline-detail"
         const val RUNS_VIEW = "partials/pipeline-runs"
         const val USAGE_VIEW = "partials/pipeline-usage"
 

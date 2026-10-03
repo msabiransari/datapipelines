@@ -119,8 +119,9 @@
              the released one otherwise. `p.currentVersion` alone printed "vnull" for every
              freshly created pipeline the moment creation started landing a DRAFT. -->
         <th:block th:with="d=${drafts != null ? drafts[p.id] : null}">
-          <!-- 102: the version badge carries its class hook — the lifecycle-changed listener
-               rewrites it from the POST's own payload (server facts, never a guess). -->
+          <!-- The badge renders the WORKING version off the level's own model. It carried a
+               lifecycle-changed class hook until #401 — the listener refreshed it from the
+               Shape A payload, and both the payload and the pane are gone. -->
           <span class="ds-badge ds-badge-default tpl-leaf-version"
                 th:if="${d != null or p.currentVersion != null}"
                 th:text="${'v' + (d != null ? d.version : p.currentVersion)}">v1</span>

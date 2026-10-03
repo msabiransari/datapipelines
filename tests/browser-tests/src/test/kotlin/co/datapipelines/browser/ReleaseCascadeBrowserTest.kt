@@ -191,12 +191,25 @@ class ReleaseCascadeBrowserTest : BrowserSuite() {
         releaseAgain.waitFor()
 
         // 4 — the release lands through the dialog's own POST; the workspace reloads with the
-        //     cascade's flash (the editor-surface shape), and the AUDIT names the templates.
+        //     cascade's flash, which NAMES the templates (the server's own list, #407), and
+        //     the AUDIT records them.
         val toast = releaseAndFlash(fixture.pipelineId) { releaseAgain.click() }
         page.screenshot(Page.ScreenshotOptions().setPath(shotDir().resolve("142-release-applied-light.png")))
         toast shouldContain "Released"
-        toast shouldContain "the draft templates it pinned were released with it"
+        toast shouldContain "Also released: $shared@1"
+        toast shouldContain "$own@1"
+        // The names REPLACE the generic sentence when they are held (#407).
+        toast shouldNotContain "the draft templates it pinned were released with it"
         toast shouldNotContain "release the template first"
+
+        // 5 — consumed once: a REPLAYED (or crafted) ok renders the generic sentence only.
+        //     The parameter is the plant a parameter-fed implementation would render.
+        page.navigate("$baseUrl/pipelines/${fixture.pipelineId}?ok=released_with_templates&also_released=ATTACKER")
+        page.waitForSelector("#toast .ds-toast")
+        val replay = page.locator("#toast .ds-toast").first().innerText()
+        replay shouldContain "the draft templates it pinned were released with it"
+        replay shouldNotContain "Also released:"
+        replay shouldNotContain "ATTACKER"
 
         assertAuditedCascade(fixture.pipelineId, shared, own)
     }
@@ -264,10 +277,11 @@ class ReleaseCascadeBrowserTest : BrowserSuite() {
             bothOrdersOn(dialog, consent)
         }
 
-        // The override releases WITH the cascade: the flash says so, the audit row carries the
-        // override reason and the cascade list.
+        // The override releases WITH the cascade: the flash names the template (#407, the
+        // server's own list), the audit row carries both the override and the cascade list.
         val toast = releaseAndFlash(pipelineId) { page.locator(OVERRIDE).click() }
-        toast shouldContain "the draft templates it pinned were released with it"
+        toast shouldContain "Also released: $template@"
+        toast shouldNotContain "the draft templates it pinned were released with it"
         assertAuditedOverrideWithCascade(pipelineId, template)
     }
 

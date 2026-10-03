@@ -363,12 +363,13 @@ class RoleVisibilityRenderTest {
      * leak every verb to a viewer. Writing every role operand `== true` makes the answer FALSE in
      * both directions: a missing role fails closed and quiet.
      *
-     * The stamp itself now lives in `fillDetail`, where all three callers of the detail fragment
-     * get it — this arm is the second line, not the first.
+     * The stamp rides the one model call that fills a fragment (the workspace's
+     * `fillWorkspaceTabs` for the versions surface since the detail pane left, #401) — this
+     * arm is the second line, not the first.
      */
     @Test
     fun `a detail fragment with no role attributes renders as a viewer's, not as an error`() {
-        listOf("partials/pipeline-detail", "partials/pipeline-versions").forEach { view ->
+        listOf("partials/pipeline-versions").forEach { view ->
             val html = engine().process(view, bare().apply { pipelineDetailModel() })
             html shouldNotContain "data-verb="
         }
@@ -1139,6 +1140,6 @@ class RoleVisibilityRenderTest {
                 refusal = null,
             ),
         )
-        setVariable("from", "explorer")
+        setVariable("from", "editor")
     }
 }

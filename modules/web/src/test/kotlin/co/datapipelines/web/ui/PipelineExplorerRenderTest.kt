@@ -3,14 +3,8 @@ package co.datapipelines.web.ui
 import co.datapipelines.executor.ExecutionRecord
 import co.datapipelines.executor.ExecutionStatus
 import co.datapipelines.executor.ExecutionTrigger
-import co.datapipelines.pipeline.Parameter
-import co.datapipelines.pipeline.PipelineJson
 import co.datapipelines.pipeline.PipelineRecord
 import co.datapipelines.pipeline.PipelineVersionStatus
-import co.datapipelines.pipeline.StagingEngine
-import co.datapipelines.typesystem.Dialect
-import co.datapipelines.typesystem.LogicalType
-import io.kotest.matchers.ints.shouldBeGreaterThan
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
@@ -25,17 +19,15 @@ import java.time.Instant
 import java.util.UUID
 
 /**
- * Render-level guard for the pipelines screen's EXPLORER layout (067): tree LEFT, the selected
- * pipeline RIGHT — the shape 058 gave templates, applied to pipelines now that their names are
- * paths too.
+ * Render-level guard for the pipelines screen's fragments — the sidebar tree, the search and
+ * the catalog, and the Versions surface the workspace composes (the detail pane these suites
+ * once guarded beside them is REMOVED by #401; its render suite left with it).
  *
- * Three properties this class exists to pin:
+ * The properties this class exists to pin:
  *
- *  - **A selection populates the detail pane WITHOUT re-rendering the tree.** Pinned at the
- *    fragment-contract level, where it is true by construction: the leaf's swap targets
- *    `#pipeline-detail` with `innerHTML`, and the detail fragment contains NO tree markup, NO
- *    tree swap target and NO out-of-band swap — there is nothing in what a selection returns
- *    that could touch the tree's DOM.
+ *  - **A tree swap never leaks into the catalog and vice versa** — each presentation renders
+ *    its own stable swap root, and the fragments contain no markup that could touch the
+ *    other's DOM.
  *  - **The tree ships no folder CRUD**, because a folder is a name prefix with no identity
  *    (§3.1). No New folder / rename / move / delete control, and no empty-folder state.
  *  - **T108: the dead "Create Pipeline" button is gone**, replaced by an honest sentence and a
@@ -46,8 +38,8 @@ import java.util.UUID
  * length, and a promise in a comment is not an affordance (the discipline
  * [TemplateExplorerRenderTest] established, for exactly this reason).
  *
- * `LargeClass` is suppressed knowingly: the pipelines list fragments (sidebar tree, nav search,
- * catalog) and the detail pane #401 retires share one fixture set; the split lands with #401.
+ * `LargeClass` is suppressed knowingly: the list fragments (sidebar tree, nav search,
+ * catalog) and the workspace's versions fragment share one fixture set.
  */
 @Suppress("LargeClass")
 class PipelineExplorerRenderTest {
@@ -217,113 +209,6 @@ class PipelineExplorerRenderTest {
     }
 
     @Test
-    fun `every link into the pipeline editor is a full document load, never a boosted swap`() {
-        // The editor page's scripts (init.js, graph.js) load WITH the document, so Alpine's
-        // CSP build binds the registered `pipelineEditor` component as the page paints. On a
-        // boosted swap the bindings evaluate the instant the markup lands — before those
-        // scripts have executed — and the page renders with no Execute, no dock and no
-        // inspector, every binding thrown. Found live on 2026-09-05, the first walk after
-        // 076 turned boost on. (301 #305: the comment said the root was
-        // `x-data="pipelineEditor()"`, the pre-195 standard build's call form.)
-        val html = render("partials/pipeline-detail") { fillDetail() }
-
-        // #348-b: the entry link is the CANONICAL read workspace now (the old /editor URL
-        // is the redirect behind it) — the guard's subject is unchanged: every link into
-        // the workspace page is a full document load, never a boosted swap.
-        val workspaceLinks = Regex("""<a [^>]*href="/pipelines/[^"]*"[^>]*>""").findAll(html).map { it.value }.toList()
-        workspaceLinks.size shouldBeGreaterThan 0
-        workspaceLinks.forEach { it shouldContain "hx-boost=\"false\"" }
-    }
-
-    @Test
-    fun `the detail fragment cannot touch the tree - no tree markup, no tree target, no OOB`() {
-        val html = render("partials/pipeline-detail") { fillDetail() }
-
-        html shouldNotContain "tpl-tree"
-        html shouldNotContain "pipeline-list-wrapper"
-        html shouldNotContain "pipeline-tree-pane"
-        html shouldNotContain "prefix="
-        html shouldNotContain "hx-swap-oob"
-        html shouldNotContain "tpl-folder"
-        // …and it IS the selected pipeline: the full path, the settings, the declared
-        // parameters (the pipeline's calling convention) and every version with its status.
-        html shouldContain "class=\"tplx-detail-path\""
-        html shouldContain DEEP_PATH
-        html shouldContain "title=\"$DEEP_PATH\""
-        // #348-b: the detail header's Open enters the canonical read workspace; the tree
-        // and search rows keep their /editor URLs, which the redirect covers.
-        html shouldContain ">Open</a>"
-        html shouldContain "href=\"/pipelines/$LEAF_ID\""
-        html shouldNotContain "/pipelines/$LEAF_ID/editor"
-        // 106: the path is the eyebrow and the LEAF is the title.
-        html shouldContain "nyc/mobility/</p>"
-        html shouldContain "revenue_by_borough</h2>"
-        // The staging engine is a CHIP; the one-row "Settings" table is gone.
-        html shouldContain "tempdb · H2"
-        html shouldNotContain "tempdb engine"
-        html shouldContain "start_date"
-        html shouldContain "DATE"
-        html shouldContain "RELEASED"
-        html shouldContain "DRAFT"
-        html shouldContain "3 nodes"
-    }
-
-    @Test
-    fun `106 - the detail is three regions - header, reading column, acting column`() {
-        val html = render("partials/pipeline-detail") { fillDetail() }
-
-        html shouldContain "class=\"tplx-detail-header\""
-        html shouldContain "class=\"tplx-read\""
-        html shouldContain "class=\"tplx-act\""
-        // The reading column's two cards, and the acting column's ONE tabbed card.
-        html shouldContain ">Overview<"
-        html shouldContain ">Parameters<"
-        html shouldContain "data-explorer-tabs"
-        html shouldContain "data-tab-panel=\"pipeline-tab-versions\""
-        html shouldContain "data-tab-panel=\"pipeline-tab-runs\""
-        html shouldContain "data-tab-panel=\"pipeline-tab-usage\""
-        // Runs and Usage are LAZY — one fragment each, fetched on the tab's first click.
-        html shouldContain "/partials/pipelines/$LEAF_ID/runs"
-        html shouldContain "/partials/pipelines/$LEAF_ID/usage"
-        html shouldContain "hx-trigger=\"click once\""
-        // The overview's key/value strip, with the facts the mock's legend names.
-        html shouldContain ">Datasources<"
-        html shouldContain ">Templates<"
-        html shouldContain ">Created<"
-        html shouldContain ">Last run<"
-        html shouldContain "sample-lake"
-        html shouldContain "demo/top_carrier.sql@1"
-        // No "via" chip: nothing records the surface a CREATE arrived on, so none is invented.
-        html shouldNotContain "via MCP"
-        html shouldNotContain "via UI"
-    }
-
-    /**
-     * 138 §E.1 — a description is a document, not a paragraph. The re-run's descriptions carried
-     * blank-line-separated sections (Question / Window and door / …) and the browser collapsed
-     * every newline, because the element had no `white-space` rule. The render side of the fix:
-     * the newlines reach the DOM INTACT (th:text keeps them, and keeps escaping — `<b>` in a
-     * description is text, never markup), on an element carrying the one utility rule
-     * (`u-pre-line`) that turns them into paragraphs. The browser half is
-     * ExplorerDetailBrowserTest (two sections, two blocks).
-     */
-    @Test
-    fun `138 - a description's blank lines reach the DOM intact, escaped, on the pre-line element`() {
-        val html =
-            render("partials/pipeline-detail") {
-                fillDetail()
-                setVariable("pipeline", record(DEEP_PATH).copy(description = sectionedDescription))
-            }
-
-        html shouldContain "class=\"tplx-measure u-pre-line\""
-        // The two paragraphs, with the blank line between them, in ONE text node — not joined,
-        // not turned into <p> or <br> by the server.
-        html shouldContain
-            "Question\nWhat the pipeline answers.\n\nWindow and door\nOne year, chosen by year.\n\nCaveats\n&lt;b&gt;none&lt;/b&gt;"
-        html shouldNotContain "<b>none</b>"
-    }
-
-    @Test
     fun `the versions surface renders the house table (349 spec section 4_4) - not the old compact rows`() {
         // 106's "rows, never a table" was the narrow-pane decision of its day; the owner's
         // 2026-09-30 workspace ruling (spec §4.4, D4) supersedes it: every version surface
@@ -338,92 +223,6 @@ class PipelineExplorerRenderTest {
         html shouldNotContain "class=\"tplx-vrow\""
         html shouldContain "7 runs"
         html shouldContain ">current<"
-    }
-
-    @Test
-    fun `106 - the header renders exactly the verbs the lifecycle allows, through 102's dialogs`() {
-        // A draft over a release: Release yes; Purge pipeline no (101 purges the ENTITY only
-        // while the only version is a draft); Discard of the released current yes — and since
-        // 102 §B.1 that is the ONE destructive the header carries, so no Purge draft either
-        // (it lives on the draft's row).
-        val overRelease = render("partials/pipeline-detail") { fillDetail() }
-        overRelease shouldContain "Release v2…"
-        overRelease shouldContain "Discard v1…"
-        overRelease shouldNotContain "Purge pipeline"
-
-        // A never-released pipeline: Purge pipeline, and no Discard.
-        val draftOnly =
-            render("partials/pipeline-detail") {
-                fillDetail()
-                setVariable("canDelete", true)
-                setVariable("canDiscardCurrent", false)
-                setVariable("canPurgeDraftInHeader", false)
-                setVariable("canSwitchHeader", false)
-                setVariable("versions", listOf(draftRow()))
-                setVariable("versionCount", 1)
-            }
-        draftOnly shouldContain "Purge pipeline…"
-        draftOnly shouldNotContain "Discard v"
-        draftOnly shouldContain "Release v2…"
-
-        // Nothing to release: no Release button at all.
-        val released =
-            render("partials/pipeline-detail") {
-                fillDetail()
-                setVariable("releasableVersion", null)
-                setVariable("draftVersion", null)
-                setVariable("versions", listOf(releasedRow()))
-            }
-        released shouldNotContain "Release v"
-    }
-
-    /**
-     * 114 §B — the ROLE half of the same header. The lifecycle flags above answer "would the
-     * server accept this verb on this version"; these answer "may THIS PERSON ask for it", and
-     * both must be true for anything to render.
-     *
-     * The three roles are asserted as a LADDER, each against the one below it, because the
-     * capability axis is not a chain: an author's page must lose Release and a promoter's must
-     * lose the authoring verbs, which no single "less privileged" case can show.
-     */
-    @Test
-    fun `114 - the header renders Release and Switch for an author and nothing for a promoter (D8, 2026-09-20)`() {
-        val admin = render("partials/pipeline-detail") { fillDetail() }
-        admin shouldContain "data-verb=\"pipeline-release\""
-        admin shouldContain "data-verb=\"pipeline-discard\""
-        admin shouldContain "data-verb=\"pipeline-switch\""
-
-        // An author: since 2026-09-20 release is the author's (D8), and so is the switch lever.
-        val author =
-            render("partials/pipeline-detail") {
-                fillDetail()
-                withRoles(canPromote = false, canAdminWorkspace = false, isSuperAdmin = false, roleLabel = "author")
-            }
-        author shouldContain "data-verb=\"pipeline-release\""
-        author shouldContain "data-verb=\"pipeline-discard\""
-        author shouldContain "data-verb=\"pipeline-switch\""
-
-        // A promoter: authors nothing, releases nothing, switches nothing (D5). The header
-        // carries no verb at all — the promoter's verb is on the promotion page.
-        val promoter =
-            render("partials/pipeline-detail") {
-                fillDetail()
-                withRoles(canExecute = false, canAuthor = false, canAdminWorkspace = false, isSuperAdmin = false, roleLabel = "promoter")
-            }
-        promoter shouldNotContain "data-verb=\"pipeline-release\""
-        promoter shouldNotContain "data-verb=\"pipeline-switch\""
-        promoter shouldNotContain "data-verb=\"pipeline-discard\""
-        promoter shouldNotContain "data-verb=\"pipeline-purge\""
-
-        // A viewer: the header carries reading and the editor link, and no verb at all.
-        val viewer =
-            render("partials/pipeline-detail") {
-                fillDetail()
-                withRoles(RoleModel.NONE.copy(canRead = true, canExecute = true))
-            }
-        viewer shouldNotContain "data-verb="
-        // …and still the thing a viewer came for.
-        viewer shouldContain ">Open</a>"
     }
 
     /**
@@ -469,20 +268,23 @@ class PipelineExplorerRenderTest {
     @Test
     fun `102 - every lifecycle verb opens its dialog partial, into the screen's container`() {
         // SUPERSEDES 106's "points at a REST verb and swaps nothing": the verbs are §4.3d
-        // dialogs now — hx-get into #px-dialog — and the DIALOG's POST is what calls the
-        // service (the plain-confirm fetch path to the REST routes is gone, with its
-        // data-verb/data-confirm/data-if-match attributes).
-        val html = render("partials/pipeline-detail") { fillDetail() } + render("partials/pipeline-versions") { fillDetail() }
+        // dialogs — hx-get into the workspace's #pe-dialog (the #401 default; the explorer's
+        // #px-dialog shapes are gone) — and the DIALOG's POST is what calls the service (the
+        // plain-confirm fetch path to the REST routes is gone, with its
+        // data-verb/data-confirm/data-if-match attributes). #401: the rows are the one
+        // producer of these links — the detail header that hx-get the bare release/switch
+        // URLs into #px-dialog is gone.
+        val html = render("partials/pipeline-versions") { fillDetail() }
 
-        html shouldContain "hx-get=\"/partials/pipelines/$LEAF_ID/lifecycle/release\""
-        html shouldContain "hx-get=\"/partials/pipelines/$LEAF_ID/lifecycle/discard?version=1\""
-        html shouldContain "hx-get=\"/partials/pipelines/$LEAF_ID/lifecycle/purge?version=2\""
-        // The HEADER's Switch carries no version (the dialog lists them); a row's Switch-to
-        // names its version — pinned by the dialog render suite, not this fixture (its only
-        // released row IS current, so no row-level Switch renders here).
-        html shouldContain "hx-get=\"/partials/pipelines/$LEAF_ID/lifecycle/switch\""
-        html shouldContain "hx-get=\"/partials/pipelines/$LEAF_ID/lifecycle/restore?version=0\""
-        html shouldContain "hx-target=\"#px-dialog\""
+        html shouldContain "hx-get=\"/partials/pipelines/$LEAF_ID/lifecycle/release?from=editor\""
+        // th:attr escapes `&` in the attribute value — the assertions match the markup as written.
+        html shouldContain "hx-get=\"/partials/pipelines/$LEAF_ID/lifecycle/discard?version=1&amp;from=editor\""
+        html shouldContain "hx-get=\"/partials/pipelines/$LEAF_ID/lifecycle/purge?version=2&amp;from=editor\""
+        html shouldContain "hx-get=\"/partials/pipelines/$LEAF_ID/lifecycle/restore?version=0&amp;from=editor\""
+        // A row's Switch-to names its version — not pinned here (the fixture's only released
+        // row IS current, so no row-level Switch renders); the dialog render suite owns it.
+        html shouldContain "hx-target=\"#pe-dialog\""
+        html shouldNotContain "px-dialog"
         // The fetch path is gone entirely: no verb attributes, no plain confirms.
         html shouldNotContain "data-verb-url="
         html shouldNotContain "data-confirm="
@@ -490,10 +292,9 @@ class PipelineExplorerRenderTest {
     }
 
     @Test
-    fun `106 - the detail carries no inline style anywhere`() {
+    fun `the workspace's fragments carry no inline style anywhere`() {
         val html =
-            render("partials/pipeline-detail") { fillDetail() } +
-                render("partials/pipeline-versions") { fillDetail() } +
+            render("partials/pipeline-versions") { fillDetail() } +
                 render("partials/pipeline-usage") { fillUsage() }
 
         html shouldNotContain "style=\""
@@ -624,42 +425,6 @@ class PipelineExplorerRenderTest {
     }
 
     @Test
-    fun `a pipeline that declares no parameters says so rather than rendering an empty table`() {
-        val html =
-            render("partials/pipeline-detail") {
-                fillDetail()
-                setVariable("parameters", emptyMap<String, Parameter>())
-            }
-
-        html shouldContain "declares no parameters"
-    }
-
-    @Test
-    fun `140 - the overview carries the working version's Checks section only when the body declares checks`() {
-        val withChecks =
-            render("partials/pipeline-detail") {
-                fillDetail()
-                setVariable("checksCount", 2)
-            }
-
-        withChecks shouldContain ">Checks</h3>"
-        withChecks shouldContain "2 checks"
-        // The list lazy-loads the read-only partial for the WORKING version (the draft here),
-        // and Run checks posts a fresh ui run into the same container.
-        withChecks shouldContain "hx-get=\"/partials/pipelines/$LEAF_ID/versions/2/checks\""
-        withChecks shouldContain "hx-trigger=\"load\""
-        withChecks shouldContain "hx-post=\"/partials/pipelines/$LEAF_ID/versions/2/checks/run\""
-        withChecks shouldContain "hx-target=\"#pipeline-detail-checks\""
-        withChecks shouldContain "Run checks"
-
-        // No checks in the body: no shell at all — an empty section would claim they had
-        // been checked. The base fixture's checksCount is 0.
-        val without = render("partials/pipeline-detail") { fillDetail() }
-        without shouldNotContain ">Checks</h3>"
-        without shouldNotContain "checks/run"
-    }
-
-    @Test
     fun `#350 - a SIDEBAR search result is a listbox option linking to the workspace, under the sidebar's root`() {
         val html = render("partials/pipeline-search") { fillSearch() }
 
@@ -714,21 +479,6 @@ class PipelineExplorerRenderTest {
         noMatch shouldNotContain "hx-get=\"/partials/pipelines\""
     }
 
-    @Test
-    fun `an id that no longer names a live pipeline renders a quiet not-found detail`() {
-        val html =
-            render("partials/pipeline-detail") {
-                fillDetail()
-                setVariable("pipeline", null)
-            }
-
-        html shouldContain "Pipeline not found"
-        html shouldContain "it may have been deleted"
-        html shouldNotContain "tplx-detail-path"
-        html shouldNotContain ">Open</a>"
-        html shouldNotContain "tpl-tree"
-    }
-
     // ------------------------------------------------------------------ fixtures
 
     /**
@@ -778,43 +528,16 @@ class PipelineExplorerRenderTest {
     }
 
     /**
-     * The 106 detail model: the three regions in one fill, exactly as
-     * [PipelineBrowseModel.fillDetail] leaves it — a draft v2 over a released v1, which is the
-     * state where every header verb has something to decide (Release yes, Delete no because a
-     * release exists, Discard yes because the pointer names one).
+     * The Versions model: a draft v2 over a released v1 (plus one discarded row for
+     * Restore), the state where every row verb has something to decide — the variables the
+     * fragments read; the detail-only variables left with the detail suite (#401).
      */
     private fun WebContext.fillDetail() {
-        setVariable("pipelineId", LEAF_ID)
         setVariable("pipeline", record(DEEP_PATH))
-        setVariable("folderPath", "nyc/mobility/")
-        setVariable("leafName", "revenue_by_borough")
-        setVariable("workingVersion", 2)
-        setVariable("draftVersion", 2)
-        setVariable("draftHash", "h2")
-        setVariable("stagingEngine", StagingEngine.H2)
-        val startDate =
-            Parameter(
-                LogicalType.DATE,
-                required = false,
-                default = PipelineJson.objectMapper().readTree("\"2024-01-01\""),
-            )
-        setVariable("parameters", mapOf("start_date" to startDate))
-        setVariable("nodeCount", 3)
-        setVariable("checksCount", 0)
-        setVariable("datasourceRows", listOf(DatasourceRowView("sample-lake", Dialect.POSTGRES)))
-        setVariable("templatePins", listOf(TemplatePinView("demo/top_carrier.sql", 1)))
-        setVariable("createdBy", "Muhammad")
-        setVariable("lastRun", null)
-        setVariable("lastRunAgo", null)
-        setVariable("lastRunBy", null)
         setVariable("versions", listOf(draftRow(), releasedRow(), discardedRow()))
-        setVariable("versionCount", 2)
-        setVariable("runCount", 7)
-        setVariable("usageCount", 0)
-        setVariable("releasableVersion", 2)
-        setVariable("canDelete", false)
-        setVariable("canSwitchHeader", true)
-        setVariable("canDiscardCurrent", true)
+        // What the workspace's Versions tab passes to the fragment (editor.html's th:with).
+        setVariable("dialogTarget", "#pe-dialog")
+        setVariable("dialogFrom", "editor")
     }
 
     private fun draftRow() =

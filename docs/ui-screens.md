@@ -1,6 +1,6 @@
 # UI Screens Inventory
 
-**Status:** v1.109
+**Status:** v1.110
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
 **Last updated:** 2026-10-03 (#399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
@@ -540,7 +540,6 @@ The table stays a `.ds-table` (the vendored primitive's type, padding and hover)
 | `partials/datasource-facts.html` (§4.5b) | learned facts (dialog and lake detail) | FIXED | prose wraps |
 | `schedules/run.html` (§4.20) | a run's Messages | FIXED (`.sch-messages-scroll`, 24rem) | — |
 | `schedules/detail.html` (§4.20) | next five occurrences; parameters | FIXED `dt-h-sm` | `dt-fit` |
-| `partials/pipeline-detail.html` (§4.3b) | declared parameters | FIXED `dt-h-sm` | `dt-fit` |
 | `pipelines/editor.html` (§4.4, #349) | the Parameters tab's declared schema | FIXED `dt-h-sm` | `dt-fit` (client-rendered rows; the observer upgrades) |
 | `partials/pipeline-versions.html` (§4.3b/§4.4, #349) | the version history | FIXED `dt-h-sm` | `dt-fit`; the ⋯ verb menus ride the rows; `data-version-row` is the client's viewed-mark hook |
 | `partials/pipeline-runs.html` (§4.3b/§4.4, #349) | the pipeline's runs | FIXED `dt-h-sm` | rows carry `data-href` (the keyboard contract); visibility unchanged |
@@ -701,13 +700,15 @@ The size lands as ONE CSS custom property, `--tplx-tree-w`, written on `<html>` 
 
 The datasource lake-table tree (§4.5) uses the same pane class and so inherits the remembered width, but has no detail pane beside it and therefore no handle.
 
-#### 4.3b The detail pane — reading and acting (106, owner-approved mock 2026-09-08)
+#### 4.3b The detail pane — reading and acting (106, owner-approved mock 2026-09-08; REMOVED by #401)
 
-> **Since #350 no page renders the pipeline detail pane** — the catalog's rows open the workspace
-> (§4.4), whose header and tabs carry everything below (#349's capability map). The fragment
-> (`partials/pipeline-detail`, `GET /partials/pipelines/detail`) and the explorer legs of the
-> lifecycle dialogs survive with no page to call them; their removal (with their auth §7.6 row) is
-> #401. The text below is the record of what moved.
+> **#401 removed the pipeline detail pane**: the fragment (`partials/pipeline-detail.html`), its
+> route (`GET /partials/pipelines/detail`, off the `pipeline.read` §7.6 row in the same commit)
+> and the explorer legs of the lifecycle dialogs — no page has rendered the pane since #350 (the
+> catalog's rows open the workspace, §4.4, whose header and tabs carry everything below, #349's
+> capability map). `PipelineBrowseModel.fillDetail` and its region fills left with it. The text
+> below is the record of what the pane was; the runs and usage fragments it lazy-loaded live on
+> as the workspace's tabs.
 
 
 The pane used to be a stack of four tables (badges, Settings, Parameters, Versions) in one
@@ -715,12 +716,14 @@ column. The owner's mock, layout B, splits it into what a reader does and what a
 does, and both explorers render the same shape.
 
 **1 — Header.** The folder path is an EYEBROW (`.tplx-detail-path`, mono, muted) and the leaf
-name is the `h2`; the full path still rides on `title`. The actions sit on the right: **Open**
+name is the `h2`; the full path still rides on `title`. The actions sat on the right: **Open**
 (primary, the canonical read workspace — #348) plus the lifecycle verbs 101 shipped, opened as
 §4.3d dialogs since 102 —
 `Release v<n>…` when a draft exists, **Discard v<cur>…** when the current version is released,
 **Purge pipeline…** only in the `{D}` shape, **Switch…** at ≥ 2 live eligible versions, at most
-one destructive among them. Each `hx-get`s its dialog partial into `#px-dialog`; the POST goes
+one destructive among them. Each hx-get its dialog partial into `#px-dialog` — until #401, which
+removed the pane and with it these headers and their target (the dialogs now open only from the
+workspace's Versions tab, §4.4, and answer `HX-Redirect` only); the POST went
 to the dialog's own partial route, which calls the service 101 wired and answers Shape A / Shape
 C (§5.1) — the plain `window.confirm` strings 106 shipped on `data-confirm`, and the `fetch`
 path that drove them, are gone.
@@ -804,7 +807,8 @@ succeeds and the schedule then blocks (`pointer_null` / `target_not_found`) at i
 occurrence, which is the consequence the heading exists to show — so the tab badge counts
 refusal evidence only, and the empty state speaks only when none of the three lists has a row.
 
-`PipelineBrowseModel.fillDetail` supplies every region in ONE call, with the lifecycle flags
+`PipelineBrowseModel.fillDetail` supplied every region in ONE call (the method left with the
+pane, #401), with the lifecycle flags
 computed beside the query that produced the rows — a button is rendered because the server
 would accept it, never because a template read a status string. Two web-side joins sit beside
 `PipelineNames` for its reason (`dag` and `pipeline-contract` own the stamped rows and neither
@@ -839,8 +843,9 @@ fits its own box at 390 and that nothing inside the detail sticks out of the det
 
 Every version-lifecycle verb 101 shipped ([Versioning §3.5](versioning.md#35-the-lifecycle-table))
 is reachable from a **confirm dialog**, one partial per verb, opened into a single per-screen
-container — `#px-dialog` (pipelines explorer — no page renders it since #350, see §4.3b),
-`#tx-dialog` (templates explorer), `#pe-dialog` (the pipeline workspace, §4.4), `#te-dialog`
+container — `#tx-dialog` (templates explorer), `#pe-dialog` (the pipeline workspace, §4.4 — since
+#401 the pipeline dialogs' ONLY container; the explorer's `#px-dialog` left with its pane),
+`#te-dialog`
 (template editor) — emptied on close, `Escape` closed, focus
 landing on the first control, the destructive button `ds-button-danger` and last in tab order.
 The exemplar is §4.5's delete dialog (094 §B): the question is asked BEFORE the button exists,
@@ -851,7 +856,7 @@ same services 101 wired, never the REST controllers over HTTP and never a second
 
 | Verb | Dialog (`GET`, into the container) | What it shows before its one button | Shapes that render it |
 |---|---|---|---|
-| Release | `…/lifecycle/release` | the draft's number, who last wrote it and when, every template pin with its status — a DISCARDED or MISSING pin is refused colour, says "release the template first", and the button is NOT rendered; else "Releasing makes v`<n>` the current version and locks it." **A DRAFT pin (142)** renders in a consent group instead: "Also release these `<N>` draft templates with the pipeline", a checkbox `releasePinnedTemplates` CHECKED by default, one row per pinned version naming the template, the version and — from the used-by service — "also pinned by `<K>` other draft pipeline(s)" (the promoter is releasing a shared object). Checked, Release is enabled and the POST cascades (versioning §5.3); unchecked, `lifecycle-dialog.js`'s consent arm withholds the submit and the rows fall back to the refused wording ("release the template first" — pure CSS `:has()`, no script), so the order rule stays visible. The Shape A toast then lists what was released: "v`<n>` is the current version now, and it is locked. Also released: `<template@version>`, …"; the editor leg answers `ok=released_with_templates`. When the draft declares `checks[]` (140): the dialog RUNS them as it opens (`POST …/checks/run?footer=release` on `hx-trigger="load"`), the Release submit starts DISABLED, and the run's own fragment decides the footer out-of-band — all pass enables Release; anything short of PASS keeps it withheld; both footer submits are consent-gated too and offers the **Override** disclosure: a required ≥ 10-char `overrideChecksReason` textarea (armed client-side at 10 trimmed chars by `lifecycle-dialog.js`'s min-chars arm — the dialogs' own layer, since Alpine is the editor's, not the explorers'), copy naming the overridden check ids and that the reason is recorded on the release's audit event, and a "Release anyway" submit riding the SAME release POST. A draft with no checks says "No checks on this version" and behaves exactly as before. **A pin that reads `needs_review` (7e)** — the pinned template version cites a retired learned fact ([Templates §3.4](templates.md#34-implements-and-drift)) — adds ONE warning row per such pin above the confirm (`[data-release-needs-review]`, a `needs review` warning badge, the pin, and "cites a retired fact: `<fact id>` — superseded by `<fact id>`", or `(retired: <reason>)` for a plain retirement), plus "Releasing is not blocked. Re-cite the successor with templates_update to clear the mark." A WARNING, never a refusal: the confirm is untouched in every footer shape, and the POST's own `warnings` (REST §5.10) come from the same port read. All text through `th:text`. | any with a DRAFT |
+| Release | `…/lifecycle/release` | the draft's number, who last wrote it and when, every template pin with its status — a DISCARDED or MISSING pin is refused colour, says "release the template first", and the button is NOT rendered; else "Releasing makes v`<n>` the current version and locks it." **A DRAFT pin (142)** renders in a consent group instead: "Also release these `<N>` draft templates with the pipeline", a checkbox `releasePinnedTemplates` CHECKED by default, one row per pinned version naming the template, the version and — from the used-by service — "also pinned by `<K>` other draft pipeline(s)" (the promoter is releasing a shared object). Checked, Release is enabled and the POST cascades (versioning §5.3); unchecked, `lifecycle-dialog.js`'s consent arm withholds the submit and the rows fall back to the refused wording ("release the template first" — pure CSS `:has()`, no script), so the order rule stays visible. The reload's flash then names what was released: "Released. Also released: `<template@version>`, …" — SERVER-DERIVED (#407): the release POST holds the cascade's own list once in the actor's session (`ReleaseFlash`), and the workspace GET the `HX-Redirect` lands consumes it (a crafted `?ok=`, another page, another actor or a minute gone by renders only "The draft is now the current version and is locked, and the draft templates it pinned were released with it."). When the draft declares `checks[]` (140): the dialog RUNS them as it opens (`POST …/checks/run?footer=release` on `hx-trigger="load"`), the Release submit starts DISABLED, and the run's own fragment decides the footer out-of-band — all pass enables Release; anything short of PASS keeps it withheld; both footer submits are consent-gated too and offers the **Override** disclosure: a required ≥ 10-char `overrideChecksReason` textarea (armed client-side at 10 trimmed chars by `lifecycle-dialog.js`'s min-chars arm — the dialogs' own layer, since Alpine is the editor's, not the explorers'), copy naming the overridden check ids and that the reason is recorded on the release's audit event, and a "Release anyway" submit riding the SAME release POST. A draft with no checks says "No checks on this version" and behaves exactly as before. **A pin that reads `needs_review` (7e)** — the pinned template version cites a retired learned fact ([Templates §3.4](templates.md#34-implements-and-drift)) — adds ONE warning row per such pin above the confirm (`[data-release-needs-review]`, a `needs review` warning badge, the pin, and "cites a retired fact: `<fact id>` — superseded by `<fact id>`", or `(retired: <reason>)` for a plain retirement), plus "Releasing is not blocked. Re-cite the successor with templates_update to clear the mark." A WARNING, never a refusal: the confirm is untouched in every footer shape, and the POST's own `warnings` (REST §5.10) come from the same port read. All text through `th:text`. | any with a DRAFT |
 | Purge draft | `…/lifecycle/purge?version=v` | the version and its execution count; the button reads "Purge v`<n>` and `<k>` runs" and needs the typed confirm `v<n>` | any with a DRAFT |
 | Discard | `…/lifecycle/discard?version=v` | whether the version is current (then the §3.4 fallback: "v`<m>` becomes current" or "nothing eligible remains — the pipeline will have no current version and its endpoints will answer 503"); parents that pin it (listed, no button) **and, since #320, the dashboards whose sources pin it (`referencing_dashboards`, listed, no button)**; **the schedules that run the pipeline (273)** — from the SAME by-target read the Usage tab makes, lensed for the caller (a promoter's view is R3's; the route itself stays `pipeline.version.manage`) — one row per schedule naming it, its condition (`enabled`/`paused`/`blocked`, the Usage tab's vocabulary) and its stored next occurrence, under "Schedules that run this pipeline — discarding does not pause them: at its next run each blocks (the pointer is gone) until repointed or deleted" (the §5.2 `pointer_null` shape, said before the button); "Discard is reversible — Restore brings it back." | RELEASED rows |
 | Restore | `…/lifecycle/restore?version=v` | whether restoring moves the pointer (v > current, or current is NULL); "Restoring makes v`<n>` a live release again." | DISCARDED rows |
@@ -865,27 +870,28 @@ purge-draft POST rides the **versioned** purge (`DELETE /api/v1/pipelines/{id}/v
 beneath): the dialog names an explicit version, so there is no two-writer hash protocol to
 honour, and the typed confirm carries the same fact the button states.
 
-**Success is Shape A; refusal is Shape C.** A POST that lands re-renders the explorer's detail
+**Success is Shape A — the templates explorer's shape; refusal is Shape C everywhere.** A POST
+that lands re-renders the explorer's detail
 region (the same fragment a selection loads — 106's model, not a copy) with the `toast-oob`
 fragment spliced in and `HX-Trigger: lifecycle-changed` whose payload carries the new
 working-version facts, so the tree leaf's badge follows server truth (`v3 draft` → `v3`) rather
-than a client guess. A verb that removes the ROW (the entity purge) answers `HX-Redirect` back
-to the explorer with a flash toast instead — the tree must lose the leaf, and this fragment may
+than a client guess. A verb that removes the ROW (the entity purge) answers `HX-Redirect` with a flash toast instead — the tree must lose the leaf, and the answer may
 never touch the tree. Every refusal — `pinned` with its pinners, `last_release`, `not_released`,
 `not_discarded`, `not_eligible`, `not_draft`, `version.conflict`, `authoring.disabled`,
 `template.in_use` — arrives as §5.1 Shape C carrying the real 4xx, never a native dialog. In
 the editors the POST answers `HX-Redirect` back to the editor URL with the flash toast: the
 page's draft state (`PEDraft`, the version chips) is embedded across the document, so the
 honest refresh is the document itself, exactly as the pre-102 editor already reloaded.
-**#395 (with #350): on the pipeline workspace that is now true of EVERY verb.** Release and the
+**#395 (with #350), then #401: on the pipeline workspace that is true of EVERY verb.** Release and the
 purges always answered the redirect; Switch, Discard and Restore (the Versions tab's row verbs)
-posted to the explorer's `#pipeline-detail` from the workspace too — an element the workspace
+used to post to the explorer's `#pipeline-detail` from the workspace too — an element the workspace
 does not have, so htmx refused the swap target and no request was ever sent. Their dialogs are
-`from`-aware now (`from=editor`: no target, `hx-swap="none"`, a hidden `from`), and their POSTs
+`from`-aware (#395: `from=editor`: no target, `hx-swap="none"`, a hidden `from`), and their POSTs
 answer `HX-Redirect` onto `/pipelines/{id}?tab=versions&ok=discarded|restored|switched` with
 the layout's flash (`Version discarded` / `Version restored` / `Current version switched`); the
-toast states what happened and the reloaded Versions tab shows the pointer the service left. The
-explorer legs are unchanged (the templates explorer is the one that still renders them).
+toast states what happened and the reloaded Versions tab shows the pointer the service left.
+**#401 removed the pipeline explorer legs** — the Shape A re-render, the `lifecycle-changed`
+payload and the `from` ternaries (the templates explorer is the one that still renders them).
 
 **One destructive verb per entity per view** (owner rule). The detail header — and since #395 the
 pipeline WORKSPACE's header, now that the explorer pane is gone — shows at most one of Purge
@@ -2335,6 +2341,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-03 | v1.110 | #401/#407 the pipelines explorer residue — the pane and the dialogs' explorer legs removed; the workspace's release flash names the cascaded templates | **§4.3b**: the detail pane's fragment (`partials/pipeline-detail.html`), its route `GET /partials/pipelines/detail` (off the `pipeline.read` §7.6 Surfaces cell in the same commit) and `PipelineBrowseModel.fillDetail` with its region fills are REMOVED — no page has rendered the pane since #350; the section is the record. **§4.3d**: the pipeline dialogs' `#px-dialog` shapes are gone (`hx-target` ternaries collapsed to the editor form, the POSTs' `from` legs with them — every pipeline verb answers `HX-Redirect`); Shape A is the templates explorer's. `lifecycle-dialog.js` drops `px-dialog` and the `pipeline-detail` close; `explorer-detail.js` drops the pipeline half (the `leafId` branch, the drawer check); `pipeline-versions.html` defaults to the workspace's `#pe-dialog`/`from=editor`. **§4.3d, the Release row**: the reload's flash NAMES the cascade — "Released. Also released: `<template@version>`, …" — server-derived (#407): the release POST holds the list once in the actor's session (`ReleaseFlash`), the workspace GET consumes it; a crafted `?ok=`, another page, another actor or a minute gone by renders the generic sentence only. No permission, role or scope row changed (one route retired with its handler, same commit); no new route. Guards: `MatrixRowReachabilityTest` (red on the row before the handler), `RoleWalkE2eTest`, `ReleaseFlashTest`, `PipelineLifecycleDialogControllerTest` (the held-names assert), `PipelineExplorerRenderTest` (30→21 tests), `LifecycleDialogRenderTest`, `ReleaseCascadeBrowserTest` (the names in the toast + the consumed/crafted replay), `lifecycle.test.mjs`, `explorer-detail.test.mjs`. |
 | 2026-10-03 | v1.109 | #399 the Visualizations workspace (#396) — renumbered at merge after 415's v1.108 | **§3.4**: Build gains **Visualizations** between Dashboards and Parameter Sets, the navigating-tree pattern's fourth use (lucide `chart-line`; link → the catalog, lazy tree WITH the search box, leaf → the workspace; no engine change). **New §4.24**: the flat catalog `GET /visualizations` (`q` over name, display name and description, `ILIKE … ESCAPE`), the sidebar branch `GET /partials/visualizations/tree`, and the version-explicit workspace `GET /visualizations/{id}?version=&tab=` with five tabs — Preview (test fixtures, the default: one case at a time in the runtime's fixture mode, the configuration built by §4.22's builder, the empty state verbatim), Overview, Evidence (states its 100-run cap; the screenshot or "no screenshot"), Used by (the pinning dashboards through the dashboard lens) and Versions (the seven lifecycle dialogs with the one `release_pinned_templates` consent and the refusal list, and the Export link). DISCARDED and lens-hidden versions are the family's 404; a malformed version is a non-echoing 400. **§4.22**: the signed-in twin paragraph. No permission, row or role changed; the routes are in auth.md §7.6's visualization Surfaces cells. Guards: the render/controller/model tests, `VisualizationPreviewBlockTest`, `ReadFloorTest`, `ScriptBlockUtextAuditTest`, the two browser suites. |
 | 2026-10-03 | v1.108 | #415 the Parameter Sets name search (follow-up to #374) — renumbered at merge after 383's v1.107 | **§3.4**: the Parameter Sets panel gains the search box in the Pipelines branch's exact markup — the third branch the shared engine serves with zero JS lines changed; a non-empty `q` swaps the flat results into the panel's root (`#params-tree-nav`), clearing returns the tree, and a set the lens hides is never a hit (the service filters it, never the template). **§4.23**: `GET /parameter-sets` gains `?q=` and the SPA search control — a case-insensitive substring of name, display name or description through the new `ParameterSetService.search` (everything lens → SQL `ILIKE … ESCAPE '\'` with the term's `%`/`_`/`\` literal; a narrowing lens → in memory over the admitted sets); `partials/parameter-set-list` is retired for the `partials/parameter-sets` dispatcher + `partials/parameter-set-search` (the dashboards' shape, one family over). No new route, permission, scope row or role changed: the same two routes on `parameter_set.read` gained a query parameter. Guards: `ParameterSetServiceIntegrationTest`, `ParameterSetsBrowseModelTest`, `ParameterSetsPartialControllerTest` (new), `ParameterSetsUiControllerTest`, `ParameterSetsRenderTest`, `ShellRenderTest`, `ParameterSetPagesBrowserTest`, the falsifications in the handback. |
 | 2026-10-03 | v1.107 | #383 the workspace's observed evaluation — the client half (workspace spec §4.2/§6.2/§6.3, #357 S2b) — renumbered at merge after 376's v1.106 | **§4.23**: the live form now STREAMS `POST /api/v1/parameter-sets/{id}/evaluations` (rest-api §21.5 — the observed evaluation; the version, the whole selection set, a fresh v4 `evaluation_id` per attempt, the CSRF header) through the same `initParameters` entry; the graph is the evaluation's LIVE STATE (waiting → admitted → running → resolved, failed with the frame's catalogued code, D3's unfinished sweep from `evaluation_failed`, the terminal response's reset marks), the live region announces one sentence per frame, a supersede CLOSES the prior attempt's stream (the server's grace aborts it), another attempt's frames are dropped before any state or DOM change, a stream ending without a terminal frame takes dashboards §6.6 (lock released by the deadline, never earlier), and the page keeps an in-memory frame log (`window.PSWorkspace.frames`) the guards read. No route, permission, scope row or role changed; no new page markup (the log is data, not a pane). Guards: `parameter-set-stream.test.mjs`, `parameter-workspace-graph-state.test.mjs`, `ParameterWorkspaceStreamBrowserTest` (scenarios 3/6/7/10 + the promoter arm), `ParameterSetFormBrowserTest`'s captures tightened to the exact `/evaluations` path. |

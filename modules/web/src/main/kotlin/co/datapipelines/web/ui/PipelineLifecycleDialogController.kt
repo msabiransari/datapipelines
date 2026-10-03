@@ -1,8 +1,6 @@
 package co.datapipelines.web.ui
 
-import co.datapipelines.application.lens.LensedView
 import co.datapipelines.auth.AuditEventSink
-import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.pipeline.PipelineErrorCodes
@@ -13,7 +11,7 @@ import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.web.api.currentPrincipal
 import co.datapipelines.web.pipelines.LifecycleVerbs
 import co.datapipelines.web.schedules.PrincipalTargetViewer
-import jakarta.servlet.http.HttpServletResponse
+import jakarta.servlet.http.HttpSession
 import org.springframework.http.ResponseEntity
 import org.springframework.ui.Model
 import org.springframework.web.bind.annotation.GetMapping
@@ -23,29 +21,30 @@ import org.springframework.web.bind.annotation.RequestParam
 import java.util.UUID
 
 /**
- * The lifecycle verbs' dialog family (ui-screens §4.3d, 102): every GET opens a confirm
- * partial into `#px-dialog` (the explorer) or `#pe-dialog` (the editor, `from=editor`), every
- * POST calls the SAME service 101 wired — never the REST controllers over HTTP, never a
- * second copy of a guard (the guard re-runs under the POST; the dialog only decides what to
- * SAY). Session-only like the verbs themselves (§4.18); an API key is refused
- * `auth.session.required` before anything is read.
+ * The pipeline lifecycle verbs' dialog family (ui-screens §4.3d, 102): every GET opens a
+ * confirm partial into `#pe-dialog` (the pipeline workspace's container — the `from=editor`
+ * surface; since #401 there is no other), every POST calls the SAME service 101 wired —
+ * never the REST controllers over HTTP, never a second copy of a guard (the guard re-runs
+ * under the POST; the dialog only decides what to SAY). Session-only like the verbs
+ * themselves (§4.18); an API key is refused `auth.session.required` before anything is read.
  *
- * Success is Shape A for the explorer verbs that keep the entity: the re-rendered detail
- * region (106's model, not a copy) with the `toast-oob` spliced in and `HX-Trigger:
- * lifecycle-changed` carrying the new working-version facts for the tree badge. A verb that
- * removes the ROW (the entity purge) answers `HX-Redirect` back to the explorer with a flash
- * toast — the tree must lose the leaf, and this controller may never touch the tree. The
- * editor surface always answers `HX-Redirect` (the editor's draft state is document-wide;
- * §4.4 records why the reload stays). Refusals ride the `UiExceptionHandler` Shape C path
- * with their real 4xx — including the typed-confirm mismatch, which is checked BEFORE the
- * service runs so a mismatched dialog can never purge anything.
+ * #401 removed the explorer legs: a rail leaf navigates to the workspace and no page renders
+ * `#pipeline-detail`, so the Shape A answer (the re-rendered pane, `HX-Trigger:
+ * lifecycle-changed`) has no reader. EVERY success answers `HX-Redirect` (the workspace's
+ * draft state is document-wide; §4.4 records why the reload stays) — the layout's flash bin
+ * renders the toast after it lands, and the release that cascaded names its templates from
+ * the server's own list ([ReleaseFlash], #407), never from the client. Refusals ride the
+ * `UiExceptionHandler` Shape C path with their real 4xx — including the typed-confirm
+ * mismatch, which is checked BEFORE the service runs so a mismatched dialog can never purge
+ * anything.
  */
 @org.springframework.stereotype.Controller
 class PipelineLifecycleDialogController(
     private val pipelines: PipelineService,
     private val dialogs: PipelineLifecycleDialogModel,
-    private val browse: PipelineBrowseModel,
     private val audit: AuditEventSink,
+    /** #407 — the one-shot, session-held cascade names the workspace's release flash renders. */
+    private val releaseFlash: ReleaseFlash,
 ) {
     // ------------------------------------------------------------------ release
 
@@ -54,11 +53,12 @@ class PipelineLifecycleDialogController(
     fun releaseDialog(
         model: Model,
         @PathVariable id: UUID,
-        @RequestParam(required = false) from: String?,
     ): String {
         LifecycleVerbs.requireSession()
         model.addAttribute("dlg", dialogs.release(currentPrincipal().requireWorkspace().id, id))
-        model.addAttribute("from", from ?: FROM_EXPLORER)
+        // #401 — the editor surface is the only one; the `from` the Versions tab's
+        // links still send is ignored, and the dialog always renders the editor shape.
+        model.addAttribute("from", FROM_EDITOR)
         // 177 §D.8: the dialog's verb renders inside a role guard like every other verb — the route
         // already refuses the wrong role; the markup now says so too, and the exemption list is empty.
         RoleModel.stamp(model)
@@ -68,13 +68,11 @@ class PipelineLifecycleDialogController(
     @PostMapping("/partials/pipelines/{id}/lifecycle/release")
     @RequiredScope(Permission.PIPELINE_RELEASE)
     fun release(
-        model: Model,
-        response: HttpServletResponse,
+        session: HttpSession,
         @PathVariable id: UUID,
-        @RequestParam(required = false) from: String?,
         @RequestParam(required = false) overrideChecksReason: String?,
         @RequestParam(required = false, defaultValue = "false") releasePinnedTemplates: Boolean,
-    ): Any {
+    ): ResponseEntity<String> {
         val principal = LifecycleVerbs.requireSession()
         val workspaceId = principal.requireWorkspace().id
         // The hash the DIALOG read (§4.2: you release what you tested); a draft that changed
@@ -96,29 +94,16 @@ class PipelineLifecycleDialogController(
         // T187 — the release is the D4 human step; it is audited on every surface that offers
         // it — one event per cascaded template first, then the pipeline's (142).
         LifecycleVerbs.auditRelease(audit, principal, workspaceId, id, released)
-        return if (from == FROM_EDITOR) {
-            // #348 merge: the canonical workspace route — `/pipelines/{id}/editor` is a compatibility
-            // redirect now and forwards only `version` and `tab`, so an `ok` sent there was dropped and
-            // the release toast never rendered (PipelineLifecycleDialogControllerTest pins the target).
-            redirect("/pipelines/$id?ok=" + if (released.templatesReleased.isEmpty()) "released" else "released_with_templates")
-        } else {
-            applied(
-                model,
-                response,
-                workspaceId,
-                id,
-                "Released v${released.version.version}",
-                releasedMessage(released),
-            )
+        // #407 — the workspace flash names the cascade, derived HERE from the release's own
+        // list: held once for this actor's session, rendered by the next GET of THIS pipeline
+        // that carries `ok=released_with_templates`, never trusted from the client.
+        if (released.templatesReleased.isNotEmpty()) {
+            releaseFlash.hold(session, id, principal.userId, released.templatesReleased)
         }
-    }
-
-    /** The toast's sentence: the lock, and — cascading (142) — the templates released with it. */
-    private fun releasedMessage(released: PipelineReleaseService.Released): String {
-        val lock = "v${released.version.version} is the current version now, and it is locked."
-        if (released.templatesReleased.isEmpty()) return lock
-        val templates = released.templatesReleased.joinToString(", ") { "${it.id}@${it.version}" }
-        return "$lock Also released: $templates."
+        // #348 merge: the canonical workspace route — `/pipelines/{id}/editor` is a compatibility
+        // redirect now and forwards only `version` and `tab`, so an `ok` sent there was dropped and
+        // the release toast never rendered (PipelineLifecycleDialogControllerTest pins the target).
+        return redirect("/pipelines/$id?ok=" + if (released.templatesReleased.isEmpty()) "released" else "released_with_templates")
     }
 
     // ------------------------------------------------------------------ purge draft (the versioned verb)
@@ -129,11 +114,12 @@ class PipelineLifecycleDialogController(
         model: Model,
         @PathVariable id: UUID,
         @RequestParam version: Int,
-        @RequestParam(required = false) from: String?,
     ): String {
         LifecycleVerbs.requireSession()
         model.addAttribute("dlg", dialogs.purge(currentPrincipal().requireWorkspace().id, id, version))
-        model.addAttribute("from", from ?: FROM_EXPLORER)
+        // #401 — the editor surface is the only one; the `from` the Versions tab's
+        // links still send is ignored, and the dialog always renders the editor shape.
+        model.addAttribute("from", FROM_EDITOR)
         // 177 §D.8: the dialog's verb renders inside a role guard like every other verb — the route
         // already refuses the wrong role; the markup now says so too, and the exemption list is empty.
         RoleModel.stamp(model)
@@ -143,13 +129,10 @@ class PipelineLifecycleDialogController(
     @PostMapping("/partials/pipelines/{id}/lifecycle/purge")
     @RequiredScope(Permission.PIPELINE_VERSION_MANAGE)
     fun purge(
-        model: Model,
-        response: HttpServletResponse,
         @PathVariable id: UUID,
         @RequestParam version: Int,
         @RequestParam confirm: String?,
-        @RequestParam(required = false) from: String?,
-    ): Any {
+    ): ResponseEntity<String> {
         val principal = LifecycleVerbs.requireSession()
         val workspaceId = principal.requireWorkspace().id
         requireTypedConfirm(confirm, "v$version")
@@ -166,32 +149,12 @@ class PipelineLifecycleDialogController(
                 "scope" to if (purged is PipelineReleaseService.Purged.Entity) "entity" else "version",
             ),
         )
-        val runs = purged.executionsDeleted
-        return when {
-            purged is PipelineReleaseService.Purged.Entity -> {
-                redirect("/pipelines?ok=entity_purged")
-            }
-
-            from == FROM_EDITOR -> {
-                redirect("/pipelines/$id?ok=draft_purged")
-            }
-
-            else -> {
-                applied(
-                    model,
-                    response,
-                    workspaceId,
-                    id,
-                    "Purged v$version",
-                    if (runs >
-                        0
-                    ) {
-                        "Its $runs run${if (runs == 1) "" else "s"} went with it. This cannot be undone."
-                    } else {
-                        "The draft is gone. This cannot be undone."
-                    },
-                )
-            }
+        // An entity purge reloads the catalog (the tree loses the leaf); a version purge
+        // reloads the workspace (the layout's flash names what happened).
+        return if (purged is PipelineReleaseService.Purged.Entity) {
+            redirect("/pipelines?ok=entity_purged")
+        } else {
+            redirect("/pipelines/$id?ok=draft_purged")
         }
     }
 
@@ -203,7 +166,6 @@ class PipelineLifecycleDialogController(
         model: Model,
         @PathVariable id: UUID,
         @RequestParam version: Int,
-        @RequestParam(required = false) from: String?,
     ): String {
         LifecycleVerbs.requireSession()
         // #273 — the dialog's schedules evidence is read through the caller's lens (the Usage
@@ -212,7 +174,9 @@ class PipelineLifecycleDialogController(
             "dlg",
             dialogs.discard(currentPrincipal().requireWorkspace().id, id, version, PrincipalTargetViewer(currentPrincipal())),
         )
-        model.addAttribute("from", from ?: FROM_EXPLORER)
+        // #401 — the editor surface is the only one; the `from` the Versions tab's
+        // links still send is ignored, and the dialog always renders the editor shape.
+        model.addAttribute("from", FROM_EDITOR)
         // 177 §D.8: the dialog's verb renders inside a role guard like every other verb — the route
         // already refuses the wrong role; the markup now says so too, and the exemption list is empty.
         RoleModel.stamp(model)
@@ -222,12 +186,9 @@ class PipelineLifecycleDialogController(
     @PostMapping("/partials/pipelines/{id}/lifecycle/discard")
     @RequiredScope(Permission.PIPELINE_VERSION_MANAGE)
     fun discard(
-        model: Model,
-        response: HttpServletResponse,
         @PathVariable id: UUID,
         @RequestParam version: Int,
-        @RequestParam(required = false) from: String?,
-    ): Any {
+    ): ResponseEntity<String> {
         val principal = LifecycleVerbs.requireSession()
         val workspaceId = principal.requireWorkspace().id
         val result = pipelines.discardVersion(workspaceId, id, version, principal.userId)
@@ -243,18 +204,9 @@ class PipelineLifecycleDialogController(
                 "current_version_after" to result.recordAfter.currentVersion,
             ),
         )
-        // §3.4's pointer outcome, from the SERVICE's result — never the dialog's guess.
-        val pointer = result.recordAfter.currentVersion
-        val outcome =
-            if (pointer != null) {
-                "v$pointer is current now."
-            } else {
-                "Nothing eligible remains — the pipeline has no current version; its endpoints answer 503."
-            }
-        // #395: the workspace's Versions tab (from=editor) has no explorer detail to re-render —
-        // it reloads onto that tab with a flash, the editor-surface shape release/purge answer.
-        if (from == FROM_EDITOR) return redirect(versionsTab(id, "discarded"))
-        return applied(model, response, workspaceId, id, "Discarded v$version", outcome)
+        // #395: the reload lands on the Versions tab with a flash; the tab shows the pointer
+        // the service left (§3.4's outcome is the tab's `current` mark, never a client guess).
+        return redirect(versionsTab(id, "discarded"))
     }
 
     // ------------------------------------------------------------------ restore
@@ -265,11 +217,12 @@ class PipelineLifecycleDialogController(
         model: Model,
         @PathVariable id: UUID,
         @RequestParam version: Int,
-        @RequestParam(required = false) from: String?,
     ): String {
         LifecycleVerbs.requireSession()
         model.addAttribute("dlg", dialogs.restore(currentPrincipal().requireWorkspace().id, id, version))
-        model.addAttribute("from", from ?: FROM_EXPLORER)
+        // #401 — the editor surface is the only one; the `from` the Versions tab's
+        // links still send is ignored, and the dialog always renders the editor shape.
+        model.addAttribute("from", FROM_EDITOR)
         // 177 §D.8: the dialog's verb renders inside a role guard like every other verb — the route
         // already refuses the wrong role; the markup now says so too, and the exemption list is empty.
         RoleModel.stamp(model)
@@ -279,12 +232,9 @@ class PipelineLifecycleDialogController(
     @PostMapping("/partials/pipelines/{id}/lifecycle/restore")
     @RequiredScope(Permission.PIPELINE_VERSION_MANAGE)
     fun restore(
-        model: Model,
-        response: HttpServletResponse,
         @PathVariable id: UUID,
         @RequestParam version: Int,
-        @RequestParam(required = false) from: String?,
-    ): Any {
+    ): ResponseEntity<String> {
         val principal = LifecycleVerbs.requireSession()
         val workspaceId = principal.requireWorkspace().id
         val record = pipelines.restoreVersion(workspaceId, id, version)
@@ -295,16 +245,7 @@ class PipelineLifecycleDialogController(
             workspaceId,
             mapOf("pipeline_id" to id.toString(), "version" to version, "current_version_after" to record.currentVersion),
         )
-        val moved = record.currentVersion == version
-        if (from == FROM_EDITOR) return redirect(versionsTab(id, "restored")) // #395, as discard
-        return applied(
-            model,
-            response,
-            workspaceId,
-            id,
-            "Restored v$version",
-            if (moved) "v$version is current now." else "v$version is released again; the pointer stays at v${record.currentVersion}.",
-        )
+        return redirect(versionsTab(id, "restored")) // #395, as discard
     }
 
     // ------------------------------------------------------------------ purge entity
@@ -314,11 +255,12 @@ class PipelineLifecycleDialogController(
     fun purgeEntityDialog(
         model: Model,
         @PathVariable id: UUID,
-        @RequestParam(required = false) from: String?,
     ): String {
         LifecycleVerbs.requireSession()
         model.addAttribute("dlg", dialogs.purgeEntity(currentPrincipal().requireWorkspace().id, id))
-        model.addAttribute("from", from ?: FROM_EXPLORER)
+        // #401 — the editor surface is the only one; the `from` the Versions tab's
+        // links still send is ignored, and the dialog always renders the editor shape.
+        model.addAttribute("from", FROM_EDITOR)
         // 177 §D.8: the dialog's verb renders inside a role guard like every other verb — the route
         // already refuses the wrong role; the markup now says so too, and the exemption list is empty.
         RoleModel.stamp(model)
@@ -370,13 +312,13 @@ class PipelineLifecycleDialogController(
         model: Model,
         @PathVariable id: UUID,
         @RequestParam(required = false) version: Int?,
-        @RequestParam(required = false) from: String?,
     ): String {
         LifecycleVerbs.requireSession()
         model.addAttribute("dlg", dialogs.switch(currentPrincipal().requireWorkspace().id, id))
         model.addAttribute("preselect", version)
-        // #395: the Versions tab passes from=editor (its row link always did; this GET ignored it).
-        model.addAttribute("from", from ?: FROM_EXPLORER)
+        // #401 — the editor surface is the only one; the `from` the Versions tab's
+        // links still send is ignored, and the dialog always renders the editor shape.
+        model.addAttribute("from", FROM_EDITOR)
         // 177 §D.8: the dialog's verb renders inside a role guard like every other verb — the route
         // already refuses the wrong role; the markup now says so too, and the exemption list is empty.
         RoleModel.stamp(model)
@@ -386,12 +328,9 @@ class PipelineLifecycleDialogController(
     @PostMapping("/partials/pipelines/{id}/lifecycle/switch")
     @RequiredScope(Permission.PIPELINE_SWITCH_VERSION)
     fun switchCurrent(
-        model: Model,
-        response: HttpServletResponse,
         @PathVariable id: UUID,
         @RequestParam version: Int,
-        @RequestParam(required = false) from: String?,
-    ): Any {
+    ): ResponseEntity<String> {
         val principal = LifecycleVerbs.requireSession()
         val workspaceId = principal.requireWorkspace().id
         val record = pipelines.switchCurrent(workspaceId, id, version)
@@ -402,51 +341,16 @@ class PipelineLifecycleDialogController(
             workspaceId,
             mapOf("pipeline_id" to id.toString(), "to" to record.currentVersion),
         )
-        if (from == FROM_EDITOR) return redirect(versionsTab(id, "switched")) // #395, as discard
-        return applied(
-            model,
-            response,
-            workspaceId,
-            id,
-            "Switched to v$version",
-            "Endpoints published on this pipeline serve v$version after this.",
-        )
+        return redirect(versionsTab(id, "switched")) // #395, as discard
     }
 
     // ------------------------------------------------------------------ shared shapes
 
     /**
-     * Shape A: the re-rendered detail (106's model fills it — no copy), the toast, and the
-     * `lifecycle-changed` payload the tree badge refresh reads. All server facts, no guesses.
-     */
-    private fun applied(
-        model: Model,
-        response: HttpServletResponse,
-        workspaceId: UUID,
-        id: UUID,
-        toastTitle: String,
-        toastMessage: String,
-    ): String {
-        // An author's re-render (the verbs are author/admin rows); the view is theirs — Everything.
-        browse.fillDetail(model, workspaceId, LensedView.EVERYTHING, id)
-        model.addAttribute("lifecycleToastTitle", toastTitle)
-        model.addAttribute("lifecycleToastMessage", toastMessage)
-        // The payload's facts: the working version the tree badge shows (§4.3's rule), the
-        // draft flag, and the leaf id the badge hangs on.
-        val record = pipelines.findRecord(workspaceId, ReadLens.Everything, id)
-        val draft = pipelines.findDraft(workspaceId, ReadLens.Everything, id)
-        val working = (draft?.version ?: record?.currentVersion)?.toString() ?: "null"
-        response.setHeader(
-            "HX-Trigger",
-            "{\"lifecycle-changed\":{\"leafId\":\"$id\",\"workingVersion\":$working,\"hasDraft\":${draft != null}}}",
-        )
-        return APPLIED_VIEW
-    }
-
-    /**
-     * The editor/entity shape (TemplateEditorController's openWorkingVersion pattern): an
+     * The editor surface's shape (TemplateEditorController's openWorkingVersion pattern): an
      * empty 200 carrying `HX-Redirect`, so htmx navigates the whole page and the layout's
-     * flash bin renders the toast after it lands.
+     * flash bin renders the toast after it lands. #401 made this EVERY surface's shape — the
+     * explorer detail the Shape A answer re-rendered has no page.
      */
     private fun redirect(url: String): ResponseEntity<String> = ResponseEntity.ok().header("HX-Redirect", url).body("")
 
@@ -471,10 +375,6 @@ class PipelineLifecycleDialogController(
     }
 
     private companion object {
-        const val FROM_EXPLORER = "explorer"
         const val FROM_EDITOR = "editor"
-
-        /** `partials/pipeline-lifecycle-applied` — the Shape A wrapper over 106's detail. */
-        const val APPLIED_VIEW = "partials/pipeline-lifecycle-applied"
     }
 }

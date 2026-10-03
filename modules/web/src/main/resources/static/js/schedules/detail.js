@@ -219,7 +219,7 @@
       .then(function (r) {
         var hit = ((r.data || {}).items || []).filter(function (p) { return p.name === name; })[0];
         // A link built here is not boosted (htmx processed the page before it existed), so the
-        // editor is the full document load it must be (pipeline-detail.html's note).
+        // editor is the full document load it must be (the rule the workspace's own links state).
         if (hit) {
           use("/pipelines/" + encodeURIComponent(hit.id) + "/editor");
         } else {

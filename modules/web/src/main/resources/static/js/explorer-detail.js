@@ -1,13 +1,15 @@
 /*
  * 106 — the explorers' detail pane: its tabs and the tree drawer the narrow layout needs.
  * Shared by BOTH explorers, exactly as template-explorer.js is: the panes and cards are found
- * by markers, never by a screen-specific id.
+ * by markers, never by a screen-specific id. (The PIPELINES explorer's pane is gone — #401
+ * removed the fragment, its route and the lifecycle legs that re-rendered it — so this file
+ * now serves the templates explorer and the schedules page; #398 owns that reshaping.)
  *
  * 102 removed the fetch-and-confirm verb path 106 shipped against the REST routes (the verbs
- * are §4.3d dialog partials now — their POSTs answer Shape A with a `lifecycle-changed`
- * payload) and added the tree badge refresh that payload drives: the leaf's version badge
- * follows the POST's OWN facts (working version, draft flag), never a client-side guess, and
- * a dialog landing closes any open ⋯ menu.
+ * are §4.3d dialog partials) and added the tree badge refresh the Shape A payload drives: the
+ * leaf's version badge follows the POST's OWN facts (working version, draft flag), never a
+ * client-side guess, and a dialog landing closes any open ⋯ menu. On the pipelines side the
+ * Shape A answer is gone with the pane (#401); the refresh now serves the templates explorer.
  *
  * THREE small jobs, and deliberately no framework.
  *
@@ -16,11 +18,11 @@
  *    with `hidden` rather than a display rule, so the swap target is in the DOM before its
  *    fragment lands and htmx has something to swap into.
  *
- * 2. THE TREE BADGE REFRESH. `lifecycle-changed` arrives with the Shape A response of every
- *    lifecycle POST, carrying {leafId|leafName, workingVersion, hasDraft} read from the row
- *    the POST just wrote. The leaf's badges are rewritten from that payload; when the working
- *    version is null (no live version remains) the version badge goes away, which is the
- *    state the empty detail will confirm on the next selection.
+ * 2. THE TREE BADGE REFRESH. `lifecycle-changed` arrives with the Shape A response of a
+ *    lifecycle POST (the templates explorer's, since #401), carrying {leafName, workingVersion,
+ *    hasDraft} read from the row the POST just wrote. The leaf's badges are rewritten from
+ *    that payload; when the working version is null (no live version remains) the version
+ *    badge goes away, which is the state the empty detail will confirm on the next selection.
  *
  * 3. THE DRAWER. Below 1100px the tree is an overlay over the detail rather than a column
  *    beside it. Opening is one class on `.tplx-body`; every rule that positions it lives in
@@ -85,9 +87,8 @@
 
   function leafFor(detail) {
     if (!detail) return null;
-    if (detail.leafId) {
-      return document.querySelector('[data-leaf-id="' + detail.leafId + '"] .tpl-leaf-version, [data-leaf-id="' + detail.leafId + '"]');
-    }
+    // #401 — the pipelines half keyed on `leafId` (the rail leaf's UUID) and is gone with
+    // the pane it refreshed; the templates half keys on the leaf NAME.
     if (detail.leafName) {
       return document.querySelector('[data-leaf-name="' + detail.leafName.replace(/"/g, '\\"') + '"]');
     }
@@ -156,7 +157,8 @@
   if (document.body) {
     document.body.addEventListener('htmx:afterSwap', function (event) {
       var target = event.detail && event.detail.target;
-      if (target && (target.id === 'pipeline-detail' || target.id === 'template-detail')) setDrawer(false);
+      // (#401 — the pipeline's pane is gone; the template explorer's is the one left.)
+      if (target && target.id === 'template-detail') setDrawer(false);
     });
 
     // 102: every lifecycle POST's Shape A response fires this with its own facts.

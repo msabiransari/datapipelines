@@ -157,7 +157,7 @@ class PipelineLifecycleDialogRenderTest {
         val html =
             render("partials/pipeline-lifecycle-release") {
                 setVariable("dlg", releaseDialog(pins = emptyList()).copy(refusal = refusal("pipeline.version.not_draft")))
-                setVariable("from", "explorer")
+                setVariable("from", "editor")
             }
 
         html shouldContain "no draft"
@@ -181,7 +181,7 @@ class PipelineLifecycleDialogRenderTest {
         val html =
             render("partials/pipeline-lifecycle-release") {
                 setVariable("dlg", releaseDialog(pins = emptyList(), hasChecks = true))
-                setVariable("from", "explorer")
+                setVariable("from", "editor")
             }
 
         // The run rides the dialog's own checks POST, asking for the release footer OOB.
@@ -200,7 +200,7 @@ class PipelineLifecycleDialogRenderTest {
         val html =
             render("partials/pipeline-lifecycle-purge") {
                 setVariable("dlg", purgeDialog(runCount = 3))
-                setVariable("from", "explorer")
+                setVariable("from", "editor")
             }
 
         html shouldContain "Purge v4?"
@@ -217,7 +217,7 @@ class PipelineLifecycleDialogRenderTest {
         val html =
             render("partials/pipeline-lifecycle-purge") {
                 setVariable("dlg", purgeDialog(runCount = 0))
-                setVariable("from", "explorer")
+                setVariable("from", "editor")
             }
 
         html shouldContain "Purge v4</button>"
@@ -258,7 +258,7 @@ class PipelineLifecycleDialogRenderTest {
                             ),
                     ),
                 )
-                setVariable("from", "explorer")
+                setVariable("from", "editor")
             }
 
         html shouldContain "nyc/rollup"
@@ -305,7 +305,7 @@ class PipelineLifecycleDialogRenderTest {
                             ),
                     ),
                 )
-                setVariable("from", "explorer")
+                setVariable("from", "editor")
             }
 
         html shouldContain "data-discard-schedules"
@@ -359,7 +359,7 @@ class PipelineLifecycleDialogRenderTest {
                             ),
                     ),
                 )
-                setVariable("from", "explorer")
+                setVariable("from", "editor")
                 withRoles(canRead = true, canExecute = false, canAuthor = false, canPromote = true, roleLabel = "promoter")
             }
 
@@ -373,14 +373,14 @@ class PipelineLifecycleDialogRenderTest {
         val moves =
             render("partials/pipeline-lifecycle-restore") {
                 setVariable("dlg", restoreDialog(movesPointer = true))
-                setVariable("from", "explorer")
+                setVariable("from", "editor")
             }
         moves shouldContain "v2 becomes current."
 
         val stays =
             render("partials/pipeline-lifecycle-restore") {
                 setVariable("dlg", restoreDialog(movesPointer = false))
-                setVariable("from", "explorer")
+                setVariable("from", "editor")
             }
         stays shouldContain "The pointer stays at v3."
     }
@@ -490,7 +490,7 @@ class PipelineLifecycleDialogRenderTest {
                     ),
                 )
                 setVariable("preselect", null)
-                setVariable("from", "explorer")
+                setVariable("from", "editor")
             }
 
         html shouldContain "role=\"radiogroup\""
@@ -540,7 +540,7 @@ class PipelineLifecycleDialogRenderTest {
     private fun renderRelease(pins: List<PipelineLifecycleDialogModel.PinView>): String =
         render("partials/pipeline-lifecycle-release") {
             setVariable("dlg", releaseDialog(pins))
-            setVariable("from", "explorer")
+            setVariable("from", "editor")
         }
 
     private fun purgeDialog(runCount: Int) =
@@ -568,7 +568,7 @@ class PipelineLifecycleDialogRenderTest {
     ): String =
         render("partials/pipeline-lifecycle-discard") {
             setVariable("dlg", discardDialog().copy(isCurrent = isCurrent, fallback = fallback))
-            setVariable("from", "explorer")
+            setVariable("from", "editor")
         }
 
     private fun restoreDialog(movesPointer: Boolean) =
@@ -599,11 +599,11 @@ class PipelineLifecycleDialogRenderTest {
                     refusal = refusal,
                 ),
             )
-            setVariable("from", "explorer")
+            setVariable("from", "editor")
         }
 
     @Test
-    fun `#395 - discard, restore and switch post WITHOUT the explorer target from the workspace, and keep it for the explorer`() {
+    fun `#395 - discard, restore and switch post WITHOUT a target from the workspace - the reload is the answer`() {
         val switchDialog =
             PipelineLifecycleDialogModel.SwitchDialog(
                 id = LEAF_ID,
@@ -628,16 +628,10 @@ class PipelineLifecycleDialogRenderTest {
                 }
             val form = Regex("""<form[^>]*hx-post[^>]*>""").find(workspace)?.value ?: error("$view: no form")
             // The workspace page has no #pipeline-detail: a target there is a request never sent (#395).
+            // #401 removed the explorer arm that re-rendered it — the redirect is EVERY surface's answer.
             form shouldNotContain "#pipeline-detail"
             form shouldContain "hx-swap=\"none\""
             workspace shouldContain "<input type=\"hidden\" name=\"from\" value=\"editor\">"
-
-            val explorer =
-                render(view) {
-                    fill()
-                    setVariable("from", "explorer")
-                }
-            Regex("""<form[^>]*hx-post[^>]*>""").find(explorer)!!.value shouldContain "hx-target=\"#pipeline-detail\""
         }
     }
 

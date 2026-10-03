@@ -294,4 +294,11 @@ class UiConfig {
         actorNames: ActorNames,
         authoring: co.datapipelines.pipeline.AuthoringGuard,
     ): TemplateLifecycleDialogModel = TemplateLifecycleDialogModel(templates, usage, actorNames, authoring)
+
+    /**
+     * #407 — the release flash's one-shot, session-held cascade names, shared by the
+     * lifecycle dialog's release POST (the hold) and [ReleaseFlashAdvice] (the consume).
+     */
+    @Bean
+    fun releaseFlash(): ReleaseFlash = ReleaseFlash()
 }
