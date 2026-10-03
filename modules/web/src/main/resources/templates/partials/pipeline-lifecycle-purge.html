@@ -19,8 +19,9 @@
     </p>
 
     <form th:attr="hx-post=@{'/partials/pipelines/{id}/lifecycle/purge'(id=${dlg.id}, version=${dlg.version})},
-                     hx-target=${from == 'editor'} ? null : '#pipeline-detail',
-                     hx-swap=${from == 'editor'} ? 'none' : 'innerHTML'">
+                     hx-swap='none'">
+      <!-- #401: every surface answers HX-Redirect — the workspace reloads with the layout's
+           flash; the explorer's in-place re-render is gone (no page renders its pane). -->
       <input type="hidden" name="from" th:value="${from}">
       <label class="ds-form-label u-mt-md" th:for="'plc-purge-confirm'">
         Type <span class="u-mono" th:text="${dlg.expected}">v4</span> to confirm

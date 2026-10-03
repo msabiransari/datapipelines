@@ -25,8 +25,9 @@
 
 
       <form th:attr="hx-post=@{'/partials/pipelines/{id}/lifecycle/purge-entity'(id=${dlg.id})},
-                       hx-target=${from == 'editor'} ? null : '#pipeline-detail',
-                       hx-swap=${from == 'editor'} ? 'none' : 'innerHTML'">
+                       hx-swap='none'">
+        <!-- #401: every surface answers HX-Redirect — the catalog reloads (the tree loses the
+             leaf); the explorer's in-place re-render is gone (no page renders its pane). -->
         <input type="hidden" name="from" th:value="${from}">
         <!-- 2026-09-18 (#165): the offer lives INSIDE the form — an htmx hx-post submits the form's own
              controls only, and the checkbox that sat above the <form> never reached the server: the

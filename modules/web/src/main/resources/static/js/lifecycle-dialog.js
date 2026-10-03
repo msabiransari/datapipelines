@@ -1,6 +1,7 @@
 /*
  * 102 — the lifecycle dialogs' client half (ui-screens §4.3d): the ONE per-screen container
- * (#px-dialog / #tx-dialog / #pe-dialog / #te-dialog, #dp-dialog since #400), its close
+ * (#tx-dialog / #pe-dialog / #te-dialog, #dp-dialog since #400; the pipelines explorer's
+ * #px-dialog is gone with its pane, #401), its close
  * paths, focus, and the typed confirm. Shared by five screens; it owns no verb, no fetch and
  * no toast — the dialogs are
  * htmx partials whose POSTs answer Shape A / HX-Redirect / Shape C, and toast.js owns the
@@ -43,7 +44,7 @@
 (function () {
   'use strict';
 
-  var CONTAINERS = ['px-dialog', 'tx-dialog', 'pe-dialog', 'te-dialog', 'dp-dialog'];
+  var CONTAINERS = ['tx-dialog', 'pe-dialog', 'te-dialog', 'dp-dialog'];
 
   function openContainer() {
     for (var i = 0; i < CONTAINERS.length; i++) {
@@ -141,7 +142,7 @@
 
   /**
    * The gates' wiring: ONE delegated listener per dialog CONTAINER (the permanent
-   * #px-dialog and siblings, which outlive every dialog swapped into them), armed once and
+   * containers, which outlive every dialog swapped into them), armed once and
    * marked on the container — so a replaced footer, a re-opened dialog or a repeated checks
    * run never stacks a listener and never leaves one bound to a node that is gone. `input`
    * and `change` both bubble; the handler re-judges from whatever controls exist NOW. The
@@ -214,8 +215,8 @@
       return;
     }
     // A Shape A success landed in a detail pane: its marker closes the dialog.
-    if ((target.id === 'pipeline-detail' || target.id === 'template-detail') &&
-        target.querySelector('[data-lifecycle-applied]')) {
+    // (#401 — the pipeline's pane is gone; the template explorer's is the one left.)
+    if (target.id === 'template-detail' && target.querySelector('[data-lifecycle-applied]')) {
       closeDialog();
       return;
     }

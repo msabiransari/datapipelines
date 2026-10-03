@@ -277,13 +277,14 @@ val NO_EXCLUSIVE_DRAFT_TEMPLATES =
     }
 
 /**
- * A [co.datapipelines.web.ui.PipelineBrowseModel] over [pipelines], with 106's detail-only
+ * A [co.datapipelines.web.ui.PipelineBrowseModel] over [pipelines], with the runs/usage-side
  * collaborators as STRICT mocks by default.
  *
  * Strict is the right double here, and the reason is the inverse of the usual one: these five
- * are read by [co.datapipelines.web.ui.PipelineBrowseModel.fillDetail] and by nothing else, so
+ * were read by the detail pane's fill — removed with the pane (#401) — and by nothing else in
+ * the list surface, so
  * a listing test that touches one has a bug and must go red. A relaxed mock would swallow
- * exactly that. A test that DOES exercise the detail passes its own real doubles.
+ * exactly that. A test that DOES exercise a tab passes its own real doubles.
  */
 @Suppress("LongParameterList") // the model's own constructor, mirrored
 fun pipelineBrowseModelOver(
@@ -294,12 +295,11 @@ fun pipelineBrowseModelOver(
     datasources: co.datapipelines.pipeline.DatasourceRegistry = co.datapipelines.pipeline.DatasourceRegistry.EMPTY,
     actors: co.datapipelines.web.ui.ActorNames = anonymousActors(),
     runStats: co.datapipelines.web.ui.PipelineRunStats = io.mockk.mockk(),
-    authoring: co.datapipelines.pipeline.AuthoringGuard = co.datapipelines.pipeline.AuthoringGuard(enabled = true),
     schedules: co.datapipelines.scheduler.ScheduleService = io.mockk.mockk(),
     dashboards: co.datapipelines.pipeline.PipelineVersionConsumers = NO_DASHBOARDS,
 ): co.datapipelines.web.ui.PipelineBrowseModel =
     co.datapipelines.web.ui
-        .PipelineBrowseModel(service, pipelines, executions, endpoints, datasources, actors, runStats, authoring, schedules, dashboards)
+        .PipelineBrowseModel(service, pipelines, executions, endpoints, datasources, actors, runStats, schedules, dashboards)
 
 /**
  * The templates twin of [pipelineBrowseModelOver], for the same reason. Since 178 the model
