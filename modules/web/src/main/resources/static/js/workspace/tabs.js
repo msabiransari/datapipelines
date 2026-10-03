@@ -2,9 +2,10 @@
   "use strict";
 
   /*
-   * #400 — the workspace tab machine's SHARED CORE (dashboards/workspace.js is its client;
-   * pipeline-editor/tabs.js adopts it under #420 — its first adapter was reverted at the #400
-   * merge, when the pipeline workspace's browser suites went red). One admission and
+   * #400 — the workspace tab machine's SHARED CORE (dashboards/workspace.js, workspace/panes.js
+   * and pipeline-editor/tabs.js are its clients; the editor's first adapter was reverted at the
+   * #400 merge, when the pipeline workspace's browser suites went red, and #420 re-adopted it
+   * with getters that read `this`). One admission and
    * transition rule, never a copy. PURE — no DOM, no Alpine, no fetch — so `node --test` owns
    * the admission and transition tables for every family that adopts it.
    *
@@ -23,7 +24,8 @@
    *    active, exactly one panel visible.
    *
    * What does NOT live here: the DOM effects, the lazy tab reads, the URL — each family's
-   * glue owns those (init.js for the editor; dashboards/workspace.js for the dashboard).
+   * glue owns those (init.js for the editor; dashboards/workspace.js for the dashboard;
+   * workspace/panes.js for the visualizations workspace, #399).
    */
 
   /**

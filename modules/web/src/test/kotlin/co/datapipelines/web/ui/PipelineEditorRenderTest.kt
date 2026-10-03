@@ -1,6 +1,7 @@
 package co.datapipelines.web.ui
 
 import co.datapipelines.pipeline.PipelineVersionStatus
+import io.kotest.matchers.comparables.shouldBeLessThan
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
@@ -59,6 +60,9 @@ class PipelineEditorRenderTest {
         // The state machines the page binds to are the ones that load.
         html shouldContain "/js/pipeline-editor/dock.js"
         html shouldContain "/js/pipeline-editor/events.js"
+        // #420: the editor's tab machine is the shared core's — the core loads, and before the adapter.
+        html shouldContain "/js/workspace/tabs.js"
+        html.indexOf("/js/workspace/tabs.js") shouldBeLessThan html.indexOf("/js/pipeline-editor/tabs.js")
     }
 
     /**

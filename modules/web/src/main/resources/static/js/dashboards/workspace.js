@@ -6,7 +6,7 @@
    * the page's closed tab set (Board | Overview | Refreshes | Versions | Keys, Board the
    * default; the server's DashboardWorkspaceTab enum resolves the page's tab by the SAME
    * rule). The admission/transition machine is the SHARED CORE (static/js/workspace/tabs.js —
-   * built for every workspace; the pipeline editor adopts it under #420); what this
+   * built for every workspace; the pipeline editor runs it too since #420); what this
    * glue owns is the DOM effects the core deliberately does not:
    *
    *  - the tab strip: aria-selected moves, panes hide through the `hidden` ATTRIBUTE (never

@@ -1,6 +1,6 @@
 # Dashboards
 
-**Status:** v0.29 — the Versions tables' created/released relative with the UTC stamp on hover (§7, #422) beside Back/Forward across the dashboards workspace's tab switches (§7, #402) beside the visualizations workspace (§7, #399) beside the dashboards workspace (§5.2's `version`, §7's workspace, #400; #409 closes with it) beside the
+**Status:** v0.30 — the pipeline editor runs the shared tab core (§7, #420) beside the Versions tables' created/released relative with the UTC stamp on hover (§7, #422) beside Back/Forward across the dashboards workspace's tab switches (§7, #402) beside the visualizations workspace (§7, #399) beside the dashboards workspace (§5.2's `version`, §7's workspace, #400; #409 closes with it) beside the
 board's small-slot margins and its breakpoint collapse (§6.2, §6.3, #386/#387), 328's release-record judgement (§4.3)
 permissions (§4, lane L1b); the transfer routes and their limits' honest contract (§3.3, lanes L1c/L1c-b/L1c-c: the
 import's atomicity, the RELEASE rules on a landing, the aggregate count ceiling, the wire's per-family arms); the server
@@ -863,8 +863,8 @@ tree had just linked; it does not any more. The five tabs:
   fetched — only for a caller with `dashboard.key.bind`.
 
 Tab state is IN-PAGE (`static/js/dashboards/workspace.js` over the SHARED tab core
-`static/js/workspace/tabs.js`, built to be the one admission and transition rule; the pipeline
-editor keeps its own `pipeline-editor/tabs.js` until #420 adopts the core): a tab switch swaps no version and cancels no poll, the
+`static/js/workspace/tabs.js`, the one admission and transition rule; the pipeline editor's
+`pipeline-editor/tabs.js` runs the same machine since #420): a tab switch swaps no version and cancels no poll, the
 URL's `?tab=` moves with a pushed history entry of the workspace's own (#402,
 `static/js/workspace/history.js`, tab only — the version switch stays a full navigation) so
 Back/Forward re-select the tab in page (a cached restore re-wires the strip once and shows the
@@ -912,6 +912,7 @@ ONE Plotly bundle the viewed version's traces need, and the choose-a-version sta
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-03 | v0.30 | #420 the pipeline editor re-adopts the shared tab core | **§7:** the tab-core sentence no longer says the editor keeps its own copy — `pipeline-editor/tabs.js` delegates admission and transition to `workspace/tabs.js` (its 18 getters keep reading `this`, so Alpine's proxy tracks them), so the dashboards, visualizations and pipeline workspaces run one machine. No dashboards behaviour changes. |
 | 2026-10-03 | v0.29 | #422 the Versions tables' time shape | **§7:** the dashboards and visualizations Versions tabs render created/released relative in the cell with the absolute UTC stamp on `title` (the keys page's shape, computed in the model's fill); the dashboards partial gains its own `dp-versions-pane` class so the framed table scrolls inside its viewport at 390 px. |
 | 2026-10-03 | v0.28 | #402 Back/Forward across the dashboards workspace's tab switches | **§7:** a tab switch PUSHES a tab-only entry through `workspace/history.js` (it was `replaceState`, so Back left the page); Back/Forward re-select in page through the helper's one window listener; a cached restore re-wires the strip once and re-paints the tab it left. |
 | 2026-10-02 | v0.27 | #399 the visualizations workspace (#396) | **§4:** "There is no UI page yet (L3)" leaves — a person reads both families and drives their lifecycle verbs from §7's pages. **§7:** the visualizations workspace subsection — the catalog and the searchable sidebar branch, and the version-explicit workspace's five tabs: Preview (test FIXTURES only, §3.4.1's builder keyed by the version), Overview, Evidence (the 100-run cap; the screenshot or "no screenshot"), Used by (through the dashboard lens) and Versions (the seven dialogs, the one `release_pinned_templates` consent, the Export link). No route, permission, code or lifecycle rule changed. |

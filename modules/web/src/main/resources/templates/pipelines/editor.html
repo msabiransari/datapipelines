@@ -38,8 +38,12 @@
     <!-- 195: the Parameters sidebar's field view models — pure, node-tested, read
          by init.js and the template's paths. -->
     <script th:src="@{/js/pipeline-editor/param-fields.js}"></script>
-    <!-- #349: the workspace's six-tab state machine (pure, node-tested) — Flow is the
-         graph tab; Runs is admitted only with the execution read. Loaded before init.js. -->
+    <!-- #349/#420: the workspace's six-tab state machine (pure, node-tested) — Flow is the
+         graph tab; Runs is admitted only with the execution read. The admission and
+         transition rule is the shared core's (workspace/tabs.js, the machine the dashboards
+         and visualizations workspaces run), so the core loads FIRST; both load before
+         init.js. -->
+    <script th:src="@{/js/workspace/tabs.js}"></script>
     <script th:src="@{/js/pipeline-editor/tabs.js}"></script>
     <!-- #348: the workspace version context (pure, node-tested) — every execute POST and
          node-SQL request reads the viewed version from it. Loaded before init.js. -->
