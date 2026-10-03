@@ -4,6 +4,7 @@ import com.microsoft.playwright.Page
 import com.microsoft.playwright.options.RequestOptions
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
+import io.kotest.matchers.collections.shouldNotBeEmpty
 import io.kotest.matchers.ints.shouldBeGreaterThan
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -242,6 +243,17 @@ class VisualizationWorkspaceBrowserTest : VisualizationBrowserSuite() {
         page.waitForTimeout(SETTLE_MS)
         withClue("$tab at $where scrolls sideways") { documentOverflowsX() shouldBe false }
         withClue("CSP on $tab at $where") { drainCspViolations().shouldBeEmpty() }
+        if (tab == "versions") {
+            // #422 — relative in the cell, the absolute UTC stamp on `title`: never a raw ISO instant.
+            val cells = page.locator("#viz-pane-versions td").allInnerTexts()
+            withClue("versions cells at $where") { cells.shouldNotBeEmpty() }
+            withClue("a raw ISO instant in the versions cells at $where: $cells") {
+                cells.filter { ISO_INSTANT.containsMatchIn(it) }.shouldBeEmpty()
+            }
+            withClue("versions at $where carries no UTC title") {
+                page.locator("#viz-pane-versions td span[title\$='UTC']").count() shouldBeGreaterThan 0
+            }
+        }
         if (tab == "preview" || tab == "versions") shot("workspace-$tab-$shotSuffix")
     }
 
@@ -266,5 +278,8 @@ class VisualizationWorkspaceBrowserTest : VisualizationBrowserSuite() {
         val WIDTHS = listOf(1440 to 900, 1100 to 800, 390 to 844)
         val TABS = listOf("preview", "overview", "evidence", "used-by", "versions")
         val SHOTS = Paths.get("build", "reports", "399-visualizations")
+
+        /** A raw ISO-8601 instant (`2026-10-01T09:00:00Z`) — the text #422 retired from the Versions cells. */
+        val ISO_INSTANT = Regex("""\d{4}-\d\d-\d\dT\d\d:\d\d""")
     }
 }

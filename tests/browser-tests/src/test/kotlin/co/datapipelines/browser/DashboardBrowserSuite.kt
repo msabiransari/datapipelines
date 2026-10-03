@@ -1,5 +1,6 @@
 package co.datapipelines.browser
 
+import com.microsoft.playwright.Page
 import java.sql.DriverManager
 
 /**
@@ -30,6 +31,18 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
     private lateinit var seededEmail: String
 
     protected fun suffix(): String = generatedPassword("d").takeLast(8).lowercase()
+
+    /**
+     * True when the page scrolls sideways — a page must never, at any width. `<main>` is the shell's scroll container
+     * (`overflow-x: auto`), so a too-wide card scrolls MAIN while the document stays put: both are read.
+     * (Moved up from VisualizationBrowserSuite, a subclass of this one — #422.)
+     */
+    protected fun documentOverflowsX(target: Page = page): Boolean =
+        target.evaluate(
+            "() => { const m = document.querySelector('.app-main');" +
+                " return document.documentElement.scrollWidth > window.innerWidth || document.body.scrollWidth > window.innerWidth" +
+                " || (m !== null && m.scrollWidth > m.clientWidth); }",
+        ) as Boolean
 
     /** A fresh admin in a workspace of their own; returns the root folder this test's names live under. */
     protected fun ready(slug: String): String {

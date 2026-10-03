@@ -62,10 +62,11 @@ class VisualizationPartialControllerTest {
     private var view: LensedView = LensedView.EVERYTHING
 
     private val workspaceModel = VisualizationWorkspaceModel(visualizations)
+    private val tabs = VisualizationTabModel(visualizations, workspaceModel, previewCases, sessions, dashboards, templateStatuses)
     private val controller =
         VisualizationPartialController(
             browse = VisualizationBrowseModel(visualizations),
-            tabs = VisualizationTabModel(visualizations, workspaceModel, previewCases, sessions, dashboards, templateStatuses),
+            tabs = tabs,
             lens = PromoterLens { view },
         )
 
@@ -331,5 +332,28 @@ class VisualizationPartialControllerTest {
         val viewer = ExtendedModelMap()
         controller.versions(viewer, vizId, null)
         viewer["canManageVersions"] shouldBe false
+    }
+
+    /** #422 — created/released are the keys page's shape: a relative age and the absolute UTC stamp, both against the fill's `now`. */
+    @Test
+    fun `the versions rows carry a relative age and the absolute UTC stamp computed against the fill's now`() {
+        authenticate(workspaceId, WorkspaceRole.AUTHOR)
+        twoVersions()
+        val released = detail(vizId, 1, PipelineVersionStatus.RELEASED).copy(releasedAt = AT.plusSeconds(3_600))
+        every { visualizations.listVersions(workspaceId, any(), vizId) } returns
+            listOf(detail(vizId, 2, PipelineVersionStatus.DRAFT), released)
+
+        val model = ExtendedModelMap()
+        tabs.fillVersions(model, workspaceId, LensedView.EVERYTHING, vizId, null, now = AT.plusSeconds(3 * 86_400 + 7_200))
+
+        @Suppress("UNCHECKED_CAST")
+        val rows = model["versions"] as List<VisualizationTabModel.VersionRow>
+        val (draft, rel) = rows
+        draft.createdAgo shouldBe "3 days ago"
+        draft.createdAbsolute shouldBe "2026-10-01 09:00 UTC"
+        draft.releasedAgo shouldBe null
+        draft.releasedAbsolute shouldBe null
+        rel.releasedAgo shouldBe "3 days ago"
+        rel.releasedAbsolute shouldBe "2026-10-01 10:00 UTC"
     }
 }
