@@ -1,0 +1,34 @@
+<!-- The Purge-visualization dialog (#399) — the whole entity, sole-draft-only and never while any live
+     dashboard version pins any of its versions: either refusal renders in place and the button does not
+     exist. The typed confirm names the VISUALIZATION (its full path); the POST re-reads the name fresh. -->
+<div xmlns:th="http://www.thymeleaf.org" class="u-backdrop" data-lifecycle-dialog="visualization-purge-entity">
+  <div class="ds-card app-modal app-modal-md" role="dialog" aria-modal="true" aria-labelledby="viz-purge-entity-title">
+    <button type="button" class="ds-button ds-button-ghost ds-button-sm app-modal-close u-text-xl"
+            aria-label="Close" data-lifecycle-close>
+      <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#x"></use></svg>
+    </button>
+    <h2 class="ds-title u-m0 u-mb-md" id="viz-purge-entity-title">Purge this visualization?</h2>
+
+    <p class="u-secondary u-text-sm" th:if="${dlg.refusal != null}" data-purge-entity-refusal
+       th:text="${dlg.refusal.message}">An entity purge requires the only version to be a DRAFT.</p>
+    <div th:replace="~{partials/visualization-lifecycle-pinned :: pinned(${dlg.pinnedBy})}"></div>
+
+    <th:block th:if="${dlg.canPurge}">
+      <p class="u-secondary u-text-sm">
+        The visualization and its draft are deleted permanently — this cannot be undone. The catalog and
+        the sidebar tree lose it at once.
+      </p>
+      <form th:attr="hx-post=@{'/partials/visualizations/{id}/lifecycle/purge-entity'(id=${dlg.id})},
+                     hx-swap='none'">
+        <label class="ds-form-label u-mt-md" for="viz-purge-entity-confirm">
+          Type <span class="u-mono" th:text="${dlg.expected}">finance/charts/revenue_by_region</span> to confirm
+        </label>
+        <input class="ds-input u-mono" id="viz-purge-entity-confirm" data-confirm-input name="confirm" autocomplete="off"
+               spellcheck="false" th:attr="data-confirm-expect=${dlg.expected}">
+        <button th:if="${canAuthor == true}" type="submit" data-verb="visualization-purge-entity-confirm"
+                class="ds-button ds-button-danger u-full u-mt-md" data-typed-confirm
+                disabled hx-disabled-elt="this">Purge visualization</button>
+      </form>
+    </th:block>
+  </div>
+</div>

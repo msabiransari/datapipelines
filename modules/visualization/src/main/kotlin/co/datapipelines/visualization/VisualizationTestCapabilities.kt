@@ -164,7 +164,6 @@ class VisualizationTestCapabilities(
             message = "The test session is expired or revoked.",
             details = mapOf("reason" to "capability_expired"),
         )
-
 }
 
 /**

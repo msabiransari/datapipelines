@@ -72,6 +72,13 @@ class ReadFloorTest {
         familyOf("/partials/parameter-sets/tree") shouldBeFamily Family.PARAMETER_SETS
         familyOf("/api/v1/visualizations") shouldBeFamily Family.VISUALIZATIONS
         familyOf("/api/v1/visualizations/{id}/versions/{version}") shouldBeFamily Family.VISUALIZATIONS
+        // #399 — the visualization pages and partials are the family's reads; its dialogs floor at their verbs.
+        familyOf("/visualizations") shouldBeFamily Family.VISUALIZATIONS
+        familyOf("/visualizations/{id}") shouldBeFamily Family.VISUALIZATIONS
+        familyOf("/partials/visualizations") shouldBeFamily Family.VISUALIZATIONS
+        familyOf("/partials/visualizations/tree") shouldBeFamily Family.VISUALIZATIONS
+        familyOf("/partials/visualizations/{id}/evidence/{runId}") shouldBeFamily Family.VISUALIZATIONS
+        familyOf("/partials/visualizations/{id}/lifecycle/switch") shouldBeFamily Family.LIFECYCLE_DIALOGS
         familyOf("/api/v1/dashboards") shouldBeFamily Family.DASHBOARDS
         familyOf("/api/v1/dashboards/{id}/versions") shouldBeFamily Family.DASHBOARDS
         familyOf("/api/v1/dashboards/{id}") shouldBeFamily Family.DASHBOARDS
@@ -195,7 +202,8 @@ class ReadFloorTest {
         LIFECYCLE_DIALOGS(
             // #400 — the dashboard family's dialogs join the pipeline and template ones: each
             // GET floors at the verb's own permission, the same rule one more family over.
-            floor = 17,
+            // #399 — the visualization family's seven join on the same rule.
+            floor = 24,
             permissions =
                 setOf(
                     Permission.PIPELINE_VERSION_MANAGE,
@@ -209,6 +217,10 @@ class ReadFloorTest {
                     Permission.DASHBOARD_DELETE,
                     Permission.DASHBOARD_RELEASE,
                     Permission.DASHBOARD_SWITCH_VERSION,
+                    Permission.VISUALIZATION_VERSION_MANAGE,
+                    Permission.VISUALIZATION_DELETE,
+                    Permission.VISUALIZATION_RELEASE,
+                    Permission.VISUALIZATION_SWITCH_VERSION,
                 ),
             matches = { path -> path.contains("/lifecycle/") },
         ),
@@ -272,12 +284,19 @@ class ReadFloorTest {
             },
         ),
 
-        /** #10 L1b: the visualizations — an every-role read (the lens aside); floor = the family's six GET handlers
-         * (L1c's export joined). */
+        /** #10 L1b: the visualizations — an every-role read (the lens aside); the family's six API GET handlers (L1c's
+         * export joined), and #399's two pages and eight partials (the sidebar tree, the catalog's swap root, the five
+         * workspace tabs and the run detail). The public capability preview is not a reader. */
         VISUALIZATIONS(
-            floor = 6,
+            floor = 16,
             permissions = setOf(Permission.VISUALIZATION_READ),
-            matches = { path -> path.startsWith("/api/v1/visualizations") },
+            matches = { path ->
+                path.startsWith("/api/v1/visualizations") ||
+                    path == "/visualizations" ||
+                    path.startsWith("/visualizations/") ||
+                    path == "/partials/visualizations" ||
+                    path.startsWith("/partials/visualizations/")
+            },
         ),
 
         /**

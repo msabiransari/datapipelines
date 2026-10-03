@@ -172,6 +172,51 @@ class UiConfig {
     ): DashboardLifecycleDialogModel =
         DashboardLifecycleDialogModel(dashboards, pipelines, sets, visualizations.pins, actorNames, authoring)
 
+    /** #399: the Visualizations screens' browse model — the rail tree's levels, its search and the catalog. */
+    @Bean
+    fun visualizationBrowseModel(visualizations: co.datapipelines.visualization.VisualizationService): VisualizationBrowseModel =
+        VisualizationBrowseModel(visualizations)
+
+    /** #399: the canonical visualization workspace page's version-resolution model. */
+    @Bean
+    fun visualizationWorkspaceModel(visualizations: co.datapipelines.visualization.VisualizationService): VisualizationWorkspaceModel =
+        VisualizationWorkspaceModel(visualizations)
+
+    /**
+     * #399: the visualization workspace's read tabs — the Preview evaluates cases through the SAME
+     * [co.datapipelines.visualization.PreviewCaseEvaluator] the capability preview builds over the fixture port.
+     */
+    @Bean
+    fun visualizationTabModel(
+        visualizations: co.datapipelines.visualization.VisualizationService,
+        workspace: VisualizationWorkspaceModel,
+        fixtures: co.datapipelines.visualization.TestFixtureEvaluator,
+        sessions: co.datapipelines.visualization.VisualizationTestSessionService,
+        dashboards: co.datapipelines.visualization.DashboardService,
+        templateStatuses: co.datapipelines.pipeline.TemplateVersionStatuses,
+    ): VisualizationTabModel =
+        VisualizationTabModel(
+            visualizations,
+            workspace,
+            co.datapipelines.visualization.PreviewCaseEvaluator(fixtures),
+            sessions,
+            dashboards,
+            templateStatuses,
+        )
+
+    /** #399: the visualization lifecycle dialogs' facts — the same reads the service's guards and the release gate make. */
+    @Bean
+    @Suppress("LongParameterList") // one collaborator per guard the dialogs pre-read
+    fun visualizationLifecycleDialogModel(
+        visualizations: co.datapipelines.visualization.VisualizationService,
+        dashboards: co.datapipelines.visualization.DashboardService,
+        templateStatuses: co.datapipelines.pipeline.TemplateVersionStatuses,
+        evidence: co.datapipelines.visualization.ReleaseEvidence,
+        actorNames: ActorNames,
+        authoring: co.datapipelines.pipeline.AuthoringGuard,
+    ): VisualizationLifecycleDialogModel =
+        VisualizationLifecycleDialogModel(visualizations, dashboards, templateStatuses, evidence, actorNames, authoring)
+
     /** 067: the pipelines explorer's one model, shared by the page and the partial controllers. */
     @Bean
     @Suppress("LongParameterList") // 106: the detail's three regions in one call need their sources

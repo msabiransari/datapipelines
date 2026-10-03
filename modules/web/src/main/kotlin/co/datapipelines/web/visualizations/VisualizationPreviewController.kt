@@ -73,7 +73,7 @@ class VisualizationPreviewController(
         model.addAttribute("visualizationName", visualization.record.name)
         model.addAttribute("version", visualization.detail.version)
         model.addAttribute("expiresAt", preview.expiresAt.toString())
-        model.addAttribute("cases", preview.cases.map { PreviewCaseView(it.name, it.assertions.map(::assertionLabel)) })
+        model.addAttribute("cases", preview.cases.map { PreviewCaseView(it.name, it.assertions.map(PreviewViews::assertionLabel)) })
         model.addAttribute("bundle", RuntimeViews.rendererBundle(listOf(visualization)))
         model.addAttribute("previewJson", ScriptSafeJson.forScriptBlock(ArtifactJson.mapper.writeValueAsString(PreviewViews.page(preview))))
         return VIEW
@@ -84,9 +84,6 @@ class VisualizationPreviewController(
         val name: String,
         val assertions: List<String>,
     )
-
-    private fun assertionLabel(assertion: co.datapipelines.visualization.Assertion): String =
-        listOfNotNull(assertion.kind.wire, assertion.equals?.let { "= $it" }, assertion.text?.let { "\"$it\"" }).joinToString(" ")
 
     private fun unavailable() = DatapipelinesException(VisualizationErrorCodes.TEST_SESSION_NOT_FOUND, "No such test session.", emptyMap())
 
@@ -116,9 +113,12 @@ internal object PreviewViews {
     private const val PARAMETER_LOCK_SECONDS = 30
     private const val RENDER_SECONDS = 20
 
+    /** One assertion as a readable label (text, never markup) — the capability page's and the workspace's Preview tab's. */
+    fun assertionLabel(assertion: co.datapipelines.visualization.Assertion): String =
+        listOfNotNull(assertion.kind.wire, assertion.equals?.let { "= $it" }, assertion.text?.let { "\"$it\"" }).joinToString(" ")
+
     /** The capability page's block: the run's version and cases, keyed by the run, with the session's expiry. */
-    fun page(preview: TestPreview): ObjectNode =
-        page(preview.visualization, preview.cases, "preview:${preview.runId}", preview.expiresAt)
+    fun page(preview: TestPreview): ObjectNode = page(preview.visualization, preview.cases, "preview:${preview.runId}", preview.expiresAt)
 
     /**
      * The block for ANY evaluated version (#399 factored it out of the run-bound form): the capability page passes its

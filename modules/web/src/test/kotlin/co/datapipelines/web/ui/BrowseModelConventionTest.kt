@@ -51,6 +51,8 @@ class BrowseModelConventionTest {
             // #374: the catalog page and the sidebar's tree level render over ONE model, so the screen and the
             // fragment cannot disagree about what a level or a page holds.
             Pair(ParameterSetsUiController::class, ParameterSetsPartialController::class, ParameterSetsBrowseModel::class),
+            // #399: the visualizations catalog and the sidebar's tree level and search render over ONE model.
+            Pair(VisualizationUiController::class, VisualizationPartialController::class, VisualizationBrowseModel::class),
         )
 
     private fun injects(

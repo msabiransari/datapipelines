@@ -1,6 +1,6 @@
 # UI Screens Inventory
 
-**Status:** v1.105
+**Status:** v1.106
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
 **Last updated:** 2026-10-02 (#374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
@@ -187,7 +187,8 @@ Build's **Pipelines** (#350) and **Dashboards** (#10 L3b, D58) items are **navig
 branches** — one pattern for every artifact family that browses as a folder tree (workspace
 spec §5, D7/D8; Templates is its declared next use, after its page design). Every role sees
 both items (`pipeline.read` and `dashboard.read` are every-role reads; the promoter through the
-lens). The pattern, normative:
+lens). Visualizations (#399) is the fourth branch, between Dashboards and Parameter Sets, with the
+Pipelines branch's search box (its bullet below; §4.24). The pattern, normative:
 
 - **Three parts, kept distinct.** The item LINK is unchanged (the catalog page — `/pipelines`
   §4.3, `/dashboards` §4.21 — the active section, the crumb). BESIDE it a **toggle button**
@@ -245,6 +246,15 @@ lens). The pattern, normative:
   through the workspace page's `[data-nav-current]` hook, the response stamped
   `DP-Nav-Stamp: <workspace>|<lens>`, the state key `dp-nav:parameter-sets:<workspace>`. Nothing in
   the engine changed: `nav-tree.js` reads the branch's `data-nav-branch` and root URL.
+- **Visualizations (#399) is the pattern's fourth use** — Build's **Visualizations** item, between
+  Dashboards and Parameter Sets (the lucide `chart-line` glyph, every role: `visualization.read`, the
+  promoter through the lens). The link opens the flat catalog (`/visualizations`, §4.24); the toggle
+  opens a panel WITH the Pipelines branch's search box (the visualization service's lensed name
+  search: a non-empty `q` swaps the flat results into the root, clearing returns the tree) and the
+  lazy tree `/partials/visualizations/tree?scope=nav` under `#viz-tree-nav`; a leaf is a full-document
+  link to the canonical workspace `/visualizations/{id}`, the current leaf marked through the workspace
+  page's `[data-nav-current]` hook, the response stamped `DP-Nav-Stamp: <workspace>|<lens>`, the state
+  key `dp-nav:visualizations:<workspace>`. Again no engine change.
 
 - **The brand mark (163, #157, "D1").** Three rings converging into an outlined tile with three
   rising bars — the tile is a 4-unit `currentColor` stroke and the bars are `currentColor`
@@ -1949,6 +1959,12 @@ themes under the live CSP with zero violations, the rendered trace count per cas
 start → preview → screenshot → submit → upload → release flow), `PublicPathsTest`,
 `PublicRouteWalkerTest`, `PublicContractE2eTest`.
 
+**The signed-in twin (#399).** A person reads the same per-case rendering on the workspace's
+Preview tab ([§4.24](#424-visualizations--the-catalog-the-sidebar-tree-and-the-workspace-399-396)):
+the same builder writes the same configuration block, keyed by the version instead of the run and
+carrying no deadline, behind `visualization.read` and the session. This page stays the agent's
+capability page — its public route admits nothing of the workspace.
+
 ---
 
 ### 4.23 Parameter Sets (the catalog and the workspace page — #374, #357 S1)
@@ -2024,6 +2040,70 @@ demo content), and the browser suite `ParameterSetPagesBrowserTest`.
 (RELEASED v1): a year → month → pickup-zone cascade over the `sample-trips` Postgres datasource through three
 pinned selector templates, a hard-coded `measure` choice and a typed `min_trips` input. The seeder derives
 the set's id per workspace and states the body's shape hash; the examples file carries neither.
+
+### 4.24 Visualizations — the catalog, the sidebar tree and the workspace (#399, #396)
+
+**The catalog.**
+
+| Attribute | Value |
+|---|---|
+| URL | `GET /visualizations` (`?q=&offset=` the deep links) |
+| Auth required | Yes — `visualization.read`, every role (a promoter through the lens: the visualizations a dashboard her lens admits pins; a hidden one is absent — not listed, not counted, not paged) |
+| Purpose | The flat catalog landing: every visualization the caller may read — or the matches of `q` over name, display name and description — one row each, a row linking the workspace |
+| Design primitives | §4.21's catalog shape exactly (`.app-catalog-search`, `.tpl-results`, the shared pager); `visualizations.css` (head-loaded, §3.0) dresses the page's own bits with design tokens only |
+| JS | None of its own — the search is the htmx SPA pattern (a debounced `hx-get` into the stable `#viz-list-wrapper` root) |
+| htmx | Yes — the search and the pager re-fetch `GET /partials/visualizations` (`scope=page`) into `#viz-list-wrapper`, `outerHTML` |
+
+Content: the flat rows at their WORKING version (a draft is marked; versioning §7). A row is a
+full navigation (`hx-boost="false"` — the workspace declares one Plotly bundle). `q` is trimmed and
+capped at 200 characters and reaches SQL only as an `ILIKE … ESCAPE '\'` pattern with its wildcards
+escaped. Empty state: visualizations are authored through the MCP server — the note says so.
+
+**The sidebar tree.** The rail's **Visualizations** item sits in Build between Dashboards and
+Parameter Sets (lucide `chart-line`) and is the navigating-tree pattern of §3.4 with all four
+pieces: the item link (this catalog), the toggle, the lazy panel
+(`GET /partials/visualizations/tree?prefix=&scope=nav` under `#viz-tree-nav`, one level per
+request, pagers in place) and the Pipelines branch's search box (a non-empty `q` swaps the FLAT,
+lensed results into the same root; clearing returns the tree). A leaf navigates to
+`/visualizations/{id}` as a full document.
+
+**The workspace.**
+
+| Attribute | Value |
+|---|---|
+| URL | `GET /visualizations/{id}?version=N&tab=…` — one URL names one visualization, one viewed version and one tab. No `version` views the current release, else the working draft |
+| Auth required | Yes — `visualization.read`. Absent, foreign or lens-hidden → the family's 404; a named version that is DISCARDED or does not resolve for the caller → the family's 404. A malformed `version` (not a positive integer) is a 400 whose message is a constant and never echoes the input. `tab` is the closed set below — anything else is Preview, never an error |
+| Purpose | The tabbed, version-explicit workspace (#396's ruling, §4.21's shape): read a visualization's version, its test evidence and the dashboards that pin it; a person releases and manages versions from the Versions tab. The browser NEVER authors — agents author over MCP |
+| Tabs (the floor) | **Preview (test fixtures)** — the DEFAULT. The viewed version's saved test cases rendered in the runtime's **fixture mode**, ONE case at a time behind a case selector (a case mounts on its first selection; a ten-case visualization boots one chart, not ten). The tab's label and its lead sentence say it shows fixtures; no case → the empty state, verbatim: "no test cases — the preview renders a visualization's test-case fixtures; live data runs inside a dashboard". No request leaves the pane — the configuration block is §4.22's, built by the SAME builder (`PreviewViews.page`), keyed `workspace:<id>:v<n>` and carrying no expiry. **Overview** — the viewed version's definition, read-only: name, display name, description, the renderer and its bundle, the inputs and their columns, the transform pin with its status and bindings, the test-case count and the body hash. **Evidence** — the version's test runs, newest first, and it SAYS its cap ("the newest 100 runs at most"); a run's detail shows its screenshot through the existing screenshot route (whose rules it follows — the image only when a screenshot was stored), else the text "no screenshot", and its cases, environment and mechanical report as text. **Used by** — the dashboard versions that pin this visualization, read through the caller's DASHBOARD lens (`DashboardService.pinnedBy`), each linking `/dashboards/{id}`; none → "no dashboard pins this visualization". **Versions** — the admitted history with current/draft/discarded markers, each version a full-navigation link onto `?version=`, the lifecycle verbs (below) and the Export link to `GET /api/v1/visualizations/{id}/export` |
+| Lifecycle dialogs | Each verb is a GET (the dialog, into `#dp-dialog`) + POST pair under `/partials/visualizations/{id}/lifecycle/…`, session-only, CSRF-protected, the POST calling the SAME service verb the REST route calls and answering `HX-Redirect` — built server-side from the id and a whitelisted `from` — back onto the Versions tab (the entity purge onto the catalog), the flash bin rendering the toast. **release** (the refusals listed BEFORE the button in the service's order — no test case, the transform pin not released, then the evidence gate; the ONE `release_pinned_templates` consent checkbox when the pin is a DRAFT, D61), **purge-draft** and **purge-version** (typed confirm; the dashboards pinning that version listed), **discard** (names the version the current pointer falls back to, by the repository's D60 rule), **restore** (says whether the pointer moves), **switch**, **purge-entity** (typed confirm naming the visualization; only a sole draft). The buttons render only for a role whose `holds` admits the verb's §7.6 row — a viewer and a promoter see none |
+| Design primitives | `dashboards.css` (the workspace frame and the runtime's emitted classes), `visualizations.css` and the vendored `plotly.css` — all head-loaded (§3.0) |
+| JS | L3a's vendored runtime + the three renderers (the ONE Plotly bundle the server chose for the VIEWED version, declared on its tag; none in the choose-a-version state), `static/js/visualization-preview.js` (§4.22's glue, exposing its per-case mount as `window.DatapipelinesPreviewMount`), `static/js/workspace/panes.js` (the pane glue — the strip, the lazy panes, `?tab=` replaceState'd — over the SHARED tab core `static/js/workspace/tabs.js`) and `static/js/visualizations/workspace.js` (the closed tab set and the one-case-at-a-time Preview) |
+| htmx | The lazy tabs' one read each (a hidden tab causes no fetch), the evidence run detail, the dialogs' GET/POST pairs. Every link that names a version is a FULL navigation (the one-bundle rule); the tab strip never navigates |
+
+Every case name, assertion label, run field and JSON document renders through `th:text`
+(`textContent` in the glue); the Preview tab's configuration block is the page's one `th:utext`
+slot, written through `ScriptSafeJson`. The workspace is NOT the session-less capability page
+of §4.22: the public `/visualizations/{id}/preview` route admits none of these routes.
+
+Guards: `VisualizationUiRenderTest` (the tree level, the flat search, the catalog, the ONE
+bundle for a 2d and a 3d version, the hidden panes, the choose-a-version state, the Preview's
+empty text verbatim, its selector and escaping, the Evidence cap and the screenshot / "no
+screenshot" split, the Used-by link and empty state, the verbs per role, every dialog's states),
+`VisualizationUiControllerTest` (the version resolution, the closed tab set, the non-echoing 400,
+DISCARDED and lens-hidden 404s, the affordances per role, the lensed catalog),
+`VisualizationPartialControllerTest` (the tree, the tabs' 400/404s, the evidence filter and cap,
+the dashboard lens on Used by), `VisualizationLifecycleDialogControllerTest` (the verbs' audits,
+the typed confirm before the service, the redirect whitelist, the session gate),
+`VisualizationLifecycleDialogModelTest` (the refusal order, the consent, the D60 fallback, the
+pinners per version), `VisualizationPreviewBlockTest` (the workspace block is the capability
+block field for field), `ShellRenderTest` (the Visualizations branch and its search),
+`ReadFloorTest` (the pages and tabs in `VISUALIZATIONS`, the dialogs in `LIFECYCLE_DIALOGS`),
+`ScriptBlockUtextAuditTest`, `MutatingHandlerScopeFloorTest`, `PublicPathsTest` /
+`PublicRouteWalkerTest`, `MatrixRowReachabilityTest`/`RoleWalkE2eTest`/`PermissionSeamE2eTest`
+(the §7.6 Surfaces cells), `visualization-workspace.test.mjs` (the glue's decision rules on
+node --test), and the browser suites `VisualizationSidebarTreeBrowserTest` +
+`VisualizationWorkspaceBrowserTest` (every tab in both themes under the live CSP with zero
+violations, the promoter's page issuing no lifecycle request, the 2d and 3d bundles, three widths).
 
 
 ## 5. htmx Usage Pattern
@@ -2189,6 +2269,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-02 | v1.106 | #399 the Visualizations workspace (#396) | **§3.4**: Build gains **Visualizations** between Dashboards and Parameter Sets, the navigating-tree pattern's fourth use (lucide `chart-line`; link → the catalog, lazy tree WITH the search box, leaf → the workspace; no engine change). **New §4.24**: the flat catalog `GET /visualizations` (`q` over name, display name and description, `ILIKE … ESCAPE`), the sidebar branch `GET /partials/visualizations/tree`, and the version-explicit workspace `GET /visualizations/{id}?version=&tab=` with five tabs — Preview (test fixtures, the default: one case at a time in the runtime's fixture mode, the configuration built by §4.22's builder, the empty state verbatim), Overview, Evidence (states its 100-run cap; the screenshot or "no screenshot"), Used by (the pinning dashboards through the dashboard lens) and Versions (the seven lifecycle dialogs with the one `release_pinned_templates` consent and the refusal list, and the Export link). DISCARDED and lens-hidden versions are the family's 404; a malformed version is a non-echoing 400. **§4.22**: the signed-in twin paragraph. No permission, row or role changed; the routes are in auth.md §7.6's visualization Surfaces cells. Guards: the render/controller/model tests, `VisualizationPreviewBlockTest`, `ReadFloorTest`, `ScriptBlockUtextAuditTest`, the two browser suites. |
 | 2026-10-02 | v1.105 | #400 the Dashboards workspace — the searchable sidebar tree, the flat catalog, the tabbed version-explicit workspace (#409 closes with it) | **§3.4**: the Dashboards panel gains the search box in the Pipelines branch's exact markup (the shared engine serves it with no JS change; a non-empty `q` swaps the flat results into the panel's root, clearing returns the tree). **§4.21 rewritten**: `GET /dashboards` is the flat CATALOG in §4.3's shape (owner ruling 2026-10-02 — the L3b tree page retired; folders are the sidebar's axis), each row a full-document link into the workspace, a draft-only dashboard's row saying so; `GET /dashboards/{id}?version=&tab=` is the tabbed, version-explicit WORKSPACE — Board (today's board page exactly: the same bundle block, the unchanged `dashboards-page.js`, the events pane beside the board), Overview (the definition, read-only, with each pin's status and the R1 release hint), Refreshes, Versions (the history and the seven lifecycle dialogs into `#dp-dialog`, `HX-Redirect` back with a flash) and Keys (`dashboard.key.bind`, read-only, linking the Keys page); #409: a dashboard with no served release opens the choose-a-version state — the heading NAMES it, the draft is offered, the runtime config never called, no `not_found`; the preview route answers 303 onto the workspace (the deep links survive); every version switch a full navigation (the one-bundle rule), tab switches in-page over the SHARED tab core (`static/js/workspace/tabs.js` — pipeline-editor/tabs.js runs the same machine), the hidden Board re-fitting through the runtime's own `resize()`. **§4.21's preview gap closed**: the #369 draft preview is documented here for the first time, as the workspace's named-version view (the chip succeeded the banner). `dashboards-page.js` unchanged; no new permission; no REST route changed. Guards: the falsifications in the handback. |
 | 2026-10-02 | v1.104 | #374 the Parameter Sets screens (workspace spec §6.2/§6.3, #357 S1) — renumbered at merge after 386's v1.103 | **§3.4**: Build gains **Parameter Sets**, the navigating-tree pattern's third use (lucide `sliders-horizontal`; link → the catalog, lazy tree beside it with no search box, leaf → the workspace). **New §4.23**: the flat paged catalog `GET /parameter-sets` and the canonical workspace `GET /parameter-sets/{id}?version=N&tab=` — the version-explicit resolve order (explicit admitted version, never clamped → the lens-visible current → an accessible draft, labelled → choose-a-version), the house 404/400, a static Cytoscape graph + inspector and the live parameter form through the dashboard runtime's new parameters-only `initParameters` entry against the EXISTING evaluate route (role-hidden: a promoter's page has no control and no request). The demo family seeds `nyc/parameters/geo_filters`. No permission, scope row or role changed; the routes are listed in auth.md §7.6's `parameter_set.read` Surfaces cell. Guards: the render/controller/model tests, `ReadFloorTest`, `SampleDataParameterSetsContentTest`, `ParameterSetPagesBrowserTest`, the falsifications in the handback. |
 | 2026-10-02 | v1.103 | #386/#387 the board's small slots and its breakpoint | **§4.21's Grid rows row** gains the collapse below `breakpoint_px` (768 px default; every item full width in grid order, the row unit kept, a crossing re-places and resizes) and the 2-row chart's plot-area floor (compact margins + `automargin`, dashboards.md §6.3). |

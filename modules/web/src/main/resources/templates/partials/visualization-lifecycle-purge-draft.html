@@ -1,0 +1,39 @@
+<!-- The Purge-draft dialog (#399) — THE irreversible one (versioning §5.4): the working draft is deleted
+     at the hash the POST reads fresh; a sole draft takes the VISUALIZATION with it. A version a live
+     dashboard pins refuses (`version.pinned`) — the dialog lists the pinners and renders no button. The
+     button needs the typed confirm `v<n>`: disabled client-side until the field matches, refused
+     server-side before the service runs. -->
+<div xmlns:th="http://www.thymeleaf.org" class="u-backdrop" data-lifecycle-dialog="visualization-purge-draft">
+  <div class="ds-card app-modal app-modal-md" role="dialog" aria-modal="true" aria-labelledby="viz-purge-draft-title">
+    <button type="button" class="ds-button ds-button-ghost ds-button-sm app-modal-close u-text-xl"
+            aria-label="Close" data-lifecycle-close>
+      <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#x"></use></svg>
+    </button>
+    <h2 class="ds-title u-m0 u-mb-md" id="viz-purge-draft-title"
+        th:text="'Purge draft v' + ${dlg.version} + '?'">Purge draft v2?</h2>
+
+    <div th:replace="~{partials/visualization-lifecycle-pinned :: pinned(${dlg.pinnedBy})}"></div>
+
+    <th:block th:if="${dlg.canPurge}">
+      <p class="u-secondary u-text-sm" th:if="${!dlg.takesEntity}">
+        The draft is deleted permanently — this cannot be undone. The released versions stay.
+      </p>
+      <p class="u-secondary u-text-sm" th:if="${dlg.takesEntity}" data-purge-takes-entity>
+        This draft is the visualization's only version: purging it deletes the visualization permanently.
+      </p>
+      <form th:attr="hx-post=@{'/partials/visualizations/{id}/lifecycle/purge-draft'(id=${dlg.id}, version=${dlg.version})},
+                     hx-swap='none'">
+        <input type="hidden" name="from" th:value="${from}">
+        <label class="ds-form-label u-mt-md" for="viz-purge-draft-confirm">
+          Type <span class="u-mono" th:text="${dlg.expected}">v2</span> to confirm
+        </label>
+        <input class="ds-input u-mono" id="viz-purge-draft-confirm" data-confirm-input name="confirm" autocomplete="off"
+               spellcheck="false" th:attr="data-confirm-expect=${dlg.expected}">
+        <button th:if="${canAuthor == true}" type="submit" data-verb="visualization-purge-draft-confirm"
+                class="ds-button ds-button-danger u-full u-mt-md" data-typed-confirm
+                disabled hx-disabled-elt="this"
+                th:text="'Purge draft v' + ${dlg.version}">Purge draft v2</button>
+      </form>
+    </th:block>
+  </div>
+</div>

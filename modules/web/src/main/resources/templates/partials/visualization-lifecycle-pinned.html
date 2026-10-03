@@ -1,0 +1,11 @@
+<!-- The pin guard's answer, shared by the discard and purge dialogs (#399): the LIVE dashboard versions
+     that pin this version (any version, for the entity purge). Non-empty = the service refuses
+     `visualization.version.pinned`, so the caller's dialog renders no button; the names are text. -->
+<div xmlns:th="http://www.thymeleaf.org" th:fragment="pinned(pinnedBy)" th:remove="tag">
+  <div class="u-text-sm u-mb-md" th:if="${!#lists.isEmpty(pinnedBy)}" data-pinned-by>
+    <p class="tplx-danger u-mb-xs">Refused — live dashboard versions pin it; unpin it from those dashboards first:</p>
+    <ul class="dp-pin-list">
+      <li th:each="ref : ${pinnedBy}" class="u-mono" th:text="${ref}">finance/dashboards/revenue@3</li>
+    </ul>
+  </div>
+</div>

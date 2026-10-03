@@ -53,6 +53,10 @@ object AppNav {
             // the lens), so unlike Executions/Promotion it rides no advice boolean. The item
             // links the tree page; its lazy branch expands beside it in the rail.
             Item("/dashboards", "Dashboards", BUILD),
+            // #399 (#396): the Visualizations item — an every-role read (`visualization.read`, the
+            // promoter through the lens), no advice boolean. The item links the flat catalog page;
+            // its lazy, searchable branch expands beside it in the rail.
+            Item("/visualizations", "Visualizations", BUILD),
             // #374 (#357 S1): the Parameter Sets item — an every-role read (`parameter_set.read`, the
             // promoter through the lens), so it rides no advice boolean either. The item links the
             // flat catalog page; its lazy branch expands beside it in the rail.

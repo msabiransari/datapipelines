@@ -496,6 +496,35 @@ class ShellRenderTest {
         html.indexOf("data-nav-branch=\"parameter-sets\"") shouldBeLessThan html.indexOf(">Operate<")
     }
 
+    @Test
+    fun `#399 - Visualizations carries the same branch between Dashboards and Parameter Sets - link, toggle, lazy tree and search`() {
+        val html = engine.process("pipelines/list", webContext().apply { fillList() })
+        val branch =
+            html
+                .substringAfter("data-nav-branch=\"visualizations\"", missingDelimiterValue = "")
+                .substringBefore("data-nav-branch=\"parameter-sets\"")
+
+        branch shouldContain "href=\"/visualizations\" class=\"app-nav-link"
+        branch shouldContain "data-nav-group=\"Build\" data-nav-label=\"Visualizations\""
+        // The lucide chart-line glyph, from the vendored sprite (icons-from-lucide-only).
+        branch shouldContain "/vendor/icons/lucide-sprite.svg#chart-line"
+        branch shouldContain "<button type=\"button\" class=\"app-nav-branch-toggle app-rail-label\" data-nav-tree-toggle"
+        branch shouldContain "aria-expanded=\"false\" aria-controls=\"nav-tree-visualizations\" aria-label=\"Visualization folders\""
+        branch shouldContain "id=\"nav-tree-visualizations\" data-nav-tree=\"visualizations\" hidden"
+        branch shouldContain "data-nav-root-url=\"/partials/visualizations/tree?scope=nav\""
+        branch shouldContain "data-nav-workspace=\"acme\""
+        // The Pipelines branch's search box, addressing THIS panel's root.
+        branch shouldContain "data-nav-tree-search"
+        branch shouldContain "hx-get=\"/partials/visualizations/tree?scope=nav\""
+        branch shouldContain "hx-target=\"#viz-tree-nav\""
+        branch shouldContain "placeholder=\"Search visualizations…\""
+        branch shouldContain "id=\"viz-tree-nav\""
+        // Order in Build: Dashboards → Visualizations → Parameter Sets → Operate.
+        html.indexOf("data-nav-branch=\"dashboards\"") shouldBeLessThan html.indexOf("data-nav-branch=\"visualizations\"")
+        html.indexOf("data-nav-branch=\"visualizations\"") shouldBeLessThan html.indexOf("data-nav-branch=\"parameter-sets\"")
+        html.indexOf("data-nav-branch=\"parameter-sets\"") shouldBeLessThan html.indexOf(">Operate<")
+    }
+
     private fun webContext(): WebContext =
         WebContext(
             JakartaServletWebApplication
