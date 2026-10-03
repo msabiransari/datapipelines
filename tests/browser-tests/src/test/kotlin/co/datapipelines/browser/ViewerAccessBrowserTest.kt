@@ -110,7 +110,10 @@ class ViewerAccessBrowserTest : BrowserSuite() {
         // families' rows are the house table now (#349/#398).
         viewer.page.locator("#tw-tab-versions").click()
         viewer.page.waitForSelector("#tw-pane-versions tr[data-version-row]")
-        val v1Open = viewer.page.locator("#tw-pane-versions tr[data-version-row]:has(td:text-is('v1')) a:has-text('Open')")
+        // The row is named by its own `data-version-row`, not by its first cell's text: the viewed
+        // version's cell carries the "viewing" badge beside `v1` (data-version-viewed), and v1 IS
+        // the viewed version here, so `td:text-is('v1')` matches no row.
+        val v1Open = viewer.page.locator("#tw-pane-versions tr[data-version-row='1'] a:has-text('Open')")
         v1Open.waitFor()
         v1Open.click()
         viewer.page.waitForURL("**/templates/${fixture.name}?version=1&tab=source")
