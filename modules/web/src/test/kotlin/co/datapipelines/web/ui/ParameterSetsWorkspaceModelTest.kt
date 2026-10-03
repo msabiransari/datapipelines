@@ -159,6 +159,8 @@ class ParameterSetsWorkspaceModelTest {
         listOf("0", "-1", "abc", "1.5").forEach {
             val refused = shouldThrow<ResponseStatusException> { ParameterSetsWorkspaceModel.parseRequestedVersion(it) }
             refused.statusCode shouldBe HttpStatus.BAD_REQUEST
+            // The reason is the shared constant: nothing of the caller's input rides it (#421).
+            refused.reason shouldBe RequestedVersion.BAD_VERSION
         }
     }
 }

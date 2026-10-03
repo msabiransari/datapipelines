@@ -367,6 +367,18 @@ class PipelineNodeSqlPartialControllerTest {
             .andExpect(status().isBadRequest)
     }
 
+    @Test
+    fun `a malformed version parameter is never echoed into the toast`() {
+        val response =
+            mvcFor(controller)
+                .perform(get("/partials/pipelines/$pipelineId/nodes/trips_by_day/sql?version=zzqx").header("HX-Request", "true"))
+                .andExpect(status().isBadRequest)
+                .andReturn()
+                .response
+        // A nonsense token: an escaped <script> would pass vacuously, a token that means nothing cannot.
+        response.contentAsString shouldNotContain "zzqx"
+    }
+
     /** The HTTP-level harness, [PipelineChecksPartialsControllerTest]'s shape: the advice is the mapping under test. */
     private fun mvcFor(controller: PipelineNodeSqlPartialController): MockMvc =
         MockMvcBuilders

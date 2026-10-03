@@ -234,9 +234,12 @@ class PipelineWorkspaceControllerTest {
     fun `an invalid version syntax is the house 400 - zero, negative and non-numeric alike`() {
         authenticate()
         seedThreeVersions()
-        shouldThrow<ResponseStatusException> { open(version = "abc") }.statusCode shouldBe HttpStatus.BAD_REQUEST
-        shouldThrow<ResponseStatusException> { open(version = "0") }.statusCode shouldBe HttpStatus.BAD_REQUEST
-        shouldThrow<ResponseStatusException> { open(version = "-1") }.statusCode shouldBe HttpStatus.BAD_REQUEST
+        listOf("abc", "0", "-1").forEach { raw ->
+            val refused = shouldThrow<ResponseStatusException> { open(version = raw) }
+            refused.statusCode shouldBe HttpStatus.BAD_REQUEST
+            // The reason is the shared constant: nothing of the caller's input rides it (#421).
+            refused.reason shouldBe RequestedVersion.BAD_VERSION
+        }
     }
 
     @Test

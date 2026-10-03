@@ -8,8 +8,6 @@ import co.datapipelines.visualization.ArtifactVersionDetail
 import co.datapipelines.visualization.VisualizationBody
 import co.datapipelines.visualization.VisualizationErrorCodes
 import co.datapipelines.visualization.VisualizationService
-import org.springframework.http.HttpStatus
-import org.springframework.web.server.ResponseStatusException
 import java.util.UUID
 
 /**
@@ -122,18 +120,14 @@ class VisualizationWorkspaceModel(
 
     companion object {
         /**
-         * The `version` query parameter's one parse: optional, and when supplied a positive integer — anything
-         * else is the house 400 whose reason NEVER echoes the input (an htmx caller shows the reason in a toast).
-         * Bound as a String so a non-numeric value is this 400, not the binder's 500.
+         * The `version` query parameter's one parse: [RequestedVersion.parse] — optional, and when supplied a
+         * positive integer, anything else the house 400 whose reason NEVER echoes the input (an htmx caller
+         * shows the reason in a toast).
          */
-        fun parseRequestedVersion(raw: String?): Int? {
-            if (raw.isNullOrEmpty()) return null
-            val parsed = raw.toIntOrNull()
-            if (parsed == null || parsed <= 0) throw ResponseStatusException(HttpStatus.BAD_REQUEST, BAD_VERSION)
-            return parsed
-        }
+        fun parseRequestedVersion(raw: String?): Int? = RequestedVersion.parse(raw)
 
-        const val BAD_VERSION = "The version parameter must be a positive integer."
+        /** The refusal's reason — an alias of the shared constant, kept for the callers that name it here. */
+        const val BAD_VERSION = RequestedVersion.BAD_VERSION
 
         /** The house 404 — an absent id, a foreign one and a lens-hidden one answer identically (auth.md §11A.1). */
         fun notFound(
