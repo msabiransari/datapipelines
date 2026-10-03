@@ -285,6 +285,42 @@ class ParameterEvaluationStreamE2eTest {
         }
     }
 
+    @Test
+    @Order(9)
+    fun `an id whose evaluation already ENDED is refused reused - the history holds ONE row for it, and nothing runs unrecorded (417)`() {
+        awaitNoStreams()
+        awaitUntil("no statement is held") { selectorsAdmitted() == 0 }
+        val appender = capture()
+        val id = uuid()
+        val path = "/api/v1/parameter-sets/$cascadeSetId/evaluations"
+        try {
+            val first = post(path, observedBody(id, """{"country":"US","state":"NJ"}"""), ADMIN, accept = "text/event-stream")
+            withClue(first.second.take(EXCERPT)) { first.first shouldBe 200 }
+            awaitUntil("the first evaluation's record is COMPLETED") {
+                count("SELECT COUNT(*) FROM parameter_evaluations WHERE id = '$id' AND status = 'COMPLETED'") == 1
+            }
+            awaitNoStreams() // the ended stream is dropped at the next 1 s tick: the registry no longer remembers the id
+
+            val reused = post(path, observedBody(id, """{"country":"US","state":"NY"}"""), ADMIN, accept = "text/event-stream")
+            println("event=e2e417.reuse_after_end status=${reused.first} record_failed=${lines(appender).filter { "record_failed" in it }}")
+
+            withClue(reused.second.take(EXCERPT)) { reused.first shouldBe 400 }
+            val error = mapper.readTree(reused.second)["error"]
+            error["code"].asText() shouldBe "parameter.validation.body_invalid"
+            error["details"]["path"].asText() shouldBe "evaluation_id"
+            error["details"]["reason"].asText() shouldBe "reused"
+            activeEvaluationStreams() shouldBe 0
+            withClue("the refused attempt wrote nothing: still ONE row for the reused id") {
+                count("SELECT COUNT(*) FROM parameter_evaluations WHERE id = '$id'") shouldBe 1
+            }
+            withClue("and no START insert hit the primary key - no record_failed ERROR for the id") {
+                lines(appender).none { "event=parameter.evaluation_record_failed" in it && "evaluation_id=$id" in it } shouldBe true
+            }
+        } finally {
+            release(appender)
+        }
+    }
+
     // ---- helpers -------------------------------------------------------------------------------------------------------
 
     private fun observedBody(
@@ -564,6 +600,18 @@ class ParameterEvaluationStreamE2eTest {
     private fun slowParameters(): List<Map<String, Any?>> =
         listOf(constants("mode", "fast", "slow", "brief"), templateSelect("wait", SLOW, listOf("mode")))
 
+    private fun count(query: String): Int {
+        val pg = SharedE2e.postgres
+        return DriverManager.getConnection(pg.jdbcUrl, pg.username, pg.password).use { connection ->
+            connection.createStatement().use { statement ->
+                statement.executeQuery(query).use { rs ->
+                    check(rs.next()) { "no row for: $query" }
+                    rs.getInt(1)
+                }
+            }
+        }
+    }
+
     private fun sql(statement: String) {
         val pg = SharedE2e.postgres
         DriverManager.getConnection(pg.jdbcUrl, pg.username, pg.password).use { connection ->
@@ -628,6 +676,7 @@ class ParameterEvaluationStreamE2eTest {
             listOf(
                 "co.datapipelines.web.parameters.stream.ParameterEvaluationStream",
                 "co.datapipelines.web.parameters.stream.ParameterEvaluationStreamRegistry",
+                "co.datapipelines.parameters.StoredParameterEvaluationRecorder",
             )
 
         @DynamicPropertySource

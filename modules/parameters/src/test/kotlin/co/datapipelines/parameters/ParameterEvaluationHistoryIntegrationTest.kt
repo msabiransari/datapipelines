@@ -491,6 +491,35 @@ class ParameterEvaluationHistoryIntegrationTest {
         }
     }
 
+    // ---- the observed route's reuse read (#417) --------------------------------------------------------------------
+
+    @Test
+    fun `exists is true for a recorded id - after the START insert, whatever the record's status`() {
+        val started = attempt()
+        release.countDown() // nothing is held: the evaluate runs to its end, and the START insert is real, not seeded
+        evaluator(Holding(release)).evaluateBlocking(workspace, set(templateSelect("a")), emptyMap(), started)
+        val running = seedRecord("RUNNING", startedHoursAgo = 0)
+
+        repository.exists(workspace, started.evaluationId) shouldBe true
+        repository.exists(workspace, running) shouldBe true
+    }
+
+    @Test
+    fun `exists is false for an id nothing recorded`() {
+        seedRecord("COMPLETED", startedHoursAgo = 0)
+
+        repository.exists(workspace, UUID.randomUUID()) shouldBe false
+    }
+
+    @Test
+    fun `exists is false for a recorded id under another workspace id - no cross-workspace existence signal`() {
+        val id = seedRecord("COMPLETED", startedHoursAgo = 0)
+        val otherWorkspace = UUID.randomUUID()
+
+        withClue("sanity: the record is there for its own workspace") { repository.exists(workspace, id) shouldBe true }
+        repository.exists(otherWorkspace, id) shouldBe false
+    }
+
     // ---- helpers ---------------------------------------------------------------------------------------------------
 
     private fun select(
