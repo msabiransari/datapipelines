@@ -57,6 +57,8 @@ class BrowseModelConventionTest {
                 ParameterSetEvaluationsPartialController::class,
                 ParameterSetEvaluationsBrowseModel::class,
             ),
+            // #399: the visualizations catalog and the sidebar's tree level and search render over ONE model.
+            Pair(VisualizationUiController::class, VisualizationPartialController::class, VisualizationBrowseModel::class),
         )
 
     private fun injects(

@@ -89,6 +89,9 @@
   <!-- #374 — the Parameter Sets workspace's rules (design tokens only). Head-loaded for 090's reason:
        /parameter-sets/{id} is a boosted route. -->
   <link th:href="@{/css/parameter-sets.css}" rel="stylesheet">
+  <!-- #399 — the Visualizations workspace's own panes (design tokens only; the frame is dashboards.css's).
+       Head-loaded for 090's reason: the catalog is a boosted route. -->
+  <link th:href="@{/css/visualizations.css}" rel="stylesheet">
   <!-- 079 §A — the rail's collapsed state, applied BEFORE the first paint.
 
        Until 188 this was the ONE inline script in the layout — the round's only
@@ -271,7 +274,9 @@
         <div class="app-nav-section app-rail-label">Build</div>
         <!-- #350 (workspace spec §5, D7/D8) — THE NAVIGATING-TREE PATTERN, one shape for every
              artifact family that browses as a folder tree (Pipelines here, Dashboards below;
-             Templates is its declared next use). Three parts, kept distinct on purpose:
+             Templates is its declared next use). #399: Visualizations joins it below Dashboards
+             with the same four pieces (this block, a browse model, a partial controller, a
+             tree-level fragment) and the same search box. Three parts, kept distinct on purpose:
 
                - the item LINK (unchanged: the catalog page, the active section, the crumb);
                - the TOGGLE beside it (a real button, aria-expanded/aria-controls) — opening the
@@ -353,6 +358,42 @@
             </div>
             <div class="app-nav-tree-scroll" data-nav-tree-scroll>
               <div class="tpl-level tpl-level-pending" id="dash-tree-nav" data-nav-tree-root>
+                <span class="ds-spinner htmx-indicator" aria-hidden="true"></span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- #399 (#396): the Visualizations item — an every-role read (`visualization.read`, the
+             promoter through the lens), so it rides no advice boolean. The same navigating-tree
+             shape as the branches above, INCLUDING the Pipelines branch's search box: the item
+             LINK is the flat catalog page, the TOGGLE opens the lazy panel, a non-empty `q`
+             renders the lensed name search (name, display name, description) into the panel's
+             root and clearing returns to the tree. A LEAF is a plain link to the canonical
+             workspace /visualizations/{id} (hx-boost="false" — a full document load: the
+             workspace declares one Plotly bundle, dashboards.md §6.4's rule). The fragment is
+             /partials/visualizations/tree (scope=nav). -->
+        <div class="app-nav-branch" data-nav-branch="visualizations">
+          <a th:href="@{/visualizations}" class="app-nav-link" data-nav-section="/visualizations"
+             data-nav-group="Build" data-nav-label="Visualizations"
+             th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/visualizations')} ? 'active' : null"
+             th:attr="aria-current=${currentPath != null and #strings.startsWith(currentPath, '/visualizations')} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#chart-line"></use></svg><span class="app-rail-label">Visualizations</span></a>
+          <button type="button" class="app-nav-branch-toggle app-rail-label" data-nav-tree-toggle
+                  aria-expanded="false" aria-controls="nav-tree-visualizations" aria-label="Visualization folders">
+            <svg class="ds-icon ds-icon-xs tpl-chevron" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#chevron-right"></use></svg>
+          </button>
+          <div class="app-nav-tree app-rail-label" id="nav-tree-visualizations" data-nav-tree="visualizations" hidden
+               th:attr="data-nav-workspace=${activeWorkspace},data-nav-root-url=@{/partials/visualizations/tree(scope='nav')}">
+            <div class="app-nav-tree-search">
+              <input type="search" name="q" class="ds-input app-nav-tree-input" autocomplete="off"
+                     placeholder="Search visualizations…" aria-label="Search visualizations in the tree"
+                     data-nav-tree-search
+                     th:attr="hx-get=@{/partials/visualizations/tree(scope='nav')}"
+                     hx-target="#viz-tree-nav" hx-swap="outerHTML"
+                     hx-trigger="input changed delay:300ms, search" hx-sync="this:replace">
+            </div>
+            <div class="app-nav-tree-scroll" data-nav-tree-scroll>
+              <div class="tpl-level tpl-level-pending" id="viz-tree-nav" data-nav-tree-root>
                 <span class="ds-spinner htmx-indicator" aria-hidden="true"></span>
               </div>
             </div>
@@ -703,7 +744,14 @@
         <th:block th:if="${code == 'switched'}"><div th:replace="~{partials/toast :: toast('success', 'Current version switched', 'Endpoints published on this pipeline serve the new current version.')}"></div></th:block>
         <th:block th:if="${code == 'draft_purged'}"><div th:replace="~{partials/toast :: toast('success', 'Draft purged', 'The draft and its runs are gone. This cannot be undone.')}"></div></th:block>
         <th:block th:if="${code == 'entity_purged'}"><div th:replace="~{partials/toast :: toast('success', 'Pipeline purged', 'The pipeline, its draft and its runs are gone.')}"></div></th:block>
-        <th:block th:if="${code == 'template_purged'}"><div th:replace="~{partials/toast :: toast('success', 'Template purged', 'The template and its draft are gone.')}"></div></th:block></th:block>
+        <th:block th:if="${code == 'template_purged'}"><div th:replace="~{partials/toast :: toast('success', 'Template purged', 'The template and its draft are gone.')}"></div></th:block>
+        <!-- #399 — the visualization lifecycle verbs' redirects: `released`, `released_with_templates`
+             (the transform template is the one pin a visualization cascades), `discarded` and `restored`
+             serve unchanged; `switched` names published endpoints — a pipeline's fact, never a
+             visualization's — so the family carries its own switch, draft-purge and purge words. -->
+        <th:block th:if="${code == 'visualization_switched'}"><div th:replace="~{partials/toast :: toast('success', 'Current version switched', 'Dashboards that pin this visualization keep their pinned versions; the Versions tab shows which version is current.')}"></div></th:block>
+        <th:block th:if="${code == 'visualization_draft_purged'}"><div th:replace="~{partials/toast :: toast('success', 'Draft purged', 'The draft is gone. This cannot be undone.')}"></div></th:block>
+        <th:block th:if="${code == 'visualization_purged'}"><div th:replace="~{partials/toast :: toast('success', 'Visualization purged', 'The visualization and its draft are gone.')}"></div></th:block></th:block>
     </div>
     <th:block th:replace="${content}"/>
   </main>

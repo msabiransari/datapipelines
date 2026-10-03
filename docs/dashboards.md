@@ -1,6 +1,6 @@
 # Dashboards
 
-**Status:** v0.26 — the dashboards workspace (§5.2's `version`, §7's workspace, #400; #409 closes with it) beside the
+**Status:** v0.27 — the visualizations workspace (§7, #399) beside the dashboards workspace (§5.2's `version`, §7's workspace, #400; #409 closes with it) beside the
 board's small-slot margins and its breakpoint collapse (§6.2, §6.3, #386/#387), 328's release-record judgement (§4.3)
 permissions (§4, lane L1b); the transfer routes and their limits' honest contract (§3.3, lanes L1c/L1c-b/L1c-c: the
 import's atomicity, the RELEASE rules on a landing, the aggregate count ceiling, the wire's per-family arms); the server
@@ -367,7 +367,7 @@ The agent's `notes` and `environment` are JSON fields, never rendered as markup.
 ## 4. The surfaces
 
 Both families are authored over REST ([REST API §22, §23](rest-api.md)) and MCP ([MCP Server §6.2.50–§6.2.60](mcp-server.md)),
-addressed by id (P24); a multi-segment name never travels in a path. There is no UI page yet (L3). Every body a surface
+addressed by id (P24); a multi-segment name never travels in a path; a person reads both and drives their lifecycle verbs from the first-party pages (§7). Every body a surface
 takes is read by §1's strict reader with §2.3's bounds, so REST and MCP refuse the same documents with the same codes.
 
 ### 4.1 Permissions
@@ -876,10 +876,38 @@ preview is the named-version view**: `/dashboards/{id}/preview?version=N` answer
 tab viewing exactly that version — the banner became the viewed-version chip the top bar
 prints (the truth about what is on screen, "v2 · draft", never "latest release").
 
+**The visualizations workspace (#399).** `/visualizations` is the flat catalog (`q` searches name,
+display name and description) and the rail's Visualizations branch is the same lazy tree with the
+same search box. `/visualizations/{id}?version=&tab=` is the version-explicit workspace on
+`visualization.read` alone — a DISCARDED or lens-hidden version is the family's 404, a malformed
+version a 400 that never echoes it. Its five tabs ([ui-screens §4.24](ui-screens.md)):
+
+- **Preview (test fixtures)** — the default: the viewed version's saved test cases in the
+  runtime's FIXTURE mode (§3.4.1's capability page's mount and builder — `PreviewViews.page` writes
+  the same per-case configuration, keyed by the version), one case at a time. It renders FIXTURES
+  only; live data runs inside a dashboard, under `dashboard.execute` — the page never executes.
+- **Overview** — the version's definition, read-only (the renderer and its bundle, the inputs,
+  the transform pin and its status, the test-case count, the body hash).
+- **Evidence** — the version's test runs (§3.4), newest first, capped at 100 and saying so; a
+  run's screenshot through the existing screenshot route, else "no screenshot".
+- **Used by** — the dashboard versions pinning this visualization, read through the caller's
+  dashboard lens, each linking its dashboard's workspace.
+- **Versions** — the history and the lifecycle verbs' dialogs: Release (the refusals before the
+  button, in the service's order — §3.1's test case and transform pin, then §3.4's evidence gate —
+  and the ONE `release_pinned_templates` consent for a DRAFT transform pin, D61), Purge draft,
+  Discard (naming the D60 fallback), Restore, Purge version, Switch, Purge visualization (typed
+  confirm, sole-draft only), and the Export link (§3.3). Every POST calls the SAME service the REST
+  route wires, is session-only, is audited as the REST route audits it (a cascaded template's own
+  event first) and answers `HX-Redirect` back onto this tab.
+
+Every version switch is a full navigation (the one-bundle rule, §6.4): the workspace declares the
+ONE Plotly bundle the viewed version's traces need, and the choose-a-version state loads none.
+
 ## Appendix A: Change Log
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-02 | v0.27 | #399 the visualizations workspace (#396) | **§4:** "There is no UI page yet (L3)" leaves — a person reads both families and drives their lifecycle verbs from §7's pages. **§7:** the visualizations workspace subsection — the catalog and the searchable sidebar branch, and the version-explicit workspace's five tabs: Preview (test FIXTURES only, §3.4.1's builder keyed by the version), Overview, Evidence (the 100-run cap; the screenshot or "no screenshot"), Used by (through the dashboard lens) and Versions (the seven dialogs, the one `release_pinned_templates` consent, the Export link). No route, permission, code or lifecycle rule changed. |
 | 2026-10-02 | v0.26 | #400 the dashboards workspace (#409 closes with it) | **§5.2:** the version routes' page is the session workspace (the preview route a 303 redirect onto it). **§5.8:** the draft preview named where it lives now. **§6.1:** `init`'s `"released"` is the workspace's DEFAULT (no version attribute unless the URL named one). **§7 rewritten:** the flat catalog (`GET /dashboards`, the tree retired to the sidebar, the branch gaining the Pipelines branch's search), the tabbed version-explicit workspace (`?version=&tab=`; Board = the L3b page exactly with the glue unchanged; Overview read-only with the pins' statuses and the R1 hint; Refreshes; Versions with the seven lifecycle dialogs — the ONE D61 consent, no #397; Keys on `dashboard.key.bind`), #409's choose-a-version state (the name, the draft, "no release yet" — never the empty `h1` and the "not found"), the 303 preview redirect, in-page tab state over the shared `workspace/tabs.js` core, full-navigation version switches (the one-bundle rule). No MCP tool, no migration, no new permission row. |
 | 2026-10-02 | v0.25 | 386 (#386, #387) the small-slot margins and the breakpoint collapse | **§6.3:** the Plotly adapter's size defaults — a compact margin (`t` opens for a title only) and `automargin` on the axes, UNDER the author's stored `margin`/`automargin` key by key, beside the theme's colours OVER the author (both precedences side by side); a 2-row slot keeps a plot area of at least half its height (measured by `DashboardGridRowUnitBrowserTest`). **§6.2:** the first-party adapter implements §2.2's promise — below `breakpoint_px` (768 when absent) every item spans the 12 columns in grid order with its own row span, the row unit kept; a viewport crossing re-places and resizes; the grid gap is the `--space-4` token. §2.2 is unchanged: its sentence is now true. |
 | 2026-10-02 | v0.24 | #369 the dashboard draft preview — renumbered at merge (main sat at v0.23) | **§5.2:** the four runtime routes take an optional `version` query parameter naming a DRAFT or RELEASED version (R2, owner-confirmed): absent = the current RELEASED version unchanged; a value is a bounded positive integer, must resolve for the caller (the family 404 naming it), and is refused to a `dashboard` key (`dashboard.key.kind_refused` — the version routes are the session page's). R1 (owner-confirmed): the pin rule is RELEASED-only on a draft exactly as on a release — a draft pinning a DRAFT pin is `dashboard.runtime.dependency_missing`/`not_released` naming the pin, the message carrying the release hint. **§6.1:** `init` admits `"released"` or a positive integer; the integer rides `?version=N` on every runtime path the instance builds. **§7:** the draft preview page (`GET /dashboards/{id}/preview?version=N`) — the board template for a named version, the banner with the way back to the released view, the version on the `data-dp-dashboard-version` attribute channel, refusals in place, the promoter's 404, session-only. No MCP tool, no migration, no new permission row. |

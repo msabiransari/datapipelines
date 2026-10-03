@@ -1,0 +1,40 @@
+<!-- The workspace's PREVIEW tab (#399) — the viewed version rendered by the runtime in FIXTURE mode
+     over the version's own test cases: the SAME {visualization, cases} block the capability page
+     embeds (PreviewViews.page over PreviewCaseEvaluator), mounted through the capability page's own
+     mount (window.DatapipelinesPreviewMount, `server: {fixtures}` — no base URL, no credentials, no
+     live data). One case is shown at a time; the selector picks it and the glue mounts it lazily
+     (visualizations/workspace.js).
+
+     Case names and assertion labels are TEXT (th:text). The JSON block is the one utext in this
+     family's templates — ScriptSafeJson.forScriptBlock escapes `<`, `>`, `&` and the line
+     separators, so no value can close the script element (ScriptBlockUtextAuditTest allowlists it). -->
+<div xmlns:th="http://www.thymeleaf.org" th:fragment="preview" class="viz-preview" data-viz-preview
+     th:attr="data-viz-preview-version=${version}">
+  <p class="u-secondary u-text-sm viz-preview-note">
+    Fixtures only — v<span th:text="${version}">2</span>'s saved test cases rendered without a pipeline run;
+    live data runs inside a dashboard.
+  </p>
+
+  <div class="ds-empty" th:if="${#lists.isEmpty(cases)}" data-viz-preview-empty>
+    <p class="ds-empty-description">no test cases — the preview renders a visualization's test-case fixtures; live data runs inside a dashboard</p>
+  </div>
+
+  <th:block th:unless="${#lists.isEmpty(cases)}">
+    <div class="u-row-md viz-case-picker" th:if="${#lists.size(cases) > 1}">
+      <label class="u-text-sm" for="viz-case-select">Test case</label>
+      <select id="viz-case-select" class="ds-input viz-case-select" data-viz-case-select>
+        <option th:each="case, iter : ${cases}" th:value="${iter.index}" th:text="${case.name}"
+                th:selected="${iter.index == 0}">twelve months</option>
+      </select>
+    </div>
+    <section class="dp-preview-case ds-card viz-preview-case" th:each="case, iter : ${cases}"
+             th:attr="data-dp-case=${case.name}, data-viz-case-index=${iter.index}, hidden=${iter.index == 0} ? null : 'hidden'">
+      <h2 class="u-text-lg u-semibold" th:text="${case.name}">twelve months</h2>
+      <ul class="dp-preview-assertions u-text-sm u-secondary">
+        <li th:each="assertion : ${case.assertions}" class="u-mono" th:text="${assertion}">rendered</li>
+      </ul>
+      <div class="dp-preview-board" th:attr="data-viz-case-board=${iter.index}"></div>
+    </section>
+    <script type="application/json" id="viz-preview-data" th:utext="${previewJson}"></script>
+  </th:block>
+</div>
