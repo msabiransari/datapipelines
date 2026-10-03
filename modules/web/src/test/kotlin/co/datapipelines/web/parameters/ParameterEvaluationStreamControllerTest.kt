@@ -6,6 +6,7 @@ import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.parameters.EvaluateResponse
 import co.datapipelines.parameters.EvaluationCaller
 import co.datapipelines.parameters.OrgEcho
+import co.datapipelines.parameters.ParameterEvaluationRepository
 import co.datapipelines.parameters.ParameterEvaluator
 import co.datapipelines.parameters.ParameterSetBody
 import co.datapipelines.parameters.ParameterSetJson
@@ -65,7 +66,13 @@ class ParameterEvaluationStreamControllerTest {
             scheduler = mockk<ScheduledExecutorService>(relaxed = true),
         )
     private val scope = ExecutionCoroutineScope()
-    private val controller = ParameterEvaluationStreamController(sets, EVERYTHING_LENS, evaluator, registry, authority, scope)
+    // The history, as a fake keyed by (workspace, id) — a wrong workspace passed by the controller reads as unused, as in the table.
+    private val recorded = mutableSetOf<Pair<UUID, UUID>>()
+    private val history =
+        mockk<ParameterEvaluationRepository> {
+            every { exists(any(), any()) } answers { (firstArg<UUID>() to secondArg<UUID>()) in recorded }
+        }
+    private val controller = ParameterEvaluationStreamController(sets, EVERYTHING_LENS, history, evaluator, registry, authority, scope)
 
     private val userId = UUID.randomUUID()
     private val setId = UUID.randomUUID()
@@ -198,6 +205,54 @@ class ParameterEvaluationStreamControllerTest {
         error.details shouldBe mapOf("path" to "evaluation_id", "reason" to "reused")
         registry.activeStreams shouldBe 1
         coVerify(exactly = 0) { evaluator.evaluate(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `an evaluation id the workspace's history already holds is refused reused - its stream closed long ago, no stream, no evaluation (417)`() {
+        authenticate()
+        every { sets.findVersion(workspaceId, any(), setId, 4) } returns set
+        recorded += workspaceId to UUID.fromString(evaluationId)
+
+        val error = shouldThrow<ApiException> { controller.evaluations(setId, body()) }
+
+        error.code shouldBe "parameter.validation.body_invalid"
+        ApiErrorCatalog.statusFor(error.code) shouldBe HttpStatus.BAD_REQUEST
+        error.details shouldBe mapOf("path" to "evaluation_id", "reason" to "reused")
+        verify(exactly = 1) { history.exists(workspaceId, UUID.fromString(evaluationId)) }
+        registry.find(UUID.fromString(evaluationId)) shouldBe null
+        nothingStarted()
+    }
+
+    @Test
+    fun `reuse is judged BEFORE the cap - a full cap and a recorded id answer reused, never rate_limit exceeded (417)`() {
+        authenticate()
+        every { sets.findVersion(workspaceId, any(), setId, 4) } returns set
+        others.set(2)
+        recorded += workspaceId to UUID.fromString(evaluationId)
+
+        val error = shouldThrow<ApiException> { controller.evaluations(setId, body()) }
+
+        error.code shouldBe "parameter.validation.body_invalid"
+        error.details shouldBe mapOf("path" to "evaluation_id", "reason" to "reused")
+        nothingStarted()
+    }
+
+    @Test
+    fun `an id recorded in ANOTHER workspace is not refused by the read - the evaluation opens its stream and runs (417)`() {
+        authenticate()
+        every { sets.findVersion(workspaceId, any(), setId, 4) } returns set
+        recorded += UUID.randomUUID() to UUID.fromString(evaluationId)
+        val ran = kotlinx.coroutines.CompletableDeferred<Any>()
+        coEvery { evaluator.evaluate(workspaceId, set, any(), any(), any()) } coAnswers {
+            ran.complete(arg<Any>(4))
+            EvaluateResponse(setId, set.record.name, 4, OrgEcho(null, null), emptyList())
+        }
+
+        val emitter = controller.evaluations(setId, body())
+
+        verify(exactly = 1) { history.exists(workspaceId, UUID.fromString(evaluationId)) }
+        emitter shouldBeSameInstanceAs (registry.find(UUID.fromString(evaluationId)) as ParameterEvaluationStream).emitter
+        kotlinx.coroutines.runBlocking { kotlinx.coroutines.withTimeout(5_000) { ran.await() } }
     }
 
     @Test

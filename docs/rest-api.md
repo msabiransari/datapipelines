@@ -1,6 +1,6 @@
 # REST API + SSE Specification
 
-**Status:** v2.78 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
+**Status:** v2.79 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
 **Last updated:** 2026-10-03
@@ -2509,13 +2509,13 @@ The Parameter Sets workspace's stream (the [parameter-set workspace spec](superp
 | `POST /api/v1/parameter-sets/{id}/evaluations` | `{version, selections, evaluation_id, instance_id}` | `200` `text/event-stream` (below) |
 
 - `version` is **REQUIRED** — the page is version-explicit. Absent or `null` is `missing`; a value that is not an integer is `wrong_type`. It is read exactly through the caller's lens, never clamped and never fallen back to the served version. `selections` follows §21.3 exactly: absent or `null` is `{}`, a non-object is `wrong_type`, and an unknown key refuses the whole request.
-- `evaluation_id` is a fresh **v4 UUID the client mints** per attempt, in its canonical lower-case spelling (the owner's §11.3 ruling). Every frame carries it, and the page drops any frame whose id is not its current attempt's. Missing is `missing`, a non-string is `wrong_type`, and a non-UUID, another version or a non-canonical spelling is `malformed`. An id already open on this instance is `reused`. Reuse is judged per instance; across instances it becomes the history row's key conflict when S3 (#376) lands. `instance_id` (the page instance, for diagnostics only — the server keeps no per-instance state) follows the same rule.
+- `evaluation_id` is a fresh **v4 UUID the client mints** per attempt, in its canonical lower-case spelling (the owner's §11.3 ruling). Every frame carries it, and the page drops any frame whose id is not its current attempt's. Missing is `missing`, a non-string is `wrong_type`, and a non-UUID, another version or a non-canonical spelling is `malformed`. An id already open on this instance, or already recorded in the caller's workspace history (it is the history record's key, #376), is `reused`. Reuse is judged against this instance's open streams AND the workspace's history; the history read is the caller's workspace's own, so another workspace's id answers as unused (no cross-workspace signal; its insert conflict is the backstop). A concurrent first use of one id on two instances is that START insert's conflict — logged at ERROR, the loser's record lost, its evaluation still run. `instance_id` (the page instance, for diagnostics only — the server keeps no per-instance state) follows the same rule.
 - **Refusals, in order** — a refused observation opens nothing and starts nothing:
   1. The route's row (the scope interceptor, before the handler, as for every route).
   2. The body's shape: the §21.3 pre-parse bound of 1,048,576 UTF-8 bytes (`413 request.body_too_large`), then the fields above (`400 parameter.validation.body_invalid` with `details.path` and `details.reason`, never the value).
   3. The set and the explicit version through the lens. A hidden set or a missing version answers the IDENTICAL `404 parameter.not_found` §21.3 answers.
   4. Every selections key against the set (`400 parameter.evaluate.unknown_parameter`, the evaluator's own judge, the same `details`).
-  5. A reused `evaluation_id`.
+  5. A reused `evaluation_id` — open here or already in the workspace's history (`400 parameter.validation.body_invalid`, `details.path = evaluation_id`, `details.reason = reused`).
   6. The per-user SSE cap (§12.1): execution, refresh and observed-evaluation streams count together (`429 rate_limit.exceeded`).
 
 **The stream.** The execution stream's framing (§6): `event:` name, `id:` monotonic per stream from 1, `data:` JSON, and a `: heartbeat` comment while quiet. Before EVERY write, the heartbeat included, the stream re-judges its subscriber in order:
@@ -2544,7 +2544,7 @@ A refusal ends the stream at that write with a final `: revoked` comment, and th
 
 | Error | HTTP | When |
 |---|---|---|
-| `parameter.validation.body_invalid` | 400 | The body is unreadable, or a field is missing (`missing`), mistyped (`wrong_type`), not a canonical v4 UUID (`malformed`), or a `evaluation_id` already open on this instance (`reused`) |
+| `parameter.validation.body_invalid` | 400 | The body is unreadable, or a field is missing (`missing`), mistyped (`wrong_type`), not a canonical v4 UUID (`malformed`), or an `evaluation_id` already open on this instance or already recorded in the caller's workspace history (`reused`) |
 | `request.body_too_large` | 413 | The body exceeds 1,048,576 UTF-8 bytes — refused before its JSON is parsed |
 | `auth.role_required` | 403 | The caller's role lacks `parameter_set.evaluate` (the promoter) |
 | `parameter.not_found` | 404 | No such set, a set the lens hides, or no such version — the identical body §21.3 answers |
@@ -2717,6 +2717,7 @@ window. A dashboard execution has no stored result: `GET /api/v1/executions/{id}
 
 ## Appendix A: Change Log
 
+| 2026-10-03 | v2.79 | #417 the observed evaluation refuses a recorded `evaluation_id` | **§21.5** — a reused `evaluation_id` is now also an id the caller's workspace history already holds (a closed stream's, or one recorded on another instance), refused before the stream opens and before the cap with the same `400 parameter.validation.body_invalid` (`details.path = evaluation_id`, `details.reason = reused`); the sentence "across instances it becomes the history row's key conflict when S3 (#376) lands" is corrected (the insert conflict is logged and the evaluation runs unrecorded, so the id is now refused up front), the refusal order's step 5 and the `body_invalid` row name both cases. The read is workspace-scoped: another workspace's id answers as unused. No route, field, code or permission changed. |
 | 2026-10-03 | v2.78 | #399 the Visualizations workspace — renumbered at merge after the #383 follow-up's v2.77 | **§22's intro** — the sentence "No UI page exists yet — this section and the MCP tools … are the whole surface" leaves: the first-party workspace ([ui-screens §4.24](ui-screens.md)) reads and drives the lifecycle verbs through the same services, its page and partial routes named as UI routes on the `visualization.*` rows (auth.md §7.6), outside this contract. No route, field, code or permission changed. |
 | 2026-10-03 | v2.77 | #383 merge follow-up — the page's client streams | **§21's intro** — the sentence "the page's live form calls §21.3 exactly as any client does" became false when #383 moved the live form onto §21.5; it now names §21.5 as the page's route and §21.3 as every other client's. **§21.5's** opening (#383) names the page's client as the route's consumer. No route, field or code changes. |
 | 2026-10-02 | v2.76 | S1 (#374) the Parameter Sets pages | **§21's intro** — the sentence "No UI page exists (the record's §13)" is replaced (workspace spec §14, row C1): the first-party workspace ([ui-screens §4.23](ui-screens.md)) reads and evaluates through §21, and its page routes (`GET /parameter-sets`, `GET /parameter-sets/{id}`, `GET /partials/parameter-sets/tree`) are named as UI routes on `parameter_set.read`, outside this contract. **§21.5** — "its page lands with S1" now reads as landed, with the client half (#383) named. No route, field, code or permission changed: the page's form calls the existing §21.3 evaluate. |

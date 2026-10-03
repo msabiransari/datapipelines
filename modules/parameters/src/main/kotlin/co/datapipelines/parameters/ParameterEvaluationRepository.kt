@@ -168,6 +168,22 @@ class ParameterEvaluationRepository(
             ).singleOrNull()
     }
 
+    /**
+     * Whether [workspaceId] already holds a record under [evaluationId] — the observed route's reuse read (#417), a
+     * primary-key lookup. The id alone is the key (V48), yet the read is scoped to the workspace: another workspace's id
+     * answers as unused, so the route gives no cross-workspace existence signal (its insert conflict stays the backstop).
+     */
+    fun exists(
+        workspaceId: UUID,
+        evaluationId: UUID,
+    ): Boolean =
+        jdbc
+            .queryForList(
+                "SELECT 1 FROM parameter_evaluations WHERE workspace_id = :workspaceId AND id = :id",
+                MapSqlParameterSource().addValue("workspaceId", workspaceId).addValue("id", evaluationId),
+                Int::class.java,
+            ).isNotEmpty()
+
     /** The statement attempts of one record, in the order they asked for admission (the caller resolved the record). */
     fun queries(evaluationId: UUID): List<QueryAttemptRecord> =
         jdbc.query(
