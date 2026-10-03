@@ -287,10 +287,13 @@ events |= set(re.findall(r"auth\.[a-z_]+(?:\.[a-z_]+)*", enums_txt))
 # below refused the first doc that cited one of them until a §3.4 table could define it.
 # `dashboard` joined at #10 L2 (§3.4J), for the same reason: `dashboard.refresh_finished` and its siblings are
 # structured log events, and `dashboard` is a code namespace (L1a) and a permission family (`dashboard.execute`).
+# `parameter` joined at #418 (§3.4M), for the same reason: `parameter.evaluation_record_failed` and its siblings are
+# structured log events, and `parameter` is ALSO the error-code family of Pipeline Contract §13.20 (`parameter.evaluate.timeout`),
+# so a bare citation of an uncatalogued event fails check C. The ONE test of §3.4M against the code is the lane's A.4 diff, not this regex.
 obs_txt = texts.get("docs/observability.md", "")
 sec34 = re.search(r"^#### 3\.4A\b.*?(?=^### )", obs_txt, re.M | re.S)
 if sec34:
-    events |= set(re.findall(r"`((?:auth|datasource|mcp|endpoint|pipeline|mail|lake|scheduler|execution|dashboard)\.[a-z0-9_]+(?:\.[a-z0-9_]+)*)`", sec34.group(0)))
+    events |= set(re.findall(r"`((?:auth|datasource|mcp|endpoint|pipeline|mail|lake|scheduler|execution|dashboard|parameter)\.[a-z0-9_]+(?:\.[a-z0-9_]+)*)`", sec34.group(0)))
 # PERMISSIONS (#215). The auth.md §7.6 catalog's FIRST column defines every
 # `<functionality>.<permission>` name (`pipeline.read`, `workspace.members.manage`). They share
 # the error codes' domain words but are neither codes nor events, and the catalog is their one
