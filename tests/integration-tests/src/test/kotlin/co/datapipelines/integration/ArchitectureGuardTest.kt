@@ -224,12 +224,12 @@ class ArchitectureGuardTest {
      * **The ordinary evaluate attaches no observer** (the parameter-set workspace spec §4.5, R1; #375).
      * The observed evaluation is exclusive to the Parameter Sets page's stream: the three ordinary
      * call sites — the REST evaluate, the dashboard runtime and the MCP tool — never name the observer
-     * or its events, and every production `evaluateBlocking(` call passes exactly its three arguments
-     * (`workspaceId, set, selections`), so an observer cannot ride in positionally either. Grep-able
+     * or its events, and every production `evaluateBlocking(` call passes exactly its four arguments
+     * (`workspaceId, set, selections, attempt`), so an observer cannot ride in positionally either. Grep-able
      * by TYPE: a leak is red, never a silent trace on every evaluate.
      *
-     * When S3 (#376) lands `attempt: EvaluationAttempt` the expected count becomes four — that lane
-     * rewrites [ORDINARY_EVALUATE_ARGUMENTS] in the same commit.
+     * S3 (#376) landed the REQUIRED `attempt: EvaluationAttempt` (the durable history's caller and principal)
+     * and rewrote [ORDINARY_EVALUATE_ARGUMENTS] from three to four in the same commit.
      */
     @Test
     fun `the ordinary evaluate call sites attach no observer`() {
@@ -434,6 +434,11 @@ class ArchitectureGuardTest {
                 "McpResourceCatalog → ExecutionRepository",
                 "McpResourceReader → ExecutionEventRepository",
                 "McpResourceReader → ExecutionRepository",
+                // #417 — the observed evaluation route's reuse refusal: ONE existence read of the history by id, in the
+                // caller's workspace (`workspace_id = :workspaceId` in its SQL — no cross-workspace signal), judged before
+                // the stream opens beside the registry's open-stream check (rest-api §21.5). A service seam would be a
+                // pass-through, so the read is inventoried here, as the set controller's are.
+                "ParameterEvaluationStreamController → ParameterEvaluationRepository",
                 "PipelineAuthoringTools → PipelineRepository",
                 "PipelineChecksPartialsController → PipelineCheckRunRepository",
                 "PipelineExecuteTool → ExecutionRepository",
@@ -497,13 +502,16 @@ class ArchitectureGuardTest {
          * audit-log retention (#310 — the job that DELETES audit rows; no route or tool may reach
          * it), and — #9 — the scheduler's db-scheduler jobs (dispatcher, run worker, reconciler),
          * their task factory and the admission gate. A transport reaches the scheduler through
-         * `ScheduleService` only, which is deliberately NOT in this list.
+         * `ScheduleService` only, which is deliberately NOT in this list. #376: the evaluation history's
+         * stale sweep and retention (steps of the retention tick) — the History tab READS the records, never
+         * the jobs that close and delete them.
          */
         val JOB_SERVICE =
             Regex(
                 "\\b(StaleExecutionSweeper|ExecutionEventRetention|reapRetiredPools|StaleExecutionSweepScheduler|" +
                     "DatasourcePoolReaperScheduler|ExecutionEventRetentionScheduler|AuditLogRetention|" +
-                    "ScheduleDispatcher|ScheduledRunWorker|RunReconciler|SchedulerTasks|SchedulerAdmission)\\b",
+                    "ScheduleDispatcher|ScheduledRunWorker|RunReconciler|SchedulerTasks|SchedulerAdmission|" +
+                    "ParameterEvaluationSweeper|ParameterEvaluationRetention)\\b",
             )
 
         /** The ordinary evaluate's call sites (spec §4.5) — the REST route, the dashboard runtime, the MCP tool. */
@@ -521,8 +529,8 @@ class ArchitectureGuardTest {
         const val OPENERS = "([{"
         const val CLOSERS = ")]}"
 
-        /** `workspaceId, set, selections` — S3 (#376) makes it four when `attempt` lands. */
-        const val ORDINARY_EVALUATE_ARGUMENTS = 3
+        /** `workspaceId, set, selections, attempt` — three until S3 (#376) landed the required `attempt`. */
+        const val ORDINARY_EVALUATE_ARGUMENTS = 4
 
         /** The four calls on this base: the REST route, the dashboard runtime's two, the MCP tool. */
         const val ORDINARY_EVALUATE_CALL_FLOOR = 4

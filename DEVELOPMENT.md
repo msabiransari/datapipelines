@@ -785,7 +785,9 @@ The gate's wall time is decided by three knobs and one budget. All three live in
 machine in `~/.gradle/gradle.properties` or per run with `-P`. CI is the worked example: every
 job in `.github/workflows/ci.yml` first writes that file for GitHub's 2-vCPU runner (workers 2,
 no forks, 2 GB daemons) — at the repo defaults the runner is oversubscribed and load-sensitive
-UI assertions lose their race.
+UI assertions lose their race. One gate step stands outside these knobs entirely:
+`./scripts/helm-check.sh`, the pinned-helm lint and render of the reference Helm chart
+(deployment.md §6.4), runs before the build.
 
 | Knob | Default | What it buys | What it costs |
 |---|---|---|---|
@@ -1063,6 +1065,19 @@ run `shasum -a 256` on it, and record the value (with the date) beside the
 version. Never bump the version alone — the pin would refuse every manifest
 the new release serves, and the scan would fail as exit `2` until the pin is
 refreshed.
+
+**Bumping helm (#411).** `scripts/helm-check.sh` pins its helm binary the same
+way — one commit carries BOTH edits, the new `HELM_VERSION` and the refreshed
+`HELM_SUMS_SHA256`. To compute the pin: download the new release's checksum
+file, `https://get.helm.sh/helm-<version>-linux-amd64.tar.gz.sha256sum` (helm
+publishes one `.sha256sum` PER PLATFORM ASSET, not one combined manifest like
+osv-scanner), run `shasum -a 256` on it, and record the value (with the date)
+beside the version. Never bump the version alone — the pin would refuse every
+checksum file the new release serves, and the chart render would fail as exit
+`2` until the pin is refreshed. helm-check is NOT a fourth scanner script: it
+borrows the install helpers below and their exit-`2` tooling contract, but its
+own exit `1` means a chart check failed (a render verdict), never a scan
+finding.
 
 The shared install helpers in `scripts/lib/scan-tools.sh` (download, SHA256
 verify) exit `2` on failure for **all three** scanner scripts —

@@ -1,0 +1,57 @@
+<!-- The workspace's OVERVIEW tab (#399) — the viewed version's definition, READ-ONLY: name, display
+     name, description, the renderer and its bundle, the inputs with their columns, the transform
+     pin with its status (RELEASED, or DRAFT with the release hint — the Release dialog's one
+     consent can release it with the visualization), the case count and the body hash. There is
+     deliberately no authoring control: the browser never authors a visualization (#396).
+     Every dynamic value is th:text — names and descriptions are user-supplied text. -->
+<div xmlns:th="http://www.thymeleaf.org" th:fragment="overview" class="viz-overview">
+  <div class="ds-card">
+    <div class="app-card-h">
+      <h3>Overview</h3>
+      <span class="app-card-note" th:text="${'v' + version + ' · ' + status.toLowerCase()}">v2 · draft</span>
+    </div>
+    <div class="app-card-b">
+      <p class="u-pre-line" th:if="${description != null}" th:text="${description}">Revenue by region, monthly.</p>
+      <dl class="tplx-kv">
+        <dt>Name</dt>
+        <dd class="u-mono" th:text="${name}">finance/charts/revenue_by_region</dd>
+        <dt>Display name</dt>
+        <dd th:text="${displayName}">Revenue by region</dd>
+        <dt>Renderer</dt>
+        <dd>
+          <span class="u-mono" th:text="${renderer}">plotly 1</span>
+          <span class="ds-badge ds-badge-default" th:text="'bundle ' + ${bundle}">bundle 2d</span>
+        </dd>
+        <dt>Inputs</dt>
+        <dd>
+          <span th:if="${#lists.isEmpty(inputs)}">—</span>
+          <ul class="dp-pin-list" th:unless="${#lists.isEmpty(inputs)}">
+            <li th:each="input : ${inputs}">
+              <span class="u-mono" th:text="${input.name}">rows</span>
+              <span class="u-muted u-mono" th:text="${#strings.listJoin(input.columns, ', ')}">region text, revenue decimal</span>
+            </li>
+          </ul>
+        </dd>
+        <dt>Transform</dt>
+        <dd>
+          <span th:if="${transform == null}">— (the input rows render as they are)</span>
+          <th:block th:if="${transform != null}">
+            <span class="u-mono" th:text="${transform.template + '@' + transform.version}">finance/templates/by_region@3</span>
+            <span class="ds-badge" th:classappend="${transform.status == 'RELEASED'} ? 'ds-badge-success' : (${transform.draftHint} ? 'ds-badge-warning' : 'ds-badge-danger')"
+                  th:text="${transform.status}" data-viz-transform-status>RELEASED</span>
+            <span class="u-secondary u-text-sm" th:if="${transform.draftHint}" data-viz-release-hint>
+              A draft pin — Release can release it together with this visualization (its one consent).
+            </span>
+            <ul class="dp-pin-list" th:unless="${#lists.isEmpty(transform.bindings)}">
+              <li th:each="b : ${transform.bindings}" class="u-mono u-text-sm" th:text="${b}">rows ← rows</li>
+            </ul>
+          </th:block>
+        </dd>
+        <dt>Test cases</dt>
+        <dd th:text="${caseCount}">3</dd>
+        <dt>Body hash</dt>
+        <dd class="u-mono u-text-sm" th:text="${bodyHash}">sha256:…</dd>
+      </dl>
+    </div>
+  </div>
+</div>

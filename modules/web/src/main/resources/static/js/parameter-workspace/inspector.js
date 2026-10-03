@@ -49,15 +49,15 @@
     return wrap;
   }
 
-  /** Mounts into [region]: returns {show(parameter, set, last), clear()}. */
+  /** Mounts into [region]: returns {show(parameter, set, last, stream), clear()}. [stream] is a live frame failure. */
   function mount(region) {
     var empty = "Select a parameter in the graph to inspect it.";
     function clear() {
       region.replaceChildren(el("p", "ps-insp-empty", empty));
     }
-    function show(parameter, set, last) {
+    function show(parameter, set, last, stream) {
       var list = el("dl", "ps-insp-list");
-      window.PSModel.inspect(parameter, set, last).forEach(function (row) {
+      window.PSModel.inspect(parameter, set, last, stream).forEach(function (row) {
         list.appendChild(renderRow(row));
       });
       var title = el("h3", "ps-insp-title", parameter.label || parameter.name);

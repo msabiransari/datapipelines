@@ -75,14 +75,19 @@ class ParameterSetFormBrowserTest : ParameterSetBrowserSuite() {
     private fun selectedLabel(parameter: String): String =
         page.locator("#ps-form-host [data-dp-parameter='$parameter'] select").evaluate("s => s.selectedOptions[0].text") as String
 
-    private fun evaluatePosts(requests: List<String>): List<String> = requests.filter { it.startsWith("POST ") && it.contains("/evaluate") }
+    /** #383 — the page's evaluate is the OBSERVED route; the capture means exactly that path, never a prefix match. */
+    private fun captureEvaluatePosts(into: MutableList<String>) {
+        page.onRequest { request ->
+            if (request.method() == "POST" && request.url().endsWith("/evaluations")) into += request.postData() ?: ""
+        }
+    }
 
     @Test
     fun `rule 1 - the first render evaluates an empty selection and shows every default with its origin`() {
         startTrace()
         val id = seedLiveSet(ready("psf1"))
         val posted = mutableListOf<String>()
-        page.onRequest { if (it.method() == "POST" && it.url().contains("/evaluate")) posted += it.postData() ?: "" }
+        captureEvaluatePosts(posted)
 
         open(id)
 
@@ -135,7 +140,7 @@ class ParameterSetFormBrowserTest : ParameterSetBrowserSuite() {
               window.fetch = function (input, init) {
                 const answer = real.apply(this, arguments);
                 const body = init && init.body ? String(init.body) : '';
-                if (String(input).indexOf('/evaluate') >= 0 && body.indexOf('"boom"') >= 0) {
+                if (String(input).indexOf('/evaluations') >= 0 && body.indexOf('"boom"') >= 0) {
                   return answer.then((r) => new Promise((resolve) => setTimeout(() => resolve(r), 1200)));
                 }
                 return answer;
@@ -171,7 +176,9 @@ class ParameterSetFormBrowserTest : ParameterSetBrowserSuite() {
         drainCspViolations()
 
         val posted = mutableListOf<String>()
-        page.onRequest { if (it.method() == "POST" && it.url().contains("/evaluate")) posted += it.url() }
+        page.onRequest { request ->
+            if (request.method() == "POST" && request.url().endsWith("/evaluations")) posted += request.url()
+        }
         // Leave through a boosted link (htmx snapshots the page), then restore it from the history cache.
         page.click("a.app-nav-link[data-nav-section='/templates']")
         page.waitForURL("**/templates**")
@@ -179,7 +186,7 @@ class ParameterSetFormBrowserTest : ParameterSetBrowserSuite() {
         awaitSelected("item", "a1")
         page.waitForTimeout(800.0)
 
-        evaluatePosts(posted.map { "POST $it" }).size shouldBe 1
+        posted.size shouldBe 1
         page.locator("#ps-form-host [data-dp-parameter='kind']").count() shouldBe 1
         page.locator(".ps-root").count() shouldBe 1
         drainCspViolations().filter { !it.contains("'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='") }.shouldBeEmpty()

@@ -1,5 +1,6 @@
 package co.datapipelines.parameters
 
+import co.datapipelines.parameters.EvaluatorFixtures.attempt
 import co.datapipelines.parameters.EvaluatorFixtures.templateSelect
 import co.datapipelines.parameters.EvaluatorFixtures.version
 import co.datapipelines.parameters.ParameterEvaluationEvent.Ended
@@ -131,7 +132,11 @@ class ParameterEvaluationObserverTest {
         val recording = Recording()
 
         val response =
-            runBlocking { evaluator(everyKindSelectors()).evaluate(EvaluatorFixtures.WORKSPACE, everyKind, emptyMap(), recording) }
+            runBlocking {
+                evaluator(
+                    everyKindSelectors(),
+                ).evaluate(EvaluatorFixtures.WORKSPACE, everyKind, emptyMap(), attempt(), recording)
+            }
 
         recording.events.first() shouldBe Started(everyKind.body.parameters.map { it.name }, Instant.parse("2026-10-02T00:00:30Z"))
         recording.events.last() shouldBe Ended(EvaluationOutcome.COMPLETED, null, response)
@@ -160,6 +165,7 @@ class ParameterEvaluationObserverTest {
                 EvaluatorFixtures.WORKSPACE,
                 everyKind,
                 EvaluatorFixtures.selections("state" to "ZZ"),
+                attempt(),
                 recording,
             )
         }
@@ -202,7 +208,10 @@ class ParameterEvaluationObserverTest {
         val recording = Recording()
 
         runBlocking {
-            evaluator(ScriptedSelectors(), pool).evaluate(EvaluatorFixtures.WORKSPACE, version(templateSelect("a")), emptyMap(), recording)
+            evaluator(
+                ScriptedSelectors(),
+                pool,
+            ).evaluate(EvaluatorFixtures.WORKSPACE, version(templateSelect("a")), emptyMap(), attempt(), recording)
         }
 
         recording.of("a") shouldContainExactly listOf("failed")
@@ -228,6 +237,7 @@ class ParameterEvaluationObserverTest {
                 EvaluatorFixtures.WORKSPACE,
                 version(templateSelect("a"), templateSelect("b", dependsOn = listOf("a"))),
                 emptyMap(),
+                attempt(),
                 recording,
             )
         }
@@ -257,7 +267,7 @@ class ParameterEvaluationObserverTest {
                     evaluator(
                         selectors,
                         config = oneSecond,
-                    ).evaluate(EvaluatorFixtures.WORKSPACE, version(templateSelect("a")), emptyMap(), recording)
+                    ).evaluate(EvaluatorFixtures.WORKSPACE, version(templateSelect("a")), emptyMap(), attempt(), recording)
                 }
             }.exceptionOrNull()
 
@@ -278,7 +288,7 @@ class ParameterEvaluationObserverTest {
             scope.async {
                 evaluator(
                     selectors,
-                ).evaluate(EvaluatorFixtures.WORKSPACE, version(templateSelect("a")), emptyMap(), recording)
+                ).evaluate(EvaluatorFixtures.WORKSPACE, version(templateSelect("a")), emptyMap(), attempt(), recording)
             }
         waitUntil { running.get() == 1 }
         job.cancel()
@@ -309,7 +319,7 @@ class ParameterEvaluationObserverTest {
             runCatching {
                 runBlocking {
                     evaluator(selectors, config = ParametersConfig(maxEvaluateResponseBytes = 65_536))
-                        .evaluate(EvaluatorFixtures.WORKSPACE, version(templateSelect("a")), emptyMap(), recording)
+                        .evaluate(EvaluatorFixtures.WORKSPACE, version(templateSelect("a")), emptyMap(), attempt(), recording)
                 }
             }.exceptionOrNull()
 
@@ -324,13 +334,13 @@ class ParameterEvaluationObserverTest {
         val pool = spyk(SelectorPool(4, 64))
         val set = version(templateSelect("a"))
 
-        evaluator(selectors, pool).evaluateBlocking(EvaluatorFixtures.WORKSPACE, set, emptyMap())
+        evaluator(selectors, pool).evaluateBlocking(EvaluatorFixtures.WORKSPACE, set, emptyMap(), attempt())
 
         coVerify(exactly = 1) { pool.run(any(), match { it === produced.single() }, null) }
         coVerify(exactly = 0) { pool.run(any(), any(), isNull(inverse = true)) }
 
         // Non-vacuity: the double does see the difference when an observer IS attached.
-        runBlocking { evaluator(selectors, pool).evaluate(EvaluatorFixtures.WORKSPACE, set, emptyMap(), Recording()) }
+        runBlocking { evaluator(selectors, pool).evaluate(EvaluatorFixtures.WORKSPACE, set, emptyMap(), attempt(), Recording()) }
         coVerify(exactly = 1) { pool.run(any(), match { it !== produced.last() }, isNull(inverse = true)) }
     }
 
@@ -340,7 +350,11 @@ class ParameterEvaluationObserverTest {
         val throwing = ParameterEvaluationObserver { calls.incrementAndGet().also { error("the stream broke") } }
 
         val response =
-            runBlocking { evaluator(everyKindSelectors()).evaluate(EvaluatorFixtures.WORKSPACE, everyKind, emptyMap(), throwing) }
+            runBlocking {
+                evaluator(
+                    everyKindSelectors(),
+                ).evaluate(EvaluatorFixtures.WORKSPACE, everyKind, emptyMap(), attempt(), throwing)
+            }
 
         response.valid shouldBe true
         calls.get() shouldBe 1

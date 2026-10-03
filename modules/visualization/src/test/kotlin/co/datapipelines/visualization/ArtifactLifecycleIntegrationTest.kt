@@ -12,6 +12,7 @@ import co.datapipelines.visualization.VisualizationTestDb.WORKSPACE
 import com.fasterxml.jackson.databind.node.ObjectNode
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldBeEmpty
+import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.types.shouldBeInstanceOf
@@ -288,6 +289,58 @@ class ArtifactLifecycleIntegrationTest {
             lifecycle.countChildren(WORKSPACE, lens, "acme/sales") shouldBe 1
             lifecycle.listChildFolders(WORKSPACE, lens, null).map { it.path to it.count } shouldBe listOf("acme" to 1)
             lifecycle.countAll(WORKSPACE, lens) shouldBe 1
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(ArtifactKind::class)
+    fun `#399 search - name, display name, description, case-insensitive, and the LIKE metacharacters match literally`(
+        kind: ArtifactKind,
+    ) {
+        with(family(kind)) {
+            create("acme/promo/100%_off")
+            create("acme/promo/1000_off")
+            create("acme/paths/a\\b")
+            create("acme/paths/ab")
+            // The edited body differs only by its display name ("…, edited"): the index row carries it.
+            lifecycle.create(WORKSPACE, "beta/plain/q", edited, AUTHOR, WriteSurface.MCP)
+            create("acme/other/edit", workspace = OTHER_WORKSPACE)
+            val all = ReadLens.Everything
+
+            fun names(query: String) = lifecycle.search(WORKSPACE, all, query).items.map { it.record.name }
+
+            names("%") shouldBe listOf("acme/promo/100%_off")
+            names("0%_") shouldBe listOf("acme/promo/100%_off")
+            // `_` is one literal underscore, never "any character": "00_" is in both, "0_o" only in the second.
+            names("00_") shouldBe listOf("acme/promo/1000_off")
+            names("\\") shouldBe listOf("acme/paths/a\\b")
+            // Case-insensitive (the order between the two is the database collation's, so it is not pinned).
+            names("PATHS/A").shouldContainExactlyInAnyOrder("acme/paths/a\\b", "acme/paths/ab")
+            // The display name matches (another workspace's artifact never does).
+            names("EDITED") shouldBe listOf("beta/plain/q")
+            // Paged in SQL with the truthful total: two one-row pages cover both matches, once each.
+            val first = lifecycle.search(WORKSPACE, all, "promo", limit = 1)
+            val second = lifecycle.search(WORKSPACE, all, "promo", offset = 1, limit = 1)
+            first.total shouldBe 2
+            (first.items + second.items).map { it.record.name }.shouldContainExactlyInAnyOrder("acme/promo/100%_off", "acme/promo/1000_off")
+            names("nothing-matches").shouldBeEmpty()
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(ArtifactKind::class)
+    fun `#399 search under the promoter lens - only admitted, only RELEASED - a hidden or draft-only match is never listed or counted`(
+        kind: ArtifactKind,
+    ) {
+        with(family(kind)) {
+            released("acme/sales/revenue_b")
+            released("acme/sales/revenue_hidden")
+            create("acme/sales/revenue_draft")
+            val lens = ReadLens.Only(setOf("acme/sales/revenue_b", "acme/sales/revenue_draft"))
+            val page = lifecycle.search(WORKSPACE, lens, "revenue")
+            page.items.map { it.record.name to it.detail.status } shouldBe listOf("acme/sales/revenue_b" to PipelineVersionStatus.RELEASED)
+            page.total shouldBe 1
+            lifecycle.search(WORKSPACE, ReadLens.Everything, "revenue").total shouldBe 3
         }
     }
 

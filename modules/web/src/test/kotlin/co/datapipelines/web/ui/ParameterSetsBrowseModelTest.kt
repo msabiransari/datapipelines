@@ -94,20 +94,22 @@ class ParameterSetsBrowseModelTest {
         every { sets.listChildFolders(ws, narrowed.parameterSets, null) } returns emptyList()
         every { sets.listChildSets(ws, narrowed.parameterSets, null, 0, PAGE_SIZE) } returns emptyList()
         every { sets.countChildSets(ws, narrowed.parameterSets, null) } returns 0
-        every { sets.listAll(ws, narrowed.parameterSets, 0, PAGE_SIZE) } returns emptyList()
-        every { sets.countAll(ws, narrowed.parameterSets) } returns 0
+        every { sets.search(ws, narrowed.parameterSets, null, 0, PAGE_SIZE) } returns emptyList()
+        every { sets.countSearch(ws, narrowed.parameterSets, null) } returns 0
         browse.fillLevel(ExtendedModelMap(), ws, narrowed, null, 0)
-        browse.fillCatalog(ExtendedModelMap(), ws, narrowed, 0)
-        verify(exactly = 0) { sets.listAll(any(), ReadLens.Everything, any(), any()) }
+        browse.fillWrapper(ExtendedModelMap(), ws, narrowed, null, 0, ParameterSetsBrowseModel.SCOPE_PAGE)
+        verify(exactly = 0) { sets.search(any(), ReadLens.Everything, any(), any(), any()) }
         verify(exactly = 0) { sets.listChildFolders(any(), ReadLens.Everything, any()) }
     }
 
     @Test
     fun `the catalog is a flat paged list rooted at the stable id, negative offsets clamp to the first page`() {
-        every { sets.listAll(ws, ReadLens.Everything, 0, PAGE_SIZE) } returns List(PAGE_SIZE) { leaf("acme/s$it") }
-        every { sets.countAll(ws, ReadLens.Everything) } returns PAGE_SIZE + 1
+        every { sets.search(ws, ReadLens.Everything, null, 0, PAGE_SIZE) } returns List(PAGE_SIZE) { leaf("acme/s$it") }
+        every { sets.countSearch(ws, ReadLens.Everything, null) } returns PAGE_SIZE + 1
         val m = ExtendedModelMap()
-        browse.fillCatalog(m, ws, everything, -7) shouldBe ParameterSetsBrowseModel.CATALOG_VIEW
+        browse.fillWrapper(m, ws, everything, null, -7, ParameterSetsBrowseModel.SCOPE_PAGE) shouldBe
+            ParameterSetsBrowseModel.WRAPPER_VIEW
+        m["searching"] shouldBe true
         m["rootId"] shouldBe ParameterSetsBrowseModel.CATALOG_ROOT_ID
         m["offset"] shouldBe 0
         m["hasMore"] shouldBe true
@@ -116,11 +118,64 @@ class ParameterSetsBrowseModelTest {
 
     @Test
     fun `the catalog's last page has no more`() {
-        every { sets.listAll(ws, ReadLens.Everything, PAGE_SIZE, PAGE_SIZE) } returns listOf(leaf("acme/last"))
-        every { sets.countAll(ws, ReadLens.Everything) } returns PAGE_SIZE + 1
+        every { sets.search(ws, ReadLens.Everything, null, PAGE_SIZE, PAGE_SIZE) } returns listOf(leaf("acme/last"))
+        every { sets.countSearch(ws, ReadLens.Everything, null) } returns PAGE_SIZE + 1
         val m = ExtendedModelMap()
-        browse.fillCatalog(m, ws, everything, PAGE_SIZE)
+        browse.fillWrapper(m, ws, everything, null, PAGE_SIZE, ParameterSetsBrowseModel.SCOPE_PAGE)
         m["hasMore"] shouldBe false
+    }
+
+    @Test
+    fun `the catalog's search asks the service for the trimmed query and renders it back (#415)`() {
+        every { sets.search(ws, ReadLens.Everything, "geo", 0, PAGE_SIZE) } returns listOf(leaf("acme/geo_filters"))
+        every { sets.countSearch(ws, ReadLens.Everything, "geo") } returns 1
+        val m = ExtendedModelMap()
+        browse.fillWrapper(m, ws, everything, "  geo  ", 0, ParameterSetsBrowseModel.SCOPE_PAGE)
+        m["q"] shouldBe "geo"
+        m["scope"] shouldBe ParameterSetsBrowseModel.SCOPE_PAGE
+        m.leaves().single().name shouldBe "acme/geo_filters"
+        m["total"] shouldBe 1
+    }
+
+    @Test
+    fun `the branch's search renders the flat results under the TREE's root id, so clearing can return to it (#415)`() {
+        every { sets.search(ws, ReadLens.Everything, "geo", 0, PAGE_SIZE) } returns listOf(leaf("acme/geo_filters"))
+        every { sets.countSearch(ws, ReadLens.Everything, "geo") } returns 1
+        val m = ExtendedModelMap()
+        browse.fillWrapper(m, ws, everything, "geo", 0) shouldBe ParameterSetsBrowseModel.WRAPPER_VIEW
+        m["searching"] shouldBe true
+        m["scope"] shouldBe ParameterSetsBrowseModel.SCOPE_NAV
+        m["rootId"] shouldBe ParameterSetsBrowseModel.NAV_ROOT_ID
+        m["q"] shouldBe "geo"
+    }
+
+    @Test
+    fun `the branch's BLANK q is the root level, never a search - clearing returns the tree by construction`() {
+        every { sets.listChildFolders(ws, ReadLens.Everything, null) } returns listOf(ParameterSetFolder("acme", "acme", 1))
+        every { sets.listChildSets(ws, ReadLens.Everything, null, 0, PAGE_SIZE) } returns emptyList()
+        every { sets.countChildSets(ws, ReadLens.Everything, null) } returns 0
+        val m = ExtendedModelMap()
+        browse.fillWrapper(m, ws, everything, "", 0) shouldBe ParameterSetsBrowseModel.WRAPPER_VIEW
+        m["searching"] shouldBe null
+        m["levelId"] shouldBe ParameterSetsBrowseModel.NAV_ROOT_ID
+        m.folders().single().path shouldBe "acme"
+        verify(exactly = 0) { sets.search(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `the search needle is trimmed and length-bounded before it reaches the service (#415)`() {
+        val bounded = "x".repeat(ParameterSetsBrowseModel.MAX_QUERY_LENGTH)
+        every { sets.search(ws, ReadLens.Everything, bounded, 0, PAGE_SIZE) } returns emptyList()
+        every { sets.countSearch(ws, ReadLens.Everything, bounded) } returns 0
+        val m = ExtendedModelMap()
+        browse.fillSearch(m, ws, everything, "  " + "x".repeat(500) + "  ", 0, ParameterSetsBrowseModel.SCOPE_PAGE)
+        m["q"] shouldBe bounded
+    }
+
+    @Test
+    fun `the swap root follows the scope - the tree panel for nav, the catalog list for page`() {
+        ParameterSetsBrowseModel.rootIdOf(ParameterSetsBrowseModel.SCOPE_NAV) shouldBe ParameterSetsBrowseModel.NAV_ROOT_ID
+        ParameterSetsBrowseModel.rootIdOf(ParameterSetsBrowseModel.SCOPE_PAGE) shouldBe ParameterSetsBrowseModel.CATALOG_ROOT_ID
     }
 
     @Test

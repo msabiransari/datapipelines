@@ -1,0 +1,77 @@
+<!-- A FLAT list of parameter sets (#415), in TWO instances — chosen by `scope`, which also names
+     the stable swap root (partials/dashboard-search.html's shape, one family over):
+
+     - `nav`  — the global sidebar's search results, under #params-tree-nav. Clearing the box
+                returns the sidebar to its tree (partials/parameter-sets dispatches on exactly
+                that). The rows are role=option in a role=listbox — a result list, not a tree —
+                and template-explorer.js's nav context gives them the same keyboard as the tree.
+     - `page` — the /parameter-sets CATALOG, under #parameter-set-list-wrapper: every set the
+                caller may read when `q` is empty, the matches otherwise. Plain links in a plain
+                list; the page has no tree and no detail pane.
+
+     A match names ALL THREE columns the service searches — the name, the display name and the
+     description — and shows the FULL path either way (§9.4: the truncated text must never be
+     the only copy). A set the lens hides is not in this list: the service never returned it —
+     never rendered disabled, never hidden by CSS.
+
+     Every row is a LINK to the canonical workspace /parameter-sets/{id} — a full document load
+     (hx-boost="false", the tree leaf's rule), never a selection into a pane. -->
+<div xmlns:th="http://www.thymeleaf.org" th:fragment="results" th:id="${rootId}"
+     th:with="nav=${scope == 'nav'}" th:attr="data-parameter-set-list=${scope}">
+  <th:block th:if="${lensUnavailable != null and #lists.isEmpty(parameterSets)}">
+    <div th:replace="~{partials/lens-unavailable :: notice(${lensUnavailable})}"></div>
+  </th:block>
+  <!-- The catalog with no query and no rows is the workspace's EMPTY state, not a failed
+       search: it says how sets arrive (R10 — authored through agents), like the tree's. -->
+  <th:block th:if="${lensUnavailable == null and #lists.isEmpty(parameterSets) and !nav and #strings.isEmpty(q)}">
+    <div class="ds-empty">
+      <p class="ds-empty-title">No parameter sets yet</p>
+      <p class="ds-empty-description">
+        Parameter sets are authored through the MCP server — ask your agent to create one. Give it a
+        folder path like <code>finance/parameters/geo_filters</code> — a folder is required, and
+        <code>test/&hellip;</code> is the place for experiments.
+      </p>
+    </div>
+  </th:block>
+  <th:block th:if="${lensUnavailable == null and #lists.isEmpty(parameterSets) and (nav or !#strings.isEmpty(q))}">
+    <div class="ds-empty">
+      <p class="ds-empty-title">No parameter sets match your search</p>
+      <div class="ds-empty-actions">
+        <!-- The sidebar's clear also empties ITS box, so it is nav-tree.js's (data-nav-tree-clear):
+             a bare hx-get would bring the tree back under a box still holding the old query. -->
+        <button th:if="${nav}" type="button" class="ds-button ds-button-secondary ds-button-sm"
+                data-nav-tree-clear>Clear search</button>
+        <button th:unless="${nav}" type="button" class="ds-button ds-button-secondary ds-button-sm"
+                th:attr="hx-get=@{/partials/parameter-sets/tree}, hx-target='#' + ${rootId}, hx-swap='outerHTML'">Clear search</button>
+      </div>
+    </div>
+  </th:block>
+
+  <ul class="tpl-results"
+      th:unless="${#lists.isEmpty(parameterSets)}"
+      th:attr="role=${nav} ? 'listbox' : null,
+               aria-label=${nav} ? 'Parameter set search results' : 'Parameter sets'">
+    <li th:attr="role=${nav} ? 'none' : null" th:each="p : ${parameterSets}">
+      <a class="tpl-result" hx-boost="false"
+         th:href="@{/parameter-sets/{id}(id=${p.id})}"
+         th:attr="role=${nav} ? 'option' : null,
+                  aria-selected=${nav} ? 'false' : null,
+                  data-leaf-id=${p.id}">
+        <!-- The FULL path, and it rides on `title` too — a deep path in a narrow pane
+             truncates, and the truncated text must never be the only copy (§9.4). -->
+        <span class="tpl-path" th:text="${p.name}" th:title="${p.name}">finance/parameters/geo_filters</span>
+        <span class="ds-badge ds-badge-default" th:text="${'v' + p.version}">v1</span>
+        <!-- versioning §7: a draft — the listed version itself, or a pending release — says so. -->
+        <span th:if="${!p.released}" class="ds-badge ds-badge-warning"
+              th:text="'draft v' + ${p.version} + ' pending release'"
+              title="A draft exists; release it to publish."></span>
+      </a>
+    </li>
+  </ul>
+
+  <th:block th:unless="${#lists.isEmpty(parameterSets)}"
+            th:with="prevUrl=${nav} ? @{/partials/parameter-sets/tree(q=${q}, scope='nav', offset=${offset - 25})} : @{/partials/parameter-sets/tree(q=${q}, offset=${offset - 25})},
+                     nextUrl=${nav} ? @{/partials/parameter-sets/tree(q=${q}, scope='nav', offset=${offset + 25})} : @{/partials/parameter-sets/tree(q=${q}, offset=${offset + 25})}">
+    <div th:replace="~{partials/pager :: pager('#' + ${rootId}, ${prevUrl}, ${nextUrl}, ${offset}, ${hasMore}, ${parameterSets.size()}, ${total})}"></div>
+  </th:block>
+</div>

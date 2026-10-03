@@ -269,6 +269,54 @@ class VisualizationTestSurfacesE2eTest {
         submit(id, session.getString("data.session_id"), GREEN_RESULTS, AUTHOR).statusCode shouldBe 200
     }
 
+    /**
+     * #399 — the workspace routes are NOT the capability page: the public `/visualizations/{id}/preview` glob admits
+     * none of them, so every page, tab partial and lifecycle dialog answers an anonymous request — WITH the live
+     * preview capability or without it — with the same refusal, never a 200, and an anonymous lifecycle POST (a valid
+     * CSRF pair, so the answer is the route's) changes nothing.
+     */
+    @Test
+    @Order(26)
+    fun `B7 - the workspace's pages, tabs and dialogs refuse an anonymous caller - the capability opens none of them`() {
+        val session = startSession(id, AUTHOR)
+        val token = session.getString("data.preview_url").substringAfter("session=")
+        val run = session.getString("data.run_id")
+        val reads =
+            listOf("/visualizations", "/visualizations/$id", "/partials/visualizations", "/partials/visualizations/tree") +
+                listOf(
+                    "preview",
+                    "overview",
+                    "evidence",
+                    "evidence/$run",
+                    "used-by",
+                    "versions",
+                ).map { "/partials/visualizations/$id/$it" } +
+                LIFECYCLE.map { "/partials/visualizations/$id/lifecycle/$it" }
+        reads.forEach { path ->
+            withClue(path) {
+                val bare = anonymousGet(path)
+                val withToken = anonymousGet("$path?session=$token")
+                bare.statusCode shouldNotBe 200
+                withToken.statusCode shouldBe bare.statusCode
+                normalised(withToken) shouldBe normalised(bare)
+            }
+        }
+        val before = envelope(get("/api/v1/visualizations/$id", AUTHOR))
+        LIFECYCLE.forEach { verb ->
+            withClue("POST $verb") {
+                val refused =
+                    anonymous()
+                        .cookie(E2eSession.CSRF_COOKIE, E2eSession.CSRF_TOKEN)
+                        .header(E2eSession.CSRF_HEADER, E2eSession.CSRF_TOKEN)
+                        .post("/partials/visualizations/$id/lifecycle/$verb?version=1&session=$token")
+                refused.statusCode shouldNotBe 200
+                refused.getHeader("HX-Redirect") shouldBe null
+            }
+        }
+        envelope(get("/api/v1/visualizations/$id", AUTHOR)) shouldBe before
+        submit(id, session.getString("data.session_id"), GREEN_RESULTS, AUTHOR).statusCode shouldBe 200
+    }
+
     @Test
     @Order(21)
     fun `B2 - the upload capability on another session's route, on a lifecycle route, or as a preview is nothing`() {
@@ -638,6 +686,7 @@ class VisualizationTestSurfacesE2eTest {
 
     private companion object {
         const val EXCERPT = 800
+        val LIFECYCLE = listOf("release", "purge-draft", "discard", "restore", "purge-version", "switch", "purge-entity")
         const val WORKSPACE = "ts-e2e"
         const val B_WORKSPACE = "ts-e2e-b"
         const val NAME = "ts/charts/evidence"

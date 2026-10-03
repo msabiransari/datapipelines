@@ -261,6 +261,62 @@ class ParameterSetRepository(
         )
 
     /**
+     * The flat listing's name search (#415): every live set at its LISTED version whose name, display
+     * name or description contains [query] — the [listAll] statement plus one OR-clause. Case-folded
+     * by the DATABASE on both sides (`ILIKE`, the [TemplateRepository][co.datapipelines.templates.TemplateRepository]
+     * search's operator: one case rule, the server's, not two that can drift), and the term's own
+     * `%`, `_` and `\` are matched LITERALLY — [query] reaches the statement only as the bound
+     * `%<escaped>%` pattern ([escapeLike]), never as SQL text. Name-ordered, so paging is stable and
+     * a page boundary can neither duplicate nor drop a row. The everything-lens arm of
+     * [ParameterSetService.search]; a narrowing lens filters in memory, never here — the admitted set
+     * is a per-request name set the SQL pager cannot take.
+     */
+    fun searchAll(
+        workspaceId: UUID,
+        query: String,
+        offset: Int = 0,
+        limit: Int = DEFAULT_PAGE_LIMIT,
+    ): List<ParameterSetVersion> =
+        jdbc.query(
+            """
+            $SELECT_VERSION
+            WHERE s.workspace_id = :workspaceId AND $LIVE_S
+               AND v.version = $LISTED_VERSION
+               AND (s.name ILIKE CAST(:needle AS TEXT) ESCAPE '\'
+                 OR s.display_name ILIKE CAST(:needle AS TEXT) ESCAPE '\'
+                 OR s.description ILIKE CAST(:needle AS TEXT) ESCAPE '\')
+             ORDER BY s.name
+             LIMIT :limit OFFSET :offset
+            """.trimIndent(),
+            mapOf(
+                "workspaceId" to workspaceId,
+                "needle" to "%${escapeLike(query)}%",
+                "limit" to limit.coerceIn(1, MAX_PAGE_LIMIT + 1),
+                "offset" to maxOf(0, offset),
+            ),
+            VERSION,
+        )
+
+    /** The truthful total of [searchAll] — the same predicate, no paging. */
+    fun countSearchAll(
+        workspaceId: UUID,
+        query: String,
+    ): Int =
+        checkNotNull(
+            jdbc.queryForObject(
+                """
+                SELECT COUNT(*) FROM parameter_sets s
+                WHERE s.workspace_id = :workspaceId AND $LIVE_S
+                   AND (s.name ILIKE CAST(:needle AS TEXT) ESCAPE '\'
+                     OR s.display_name ILIKE CAST(:needle AS TEXT) ESCAPE '\'
+                     OR s.description ILIKE CAST(:needle AS TEXT) ESCAPE '\')
+                """.trimIndent(),
+                mapOf("workspaceId" to workspaceId, "needle" to "%${escapeLike(query)}%"),
+                Int::class.java,
+            ),
+        )
+
+    /**
      * Every live set that HAS a current version, with that version's number and hash — the promoter
      * lens's input (versioning §10.2: released and newer than the target's). A never-released set is
      * absent: a draft is never promotable.

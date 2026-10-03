@@ -6,6 +6,7 @@ import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.auth.WorkspaceRole
+import co.datapipelines.parameters.ParameterEvaluationRepository
 import co.datapipelines.parameters.ParameterSetService
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.ReadLens
@@ -36,8 +37,15 @@ class ParameterSetsUiControllerTest {
     private val sets = mockk<ParameterSetService>()
     private val themeResolver = mockk<ThemeResolver>()
     private val lens = mockk<PromoterLens>()
+    private val evaluations = mockk<ParameterEvaluationRepository>()
     private val controller =
-        ParameterSetsUiController(ParameterSetsBrowseModel(sets), ParameterSetsWorkspaceModel(sets), themeResolver, lens)
+        ParameterSetsUiController(
+            ParameterSetsBrowseModel(sets),
+            ParameterSetsWorkspaceModel(sets),
+            ParameterSetEvaluationsBrowseModel(sets, evaluations),
+            themeResolver,
+            lens,
+        )
     private val ws = ParameterSetsUiFixtures.workspaceId
     private val id = UUID.randomUUID()
     private val request: HttpServletRequest = MockHttpServletRequest()
@@ -78,10 +86,42 @@ class ParameterSetsUiControllerTest {
         every { sets.findVersion(ws, lens, id, 2) } returns if (withDraft) draft else null
     }
 
-    private fun open(version: String? = null): ExtendedModelMap {
+    private fun open(
+        version: String? = null,
+        tab: String? = null,
+    ): ExtendedModelMap {
         val m = ExtendedModelMap()
-        controller.workspace(id, version, null, m, request) shouldBe "parameter-sets/workspace"
+        controller.workspace(id, version, tab, m, request) shouldBe "parameter-sets/workspace"
         return m
+    }
+
+    @Test
+    fun `the history tab paints the first page of records and mounts no body - the page issues no evaluate`() {
+        authenticate(WorkspaceRole.AUTHOR, everything)
+        seed(ReadLens.Everything, withDraft = false)
+        every { evaluations.page(ws, id, null, ParameterSetEvaluationsBrowseModel.PAGE_SIZE + 1, 0) } returns emptyList()
+
+        val m = open(tab = "history")
+
+        m["activeTab"] shouldBe "history"
+        m["evaluations"] shouldBe emptyList<Any>()
+        m["historyOffset"] shouldBe 0
+        val state = m["workspaceJson"] as String
+        state shouldContain "\"tab\":\"history\""
+        state shouldContain "\"hasBody\":false"
+        state shouldContain "\"canEvaluate\":false"
+        // Non-vacuity: the same author on the workspace tab DOES mount the body and may evaluate.
+        (open()["workspaceJson"] as String) shouldContain "\"canEvaluate\":true"
+    }
+
+    @Test
+    fun `a promoter's history lists only the records of versions the lens admits`() {
+        val narrowed = LensedView(ReadLens.Everything, ReadLens.Everything, parameterSets = ReadLens.Only(setOf(record.name)))
+        authenticate(WorkspaceRole.PROMOTER, narrowed)
+        seed(ReadLens.Only(setOf(record.name)), withDraft = false)
+        every { evaluations.page(ws, id, listOf(1), ParameterSetEvaluationsBrowseModel.PAGE_SIZE + 1, 0) } returns emptyList()
+
+        open(tab = "history")["evaluations"] shouldBe emptyList<Any>()
     }
 
     @Test
@@ -160,12 +200,23 @@ class ParameterSetsUiControllerTest {
     @Test
     fun `the catalog page stamps the roles and the active theme and fills the flat list`() {
         authenticate(WorkspaceRole.AUTHOR, everything)
-        every { sets.listAll(ws, ReadLens.Everything, 0, ParameterSetsBrowseModel.PAGE_SIZE) } returns emptyList()
-        every { sets.countAll(ws, ReadLens.Everything) } returns 0
+        every { sets.search(ws, ReadLens.Everything, null, 0, ParameterSetsBrowseModel.PAGE_SIZE) } returns emptyList()
+        every { sets.countSearch(ws, ReadLens.Everything, null) } returns 0
         val m = ExtendedModelMap()
-        controller.list(m, request, null) shouldBe "parameter-sets/list"
+        controller.list(m, request, null, null) shouldBe "parameter-sets/list"
         m["activeTheme"] shouldBe "saas"
         m["canEvaluateParameterSets"] shouldBe true
         m["rootId"] shouldBe ParameterSetsBrowseModel.CATALOG_ROOT_ID
+    }
+
+    @Test
+    fun `the catalog page carries the caller's q - a deep link searches like the box does (#415)`() {
+        authenticate(WorkspaceRole.AUTHOR, everything)
+        every { sets.search(ws, ReadLens.Everything, "geo", 0, ParameterSetsBrowseModel.PAGE_SIZE) } returns emptyList()
+        every { sets.countSearch(ws, ReadLens.Everything, "geo") } returns 0
+        val m = ExtendedModelMap()
+        controller.list(m, request, "  geo  ", null) shouldBe "parameter-sets/list"
+        m["q"] shouldBe "geo"
+        m["searching"] shouldBe true
     }
 }

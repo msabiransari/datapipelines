@@ -89,6 +89,33 @@ internal class ArtifactSql(
 
     val countAll = "SELECT COUNT(*) FROM $index s WHERE s.workspace_id = :workspaceId AND $liveS"
 
+    /**
+     * The name search's scope (#399; `TemplateRepository`'s shape): the workspace, the live artifacts, and the index row's
+     * name, display name or description matching `:pattern` — a bind the repository builds as `%term%` with the term's
+     * LIKE metacharacters escaped, so `%`, `_` and `\` match literally and case-insensitively. Never string-built.
+     */
+    private val searchWhere =
+        "WHERE s.workspace_id = :workspaceId AND $liveS AND (" +
+            "s.name ILIKE CAST(:pattern AS TEXT) ESCAPE '\\'" +
+            " OR s.display_name ILIKE CAST(:pattern AS TEXT) ESCAPE '\\'" +
+            " OR s.description ILIKE CAST(:pattern AS TEXT) ESCAPE '\\')"
+
+    /** [listAll] narrowed by [searchWhere] — each match at its listed version, by name. */
+    val search =
+        """
+        $selectVersion
+        $searchWhere
+           AND v.version = $listedVersion
+         ORDER BY s.name
+         LIMIT :limit OFFSET :offset
+        """.trimIndent()
+
+    /** The truthful total of [search]. */
+    val countSearch = "SELECT COUNT(*) FROM $index s $searchWhere"
+
+    /** Every match's id, unpaged — the narrowing lens intersects it with the admitted set and pages in memory. */
+    val searchIds = "SELECT s.id FROM $index s $searchWhere"
+
     val currentVersions =
         """
         SELECT s.id, s.name, s.display_name, v.version, v.body_hash

@@ -1,5 +1,6 @@
 package co.datapipelines.parameters
 
+import co.datapipelines.parameters.EvaluatorFixtures.attempt
 import co.datapipelines.parameters.EvaluatorFixtures.templateSelect
 import co.datapipelines.parameters.EvaluatorFixtures.version
 import co.datapipelines.typesystem.DatapipelinesException
@@ -64,7 +65,7 @@ class EvaluatorConcurrencyTest {
         selectors["acme/sales/a.sql"] = rendezvous
         selectors["acme/sales/b.sql"] = rendezvous
 
-        evaluator().evaluateBlocking(EvaluatorFixtures.WORKSPACE, version(templateSelect("a"), templateSelect("b")), emptyMap())
+        evaluator().evaluateBlocking(EvaluatorFixtures.WORKSPACE, version(templateSelect("a"), templateSelect("b")), emptyMap(), attempt())
 
         withClue("had they run one after the other, the first would have waited out the latch alone") { met.get() shouldBe 2 }
     }
@@ -84,6 +85,7 @@ class EvaluatorConcurrencyTest {
             EvaluatorFixtures.WORKSPACE,
             version(templateSelect("a"), templateSelect("b", dependsOn = listOf("a"))),
             emptyMap(),
+            attempt(),
         )
 
         selectors.events.indexOf("end:acme/sales/a.sql") shouldBeLessThan selectors.events.indexOf("start:acme/sales/b.sql")
@@ -97,7 +99,7 @@ class EvaluatorConcurrencyTest {
         val set = version(*(1..5).map { templateSelect("s$it") }.toTypedArray())
         val pool = SelectorPool(size = 4, waiting = 64)
 
-        val evaluate = scope.async { evaluator(pool).evaluate(EvaluatorFixtures.WORKSPACE, set, emptyMap()) }
+        val evaluate = scope.async { evaluator(pool).evaluate(EvaluatorFixtures.WORKSPACE, set, emptyMap(), attempt()) }
         waitUntil { started.get() == 4 && pool.admitted() == 5 }
 
         withClue("five admitted, four running: the fifth slot never opens while four spin") { started.get() shouldBe 4 }
@@ -121,7 +123,7 @@ class EvaluatorConcurrencyTest {
                     evaluator(
                         pool,
                         oneSecond,
-                    ).evaluate(EvaluatorFixtures.WORKSPACE, version(templateSelect("a"), templateSelect("b")), emptyMap())
+                    ).evaluate(EvaluatorFixtures.WORKSPACE, version(templateSelect("a"), templateSelect("b")), emptyMap(), attempt())
                 }
             }
         val outcome = runBlocking { withTimeout(COMPLETES_MS) { call.await() } }

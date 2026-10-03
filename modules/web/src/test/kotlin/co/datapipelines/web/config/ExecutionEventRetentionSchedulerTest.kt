@@ -7,6 +7,8 @@ import co.datapipelines.auth.AuditLogRetention
 import co.datapipelines.auth.KeyRetentionPurge
 import co.datapipelines.executor.ExecutionEventRetention
 import co.datapipelines.web.dashboards.runtime.DashboardRefreshRetention
+import co.datapipelines.web.parameters.ParameterEvaluationRetention
+import co.datapipelines.web.parameters.ParameterEvaluationSweeper
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -19,9 +21,9 @@ import org.slf4j.LoggerFactory
 import org.springframework.dao.DataAccessResourceFailureException
 
 /**
- * The retention sweep's one `@Scheduled` tick (metadata-db §8, #310): four steps in a fixed
- * order — execution events, the finished dashboard refreshes (#10 L2), the keys purge, the audit log — each isolated
- * from the others.
+ * The retention sweep's one `@Scheduled` tick (metadata-db §8, #310): six steps in a fixed
+ * order — execution events, the finished dashboard refreshes (#10 L2), the evaluation history's stale sweep and its
+ * retention (#376), the keys purge, the audit log — each isolated from the others.
  *
  * Isolation is the point of this suite. Before #310 the keys purge was the LAST step, so its
  * exception reaching Spring's scheduler stopped nothing; with the audit purge after it, an
@@ -37,19 +39,47 @@ class ExecutionEventRetentionSchedulerTest {
     private val keys = mockk<KeyRetentionPurge>(relaxed = true)
     private val audit = mockk<AuditLogRetention>(relaxed = true)
     private val dashboards = mockk<DashboardRefreshRetention>(relaxed = true)
-    private val scheduler = ExecutionEventRetentionScheduler(events, keys, audit, dashboards)
+    private val evaluationSweeper = mockk<ParameterEvaluationSweeper>(relaxed = true)
+    private val evaluations = mockk<ParameterEvaluationRetention>(relaxed = true)
+    private val scheduler = ExecutionEventRetentionScheduler(events, keys, audit, dashboards, evaluationSweeper, evaluations)
 
     @Test
-    fun `a tick runs the four steps in order - events, dashboard refreshes, keys, then the audit log`() {
+    fun `a tick runs the six steps in order - events, dashboard refreshes, the evaluation sweep and retention, keys, the audit log`() {
         val lines = captured { scheduler.retain() }
 
         verifyOrder {
             events.retainOnce()
             dashboards.retainOnce()
+            evaluationSweeper.sweepOnce()
+            evaluations.retainOnce()
             keys.purgeOnce()
             audit.purgeOnce()
         }
         lines.filter { it.level == Level.ERROR }.shouldBeEmpty()
+    }
+
+    @Test
+    fun `a failing evaluation sweep does not stop the evaluation retention or the purges after it`() {
+        every { evaluationSweeper.sweepOnce() } throws IllegalStateException("unexpected")
+
+        val lines = captured { scheduler.retain() }
+
+        verify(exactly = 1) { evaluations.retainOnce() }
+        verify(exactly = 1) { keys.purgeOnce() }
+        verify(exactly = 1) { audit.purgeOnce() }
+        lines.single { it.level == Level.ERROR }.formattedMessage shouldContain
+            "event=retention.step_failed step=parameter_evaluation_sweep"
+    }
+
+    @Test
+    fun `a failing evaluation retention does not stop the purges after it`() {
+        every { evaluations.retainOnce() } throws DataAccessResourceFailureException("metadata database unreachable")
+
+        val lines = captured { scheduler.retain() }
+
+        verify(exactly = 1) { keys.purgeOnce() }
+        verify(exactly = 1) { audit.purgeOnce() }
+        lines.single { it.level == Level.ERROR }.formattedMessage shouldContain "event=retention.step_failed step=parameter_evaluations"
     }
 
     @Test
@@ -99,13 +129,16 @@ class ExecutionEventRetentionSchedulerTest {
     @Test
     fun `every step failing still ends the tick normally, one ERROR line per step`() {
         every { events.retainOnce() } throws IllegalStateException("a")
-        every { keys.purgeOnce() } throws IllegalStateException("b")
-        every { audit.purgeOnce() } throws IllegalStateException("c")
+        every { dashboards.retainOnce() } throws IllegalStateException("b")
+        every { evaluationSweeper.sweepOnce() } throws IllegalStateException("c")
+        every { evaluations.retainOnce() } throws IllegalStateException("d")
+        every { keys.purgeOnce() } throws IllegalStateException("e")
+        every { audit.purgeOnce() } throws IllegalStateException("f")
 
         val lines = captured { scheduler.retain() }
 
         lines.filter { it.level == Level.ERROR }.map { it.formattedMessage.substringAfter("step=").substringBefore(' ') } shouldBe
-            listOf("execution_events", "keys", "audit_log")
+            listOf("execution_events", "dashboard_refreshes", "parameter_evaluation_sweep", "parameter_evaluations", "keys", "audit_log")
     }
 
     private fun captured(block: () -> Unit): List<ILoggingEvent> {

@@ -91,7 +91,10 @@ class TransformImplementsBrowserTest : BrowserSuite() {
         confirm.isDisabled shouldBe false
         val toast = successToastAfter { confirm.click() }
         toast shouldContain "Released"
-        toast shouldContain "is now the current version"
+        // #407: a cascaded release's flash names what it released, server-derived — the pinned
+        //     transform among them (ReleaseCascadeBrowserTest owns the consume and crafted-?ok= arms).
+        toast shouldContain "Also released: "
+        toast shouldContain "$transform@1"
         drainCspViolations().shouldBeEmpty()
     }
 

@@ -468,10 +468,11 @@
       },
 
       /**
-       * The composition facts, re-read from the page's ONE workspace block — at init
-       * and after every in-page version switch (the switch rewrites the block's shape
-       * in the component; the DOM block stays the server's arrival snapshot, so the
-       * component fields are the working copy, not re-read from the DOM).
+       * The composition facts, re-read from the page's ONE workspace block at init — a
+       * first arrival AND a cached history restore. The component fields are the working
+       * copy; an in-page version switch re-states only the block's pin fields and the
+       * rows' viewed marks (#402: a snapshot taken after a switch restores with its
+       * selector, Overview facts and dialect map intact).
        */
       readComposition: function () {
         var self = this;
@@ -529,8 +530,12 @@
        * stamp the whole page with a new generation so every stale completion — success
        * or refusal — is dropped. A late v1 response cannot overwrite v2; returning to
        * v1 is a new generation (A→B→A included).
+       *
+       * #402: a USER's switch pushes a history entry once the body lands (a refused or
+       * superseded read pushes nothing); `options.history === false` is a Back/Forward
+       * REPLAY of an entry that already holds this URL — it re-applies, never mints.
        */
-      applyVersion: function (n) {
+      applyVersion: function (n, options) {
         var self = this;
         var version = Number(n);
         if (!self.pipeline || !self.pipeline.id) return Promise.resolve(false);
@@ -562,7 +567,7 @@
               if (window.PEWorkspaceLogic.stale({ generation: generation, pipelineId: pipelineId }, self.currentStamp())) {
                 return null;
               }
-              self.applyBodySnapshot(version, data);
+              self.applyBodySnapshot(version, data, options);
               return true;
             });
           })
@@ -589,9 +594,10 @@
        * keeps streaming while the view moves (spec §4.3); only the GRAPH PAINTING
        * gate changes, because the run's facts attach to their own version.
        */
-      applyBodySnapshot: function (version, data) {
+      applyBodySnapshot: function (version, data, options) {
         var self = this;
         var previousVersion = self.viewedVersionOrNull();
+        var previousTab = self.tabs ? self.tabs.active : "flow";
         // The per-version override rule FIRST (spec §4.3 — never reuse another
         // version's fields): the old bag saves under the OLD version, the new one
         // loads from the new version's own store. Only then does the reactive
@@ -640,10 +646,14 @@
         // source (init reads it; a later PEWorkspaceRead identity-checks the pair),
         // and the workspace block is the pin every execute and SQL read makes.
         if (typeof document !== "undefined") {
+          // #402 security pass: written SCRIPT-SAFE, as the server writes them (ScriptSafeJson).
+          // A history snapshot serialises #app-main as innerHTML, where a <script>'s text is
+          // emitted RAW — a literal `</script>` in an author's description would close the
+          // block on the cache-hit re-parse. `\u003c` is still valid JSON for the same value.
           var dataEl = document.getElementById("pipeline-data");
-          if (dataEl) dataEl.textContent = JSON.stringify(data);
+          if (dataEl) dataEl.textContent = scriptSafeJson(data);
           var wsEl = document.getElementById("pipeline-workspace");
-          if (wsEl) wsEl.textContent = JSON.stringify(window.PEWorkspace);
+          if (wsEl) wsEl.textContent = scriptSafeJson(self.restatedWorkspaceBlock(wsEl.textContent, version));
         }
 
         // The graph: rebuilt for the new nodes, its events re-armed, and the RUN's
@@ -663,7 +673,40 @@
         self.replayRunOntoGraph();
         self.refreshChecks();
         self.syncViewedMarkers(version);
-        self.updateViewedUrl(version);
+        self.updateViewedUrl(version, previousVersion === null ? null : { version: previousVersion, tab: previousTab }, options);
+      },
+
+      /**
+       * #402 — the workspace block after an in-page switch: the four pin fields re-stated,
+       * the admitted rows' viewed mark moved, and every other composition fact (the rows
+       * themselves, the Overview's record-level facts, the dialect map) KEPT — the block is
+       * what a cached history restore re-reads, so it must describe the page as it is.
+       * An unreadable block is replaced by the pin alone (workspace.js refuses it anyway).
+       */
+      restatedWorkspaceBlock: function (raw, version) {
+        var block = null;
+        try {
+          block = JSON.parse(raw);
+        } catch (e) {
+          block = null;
+        }
+        if (!block || typeof block !== "object" || Array.isArray(block)) block = {};
+        var pin = window.PEWorkspace || {};
+        block.pipelineId = pin.pipelineId;
+        block.viewedVersion = pin.viewedVersion;
+        block.hasBody = pin.hasBody;
+        block.canExecute = pin.canExecute;
+        if (Array.isArray(block.versionRows)) {
+          block.versionRows = block.versionRows.map(function (row) {
+            var copy = {};
+            Object.keys(row || {}).forEach(function (k) {
+              copy[k] = row[k];
+            });
+            copy.viewed = copy.version === version;
+            return copy;
+          });
+        }
+        return block;
       },
 
       /** The run's own states return to the graph when the view returns to its version. */
@@ -786,11 +829,27 @@
         }
       },
 
-      /** The canonical URL follows the viewed version and tab — REPLACE, not push:
-          no history entries are minted the htmx shell does not own. */
-      updateViewedUrl: function (version) {
-        if (typeof history === "undefined" || !history.replaceState) return;
+      /**
+       * The canonical URL follows the viewed version and tab (#402): a USER's switch from
+       * [from] pushes an entry of the workspace's own beside the shell's htmx entries
+       * (workspace/history.js — `{dpWorkspace: {family, version, tab}}`, never a parameter
+       * value), so Back/Forward return to the previous version or tab IN PAGE; an unchanged
+       * view only re-states the current entry. A replay (`options.history === false`) writes
+       * nothing — the entry already holds this URL — and only keeps htmx's path record on it.
+       */
+      updateViewedUrl: function (version, from, options) {
+        var History = typeof window !== "undefined" ? window.WorkspaceHistory : null;
+        if (options && options.history === false) {
+          if (History) History.syncHtmxPath();
+          return;
+        }
         var tab = this.tabs ? this.tabs.active : "flow";
+        if (History) {
+          History.push("pipelines", from, { version: version, tab: tab }, { defaultTab: "flow" });
+          return;
+        }
+        // No helper on the page (a harness without it): the pre-#402 replace, never a push.
+        if (typeof history === "undefined" || !history.replaceState) return;
         var params = new URLSearchParams(window.location.search);
         params.set("version", String(version));
         if (tab && tab !== "flow") params.set("tab", tab);
@@ -872,12 +931,37 @@
         // only — no run state is touched.
         this.switchTab("parameters");
       },
-      switchTab: function (tab) {
+      switchTab: function (tab, options) {
         if (!this.tabs) return;
-        this.tabs.select(tab);
+        var previous = this.tabs.active;
+        var next = this.tabs.select(tab);
+        // #402: the root's tab attribute is what a cached history restore re-reads
+        // (readComposition) — kept on the ACTIVE tab, the resolved name only.
+        var root = typeof document !== "undefined" && document.querySelector ? document.querySelector(".pe-root") : null;
+        if (root && root.setAttribute) root.setAttribute("data-active-tab", next);
         var viewed = this.viewedVersionOrNull();
-        if (viewed !== null) this.updateViewedUrl(viewed);
-        this.ensureTabLoaded(tab);
+        if (viewed !== null) this.updateViewedUrl(viewed, { version: viewed, tab: previous }, options);
+        this.ensureTabLoaded(next);
+      },
+
+      /**
+       * #402 — a Back/Forward REPLAY of one of the workspace's own entries: the tab through
+       * the tab machine's admission (unknown/unadmitted → Flow), the version through
+       * applyVersion's numeric check and its lensed read (a refused version is the house
+       * banner, never a body). Nothing is pushed. A version equal to the viewed one still
+       * takes a new generation, so a switch still in flight cannot land over the entry the
+       * user went back to. The stream and the run state are never touched (spec §4.3).
+       */
+      replayHistoryEntry: function (version, tab) {
+        var replay = { history: false };
+        this.switchTab(typeof tab === "string" ? tab : "flow", replay);
+        var v = Number(version);
+        if (version === null || !isFinite(v) || v <= 0) return;
+        if (v === this.viewedVersionOrNull()) {
+          this.nextToken();
+          return;
+        }
+        this.applyVersion(v, replay);
       },
       viewRunVersion: function () {
         var v = this.executionVersion;
@@ -2302,6 +2386,40 @@
     });
   }
 
+  /** JSON for a `<script type="application/json">` block: every `<` escaped (`\u003c`). */
+  function scriptSafeJson(value) {
+    return JSON.stringify(value).replace(/</g, "\\u003c");
+  }
+
+  /*
+   * #402 — Back/Forward over the workspace's OWN entries (workspace/history.js): the ONE
+   * window listener dispatches a `pipelines` entry here, and the LIVE component is resolved
+   * at event time through the teardown handle — never the one that existed when this ran.
+   * The entry is replayed in place only when the live root IS this URL's workspace (the
+   * same pipeline, the root in the document); otherwise — the list is showing, another
+   * pipeline's workspace is, or a history restore left a destroyed component behind — the
+   * answer is false and the helper hands the entry to htmx's own restore.
+   */
+  function wireWorkspaceHistory() {
+    if (typeof window === "undefined" || !window.WorkspaceHistory || typeof document === "undefined") return;
+    window.WorkspaceHistory.listen("pipelines", function (version, tab) {
+      var inst = window.__peInstance;
+      if (!inst || typeof inst.replayHistoryEntry !== "function" || !inst.pipeline || !inst.pipeline.id) return false;
+      var root = document.querySelector ? document.querySelector("#app-main .pe-root") : null;
+      if (!root || !root._x_dataStack) return false;
+      var match = /\/pipelines\/([^/]+)$/.exec(window.location.pathname);
+      var id = null;
+      try {
+        id = match ? decodeURIComponent(match[1]) : null;
+      } catch (e) {
+        id = null;
+      }
+      if (id !== inst.pipeline.id) return false;
+      inst.replayHistoryEntry(version, tab);
+      return true;
+    });
+  }
+
   /*
    * 195 — the component registers itself under the CSP build's rule: `x-data`
    * may only NAME a component registered with Alpine.data (no inline object, no
@@ -2327,4 +2445,5 @@
   wireBoostLifecycle();
   wireVersionLinks();
   wireSinkTokenGuard();
+  wireWorkspaceHistory();
 })();

@@ -171,6 +171,29 @@ open class ArtifactRepository<B : Any>(
     fun countAll(workspaceId: UUID): Int =
         checkNotNull(jdbc.queryForObject(sql.countAll, mapOf("workspaceId" to workspaceId), Int::class.java))
 
+    /**
+     * The name search (#399): every live artifact whose name, display name or description contains [query] — literally
+     * (its `\`, `%` and `_` escaped) and case-insensitively — at its LISTED version, by name.
+     */
+    fun search(
+        workspaceId: UUID,
+        query: String,
+        offset: Int = 0,
+        limit: Int = DEFAULT_PAGE_LIMIT,
+    ): List<ArtifactVersion<B>> = jdbc.query(sql.search, searchParams(workspaceId, query) + paging(offset, limit), versionMapper)
+
+    /** The truthful total of [search]. */
+    fun countSearch(
+        workspaceId: UUID,
+        query: String,
+    ): Int = checkNotNull(jdbc.queryForObject(sql.countSearch, searchParams(workspaceId, query), Int::class.java))
+
+    /** Every [search] match's id, unpaged — the narrowing lens's input. */
+    fun searchIds(
+        workspaceId: UUID,
+        query: String,
+    ): Set<UUID> = jdbc.queryForList(sql.searchIds, searchParams(workspaceId, query), UUID::class.java).toSet()
+
     /** Every live artifact that HAS a current RELEASED version — the promoter lens's input (versioning §10.2). */
     fun findCurrentVersions(workspaceId: UUID): List<CurrentArtifactVersion> =
         jdbc.query(sql.currentVersions, mapOf("workspaceId" to workspaceId)) { rs, _ ->
@@ -394,6 +417,11 @@ open class ArtifactRepository<B : Any>(
         offset: Int,
         limit: Int,
     ): Map<String, Any?> = mapOf("limit" to limit.coerceIn(1, MAX_PAGE_LIMIT + 1), "offset" to maxOf(0, offset))
+
+    private fun searchParams(
+        workspaceId: UUID,
+        query: String,
+    ): Map<String, Any?> = mapOf("workspaceId" to workspaceId, "pattern" to "%${escapeLike(query)}%")
 
     private fun writeParams(
         workspaceId: UUID,

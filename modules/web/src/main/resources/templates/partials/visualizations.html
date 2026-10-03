@@ -1,0 +1,15 @@
+<!-- The visualizations surfaces' swap ROOT (#399) — a dispatcher, not an element of its own
+     (partials/dashboards.html's shape, one family over). The catalog and the sidebar's branch
+     are two presentations of the same flat-list fragment:
+       - scope=page  — the /visualizations CATALOG: every visualization the caller may read when
+                       `q` is empty, the matches otherwise, rooted at id="viz-list-wrapper".
+       - scope=nav   — the SIDEBAR's Visualizations branch: an empty `q` is the tree's root level,
+                       a non-empty one the flat search, rooted at id="viz-tree-nav" — so clearing
+                       the box returns to the tree by construction.
+     VisualizationBrowseModel.fillWrapper decides; this th:block contributes no element and MUST
+     NOT carry the id — th:replace removes the host. -->
+<th:block xmlns:th="http://www.thymeleaf.org" th:fragment="fragment"
+          th:replace="${searching} ? ~{partials/visualization-search :: results} : ~{partials/visualization-tree-level :: level}">
+  <!-- ONE conditional fragment expression: th:replace outranks th:if, so a pair of blocks
+       would render both presentations. -->
+</th:block>

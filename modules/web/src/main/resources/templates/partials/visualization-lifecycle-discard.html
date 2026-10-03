@@ -1,0 +1,33 @@
+<!-- The Discard dialog (#399) — a RELEASED version stops being viewable or pinnable; reversible (Restore).
+     When it is the current version the dialog says where the pointer falls (D60). A version a live
+     dashboard pins refuses `version.pinned`: the pinners are listed and the button does not exist. -->
+<div xmlns:th="http://www.thymeleaf.org" class="u-backdrop" data-lifecycle-dialog="visualization-discard">
+  <div class="ds-card app-modal app-modal-md" role="dialog" aria-modal="true" aria-labelledby="viz-discard-title">
+    <button type="button" class="ds-button ds-button-ghost ds-button-sm app-modal-close u-text-xl"
+            aria-label="Close" data-lifecycle-close>
+      <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#x"></use></svg>
+    </button>
+    <h2 class="ds-title u-m0 u-mb-md" id="viz-discard-title"
+        th:text="'Discard v' + ${dlg.version} + '?'">Discard v1?</h2>
+
+    <div th:replace="~{partials/visualization-lifecycle-pinned :: pinned(${dlg.pinnedBy})}"></div>
+
+    <th:block th:if="${dlg.canDiscard}">
+      <p class="u-secondary u-text-sm">
+        v<span th:text="${dlg.version}">1</span> can no longer be pinned by a dashboard. Discarding is
+        reversible — Restore brings it back as a released version.
+      </p>
+      <div class="u-text-sm u-mb-md" th:if="${dlg.isCurrent}">
+        <p class="u-mb-xs">This is the current version. After the discard:</p>
+        <p class="u-secondary" th:text="${dlg.fallback}">v2 becomes the current version.</p>
+      </div>
+      <form th:attr="hx-post=@{'/partials/visualizations/{id}/lifecycle/discard'(id=${dlg.id}, version=${dlg.version})},
+                     hx-swap='none'">
+        <input type="hidden" name="from" th:value="${from}">
+        <button th:if="${canAuthor == true}" type="submit" data-verb="visualization-discard-confirm"
+                class="ds-button ds-button-danger u-full" hx-disabled-elt="this"
+                th:text="'Discard v' + ${dlg.version}">Discard v1</button>
+      </form>
+    </th:block>
+  </div>
+</div>

@@ -1,0 +1,94 @@
+<!-- The workspace's VERSIONS tab (#400) — the admitted history, newest first, each row marked
+     with the served pointer (current RELEASED), the draft state and the discarded state, and
+     — for a caller whose permissions admit the verb — the lifecycle actions. The dialogs open
+     into #dp-dialog with from=versions, so a success HX-Redirects back onto THIS tab with a
+     flash toast (a lifecycle change moves the version set the whole page reads). The POST
+     re-runs the service's guard; these controls only decide what to SAY.
+
+     The verbs and their permissions (the brief's roles table; auth §7.6 carries the routes):
+       - Release (the D61 consent rides inside the dialog)   dashboard.release
+       - Purge draft / Discard / Restore / Purge version     dashboard.version.manage
+       - Switch (make current)                               dashboard.switch_version
+       - Purge dashboard                                     dashboard.delete
+     A viewer and a promoter draw no verb at all (RoleVisibilityRenderTest pins the ladder). -->
+<div xmlns:th="http://www.thymeleaf.org" th:fragment="versions" class="dp-versions dp-versions-pane"
+     th:with="dialogTarget='#dp-dialog', dialogFrom='versions'">
+  <div class="ds-card">
+    <div class="app-card-h">
+      <h3>Versions</h3>
+      <span class="app-card-note" th:text="${#lists.size(versions)} + (${#lists.size(versions)} == 1 ? ' version' : ' versions')">3 versions</span>
+    </div>
+    <div class="app-card-b">
+      <p class="u-secondary u-text-sm" th:if="${#lists.isEmpty(versions)}">No versions your role can view yet.</p>
+      <div class="dt-frame dt-scroll dt-h-sm" th:unless="${#lists.isEmpty(versions)}">
+      <div class="dt-viewport" tabindex="-1">
+      <table class="ds-table">
+        <thead>
+          <tr><th>Version</th><th>Status</th><th>Created</th><th>Released</th><th><span class="u-sr-only">Actions</span></th></tr>
+        </thead>
+        <tbody>
+          <tr th:each="v : ${versions}" th:attr="data-version-row=${v.version}">
+            <td class="u-mono">
+              <span th:text="'v' + ${v.version}">v3</span>
+              <span class="ds-badge ds-badge-success" th:if="${v.isServed}">serving</span>
+              <span class="ds-badge ds-badge-warning" th:if="${v.isDraft}">draft</span>
+              <span class="ds-badge ds-badge-default" th:if="${v.isDiscarded}">discarded</span>
+            </td>
+            <td th:text="${v.status.toLowerCase()}">released</td>
+            <!-- Relative in the cell, absolute UTC on hover — the keys page's shape (ui-screens §3.7). -->
+            <td><span th:title="${v.createdAbsolute}" th:text="${v.createdAgo}">3 days ago</span></td>
+            <td>
+              <span th:if="${v.releasedAt == null}">—</span>
+              <span th:if="${v.releasedAt != null}" th:title="${v.releasedAbsolute}" th:text="${v.releasedAgo}">3 days ago</span>
+            </td>
+            <td class="dp-version-actions">
+              <!-- RELEASE — an author's verb over the WORKING DRAFT; the dialog names the
+                   draft version and carries the D61 consent when a visualization pin is draft. -->
+              <th:block th:if="${canRelease}">
+                <button type="button" class="ds-button ds-button-primary ds-button-sm" data-verb="dashboard-release"
+                        th:attr="hx-get=@{'/partials/dashboards/{id}/lifecycle/release'(id=${dashboardId}, from='versions')},
+                                 hx-target='#dp-dialog', hx-swap='innerHTML'">Release draft…</button>
+              </th:block>
+              <!-- DISCARD a RELEASED version; RESTORE a DISCARDED one; PURGE a DRAFT one. -->
+              <th:block th:if="${canManageVersions}">
+                <button th:if="${v.status == 'RELEASED'}" type="button" class="ds-button ds-button-secondary ds-button-sm" data-verb="dashboard-discard"
+                        th:attr="hx-get=@{'/partials/dashboards/{id}/lifecycle/discard'(id=${dashboardId}, version=${v.version}, from='versions')},
+                                 hx-target='#dp-dialog', hx-swap='innerHTML'">Discard…</button>
+                <button th:if="${v.status == 'DISCARDED'}" type="button" class="ds-button ds-button-secondary ds-button-sm" data-verb="dashboard-restore"
+                        th:attr="hx-get=@{'/partials/dashboards/{id}/lifecycle/restore'(id=${dashboardId}, version=${v.version}, from='versions')},
+                                 hx-target='#dp-dialog', hx-swap='innerHTML'">Restore…</button>
+                <button th:if="${v.status == 'DRAFT' and v.version != servedVersion}" type="button" class="ds-button ds-button-secondary ds-button-sm" data-verb="dashboard-purge"
+                        th:attr="hx-get=@{'/partials/dashboards/{id}/lifecycle/purge'(id=${dashboardId}, version=${v.version}, from='versions')},
+                                 hx-target='#dp-dialog', hx-swap='innerHTML'">Purge draft…</button>
+              </th:block>
+              <!-- SWITCH the pointer to an eligible version (the receiver's lever, D60). -->
+              <th:block th:if="${canSwitch}">
+                <button th:if="${!v.isServed and (v.status == 'RELEASED' or v.status == 'DRAFT') and v.version != servedVersion}"
+                        type="button" class="ds-button ds-button-ghost ds-button-sm" data-verb="dashboard-switch"
+                        th:attr="hx-get=@{'/partials/dashboards/{id}/lifecycle/switch'(id=${dashboardId}, version=${v.version}, from='versions')},
+                                 hx-target='#dp-dialog', hx-swap='innerHTML'">Make current…</button>
+              </th:block>
+              <!-- PURGE VERSION — a DRAFT version, irreversible (typed confirm). -->
+              <th:block th:if="${canManageVersions}">
+                <button th:if="${v.status == 'DRAFT'}" type="button" class="ds-button ds-button-danger ds-button-sm" data-verb="dashboard-purge-version"
+                        th:attr="hx-get=@{'/partials/dashboards/{id}/lifecycle/purge-version'(id=${dashboardId}, version=${v.version}, from='versions')},
+                                 hx-target='#dp-dialog', hx-swap='innerHTML'">Purge version…</button>
+              </th:block>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      </div>
+      </div>
+
+      <!-- PURGE DASHBOARD — the one whole-entity verb, in its own section (the {D} shape's
+           home when the Versions table is the only surface): sole-draft only, typed confirm. -->
+      <div class="dp-danger-zone" th:if="${canDelete}">
+        <button type="button" class="ds-button ds-button-danger ds-button-sm" data-verb="dashboard-purge-entity"
+                th:attr="hx-get=@{'/partials/dashboards/{id}/lifecycle/purge-entity'(id=${dashboardId}, from='versions')},
+                         hx-target='#dp-dialog', hx-swap='innerHTML'">Purge dashboard…</button>
+        <span class="u-secondary u-text-sm">Deletes the dashboard — only possible while its only version is a draft.</span>
+      </div>
+    </div>
+  </div>
+</div>

@@ -1,9 +1,9 @@
 # Deployment & Packaging Specification
 
-**Status:** v1.40
+**Status:** v1.41
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
-**Last updated:** 2026-10-02
+**Last updated:** 2026-10-03
 
 ---
 
@@ -434,7 +434,7 @@ Reference Helm chart in `deploy/helm/`. Includes:
 - `Deployment` (N+ replicas, behind a `Service`; `terminationGracePeriodSeconds: 60` — #251, #277, #266: the `preStop` sleep (5 s) plus the scheduler's admission wait (up to 15 s) plus the drain's flush (up to 20 s) plus Tomcat's graceful shutdown (10 s) plus the persistence drain (up to 10 s) must complete before the pod is killed; the shipped `deploy/compose.yml` sets the matching `stop_grace_period: 60s` — §8.3.2 has the arithmetic).
 - Externalized Postgres (managed recommended).
 - Externalized Redis (managed recommended).
-- `HorizontalPodAutoscaler` (scales on CPU + memory).
+- `HorizontalPodAutoscaler` (scales on CPU).
 - `PodDisruptionBudget` (availability during node drains).
 
 The pod keeps its root filesystem read-only and mounts a disk-backed `emptyDir` at `/tmp`.
@@ -456,6 +456,13 @@ image's `ENV` and push every LAKE pool back to `INSTALL`+`LOAD`, which needs egr
 writable home the read-only root filesystem does not provide. Every other non-secret env key goes
 through `extraEnv`; an `extraEnv` key that double-maps either DuckDB key fails `helm template`,
 because Kubernetes does not reject duplicate `env` names and would silently honor the last one.
+CI renders the chart on every push and pull request: the `gate` job runs `scripts/helm-check.sh`,
+a pinned `helm` (version and checksum pin bumped together per DEVELOPMENT.md §10.2) running
+`helm lint --strict` plus the four template cases above — defaults render no `env:` block, both
+DuckDB values render exactly their two quoted entries, each `extraEnv` double mapping is refused
+with the template's own message, and the missing `existingSecret` is refused — exiting 0 when
+every case passes, 1 when a chart check fails, and 2 on a tooling failure (a download or
+checksum-pin mismatch, never a chart verdict).
 
 No sticky session affinity needed. Standard `ClusterIP` service with round-robin or random load balancing.
 
@@ -1163,6 +1170,7 @@ operator.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-03 | v1.41 | 411 (#411) CI renders the reference chart | §6.4: the chart is rendered by CI — the `gate` job runs `scripts/helm-check.sh`, a pinned `helm` (v4.3.0; the release's checksum file SHA-256-pinned in-repo, bumped with the version in one commit) running `helm lint --strict` plus four `helm template` cases: defaults render no `env:` block, both `duckdb.*` values render exactly their two quoted entries, each `extraEnv` double mapping is refused with the template's own message, and a missing `existingSecret` is refused. Exit contract: 0 all cases green, 1 a chart check failed, 2 tooling. Also corrects this section's HPA bullet — the chart scales on CPU only (`hpa.yaml` carries one `cpu` metric; there is no memory metric). No chart change. |
 | 2026-10-02 | v1.40 | 140 (#140) the Helm chart maps the DuckDB operator keys | §6.4: the reference chart gains a `duckdb` values block — `duckdb.extensionDirectory` and `duckdb.memoryLimit` (configuration.md §3.25's two env vars) — each rendered as an env entry ONLY when non-empty: an empty default inherits the image's bundled extension directory, and a rendered `""` would override the image's `ENV` and break zero-egress LAKE under the read-only root filesystem. `extraEnv` stays the escape hatch for every other non-secret key; an `extraEnv` double mapping of either DuckDB key is refused at render time. Chart version 0.1.0 → 0.1.1. `HelmDuckDbValuesSpecDriftTest` pins doc = chart values = env entries. |
 | 2026-09-30 | v1.39 | L3a (#10) the dashboards client runtime — renumbered at merge after 337's v1.38 | **New §6.2A Vendored browser assets** — where the vendor manifest and its audit tests live, and the Plotly 4.1.1 provenance: the two custom bundles' exact rebuild recipe (clone the pinned tag, `npm run custom-bundle` per trace list, commit the outputs), the sizes and the npm tarball sha1, and the plotly.css design-around that keeps `style-src` at `'self'` plus Cytoscape's one hash. No code, route or policy change. |
 | 2026-09-30 | v1.38 | 337 (#337) structured local logging | **§5.2 gains "Log output format — turning JSON on"**: what each deploy path resolves today (`app.sh`/VPS `console` from `defaults.env`, raw compose and bare jar `json`), the operator recipe for turning JSON on (set the env in `secrets.env`, redeploy), the startup refusal on an unknown value, and the statement that redaction runs under both values. No deploy file changed — the declared env var just works now. |

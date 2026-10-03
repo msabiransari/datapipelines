@@ -19,11 +19,11 @@
      ([VersionRowView]).
 
      DIALOG COMPOSITION: the container and the post-success shape are the COMPOSING
-     SURFACE's choice, passed in — `dialogTarget` (#px-dialog for the explorer detail,
-     #pe-dialog for the workspace) and `dialogFrom` (`editor` from the workspace, so a
-     successful verb HX-Redirects the whole page: a lifecycle change moves the version
-     set the page's own state is built from). Both default to the explorer's shapes, so
-     the explorer's callers render exactly what they always rendered.
+     SURFACE's choice, passed in — `dialogTarget` and `dialogFrom`. Since #401 the pipeline
+     workspace is the only composer (`#pe-dialog`, `from=editor`, so a successful verb
+     HX-Redirects the whole page: a lifecycle change moves the version set the page's own
+     state is built from), and those are the defaults a caller gets when it passes nothing —
+     the explorer's `#px-dialog` shapes are gone with its pane.
 
      OPEN: a version-row Open enters the read workspace at ITS OWN version. In the
      workspace the same anchor switches the viewed version IN PAGE (the client
@@ -31,7 +31,7 @@
      link (the page's entry rule), so a non-current row opens the body it names, never
      the default. -->
 <div xmlns:th="http://www.thymeleaf.org" th:fragment="versions" class="tplx-vlist"
-     th:with="dialogTarget=${dialogTarget != null ? dialogTarget : '#px-dialog'},
+     th:with="dialogTarget=${dialogTarget != null ? dialogTarget : '#pe-dialog'},
               dialogFrom=${dialogFrom}">
   <p class="ds-empty-description" th:if="${#lists.isEmpty(versions)}">This pipeline has no versions.</p>
 
@@ -89,27 +89,27 @@
                     <summary class="ds-button ds-button-ghost ds-button-sm" aria-label="Version actions" title="Version actions">⋯</summary>
                     <div class="tplx-vmenu-list" role="menu" data-vmenu popover="manual">
                       <button th:if="${mayRelease}" data-verb="pipeline-release" type="button" role="menuitem" class="tplx-vmenu-item"
-                              th:attr="hx-get=${dialogFrom != null} ? @{'/partials/pipelines/{id}/lifecycle/release'(id=${pipeline.id}, from=${dialogFrom})} : @{'/partials/pipelines/{id}/lifecycle/release'(id=${pipeline.id})},
+                              th:attr="hx-get=@{'/partials/pipelines/{id}/lifecycle/release'(id=${pipeline.id}, from=${dialogFrom})},
                                        hx-target=${dialogTarget}, hx-swap='innerHTML'"
                               th:text="'Release v' + ${v.version} + '…'">Release v2…</button>
 
                       <button th:if="${mayPurge}" data-verb="pipeline-purge" type="button" role="menuitem" class="tplx-vmenu-item tplx-danger"
-                              th:attr="hx-get=${dialogFrom != null} ? @{'/partials/pipelines/{id}/lifecycle/purge'(id=${pipeline.id}, version=${v.version}, from=${dialogFrom})} : @{'/partials/pipelines/{id}/lifecycle/purge'(id=${pipeline.id}, version=${v.version})},
+                              th:attr="hx-get=@{'/partials/pipelines/{id}/lifecycle/purge'(id=${pipeline.id}, version=${v.version}, from=${dialogFrom})},
                                        hx-target=${dialogTarget}, hx-swap='innerHTML'"
                               th:text="'Purge v' + ${v.version} + '…'">Purge v2…</button>
 
                       <button th:if="${mayDiscard}" data-verb="pipeline-discard" type="button" role="menuitem" class="tplx-vmenu-item tplx-danger"
-                              th:attr="hx-get=${dialogFrom != null} ? @{'/partials/pipelines/{id}/lifecycle/discard'(id=${pipeline.id}, version=${v.version}, from=${dialogFrom})} : @{'/partials/pipelines/{id}/lifecycle/discard'(id=${pipeline.id}, version=${v.version})},
+                              th:attr="hx-get=@{'/partials/pipelines/{id}/lifecycle/discard'(id=${pipeline.id}, version=${v.version}, from=${dialogFrom})},
                                        hx-target=${dialogTarget}, hx-swap='innerHTML'"
                               th:text="'Discard v' + ${v.version} + '…'">Discard v2…</button>
 
                       <button th:if="${maySwitch}" data-verb="pipeline-switch" type="button" role="menuitem" class="tplx-vmenu-item"
-                              th:attr="hx-get=${dialogFrom != null} ? @{'/partials/pipelines/{id}/lifecycle/switch'(id=${pipeline.id}, version=${v.version}, from=${dialogFrom})} : @{'/partials/pipelines/{id}/lifecycle/switch'(id=${pipeline.id}, version=${v.version})},
+                              th:attr="hx-get=@{'/partials/pipelines/{id}/lifecycle/switch'(id=${pipeline.id}, version=${v.version}, from=${dialogFrom})},
                                        hx-target=${dialogTarget}, hx-swap='innerHTML'"
                               th:text="'Switch to v' + ${v.version} + '…'">Switch to v1…</button>
 
                       <button th:if="${mayRestore}" data-verb="pipeline-restore" type="button" role="menuitem" class="tplx-vmenu-item"
-                              th:attr="hx-get=${dialogFrom != null} ? @{'/partials/pipelines/{id}/lifecycle/restore'(id=${pipeline.id}, version=${v.version}, from=${dialogFrom})} : @{'/partials/pipelines/{id}/lifecycle/restore'(id=${pipeline.id}, version=${v.version})},
+                              th:attr="hx-get=@{'/partials/pipelines/{id}/lifecycle/restore'(id=${pipeline.id}, version=${v.version}, from=${dialogFrom})},
                                        hx-target=${dialogTarget}, hx-swap='innerHTML'"
                               th:text="'Restore v' + ${v.version} + '…'">Restore v1…</button>
                     </div>

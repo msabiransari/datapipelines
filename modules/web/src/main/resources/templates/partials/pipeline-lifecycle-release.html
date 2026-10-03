@@ -52,8 +52,10 @@
 
       <form th:if="${#lists.isEmpty(dlg.blockingPins)}"
             th:attr="hx-post=@{'/partials/pipelines/{id}/lifecycle/release'(id=${dlg.id})},
-                     hx-target=${from == 'editor'} ? null : '#pipeline-detail',
-                     hx-swap=${from == 'editor'} ? 'none' : 'innerHTML'">
+                     hx-swap='none'">
+        <!-- #401: every surface answers HX-Redirect — the workspace reloads with the layout's
+             flash (which names the cascaded templates, #407); the explorer's in-place
+             re-render is gone (no page renders its pane). -->
         <input type="hidden" name="from" th:value="${from}">
 
         <th:block th:if="${!#lists.isEmpty(dlg.pins)}">

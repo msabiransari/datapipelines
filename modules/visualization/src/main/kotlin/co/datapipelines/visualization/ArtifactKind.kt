@@ -139,6 +139,12 @@ data class ArtifactVersion<B>(
     val body: B,
 )
 
+/** One page of a lensed listing and the truthful total behind it (#399's name search). */
+data class ArtifactPage<B>(
+    val items: List<ArtifactVersion<B>>,
+    val total: Int,
+)
+
 /** One virtual folder of an artifact tree — a name prefix, derived per request from the live artifacts beneath it. */
 data class ArtifactFolder(
     val path: String,

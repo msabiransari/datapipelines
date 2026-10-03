@@ -1,6 +1,6 @@
 # Configuration Reference
 
-**Status:** v1.48 (single source of truth for every config key)
+**Status:** v1.49 (single source of truth for every config key)
 **Owner:** datapipelines.co core
 **Last updated:** 2026-10-02
 
@@ -520,6 +520,8 @@ The parameter engine's limits ([the design record](superpowers/specs/2026-09-21-
 
 No options cache in round one (`selector-cache-ttl-seconds` is deliberately absent — the record's §11: authority-aware keys and invalidation are its price, and it lands when a measured query count says it must).
 
+Retention of the evaluation history (`parameter_evaluations` and their `parameter_evaluation_queries`, #376) has no key of its own — the dashboard refreshes' precedent: finished records are deleted by the execution-event retention step, on the same hourly tick and the same cutoff as `datapipelines.executions.event-retention-days` (§3.11, 7 days), one bounded batch per tick; a record left `RUNNING` past `evaluate-timeout-seconds` plus a fixed one-minute margin is closed `INCOMPLETE` on that tick — see [Metadata DB §8.1/§8.5](metadata-db.md). A retention key of its own would be an additive change (the workspace spec's §11.5).
+
 ### 3.31 Web request limits
 
 The platform-wide request-body cap (pipeline-contract §13.21, [REST API §4.2](rest-api.md#42-error-envelope)): a JSON request body over the cap is refused with `413 request.body_too_large` at a servlet filter on BOTH surfaces — `/api/v1` and `/mcp` — before authentication and before any parser reads the body, so no handler, tool or permission is involved. The filter refuses without buffering: a declared `Content-Length` over the cap is refused unread; a chunked body is counted through a wrapping stream that never pulls a byte past the cap. Jackson's `StreamReadConstraints` — nesting depth **100**, string length **4,000,000** characters, number length **1000** digits — are stated explicitly on the request mappers of both surfaces rather than inherited from the pinned Jackson 2.21.5's defaults (depth 1000, string 20,000,000, number 1000), so a within-cap body that is adversarial for the parser is refused by the parser as a 400 — since #291 on every route that parses its own text body as well (a request copy of its domain mapper; pipeline-contract §13.21 names the one exception still open). They are constants, not keys.
@@ -1032,6 +1034,7 @@ Validation runs in `@PostConstruct` of a `ConfigValidator` bean. Failures stop s
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-02 | v1.49 | S3 (#376) the evaluation history's retention | §3.30 states that the parameter-evaluation history has NO key of its own: the execution-event retention (§3.11) deletes finished records on its hourly tick, and the stale sweep's cutoff is `evaluate-timeout-seconds` plus a fixed one-minute margin. No key, default or bound added or changed (the owner's §11.5 ruling). |
 | 2026-10-02 | v1.48 | 140 (#140) the Helm chart maps the DuckDB operator keys | §3.25's operator instruction names the Helm route: the reference chart's `duckdb.extensionDirectory` and `duckdb.memoryLimit` values render these two env vars when non-empty, an empty value renders no entry (inheriting the image's bundled extension directory), and an `extraEnv` double mapping is refused at render time. No key, default or bound changed. |
 | 2026-10-02 | v1.47 | 167 (#167) the probe's timeout ceiling | §3.2: `node-query-timeout-seconds` and `node-query-timeout-seconds-by-dialect.<dialect>` are documented as ALSO the `sql_probe` timeout ceiling (was a static 30 s in code). No key, default or bound added or changed — the existing knob is the one truth. |
 | 2026-10-02 | v1.46 | 204 (#204 L4/L5) the in-process boundaries at the pool build — renumbered at merge after 375's v1.45 | §3.26's `file-roots` row: the file itself is resolved (a final-component symlink aimed outside every root, or a dangling one, is refused) and the rule is re-checked at every pool build ([Datasources §4.2A](datasources.md)). No key, default or bound changed. |

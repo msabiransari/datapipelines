@@ -1,0 +1,37 @@
+<!-- The Switch dialog (#399) — the current pointer's manual move (D60): every version listed, the eligible
+     ones selectable (RELEASED always; a DRAFT under the development posture), the current one marked.
+     Dashboards pin a visualization BY VERSION, so the switch changes what "current" names, never a pin. -->
+<div xmlns:th="http://www.thymeleaf.org" class="u-backdrop" data-lifecycle-dialog="visualization-switch">
+  <div class="ds-card app-modal app-modal-md" role="dialog" aria-modal="true" aria-labelledby="viz-switch-title">
+    <button type="button" class="ds-button ds-button-ghost ds-button-sm app-modal-close u-text-xl"
+            aria-label="Close" data-lifecycle-close>
+      <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#x"></use></svg>
+    </button>
+    <h2 class="ds-title u-m0 u-mb-md" id="viz-switch-title">Make a version current</h2>
+
+    <p class="u-secondary u-text-sm">
+      Choose which version of <span class="u-mono" th:text="${dlg.name}">finance/charts/revenue_by_region</span>
+      is current. Dashboards keep the versions they pin.
+    </p>
+
+    <form th:attr="hx-post=@{'/partials/visualizations/{id}/lifecycle/switch'(id=${dlg.id})},
+                   hx-swap='none'">
+      <input type="hidden" name="from" th:value="${from}">
+      <ul class="dp-switch-options u-mb-md">
+        <li th:each="o : ${dlg.options}">
+          <label class="dp-switch-option">
+            <input type="radio" name="version" th:value="${o.version}"
+                   th:attr="checked=${o.version == (preselect != null ? preselect : dlg.currentVersion)} ? 'checked' : null,
+                            disabled=${!o.eligible} ? 'disabled' : null">
+            <span class="u-mono" th:text="'v' + ${o.version}">v2</span>
+            <span th:text="${o.status.name().toLowerCase()}">released</span>
+            <span class="ds-badge ds-badge-success" th:if="${o.isCurrent}">current</span>
+            <span class="u-secondary" th:if="${!o.eligible}">not eligible for the pointer on this deployment</span>
+          </label>
+        </li>
+      </ul>
+      <button th:if="${canAuthor == true}" type="submit" data-verb="visualization-switch-confirm"
+              class="ds-button ds-button-primary u-full" hx-disabled-elt="this">Make current</button>
+    </form>
+  </div>
+</div>

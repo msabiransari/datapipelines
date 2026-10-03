@@ -5,7 +5,7 @@ import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
 
 /**
- * enums.md §27–§30 (the wire tables) versus the four closed sets the parameter engine declares — the
+ * enums.md §27–§30 and §39–§41 (the wire tables) versus the closed sets the parameter engine declares — the
  * `LearnedFactKindSpecDriftTest` shape: the doc's first column is parsed, the Kotlin wire values are
  * read, and a value on one side only is red.
  */
@@ -21,6 +21,18 @@ class ParameterEnumsSpecDriftTest {
         }
         withClue("§29 PresentationControl") { values("## 29. `PresentationControl`") shouldBe PresentationControl.WIRE_VALUES.toSet() }
         withClue("§30 NumericFormatKind") { values("## 30. `NumericFormatKind`") shouldBe NumericFormatKind.WIRE_VALUES.toSet() }
+    }
+
+    /** #376 — the three V48 CHECK lists: the doc's table, the Kotlin enum (and so the recorder's writes), in both directions. */
+    @Test
+    fun `the evaluation history's three closed sets are exactly the enums'`() {
+        withClue("§39 EvaluationCaller") { values("## 39. `EvaluationCaller`") shouldBe EvaluationCaller.entries.map { it.name }.toSet() }
+        withClue("§40 ParameterEvaluationStatus") {
+            values("## 40. `ParameterEvaluationStatus`") shouldBe ParameterEvaluationStatus.entries.map { it.name }.toSet()
+        }
+        withClue("§41 QueryAttemptOutcome") {
+            values("## 41. `QueryAttemptOutcome`") shouldBe QueryAttemptOutcome.entries.map { it.name }.toSet()
+        }
     }
 
     /** The backticked first cells of the table under [heading], up to the next `---`. */

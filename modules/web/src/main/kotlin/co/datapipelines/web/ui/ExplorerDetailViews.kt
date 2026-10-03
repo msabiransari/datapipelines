@@ -128,14 +128,6 @@ data class WorkspaceLastRunView(
     val by: String,
 )
 
-/** One template version a pipeline's working body pins — `id@version`, linked into §4.6. */
-data class TemplatePinView(
-    val id: String,
-    val version: Int,
-) {
-    val label: String get() = "$id@$version"
-}
-
 /**
  * The Usage tab's answer: **what the server would refuse a discard over**.
  *

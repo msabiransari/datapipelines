@@ -3,6 +3,9 @@ package co.datapipelines.web.parameters
 import co.datapipelines.application.lens.PromoterLens
 import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
+import co.datapipelines.parameters.EvaluationAttempt
+import co.datapipelines.parameters.EvaluationCaller
+import co.datapipelines.parameters.ParameterEvaluationRepository
 import co.datapipelines.parameters.ParameterEvaluator
 import co.datapipelines.parameters.ParameterSetService
 import co.datapipelines.parameters.SelectionKeys
@@ -38,8 +41,9 @@ import java.util.UUID
  * `version` REQUIRED, `selections` an object, both ids v4 UUIDs), the set AND the explicit version through the caller's
  * lens (a hidden set or a missing version is the ordinary evaluate's IDENTICAL `parameter.not_found` 404 — the same
  * lensed read, never clamped), every selections key against the set (`parameter.evaluate.unknown_parameter` — the
- * evaluator's own judge, #375 D4), a reused `evaluation_id` (`body_invalid`, `reason: reused`, D5), then the one
- * per-user SSE cap (`rate_limit.exceeded`, D7).
+ * evaluator's own judge, #375 D4), a reused `evaluation_id` (`body_invalid`, `reason: reused`, D5 — open on this
+ * instance, or already recorded in the caller's workspace history, #417), then the one per-user SSE cap
+ * (`rate_limit.exceeded`, D7).
  *
  * ## The stream
  * `produces` lists `application/json` beside `text/event-stream` so a pre-stream refusal renders the §4.2 envelope for a
@@ -57,6 +61,7 @@ import java.util.UUID
 class ParameterEvaluationStreamController(
     private val sets: ParameterSetService,
     private val lens: PromoterLens,
+    private val evaluations: ParameterEvaluationRepository,
     private val evaluator: ParameterEvaluator,
     private val streams: ParameterEvaluationStreamRegistry,
     private val authority: ParameterEvaluationStreamAuthority,
@@ -83,16 +88,20 @@ class ParameterEvaluationStreamController(
         val set =
             sets.findVersion(workspaceId, view, id, request.version) ?: throw ApiErrors.parameterNotFound(id.toString(), request.version)
         SelectionKeys.refuseUnknown(set.body, request.selections)
-        if (streams.isOpen(request.evaluationId)) {
+        // The id is also the history record's key (#376): an id open on this instance OR already recorded in THIS workspace
+        // is reused. The read is the workspace's own — another workspace's id answers as unused (its insert conflict is the backstop).
+        if (streams.isOpen(request.evaluationId) || evaluations.exists(workspaceId, request.evaluationId)) {
             throw ParameterEvaluationRequests.bad("evaluation_id", ParameterEvaluationRequests.REUSED)
         }
         if (streams.atStreamLimit(principal.userId)) throw ApiErrors.streamLimitExceeded(streams.maxStreamsPerUser)
         val stream = streams.open(request.evaluationId, id, request.version, principal, authority)
+        // #376: the client-minted evaluation id is the history record's key; the page is the PAGE caller.
+        val attempt = EvaluationAttempt.of(EvaluationCaller.PAGE, principal.userId, principal.keyId, evaluationId = request.evaluationId)
         // LAZY: the job is attached for the grace BEFORE it can run, so even an instant evaluation is abortable by it.
         val job =
             scope.launch(start = CoroutineStart.LAZY) {
                 try {
-                    evaluator.evaluate(workspaceId, set, request.selections, observation = stream)
+                    evaluator.evaluate(workspaceId, set, request.selections, attempt = attempt, observation = stream)
                 } catch (_: CancellationException) {
                     // The grace or the shutdown: the evaluator already wrote Ended(ABORTED) under NonCancellable.
                 } catch (e: DatapipelinesException) {
