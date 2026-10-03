@@ -36,7 +36,9 @@ import java.util.concurrent.TimeUnit
  *
  * ## Reuse (#375 D5)
  * An `evaluation_id` already registered here is refused `reused` — checked before the cap and again atomically at
- * [open]. Cross-instance reuse is S3's (#376): its history row's primary key refuses it at insert.
+ * [open]. This registry judges only the streams open on THIS instance: the route also refuses an id the caller's
+ * workspace history already holds (#417), and a concurrent first use of one id on two instances is the history insert's
+ * conflict — logged, the loser's record lost, its evaluation still run.
  */
 class ParameterEvaluationStreamRegistry(
     private val properties: SseProperties,

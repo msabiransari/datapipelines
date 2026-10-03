@@ -321,6 +321,17 @@ class VisualizationUiRenderTest {
         html shouldNotContain "data-viz-used-by-empty"
     }
 
+    /** #422 — created/released relative in the cell, the absolute UTC stamp on `title` (ui-screens §3.7, the keys rule). */
+    @Test
+    fun `the versions pane shows created and released relative with the UTC stamp on hover`() {
+        val html = versions(canAct = true)
+        html shouldNotContain Regex("""\d{4}-\d\d-\d\dT\d\d:\d\d""")
+        html shouldContain "<span title=\"2026-10-01 09:00 UTC\">3 days ago</span>"
+        // A released row shows its release the same way; an unreleased one the em dash (never a title).
+        html shouldContain "<span title=\"2026-10-01 10:00 UTC\">2 days ago</span>"
+        html shouldContain "<span>—</span>"
+    }
+
     @Test
     fun `the versions pane offers the export to every role and the verbs only to the permissions that admit them`() {
         val author = versions(canAct = true)
@@ -625,8 +636,12 @@ class VisualizationUiRenderTest {
     ) = VisualizationTabModel.VersionRow(
         version = version,
         status = status,
-        createdAt = "2026-10-01T09:00:00Z",
-        releasedAt = null,
+        createdAt = VisualizationUiFixtures.AT,
+        createdAgo = "3 days ago",
+        createdAbsolute = "2026-10-01 09:00 UTC",
+        releasedAt = if (status == "RELEASED") VisualizationUiFixtures.AT.plusSeconds(3_600) else null,
+        releasedAgo = if (status == "RELEASED") "2 days ago" else null,
+        releasedAbsolute = if (status == "RELEASED") "2026-10-01 10:00 UTC" else null,
         isCurrent = isCurrent,
         isDraft = status == "DRAFT",
         isDiscarded = status == "DISCARDED",

@@ -434,6 +434,11 @@ class ArchitectureGuardTest {
                 "McpResourceCatalog → ExecutionRepository",
                 "McpResourceReader → ExecutionEventRepository",
                 "McpResourceReader → ExecutionRepository",
+                // #417 — the observed evaluation route's reuse refusal: ONE existence read of the history by id, in the
+                // caller's workspace (`workspace_id = :workspaceId` in its SQL — no cross-workspace signal), judged before
+                // the stream opens beside the registry's open-stream check (rest-api §21.5). A service seam would be a
+                // pass-through, so the read is inventoried here, as the set controller's are.
+                "ParameterEvaluationStreamController → ParameterEvaluationRepository",
                 "PipelineAuthoringTools → PipelineRepository",
                 "PipelineChecksPartialsController → PipelineCheckRunRepository",
                 "PipelineExecuteTool → ExecutionRepository",

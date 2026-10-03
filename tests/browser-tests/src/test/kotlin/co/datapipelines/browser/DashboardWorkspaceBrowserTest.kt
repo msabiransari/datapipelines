@@ -1,6 +1,9 @@
 package co.datapipelines.browser
 
+import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
+import io.kotest.matchers.collections.shouldNotBeEmpty
+import io.kotest.matchers.ints.shouldBeGreaterThan
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
@@ -167,6 +170,8 @@ class DashboardWorkspaceBrowserTest : DashboardBrowserSuite() {
                 .filter { !it.contains("'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='") }
                 .shouldBeEmpty()
         }
+
+        assertVersionsAtPhoneAndDesktop(board)
 
         // The choose-a-version state (a draft-only dashboard), both themes.
         val draftOnly = seedDraftOnlyBoard(root + "x")
@@ -363,6 +368,37 @@ class DashboardWorkspaceBrowserTest : DashboardBrowserSuite() {
         )
     }
 
+    /**
+     * #422 — the four tabs at the phone width too, Versions included: no sideways scroll, and the Versions
+     * cells read relative with the absolute UTC stamp on `title`, never a raw ISO instant. Restores the viewport.
+     */
+    private fun assertVersionsAtPhoneAndDesktop(board: String) {
+        val desktop = page.viewportSize()
+        page.setViewportSize(PHONE_W, PHONE_H)
+        listOf("board", "overview", "refreshes", "versions").forEach { tab ->
+            page.navigate("$baseUrl/dashboards/$board?tab=$tab")
+            page.waitForSelector("#dp-pane-" + tab + ":not([hidden])")
+            if (tab == "versions") page.waitForSelector("#dp-pane-versions .ds-table")
+            page.waitForTimeout(300.0)
+            withClue("$tab at ${PHONE_W}x$PHONE_H scrolls sideways") { documentOverflowsX() shouldBe false }
+        }
+        page.screenshot(
+            com.microsoft.playwright.Page
+                .ScreenshotOptions()
+                .setPath(
+                    java.nio.file.Paths
+                        .get("build", "reports", "dashboards-workspace-versions-390.png"),
+                ),
+        )
+        page.setViewportSize(desktop.width, desktop.height)
+        page.navigate("$baseUrl/dashboards/$board?tab=versions")
+        page.waitForSelector("#dp-pane-versions .ds-table")
+        val cells = page.locator("#dp-pane-versions td").allInnerTexts()
+        cells.shouldNotBeEmpty()
+        cells.filter { ISO_INSTANT.containsMatchIn(it) }.shouldBeEmpty()
+        page.locator("#dp-pane-versions td span[title$='UTC']").count() shouldBeGreaterThan 0
+    }
+
     /** One DRAFT version copied off the board's RELEASED v1 — same body, new number, no release stamps. */
     private fun seedDraftVersion(boardId: String) {
         sql(
@@ -386,5 +422,13 @@ class DashboardWorkspaceBrowserTest : DashboardBrowserSuite() {
                     }
             }
         return value!!
+    }
+
+    private companion object {
+        const val PHONE_W = 390
+        const val PHONE_H = 844
+
+        /** A raw ISO-8601 instant (`2026-10-01T09:00:00Z`) — the text #422 retired from the Versions cells. */
+        val ISO_INSTANT = Regex("""\d{4}-\d\d-\d\dT\d\d:\d\d""")
     }
 }
