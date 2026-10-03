@@ -206,9 +206,8 @@
         <button th:if="${hasDraft == true and canAuthor == true}" data-verb="pipeline-release" class="ds-button ds-button-primary ds-button-sm"
                 id="pe-release-draft"
                 th:attr="hx-get=@{'/partials/pipelines/{id}/lifecycle/release'(id=${pipelineId}, from='editor')},
-                         hx-target='#pe-dialog', hx-swap='innerHTML'">
-          Release v<span th:text="${draftVersion}"></span>…
-        </button>
+                         hx-target='#pe-dialog', hx-swap='innerHTML'"
+                th:text="'Release v' + ${draftVersion} + '…'">Release v2…</button>
         <!-- #395 — ONE destructive in the header (the explorer's 102 §B.1 rule, kept now that the
              explorer's detail pane is gone, #350): a draft-only pipeline (the {D} shape) offers the
              ENTITY purge — its own dialog, with the exclusive draft templates and #335's kept list —

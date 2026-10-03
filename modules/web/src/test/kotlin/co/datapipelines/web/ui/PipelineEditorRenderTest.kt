@@ -2,8 +2,10 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.pipeline.PipelineVersionStatus
 import io.kotest.matchers.comparables.shouldBeLessThan
+import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
+import org.jsoup.Jsoup
 import org.junit.jupiter.api.Test
 import org.springframework.mock.web.MockHttpServletRequest
 import org.springframework.mock.web.MockHttpServletResponse
@@ -269,6 +271,23 @@ class PipelineEditorRenderTest {
         html shouldContain "has no version your role can view yet"
     }
 
+    /**
+     * #431 — the topbar Release button's label is ONE text node (the house form: one `th:text`
+     * expression, as in the versions tab and the template detail). `.ds-button` is inline-flex
+     * with a gap, so a label split into text + span + text paints as three flex items:
+     * "Release v  3  …".
+     */
+    @Test
+    fun `the topbar Release button's label is one text node (431)`() {
+        val html = render(hasDraft = true, draftVersion = 3)
+
+        val button = Jsoup.parse(html).selectFirst("#pe-release-draft")
+        requireNotNull(button) { "a draft and an author must render #pe-release-draft" }
+        button.children().size shouldBe 0
+        button.textNodes().size shouldBe 1
+        button.text() shouldBe "Release v3…"
+    }
+
     /** One selector/history row, as the controller's [PipelineWorkspaceModel.VersionChoice] renders. */
     private fun vr(
         version: Int,
@@ -299,6 +318,8 @@ class PipelineEditorRenderTest {
     private fun render(
         hasSelectedBody: Boolean = true,
         versions: List<Map<String, Any>> = emptyList(),
+        hasDraft: Boolean = false,
+        draftVersion: Int? = null,
     ): String =
         engine.process(
             "pipelines/editor",
@@ -321,8 +342,8 @@ class PipelineEditorRenderTest {
                 setVariable("viewedIsCurrent", hasSelectedBody)
                 setVariable("viewedStatusLabel", if (hasSelectedBody) "released" else null)
                 setVariable("currentVersion", 1)
-                setVariable("hasDraft", false)
-                setVariable("draftVersion", null)
+                setVariable("hasDraft", hasDraft)
+                setVariable("draftVersion", draftVersion)
                 setVariable("versions", versions)
                 setVariable("activeTab", "flow")
                 setVariable("canReadExecutions", true)
