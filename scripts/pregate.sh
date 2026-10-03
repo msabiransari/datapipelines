@@ -36,9 +36,13 @@ source "$ROOT/scripts/pregate-2b-lib.sh"
 if [ "${1:-}" = "--self-test" ]; then pg2b::self_test; exit $?; fi
 BASE="${1:-origin/main}"; LOGDIR="$ROOT/.pregate-logs"; mkdir -p "$LOGDIR"
 
+# run() appends `-Pdp.browser.ciPatience=true` (#438): the pre-gate's browser-class stage
+# runs those classes with CI's 90 s per-action patience, exactly as the full gate does. A
+# clean/lint invocation ignores the setting harmlessly; the GRADLE command lines that assert
+# this stage's argv are built by pg2b::gradle_args and are unaffected (--self-test pins them).
 run() { # run <logfile> <args...> → echoes exit code; never pipes gradle
   local log="$1"; shift
-  ./gradlew "$@" > "$log" 2>&1
+  ./gradlew "$@" -Pdp.browser.ciPatience=true > "$log" 2>&1
   echo $?
 }
 
@@ -51,6 +55,7 @@ echo "=============================================================="
 echo " Pre-gate   |   $(date '+%Y-%m-%d %H:%M:%S %z')   |   base $BASE ($mb)"
 echo " touched modules: ${touched:-(none)}"
 echo " touched tests/ modules: ${touched_tests:-(none)}"
+echo " browser patience: CI's 90 s per action (-Pdp.browser.ciPatience=true, #438)"
 echo " logs: $LOGDIR"
 echo "=============================================================="
 
