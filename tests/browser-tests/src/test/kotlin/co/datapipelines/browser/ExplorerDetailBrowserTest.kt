@@ -305,7 +305,10 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
         check(edges["missing"] != true) { "$where: no read-only source pane on the workspace" }
         // Non-vacuity: the fixture's longest line must genuinely exceed the pane's width, or
         // a green containment assertion is a line that happened to fit.
-        withClue({ "$where: the line needs no more room than the pane (${edges["unwrapped"]} <= ${edges["clientWidth"]}) — the fixture must not fit" }) {
+        withClue({
+            "$where: the line needs no more room than the pane " +
+                "(${edges["unwrapped"]} <= ${edges["clientWidth"]}) — the fixture must not fit"
+        }) {
             (edges["unwrapped"] as Number).toDouble() shouldBeGreaterThan (edges["clientWidth"] as Number).toDouble()
         }
         val offenders = mutableListOf<String>()
@@ -600,27 +603,6 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
         page.locator("#tx-dialog [data-verb-url]").count() shouldBe 0
         page.keyboard().press("Escape")
         page.locator("#tx-dialog [data-lifecycle-dialog]").count() shouldBe 0
-    }
-
-    private fun putJson(
-        url: String,
-        body: String,
-    ) {
-        val status =
-            page.evaluate(
-                """async (args) => {
-                  const csrf = document.cookie.match(/(?:^|;\s*)dp_csrf=([^;]*)/);
-                  const res = await fetch(args.url, {
-                    method: 'PUT', credentials: 'same-origin',
-                    headers: {'Content-Type': 'application/json',
-                              'DP-CSRF-Token': csrf ? decodeURIComponent(csrf[1]) : ''},
-                    body: args.body,
-                  });
-                  return res.status;
-                }""",
-                mapOf("url" to url, "body" to body),
-            )
-        (status as Number).toInt() shouldBe 200
     }
 
     // ---------------------------------------------------------- the evidence

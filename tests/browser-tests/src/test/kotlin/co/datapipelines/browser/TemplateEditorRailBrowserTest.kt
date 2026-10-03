@@ -193,9 +193,10 @@ class TemplateEditorRailBrowserTest : BrowserSuite() {
             page.waitForSelector(".tw-root")
         } catch (e: com.microsoft.playwright.PlaywrightException) {
             // Name the page the browser actually has: the honest 404 of a lens-hidden or
-            // failed seed names itself, and a vacuous timeout does not.
+            // failed seed names itself, and a vacuous timeout does not. (e is the timeout;
+            // the page's own body is the useful diagnostic.)
             val body = page.evaluate("() => document.body ? document.body.innerText.slice(0, 300) : '(no body)'")
-            error("openWorkspace($name) landed on ${page.url()}\n$body")
+            error("openWorkspace($name) landed on ${page.url()} - $body - ${e.message?.lineSequence()?.firstOrNull()}")
         }
         page.waitForLoadState(com.microsoft.playwright.options.LoadState.NETWORKIDLE)
     }

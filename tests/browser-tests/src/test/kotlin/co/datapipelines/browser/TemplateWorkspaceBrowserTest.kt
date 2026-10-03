@@ -245,9 +245,14 @@ class TemplateWorkspaceBrowserTest : BrowserSuite() {
         val draftRow =
             page
                 .locator("#tw-pane-versions tr[data-version-row]")
-                .filter(com.microsoft.playwright.Locator.FilterOptions().setHasText("v3"))
-                .first()
-        draftRow.locator("details.tplx-vmenu summary").click()
+                .filter(
+                    com.microsoft.playwright.Locator
+                        .FilterOptions()
+                        .setHasText("v3"),
+                ).first()
+        draftRow
+            .locator("details.tplx-vmenu summary")
+            .click()
         page
             .locator(
                 "#tw-pane-versions .tplx-vmenu-list button",

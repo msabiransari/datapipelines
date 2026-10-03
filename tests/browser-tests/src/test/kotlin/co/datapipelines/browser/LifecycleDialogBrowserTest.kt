@@ -342,7 +342,9 @@ class LifecycleDialogBrowserTest : BrowserSuite() {
 
         val releaseDialog = openDialog(page.locator(".tw-topbar button", Page.LocatorOptions().setHasText("Release v1")))
         releaseDialog.innerText() shouldContain "pin without a number"
-        successToastAfter { releaseDialog.locator("button[type=submit]").click() } shouldContain "Released v1"
+        // #398: the redirect flash uses the layout's released toast (title "Released"; the
+        // body carries the "current version and locked" sentence).
+        successToastAfter { releaseDialog.locator("button[type=submit]").click() } shouldContain "Released"
 
         // A draft over the release, then Discard the resolved release: the twin's fallback.
         // #398: every success lands back on ?tab=versions, so the tab is where the walk is.

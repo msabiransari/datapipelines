@@ -98,14 +98,16 @@ class ExplorerPaneGeometryBrowserTest : SchedulesBrowserSuite() {
     /**
      * The root level shows FOLDERS, and a folder must be OPEN before its leaf exists (§9.1 —
      * one request per level). Opening it is also what puts a real name in the pane. #398: the
-     * SCHEDULES explorer's first folder — the pane's last live caller.
+     * SCHEDULES explorer's first folder — the pane's last live caller — driven the way
+     * [SchedulesExplorerBrowserTest] drives it: the tree waits for its own ready marker
+     * (`#schedule-list` not busy), the folder is addressed by `data-folder`, and the expand
+     * request is awaited.
      */
     private fun openFirstFolder(root: String) {
-        page.waitForSelector("[data-explorer-pane] summary.tpl-summary")
-        if (page.locator("[data-explorer-pane] details.tpl-folder[open]").count() == 0) {
-            page.waitForResponse({ it.url().contains("prefix=$root") }) {
-                page.locator("[data-explorer-pane] summary.tpl-summary").first().click()
-            }
+        page.waitForSelector("#schedule-list:not([aria-busy])")
+        val folder = page.locator("#schedule-list details.tpl-folder[data-folder='$root']")
+        page.waitForRequest({ it.url().contains("/api/v1/schedules?prefix=$root&") }) {
+            folder.locator("summary").click()
         }
         page.waitForSelector("[data-explorer-pane] button.tpl-leaf")
     }
@@ -357,7 +359,7 @@ class ExplorerPaneGeometryBrowserTest : SchedulesBrowserSuite() {
             for (collapsed in listOf(false, true)) {
                 page.setViewportSize(width, 900)
                 // #398: the SCHEDULES page is the pane's last live caller.
-                page.navigate("$baseUrl/schedules")
+                openSchedules()
                 page.evaluate(
                     "(c) => { document.documentElement.classList.toggle('rail-collapsed', c);" +
                         " window.localStorage.setItem('dp-rail', c ? '1' : '0'); }",
@@ -431,8 +433,7 @@ class ExplorerPaneGeometryBrowserTest : SchedulesBrowserSuite() {
         val root = ready("geod")
         seedPane(root)
         page.setViewportSize(1920, 900)
-        page.navigate("$baseUrl/schedules")
-        page.waitForSelector(".tplx-tree")
+        openSchedules()
         page.waitForLoadState(LoadState.NETWORKIDLE)
         openFirstFolder(root)
 
@@ -493,8 +494,7 @@ class ExplorerPaneGeometryBrowserTest : SchedulesBrowserSuite() {
         val root = ready("geor")
         seedPane(root)
         page.setViewportSize(1920, 900)
-        page.navigate("$baseUrl/schedules")
-        page.waitForSelector(".tplx-tree")
+        openSchedules()
         page.waitForLoadState(LoadState.NETWORKIDLE)
         openFirstFolder(root)
 

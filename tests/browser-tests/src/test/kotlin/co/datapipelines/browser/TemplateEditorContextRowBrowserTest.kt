@@ -35,9 +35,14 @@ class TemplateEditorContextRowBrowserTest : BrowserSuite() {
         /** [BrowserSuite.ensureTheme], for the session's own page (the toggle flips light ↔ dark). */
         fun ensureThemeOnSession(mode: String) {
             val wanted = "/themes/$mode.css"
-            val current = author.page.locator("#theme-link").first().getAttribute("href") ?: ""
+            val current =
+                author.page
+                    .locator("#theme-link")
+                    .first()
+                    .getAttribute("href") ?: ""
             if (current.contains(wanted)) return
-            author.page.waitForResponse("**/partials/profile/theme") { author.page.locator("#mode-toggle").click() }
+            author.page
+                .waitForResponse("**/partials/profile/theme") { author.page.locator("#mode-toggle").click() }
             author.page.waitForFunction("() => document.getElementById('theme-link').getAttribute('href').includes('$wanted')")
         }
 
