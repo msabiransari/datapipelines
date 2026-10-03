@@ -1,6 +1,6 @@
 # Metadata Database Schema Specification
 
-**Status:** v1.40 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
+**Status:** v1.41 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
 **Owner:** datapipelines.co core
 **Depends on:** all specs (this is the physical schema for every logical model)
 **Last updated:** 2026-10-02
@@ -1413,6 +1413,82 @@ CREATE INDEX idx_dashboard_key_bindings_key ON dashboard_key_bindings(api_key_id
 - The primary key `(name_prefix, api_key_id)` says one key binds a folder once and several keys may bind the same folder.
 - No `updated_at`: a binding is inserted and deleted, never edited.
 
+### 4.37 `parameter_evaluations`
+
+**One row per parameter-set evaluation ATTEMPT, whoever ran it** (V48; #376, the [parameter-set workspace spec](superpowers/specs/2026-10-02-parameter-set-workspace-spec.md) §2.1, R2) — the Parameter Sets page's observed evaluation, a dashboard's parameter evaluate or refresh, the REST evaluate, the MCP tool. `id` is the observed route's client-minted `evaluation_id` (the owner's §11.3 ruling), server-minted for every other caller — never re-issued. The row is inserted `RUNNING` when the evaluator ADMITS the attempt: a request refused before admission (an unknown selection key, `parameter.evaluate.unknown_parameter`) writes no row. It is finished exactly once, at the one point that owns the evaluation's end, non-cancellably (`ParameterEvaluator`'s `finally`; the dashboard refreshes' rule), whatever the ending.
+
+```sql
+CREATE TABLE parameter_evaluations (
+    id                    UUID        PRIMARY KEY,                  -- the evaluation id (client-minted on the observed route)
+    workspace_id          UUID        NOT NULL REFERENCES workspaces(id),
+    parameter_set_id      UUID        NOT NULL REFERENCES parameter_sets(id) ON DELETE CASCADE,
+    parameter_set_version INTEGER     NOT NULL,                     -- the version actually evaluated; NO FK (a purged version keeps its record)
+    caller                TEXT        NOT NULL,                     -- EvaluationCaller (enums.md §39)
+    principal_user_id     UUID        NULL REFERENCES users(id),
+    principal_key_id      TEXT        NULL,                         -- the key's dpk_ id as text; NO FK (see the notes)
+    correlation_id        TEXT        NULL,                         -- the dashboard runtime's refresh id; NULL for page, REST, MCP
+    status                TEXT        NOT NULL,                     -- ParameterEvaluationStatus (enums.md §40)
+    outcome_code          TEXT        NULL,                         -- the catalogued whole-request code; never a message
+    valid                 BOOLEAN     NULL,                         -- the response's valid flag — set exactly when COMPLETED
+    outcomes_json         JSONB       NULL,                         -- per parameter {name, outcome, error_code?, detail?}; <= 8 KiB stored
+    started_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    finished_at           TIMESTAMPTZ NULL,
+    CONSTRAINT chk_parameter_evaluations_version CHECK (parameter_set_version >= 1),
+    CONSTRAINT chk_parameter_evaluations_caller CHECK (caller IN ('PAGE', 'DASHBOARD', 'PIPELINE', 'REST', 'MCP')),
+    CONSTRAINT chk_parameter_evaluations_principal CHECK ((principal_user_id IS NOT NULL AND principal_key_id IS NULL)
+        OR (principal_user_id IS NULL AND principal_key_id IS NOT NULL)),
+    CONSTRAINT chk_parameter_evaluations_status
+        CHECK (status IN ('RUNNING', 'COMPLETED', 'ABORTED', 'TIMEOUT', 'FAILED', 'INCOMPLETE')),
+    CONSTRAINT chk_parameter_evaluations_finished CHECK ((status = 'RUNNING' AND finished_at IS NULL) OR (status <> 'RUNNING' AND finished_at IS NOT NULL)),
+    CONSTRAINT chk_parameter_evaluations_valid CHECK ((status = 'COMPLETED') = (valid IS NOT NULL)),
+    CONSTRAINT chk_parameter_evaluations_outcomes_size CHECK (pg_column_size(outcomes_json) <= 8192)
+);
+CREATE INDEX idx_parameter_evaluations_set_started ON parameter_evaluations (workspace_id, parameter_set_id, started_at DESC);
+CREATE INDEX idx_parameter_evaluations_running ON parameter_evaluations (started_at) WHERE status = 'RUNNING';
+CREATE INDEX idx_parameter_evaluations_finished ON parameter_evaluations (started_at) WHERE finished_at IS NOT NULL;
+```
+
+**Notes:**
+- **The status words** (enums.md §40): `COMPLETED` — a response was produced (`valid` its flag; an invalid form is a COMPLETED `valid = false` evaluation, never a failure); `TIMEOUT` — the whole-request `parameter.evaluate.timeout`; `FAILED` — a whole-request refusal after work began (`outcome_code` names it, e.g. `parameter.evaluate.response_too_large`) or an uncatalogued defect (`outcome_code` NULL; the exception class is logged, never stored); `ABORTED` — the caller stopped it (the observed route's disconnect grace, the owner's §11.7 ruling, or a shutdown); `INCOMPLETE` — no terminal write ever landed, written ONLY by the stale sweep ([§8.5](#85-stale-parameter-evaluation-sweep)) and never claiming a timeout that may not have happened.
+- **`outcomes_json` never holds a value.** One entry per parameter that finished, in declaration order: `outcome` is `resolved`, `reset` or `error`; `error_code` the first error's catalogued code; `detail` that error's own `details.reason` word (≤ 200 characters) — never its message, which may quote a driver. `required_missing`, `constraint_violation`, `selector_rows_invalid` and every per-parameter error land here, so a parameter that ran no statement is never given a fabricated query row. The writer bounds the encoding (5,120 text bytes — measured ≤ 6,005 bytes of binary JSONB at the worst shape), degrading to the error entries first; the 8 KiB CHECK is the backstop.
+- **The principal is a person XOR a key** (the [§4.34](#434-dashboard_refreshes) CHECK shape): a session records its user, an API key its key id. `principal_key_id` has no foreign key on purpose: the keys purge ([Auth §11C](auth.md#11c-the-keys-purge-keys-v2-a17b5)) deletes a revoked key once nothing references it, and a diagnostic record must neither hold a key alive nor block that purge; the id stays as the text it was.
+- **`PIPELINE` is dormant** (the owner's §11.10 ruling): declared so no migration widens the CHECK later, refused by the recorder until a pipeline binds a parameter set (the engine record's §13).
+- **Cascade and retention.** Purging the SET takes its history (a history of a purged artifact answers absent); purging a VERSION never rewrites history. Finished rows go with the execution events ([§8.1](#81-execution-event-cleanup)); a row a crash left `RUNNING` is closed by [§8.5](#85-stale-parameter-evaluation-sweep).
+- **Persistence never fails an evaluation**: a failed START is one structured ERROR line and the evaluation proceeds unrecorded; a failed terminal write leaves the row `RUNNING` for the sweep.
+
+### 4.38 `parameter_evaluation_queries`
+
+**One row per actual statement attempt of an evaluation** (V48; #376, the spec's §2.2) — a template-backed `SELECT`'s selector, or a database-fed `INPUT`'s source. Inserted when the statement asks the `SelectorPool` bulkhead for admission (`queued_at`), finished once when it ends; concurrency is preserved IN the evidence — each row carries its own three stamps (taken on the selector's worker thread for `started_at`/`ended_at`) and nothing serialises them, so two statements that ran together show overlapping ranges.
+
+```sql
+CREATE TABLE parameter_evaluation_queries (
+    id               UUID        PRIMARY KEY,
+    evaluation_id    UUID        NOT NULL REFERENCES parameter_evaluations(id) ON DELETE CASCADE,
+    parameter        TEXT        NOT NULL,
+    datasource       TEXT        NOT NULL,                          -- re-resolved per evaluate (C25)
+    template_id      TEXT        NOT NULL,                          -- the pin that rendered the statement (P22)
+    template_version INTEGER     NOT NULL,
+    queued_at        TIMESTAMPTZ NULL,                              -- asked the bulkhead for admission
+    started_at       TIMESTAMPTZ NULL,                              -- the worker began it; NULL when it never started
+    ended_at         TIMESTAMPTZ NULL,                              -- the worker returned it; NULL on TIMEOUT / ABORTED
+    outcome          TEXT        NULL,                              -- QueryAttemptOutcome (enums.md §41); NULL while in flight
+    refusal_code     TEXT        NULL,                              -- the catalogued code, REFUSED only
+    error_code       TEXT        NULL,                              -- the owning subsystem's code, FAILED only
+    row_count        INTEGER     NULL,                              -- rows read, EXECUTED only
+    CONSTRAINT chk_parameter_evaluation_queries_outcome CHECK (outcome IN ('EXECUTED', 'REFUSED', 'FAILED', 'TIMEOUT', 'ABORTED')),
+    CONSTRAINT chk_parameter_evaluation_queries_codes CHECK ((refusal_code IS NULL OR outcome = 'REFUSED')
+        AND (error_code IS NULL OR outcome = 'FAILED')
+        AND (row_count IS NULL OR (outcome = 'EXECUTED' AND row_count >= 0)))
+);
+CREATE INDEX idx_parameter_evaluation_queries_evaluation ON parameter_evaluation_queries (evaluation_id);
+```
+
+**Notes:**
+- **`REFUSED` is a value, never an absence** (R2): the statement never ran — a render failure (`pipeline.node.template_render_failed` / `…template_not_found`), a datasource the workspace cannot see (`datasource.not_found`) or reach (`pipeline.execution.datasource_unreachable`), a bind the context lacks (`pipeline.node.sql_parameter_missing`), `parameter.evaluate.too_many_binds`, the read-only gate or a placeholder text the binder refused (`pipeline.node.query_execution_failed` with that `details.reason`), a full bulkhead (`parameter.evaluate.selectors_saturated` — `started_at` NULL). `FAILED` ran and failed (a driver error, the statement's own timeout `pipeline.node.query_timeout`, `datasource.table_forbidden`; a runtime defect has no code). `TIMEOUT` — the evaluate deadline abandoned it (`Statement.cancel()` + `ConnectionPool.discard`); `ABORTED` — its evaluation's caller stopped it: both mean only that the evaluation stopped waiting, so `ended_at` stays NULL — the worker may still be running and the row never claims it stopped.
+- **Never stored, by name:** SQL text (rendered or pinned), a bind value, a selection or resolved value, a result row, a driver message — no column exists that could carry one.
+- **Constants and free inputs are resolution steps, not query rows**: a `constants` selector and a plain-default `INPUT` produce NO row (their outcomes ride `outcomes_json`); the SAVE-time probe is authoring validation and records nothing here.
+- An evaluation holds at most `max-parameters-per-set` rows. `outcome` stays NULL on the rows of an evaluation the sweep closed `INCOMPLETE` — nobody saw them end.
+
 ## 5. Index Strategy Summary
 
 **This table is generated from §4 and must contain nothing §4 does not create.** Two kinds of entry appear:
@@ -1525,6 +1601,12 @@ CREATE INDEX idx_dashboard_key_bindings_key ON dashboard_key_bindings(api_key_id
 | `dashboard_refreshes` | `idx_dashboard_refreshes_finished` | explicit (partial) | V43: the retention step's cutoff scan |
 | `dashboard_refresh_executions` | `pk_dashboard_refresh_executions` | explicit (PK) | V43: one link per (refresh, source) ([§4.35](#435-dashboard_refresh_executions)) |
 | `dashboard_refresh_executions` | `idx_dashboard_refresh_executions_execution` | explicit | V43: the refresh of an execution — the events pane's reverse lookup |
+| `parameter_evaluations` | `parameter_evaluations_pkey` | via PK | Lookup by the evaluation id — the record detail and every guarded write ([§4.37](#437-parameter_evaluations)) |
+| `parameter_evaluations` | `idx_parameter_evaluations_set_started` | explicit | V48: one set's records, newest first — the History tab |
+| `parameter_evaluations` | `idx_parameter_evaluations_running` | explicit (partial) | V48: the stale sweep's worklist (`RUNNING` only, so the scan stays tiny) |
+| `parameter_evaluations` | `idx_parameter_evaluations_finished` | explicit (partial) | V48: the retention step's cutoff scan on `started_at` over finished rows |
+| `parameter_evaluation_queries` | `parameter_evaluation_queries_pkey` | via PK | Each attempt's guarded terminal write ([§4.38](#438-parameter_evaluation_queries)) |
+| `parameter_evaluation_queries` | `idx_parameter_evaluation_queries_evaluation` | explicit | V48: a record's attempts (the detail) and the cascade from a deleted record (retention) |
 
 **Deliberately absent:**
 - `uq_users_email` — this name never existed. The uniqueness rule is a `UNIQUE` *constraint* declared inline in §4, so Postgres names its index `users_email_key`. The old entry would have sent a migration author looking for a `CREATE UNIQUE INDEX` statement that was not there. (`uq_pipelines_name`/`pipelines_name_key` are gone too — V4 replaced the global rule with the explicitly named `uq_pipelines_workspace_name`.)
@@ -1588,6 +1670,8 @@ table and the test's expected-table list in the same commit.
 | `visualization_test_screenshots` | environment-local | Visualization | — | — | A run's image — the run's classification |
 | `dashboard_refreshes` | derived | DashboardRefresh | — | — | What THIS deployment's viewers refreshed; per-environment by construction, never authored, never promoted |
 | `dashboard_refresh_executions` | derived | DashboardRefresh | — | — | The refresh's link to its executions — the refresh's classification |
+| `parameter_evaluations` | derived | ParameterEvaluation | — | — | What THIS deployment's callers evaluated (#376); per-environment diagnostics by construction, never authored, never promoted |
+| `parameter_evaluation_queries` | derived | ParameterEvaluation | — | — | The evaluation's statement attempts — the record's classification |
 | `template_implements` | promotable | Template | — (follows `template_versions`) | `(name, version)` + the fact ids | The citations ride the template version's payload (export, import, the promotion batch) outside its `body_hash` (R9). Their targets are [`learned_facts`](#418-learned_facts) rows, which are environment-local: the importing workspace stores the ids that resolve there and drops the rest without refusing (owner ruling 2026-09-25), so a cross-deployment promotion lands with none ([§4.21](#421-template_implements)) |
 
 ---
@@ -1756,7 +1840,7 @@ Flyway uses Postgres advisory locks (`pg_advisory_lock`). Multiple instances sta
 
 ## 8. Operational Jobs
 
-Four scheduled jobs act on this schema. **None of them hard-codes an interval literal.** Every retention and timeout bound is a bind parameter fed from a config key owned by [Configuration §3](configuration.md#3-optional-configuration-with-defaults) (D8) — the SQL below shows the parameterized form, because an `INTERVAL '7 days'` written into a query is a config key that silently stopped working.
+Four scheduled jobs act on this schema (the hourly retention tick carries several steps — §8.1 and [§8.5](#85-stale-parameter-evaluation-sweep)). **None of them hard-codes an interval literal.** Every retention and timeout bound is a bind parameter fed from a config key owned by [Configuration §3](configuration.md#3-optional-configuration-with-defaults) (D8) — the SQL below shows the parameterized form, because an `INTERVAL '7 days'` written into a query is a config key that silently stopped working.
 
 The `make_interval()` form is used rather than string concatenation: it takes an integer bind parameter, so there is no interval literal to build and nothing to inject.
 
@@ -1774,6 +1858,8 @@ DELETE FROM execution_events
 `:eventRetentionDays` ← [`datapipelines.executions.event-retention-days`](configuration.md#311-execution-history).
 
 **Dashboard refreshes ride the same tick (#10 L2).** After the events, the step deletes `dashboard_refreshes` rows that FINISHED before the same cutoff — `DELETE FROM dashboard_refreshes WHERE finished_at IS NOT NULL AND finished_at < NOW() - make_interval(days => :eventRetentionDays)` — and the cascade takes their `dashboard_refresh_executions` links (never the executions, which are never deleted). Before this rule the spec said "the executions' own policy"; `pipeline_executions` has none, so refreshes are retained like the events that describe them (§18 premise 7). A `RUNNING` row is never deleted by retention.
+
+**Parameter evaluation records ride the same tick (#376; the workspace spec §2.3, the owner's §11.5 ruling).** After the dashboard refreshes, the step deletes finished `parameter_evaluations` rows that STARTED before the same cutoff, ONE bounded batch per tick — `DELETE FROM parameter_evaluations WHERE id IN (SELECT id FROM parameter_evaluations WHERE finished_at IS NOT NULL AND started_at < NOW() - make_interval(days => :eventRetentionDays) ORDER BY started_at LIMIT :batchSize)` over `idx_parameter_evaluations_finished`, `:batchSize` = 5,000 (a code constant, `ParameterEvaluationRetention`); the cascade takes their `parameter_evaluation_queries`. A full batch is a backlog, said once at WARN, and the next hour takes the next batch. No key of its own: a record is a bounded row with no payload, so the event retention is the policy (a retention key of its own would be an additive change). A `RUNNING` row is never deleted.
 
 This purges the **durable** 7-day record only. The 1-hour Redis event log ([§9](#9-what-is-not-in-this-database)) expires on its own TTL and is not this job's concern.
 
@@ -1858,6 +1944,20 @@ UPDATE dashboard_refreshes
 
 `:staleAfterSeconds` = [`datapipelines.dashboards.timeouts.max-refresh-seconds`](configuration.md#334-the-dashboard-runtime-10-l2) plus one [`cancel-poll-interval-seconds`](configuration.md#32-executor) — no live refresh outlives its own deadline (§9.6 caps it), so a row past both is not running anywhere. The `AND status = 'RUNNING'` guard is the whole safety: a refresh that finishes as the sweep runs keeps its own terminal state. Every replica may run it (one idempotent `UPDATE`, like §8.1); a tick that fails is logged (`event=dashboard.refresh_sweep_failed`, the class and SQLState only) and retried.
 
+### 8.5 Stale parameter evaluation sweep
+
+An instance that dies mid-evaluation — or a terminal write the database refused — leaves a `parameter_evaluations` row `RUNNING` forever (§8.4's shape). `ParameterEvaluationSweeper` (#376) closes them as a step of the HOURLY retention tick ([§8.1](#81-execution-event-cleanup); no `@Scheduled` of its own), before that tick's evaluation retention, so a record it closes ages out with the rest:
+
+```sql
+UPDATE parameter_evaluations
+   SET status = 'INCOMPLETE', finished_at = NOW()
+ WHERE status = 'RUNNING'
+   AND started_at < NOW() - make_interval(secs => :staleAfterSeconds)
+RETURNING id;
+```
+
+`:staleAfterSeconds` = [`datapipelines.parameters.evaluate-timeout-seconds`](configuration.md#330-parameter-engine-194) plus a 60-second margin (`ParameterEvaluationSweeper.MARGIN_SECONDS`, a code constant: the instance's clock stamps `started_at`, the database's `NOW()` judges it). Every evaluate is bounded by that deadline, so a row past it is not running anywhere. It writes `INCOMPLETE`, never `TIMEOUT` — nobody knows how the lost attempt ended — and leaves the record's query rows as they were. The `status = 'RUNNING'` guard keeps a terminal write that lands as the sweep runs; the scan reads the partial `idx_parameter_evaluations_running`. A step that fails is logged by class and SQLState only and retried the next hour.
+
 ---
 
 ## 9. What Is NOT In This Database
@@ -1886,6 +1986,7 @@ Three pieces of execution state that a reader might reasonably expect to find he
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-02 | v1.41 | V48 (#376, parameter-set workspace S3) the evaluation history | **§4.37 `parameter_evaluations` and §4.38 `parameter_evaluation_queries`** — the spec's §2.1/§2.2 verbatim with the owner's rulings: the status CHECK carries `ABORTED` beside the spec's five (§11.7), the query outcome CHECK carries `ABORTED` too, the caller CHECK all five values with `PIPELINE` dormant (§11.10); plus three CHECKs that pin the state machine (`finished_at` iff not `RUNNING`, `valid` iff `COMPLETED`, each code only on its own outcome) and the `parameter_set_version >= 1` floor. `principal_key_id` takes NO foreign key (the keys purge must not be blocked by a diagnostic row), and `outcome` is NULL while a statement is in flight. §5 gains six indexes (the spec's two, the §2.3 cutoff index, the queries' FK index the cascade and the detail need, two PKs); §5A classifies both tables **derived**. **§8.1** gains the evaluation retention (the event cutoff on `started_at`, one bounded batch of 5,000 per tick); **new §8.5** the stale sweep (`INCOMPLETE` past `evaluate-timeout-seconds` + 60 s, on the same hourly tick). Up-and-down rehearsal on a copy of the demo database is the lane's evidence. |
 | 2026-10-02 | v1.40 | V47 (#328) the release records its caller node's result columns | **Two nullable JSONB columns, no backfill:** §4.6 `pipeline_executions.result_schema_json` — every execution's caller-output schema, an array of `{name, type, nullable}`, written by `recordResult` beside `result_row_count` (history, durable past the Redis TTL; NULL for no caller node, no record, or past the 256-column / 128-character record bounds — record nothing + `warn`, never fail); §4.5 `pipeline_versions.caller_output_json` — the release's copy, written ONLY by the release flip's D1 subselect (the latest SUCCESS root execution started after the last draft write; a never-run release records NULL and still succeeds). Both outside `body_hash`. Pipeline-contract §3.3.1 is the shape and precedence source of truth. Up-and-down rehearsal on the shared test container: ALTER, ALTER, DROP, DROP, ALTER, ALTER. |
 | 2026-10-01 | v1.39 | V45 (#367, L5 — the key kind; the number 352's `V44__visualization_test_capabilities` holds) | **§4.2 `api_keys`: `chk_api_keys_kind` gains `'dashboard'`, `chk_api_keys_role` gains the arm `(kind = 'dashboard' AND role IS NOT NULL AND role = 'dashboard_viewer')`** — the `IS NOT NULL` is the V37 lesson spelled again; **§4.6 `pipeline_executions.executed_by_key_kind`'s CHECK gains `'dashboard'`** (the column comment also gains the `'mcp'` V37 had added and this table omitted). **§4.36 `dashboard_key_bindings`** — the `endpoint_key_bindings` twin: a folder `name_prefix` of the dashboard name space (the root `/` allowed), the key by TEXT id, cascading on delete; §5 gains its two indexes; §5A classifies it **promotable** — the twin's own class and reason, the lane's recorded decision (no promotion carrier today; a batch would carry it by key NAME exactly like its twin). |
 | 2026-10-01 | v1.38 | L4b (#353) a key name | **§4.32, no DDL change:** the preview token's TTL names the shipped key `datapipelines.visualization.session-ttl-minutes` (the spec's `tests.session-ttl-minutes` has no YAML form — configuration.md §3.33). |

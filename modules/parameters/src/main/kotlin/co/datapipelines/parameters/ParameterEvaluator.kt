@@ -24,6 +24,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import org.slf4j.LoggerFactory
 import java.time.Clock
 import java.time.LocalDate
 import java.time.ZoneId
@@ -72,6 +73,13 @@ import kotlin.time.Duration.Companion.seconds
  * [selectors] applies the STATEMENT-level ones from its own (`max-binds-per-statement`, the clamped
  * statement timeout). The wiring builds both — and the one [SelectorPool] — from the same
  * `ParametersConfig`.
+ *
+ * **Every evaluation is recorded** (#376, the workspace spec R2): the [recorder] is a constructor collaborator, so the
+ * durable history sees the REST route, the dashboard runtime, the MCP tool and the Parameter Sets page alike — each
+ * names itself in the REQUIRED [EvaluationAttempt]. The record opens when the attempt is admitted (after the
+ * whole-request key check), gets one row per statement attempt, and is finished exactly once in [evaluate]'s `finally`
+ * — non-cancellably, BEFORE the observer's `Ended`, so a page that reads the history on its terminal frame finds the
+ * record finished.
  */
 class ParameterEvaluator(
     private val selectors: SelectorTasks,
@@ -79,8 +87,13 @@ class ParameterEvaluator(
     private val config: ParametersConfig = ParametersConfig(),
     /** The deployment's org tier — bindable by every selector without a dependency (P30), echoed as `org`. */
     private val org: OrgContext = OrgContext.DEFAULTS,
-    /** `current_date` / `current_timestamp` — read once per evaluate, the same instant for every selector. */
+    /**
+     * `current_date` / `current_timestamp` — read once per evaluate, the same instant for every selector — and the
+     * history's stamps (admission, each statement's queued/started/ended, the terminal write).
+     */
     private val clock: Clock = Clock.systemUTC(),
+    /** The durable evaluation history (#376) — every caller records; [ParameterEvaluationRecorder.NONE] records nothing. */
+    private val recorder: ParameterEvaluationRecorder = ParameterEvaluationRecorder.NONE,
 ) {
     /** The shared judge (P28) with the engine's limits — the `max_length` default and the regex budget (P34). */
     private val validator = ParameterValueValidator(config.valueLimits)
@@ -94,11 +107,15 @@ class ParameterEvaluator(
         workspaceId: UUID,
         set: ParameterSetVersion,
         selections: Map<String, JsonNode?>,
-    ): EvaluateResponse = runBlocking { evaluate(workspaceId, set, selections) }
+        attempt: EvaluationAttempt,
+    ): EvaluateResponse = runBlocking { evaluate(workspaceId, set, selections, attempt) }
 
     /**
      * Evaluates [set] (a stored version the caller resolved and may read — lane D's route and tool)
      * in [workspaceId] against [selections] (the request's `selections` object, keyed by parameter).
+     *
+     * [attempt] names the caller and its principal for the durable record (#376) — required, so no call site records
+     * under a discriminator it did not choose; it sits before the optional [observation] so S2's default stays last.
      *
      * [observation] is the observed evaluation's port (the parameter-set workspace spec §4.3, #375): the
      * Parameter Sets page's stream passes one and receives [ParameterEvaluationEvent]s — `Started` first,
@@ -110,14 +127,17 @@ class ParameterEvaluator(
      *   `parameter.evaluate.timeout` (504), `parameter.evaluate.response_too_large` (413) — the three
      *   whole-request refusals; everything else is per parameter, in `state.errors`.
      */
+    @Suppress("ThrowsCount") // every catch arm only records how the evaluation ended, then rethrows it unchanged
     suspend fun evaluate(
         workspaceId: UUID,
         set: ParameterSetVersion,
         selections: Map<String, JsonNode?>,
+        attempt: EvaluationAttempt,
         observation: ParameterEvaluationObserver = ParameterEvaluationObserver.NONE,
     ): EvaluateResponse {
         require(set.record.workspaceId == workspaceId) { "the set is not this workspace's — the caller resolved it wrongly" }
         val events = if (observation === ParameterEvaluationObserver.NONE) null else ObservedEvaluation(observation)
+        val record = RecordedEvaluation(recorder, attempt, set, clock)
         events?.emit(
             ParameterEvaluationEvent.Started(
                 set.body.parameters.map { it.name },
@@ -129,7 +149,7 @@ class ParameterEvaluator(
         var code: String? = null
         var completed: EvaluateResponse? = null
         try {
-            return evaluated(workspaceId, set, selections, events).also {
+            return evaluated(workspaceId, set, selections, events, record).also {
                 outcome = EvaluationOutcome.COMPLETED
                 completed = it
             }
@@ -142,9 +162,17 @@ class ParameterEvaluator(
             outcome = if (e.code == ParameterErrorCodes.EVALUATE_TIMEOUT) EvaluationOutcome.TIMEOUT else EvaluationOutcome.FAILED
             code = e.code
             throw e
+        } catch (
+            @Suppress("TooGenericExceptionCaught") e: RuntimeException,
+        ) {
+            // A defect, never an author's problem: the record says FAILED with no code; the class is the one fact kept.
+            log.warn("event=parameter.evaluation_defect evaluation_id={} error={}", attempt.evaluationId, e.javaClass.simpleName)
+            throw e
         } finally {
-            if (events != null) {
-                withContext(NonCancellable) { events.emit(ParameterEvaluationEvent.Ended(outcome, code, completed)) }
+            // The record first (#376), then the observer's last frame: both written once, here, whatever ended it.
+            withContext(NonCancellable) {
+                record.end(outcome, code, completed)
+                events?.emit(ParameterEvaluationEvent.Ended(outcome, code, completed))
             }
         }
     }
@@ -154,12 +182,15 @@ class ParameterEvaluator(
         set: ParameterSetVersion,
         selections: Map<String, JsonNode?>,
         events: ObservedEvaluation?,
+        record: RecordedEvaluation,
     ): EvaluateResponse {
         val body = set.body
         SelectionKeys.refuseUnknown(body, selections)
+        // Admitted: a request refused above (an unknown key) records nothing — "refused at admission writes no row".
+        record.open()
         val submissions = body.parameters.associate { it.name to judge(it, selections[it.name]) }
         val graph = ParameterSetGraph.of(body)
-        val evaluation = Evaluation(workspaceId, set.record.name, body, graph, submissions, events)
+        val evaluation = Evaluation(workspaceId, set.record.name, body, graph, submissions, events, record)
         val states = underDeadline { evaluation.cascade() }
         val order = body.parameters.withIndex().associate { it.value.name to it.index }
         val response =
@@ -252,6 +283,8 @@ class ParameterEvaluator(
         private val submissions: Map<String, Submission>,
         /** The observed evaluation's delivery, or null for every ordinary caller (no event is ever built then). */
         private val events: ObservedEvaluation?,
+        /** The durable record (#376) — a no-op for an unrecorded evaluation. */
+        private val record: RecordedEvaluation,
     ) {
         private val types: Map<String, LogicalType> = body.parameters.associate { it.name to it.type }
 
@@ -277,7 +310,10 @@ class ParameterEvaluator(
                             if (parents.isNotEmpty()) events?.emit(ParameterEvaluationEvent.ParameterWaiting(name, parents.keys.toList()))
                             // The parents FIRST: a child never starts before every parent completed.
                             val effective = parents.mapValues { (_, state) -> state.await().value }
-                            evaluate(parameter, effective).also { state -> events?.let { report(it, parameter, state) } }
+                            evaluate(parameter, effective).also { state ->
+                                record.parameterEnded(parameter, state)
+                                events?.let { report(it, parameter, state) }
+                            }
                         }
                 }
                 scheduled.mapValues { (_, state) -> state.await() }
@@ -388,16 +424,31 @@ class ParameterEvaluator(
                     binds[dependency] = value
                 }
             }
-            val task = selectors.task(SelectorRequest(workspaceId, template, datasource, context, binds, maxRows), resolver)
             val label = SelectorLabel(setName, parameter.name, datasource)
+            // The statement attempt's row (#376) — null for an unrecorded evaluation, which then hands the pool the bare task.
+            val query = record.queued(parameter.name, datasource, template)
+            val produced = selectors.task(SelectorRequest(workspaceId, template, datasource, context, binds, maxRows), resolver)
+            val task = query?.stamping(produced) ?: produced
             val admission =
-                if (events == null) {
-                    pool.run(label, task)
-                } else {
-                    pool.run(label, observed(task, parameter.name, datasource, template, events)) {
-                        events.emit(ParameterEvaluationEvent.ParameterAdmitted(parameter.name))
+                try {
+                    if (events == null) {
+                        pool.run(label, task)
+                    } else {
+                        pool.run(label, observed(task, parameter.name, datasource, template, events)) {
+                            events.emit(ParameterEvaluationEvent.ParameterAdmitted(parameter.name))
+                        }
                     }
+                } catch (e: CancellationException) {
+                    // Abandoned (the deadline, an abort): the terminal write closes this attempt with the evaluation's ending.
+                    throw e
+                } catch (
+                    @Suppress("TooGenericExceptionCaught") e: RuntimeException,
+                ) {
+                    // The task itself threw (a defect): its attempt is FAILED, and the evaluation fails with it.
+                    query?.let { record.defect(it) }
+                    throw e
                 }
+            query?.let { record.ended(it, admission) }
             return when (admission) {
                 is SelectorAdmission.Completed -> admission.run
                 SelectorAdmission.Saturated -> null
@@ -676,6 +727,8 @@ class ParameterEvaluator(
     }
 
     private companion object {
+        private val log = LoggerFactory.getLogger(ParameterEvaluator::class.java)
+
         const val NO_OPTIONS = "no_options"
         const val NO_DEFAULT = "no_default"
         const val NO_ROW = "no_row"

@@ -4,6 +4,7 @@ import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.parameters.EvaluateResponse
+import co.datapipelines.parameters.EvaluationCaller
 import co.datapipelines.parameters.OrgEcho
 import co.datapipelines.parameters.ParameterEvaluator
 import co.datapipelines.parameters.ParameterSetBody
@@ -117,7 +118,7 @@ class ParameterEvaluationStreamControllerTest {
     /** Nothing opened, nothing started — the assertion every refusal below ends with. */
     private fun nothingStarted() {
         registry.activeStreams shouldBe 0
-        coVerify(exactly = 0) { evaluator.evaluate(any(), any(), any(), any()) }
+        coVerify(exactly = 0) { evaluator.evaluate(any(), any(), any(), any(), any()) }
     }
 
     @Test
@@ -196,7 +197,7 @@ class ParameterEvaluationStreamControllerTest {
         error.code shouldBe "parameter.validation.body_invalid"
         error.details shouldBe mapOf("path" to "evaluation_id", "reason" to "reused")
         registry.activeStreams shouldBe 1
-        coVerify(exactly = 0) { evaluator.evaluate(any(), any(), any(), any()) }
+        coVerify(exactly = 0) { evaluator.evaluate(any(), any(), any(), any(), any()) }
     }
 
     @Test
@@ -217,8 +218,12 @@ class ParameterEvaluationStreamControllerTest {
         authenticate()
         every { sets.findVersion(workspaceId, any(), setId, 4) } returns set
         val ran = kotlinx.coroutines.CompletableDeferred<Any>()
-        coEvery { evaluator.evaluate(workspaceId, set, any(), any()) } coAnswers {
-            ran.complete(arg<Any>(3))
+        // #376: the page is the PAGE caller, and the client-minted evaluation id is the history record's key.
+        val minted = UUID.fromString(evaluationId)
+        coEvery {
+            evaluator.evaluate(workspaceId, set, any(), match { it.caller == EvaluationCaller.PAGE && it.evaluationId == minted }, any())
+        } coAnswers {
+            ran.complete(arg<Any>(4))
             EvaluateResponse(setId, set.record.name, 4, OrgEcho(null, null), emptyList())
         }
 

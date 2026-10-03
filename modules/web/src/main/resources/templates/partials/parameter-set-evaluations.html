@@ -1,0 +1,79 @@
+<!-- The Parameter Sets workspace's HISTORY tab (#376; workspace spec §6.4, R3) — one row per evaluation record of this
+     set, whoever ran it: the page itself, a dashboard, the REST route or an MCP client (the Caller column says which).
+     Painted first by the workspace page (?tab=history) and paged by GET /partials/parameter-sets/{id}/evaluations —
+     ONE browse model, so the page and the pager cannot disagree.
+
+     Lensed SERVER-side: a set the caller's lens hides never reaches this fragment (the house 404), and under a
+     narrowing lens only records of versions it admits are listed. Nothing here carries a value, a selection, SQL or a
+     driver message — the record holds none (metadata-db §4.37/§4.38).
+
+     HOUSE TABLE (ui-screens §3.7): the fixed data-table frame, one line per row, server-paged 25 at a time
+     (`data-dt-paged`: the sort buttons sort THIS page). A row's first cell opens the record's detail beneath the
+     table; every cell is th:text. -->
+<div xmlns:th="http://www.thymeleaf.org" th:fragment="history" id="ps-history" class="ps-history"
+     th:attr="data-history-offset=${historyOffset}">
+  <div class="dt-frame dt-scroll dt-nowrap" data-dt-paged>
+    <div class="dt-viewport" tabindex="-1">
+      <table class="ds-table" aria-label="Evaluation history">
+        <thead>
+          <tr>
+            <th data-type="date">Started (UTC)</th>
+            <th>Caller</th>
+            <th>Principal</th>
+            <th>Version</th>
+            <th>Status</th>
+            <th>Valid</th>
+            <th class="num" data-type="number">Outcomes</th>
+            <th class="num" data-type="number">Queries</th>
+            <th class="num">Took</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr th:if="${#lists.isEmpty(evaluations)}" class="dt-state-row">
+            <td colspan="9" class="dt-state-cell">
+              <div class="dt-state">
+                <b>No evaluations recorded</b>
+                <span th:if="${historyOffset == 0}">Every evaluation of this set — from this page, a dashboard, the REST API or an agent — is listed here.</span>
+                <span th:unless="${historyOffset == 0}">No more records.</span>
+              </div>
+            </td>
+          </tr>
+          <tr th:each="e : ${evaluations}" th:attr="data-evaluation-id=${e.id},data-caller=${e.caller}">
+            <td class="u-mono">
+              <button type="button" class="ps-history-open"
+                      th:attr="hx-get=@{/partials/parameter-sets/{id}/evaluations/{eid}(id=${historySetId},eid=${e.id})},title=${e.startedIso}"
+                      hx-target="#ps-history-detail" hx-swap="innerHTML"
+                      th:text="${e.started}">2026-10-02 23:30:00</button>
+            </td>
+            <td th:text="${e.caller}">PAGE</td>
+            <td th:text="${e.principal}">Author</td>
+            <td class="u-mono" th:text="${e.version}">v2</td>
+            <td>
+              <!-- The chip shows the word; the ENUM rides on data-status for a machine reader. -->
+              <span class="app-chip" th:attr="data-status=${e.status}"
+                    th:classappend="'app-chip-' + ${e.statusTone}"><i class="ds-status"></i><span th:text="${e.status}">COMPLETED</span></span>
+            </td>
+            <td th:text="${e.valid}">yes</td>
+            <td class="num" th:text="${e.outcomes}">3</td>
+            <td class="num" th:text="${e.queries}">2</td>
+            <td class="num u-mono" th:text="${e.took}">41 ms</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="u-row u-between u-mt-md" th:unless="${#lists.isEmpty(evaluations) and historyOffset == 0}">
+    <th:block th:if="${historyOffset > 0}">
+      <button type="button" class="ds-button ds-button-secondary" data-history-previous
+              th:attr="hx-get=@{/partials/parameter-sets/{id}/evaluations(id=${historySetId},offset=${historyPreviousOffset})}"
+              hx-target="#ps-history" hx-swap="outerHTML">Previous</button>
+    </th:block>
+    <span th:unless="${historyOffset > 0}"></span>
+    <th:block th:if="${historyHasMore}">
+      <button type="button" class="ds-button ds-button-secondary" data-history-next
+              th:attr="hx-get=@{/partials/parameter-sets/{id}/evaluations(id=${historySetId},offset=${historyNextOffset})}"
+              hx-target="#ps-history" hx-swap="outerHTML">Next</button>
+    </th:block>
+  </div>
+</div>

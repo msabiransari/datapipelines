@@ -3,6 +3,8 @@ package co.datapipelines.web.parameters
 import co.datapipelines.application.lens.PromoterLens
 import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
+import co.datapipelines.parameters.EvaluationAttempt
+import co.datapipelines.parameters.EvaluationCaller
 import co.datapipelines.parameters.ParameterEvaluator
 import co.datapipelines.parameters.ParameterSetService
 import co.datapipelines.parameters.SelectionKeys
@@ -88,11 +90,13 @@ class ParameterEvaluationStreamController(
         }
         if (streams.atStreamLimit(principal.userId)) throw ApiErrors.streamLimitExceeded(streams.maxStreamsPerUser)
         val stream = streams.open(request.evaluationId, id, request.version, principal, authority)
+        // #376: the client-minted evaluation id is the history record's key; the page is the PAGE caller.
+        val attempt = EvaluationAttempt.of(EvaluationCaller.PAGE, principal.userId, principal.keyId, evaluationId = request.evaluationId)
         // LAZY: the job is attached for the grace BEFORE it can run, so even an instant evaluation is abortable by it.
         val job =
             scope.launch(start = CoroutineStart.LAZY) {
                 try {
-                    evaluator.evaluate(workspaceId, set, request.selections, observation = stream)
+                    evaluator.evaluate(workspaceId, set, request.selections, attempt = attempt, observation = stream)
                 } catch (_: CancellationException) {
                     // The grace or the shutdown: the evaluator already wrote Ended(ABORTED) under NonCancellable.
                 } catch (e: DatapipelinesException) {

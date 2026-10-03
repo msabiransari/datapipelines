@@ -1,0 +1,81 @@
+<!-- One evaluation record (#376; workspace spec §6.4) — opened from a History row into #ps-history-detail. The header
+     (caller, principal, correlation id when one exists, status and its catalogued code, the stamps), the per-parameter
+     outcomes as `outcomes_json` recorded them (resolved / reset / error + the catalogued code and its reason word), and
+     the statement attempts with their three stamps to the millisecond: two selectors that ran together show OVERLAPPING
+     started/ended ranges, as stored — never re-serialised (R2). A REFUSED attempt never ran; a TIMEOUT or ABORTED one has
+     no end stamp because the evaluation stopped waiting, not because the worker was seen to stop.
+
+     Every field is th:text: parameter, datasource and template names, codes and words. No value, selection, SQL or driver
+     message exists in the record to render. -->
+<section xmlns:th="http://www.thymeleaf.org" th:fragment="detail" class="ps-card ps-history-detail"
+         th:attr="data-evaluation-id=${evaluation.row.id}" aria-label="Evaluation record">
+  <h3 class="ps-card-title">Evaluation <span class="u-mono" th:text="${evaluation.row.id}">id</span></h3>
+  <dl class="ps-history-facts">
+    <dt>Caller</dt><dd th:text="${evaluation.row.caller}">PAGE</dd>
+    <dt>Principal</dt><dd th:text="${evaluation.row.principal}">Author</dd>
+    <th:block th:if="${evaluation.correlationId != null}">
+      <dt>Correlation id</dt><dd class="u-mono" th:text="${evaluation.correlationId}">refresh id</dd>
+    </th:block>
+    <dt>Version</dt><dd class="u-mono" th:text="${evaluation.row.version}">v2</dd>
+    <dt>Status</dt>
+    <dd>
+      <span class="app-chip" th:attr="data-status=${evaluation.row.status}"
+            th:classappend="'app-chip-' + ${evaluation.row.statusTone}"><i class="ds-status"></i><span th:text="${evaluation.row.status}">COMPLETED</span></span>
+      <code th:if="${evaluation.outcomeCode != null}" data-outcome-code th:text="${evaluation.outcomeCode}">parameter.evaluate.timeout</code>
+    </dd>
+    <dt>Valid</dt><dd th:text="${evaluation.row.valid}">yes</dd>
+    <dt>Started (UTC)</dt><dd class="u-mono" th:text="${evaluation.row.started}">started</dd>
+    <dt>Finished (UTC)</dt><dd class="u-mono" th:text="${evaluation.finished}">finished</dd>
+    <dt>Took</dt><dd class="u-mono" th:text="${evaluation.row.took}">41 ms</dd>
+  </dl>
+
+  <h4 class="ps-history-subtitle">Parameters</h4>
+  <div class="dt-frame dt-nowrap dt-fit">
+    <div class="dt-viewport" tabindex="-1">
+      <table class="ds-table" aria-label="Parameter outcomes" data-history-outcomes>
+        <thead><tr><th>Parameter</th><th>Outcome</th><th>Error code</th><th>Reason</th></tr></thead>
+        <tbody>
+          <tr th:if="${#lists.isEmpty(evaluationOutcomes)}" class="dt-state-row">
+            <td colspan="4" class="dt-state-cell"><div class="dt-state"><span>No parameter finished before the evaluation ended.</span></div></td>
+          </tr>
+          <tr th:each="o : ${evaluationOutcomes}" th:attr="data-parameter=${o.name},data-outcome=${o.outcome}">
+            <td class="u-mono" th:text="${o.name}">country</td>
+            <td th:text="${o.outcome}">resolved</td>
+            <td class="u-mono" th:text="${o.errorCode}">—</td>
+            <td th:text="${o.detail}">—</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <h4 class="ps-history-subtitle">Statement attempts</h4>
+  <div class="dt-frame dt-nowrap dt-fit">
+    <div class="dt-viewport" tabindex="-1">
+      <table class="ds-table" aria-label="Statement attempts" data-history-queries>
+        <thead>
+          <tr>
+            <th>Parameter</th><th>Datasource</th><th>Template</th><th>Queued (UTC)</th><th>Started</th><th>Ended</th>
+            <th>Outcome</th><th class="num">Rows</th><th>Code</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr th:if="${#lists.isEmpty(evaluationQueries)}" class="dt-state-row">
+            <td colspan="9" class="dt-state-cell"><div class="dt-state"><span>No statement ran — constants and plain inputs resolve without one.</span></div></td>
+          </tr>
+          <tr th:each="q : ${evaluationQueries}" th:attr="data-parameter=${q.parameter},data-outcome=${q.outcome}">
+            <td class="u-mono" th:text="${q.parameter}">state</td>
+            <td th:text="${q.datasource}">warehouse</td>
+            <td class="u-mono" th:text="${q.template}">acme/sales/state.sql v1</td>
+            <td class="u-mono" th:text="${q.queued}">12:00:00.001</td>
+            <td class="u-mono" data-started th:text="${q.started}">12:00:00.002</td>
+            <td class="u-mono" data-ended th:text="${q.ended}">12:00:00.040</td>
+            <td th:text="${q.outcome}">EXECUTED</td>
+            <td class="num" th:text="${q.rows}">3</td>
+            <td class="u-mono" th:text="${q.code}">—</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>

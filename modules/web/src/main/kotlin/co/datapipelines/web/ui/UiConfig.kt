@@ -132,6 +132,13 @@ class UiConfig {
     fun parameterSetsBrowseModel(sets: co.datapipelines.parameters.ParameterSetService): ParameterSetsBrowseModel =
         ParameterSetsBrowseModel(sets)
 
+    /** #376: the Parameter Sets workspace's History tab — the page's first page and its pager partial, one model. */
+    @Bean
+    fun parameterSetEvaluationsBrowseModel(
+        sets: co.datapipelines.parameters.ParameterSetService,
+        evaluations: co.datapipelines.parameters.ParameterEvaluationRepository,
+    ): ParameterSetEvaluationsBrowseModel = ParameterSetEvaluationsBrowseModel(sets, evaluations)
+
     /** #374: the canonical Parameter Sets workspace page's version-resolution model. */
     @Bean
     fun parameterSetsWorkspaceModel(sets: co.datapipelines.parameters.ParameterSetService): ParameterSetsWorkspaceModel =

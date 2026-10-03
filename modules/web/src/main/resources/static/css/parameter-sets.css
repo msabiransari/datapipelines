@@ -176,3 +176,71 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* #376 — the section links (Workspace | History) and the History tab's record detail. Tokens only. */
+.ps-tabs {
+  display: flex;
+  gap: var(--space-1);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.ps-tab {
+  padding: var(--space-2) var(--space-3);
+  color: var(--text-secondary);
+  text-decoration: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+
+.ps-tab:hover,
+.ps-tab:focus-visible {
+  color: var(--text-primary);
+}
+
+.ps-tab.is-on {
+  color: var(--text-primary);
+  border-bottom-color: var(--accent-primary);
+  font-weight: var(--weight-semibold);
+}
+
+.ps-history {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.ps-history-open {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: var(--text-link);
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.ps-history-detail-host:not(:empty) {
+  margin-top: var(--space-4);
+}
+
+.ps-history-facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--space-1) var(--space-3);
+  margin: 0 0 var(--space-3);
+}
+
+.ps-history-facts dt {
+  color: var(--text-secondary);
+}
+
+.ps-history-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.ps-history-subtitle {
+  margin: var(--space-3) 0 var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+}

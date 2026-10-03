@@ -28,6 +28,10 @@ import java.util.UUID
  * markup (`canEvaluateParameterSets`) AND never issued by the client without the flag. A set the caller
  * cannot see (absent, foreign, lens-hidden, an explicit version not admitted) is the family's one 404.
  *
+ * `?tab=history` (#376) paints the set's evaluation records through [ParameterSetEvaluationsBrowseModel] — the SAME
+ * model its pager partial uses — and renders no live form: the state block says there is no body to mount, so the
+ * History arm never issues an evaluate.
+ *
  * The two JSON blocks go out through [ScriptSafeJson.forScriptBlock]: a set's `display_name`,
  * `description` and labels have no charset rule, and a `</script>` or `<!--` inside a value must not
  * close the block it rides in.
@@ -36,6 +40,8 @@ import java.util.UUID
 class ParameterSetsUiController(
     private val browse: ParameterSetsBrowseModel,
     private val workspace: ParameterSetsWorkspaceModel,
+    /** #376 — the History tab's first page; its pager is [ParameterSetEvaluationsPartialController] over the same model. */
+    private val history: ParameterSetEvaluationsBrowseModel,
     private val themeResolver: ThemeResolver,
     /** 178 — the promoter lens: the pages render the caller's view. */
     private val lens: PromoterLens,
@@ -84,7 +90,10 @@ class ParameterSetsUiController(
         model.addAttribute("parameterSetDisplayName", resolved.selected?.body?.displayName ?: resolved.record.displayName)
         // The sidebar tree's current-leaf hook reads the FULL path, so the rail can reveal this set's folders.
         model.addAttribute("navCurrentPath", resolved.record.name)
-        model.addAttribute("activeTab", ParameterSetsWorkspaceModel.ParameterSetWorkspaceTab.fromWire(tab).wire)
+        val activeTab = ParameterSetsWorkspaceModel.ParameterSetWorkspaceTab.fromWire(tab)
+        val onHistory = activeTab == ParameterSetsWorkspaceModel.ParameterSetWorkspaceTab.HISTORY
+        model.addAttribute("activeTab", activeTab.wire)
+        if (onHistory) history.fillHistory(model, workspaceId, view, id, offset = 0)
         model.addAttribute("hasSelectedBody", resolved.hasSelectedBody)
         model.addAttribute("viewedVersion", resolved.viewedVersion)
         model.addAttribute("viewedIsDraft", resolved.viewedIsDraft)
@@ -105,12 +114,16 @@ class ParameterSetsUiController(
         }
         // The workspace state the client pins reads and submits from — ONE source for the displayed and the
         // submitted version. A malformed block is a refusal in the client, never a default.
+        // On the History tab there is nothing to mount: no body block, no form — `hasBody` and `canEvaluate` say so, and the
+        // client then renders no structure and issues no evaluate (#376).
+        val mountsBody = resolved.hasSelectedBody && !onHistory
         val state =
             mapOf<String, Any?>(
                 "parameterSetId" to resolved.record.id.toString(),
                 "viewedVersion" to resolved.viewedVersion,
-                "hasBody" to resolved.hasSelectedBody,
-                "canEvaluate" to (roles.canEvaluateParameterSets && resolved.hasSelectedBody),
+                "tab" to activeTab.wire,
+                "hasBody" to mountsBody,
+                "canEvaluate" to (roles.canEvaluateParameterSets && mountsBody),
                 "versionRows" to
                     resolved.versions.map {
                         mapOf<String, Any?>(

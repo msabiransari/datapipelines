@@ -1,6 +1,7 @@
 package co.datapipelines.parameters
 
 import co.datapipelines.datasources.DatasourceErrorCodes
+import co.datapipelines.parameters.EvaluatorFixtures.attempt
 import co.datapipelines.parameters.EvaluatorFixtures.selections
 import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.typesystem.DatapipelinesException
@@ -89,7 +90,7 @@ class ParameterEvaluatorIntegrationTest {
         val leasesBefore = customers.leases.get()
         val readsBefore = customers.liveReads.get()
 
-        val first = evaluator().evaluateBlocking(workspace, released, emptyMap())
+        val first = evaluator().evaluateBlocking(workspace, released, emptyMap(), attempt())
 
         first.valid shouldBe true
         first.values shouldBe mapOf("country" to "USA", "state" to "CA", "city" to "Los Angeles")
@@ -103,7 +104,13 @@ class ParameterEvaluatorIntegrationTest {
             (statements to reads) shouldBe (2 to 1)
         }
 
-        val walked = evaluator().evaluateBlocking(workspace, released, selections("country" to "CAN", "state" to "NJ", "city" to "Newark"))
+        val walked =
+            evaluator().evaluateBlocking(
+                workspace,
+                released,
+                selections("country" to "CAN", "state" to "NJ", "city" to "Newark"),
+                attempt(),
+            )
 
         walked.values shouldBe mapOf("country" to "CAN", "state" to "ON", "city" to "Toronto")
         (walked.state("state").reset to walked.state("city").reset) shouldBe (true to true)
@@ -115,7 +122,7 @@ class ParameterEvaluatorIntegrationTest {
         val released = cascade()
 
         customers.revoke(CustomerDb.WAREHOUSE, workspace)
-        val response = evaluator().evaluateBlocking(workspace, released, emptyMap())
+        val response = evaluator().evaluateBlocking(workspace, released, emptyMap(), attempt())
 
         response
             .state("state")
@@ -143,7 +150,7 @@ class ParameterEvaluatorIntegrationTest {
                 )
             val error =
                 evaluator()
-                    .evaluateBlocking(workspace, set, emptyMap())
+                    .evaluateBlocking(workspace, set, emptyMap(), attempt())
                     .state("state")
                     .errors
                     .single()
@@ -185,13 +192,16 @@ class ParameterEvaluatorIntegrationTest {
                 workspace = workspace,
             )
 
-        evaluator().evaluateBlocking(workspace, set, selections("states" to listOf("NY", "NJ"))).state("city").options!!.map {
+        evaluator().evaluateBlocking(workspace, set, selections("states" to listOf("NY", "NJ")), attempt()).state("city").options!!.map {
             it.value
         } shouldContainExactly
             listOf("Buffalo", "New York", "Newark")
         val tight = ParametersConfig(maxBindsPerStatement = 20)
-        evaluator(tight).evaluateBlocking(workspace, set, selections("states" to states.take(20))).state("city").errors shouldBe emptyList()
-        evaluator(tight).evaluateBlocking(workspace, set, selections("states" to states.take(21))).state("city").errors.single().let {
+        evaluator(tight).evaluateBlocking(workspace, set, selections("states" to states.take(20)), attempt()).state("city").errors shouldBe
+            emptyList()
+        evaluator(
+            tight,
+        ).evaluateBlocking(workspace, set, selections("states" to states.take(21)), attempt()).state("city").errors.single().let {
             it.code shouldBe ParameterErrorCodes.EVALUATE_TOO_MANY_BINDS
             it.details["binds"] shouldBe 21
         }
@@ -215,7 +225,7 @@ class ParameterEvaluatorIntegrationTest {
         val twoSeconds = ParametersConfig(evaluateTimeoutSeconds = 2, selectorQueryTimeoutSeconds = 2)
         val begun = System.nanoTime()
 
-        val refused = shouldThrow<DatapipelinesException> { evaluator(twoSeconds).evaluateBlocking(workspace, set, emptyMap()) }
+        val refused = shouldThrow<DatapipelinesException> { evaluator(twoSeconds).evaluateBlocking(workspace, set, emptyMap(), attempt()) }
 
         refused.code shouldBe ParameterErrorCodes.EVALUATE_TIMEOUT
         withClue("answered at the deadline, not after the 30 s statement") {

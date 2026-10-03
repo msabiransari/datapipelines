@@ -1,9 +1,9 @@
 # UI Screens Inventory
 
-**Status:** v1.105
+**Status:** v1.106
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
-**Last updated:** 2026-10-02 (#374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
+**Last updated:** 2026-10-03 (#376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
 
 ---
 
@@ -2020,6 +2020,38 @@ cells), `parameter-set-init.test.mjs` (the runtime's parameters-only entry), `Sa
 and `ExampleContentSeederTest` (the demo set `nyc/parameters/geo_filters` is seeded through the seeder, §4.23's
 demo content), and the browser suite `ParameterSetPagesBrowserTest`.
 
+**History — the evaluation records (#376, #357 S3; workspace spec §6.4, R3).** The header carries two section links
+under it, `Workspace` and `History` (`nav.ps-tabs`, full-document links, `aria-current="page"` on the current one; the
+viewed `version` rides along): one canonical URL each, `?tab=workspace` (the default) and `?tab=history`. The History
+arm renders **no live form, no graph and no body block** — the workspace state block says `hasBody: false`, so opening
+the tab evaluates nothing (an evaluate would be a record of its own). It paints the house table (§3.7: the fixed
+`dt-frame dt-scroll dt-nowrap` frame, `data-dt-paged`, `data-table.js` from the shell — no second renderer), one row per
+evaluation record of the SET, whoever ran it — this page, a dashboard, the REST route or an MCP client: **Started** (UTC),
+**Caller** (`PAGE`, `DASHBOARD`, `REST`, `MCP`), **Principal** (the person's name, or `key dpk_…`), **Version**, **Status**
+(the house chip; the enum on `data-status`), **Valid**, **Outcomes** and **Queries** (counts), **Took**. 25 a page,
+newest first; Previous/Next page `GET /partials/parameter-sets/{id}/evaluations?offset=` (the same browse model the page
+painted with). A row's Started cell is a button that loads `GET /partials/parameter-sets/{id}/evaluations/{evaluationId}`
+into the region below the table: the record's header (caller, principal, correlation id when one exists — a dashboard
+refresh's id —, status with its catalogued `outcome_code`, the stamps), the per-parameter outcomes as recorded
+(`resolved` / `reset` / `error` + the code and its reason word), and the statement attempts — parameter, datasource,
+template pin, queued / started / ended to the millisecond, outcome (`EXECUTED`, `REFUSED`, `FAILED`, `TIMEOUT`, `ABORTED`;
+`in flight` while open), rows, code — so two selectors that ran together show OVERLAPPING ranges, as stored, never
+re-serialised. A record never holds a value, a selection, SQL or a driver message, so none can render; every field is
+`th:text`.
+
+Roles: the tab and both partials are `parameter_set.read` (the owner's §11.2 ruling — no new permission): viewer, author,
+workspace admin and super admin read every record; a promoter reads through the LENS — a set the lens hides is the
+workspace page's own 404 on the page and on both partials (same status, same body), and under a narrowing lens only the
+records of the versions it admits (released) are listed or openable, so a draft's parameter names never reach a promoter.
+No REST or MCP history surface (§11.6).
+
+Guards: `ParameterSetEvaluationsBrowseModelTest` (the lens before any read, the version narrowing, the pager, the text
+projection), `ParameterSetHistoryRenderTest` (the section links, the History arm without form/graph/body, the row's open
+target, the pager, escaping), `ParameterSetsUiControllerTest` (the history arm's state block), `BrowseModelConventionTest`
+(the page and the partial share the model), `ReadFloorTest`, `RoleWalkE2eTest`, `ParameterEvaluationHistoryE2eTest`
+(scenarios 9 and 10: every caller's record, the promoter's 404 parity, the draft record hidden from the lens), and the
+browser suite `ParameterSetHistoryBrowserTest` (both themes, the overlapping attempts, a timed-out attempt).
+
 **Demo content.** Every personal workspace seeded with the NYC demo family gets `nyc/parameters/geo_filters`
 (RELEASED v1): a year → month → pickup-zone cascade over the `sample-trips` Postgres datasource through three
 pinned selector templates, a hard-coded `measure` choice and a typed `min_trips` input. The seeder derives
@@ -2189,6 +2221,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-03 | v1.106 | #376 the Parameter Sets History tab (workspace spec §6.4, #357 S3) — renumbered at merge after 400's v1.105 | **§4.23** gains **History**: the `Workspace` / `History` section links (one canonical URL each, `?tab=`), the History arm with no live form, graph or body block (so the tab evaluates nothing), the house table of the set's evaluation records — every caller's, 25 a page, newest first — its pager partial and the record detail partial (header, per-parameter outcomes, the statement attempts to the millisecond); `parameter_set.read`, the lens server-side (the page's own 404 on both partials; a narrowing lens lists only the versions it admits). |
 | 2026-10-02 | v1.105 | #400 the Dashboards workspace — the searchable sidebar tree, the flat catalog, the tabbed version-explicit workspace (#409 closes with it) | **§3.4**: the Dashboards panel gains the search box in the Pipelines branch's exact markup (the shared engine serves it with no JS change; a non-empty `q` swaps the flat results into the panel's root, clearing returns the tree). **§4.21 rewritten**: `GET /dashboards` is the flat CATALOG in §4.3's shape (owner ruling 2026-10-02 — the L3b tree page retired; folders are the sidebar's axis), each row a full-document link into the workspace, a draft-only dashboard's row saying so; `GET /dashboards/{id}?version=&tab=` is the tabbed, version-explicit WORKSPACE — Board (today's board page exactly: the same bundle block, the unchanged `dashboards-page.js`, the events pane beside the board), Overview (the definition, read-only, with each pin's status and the R1 release hint), Refreshes, Versions (the history and the seven lifecycle dialogs into `#dp-dialog`, `HX-Redirect` back with a flash) and Keys (`dashboard.key.bind`, read-only, linking the Keys page); #409: a dashboard with no served release opens the choose-a-version state — the heading NAMES it, the draft is offered, the runtime config never called, no `not_found`; the preview route answers 303 onto the workspace (the deep links survive); every version switch a full navigation (the one-bundle rule), tab switches in-page over the SHARED tab core (`static/js/workspace/tabs.js`; the pipeline editor's adoption was reverted at merge — #420), the hidden Board re-fitting through the runtime's own `resize()`. **§4.21's preview gap closed**: the #369 draft preview is documented here for the first time, as the workspace's named-version view (the chip succeeded the banner). `dashboards-page.js` unchanged; no new permission; no REST route changed. Guards: the falsifications in the handback. |
 | 2026-10-02 | v1.104 | #374 the Parameter Sets screens (workspace spec §6.2/§6.3, #357 S1) — renumbered at merge after 386's v1.103 | **§3.4**: Build gains **Parameter Sets**, the navigating-tree pattern's third use (lucide `sliders-horizontal`; link → the catalog, lazy tree beside it with no search box, leaf → the workspace). **New §4.23**: the flat paged catalog `GET /parameter-sets` and the canonical workspace `GET /parameter-sets/{id}?version=N&tab=` — the version-explicit resolve order (explicit admitted version, never clamped → the lens-visible current → an accessible draft, labelled → choose-a-version), the house 404/400, a static Cytoscape graph + inspector and the live parameter form through the dashboard runtime's new parameters-only `initParameters` entry against the EXISTING evaluate route (role-hidden: a promoter's page has no control and no request). The demo family seeds `nyc/parameters/geo_filters`. No permission, scope row or role changed; the routes are listed in auth.md §7.6's `parameter_set.read` Surfaces cell. Guards: the render/controller/model tests, `ReadFloorTest`, `SampleDataParameterSetsContentTest`, `ParameterSetPagesBrowserTest`, the falsifications in the handback. |
 | 2026-10-02 | v1.103 | #386/#387 the board's small slots and its breakpoint | **§4.21's Grid rows row** gains the collapse below `breakpoint_px` (768 px default; every item full width in grid order, the row unit kept, a crossing re-places and resizes) and the 2-row chart's plot-area floor (compact margins + `automargin`, dashboards.md §6.3). |

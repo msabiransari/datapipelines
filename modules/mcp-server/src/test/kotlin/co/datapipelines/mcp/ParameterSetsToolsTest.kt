@@ -190,7 +190,7 @@ class ParameterSetsToolsTest {
 
         refusal.code shouldBe ParameterErrorCodes.NOT_FOUND
         refusal.details["version"] shouldBe 3
-        verify(exactly = 0) { evaluator.evaluateBlocking(any(), any(), any()) }
+        verify(exactly = 0) { evaluator.evaluateBlocking(any(), any(), any(), any()) }
     }
 
     @Test
@@ -203,7 +203,7 @@ class ParameterSetsToolsTest {
             }
 
         refusal.code shouldBe ParameterErrorCodes.NOT_FOUND
-        verify(exactly = 0) { evaluator.evaluateBlocking(any(), any(), any()) }
+        verify(exactly = 0) { evaluator.evaluateBlocking(any(), any(), any(), any()) }
     }
 
     @Test
@@ -233,6 +233,6 @@ class ParameterSetsToolsTest {
             }
 
         refusal.code shouldBe ParameterErrorCodes.EVALUATE_TEMPLATE_UNRENDERED
-        verify(exactly = 0) { evaluator.evaluateBlocking(any(), any(), any()) }
+        verify(exactly = 0) { evaluator.evaluateBlocking(any(), any(), any(), any()) }
     }
 }

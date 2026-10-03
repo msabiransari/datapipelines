@@ -20,6 +20,8 @@ import co.datapipelines.executor.RefreshStartMarker
 import co.datapipelines.executor.RefreshStartMarkers
 import co.datapipelines.executor.StartMarkerRegistration
 import co.datapipelines.parameters.EvaluateResponseJson
+import co.datapipelines.parameters.EvaluationAttempt
+import co.datapipelines.parameters.EvaluationCaller
 import co.datapipelines.parameters.ParameterEvaluator
 import co.datapipelines.visualization.DashboardErrorCodes
 import co.datapipelines.visualization.DashboardRefreshRepository
@@ -108,7 +110,9 @@ class DashboardRuntime internal constructor(
         requireCurrent(resolved, request.configurationId)
         val revision = revisions.next(request.instanceId)
         val set = resolved.set ?: return emptyEvaluation(revision)
-        val response = evaluator.evaluateBlocking(principal.requireWorkspace().id, set, request.selections)
+        // No refresh exists on this route, so the record carries no correlation id (#376).
+        val attempt = EvaluationAttempt.of(EvaluationCaller.DASHBOARD, principal.userId, principal.keyId)
+        val response = evaluator.evaluateBlocking(principal.requireWorkspace().id, set, request.selections, attempt)
         return RuntimeViews.parameters(response, resolved.served.body, revision)
     }
 
@@ -202,7 +206,15 @@ class DashboardRuntime internal constructor(
         request: RefreshRequest,
     ): Map<String, JsonNode?> {
         val set = resolved.set ?: return emptyMap()
-        val response = evaluator.evaluateBlocking(principal.requireWorkspace().id, set, request.selections)
+        // The refresh's own id is the record's correlation id (#376): the history row and the refresh row join on it.
+        val attempt =
+            EvaluationAttempt.of(
+                EvaluationCaller.DASHBOARD,
+                principal.userId,
+                principal.keyId,
+                correlationId = request.refreshId.toString(),
+            )
+        val response = evaluator.evaluateBlocking(principal.requireWorkspace().id, set, request.selections, attempt)
         if (!response.valid) {
             val invalid = response.parameters.filter { it.state.errors.isNotEmpty() }.map { it.definition.name }
             throw ApiException(
