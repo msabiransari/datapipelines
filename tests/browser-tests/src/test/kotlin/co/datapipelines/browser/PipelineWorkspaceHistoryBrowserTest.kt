@@ -326,7 +326,9 @@ class PipelineWorkspaceHistoryBrowserTest : BrowserSuite() {
 
         // A boosted anchor into the workspace (plain anchors inherit #app-main's
         // hx-boost): a genuine htmx navigation — swap, URL push, and the outgoing
-        // /pipelines page into the cache.
+        // /pipelines page into the cache. htmx boosts only the elements it has
+        // processed, so the appended anchor is processed; without that it is a
+        // full document navigation and the assertions below prove nothing about flow 2.
         page.evaluate(
             """(url) => {
               const a = document.createElement('a');
@@ -334,13 +336,19 @@ class PipelineWorkspaceHistoryBrowserTest : BrowserSuite() {
               a.id = 'pe-boosted-entry';
               a.textContent = 'workspace';
               document.querySelector('#app-main').appendChild(a);
+              window.htmx.process(a); // an anchor added after load is boosted only once processed
             }""",
             "/pipelines/$id?version=2",
         )
+        page.evaluate("() => { window.__boostedEntryWindow = true; }")
         page.locator("#pe-boosted-entry").click()
         page.waitForSelector(".pe-root")
         waitActivated()
 
+        // The entry IS boosted: the window seeded before the click survives it (a full
+        // document navigation would have wiped the marker) and htmx owns the history entry.
+        (page.evaluate("() => window.__boostedEntryWindow === true") as Boolean) shouldBe true
+        (page.evaluate("() => !!(history.state && history.state.htmx)") as Boolean) shouldBe true
         stackDepth() shouldBe 1
         page.locator(".pe-vchip").innerText() shouldBe "v2 · released"
 
