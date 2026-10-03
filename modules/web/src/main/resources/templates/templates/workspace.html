@@ -159,8 +159,9 @@
       <button type="button" class="tw-tab" role="tab" id="tw-tab-runs" aria-controls="tw-pane-runs"
               data-tw-tab="runs"
               th:attr="aria-selected=${activeTab == 'runs'} ? 'true' : 'false',
-                       hx-get=@{/partials/templates/runs(name=${templateName})}"
-              hx-target="#tw-runs-body" hx-swap="innerHTML" hx-trigger="click once">Runs</button>
+                       hx-get=@{/partials/templates/runs(name=${templateName})},
+                       hx-trigger=${activeTab == 'runs'} ? 'load' : 'click once'"
+              hx-target="#tw-runs-body" hx-swap="innerHTML">Runs</button>
       <button type="button" class="tw-tab" role="tab" id="tw-tab-used" aria-controls="tw-pane-used"
               data-tw-tab="used-by" th:attr="aria-selected=${activeTab == 'used-by'} ? 'true' : 'false'">Used by</button>
       <button type="button" class="tw-tab" role="tab" id="tw-tab-versions" aria-controls="tw-pane-versions"

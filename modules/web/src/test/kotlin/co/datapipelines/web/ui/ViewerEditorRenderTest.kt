@@ -90,6 +90,22 @@ class ViewerEditorRenderTest {
     }
 
     @Test
+    fun `a page opened on the Runs tab loads its runs - the lazy click is only for a tab opened later`() {
+        // 398b review: `?tab=runs` showed the Runs pane with "Open the tab to load the recent runs."
+        // until the reader clicked the tab that was already active (`click once` was its only trigger).
+        val runsTab = Regex("<button[^>]*id=\"tw-tab-runs\"[^>]*>")
+        val opened =
+            render("templates/workspace") {
+                page(viewedEditable = true)
+                setVariable("activeTab", "runs")
+            }
+        val later = render("templates/workspace") { page(viewedEditable = true) }
+
+        runsTab.find(opened)?.value shouldContain "hx-trigger=\"load\""
+        runsTab.find(later)?.value shouldContain "hx-trigger=\"click once\""
+    }
+
+    @Test
     fun `a viewer's workspace carries exactly its tab strip and nothing else`() {
         val html =
             render("templates/workspace") {
