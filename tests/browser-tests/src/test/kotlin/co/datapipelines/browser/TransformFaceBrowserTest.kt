@@ -147,7 +147,7 @@ class TransformFaceBrowserTest : BrowserSuite() {
 
         // Release through the existing dialog: the POST answers HX-Redirect onto the
         // workspace's Versions tab with the flash (102, #398's landing).
-        page.locator("[data-verb='template-release']").click()
+        page.locator(".tw-topbar [data-verb='template-release']").click()
         val dialog = page.locator("#tx-dialog [data-lifecycle-dialog]").first()
         dialog.waitFor()
         dialog.locator("button[type=submit]").click()

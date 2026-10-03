@@ -46,7 +46,10 @@ class TemplateEditorRailBrowserTest : BrowserSuite() {
         startTrace()
         val maker = seedAndLogin("railmk", role = "author")
         val name = "test/rail_promo_" + suffix()
-        seedTemplate(maker, name)
+        val hash = seedTemplate(maker, name)
+        // The promoter's LENS hides drafts (178): the fixture releases v1 so the promoter
+        // reaches the workspace at all — the case is about the TAB absence, not the lens.
+        release(maker, name, hash) shouldBe 200
         maker.close()
 
         val promoter = seedAndLogin("railpr", role = "promoter")

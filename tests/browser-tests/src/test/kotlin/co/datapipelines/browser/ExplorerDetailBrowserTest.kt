@@ -251,7 +251,7 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
                   const res = await fetch('/api/v1/templates/release', {
                     method: 'POST', credentials: 'same-origin',
                     headers: {'Content-Type': 'application/json', 'DP-CSRF-Token': csrf ? decodeURIComponent(csrf[1]) : '',
-                              'If-Match': body.body_hash},
+                              'If-Match': body.data.body_hash},
                     body: JSON.stringify({name: 'test/$slug/orders_sql'}),
                   });
                   return res.status;
@@ -313,8 +313,12 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
         page.setViewportSize(1440, 900)
         openTemplateWorkspace()
 
-        // Versions is FIRST PAINT — it is server-rendered into the page.
-        page.waitForSelector("#tw-pane-versions")
+        // Versions is FIRST PAINT — server-rendered into the page (hidden: Source is the
+        // default tab; the assertion is that it is IN the document, not a lazy load).
+        page.waitForSelector(
+            "#tw-pane-versions",
+            Page.WaitForSelectorOptions().setState(com.microsoft.playwright.options.WaitForSelectorState.ATTACHED),
+        )
 
         var runsRequests = 0
         page.onRequest { if (it.url().contains("/partials/templates/runs")) runsRequests++ }
@@ -557,7 +561,7 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
                   const res = await fetch('/api/v1/templates', {
                     method: 'PUT', credentials: 'same-origin',
                     headers: {'Content-Type': 'application/json', 'DP-CSRF-Token': csrf ? decodeURIComponent(csrf[1]) : '',
-                              'If-Match': body.body_hash},
+                              'If-Match': body.data.body_hash},
                     body: JSON.stringify({id: 'test/detail_probe', type: 'sql', dialect: 'POSTGRES',
                                           display_name: 'detail_probe', description: '106 detail fixture',
                                           body: 'SELECT 1 -- drafted'}),
