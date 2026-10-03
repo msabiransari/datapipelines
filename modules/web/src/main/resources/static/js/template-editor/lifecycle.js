@@ -59,7 +59,7 @@
   }
 
   /* The draft lifecycle (Release / Discard) that this file carried from 097 §D is gone:
-     since 102 those buttons open the §4.3d dialogs (`#te-dialog`, js/lifecycle-dialog.js),
+     since 102 those buttons open the §4.3d dialogs (`#tx-dialog`, js/lifecycle-dialog.js),
      which own the confirm, the CSRF header and the If-Match hash. What stays here is the
      render-context rail, the tab state and the preview call. */
 

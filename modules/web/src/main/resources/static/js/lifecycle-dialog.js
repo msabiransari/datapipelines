@@ -1,7 +1,7 @@
 /*
  * 102 — the lifecycle dialogs' client half (ui-screens §4.3d): the ONE per-screen container
- * (#tx-dialog / #pe-dialog / #te-dialog, #dp-dialog since #400; the pipelines explorer's
- * #px-dialog is gone with its pane, #401, and the templates explorer's pane with it, #398), its close
+ * (#tx-dialog / #pe-dialog / #dp-dialog; the explorers' #px-dialog went with the pipelines pane,
+ * #401, and the standalone template editor's #te-dialog with that page, #398), its close
  * paths, focus, and the typed confirm. Shared by the workspaces; it owns no verb, no fetch and
  * no toast — the dialogs are
  * htmx partials whose POSTs answer HX-Redirect / Shape C, and toast.js owns the
@@ -40,7 +40,7 @@
 (function () {
   'use strict';
 
-  var CONTAINERS = ['tx-dialog', 'pe-dialog', 'te-dialog', 'dp-dialog'];
+  var CONTAINERS = ['tx-dialog', 'pe-dialog', 'dp-dialog'];
 
   function openContainer() {
     for (var i = 0; i < CONTAINERS.length; i++) {
