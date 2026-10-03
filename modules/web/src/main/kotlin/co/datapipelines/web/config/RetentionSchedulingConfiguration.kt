@@ -14,6 +14,7 @@ import co.datapipelines.web.parameters.ParameterEvaluationRetention
 import co.datapipelines.web.parameters.ParameterEvaluationSweeper
 import io.micrometer.core.instrument.MeterRegistry
 import org.slf4j.LoggerFactory
+import org.springframework.beans.factory.ObjectProvider
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
@@ -65,19 +66,28 @@ class RetentionSchedulingConfiguration {
         properties: ExecutionsProperties,
     ): DashboardRefreshRetention = DashboardRefreshRetention(DashboardRefreshRepository(jdbc), properties.eventRetentionDays)
 
-    /** #376: a RUNNING evaluation record past the evaluate deadline (plus the sweeper's margin) is closed INCOMPLETE. */
+    /**
+     * #376: a RUNNING evaluation record past the evaluate deadline (plus the sweeper's margin) is closed INCOMPLETE. The
+     * repository is built here from the jdbc template, as the dashboard refreshes' is, so the scheduling slice
+     * (`ScheduledJobsSchedulerTest`) loads this configuration without the engine's; the deadline is the engine's own
+     * `ParametersConfig` bean, which the application always has — the slice, which has none, gets the key's default.
+     */
     @Bean
     fun parameterEvaluationSweeper(
-        evaluations: ParameterEvaluationRepository,
-        parameters: ParametersConfig,
-    ): ParameterEvaluationSweeper = ParameterEvaluationSweeper(evaluations, parameters.evaluateTimeoutSeconds)
+        jdbc: NamedParameterJdbcTemplate,
+        parameters: ObjectProvider<ParametersConfig>,
+    ): ParameterEvaluationSweeper =
+        ParameterEvaluationSweeper(
+            ParameterEvaluationRepository(jdbc),
+            parameters.getIfAvailable(::ParametersConfig).evaluateTimeoutSeconds,
+        )
 
     /** #376: finished evaluation records ride the event retention's tick and cutoff — no key of their own (§11.5). */
     @Bean
     fun parameterEvaluationRetention(
-        evaluations: ParameterEvaluationRepository,
+        jdbc: NamedParameterJdbcTemplate,
         properties: ExecutionsProperties,
-    ): ParameterEvaluationRetention = ParameterEvaluationRetention(evaluations, properties.eventRetentionDays)
+    ): ParameterEvaluationRetention = ParameterEvaluationRetention(ParameterEvaluationRepository(jdbc), properties.eventRetentionDays)
 
     @Bean
     fun executionEventRetentionScheduler(

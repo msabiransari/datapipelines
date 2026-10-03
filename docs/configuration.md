@@ -520,7 +520,7 @@ The parameter engine's limits ([the design record](superpowers/specs/2026-09-21-
 
 No options cache in round one (`selector-cache-ttl-seconds` is deliberately absent — the record's §11: authority-aware keys and invalidation are its price, and it lands when a measured query count says it must).
 
-Retention of the evaluation history (`parameter_evaluations` and their `parameter_evaluation_queries`, #376) has no key of its own — the dashboard refreshes' precedent: finished records are deleted by the execution-event retention step, on the same hourly tick and the same cutoff as `datapipelines.executions.event-retention-days` (§3.11, 7 days), one bounded batch per tick; a record left `RUNNING` past `evaluate-timeout-seconds` plus a fixed one-minute margin is closed `INCOMPLETE` on that tick — see [Metadata DB §8.1/§8.5](metadata-db.md). An own `datapipelines.parameters.history-retention-days` would be an additive change (the workspace spec's §11.5).
+Retention of the evaluation history (`parameter_evaluations` and their `parameter_evaluation_queries`, #376) has no key of its own — the dashboard refreshes' precedent: finished records are deleted by the execution-event retention step, on the same hourly tick and the same cutoff as `datapipelines.executions.event-retention-days` (§3.11, 7 days), one bounded batch per tick; a record left `RUNNING` past `evaluate-timeout-seconds` plus a fixed one-minute margin is closed `INCOMPLETE` on that tick — see [Metadata DB §8.1/§8.5](metadata-db.md). A retention key of its own would be an additive change (the workspace spec's §11.5).
 
 ### 3.31 Web request limits
 
