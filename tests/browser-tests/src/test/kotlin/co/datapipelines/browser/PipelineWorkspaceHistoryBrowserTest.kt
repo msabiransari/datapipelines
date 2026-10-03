@@ -830,6 +830,30 @@ class PipelineWorkspaceHistoryBrowserTest : BrowserSuite() {
     }
 
     @Test
+    fun `#402 - an author's markup in the rewritten blocks stays text through a cache-hit restore`() {
+        // The security pass's regression: the in-page switch rewrites the two script blocks, the
+        // boosted leave snapshots #app-main as innerHTML (a <script>'s text serialises RAW), and
+        // the HIT re-parses it. A raw `</script>` would close the block and inject the rest.
+        val id = seedSqlVersions("pwhx" + generatedPassword("s").take(6).lowercase(), INJECTION)
+        page.navigate("$baseUrl/pipelines/$id?version=1")
+        page.waitForSelector(".pe-root")
+        waitActivated()
+        seedHistoryCounters()
+        switchVersionInPage(2, "sql_v2")
+        leaveThroughTheUi()
+        val restoresBefore = counter("restore")
+        page.goBack()
+        waitForRestore(restoresBefore)
+        waitActivated()
+        counter("hit") shouldBe 1
+        page.locator("#p402-injected").count() shouldBe 0
+        expectView(2, "flow", "v2 · released", "sql_v2")
+        page.locator(".pe-versions a").count() shouldBe 3
+        (page.evaluate("() => JSON.parse(document.getElementById('pipeline-data').textContent).description") as String) shouldBe
+            INJECTION
+    }
+
+    @Test
     fun `#402 - Forward from the list onto a workspace entry is handed to htmx and restores the workspace`() {
         val id = seedSqlVersions("pwhf" + generatedPassword("s").take(6).lowercase())
         page.navigate("$baseUrl/pipelines")
@@ -966,6 +990,9 @@ class PipelineWorkspaceHistoryBrowserTest : BrowserSuite() {
         const val ACTIVATED_JS =
             "() => { const r = document.querySelector('#app-main .pe-root'); " +
                 "return !!(r && r._x_dataStack && r._x_dataStack.length >= 1); }"
+
+        /** #402 security pass: markup an author could write into a description (unquoted id: JSON escapes quotes). */
+        const val INJECTION = "</script><b id=p402-injected>owned</b><!--"
 
         /** A run long enough to outlive a navigation, short enough to keep the suite honest. */
         const val ROWS = 400_000

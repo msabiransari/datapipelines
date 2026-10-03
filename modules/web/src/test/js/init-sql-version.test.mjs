@@ -274,3 +274,32 @@ test("the re-stated block keeps the rows, facts and dialects and moves the viewe
   // An unreadable block becomes the pin alone (workspace.js refuses it as before).
   assert.deepEqual(component.restatedWorkspaceBlock("{", 3), window.PEWorkspace);
 });
+
+test("the rewritten script blocks stay script-safe: no `<` survives into a block a history snapshot serialises", () => {
+  // htmx snapshots #app-main as innerHTML, and a <script>'s text serialises RAW: a literal
+  // `</script>` in a block would close it on the cache-hit re-parse (HTML injection). The server
+  // escapes its blocks (ScriptSafeJson); the client's rewrite must keep that property.
+  const { component } = loadWithHistory();
+  const blocks = {
+    "pipeline-data": { textContent: DATA },
+    "pipeline-workspace": {
+      textContent: JSON.stringify({ pipelineId: "p1", viewedVersion: 2, hasBody: true, canExecute: true, pageFacts: { createdBy: "</script><b id=x>by</b>" } }),
+    },
+  };
+  const find = document.getElementById;
+  document.getElementById = (id) => blocks[id] || find(id);
+  component.cy = null;
+  component.graph = null;
+  component.dock = { clearSelection: () => {} };
+  component.wireGraphEventsOn = () => {};
+  component.replayRunOntoGraph = () => {};
+  component.refreshChecks = () => {};
+  component.applyBodySnapshot(3, { id: "p1", name: "p", description: "</script><b id=x>owned</b><!--", nodes: [], parameters: {} });
+  for (const id of Object.keys(blocks)) {
+    assert.equal(blocks[id].textContent.includes("<"), false, id + " must carry no raw `<`");
+  }
+  // Still valid JSON, the same values back.
+  assert.equal(JSON.parse(blocks["pipeline-data"].textContent).description, "</script><b id=x>owned</b><!--");
+  assert.equal(JSON.parse(blocks["pipeline-workspace"].textContent).pageFacts.createdBy, "</script><b id=x>by</b>");
+  assert.equal(JSON.parse(blocks["pipeline-workspace"].textContent).viewedVersion, 3);
+});

@@ -646,10 +646,14 @@
         // source (init reads it; a later PEWorkspaceRead identity-checks the pair),
         // and the workspace block is the pin every execute and SQL read makes.
         if (typeof document !== "undefined") {
+          // #402 security pass: written SCRIPT-SAFE, as the server writes them (ScriptSafeJson).
+          // A history snapshot serialises #app-main as innerHTML, where a <script>'s text is
+          // emitted RAW — a literal `</script>` in an author's description would close the
+          // block on the cache-hit re-parse. `\u003c` is still valid JSON for the same value.
           var dataEl = document.getElementById("pipeline-data");
-          if (dataEl) dataEl.textContent = JSON.stringify(data);
+          if (dataEl) dataEl.textContent = scriptSafeJson(data);
           var wsEl = document.getElementById("pipeline-workspace");
-          if (wsEl) wsEl.textContent = JSON.stringify(self.restatedWorkspaceBlock(wsEl.textContent, version));
+          if (wsEl) wsEl.textContent = scriptSafeJson(self.restatedWorkspaceBlock(wsEl.textContent, version));
         }
 
         // The graph: rebuilt for the new nodes, its events re-armed, and the RUN's
@@ -2380,6 +2384,11 @@
         evt.detail.isError = false;
       }
     });
+  }
+
+  /** JSON for a `<script type="application/json">` block: every `<` escaped (`\u003c`). */
+  function scriptSafeJson(value) {
+    return JSON.stringify(value).replace(/</g, "\\u003c");
   }
 
   /*
