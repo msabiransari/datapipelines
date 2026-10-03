@@ -1,5 +1,9 @@
 package co.datapipelines.web.parameters
 
+import ch.qos.logback.classic.Level
+import ch.qos.logback.classic.Logger
+import ch.qos.logback.classic.spi.ILoggingEvent
+import ch.qos.logback.core.read.ListAppender
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.WorkspaceContext
@@ -31,6 +35,8 @@ import co.datapipelines.web.parameters.stream.ParameterEvaluationStreamRegistry
 import co.datapipelines.web.sse.SseJson
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import io.kotest.matchers.types.shouldBeSameInstanceAs
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -39,12 +45,15 @@ import io.mockk.mockk
 import io.mockk.verify
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
+import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
 import org.springframework.security.core.context.SecurityContextHolder
 import java.time.Instant
 import java.util.UUID
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
@@ -290,6 +299,42 @@ class ParameterEvaluationStreamControllerTest {
         kotlinx.coroutines.runBlocking { kotlinx.coroutines.withTimeout(5_000) { ran.await() } } shouldBeSameInstanceAs stream
         stream.parameterSetId shouldBe setId
         stream.version shouldBe 4
+    }
+
+    @Test
+    fun `a defect in the evaluation is ONE error line naming class and sql_state - the stack rides a DEBUG line only`() {
+        authenticate()
+        every { sets.findVersion(workspaceId, any(), setId, 4) } returns set
+        coEvery { evaluator.evaluate(any(), any(), any(), any(), any()) } throws IllegalStateException("SECRET sql text")
+        val logger = LoggerFactory.getLogger(ParameterEvaluationStreamController::class.java) as Logger
+        val priorLevel = logger.level
+        // The DEBUG line follows the ERROR line, so its arrival proves both are in the list.
+        val causeLogged = CountDownLatch(1)
+        val appender =
+            object : ListAppender<ILoggingEvent>() {
+                override fun append(event: ILoggingEvent) {
+                    super.append(event)
+                    if (event.formattedMessage.contains("event=parameter.evaluation_failed_cause")) causeLogged.countDown()
+                }
+            }.apply { start() }
+        logger.level = Level.DEBUG
+        logger.addAppender(appender)
+        try {
+            controller.evaluations(setId, body())
+            causeLogged.await(5, TimeUnit.SECONDS) shouldBe true
+        } finally {
+            logger.detachAppender(appender)
+            logger.level = priorLevel
+        }
+
+        val error = appender.list.single { it.level == Level.ERROR }
+        error.formattedMessage shouldContain
+            "event=parameter.evaluation_failed evaluation_id=$evaluationId error=java.lang.IllegalStateException sql_state=none"
+        error.formattedMessage shouldNotContain "SECRET"
+        error.throwableProxy shouldBe null
+        val cause = appender.list.single { it.level == Level.DEBUG }
+        cause.formattedMessage shouldContain "event=parameter.evaluation_failed_cause evaluation_id=$evaluationId"
+        cause.throwableProxy?.className shouldBe "java.lang.IllegalStateException"
     }
 
     private fun principal() =
