@@ -50,7 +50,8 @@ class ParameterWorkspaceStreamBrowserTest : ParameterSetBrowserSuite() {
         )
         createTemplate(
             "$root/parameters/level3_options.sql",
-            "SELECT CAST(:level2 AS TEXT) || '-child' AS value, CAST(:level2 AS TEXT) || '-child' AS display_value, true AS is_default ORDER BY 1",
+            "SELECT CAST(:level2 AS TEXT) || '-child' AS value, CAST(:level2 AS TEXT) || '-child' AS display_value, " +
+                "true AS is_default ORDER BY 1",
         )
         val level2 =
             """{"name":"level2","label":"Level two","type":"STRING","kind":"SELECT","cardinality":"SINGLE","required":true,""" +
@@ -60,7 +61,8 @@ class ParameterWorkspaceStreamBrowserTest : ParameterSetBrowserSuite() {
             """{"name":"level3","label":"Level three","type":"STRING","kind":"SELECT","cardinality":"SINGLE","required":true,""" +
                 """"depends_on":["level2"],"source":{"template":{"id":"$root/parameters/level3_options.sql","version":1},""" +
                 """"datasource":"$datasource"},"presentation":{"control":"dropdown"}}"""
-        val (id, hash) = createSet(setBody("$root/parameters/cascade", "[${constants("level1", listOf("a", "b", "boom"))},$level2,$level3]"))
+        val body = setBody("$root/parameters/cascade", "[${constants("level1", listOf("a", "b", "boom"))},$level2,$level3]")
+        val (id, hash) = createSet(body)
         release(id, hash, withTemplates = true)
         return id
     }
@@ -263,7 +265,8 @@ class ParameterWorkspaceStreamBrowserTest : ParameterSetBrowserSuite() {
         val bootstrappedId = appliedFrames().last { it["event"] == "evaluation_started" }["evaluation_id"] as String
         choose("paced1", "SLOW")
         awaitLog(
-            "frames => frames.some(f => f.applied && f.event === 'parameter_running' && f.name === 'paced' && f.evaluation_id !== '$bootstrappedId')",
+            "frames => frames.some(f => f.applied && f.event === 'parameter_running' && f.name === 'paced'" +
+                " && f.evaluation_id !== '$bootstrappedId')",
         )
         val oldId = appliedFrames().last { it["event"] == "evaluation_started" }["evaluation_id"] as String
         assertTrue(oldId != bootstrappedId)
@@ -287,7 +290,10 @@ class ParameterWorkspaceStreamBrowserTest : ParameterSetBrowserSuite() {
         // A SECOND streamed window, undisturbed: both themes and the CSP collector across a live evaluation.
         drainCspViolations()
         choose("paced1", "SLOW")
-        awaitLog("frames => frames.some(f => f.applied && f.event === 'parameter_running' && f.name === 'paced' && f.evaluation_id !== '$oldId')")
+        awaitLog(
+            "frames => frames.some(f => f.applied && f.event === 'parameter_running' && f.name === 'paced'" +
+                " && f.evaluation_id !== '$oldId')",
+        )
         ensureTheme("light")
         shot("parameter-stream-light")
         ensureTheme("dark")
@@ -356,7 +362,8 @@ class ParameterWorkspaceStreamBrowserTest : ParameterSetBrowserSuite() {
         val bootedId = appliedFrames().last { it["event"] == "evaluation_started" }["evaluation_id"] as String
         choose("paced1", "SLOW")
         awaitLog(
-            "frames => frames.some(f => f.applied && f.event === 'parameter_running' && f.name === 'paced' && f.evaluation_id !== '$bootedId')",
+            "frames => frames.some(f => f.applied && f.event === 'parameter_running' && f.name === 'paced'" +
+                " && f.evaluation_id !== '$bootedId')",
         )
         val idsBefore = frames().map { it["evaluation_id"] }.toSet()
 
