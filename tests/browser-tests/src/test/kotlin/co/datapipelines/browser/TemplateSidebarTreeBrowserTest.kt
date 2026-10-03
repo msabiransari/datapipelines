@@ -258,8 +258,13 @@ class TemplateSidebarTreeBrowserTest : BrowserSuite() {
         page.evaluate("() => document.activeElement?.matches('#nav-tree-templates [data-nav-tree-search]')") shouldBe true
 
         // The keyboard: ArrowDown moves focus among the rows (the nav context moves FOCUS only).
+        // The root level holds FOLDERS only (077) — the first row the keydown reaches is the
+        // folder summary; the invariant is that focus moved into the tree's rows at all.
         page.press("#nav-tree-templates [data-nav-tree-search]", "ArrowDown")
-        val focused = page.evaluate("() => document.activeElement?.classList?.contains('tpl-leaf')") as Boolean
+        val focused =
+            page.evaluate(
+                "() => document.activeElement?.matches('#nav-tree-templates .tpl-summary, #nav-tree-templates .tpl-leaf')",
+            ) as Boolean
         focused shouldBe true
 
         consoleErrors shouldBe emptyList()
