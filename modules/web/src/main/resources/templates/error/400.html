@@ -14,7 +14,8 @@
     <div class="ds-card app-card-auth u-center">
       <h2 class="ds-headline u-mb-sm">400</h2>
       <h3 class="u-text-lg u-mb-md">That request could not be read</h3>
-      <p class="u-secondary u-text-sm u-mb-lg">
+      <p class="u-secondary u-text-sm u-mb-lg" th:if="${detail}" th:text="${detail}"></p>
+      <p class="u-secondary u-text-sm u-mb-lg" th:unless="${detail}">
         Something in the form that was sent is missing or malformed. Go back and try again.
       </p>
       <a th:href="@{/dashboard}" class="ds-button ds-button-secondary">Go to Dashboard</a>
