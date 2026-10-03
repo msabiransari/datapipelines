@@ -328,10 +328,13 @@ class PromoterLensSweepTest {
                     .map { it.path("pipeline_version_status").asText() }
                     .contains("DRAFT") shouldBe true
             }
-            val usedByPage = call("/partials/templates/versions?name=$T/newer.sql", promoter).body
-            usedByPage.contains("(DRAFT)") shouldBe false
-            usedByPage.contains("v4") shouldBe false
-            call("/partials/templates/versions?name=$T/newer.sql", viewer).body.contains("(DRAFT)") shouldBe true
+            // #398: the Versions tab is the template workspace's (the explorer's versions
+            // partial is gone), a row per admitted version — `data-version-row`.
+            val versionsPage = call("/templates/$T/newer.sql?tab=versions", promoter)
+            versionsPage.status shouldBe 200
+            versionsPage.body.contains("data-version-row=\"3\"") shouldBe true // non-vacuity: the page lists versions
+            versionsPage.body.contains("data-version-row=\"4\"") shouldBe false
+            call("/templates/$T/newer.sql?tab=versions", viewer).body.contains("data-version-row=\"4\"") shouldBe true
         }
     }
 
