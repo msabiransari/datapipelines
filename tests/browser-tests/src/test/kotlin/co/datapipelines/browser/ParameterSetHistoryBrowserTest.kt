@@ -98,7 +98,8 @@ class ParameterSetHistoryBrowserTest : ParameterSetBrowserSuite() {
         page.selectOption("#ps-form-host [data-dp-parameter='kind'] select", SelectOption().setLabel("B"))
         page.selectOption("#ps-form-host [data-dp-parameter='kind'] select", SelectOption().setLabel("C"))
         awaitSelected("item", "c1")
-        // And one OBSERVED evaluation (the S2 route; its client half is #383) — the PAGE caller, the client's id as the key.
+        // And one OBSERVED evaluation posted directly — the S2 route the page itself streams since #383 — so the PAGE
+        // caller and the client's id as the record's key are pinned on an id this test knows.
         val observed = UUID.randomUUID().toString()
         val (status, _) =
             api(
@@ -116,8 +117,9 @@ class ParameterSetHistoryBrowserTest : ParameterSetBrowserSuite() {
         val listed = rows()
         withClue("first render, B (superseded on the client), C, and the observed one: $listed") {
             listed.size shouldBeGreaterThanOrEqual 4
-            listed.count { it["caller"] == "REST" } shouldBeGreaterThanOrEqual 3
-            listed.single { it["caller"] == "PAGE" }["id"] shouldBe observed
+            // Since #383 the live form streams the observed route, so the page's own evaluates are PAGE records too.
+            listed.all { it["caller"] == "PAGE" } shouldBe true
+            listed.count { it["id"] == observed } shouldBe 1
             listed.all { it["status"] == "COMPLETED" } shouldBe true
         }
         openRecord(observed)
