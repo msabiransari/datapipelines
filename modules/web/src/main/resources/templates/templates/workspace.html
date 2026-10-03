@@ -80,9 +80,11 @@
          draft, beside Release when a draft exists. -->
     <div class="tw-topbar">
       <a th:href="@{/templates}" class="tw-back"><svg class="ds-icon ds-icon-xs" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#arrow-left"></use></svg> Templates</a>
+      <!-- The crumb's split is the controller's: SpEL cannot call the Kotlin stdlib's
+           substring helpers, so the page reads the two parts off the model (crumbPath). -->
       <div class="tw-crumb">
-        <span class="tw-crumb-path" th:text="${templateName.contains('/') ? templateName.substring(0, templateName.lastIndexOf('/') + 1) : ''}" th:title="${templateName}">acme/finance/</span>
-        <span class="tw-crumb-name" th:text="${template?.displayName ?: templateName.substringAfterLast('/')}" th:title="${templateName}">monthly</span>
+        <span class="tw-crumb-path" th:text="${crumbPath}" th:title="${templateName}">acme/finance/</span>
+        <span class="tw-crumb-name" th:text="${template?.displayName ?: crumbName}" th:title="${templateName}">monthly</span>
         <!-- The chip names the VIEWED version and its own status — never the working version,
              never "latest release" (versioning §3.4: the current pointer is sticky and
              event-driven, and this page displays the row it resolved). -->

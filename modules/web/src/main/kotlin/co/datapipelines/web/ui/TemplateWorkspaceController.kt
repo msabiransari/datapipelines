@@ -67,7 +67,14 @@ class TemplateWorkspaceController(
         model.addAttribute("activeTheme", themeResolver.resolve(request))
         RoleModel.stamp(model, principal)
         model.addAttribute("templateName", templateName)
+        // The crumb's two parts, computed HERE: SpEL cannot call the Kotlin stdlib's substring
+        // helpers, so the page reads them off the model.
+        model.addAttribute("crumbPath", templateName.substringBeforeLast('/', missingDelimiterValue = ""))
+        model.addAttribute("crumbName", templateName.substringAfterLast('/'))
         model.addAttribute("templateWorkspace", resolved)
+        // The Versions tab's house table and the header's count read the flat `versions` —
+        // the SAME admitted history the resolved state carries, marked with the viewed row.
+        model.addAttribute("versions", workspace.markViewed(resolved.versions, resolved.viewedVersion))
         // The Used by fragment reads the flat attribute names the detail pane used to fill —
         // stamped from the one resolved facts object, so the tab and the refusal evidence
         // (the same scan `template.in_use` reads) cannot drift.
