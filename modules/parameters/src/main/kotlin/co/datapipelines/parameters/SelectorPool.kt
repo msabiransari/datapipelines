@@ -61,8 +61,8 @@ sealed interface SelectorAdmission {
  *    [SelectorTask.abandon] (`Statement.cancel()`, best effort, then `ConnectionPool.discard`) runs on
  *    a detached `selector-abandon-N` thread — a driver's cancel may itself block on the network, and
  *    the caller answers `timeout` WITHOUT waiting — [abandoned] is incremented, and ONE error line
- *    names the set, the parameter and the datasource. The worker thread lives on, detached, and frees
- *    its slot when the driver returns.
+ *    names the set, the parameter, the datasource and the cause (`deadline` or `caller`, #425). The
+ *    worker thread lives on, detached, and frees its slot when the driver returns.
  *  - **No Micrometer here.** [abandoned] is the `LongAdder` the assembling layer scrapes into the
  *    `parameters.selectors.abandoned` gauge (record §11 — lane D's bean, the
  *    `transform.evaluations.abandoned` shape).
@@ -84,7 +84,10 @@ class SelectorPool(
     /** The admission capacity — running plus waiting. */
     val queue: Int = size + waiting
 
-    /** Statements abandoned at their evaluate's deadline — scrape into the `parameters.selectors.abandoned` gauge. */
+    /**
+     * Statements abandoned when their evaluate's await was cancelled (its deadline or its caller) — scrape
+     * into the `parameters.selectors.abandoned` gauge.
+     */
     val abandoned = LongAdder()
 
     private val admission = java.util.concurrent.Semaphore(queue)
