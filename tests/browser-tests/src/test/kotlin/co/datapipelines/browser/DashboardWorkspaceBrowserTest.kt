@@ -222,6 +222,9 @@ class DashboardWorkspaceBrowserTest : DashboardBrowserSuite() {
         val board = seedBoardWithGrid(root)
         seedDraftVersion(board)
 
+        // A blocked inline style or script on any walk below fails the class's after-each (zero CSP):
+        // the in-page walk runs light, the leave-and-restore dark.
+        ensureTheme("light")
         page.navigate("$baseUrl/dashboards/$board?version=2")
         page.waitForSelector("#dp-pane-board:not([hidden])")
         val length = historyLength()
@@ -245,6 +248,9 @@ class DashboardWorkspaceBrowserTest : DashboardBrowserSuite() {
         historyStat("replayed.dashboards") shouldBe 4
         historyStat("listeners") shouldBe 1
 
+        ensureTheme("dark")
+        page.navigate("$baseUrl/dashboards/$board?version=2&tab=versions")
+        page.waitForSelector("#dp-pane-versions:not([hidden])")
         // A boosted leave and Back: htmx restores the page; it is wired ONCE (one root marker,
         // one window listener) and its strip still switches and replays.
         page.click(".app-nav-link[data-nav-section='/templates']")
