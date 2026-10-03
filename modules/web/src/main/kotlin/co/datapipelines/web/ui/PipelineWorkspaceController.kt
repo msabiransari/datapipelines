@@ -97,6 +97,7 @@ class PipelineWorkspaceController(
                 resolved.record,
                 resolved.versions.map { it.record },
                 resolved.viewedVersion,
+                principal,
             )
 
         // A body selected: the graph's data block. Two fields are the PAGE's, not the REST
