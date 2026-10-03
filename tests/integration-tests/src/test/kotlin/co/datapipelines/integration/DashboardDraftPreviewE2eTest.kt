@@ -513,9 +513,11 @@ class DashboardDraftPreviewE2eTest {
     private fun seedPeople() {
         sql("INSERT INTO workspaces (id, name, display_name) VALUES ('$WORKSPACE_ID', '$WORKSPACE', 'Draft Preview')")
         listOf(ADMIN_ID to "admin", VIEWER_ID to "viewer", PROMOTER_ID to "promoter").forEach { (id, slug) ->
+            // A suite-unique subject: the E2E suites share one Postgres per fork, and a bare
+            // '$slug-sub' collides with DashboardKeyE2eTest's admin on uq_users_provider_subject (#423).
             sql(
                 "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin) VALUES " +
-                    "('$id', '$slug@dpprev.test', '$slug', 'test', '$slug-sub', TRUE, ${slug == "admin"})",
+                    "('$id', '$slug@dpprev.test', '$slug', 'test', 'dpprev-$slug-sub', TRUE, ${slug == "admin"})",
             )
             val role =
                 when (slug) {

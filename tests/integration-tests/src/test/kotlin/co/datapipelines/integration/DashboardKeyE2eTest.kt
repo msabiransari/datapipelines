@@ -671,7 +671,7 @@ class DashboardKeyE2eTest {
         listOf(ADMIN_ID to "admin", USER_B_ID to "userb").forEach { (id, slug) ->
             sql(
                 "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin) VALUES " +
-                    "('$id', '$slug@dbkey.test', '$slug', 'test', '$slug-sub', TRUE, ${slug == "admin"})",
+                    "('$id', '$slug@dbkey.test', '$slug', 'test', 'dbkey-$slug-sub', TRUE, ${slug == "admin"})",
             )
             sql(
                 "INSERT INTO workspace_members (workspace_id, user_id, role) VALUES ('$WORKSPACE_ID', '$id', " +
