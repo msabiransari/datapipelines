@@ -240,6 +240,24 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
             """{"id":"test/$slug/orders_sql","type":"sql","dialect":"POSTGRES","display_name":"orders_sql",""" +
                 """"description":"#240 fixture","body":"$LONG_SQL_FIRST_LINE\nORDER BY order_id"}""",
         )
+        // The read-only pane is the RELEASED view (the workspace's default): release v1 via
+        // the in-page REST (the session's CSRF pair), hash from the create response.
+        val createStatus =
+            page.evaluate(
+                """async () => {
+                  const csrf = document.cookie.match(/(?:^|;\s*)dp_csrf=([^;]*)/);
+                  const got = await fetch('/api/v1/templates?name=test/$slug/orders_sql', { credentials: 'same-origin' });
+                  const body = await got.json();
+                  const res = await fetch('/api/v1/templates/release', {
+                    method: 'POST', credentials: 'same-origin',
+                    headers: {'Content-Type': 'application/json', 'DP-CSRF-Token': csrf ? decodeURIComponent(csrf[1]) : '',
+                              'If-Match': body.body_hash},
+                    body: JSON.stringify({name: 'test/$slug/orders_sql'}),
+                  });
+                  return res.status;
+                }""",
+            )
+        (createStatus as Number).toInt() shouldBe 200
 
         val offenders = mutableListOf<String>()
         page.navigate("$baseUrl/templates")
@@ -528,11 +546,26 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
         startTrace()
         ready()
         seed()
-        putJson(
-            "/api/v1/templates/test/detail_probe",
-            """{"id":"test/detail_probe","type":"sql","dialect":"POSTGRES","display_name":"detail_probe",""" +
-                """"description":"106 detail fixture","body":"SELECT 1 -- drafted"}""",
-        )
+        // A draft over the seeded v1: the draft's write is the hash-preconditioned PUT (the
+        // precondition is the working version's hash — for a draft-only template, its own).
+        val putStatus =
+            page.evaluate(
+                """async () => {
+                  const csrf = document.cookie.match(/(?:^|;\s*)dp_csrf=([^;]*)/);
+                  const got = await fetch('/api/v1/templates?name=test/detail_probe', { credentials: 'same-origin' });
+                  const body = await got.json();
+                  const res = await fetch('/api/v1/templates', {
+                    method: 'PUT', credentials: 'same-origin',
+                    headers: {'Content-Type': 'application/json', 'DP-CSRF-Token': csrf ? decodeURIComponent(csrf[1]) : '',
+                              'If-Match': body.body_hash},
+                    body: JSON.stringify({id: 'test/detail_probe', type: 'sql', dialect: 'POSTGRES',
+                                          display_name: 'detail_probe', description: '106 detail fixture',
+                                          body: 'SELECT 1 -- drafted'}),
+                  });
+                  return res.status;
+                }""",
+            )
+        (putStatus as Number).toInt() shouldBe 200
 
         page.setViewportSize(1440, 900)
         openTemplateWorkspace()

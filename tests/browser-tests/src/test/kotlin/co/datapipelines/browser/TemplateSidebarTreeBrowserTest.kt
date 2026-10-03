@@ -76,7 +76,7 @@ class TemplateSidebarTreeBrowserTest : BrowserSuite() {
         must(
             "POST",
             "/api/v1/templates",
-            """{"id":"$name","type":"sql","dialect":"POSTGRES","display_name":"x"",""" +
+            """{"id":"$name","type":"sql","dialect":"POSTGRES","display_name":"${name.substringAfterLast('/')}",""" +
                 """"description":"398 sidebar fixture","body":"SELECT 1"}""",
         )
     }
