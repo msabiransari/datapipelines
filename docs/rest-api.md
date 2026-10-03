@@ -1,6 +1,6 @@
 # REST API + SSE Specification
 
-**Status:** v2.79 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
+**Status:** v2.80 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
 **Last updated:** 2026-10-03
@@ -640,6 +640,25 @@ it answers that same `404 pipeline.execution.not_found`.
 Response: `200 OK` with `Content-Type: text/event-stream`.
 
 The response is a **stream of SSE events**, one per execution milestone. The stream closes when execution completes (success or failure).
+
+#### 6.1.3 Refusals before the first event
+
+A refusal decided before the first event is never a stream: it answers the §4.2 JSON envelope
+(`Content-Type: application/json`) with its own status, also to a client whose `Accept` is
+`text/event-stream` only. Most are decided by the handler itself (the `400`s of §6.1.2, the `404`s
+of §6.1.1). Two are decided AFTER the handler has opened the stream,
+off the request thread, still before any byte is sent — and answer exactly the same way:
+
+| Status | Code | When |
+|---|---|---|
+| `429` | `pipeline.execution.concurrency_limit` | The executor has no execution slot for the caller (`details.scope`: `per_user` or `global`, `details.limit`; §12.1). The reservation of an `Idempotency-Key`, if one was sent, was already claimed — its retry is the next row. |
+| `410` | `result.expired` | An idempotent retry (§3.5) attached to an original that never started: no event appeared within the follow's patience (~15 s). `details.reason: original_not_started` and NO `execution_id` — that id never resolves. Re-execute with a fresh `Idempotency-Key`. |
+
+Until v2.80 both answered `401 auth.api_key.missing` ("No credentials provided") to a fully
+authenticated caller: the stream's completion re-enters the server as an async dispatch, and the
+authorization interceptor judged that dispatch against its empty security context (#404,
+[auth §8.2](auth.md#82-filter-order-per-request)). A refusal after the first event is not an
+HTTP status at all — it is the stream's own terminal event (§6.5).
 
 ### 6.2 Why SSE, not WebSocket
 
@@ -2717,6 +2736,7 @@ window. A dashboard execution has no stored result: `GET /api/v1/executions/{id}
 
 ## Appendix A: Change Log
 
+| 2026-10-03 | v2.80 | #404 the pre-first-event refusals reach the wire | **New §6.1.3** names the execute route's two refusals decided after the stream opened and before its first event — `429 pipeline.execution.concurrency_limit` (no execution slot, §12.1) and the idempotent retry's never-started `410 result.expired` (`reason: original_not_started`, no `execution_id`, §3.5) — as §4.2 JSON envelopes with their own status, also under an SSE-only `Accept`. Both were documented before (§3.5, §12.1) but answered `401 auth.api_key.missing` on the wire: the authorization interceptor judged the stream's async completion dispatch against an empty security context (auth v3.40 §8.2). A bug fix, not a contract change: no route, field or code is added. Wire-proven by `IdempotentAttachRowOrderE2eTest`. |
 | 2026-10-03 | v2.79 | #417 the observed evaluation refuses a recorded `evaluation_id` | **§21.5** — a reused `evaluation_id` is now also an id the caller's workspace history already holds (a closed stream's, or one recorded on another instance), refused before the stream opens and before the cap with the same `400 parameter.validation.body_invalid` (`details.path = evaluation_id`, `details.reason = reused`); the sentence "across instances it becomes the history row's key conflict when S3 (#376) lands" is corrected (the insert conflict is logged and the evaluation runs unrecorded, so the id is now refused up front), the refusal order's step 5 and the `body_invalid` row name both cases. The read is workspace-scoped: another workspace's id answers as unused. No route, field, code or permission changed. |
 | 2026-10-03 | v2.78 | #399 the Visualizations workspace — renumbered at merge after the #383 follow-up's v2.77 | **§22's intro** — the sentence "No UI page exists yet — this section and the MCP tools … are the whole surface" leaves: the first-party workspace ([ui-screens §4.24](ui-screens.md)) reads and drives the lifecycle verbs through the same services, its page and partial routes named as UI routes on the `visualization.*` rows (auth.md §7.6), outside this contract. No route, field, code or permission changed. |
 | 2026-10-03 | v2.77 | #383 merge follow-up — the page's client streams | **§21's intro** — the sentence "the page's live form calls §21.3 exactly as any client does" became false when #383 moved the live form onto §21.5; it now names §21.5 as the page's route and §21.3 as every other client's. **§21.5's** opening (#383) names the page's client as the route's consumer. No route, field or code changes. |
