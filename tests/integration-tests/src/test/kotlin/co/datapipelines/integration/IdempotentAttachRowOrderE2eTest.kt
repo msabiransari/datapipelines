@@ -300,7 +300,8 @@ class IdempotentAttachRowOrderE2eTest {
             withClue("the slot-refused POST must answer the 429 envelope (#404), not start a second execution: ${doomed.body()}") {
                 doomed.statusCode() shouldBe 429
                 doomed.headers().firstValue("Content-Type").orElse("") shouldContain "application/json"
-                mapper.readTree(doomed.body()).path("error").path("code").asText() shouldBe "pipeline.execution.concurrency_limit"
+                val error = mapper.readTree(doomed.body()).path("error")
+                error.path("code").asText() shouldBe "pipeline.execution.concurrency_limit"
             }
             val doomedReservationKey = awaitReservation(reservationsBefore)
             val doomedExecutionId = reservationRecord(doomedReservationKey).path("executionId").asText()
