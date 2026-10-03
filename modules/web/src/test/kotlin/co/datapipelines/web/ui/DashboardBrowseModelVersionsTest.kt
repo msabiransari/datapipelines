@@ -32,6 +32,9 @@ class DashboardBrowseModelVersionsTest {
         releasedAt: Instant? = null,
     ) = ArtifactVersionDetail(dashboardId, version, status, "hash-$version", created, UUID.randomUUID(), releasedAt = releasedAt)
 
+    @Suppress("UNCHECKED_CAST") // the fill's own attribute, typed at its one writer
+    private fun rows(ui: ExtendedModelMap) = ui["versions"] as List<DashboardBrowseModel.VersionDetailView>
+
     @Test
     fun `a row carries the relative age and the absolute UTC stamp for created and released`() {
         every { dashboards.listVersions(workspaceId, any(), dashboardId) } returns
@@ -41,10 +44,16 @@ class DashboardBrowseModelVersionsTest {
             )
         val ui = ExtendedModelMap()
 
-        model.fillVersions(ui, workspaceId, LensedView.EVERYTHING, dashboardId, 1, now = created.plusSeconds(3 * 86_400 + 7_200))
+        model.fillVersions(
+            ui,
+            workspaceId,
+            LensedView.EVERYTHING,
+            dashboardId,
+            1,
+            now = created.plusSeconds(3 * 86_400 + 7_200),
+        )
 
-        @Suppress("UNCHECKED_CAST")
-        val (draft, released) = ui["versions"] as List<DashboardBrowseModel.VersionDetailView>
+        val (draft, released) = rows(ui)
         draft.createdAgo shouldBe "3 days ago"
         draft.createdAbsolute shouldBe "2026-10-01 09:00 UTC"
         draft.releasedAgo shouldBe null
@@ -61,7 +70,6 @@ class DashboardBrowseModelVersionsTest {
 
         model.fillVersions(ui, workspaceId, LensedView.EVERYTHING, dashboardId, null, now = created.minusSeconds(30))
 
-        @Suppress("UNCHECKED_CAST")
-        (ui["versions"] as List<DashboardBrowseModel.VersionDetailView>).single().createdAgo shouldBe "just now"
+        rows(ui).single().createdAgo shouldBe "just now"
     }
 }

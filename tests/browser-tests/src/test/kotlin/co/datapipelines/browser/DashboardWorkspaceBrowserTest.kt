@@ -171,32 +171,7 @@ class DashboardWorkspaceBrowserTest : DashboardBrowserSuite() {
                 .shouldBeEmpty()
         }
 
-        // #422 — the four tabs at the phone width too, Versions included: no sideways scroll, and the
-        // Versions cells read relative with the absolute UTC stamp on `title`, never a raw ISO instant.
-        val desktop = page.viewportSize()
-        page.setViewportSize(PHONE_W, PHONE_H)
-        listOf("board", "overview", "refreshes", "versions").forEach { tab ->
-            page.navigate("$baseUrl/dashboards/$board?tab=$tab")
-            page.waitForSelector("#dp-pane-" + tab + ":not([hidden])")
-            if (tab == "versions") page.waitForSelector("#dp-pane-versions .ds-table")
-            page.waitForTimeout(300.0)
-            withClue("$tab at ${PHONE_W}x$PHONE_H scrolls sideways") { documentOverflowsX() shouldBe false }
-        }
-        page.screenshot(
-            com.microsoft.playwright.Page
-                .ScreenshotOptions()
-                .setPath(
-                    java.nio.file.Paths
-                        .get("build", "reports", "dashboards-workspace-versions-390.png"),
-                ),
-        )
-        page.setViewportSize(desktop.width, desktop.height)
-        page.navigate("$baseUrl/dashboards/$board?tab=versions")
-        page.waitForSelector("#dp-pane-versions .ds-table")
-        val cells = page.locator("#dp-pane-versions td").allInnerTexts()
-        cells.shouldNotBeEmpty()
-        cells.filter { ISO_INSTANT.containsMatchIn(it) }.shouldBeEmpty()
-        page.locator("#dp-pane-versions td span[title$='UTC']").count() shouldBeGreaterThan 0
+        assertVersionsAtPhoneAndDesktop(board)
 
         // The choose-a-version state (a draft-only dashboard), both themes.
         val draftOnly = seedDraftOnlyBoard(root + "x")
@@ -391,6 +366,37 @@ class DashboardWorkspaceBrowserTest : DashboardBrowserSuite() {
         return sqlToValue(
             "SELECT id::text AS i FROM dashboards WHERE name = '$root/boards/only_draft' AND workspace_id = $workspaceSql",
         )
+    }
+
+    /**
+     * #422 — the four tabs at the phone width too, Versions included: no sideways scroll, and the Versions
+     * cells read relative with the absolute UTC stamp on `title`, never a raw ISO instant. Restores the viewport.
+     */
+    private fun assertVersionsAtPhoneAndDesktop(board: String) {
+        val desktop = page.viewportSize()
+        page.setViewportSize(PHONE_W, PHONE_H)
+        listOf("board", "overview", "refreshes", "versions").forEach { tab ->
+            page.navigate("$baseUrl/dashboards/$board?tab=$tab")
+            page.waitForSelector("#dp-pane-" + tab + ":not([hidden])")
+            if (tab == "versions") page.waitForSelector("#dp-pane-versions .ds-table")
+            page.waitForTimeout(300.0)
+            withClue("$tab at ${PHONE_W}x$PHONE_H scrolls sideways") { documentOverflowsX() shouldBe false }
+        }
+        page.screenshot(
+            com.microsoft.playwright.Page
+                .ScreenshotOptions()
+                .setPath(
+                    java.nio.file.Paths
+                        .get("build", "reports", "dashboards-workspace-versions-390.png"),
+                ),
+        )
+        page.setViewportSize(desktop.width, desktop.height)
+        page.navigate("$baseUrl/dashboards/$board?tab=versions")
+        page.waitForSelector("#dp-pane-versions .ds-table")
+        val cells = page.locator("#dp-pane-versions td").allInnerTexts()
+        cells.shouldNotBeEmpty()
+        cells.filter { ISO_INSTANT.containsMatchIn(it) }.shouldBeEmpty()
+        page.locator("#dp-pane-versions td span[title$='UTC']").count() shouldBeGreaterThan 0
     }
 
     /** One DRAFT version copied off the board's RELEASED v1 — same body, new number, no release stamps. */

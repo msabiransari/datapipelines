@@ -511,7 +511,15 @@ class RoleVisibilityRenderTest {
             listOf(
                 versionDetail(1, "RELEASED", "2026-10-01T09:00:00Z", "3 days ago", "2026-10-01T10:00:00Z", "3 days ago", isServed = true),
                 versionDetail(2, "DRAFT", "2026-10-02T09:00:00Z", "2 days ago", null, null, isDraft = true),
-                versionDetail(0, "DISCARDED", "2026-09-30T09:00:00Z", "4 days ago", "2026-09-30T10:00:00Z", "4 days ago", isDiscarded = true),
+                versionDetail(
+                    0,
+                    "DISCARDED",
+                    "2026-09-30T09:00:00Z",
+                    "4 days ago",
+                    "2026-09-30T10:00:00Z",
+                    "4 days ago",
+                    isDiscarded = true,
+                ),
             ),
         )
     }
