@@ -339,5 +339,7 @@ class DashboardWorkspaceControllerTest {
         every { dashboards.findWorking(workspaceId, ReadLens.Everything, dashboardId) } returns workingVersion()
         val thrown = assertThrows<ResponseStatusException> { render(version = "two") }
         thrown.statusCode.value() shouldBe 400
+        // The reason is the shared constant: nothing of the caller's input rides it (#421).
+        thrown.reason shouldBe RequestedVersion.BAD_VERSION
     }
 }

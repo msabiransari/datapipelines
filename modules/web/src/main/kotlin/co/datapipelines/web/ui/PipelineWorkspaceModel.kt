@@ -8,8 +8,6 @@ import co.datapipelines.pipeline.PipelineVersionDetail
 import co.datapipelines.pipeline.PipelineVersionRecord
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.typesystem.DatapipelinesException
-import org.springframework.http.HttpStatus
-import org.springframework.web.server.ResponseStatusException
 import java.util.UUID
 
 /**
@@ -200,22 +198,10 @@ class PipelineWorkspaceModel(
     companion object {
         /**
          * The `version` query parameter's one parse, shared by the canonical page and the old
-         * editor's redirect (workspace spec §3.1/§3.2): optional, and when supplied a positive
-         * integer — anything else is the house 400, never a silent clamp to another version.
-         * Bound as a STRING on purpose: an `Int` binding would answer a non-numeric value with
-         * the unhandled-mismatch 500; this way the caller's malformed input gets the 400 page.
+         * editor's redirect (workspace spec §3.1/§3.2): [RequestedVersion.parse] — optional, and
+         * when supplied a positive integer, anything else the house 400 whose reason never
+         * echoes the input.
          */
-        fun parseRequestedVersion(raw: String?): Int? {
-            if (raw.isNullOrEmpty()) return null
-            val parsed = raw.toIntOrNull() ?: throw badVersion(raw)
-            if (parsed <= 0) throw badVersion(raw)
-            return parsed
-        }
-
-        private fun badVersion(raw: String) =
-            ResponseStatusException(
-                HttpStatus.BAD_REQUEST,
-                "The version parameter must be a positive integer (got '$raw').",
-            )
+        fun parseRequestedVersion(raw: String?): Int? = RequestedVersion.parse(raw)
     }
 }
