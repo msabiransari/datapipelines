@@ -68,14 +68,14 @@ import java.util.concurrent.TimeoutException
  * The negative half forces R2's answer for an original that never started: with
  * `datapipelines.executor.max-concurrent-executions-per-user=1` (this class's property) a second
  * POST is refused the only slot AFTER its reservation was claimed and BEFORE any event — no row,
- * no log. The retry of that key attaches to nothing: the follow polls for ~15 s and gives up, and
- * the test pins what is stable — the follow's patience IS the wait, and the answer never carries
- * the id. The answer's STATUS is a filed finding, not this test's assertion: an emitter completed
- * with an error before any frame renders as `401 auth.api_key.missing` on this base (the advice
- * envelope does not survive the async error dispatch — the same gap renders the execute route's
- * fail-before-start refusals as that 401); the unit witness (`SseLogStreamerTest`) pins the
- * completion's `ApiException` — `410 result.expired`, `reason: original_not_started`, no
- * `execution_id` — which is what the wire answers once the render path is fixed.
+ * no log. That POST answers `429 pipeline.execution.concurrency_limit`. The retry of its key
+ * attaches to nothing: the follow polls for ~15 s and gives up — the follow's patience IS the
+ * wait — and answers the id-free `410 result.expired` (`reason: original_not_started`, no
+ * `execution_id`). Both are JSON envelopes under the SSE-only Accept. Until #404 both reached
+ * the wire as `401 auth.api_key.missing`: the stream's error completion re-enters as an ASYNC
+ * dispatch, and `ScopeInterceptor` judged it against the empty security context — this class's
+ * red-first record of that is #404's evidence. A third method proves the same 429 for an
+ * execute that sent no `Idempotency-Key` at all.
  *
  * The lock-hold window stays well under the shipped lifecycle bound
  * (`datapipelines.executor.lifecycle-write-timeout-seconds`, 10 s) — past it the insert would be
@@ -240,15 +240,11 @@ class IdempotentAttachRowOrderE2eTest {
     }
 
     /**
-     * The negative half, pinned to what is STABLE on the wire: the follow's patience is the
-     * wait, and the retry's answer never again carries the id. The answer's STATUS is a filed
-     * finding, not this test's subject: an emitter completed with an error before any frame
-     * renders as `401 auth.api_key.missing` on this base — the advice envelope the completion
-     * carries does not survive the async error dispatch (the same gap renders the execute
-     * route's own fail-before-start refusals — e.g. the concurrency 429 — as the same 401).
-     * Filed against the render path; when it is fixed, the answer becomes the id-free
-     * `410 result.expired` (`reason: original_not_started`) the unit witness
-     * (`SseLogStreamerTest`) pins, and this method's assertions already accept that.
+     * The negative half, on the wire: the slot-refused POST answers the `429` envelope, the
+     * follow's patience is the retry's wait, and the retry answers the id-free `410
+     * result.expired` (`reason: original_not_started`) — never the id again. Both statuses were
+     * `401 auth.api_key.missing` until #404 (the async completion dispatch was judged against an
+     * empty security context); red on that base, green since.
      */
     @Test
     @Order(2)
@@ -292,8 +288,7 @@ class IdempotentAttachRowOrderE2eTest {
 
             // 2. A second POST, different key: the reservation is claimed (Redis, before the
             //    executor runs), then the executor refuses the only slot BEFORE any event — no
-            //    row, no log. The refusal's wire status is the filed rendering gap (a mapped
-            //    429 rendered as 401); the precondition that matters is below.
+            //    row, no log — and the refusal is the 429 envelope (#404).
             val doomedKey = "e2e-324-doomed-${UUID.randomUUID()}"
             val reservationsBefore = reservationKeys()
             val doomed =
@@ -302,8 +297,10 @@ class IdempotentAttachRowOrderE2eTest {
                     .version(HttpClient.Version.HTTP_1_1)
                     .build()
                     .send(executeRequest(pipelineId, doomedKey), HttpResponse.BodyHandlers.ofString())
-            withClue("the slot-refused POST must not start a second execution: ${doomed.body()}") {
-                (doomed.statusCode() != 200) shouldBe true
+            withClue("the slot-refused POST must answer the 429 envelope (#404), not start a second execution: ${doomed.body()}") {
+                doomed.statusCode() shouldBe 429
+                doomed.headers().firstValue("Content-Type").orElse("") shouldContain "application/json"
+                mapper.readTree(doomed.body()).path("error").path("code").asText() shouldBe "pipeline.execution.concurrency_limit"
             }
             val doomedReservationKey = awaitReservation(reservationsBefore)
             val doomedExecutionId = reservationRecord(doomedReservationKey).path("executionId").asText()
@@ -321,8 +318,8 @@ class IdempotentAttachRowOrderE2eTest {
             }
 
             // 3. The doomed key's retry: attach → no log → row absent → follow → the follow's
-            //    ~15 s patience IS the wait (on the streamer's scheduler), and the answer —
-            //    whatever the error-completion renders as — must NOT carry the id again.
+            //    ~15 s patience IS the wait (on the streamer's scheduler), and the answer is the
+            //    id-free 410 envelope — it must NOT carry the id again.
             val retryStart = System.currentTimeMillis()
             val retry =
                 HttpClient
@@ -338,12 +335,95 @@ class IdempotentAttachRowOrderE2eTest {
             }
             val body = retry.body()
             withClue(
-                "the never-started retry's answer must not re-disclose the id or the old reason " +
-                    "(status=${retry.statusCode()}): $body",
+                "the never-started retry must answer the id-free 410 envelope (#404) — never the id or the old " +
+                    "reason (status=${retry.statusCode()}): $body",
             ) {
+                retry.statusCode() shouldBe 410
+                retry.headers().firstValue("Content-Type").orElse("") shouldContain "application/json"
+                val error = mapper.readTree(body).path("error")
+                error.path("code").asText() shouldBe "result.expired"
+                error.path("details").path("reason").asText() shouldBe "original_not_started"
                 body shouldNotContain """"execution_id""""
                 body shouldNotContain "event_log_expired"
             }
+        }
+    }
+
+    /**
+     * #404 A.3 — the execute route's own fail-before-start refusal with NO `Idempotency-Key`: the
+     * executor refuses the only per-user slot before any event, `failBeforeStart` completes the
+     * stream with the error, and the wire answers the `429 pipeline.execution.concurrency_limit`
+     * envelope as JSON under an SSE-only Accept — not the `401 auth.api_key.missing` the async
+     * re-dispatch used to write. No reservation, no follow: the plain refusal, nothing else.
+     *
+     * A SECOND member holds the slot here, not the admin: the limit is per user, and the admin's
+     * slot may still be held by the previous method's 30 s original, so this method depends on no
+     * other's leftovers. Its own slot-holder is cancelled at the end and drained to its terminal
+     * event, so it leaves nothing running.
+     */
+    @Test
+    @Order(3)
+    fun `an unkeyed execute refused the only slot before any event answers the 429 envelope`() {
+        ensureAuthSeeded()
+        ensureAuthSeeded(SECOND_USER_ID, SECOND_EMAIL)
+        registerDatasource()
+        seedSourceUsers()
+        createTemplate(NO_KEY_TEMPLATE_ID, SLOT_QUERY)
+        val pipelineId = createPipeline(NO_KEY_PIPELINE_NAME, NO_KEY_TEMPLATE_ID, declareParameter = false)
+
+        assertTimeoutPreemptively(Duration.ofMinutes(SSE_BUDGET_MINUTES)) {
+            // 1. The second member's slow original takes their only slot; its first frame proves it.
+            val holderFuture =
+                Executors
+                    .newSingleThreadExecutor { r -> Thread(r, "e2e-404-holder-reader").apply { isDaemon = true } }
+                    .submit<HttpResponse<InputStream>> {
+                        HttpClient
+                            .newBuilder()
+                            .version(HttpClient.Version.HTTP_1_1)
+                            .build()
+                            .send(executeRequest(pipelineId, null, SECOND_SESSION), HttpResponse.BodyHandlers.ofInputStream())
+                    }
+            val holder = holderFuture.get(30, TimeUnit.SECONDS)
+            if (holder.statusCode() != 200) {
+                throw AssertionError(
+                    "the slot-holder's POST answered ${holder.statusCode()}: " + holder.body().readBytes().toString(Charsets.UTF_8),
+                )
+            }
+            val holderReader = BufferedReader(InputStreamReader(holder.body()))
+            val holderFirstLine = holderReader.readLine()
+            withClue("the slot-holder's first frame was: $holderFirstLine") {
+                holderFirstLine shouldBe "event:execution_started"
+            }
+            val holderExecutionId = readDataLine(holderReader).path("execution_id").asText()
+
+            // 2. The unkeyed second execute: refused the slot inside the executor, before any event.
+            val refused =
+                HttpClient
+                    .newBuilder()
+                    .version(HttpClient.Version.HTTP_1_1)
+                    .build()
+                    .send(executeRequest(pipelineId, null, SECOND_SESSION), HttpResponse.BodyHandlers.ofString())
+            withClue("the unkeyed slot refusal must answer the 429 envelope (#404): ${refused.body()}") {
+                refused.statusCode() shouldBe 429
+                refused.headers().firstValue("Content-Type").orElse("") shouldContain "application/json"
+                val error = mapper.readTree(refused.body()).path("error")
+                error.path("code").asText() shouldBe "pipeline.execution.concurrency_limit"
+                error.path("details").path("scope").asText() shouldBe "per_user"
+                error.path("details").path("limit").asInt() shouldBe 1
+            }
+            withClue("the refused execute must not have started a second execution") {
+                rowCount(pipelineId) shouldBe 1L
+            }
+
+            // 3. Release the slot: cancel the holder and drain it to its terminal event.
+            given()
+                .port(port)
+                .asSession(SECOND_SESSION)
+                .`when`()
+                .delete("/api/v1/executions/$holderExecutionId")
+                .then()
+                .statusCode(204)
+            drainToTerminal(holderReader, "the cancelled slot-holder")
         }
     }
 
@@ -416,11 +496,12 @@ class IdempotentAttachRowOrderE2eTest {
     private fun executeRequest(
         pipelineId: String,
         idempotencyKey: String?,
+        session: String = ADMIN_SESSION,
     ): HttpRequest {
         val builder =
             HttpRequest
                 .newBuilder(URI.create("http://localhost:$port/api/v1/pipelines/$pipelineId/execute"))
-                .header("Cookie", E2eSession.cookieHeader(ADMIN_SESSION))
+                .header("Cookie", E2eSession.cookieHeader(session))
                 .header(E2eSession.CSRF_HEADER, E2eSession.CSRF_TOKEN)
                 .header("Content-Type", "application/json")
                 .header("Accept", "text/event-stream")
@@ -430,13 +511,17 @@ class IdempotentAttachRowOrderE2eTest {
             .build()
     }
 
-    private fun ensureAuthSeeded() {
+    /** Seeds [userId] as an active admin and a workspace admin of the default workspace (idempotent). */
+    private fun ensureAuthSeeded(
+        userId: String = ADMIN_USER_ID,
+        email: String = ADMIN_EMAIL,
+    ) {
         DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
             connection.createStatement().use { statement ->
                 statement.execute(
                     """
                     INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin)
-                    VALUES ('$ADMIN_USER_ID', 'e2e-324-admin@datapipelines.test', 'e2e-324-admin', 'test', 'sub-$ADMIN_USER_ID', TRUE, TRUE)
+                    VALUES ('$userId', '$email', '${email.substringBefore('@')}', 'test', 'sub-$userId', TRUE, TRUE)
                     ON CONFLICT (id) DO NOTHING
                     """.trimIndent(),
                 )
@@ -445,7 +530,7 @@ class IdempotentAttachRowOrderE2eTest {
                 statement.execute(
                     """
                     INSERT INTO workspace_members (workspace_id, user_id, role) VALUES
-                        ('$DEFAULT_WORKSPACE', '$ADMIN_USER_ID', 'workspace_admin')
+                        ('$DEFAULT_WORKSPACE', '$userId', 'workspace_admin')
                     ON CONFLICT DO NOTHING
                     """.trimIndent(),
                 )
@@ -598,6 +683,8 @@ class IdempotentAttachRowOrderE2eTest {
         private const val SLOT_TEMPLATE_ID = "test/order_324_slot.sql"
         private const val PIPELINE_NAME = "test/order_324"
         private const val SLOT_PIPELINE_NAME = "test/order_324_slot"
+        private const val NO_KEY_TEMPLATE_ID = "test/order_404_no_key.sql"
+        private const val NO_KEY_PIPELINE_NAME = "test/order_404_no_key"
 
         /**
          * How long the test holds the lock and demands silence from BOTH requests. Must stay well
@@ -624,7 +711,13 @@ class IdempotentAttachRowOrderE2eTest {
 
         /** The per-run JWT secret — registered as `datapipelines.jwt.secret`, signing the session (#215 B2). */
         private val JWT_SECRET = E2eSession.newSecret()
-        private val ADMIN_SESSION get() = E2eSession.jwt(JWT_SECRET, ADMIN_USER_ID, "e2e-324-admin@datapipelines.test")
+        private const val ADMIN_EMAIL = "e2e-324-admin@datapipelines.test"
+        private val ADMIN_SESSION get() = E2eSession.jwt(JWT_SECRET, ADMIN_USER_ID, ADMIN_EMAIL)
+
+        /** #404 A.3's slot-holder: a second member, so the per-user slot is theirs alone. */
+        private val SECOND_USER_ID: String = UUID.randomUUID().toString()
+        private const val SECOND_EMAIL = "e2e-404-member@datapipelines.test"
+        private val SECOND_SESSION get() = E2eSession.jwt(JWT_SECRET, SECOND_USER_ID, SECOND_EMAIL)
 
         /** The module's shared containers — started on first touch, migrated by the first context's Flyway. */
         private val postgres get() = SharedE2e.postgres
