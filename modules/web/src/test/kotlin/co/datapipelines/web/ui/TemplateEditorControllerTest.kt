@@ -154,6 +154,19 @@ class TemplateEditorControllerTest {
         view.url shouldBe "/templates/acme/finance/rev.sql"
     }
 
+    /**
+     * The query's name is the caller's text, redirected BEFORE any grammar check: it reaches the URL
+     * percent-encoded. Raw, `{b}` is a URI template variable RedirectView tries to expand (a 500, not
+     * the workspace's 404) and `?`/`#` would rewrite the redirect's own query (398b review).
+     */
+    @Test
+    fun `a name the grammar refuses is percent-encoded into the redirect, never raw`() {
+        authenticate()
+
+        controller.editor("a{b}", null, null).url shouldBe "/templates/a%7Bb%7D"
+        controller.editor("x?tab=runs#y", "2", null).url shouldBe "/templates/x%3Ftab=runs%23y?version=2"
+    }
+
     /** The success half of `edit`: an HX-Redirect entity, not a fragment. */
     @Suppress("UNCHECKED_CAST")
     private fun redirect(result: Any) = result as org.springframework.http.ResponseEntity<String>

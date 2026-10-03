@@ -66,7 +66,7 @@ class TemplateEditorController(
         val builder = canonicalBuilder(name)
         parsedVersion?.let { builder.queryParam("version", it) }
         supportedTab?.let { builder.queryParam("tab", it.wire) }
-        return RedirectView(builder.build().toUriString())
+        return RedirectView(builder.build().encode().toUriString())
     }
 
     /**
