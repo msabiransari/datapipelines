@@ -70,6 +70,8 @@ class ReadFloorTest {
         familyOf("/parameter-sets") shouldBeFamily Family.PARAMETER_SETS
         familyOf("/parameter-sets/{id}") shouldBeFamily Family.PARAMETER_SETS
         familyOf("/partials/parameter-sets/tree") shouldBeFamily Family.PARAMETER_SETS
+        familyOf("/partials/parameter-sets/{id}/evaluations") shouldBeFamily Family.PARAMETER_SETS
+        familyOf("/partials/parameter-sets/{id}/evaluations/{evaluationId}") shouldBeFamily Family.PARAMETER_SETS
         familyOf("/api/v1/visualizations") shouldBeFamily Family.VISUALIZATIONS
         familyOf("/api/v1/visualizations/{id}/versions/{version}") shouldBeFamily Family.VISUALIZATIONS
         familyOf("/api/v1/dashboards") shouldBeFamily Family.DASHBOARDS
@@ -240,15 +242,16 @@ class ReadFloorTest {
         ),
 
         /** #194 lane D: the parameter sets — an every-role read (the lens aside, one row shape). #374 added the
-         * three pages (catalog, workspace, tree partial): the family's reads, never an evaluate declaration. */
+         * three pages (catalog, workspace, tree partial): the family's reads, never an evaluate declaration. #376
+         * added the History tab's two partials (the list and the record detail) — reads of the set, §11.2. */
         PARAMETER_SETS(
-            floor = 7,
+            floor = 9,
             permissions = setOf(Permission.PARAMETER_SET_READ),
             matches = { path ->
                 path.startsWith("/api/v1/parameter-sets") ||
                     path == "/parameter-sets" ||
                     path.startsWith("/parameter-sets/") ||
-                    path == "/partials/parameter-sets/tree"
+                    path.startsWith("/partials/parameter-sets/")
             },
         ),
 

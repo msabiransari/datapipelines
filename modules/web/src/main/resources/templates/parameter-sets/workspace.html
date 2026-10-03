@@ -44,6 +44,20 @@
       </div>
     </div>
 
+    <!-- #376 — the page's two sections, one canonical URL each (`?tab=` is the closed set workspace | history; the viewed
+         version rides along so the header above keeps naming it). Full-document links, not client tabs: the History
+         arm renders no live form, so opening it never issues an evaluate (it would be a history row of its own). -->
+    <nav class="ps-tabs" aria-label="Workspace sections">
+      <a class="ps-tab" hx-boost="false" data-ps-tab="workspace"
+         th:classappend="${activeTab == 'workspace'} ? 'is-on'"
+         th:href="${viewedVersion != null} ? @{/parameter-sets/{id}(id=${parameterSetId}, version=${viewedVersion})} : @{/parameter-sets/{id}(id=${parameterSetId})}"
+         th:attr="aria-current=${activeTab == 'workspace'} ? 'page' : null">Workspace</a>
+      <a class="ps-tab" hx-boost="false" data-ps-tab="history"
+         th:classappend="${activeTab == 'history'} ? 'is-on'"
+         th:href="${viewedVersion != null} ? @{/parameter-sets/{id}(id=${parameterSetId}, version=${viewedVersion}, tab='history')} : @{/parameter-sets/{id}(id=${parameterSetId}, tab='history')}"
+         th:attr="aria-current=${activeTab == 'history'} ? 'page' : null">History</a>
+    </nav>
+
     <!-- The version selector: every version the caller's lens admits, each link naming its EXACT version
          (?version=N — never a clamp). Under a narrowing lens only released versions are listed. -->
     <nav class="ps-versions" aria-label="Versions" th:unless="${#lists.isEmpty(versions)}">
@@ -56,7 +70,7 @@
 
     <!-- The choose-a-version state (workspace spec §3.1, rule 4): no body resolved for this caller, so there is
          nothing to render a graph OF. The admitted history is the affordance; no form, no evaluate. -->
-    <div class="ds-empty" th:if="${!hasSelectedBody}">
+    <div class="ds-empty" th:if="${!hasSelectedBody and activeTab == 'workspace'}">
       <p class="ds-empty-title" th:text="${#lists.isEmpty(versions)} ? 'No viewable version' : 'Choose a version'">Choose a version</p>
       <p class="ds-empty-description">
         <span th:if="${#lists.isEmpty(versions)}">This parameter set has no version your role can view yet — ask an author to release one.</span>
@@ -67,10 +81,10 @@
     <!--/* The two JSON blocks (ScriptSafeJson.forScriptBlock): `</script>`, `<!--` and U+2028/9 inside a set's
             display_name, description or labels cannot close the block they ride in. th:utext is correct ONLY
             because the controller escaped these strings for a script block. */-->
-    <script type="application/json" id="ps-data" th:if="${hasSelectedBody}" th:utext="${parameterSetJson}"></script>
+    <script type="application/json" id="ps-data" th:if="${hasSelectedBody and activeTab == 'workspace'}" th:utext="${parameterSetJson}"></script>
     <script type="application/json" id="ps-workspace" th:utext="${workspaceJson}"></script>
 
-    <div class="ps-body" th:if="${hasSelectedBody}">
+    <div class="ps-body" th:if="${hasSelectedBody and activeTab == 'workspace'}">
       <!-- THE FORM: the live controls. A role that may not evaluate (the promoter) gets NO control and the page
            issues NO request — the server stamps `canEvaluate` and the glue never calls initParameters without it. -->
       <section class="ps-card" aria-labelledby="ps-form-title">
@@ -108,6 +122,15 @@
         </section>
       </div>
     </div>
+
+    <!-- #376 — the History arm (workspace spec §6.4): every evaluation record of this set, whoever ran it, in the house
+         table; a row opens its record below. The first page is painted here by the same browse model the pager's
+         partial uses. Readable by every role that reads the set (promoter included, through the lens). -->
+    <section class="ps-card" aria-labelledby="ps-history-title" th:if="${activeTab == 'history'}" data-ps-history>
+      <h2 class="ps-card-title" id="ps-history-title">Evaluation history</h2>
+      <div th:replace="~{partials/parameter-set-evaluations :: history}"></div>
+      <div id="ps-history-detail" class="ps-history-detail-host" aria-live="polite"></div>
+    </section>
   </div>
 
   <!-- The guarded bootstrap: the ONE executable script a history restore replays (it turns the replay into another

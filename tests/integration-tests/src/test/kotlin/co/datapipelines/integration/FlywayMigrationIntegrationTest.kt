@@ -159,6 +159,8 @@ class FlywayMigrationIntegrationTest {
                 // #328 (V47) — the release's caller-output record: two nullable JSONB columns
                 // (pipeline_executions.result_schema_json, pipeline_versions.caller_output_json).
                 "47|release result columns|true",
+                // #376 (V48) — the parameter-set evaluation history: parameter_evaluations + parameter_evaluation_queries.
+                "48|parameter evaluations|true",
             )
     }
 
@@ -558,6 +560,137 @@ class FlywayMigrationIntegrationTest {
                 "dashboard_refresh_executions->dashboard_refreshes c",
                 "dashboard_refresh_executions->pipeline_executions a",
             )
+    }
+
+    /**
+     * #376 (V48) — the evaluation history. **The column SETS equal the spec's §2.1/§2.2 lists exactly** (equality, never
+     * containment): a column that could carry a value, a bind, a selection, a result row, a driver message or SQL text
+     * cannot exist unnoticed (the brief's Security item 1). Then every CHECK's text, both cascades and the absent FKs (no
+     * version FK, no key FK), the indexes, and the CHECKs proven by INSERT — the planted oversize `outcomes_json` is
+     * refused by the DATABASE, the V17 rule (a constraint that parses but does not bind is invisible to a text assertion).
+     */
+    @Test
+    @Suppress("LongMethod") // the inventory IS the assertion (the V43 case's shape); splitting it hides what is asserted
+    fun `V48 creates the evaluation history - exactly the spec's columns, the checks, the cascades, and an oversize row refused`() {
+        columnsOf("parameter_evaluations") shouldContainExactlyInAnyOrder
+            listOf(
+                "id",
+                "workspace_id",
+                "parameter_set_id",
+                "parameter_set_version",
+                "caller",
+                "principal_user_id",
+                "principal_key_id",
+                "correlation_id",
+                "status",
+                "outcome_code",
+                "valid",
+                "outcomes_json",
+                "started_at",
+                "finished_at",
+            )
+        columnsOf("parameter_evaluation_queries") shouldContainExactlyInAnyOrder
+            listOf(
+                "id",
+                "evaluation_id",
+                "parameter",
+                "datasource",
+                "template_id",
+                "template_version",
+                "queued_at",
+                "started_at",
+                "ended_at",
+                "outcome",
+                "refusal_code",
+                "error_code",
+                "row_count",
+            )
+        query(
+            "SELECT conname || '|' || pg_get_constraintdef(oid) FROM pg_constraint" +
+                " WHERE conrelid IN ('parameter_evaluations'::regclass, 'parameter_evaluation_queries'::regclass) AND contype = 'c'" +
+                " ORDER BY conname COLLATE \"C\"",
+        ) { it.getString(1) } shouldContainExactly
+            listOf(
+                "chk_parameter_evaluation_queries_codes|CHECK ((((refusal_code IS NULL) OR (outcome = 'REFUSED'::text)) AND " +
+                    "((error_code IS NULL) OR (outcome = 'FAILED'::text)) AND ((row_count IS NULL) OR " +
+                    "((outcome = 'EXECUTED'::text) AND (row_count >= 0)))))",
+                "chk_parameter_evaluation_queries_outcome|CHECK ((outcome = ANY (ARRAY['EXECUTED'::text, 'REFUSED'::text, " +
+                    "'FAILED'::text, 'TIMEOUT'::text, 'ABORTED'::text])))",
+                "chk_parameter_evaluations_caller|CHECK ((caller = ANY (ARRAY['PAGE'::text, 'DASHBOARD'::text, 'PIPELINE'::text, " +
+                    "'REST'::text, 'MCP'::text])))",
+                "chk_parameter_evaluations_finished|CHECK ((((status = 'RUNNING'::text) AND (finished_at IS NULL)) OR " +
+                    "((status <> 'RUNNING'::text) AND (finished_at IS NOT NULL))))",
+                "chk_parameter_evaluations_outcomes_size|CHECK ((pg_column_size(outcomes_json) <= 8192))",
+                "chk_parameter_evaluations_principal|CHECK ((((principal_user_id IS NOT NULL) AND (principal_key_id IS NULL)) OR " +
+                    "((principal_user_id IS NULL) AND (principal_key_id IS NOT NULL))))",
+                "chk_parameter_evaluations_status|CHECK ((status = ANY (ARRAY['RUNNING'::text, 'COMPLETED'::text, 'ABORTED'::text, " +
+                    "'TIMEOUT'::text, 'FAILED'::text, 'INCOMPLETE'::text])))",
+                "chk_parameter_evaluations_valid|CHECK (((status = 'COMPLETED'::text) = (valid IS NOT NULL)))",
+                "chk_parameter_evaluations_version|CHECK ((parameter_set_version >= 1))",
+            )
+        query(
+            "SELECT conrelid::regclass::text || '->' || confrelid::regclass::text || ' ' || confdeltype::text FROM pg_constraint" +
+                " WHERE contype = 'f' AND conrelid IN ('parameter_evaluations'::regclass, 'parameter_evaluation_queries'::regclass)" +
+                " ORDER BY 1",
+        ) { it.getString(1) } shouldContainExactlyInAnyOrder
+            listOf(
+                "parameter_evaluations->workspaces a",
+                "parameter_evaluations->parameter_sets c",
+                "parameter_evaluations->users a",
+                "parameter_evaluation_queries->parameter_evaluations c",
+            )
+        query(
+            "SELECT pg_get_indexdef(indexrelid) FROM pg_index" +
+                " WHERE indrelid IN ('parameter_evaluations'::regclass, 'parameter_evaluation_queries'::regclass) AND NOT indisprimary" +
+                " ORDER BY 1",
+        ) { it.getString(1) } shouldContainExactlyInAnyOrder
+            listOf(
+                "CREATE INDEX idx_parameter_evaluations_set_started ON public.parameter_evaluations USING btree " +
+                    "(workspace_id, parameter_set_id, started_at DESC)",
+                "CREATE INDEX idx_parameter_evaluations_running ON public.parameter_evaluations USING btree (started_at) " +
+                    "WHERE (status = 'RUNNING'::text)",
+                "CREATE INDEX idx_parameter_evaluations_finished ON public.parameter_evaluations USING btree (started_at) " +
+                    "WHERE (finished_at IS NOT NULL)",
+                "CREATE INDEX idx_parameter_evaluation_queries_evaluation ON public.parameter_evaluation_queries " +
+                    "USING btree (evaluation_id)",
+            )
+
+        val userId = UUID.randomUUID()
+        val setId = UUID.randomUUID()
+        dataSource.connection.use { connection ->
+            connection.createStatement().use { statement ->
+                statement.execute(
+                    "INSERT INTO users (id, email, display_name, provider, provider_subject) " +
+                        "VALUES ('$userId', 'v48-$userId@datapipelines.test', 'V48', 'local', 'v48-$userId')",
+                )
+                statement.execute(
+                    "INSERT INTO parameter_sets (id, workspace_id, name, display_name, created_by) " +
+                        "VALUES ('$setId', '$DEFAULT_WORKSPACE_UUID', 'v48/sets/s${userId.toString().take(8)}', 'V48', '$userId')",
+                )
+
+                fun evaluation(
+                    outcomes: String,
+                    principal: String = "'$userId', NULL",
+                ) = "INSERT INTO parameter_evaluations (id, workspace_id, parameter_set_id, parameter_set_version, caller, " +
+                    "principal_user_id, principal_key_id, status, valid, outcomes_json, finished_at) VALUES ('${UUID.randomUUID()}', " +
+                    "'$DEFAULT_WORKSPACE_UUID', '$setId', 1, 'REST', $principal, 'COMPLETED', TRUE, $outcomes, NOW())"
+                // Positive control: a bounded record lands.
+                statement.execute(evaluation("'[{\"name\": \"a\", \"outcome\": \"resolved\"}]'::jsonb"))
+                val oversize =
+                    shouldThrow<SQLException> {
+                        // 2,000 md5 strings: ~70 KB of JSONB, far past the cap whether or not it would compress.
+                        statement.execute(evaluation("(SELECT jsonb_agg(md5(i::text)) FROM generate_series(1, 2000) i)"))
+                    }
+                oversize.message.orEmpty() shouldContain "chk_parameter_evaluations_outcomes_size"
+                shouldThrow<SQLException> { statement.execute(evaluation("NULL", principal = "'$userId', 'dpk_both'")) }
+                    .message
+                    .orEmpty() shouldContain "chk_parameter_evaluations_principal"
+                // A purged SET takes its history (the cascade).
+                statement.execute("DELETE FROM parameter_sets WHERE id = '$setId'")
+                statement.execute("DELETE FROM users WHERE id = '$userId'")
+            }
+        }
+        query("SELECT COUNT(*) FROM parameter_evaluations WHERE parameter_set_id = '$setId'") { it.getInt(1) }.single() shouldBe 0
     }
 
     /**
@@ -1208,7 +1341,7 @@ class FlywayMigrationIntegrationTest {
     }
 
     @Test
-    fun `creates exactly the thirty-four tables of metadata-db §4`() {
+    fun `creates exactly the thirty-eight tables of metadata-db §4`() {
         val tables =
             query(
                 """
@@ -1239,6 +1372,9 @@ class FlywayMigrationIntegrationTest {
                 // #194 (V39) — the parameter engine's sets and their versions (metadata-db §4.26/§4.27).
                 "parameter_set_versions",
                 "parameter_sets",
+                // #376 (V48) — the parameter-set evaluation history (metadata-db §4.37/§4.38).
+                "parameter_evaluation_queries",
+                "parameter_evaluations",
                 // #10 L1a (V42) — the two artifact families and the test evidence (metadata-db §4.28–§4.33).
                 // #10 L2 (V43) — a dashboard's refreshes and their execution links (§4.34–§4.35).
                 "dashboard_refresh_executions",
@@ -1338,6 +1474,13 @@ class FlywayMigrationIntegrationTest {
                 "parameter_set_versions.uq_parameter_set_versions_one_draft",
                 "parameter_sets.parameter_sets_pkey",
                 "parameter_sets.uq_parameter_sets_workspace_name",
+                // #376 (V48) — the History tab, the stale sweep, the retention cutoff, the queries' FK and the two PKs.
+                "parameter_evaluations.parameter_evaluations_pkey",
+                "parameter_evaluations.idx_parameter_evaluations_set_started",
+                "parameter_evaluations.idx_parameter_evaluations_running",
+                "parameter_evaluations.idx_parameter_evaluations_finished",
+                "parameter_evaluation_queries.parameter_evaluation_queries_pkey",
+                "parameter_evaluation_queries.idx_parameter_evaluation_queries_evaluation",
                 // #10 L1a (V42) — the same four per family; a run's (visualization, version, session) uniqueness
                 // is also its per-version lookup; a screenshot's PK is its run.
                 // #10 L2 (V43) — a refresh's list (newest first), the sweeper's RUNNING scan, the retention cutoff, and the
@@ -1507,6 +1650,16 @@ class FlywayMigrationIntegrationTest {
                 "chk_learned_facts_via",
                 // 137 (V27) — mail_sends.kind is the closed welcome | password_reset | new_user list.
                 "chk_mail_sends_kind",
+                // #376 (V48) — the evaluation history's state machine, closed lists and the outcomes bound (§4.37/§4.38).
+                "chk_parameter_evaluation_queries_codes",
+                "chk_parameter_evaluation_queries_outcome",
+                "chk_parameter_evaluations_caller",
+                "chk_parameter_evaluations_finished",
+                "chk_parameter_evaluations_outcomes_size",
+                "chk_parameter_evaluations_principal",
+                "chk_parameter_evaluations_status",
+                "chk_parameter_evaluations_valid",
+                "chk_parameter_evaluations_version",
                 // #194 (V39) — parameter_sets' pointer floor and parameter_set_versions' version floor, body shape,
                 // release and discard stamps, status and write surface (metadata-db §4.26/§4.27).
                 "chk_parameter_set_versions_body",

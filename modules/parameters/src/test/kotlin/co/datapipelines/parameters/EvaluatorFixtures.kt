@@ -99,6 +99,12 @@ internal object EvaluatorFixtures {
         )
     }
 
+    /** The fixtures' evaluator user — a person, so the attempt carries no key. */
+    val USER: UUID = UUID.fromString("a0740000-0000-0000-0000-000000000194")
+
+    /** An attempt for [caller] (#376: every evaluate names one); a fresh evaluation id per call. */
+    fun attempt(caller: EvaluationCaller = EvaluationCaller.REST): EvaluationAttempt = EvaluationAttempt.of(caller, USER, keyId = null)
+
     fun selections(vararg pairs: Pair<String, Any?>): Map<String, JsonNode?> =
         pairs.associate { (name, value) -> name to ParameterSetJson.mapper.valueToTree<JsonNode>(value) }
 

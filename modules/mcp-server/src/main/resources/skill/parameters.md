@@ -116,3 +116,7 @@ its type, `MULTI` as an array.
 
 An unknown `selections` key refuses the whole request. Sending only the changed control is the
 one mistake this loop cannot recover from: the server cannot tell "unchanged" from "cleared".
+
+Every evaluate is recorded, yours included: a failed or timed-out evaluation is visible on the
+Parameter Sets page's History tab, whoever ran it — point the person there rather than describing
+a failure you cannot see. The record holds codes and stamps only, never a value you submitted.

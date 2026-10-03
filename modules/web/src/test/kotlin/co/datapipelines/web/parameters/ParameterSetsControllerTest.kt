@@ -5,6 +5,7 @@ import co.datapipelines.application.lens.PromoterLens
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.WorkspaceContext
+import co.datapipelines.parameters.EvaluationCaller
 import co.datapipelines.parameters.ParameterEvaluator
 import co.datapipelines.parameters.ParameterSetImported
 import co.datapipelines.parameters.ParameterSetJson
@@ -275,7 +276,8 @@ class ParameterSetsControllerTest {
                 org = co.datapipelines.parameters.OrgEcho(null, null),
                 parameters = emptyList(),
             )
-        every { evaluator.evaluateBlocking(workspaceId, loaded, emptyMap()) } returns runtime
+        // #376: the REST route names itself — the history's caller is REST, the principal the session's person.
+        every { evaluator.evaluateBlocking(workspaceId, loaded, emptyMap(), match { it.caller == EvaluationCaller.REST }) } returns runtime
 
         val response = controller.evaluate(setId, """{"selections":{}}""")
 
@@ -295,7 +297,7 @@ class ParameterSetsControllerTest {
         error.code shouldBe "request.body_too_large"
         statusOf(error.code) shouldBe HttpStatus.PAYLOAD_TOO_LARGE
         error.details["limit_bytes"] shouldBe MAX_EVALUATE_REQUEST_BYTES
-        verify(exactly = 0) { evaluator.evaluateBlocking(any(), any(), any()) }
+        verify(exactly = 0) { evaluator.evaluateBlocking(any(), any(), any(), any()) }
     }
 
     @Test
@@ -342,7 +344,7 @@ class ParameterSetsControllerTest {
         error.code shouldBe "parameter.validation.body_invalid"
         error.details["path"] shouldBe "version"
         error.details["reason"] shouldBe "wrong_type"
-        verify(exactly = 0) { evaluator.evaluateBlocking(any(), any(), any()) }
+        verify(exactly = 0) { evaluator.evaluateBlocking(any(), any(), any(), any()) }
         verify(exactly = 0) { repository.findCurrent(any(), any()) }
     }
 
@@ -358,7 +360,7 @@ class ParameterSetsControllerTest {
         error.code shouldBe "parameter.validation.body_invalid"
         error.details["path"] shouldBe "selections"
         error.details["reason"] shouldBe "wrong_type"
-        verify(exactly = 0) { evaluator.evaluateBlocking(any(), any(), any()) }
+        verify(exactly = 0) { evaluator.evaluateBlocking(any(), any(), any(), any()) }
     }
 
     @Test

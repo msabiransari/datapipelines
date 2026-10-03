@@ -6,6 +6,8 @@ import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.parameters.EvaluateResponseJson
+import co.datapipelines.parameters.EvaluationAttempt
+import co.datapipelines.parameters.EvaluationCaller
 import co.datapipelines.parameters.ParameterErrorCodes
 import co.datapipelines.parameters.ParameterEvaluator
 import co.datapipelines.parameters.ParameterSetImported
@@ -513,7 +515,8 @@ class ParameterSetsController(
                 ?.properties()
                 ?.associate { it.key to it.value as JsonNode }
                 ?: emptyMap()
-        val response = evaluator.evaluateBlocking(workspaceId, set, selections)
+        val attempt = EvaluationAttempt.of(EvaluationCaller.REST, principal.userId, principal.keyId)
+        val response = evaluator.evaluateBlocking(workspaceId, set, selections, attempt)
         return ApiResponse.of(EvaluateResponseJson.write(response))
     }
 

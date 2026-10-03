@@ -124,9 +124,8 @@ class ParameterSetsWorkspaceModel(
 
     /**
      * The tab set the page's query contract admits (workspace spec §6.2): the closed set
-     * `workspace | history`, an unknown or missing value is `workspace`. S1 renders the workspace pane
-     * for both — `history` is ACCEPTED here so the S3 lane lands the strip entry without touching the
-     * parser, and until it does the page resolves it to the workspace pane.
+     * `workspace | history`, an unknown or missing value is `workspace`. `history` renders the set's
+     * evaluation records (#376, spec §6.4) in place of the live form and the graph.
      */
     enum class ParameterSetWorkspaceTab(
         val wire: String,
