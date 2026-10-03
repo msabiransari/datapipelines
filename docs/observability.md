@@ -1,9 +1,9 @@
 # Observability Specification
 
-**Status:** v1.31 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
+**Status:** v1.32 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
-**Last updated:** 2026-10-02
+**Last updated:** 2026-10-03
 
 ---
 
@@ -269,6 +269,31 @@ A refusal is named by `error` (its class) and `sql_state` (`FailureShape`, the �
 | Level | `event=` | When | Fields |
 |---|---|---|---|
 | WARN | `datasource.lease_cleanup_failed` | A selector lease's statement close, connection close or statement cancel was refused; a refused connection close DISCARDS the connection (never returned to service) | `datasource`, `operation` (`statement_close`/`connection_close`/`statement_cancel`), `error`, `sql_state` |
+
+#### 3.4M The parameter evaluation events (#376)
+
+The parameter-set evaluation history ([REST API §21.5](rest-api.md#215-the-observed-evaluation), [Metadata DB §8.1](metadata-db.md#81-execution-event-cleanup) retention, [§8.5](metadata-db.md#85-stale-parameter-evaluation-sweep) sweep) logs at these points. Every failure line names its cause by class (`error=`) and, for a store, by SQLState (`sql_state=`) — never by message (the 321 rule, §3.4G); NO line carries a selection, a binding value, a row or a query's text. A history write that fails is logged at ERROR and the evaluation carries on unrecorded: that is the #376 design — the record is a side channel of the evaluation, never its master — so a steady presence of `parameter.evaluation_record_failed` means the metadata store is refusing the history writes while evaluations still answer.
+
+| Level | `event=` | When | Fields |
+|---|---|---|---|
+| ERROR | `parameter.evaluation_record_failed` | One history write was refused by the store (`DataAccessException`); the evaluation continues unrecorded for that write | `write` (`start`/`query_queued`/`query_ended`/`end`/`abandoned_queries`), `evaluation_id`, `workspace_id`, `parameter_set_id`, `error`, `sql_state` |
+| WARN | `parameter.evaluation_defect` | The evaluator hit an unexpected `RuntimeException` (a defect, never an author's problem); the record closes `FAILED` with no code and the exception is rethrown | `evaluation_id`, `error` |
+| ERROR | `parameter.evaluation_failed` | The observed (page) route's evaluation threw a non-domain exception; its failure frame carried the stand-in code only, so the cause is logged here, with the stack trace. A `parameter.evaluation_defect` precedes it when the throw came from the evaluator itself | `evaluation_id`, `error` (the class's binary name) |
+| INFO | `parameter.evaluation_refused` | The observed route's evaluation was refused as a whole (a domain error — timeout, `response_too_large`); its `evaluation_failed` frame was already written | `evaluation_id`, `code` |
+| INFO | `parameter.evaluation_ended` | The stream's last frame: the evaluation ended (any outcome) and the stream closed | `evaluation_id`, `outcome`, `delivered` (whether the last frame reached a connected, still-authorised client) |
+| WARN | `parameter.evaluation_observer_failed` | The stream observer threw while receiving an event; the stream is closed and the evaluation carries on (the stream is a side channel) | `while` (the event's class), `error` |
+| INFO | `parameter.evaluation_stream_cut` | A stream was cut because its subscriber's standing no longer holds (expired session, revoked key, lost permission); the evaluation keeps running | `evaluation_id`, `verdict` |
+| WARN | `parameter.evaluation_stream_authority_failed` | The authority's check threw; the stream is treated as revoked (fail-closed) | `error` |
+| INFO | `parameter.evaluation_client_gone` | A stream's client vanished before the evaluation ended; the disconnect grace begins | `evaluation_id`, `grace_seconds` |
+| INFO | `parameter.evaluation_grace_elapsed` | The grace elapsed with no client: the evaluation is aborted | `evaluation_id`, `action=abort` |
+| WARN | `parameter.evaluation_tick_failed` | The stream registry's heartbeat/grace tick threw; the timer survives and the next tick retries | `error` |
+| DEBUG | `parameter.evaluation_stream_gone` | A frame or heartbeat write found the client gone (`IOException`; with `state=completed`, the emitter was already completed); the stream is marked disconnected. Carries the exception's stack trace | `evaluation_id`, `while` (the frame's SSE event name, or `heartbeat`), `state=completed` on one heartbeat variant |
+| DEBUG | `parameter.evaluation_stream_closed` | A frame write found the emitter already complete (`IllegalStateException`); the stream is marked disconnected. Carries the exception's stack trace | `evaluation_id`, `while` (the frame's SSE event name) |
+| WARN | `parameter.evaluation_swept` | The stale sweep closed a `RUNNING` record past its deadline as `INCOMPLETE` (metadata-db §8.5); one line per record | `evaluation_id`, `message` |
+| WARN | `parameter.evaluation_sweep_failed` | The sweep's UPDATE threw; the next tick retries | `error`, `sql_state` |
+| INFO | `parameter.evaluations_purged` | The retention step deleted finished evaluation records (nothing is logged for an empty tick); the plural twin of `dashboard.refreshes_purged` | `count`, `retention_days` |
+| WARN | `parameter.evaluation_retention_failed` | The retention DELETE threw; the next tick retries | `error`, `sql_state` |
+| WARN | `parameter.evaluation_retention_incomplete` | A retention batch came back full (a backlog): records older than the cutoff remain and the next tick takes the next batch | `count`, `message` |
 
 ### 3.5 Log destination
 
@@ -561,6 +586,7 @@ This is a construction rule, not a filter — the redacting encoder covers logs,
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-03 | v1.32 | 418 (#418) the parameter evaluation events catalogued | New **§3.4M**: the 18 `event=parameter.*` names the code logs (#376's history writes, the sweep and retention, the observed stream and its grace), each with its level, trigger and fields; a failed history write is ERROR and the evaluation continues unrecorded. The docs audit's §3.4 event extraction admits the `parameter` namespace in the same commit (`scripts/docs-audit.sh`; the `execution`/`dashboard` precedent) — without it every backticked name fails check C against the error-code catalog. metadata-db §8.1/§8.5 cite the rows. |
 | 2026-10-02 | v1.31 | 235 (#164) the audit boundary stated | **§7** states the rule: the audit log records authentication, administration, lifecycle verbs and MCP tool calls; REST reads produce no audit row by design (an MCP key is refused on REST); the one agent write over REST, the screenshot upload, is audited as `visualization.test.screenshot_uploaded`. |
 | 2026-09-30 | v1.30 | 337-c (#337) redaction composed on the original text | **§9.2**: the rendered-text layer is ONE left-to-right recognizer over the original text, shared by the JSON `message`/`stack_trace` members and the console format — not an assignment pass followed by a JSON pass (and, on the console, two nested `%replace` calls). The delivered composition let the first pass rewrite text inside a quoted value (consuming an escape with it), so the second pass read an orphaned quote as the end of the outer value and a secret tail survived (`{"password":"x secret=abc\"tail"}`); a secret-shaped fragment inside a value is now part of that value, and overlapping spans merge into one masked region (a nested match that outruns its container extends the mask). A failed match is no longer rescanned from every later key start (a repeated `password_…` token with no value was quadratic, measured 4 s at 72 KB); the bound is a counted-step test. The console pattern's redaction word `%dpRedact` is a house logback converter registered by the encoder. The sensitive-key list, the never-redacted set, `***`-keeps-key, the redact-before-bound order and the no-disable rule are unchanged (drift-tested); the known limits are unchanged. |
 | 2026-09-30 | v1.29 | 337-b (#337) redaction and console correlation completed | **§9.2**: the rendered-text layer is now stated as built — case-insensitive in BOTH text forms by one key rule (the JSON form was case-sensitive), the whole value masked with delimiters kept (escaped quotes and backslashes never end a quoted value; single-quoted values; bare JSON scalars; a never-closed quote masks to the end of its line), the stack trace redacted BEFORE its 8192-character bound — and its known limits are listed rather than implied (object/array values, escaped-quote JSON keys, Python-style keys, the unquoted colon form). The member matcher now also accepts the prefixed-and-suffixed compound the text matcher always masked (`db_password_v2`). **§3.3**: the console format prints `correlation_id=` / `execution_id=` before the message (`-` when absent; the two named MDC keys, no MDC dump). **§3.1**: under `json` the binding switches Spring's banner off so a normal startup's stdout is JSON lines only (pinned by a normal-boot test). The scrubber's key pattern lost its prefix group loop: measured on the delivered pattern, a 4 KB `a_a_a_…` token overflowed the stack inside the logging call and a 50 KB word before `=` took ~15 s. The sensitive-key list, the never-redacted set, `***`-keeps-key and the no-disable rule are unchanged (drift-tested). |
