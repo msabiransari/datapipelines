@@ -183,6 +183,71 @@ test("the theme mapping reads the chart tokens through a probe and never invents
   }
 });
 
+test("#386: the size defaults sit UNDER the author — compact margin, automargin on the axes, the stored keys win", async () => {
+  const plotly = require(resolveStatic("datapipelines-dashboard-plotly.js"));
+  const { withSizeDefaults, mergeLayout, COMPACT_MARGIN, COMPACT_TITLED_TOP } = plotly._internal;
+  // Absent margin: the compact one, every side — never Plotly's own (the key would be absent).
+  const bare = withSizeDefaults({});
+  assert.deepEqual(bare.margin, { l: COMPACT_MARGIN.l, r: COMPACT_MARGIN.r, t: COMPACT_MARGIN.t, b: COMPACT_MARGIN.b, pad: 0 });
+  assert.ok(COMPACT_MARGIN.t < 20 && COMPACT_MARGIN.l < 20, "compact means well under Plotly's 80/100: " + JSON.stringify(COMPACT_MARGIN));
+  assert.equal(bare.xaxis.automargin, true, "x automargin defaults on");
+  assert.equal(bare.yaxis.automargin, true, "y automargin defaults on");
+  assert.deepEqual(withSizeDefaults(undefined).margin, bare.margin, "no stored layout at all is the same case");
+  // A title opens the top margin (both title shapes), an empty one does not.
+  assert.equal(withSizeDefaults({ title: { text: "Units" } }).margin.t, COMPACT_TITLED_TOP);
+  assert.equal(withSizeDefaults({ title: "Units" }).margin.t, COMPACT_TITLED_TOP);
+  assert.equal(withSizeDefaults({ title: { text: "" } }).margin.t, COMPACT_MARGIN.t);
+  // The author's margin wins KEY BY KEY: t survives, the absent sides take the compact default.
+  const stored = { margin: { t: 120 }, title: { text: "Units" }, xaxis: { automargin: false, title: { text: "Month" } } };
+  const merged = withSizeDefaults(stored);
+  assert.equal(merged.margin.t, 120, "the stored top margin survives the defaults");
+  assert.equal(merged.margin.l, COMPACT_MARGIN.l, "an absent side is compact");
+  assert.equal(merged.xaxis.automargin, false, "the author's automargin=false stands");
+  assert.equal(merged.xaxis.title.text, "Month", "the rest of the axis is untouched");
+  assert.equal(merged.yaxis.automargin, true, "the other axis still defaults on");
+  assert.equal(stored.margin.l, undefined, "the stored configuration is never mutated");
+  assert.equal(stored.yaxis, undefined);
+  // A numbered axis the author declared defaults on too.
+  assert.equal(withSizeDefaults({ yaxis2: { overlaying: "y" } }).yaxis2.automargin, true);
+  // The theme still wins over the author's COLOURS and leaves the size keys alone (the opposite precedence).
+  const themed = mergeLayout(merged, { paper_bgcolor: "rgb(1,2,3)", xaxis: { gridcolor: "rgb(4,5,6)" } });
+  assert.equal(themed.paper_bgcolor, "rgb(1,2,3)");
+  assert.equal(themed.xaxis.gridcolor, "rgb(4,5,6)");
+  assert.equal(themed.xaxis.automargin, false, "the theme does not touch automargin");
+  assert.equal(themed.margin.t, 120, "the theme does not touch the margin");
+});
+
+test("#386: the plotly renderer hands Plotly the compact margin and automargin on every render", async () => {
+  installDom();
+  try {
+    const runtime = require(resolveStatic("datapipelines-dashboard.js"));
+    const plotly = require(resolveStatic("datapipelines-dashboard-plotly.js"));
+    plotly.register(runtime);
+    const calls = [];
+    globalThis.window.Plotly = {
+      react: (el, data, layout, config) => {
+        calls.push({ layout });
+        return Promise.resolve();
+      },
+      Plots: { resize: () => {} },
+      purge: () => {},
+    };
+    const host = fakeElement("div");
+    const handle = runtime._internal.renderers().plotly.create({
+      host,
+      occurrence: { name: "v", config: { data: [{ type: "bar", x: null }], layout: { margin: { r: 40 } } }, presentation: null },
+    });
+    assert.equal(await handle.renderData({ name: "v" }, 2, { "data[0].x": [1, 2] }), "rendered");
+    const layout = calls[0].layout;
+    assert.equal(layout.margin.t, plotly._internal.COMPACT_MARGIN.t, "no title: the compact top");
+    assert.equal(layout.margin.r, 40, "the stored right margin wins");
+    assert.equal(layout.xaxis.automargin, true);
+    assert.equal(layout.yaxis.automargin, true);
+  } finally {
+    uninstallDom();
+  }
+});
+
 test("the plotly renderer resolves rendered on the plot and answers no-data for empty rows", async () => {
   installDom();
   try {
@@ -323,6 +388,167 @@ test("the composite adapter builds the grid, mounts renderers by kind and render
     // The contract's readSelections answers every rendered control's TYPED wire value.
     await adapter.renderParameters(compositeState());
     assert.deepEqual(adapter.readSelections(), { year: 2026 });
+    adapter.dispose();
+  } finally {
+    uninstallDom();
+  }
+});
+
+/**
+ * A `matchMedia` stand-in: answers the composite's "below N px" query against a settable viewport
+ * width, and fires `change` on the queries whose answer a resize flips (the browser's contract).
+ */
+function installViewport(width) {
+  const queries = [];
+  const viewport = {
+    width,
+    queries,
+    resize(next) {
+      const before = queries.map((q) => q.matches);
+      viewport.width = next;
+      queries.forEach((q, i) => {
+        if (q.matches !== before[i]) q.listeners.slice().forEach((fn) => fn({ matches: q.matches, media: q.media }));
+      });
+    },
+    listening() {
+      return queries.reduce((n, q) => n + q.listeners.length, 0);
+    },
+  };
+  globalThis.window.matchMedia = (media) => {
+    const parsed = /^not all and \(min-width: (\d+)px\)$/.exec(media);
+    assert.ok(parsed, "the composite asks one numeric 'below N px' query: " + media);
+    const query = {
+      media,
+      breakpoint: Number(parsed[1]),
+      listeners: [],
+      get matches() {
+        return viewport.width < this.breakpoint;
+      },
+      addEventListener(type, fn) {
+        if (type === "change") this.listeners.push(fn);
+      },
+      removeEventListener(type, fn) {
+        if (type === "change") this.listeners = this.listeners.filter((other) => other !== fn);
+      },
+    };
+    queries.push(query);
+    return query;
+  };
+  return viewport;
+}
+
+const SEEDED_GRID = [
+  { name: "slowchart", x: 3, y: 4, w: 9, h: 2 },
+  { name: "revenue", x: 0, y: 0, w: 6, h: 4 },
+  { name: "total", x: 0, y: 4, w: 3, h: 2 },
+  { name: "cells", x: 6, y: 0, w: 6, h: 4 },
+];
+
+const placement = (container, name) => {
+  const slot = container.querySelectorAll("[data-dp-slot]").find((el) => el.getAttribute("data-dp-slot") === name);
+  const s = slot.style;
+  return [s.gridColumnStart, s.gridColumnEnd, s.gridRowStart, s.gridRowEnd].join(" / ");
+};
+
+test("#387: below breakpoint_px every item spans the full width in grid order, its own row span kept", async () => {
+  installDom();
+  try {
+    const viewport = installViewport(767);
+    const runtime = require(resolveStatic("datapipelines-dashboard.js"));
+    runtime._internal.resetRenderers();
+    const container = fakeElement("div");
+    const adapter = runtime.adapters(container);
+    // breakpoint_px ABSENT — the wire omits a null (NON_NULL): the 768 case.
+    await adapter.mountLayout({ columns: 12, grid: SEEDED_GRID });
+    assert.equal(viewport.queries[0].breakpoint, 768, "absent breakpoint_px is 768");
+    assert.equal(container.children[0].style.gridTemplateColumns, "repeat(12, minmax(0, 1fr))", "the track list stands; the items span it");
+    // Grid order is row, then column — NOT the configuration's array order (slowchart is listed first).
+    assert.equal(placement(container, "revenue"), "1 / span 12 / 1 / span 4");
+    assert.equal(placement(container, "cells"), "1 / span 12 / 5 / span 4");
+    assert.equal(placement(container, "total"), "1 / span 12 / 9 / span 2");
+    assert.equal(placement(container, "slowchart"), "1 / span 12 / 11 / span 2");
+    const defaultSlot = container.children[0].children.find((el) => el.getAttribute("data-dp-slot") === null);
+    assert.equal(defaultSlot.style.gridColumnEnd, "span 12", "the default slot is full width too");
+    assert.equal(defaultSlot.style.gridRowStart, undefined, "the default slot is never placed: it auto-flows after the items");
+    adapter.dispose();
+  } finally {
+    uninstallDom();
+  }
+});
+
+test("#387: at and above breakpoint_px the stored spans hold; a viewport crossing re-places and resizes, both ways", async () => {
+  installDom();
+  try {
+    const viewport = installViewport(768);
+    const runtime = require(resolveStatic("datapipelines-dashboard.js"));
+    runtime._internal.resetRenderers();
+    let resized = 0;
+    runtime.registerRenderer({
+      kind: "plotly",
+      version: "4",
+      create: () => ({ renderData: () => Promise.resolve("rendered"), resize: () => (resized += 1) }),
+    });
+    const container = fakeElement("div");
+    const adapter = runtime.adapters(container);
+    await adapter.mountLayout({ columns: 12, grid: SEEDED_GRID });
+    await adapter.mountVisualization({ name: "revenue", renderer: { kind: "plotly", version: "4" }, config: {} }, { kind: "plotly", version: "4" });
+    const stored = { revenue: "1 / span 6 / 1 / span 4", cells: "7 / span 6 / 1 / span 4", total: "1 / span 3 / 5 / span 2", slowchart: "4 / span 9 / 5 / span 2" };
+    for (const [name, expected] of Object.entries(stored)) assert.equal(placement(container, name), expected, name + " at 768 px");
+    assert.equal(viewport.listening(), 1, "one viewport listener");
+    viewport.resize(767);
+    assert.equal(placement(container, "slowchart"), "1 / span 12 / 11 / span 2", "below: collapsed by the listener");
+    assert.equal(resized, 1, "the crossing resized the mounted renderer");
+    viewport.resize(1280);
+    for (const [name, expected] of Object.entries(stored)) assert.equal(placement(container, name), expected, name + " restored");
+    assert.equal(resized, 2);
+    const defaultSlot = container.children[0].children.find((el) => el.getAttribute("data-dp-slot") === null);
+    assert.equal(defaultSlot.style.gridColumnEnd, "", "the default slot's span is cleared above the breakpoint");
+    // Teardown: dispose removes the listener; a later crossing touches nothing.
+    adapter.dispose();
+    assert.equal(viewport.listening(), 0, "dispose removed the viewport listener");
+    viewport.resize(500);
+    assert.equal(resized, 2, "no resize after dispose");
+  } finally {
+    uninstallDom();
+  }
+});
+
+test("#387: breakpoint_px is honoured as a clamped NUMBER — 500 collapses at 499 and not at 500", async () => {
+  installDom();
+  try {
+    const runtime = require(resolveStatic("datapipelines-dashboard.js"));
+    runtime._internal.resetRenderers();
+    const mountAt = async (width, layout) => {
+      const viewport = installViewport(width);
+      const container = fakeElement("div");
+      const adapter = runtime.adapters(container);
+      await adapter.mountLayout(Object.assign({ columns: 12, grid: SEEDED_GRID }, layout));
+      const result = { breakpoint: viewport.queries[0].breakpoint, revenue: placement(container, "revenue") };
+      adapter.dispose();
+      return result;
+    };
+    assert.equal((await mountAt(499, { breakpoint_px: 500 })).revenue, "1 / span 12 / 1 / span 4", "499 < 500: collapsed");
+    assert.equal((await mountAt(500, { breakpoint_px: 500 })).revenue, "1 / span 6 / 1 / span 4", "500: the stored grid");
+    assert.equal((await mountAt(700, { breakpoint_px: 500 })).revenue, "1 / span 6 / 1 / span 4", "the default 768 is not what decides");
+    // Only a clamped number reaches the query: out of range clamps, a non-number is the default.
+    assert.equal((await mountAt(800, { breakpoint_px: 0 })).breakpoint, 1);
+    assert.equal((await mountAt(800, { breakpoint_px: 20000 })).breakpoint, 10000);
+    assert.equal((await mountAt(800, { breakpoint_px: "500px), (min-width: 0" })).breakpoint, 768);
+    assert.equal((await mountAt(800, { breakpoint_px: null })).breakpoint, 768);
+  } finally {
+    uninstallDom();
+  }
+});
+
+test("#387: without matchMedia (a non-browser host) the stored grid always holds", async () => {
+  installDom();
+  try {
+    const runtime = require(resolveStatic("datapipelines-dashboard.js"));
+    runtime._internal.resetRenderers();
+    const container = fakeElement("div");
+    const adapter = runtime.adapters(container);
+    await adapter.mountLayout({ columns: 12, grid: SEEDED_GRID });
+    assert.equal(placement(container, "slowchart"), "4 / span 9 / 5 / span 2");
     adapter.dispose();
   } finally {
     uninstallDom();

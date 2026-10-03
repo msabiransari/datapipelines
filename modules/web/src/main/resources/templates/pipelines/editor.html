@@ -44,6 +44,9 @@
     <!-- #348: the workspace version context (pure, node-tested) — every execute POST and
          node-SQL request reads the viewed version from it. Loaded before init.js. -->
     <script th:src="@{/js/pipeline-editor/workspace.js}"></script>
+    <!-- #402: the workspaces' own history entries (pure core + one window listener) — an
+         in-page version/tab switch pushes, Back/Forward replays. Loaded before init.js. -->
+    <script th:src="@{/js/workspace/history.js}"></script>
     <script th:src="@{/js/pipeline-editor/init.js}"></script>
     <script th:src="@{/js/pipeline-editor/sql-highlight.js}"></script>
     <script th:src="@{/js/pipeline-editor/graph.js}"></script>

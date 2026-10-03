@@ -37,8 +37,18 @@ spec:
           envFrom:
             - secretRef:
                 name: {{ required "existingSecret is required — see values.yaml (deployment.md §5.1)" .Values.existingSecret }}
-          {{- if .Values.extraEnv }}
+          {{- if hasKey .Values.extraEnv "DATAPIPELINES_DUCKDB_EXTENSION_DIRECTORY" }}{{ fail "set duckdb.extensionDirectory, not extraEnv.DATAPIPELINES_DUCKDB_EXTENSION_DIRECTORY" }}{{- end }}
+          {{- if hasKey .Values.extraEnv "DATAPIPELINES_DUCKDB_MEMORY_LIMIT" }}{{ fail "set duckdb.memoryLimit, not extraEnv.DATAPIPELINES_DUCKDB_MEMORY_LIMIT" }}{{- end }}
+          {{- if or .Values.extraEnv .Values.duckdb.extensionDirectory .Values.duckdb.memoryLimit }}
           env:
+            {{- if .Values.duckdb.extensionDirectory }}
+            - name: DATAPIPELINES_DUCKDB_EXTENSION_DIRECTORY
+              value: {{ .Values.duckdb.extensionDirectory | quote }}
+            {{- end }}
+            {{- if .Values.duckdb.memoryLimit }}
+            - name: DATAPIPELINES_DUCKDB_MEMORY_LIMIT
+              value: {{ .Values.duckdb.memoryLimit | quote }}
+            {{- end }}
             {{- range $name, $value := .Values.extraEnv }}
             - name: {{ $name }}
               value: {{ $value | quote }}

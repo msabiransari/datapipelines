@@ -1,0 +1,87 @@
+<!-- The workspace's VERSIONS tab (#399) — the admitted history, newest first, each row marked viewed /
+     current / draft / discarded, and — for a caller whose permissions admit the verb — the lifecycle
+     actions. The dialogs open into #dp-dialog with from=versions, so a success HX-Redirects back onto THIS
+     tab with a flash toast. The POST re-runs the service's guard; these controls only decide what to SAY.
+
+     The verbs and their permission rows (auth §7.6 carries the routes):
+       - Release draft (the one template consent rides inside the dialog)   visualization.release
+       - Purge draft / Discard / Restore / Purge version                    visualization.version.manage
+       - Make current                                                       visualization.switch_version
+       - Purge visualization                                                visualization.delete
+     A viewer and a promoter hold none, and draw no verb (RoleVisibilityRenderTest pins the ladder).
+     Export is a READ (`visualization.read`): the existing REST route's JSON document, every role. -->
+<div xmlns:th="http://www.thymeleaf.org" th:fragment="versions" class="viz-versions">
+  <div class="ds-card">
+    <div class="app-card-h">
+      <h3>Versions</h3>
+      <span class="app-card-note" th:text="${#lists.size(versions)} + (${#lists.size(versions)} == 1 ? ' version' : ' versions')">3 versions</span>
+      <div class="dp-version-actions">
+        <a class="ds-button ds-button-ghost ds-button-sm" data-viz-export hx-boost="false" download
+           th:href="@{/api/v1/visualizations/{id}/export(id=${visualizationId})}">Export</a>
+      </div>
+    </div>
+    <div class="app-card-b">
+      <p class="u-secondary u-text-sm" th:if="${#lists.isEmpty(versions)}">No versions your role can view yet.</p>
+      <div class="dt-frame dt-scroll dt-h-sm" th:unless="${#lists.isEmpty(versions)}">
+      <div class="dt-viewport" tabindex="-1">
+      <table class="ds-table">
+        <thead>
+          <tr><th>Version</th><th>Status</th><th>Created</th><th>Released</th><th><span class="u-sr-only">Actions</span></th></tr>
+        </thead>
+        <tbody>
+          <tr th:each="v : ${versions}" th:attr="data-version-row=${v.version}">
+            <td class="u-mono">
+              <!-- A DISCARDED version is not viewable (it serves nothing): its number is text, not a link. -->
+              <a th:unless="${v.isDiscarded}" hx-boost="false"
+                 th:href="@{/visualizations/{id}(id=${visualizationId}, version=${v.version}, tab='preview')}"
+                 th:text="'v' + ${v.version}">v3</a>
+              <span th:if="${v.isDiscarded}" th:text="'v' + ${v.version}">v1</span>
+              <span class="ds-badge ds-badge-default" th:if="${v.isViewed}">viewing</span>
+              <span class="ds-badge ds-badge-success" th:if="${v.isCurrent}">current</span>
+              <span class="ds-badge ds-badge-warning" th:if="${v.isDraft}">draft</span>
+              <span class="ds-badge ds-badge-default" th:if="${v.isDiscarded}">discarded</span>
+            </td>
+            <td th:text="${v.status.toLowerCase()}">released</td>
+            <td th:text="${v.createdAt}">2026-10-01T09:00:00Z</td>
+            <td th:text="${v.releasedAt ?: '—'}">2026-10-01T10:00:00Z</td>
+            <td class="dp-version-actions">
+              <th:block th:if="${v.isDraft}">
+                <button th:if="${canRelease}" type="button" class="ds-button ds-button-primary ds-button-sm" data-verb="visualization-release"
+                        th:attr="hx-get=@{'/partials/visualizations/{id}/lifecycle/release'(id=${visualizationId}, from='versions')},
+                                 hx-target='#dp-dialog', hx-swap='innerHTML'">Release…</button>
+                <button th:if="${canManageVersions}" type="button" class="ds-button ds-button-secondary ds-button-sm" data-verb="visualization-purge-draft"
+                        th:attr="hx-get=@{'/partials/visualizations/{id}/lifecycle/purge-draft'(id=${visualizationId}, version=${v.version}, from='versions')},
+                                 hx-target='#dp-dialog', hx-swap='innerHTML'">Purge draft…</button>
+              </th:block>
+              <th:block th:if="${canManageVersions}">
+                <button th:if="${v.status == 'RELEASED'}" type="button" class="ds-button ds-button-secondary ds-button-sm" data-verb="visualization-discard"
+                        th:attr="hx-get=@{'/partials/visualizations/{id}/lifecycle/discard'(id=${visualizationId}, version=${v.version}, from='versions')},
+                                 hx-target='#dp-dialog', hx-swap='innerHTML'">Discard…</button>
+                <button th:if="${v.isDiscarded}" type="button" class="ds-button ds-button-secondary ds-button-sm" data-verb="visualization-restore"
+                        th:attr="hx-get=@{'/partials/visualizations/{id}/lifecycle/restore'(id=${visualizationId}, version=${v.version}, from='versions')},
+                                 hx-target='#dp-dialog', hx-swap='innerHTML'">Restore…</button>
+                <button th:if="${v.isDraft}" type="button" class="ds-button ds-button-danger ds-button-sm" data-verb="visualization-purge-version"
+                        th:attr="hx-get=@{'/partials/visualizations/{id}/lifecycle/purge-version'(id=${visualizationId}, version=${v.version}, from='versions')},
+                                 hx-target='#dp-dialog', hx-swap='innerHTML'">Purge version…</button>
+              </th:block>
+              <button th:if="${canSwitch and !v.isCurrent and !v.isDiscarded}" type="button"
+                      class="ds-button ds-button-ghost ds-button-sm" data-verb="visualization-switch"
+                      th:attr="hx-get=@{'/partials/visualizations/{id}/lifecycle/switch'(id=${visualizationId}, version=${v.version}, from='versions')},
+                               hx-target='#dp-dialog', hx-swap='innerHTML'">Make current…</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      </div>
+      </div>
+
+      <!-- PURGE VISUALIZATION — the one whole-entity verb, in its own section: sole-draft only, typed confirm. -->
+      <div class="dp-danger-zone" th:if="${canDelete}">
+        <button type="button" class="ds-button ds-button-danger ds-button-sm" data-verb="visualization-purge-entity"
+                th:attr="hx-get=@{'/partials/visualizations/{id}/lifecycle/purge-entity'(id=${visualizationId}, from='versions')},
+                         hx-target='#dp-dialog', hx-swap='innerHTML'">Purge visualization…</button>
+        <span class="u-secondary u-text-sm" th:text="${soleDraft} ? 'Deletes the visualization — its only version is a draft.' : 'Deletes the visualization — only possible while its only version is a draft.'">Deletes the visualization — only possible while its only version is a draft.</span>
+      </div>
+    </div>
+  </div>
+</div>

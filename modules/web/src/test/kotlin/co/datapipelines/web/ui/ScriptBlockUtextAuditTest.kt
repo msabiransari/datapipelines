@@ -11,9 +11,9 @@ import java.io.File
  * written through `ScriptSafeJson`, and the allowlist of `th:utext` slots is closed.
  *
  * `th:utext` is the unescaped insertion point: whatever the model carries reaches the
- * document as markup. Today that is legitimate for exactly seven slots — the two rendered
- * Markdown bodies (escaped by `DocsCatalog` since 188, #190) and the five JSON-LD / JSON script
- * blocks, which are safe ONLY because their writers escape. The sweep pins both halves:
+ * document as markup. Today that is legitimate for exactly eight files — the two rendered
+ * Markdown bodies (escaped by `DocsCatalog` since 188, #190) and the six JSON-LD / JSON script
+ * files, which are safe ONLY because their writers escape. The sweep pins both halves:
  * no NEW unescaped slot can arrive silently, and the editor's two blobs cannot lose their
  * writer-side escaping without this audit going red.
  *
@@ -56,8 +56,24 @@ class ScriptBlockUtextAuditTest {
      * its size makes that a deliberate, reviewed act (the AlpineCloakAuditTest rule).
      */
     @Test
-    fun `the allowlist is exactly the six files argued for`() {
-        ALLOWED.size shouldBe 6
+    fun `the allowlist is exactly the eight files argued for`() {
+        ALLOWED.size shouldBe 8
+    }
+
+    @Test
+    fun `the parameter-set controller writes both json blobs through ScriptSafeJson`() {
+        val source = File("src/main/kotlin/co/datapipelines/web/ui/ParameterSetsUiController.kt").also { require(it.isFile) }.readText()
+        // The two blocks of parameter-sets/workspace.html (#374): the set's body and the workspace state. A slot that
+        // stops matching its shape fails here, not in a browser holding a set whose display_name closes the block.
+        listOf("parameterSetJson", "workspaceJson").forEach { attribute ->
+            require(
+                Regex(
+                    """addAttribute\("$attribute", ScriptSafeJson\.forScriptBlock\(mapper\.writeValueAsString\(""",
+                ).containsMatchIn(source),
+            ) {
+                "'$attribute' is not written through ScriptSafeJson.forScriptBlock in ParameterSetsUiController.kt"
+            }
+        }
     }
 
     @Test
@@ -91,12 +107,14 @@ class ScriptBlockUtextAuditTest {
         val UTEXT = Regex("""\sth:utext=""")
 
         /**
-         * Every `th:utext` slot, with the count each file may carry. All six writers are
+         * Every `th:utext` slot, with the count each file may carry. All eight writers are
          * safe TODAY: `docs/doc.html` and `docs/doc-public.html` render packaged Markdown
          * through a renderer that escapes raw HTML (188, #190), and the three JSON writers go through
          * [ScriptSafeJson] — the docs' JSON-LD via `DocJsonLd`, the FAQ blocks via
          * `FaqJsonLd`, the editor's two blobs via `PipelineEditorController`, the test preview's block via
-         * `VisualizationPreviewController` (#353).
+         * `VisualizationPreviewController` (#353), the visualization workspace's Preview tab via
+         * `VisualizationTabModel` (#399), the parameter-set workspace's two blocks via
+         * `ParameterSetsUiController` (#374).
          */
         val ALLOWED =
             mapOf(
@@ -109,6 +127,14 @@ class ScriptBlockUtextAuditTest {
                 // results the runtime's fixture mode mounts), written through ScriptSafeJson by
                 // VisualizationPreviewController; case names and assertion labels render through th:text.
                 "visualizations/preview.html" to 1,
+                // #399 — the visualization workspace's Preview tab: the SAME block the capability page embeds
+                // (PreviewViews.page through ScriptSafeJson, by VisualizationTabModel.previewJson); case names and
+                // assertion labels render through th:text.
+                "partials/visualization-preview.html" to 1,
+                // #374 — the parameter-set workspace's two JSON blocks (the set's body, the workspace state: the
+                // viewed version and the evaluate flag), written through ScriptSafeJson by ParameterSetsUiController;
+                // every label, path and count on the page renders through th:text.
+                "parameter-sets/workspace.html" to 2,
             )
     }
 }

@@ -23,7 +23,8 @@
    *    always active, exactly one panel visible.
    *
    * What does NOT live here: the lazy tab reads and their generation stamps (init.js),
-   * the URL (init.js replaceState), and every DOM effect.
+   * the URL (init.js pushes a history entry through workspace/history.js, #402), and
+   * every DOM effect.
    */
 
   var FLOW = "flow";

@@ -5,6 +5,8 @@ import co.datapipelines.application.mcp.McpToolLearnings
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.mcp.docs.DocArea
 import co.datapipelines.parameters.EvaluateResponseJson
+import co.datapipelines.parameters.EvaluationAttempt
+import co.datapipelines.parameters.EvaluationCaller
 import co.datapipelines.parameters.ParameterEvaluator
 import co.datapipelines.parameters.ParameterSetBody
 import co.datapipelines.parameters.ParameterSetImported
@@ -427,7 +429,8 @@ class ParameterSetsEvaluateTool(
                 .objectArg("selections")
                 ?.mapValues { (_, value) -> ParameterSetJson.mapper.valueToTree<JsonNode>(value) }
                 ?: emptyMap()
-        val response = evaluator.evaluateBlocking(workspaceId, loaded, selections)
+        val attempt = EvaluationAttempt.of(EvaluationCaller.MCP, ctx.principal.userId, ctx.principal.keyId)
+        val response = evaluator.evaluateBlocking(workspaceId, loaded, selections, attempt)
         return EvaluateResponseJson.write(response)
     }
 

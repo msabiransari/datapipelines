@@ -43,6 +43,9 @@ class DashboardPartialControllerTest {
             pipelineNames,
             co.datapipelines.web.EVERYTHING_LENS,
             browse,
+            // #400 — the family's service (the Overview/Versions/Keys tabs' reads); relaxed,
+            // because these cases pin WHAT the controller asks, not what the service answers.
+            mockk<co.datapipelines.visualization.DashboardService>(relaxed = true),
         )
 
     private val userId = UUID.randomUUID()
@@ -184,10 +187,10 @@ class DashboardPartialControllerTest {
     // ------------------------------------------------------------ #10 L3b: the tree partial
 
     @Test
-    fun `the tree partial threads the pager's offset and the instance scope to the level`() {
+    fun `the tree partial threads the pager's offset to the level - the NAV branch's only instance (#400)`() {
         authenticate()
 
-        controller.dashboardTree(model, prefix = "finance/dashboards", scope = "nav", offset = 25)
+        controller.dashboardTree(model, prefix = "finance/dashboards", q = null, scope = "nav", offset = 25)
 
         verify(exactly = 1) {
             browse.fillLevel(
@@ -196,19 +199,45 @@ class DashboardPartialControllerTest {
                 any(),
                 prefix = "finance/dashboards",
                 offset = 25,
-                scope = DashboardBrowseModel.SCOPE_NAV,
             )
         }
     }
 
     @Test
-    fun `the tree partial without an offset is page one, and an unknown scope is the page instance`() {
+    fun `the tree partial without an offset is page one, and an unknown scope is the flat branch`() {
         authenticate()
 
-        controller.dashboardTree(model, prefix = null, scope = "bogus", offset = null)
+        controller.dashboardTree(model, prefix = null, q = null, scope = "bogus", offset = null)
 
         verify(exactly = 1) {
-            browse.fillLevel(model, workspaceId, any(), prefix = null, offset = 0, scope = DashboardBrowseModel.SCOPE_PAGE)
+            browse.fillWrapper(model, workspaceId, any(), q = null, offset = 0, scope = DashboardListScope.PAGE)
         }
+    }
+
+    @Test
+    fun `the branch's search dispatches the flat list into the nav root, and the catalog partial is always flat (#400)`() {
+        authenticate()
+
+        controller.dashboardTree(model, prefix = null, q = "revenue", scope = "nav", offset = null)
+        verify(exactly = 1) {
+            browse.fillWrapper(model, workspaceId, any(), q = "revenue", offset = 0, scope = DashboardListScope.NAV)
+        }
+
+        controller.dashboardCatalog(model, q = null, offset = 50)
+        verify(exactly = 1) {
+            browse.fillWrapper(model, workspaceId, any(), q = null, offset = 50, scope = DashboardListScope.PAGE)
+        }
+    }
+
+    @Test
+    fun `the overview partial bounds the version and threads the lensed read (#400)`() {
+        authenticate()
+        val id = UUID.randomUUID()
+
+        controller.dashboardOverview(model, id, version = 2)
+        verify(exactly = 1) { browse.fillOverview(model, workspaceId, any(), id, 2) }
+
+        controller.dashboardVersions(model, id)
+        verify(exactly = 1) { browse.fillVersions(model, workspaceId, any(), id, any()) }
     }
 }

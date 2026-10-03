@@ -2,9 +2,11 @@ package co.datapipelines.web.visualizations
 
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.visualization.ArtifactJson
+import co.datapipelines.visualization.ArtifactVersion
 import co.datapipelines.visualization.PreviewCase
 import co.datapipelines.visualization.TestPreview
 import co.datapipelines.visualization.TestSessionLinks
+import co.datapipelines.visualization.VisualizationBody
 import co.datapipelines.visualization.VisualizationErrorCodes
 import co.datapipelines.visualization.VisualizationTestCapabilities
 import co.datapipelines.web.dashboards.runtime.RuntimeViews
@@ -19,6 +21,7 @@ import org.springframework.ui.Model
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.RequestParam
+import java.time.Instant
 import java.util.UUID
 
 /**
@@ -70,7 +73,7 @@ class VisualizationPreviewController(
         model.addAttribute("visualizationName", visualization.record.name)
         model.addAttribute("version", visualization.detail.version)
         model.addAttribute("expiresAt", preview.expiresAt.toString())
-        model.addAttribute("cases", preview.cases.map { PreviewCaseView(it.name, it.assertions.map(::assertionLabel)) })
+        model.addAttribute("cases", preview.cases.map { PreviewCaseView(it.name, it.assertions.map(PreviewViews::assertionLabel)) })
         model.addAttribute("bundle", RuntimeViews.rendererBundle(listOf(visualization)))
         model.addAttribute("previewJson", ScriptSafeJson.forScriptBlock(ArtifactJson.mapper.writeValueAsString(PreviewViews.page(preview))))
         return VIEW
@@ -81,9 +84,6 @@ class VisualizationPreviewController(
         val name: String,
         val assertions: List<String>,
     )
-
-    private fun assertionLabel(assertion: co.datapipelines.visualization.Assertion): String =
-        listOfNotNull(assertion.kind.wire, assertion.equals?.let { "= $it" }, assertion.text?.let { "\"$it\"" }).joinToString(" ")
 
     private fun unavailable() = DatapipelinesException(VisualizationErrorCodes.TEST_SESSION_NOT_FOUND, "No such test session.", emptyMap())
 
@@ -113,35 +113,52 @@ internal object PreviewViews {
     private const val PARAMETER_LOCK_SECONDS = 30
     private const val RENDER_SECONDS = 20
 
-    fun page(preview: TestPreview): ObjectNode =
+    /** One assertion as a readable label (text, never markup) — the capability page's and the workspace's Preview tab's. */
+    fun assertionLabel(assertion: co.datapipelines.visualization.Assertion): String =
+        listOfNotNull(assertion.kind.wire, assertion.equals?.let { "= $it" }, assertion.text?.let { "\"$it\"" }).joinToString(" ")
+
+    /** The capability page's block: the run's version and cases, keyed by the run, with the session's expiry. */
+    fun page(preview: TestPreview): ObjectNode = page(preview.visualization, preview.cases, "preview:${preview.runId}", preview.expiresAt)
+
+    /**
+     * The block for ANY evaluated version (#399 factored it out of the run-bound form): the capability page passes its
+     * run's version, cases, `preview:<runId>` key and expiry; the signed-in workspace's Preview tab passes the lensed
+     * version, the same evaluation's cases, its own key and no expiry. Each case's `configuration_id` is
+     * `<configurationKey>:<index>`; `expires_at` is written only when given.
+     */
+    fun page(
+        visualization: ArtifactVersion<VisualizationBody>,
+        cases: List<PreviewCase>,
+        configurationKey: String,
+        expiresAt: Instant?,
+    ): ObjectNode =
         nodes.objectNode().also { out ->
-            val visualization = preview.visualization
             out.putObject("visualization").also {
                 it.put("id", visualization.record.id.toString())
                 it.put("name", visualization.record.name)
                 it.put("version", visualization.detail.version)
             }
-            out.put("expires_at", preview.expiresAt.toString())
-            val cases = out.putArray("cases")
-            preview.cases.forEachIndexed { index, case -> cases.add(case(preview, case, index)) }
+            if (expiresAt != null) out.put("expires_at", expiresAt.toString())
+            val array = out.putArray("cases")
+            cases.forEachIndexed { index, case -> array.add(case(visualization, case, "$configurationKey:$index")) }
         }
 
     private fun case(
-        preview: TestPreview,
+        visualization: ArtifactVersion<VisualizationBody>,
         case: PreviewCase,
-        index: Int,
+        configurationId: String,
     ): ObjectNode =
         nodes.objectNode().also { out ->
             val mapper = ArtifactJson.mapper
             out.put("name", case.name)
             out.set<JsonNode>("inputs", mapper.valueToTree(case.fixtures))
             out.set<JsonNode>("assertions", mapper.valueToTree(case.assertions))
-            out.set<JsonNode>("config", config(preview, index))
-            out.putObject("results").set<JsonNode>(OCCURRENCE, result(preview, case))
+            out.set<JsonNode>("config", config(visualization, configurationId))
+            out.putObject("results").set<JsonNode>(OCCURRENCE, result(visualization, case))
         }
 
     private fun result(
-        preview: TestPreview,
+        visualization: ArtifactVersion<VisualizationBody>,
         case: PreviewCase,
     ): JsonNode {
         val refusal = case.refusal
@@ -159,7 +176,7 @@ internal object PreviewViews {
 
             else -> {
                 val bindings =
-                    preview.visualization.body.bindings
+                    visualization.body.bindings
                         .mapValues { (_, column) -> rows.map { it[column] } }
                 nodes.objectNode().also {
                     it.set<JsonNode>("bindings", ArtifactJson.mapper.valueToTree(bindings))
@@ -171,14 +188,13 @@ internal object PreviewViews {
 
     /** The §8.1 configuration of a one-occurrence board — the visualization exactly as the run pinned it. */
     private fun config(
-        preview: TestPreview,
-        index: Int,
+        visualization: ArtifactVersion<VisualizationBody>,
+        configurationId: String,
     ): ObjectNode {
-        val visualization = preview.visualization
         val body = visualization.body
         val mapper = ArtifactJson.mapper
         return nodes.objectNode().also { out ->
-            out.put("configuration_id", "preview:${preview.runId}:$index")
+            out.put("configuration_id", configurationId)
             out.putObject("renderer").put("bundle", RuntimeViews.rendererBundle(listOf(visualization)))
             out.putObject("dashboard").also {
                 it.put("id", visualization.record.id.toString())

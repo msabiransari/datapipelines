@@ -1,0 +1,51 @@
+<!-- The workspace's KEYS tab (#400) — the `dashboard` keys whose bindings cover THIS
+     dashboard's name (the folder itself or an ancestor), READ-ONLY, each row linking the
+     Keys page's editor (api/keys.html — the binding editor stays there; this tab adds no
+     binding control, the brief's floor). The route floors at `dashboard.key.bind` — the
+     lowest row whose cells match the tab's visibility — so this fragment renders for a
+     workspace admin and a super admin alone, and the page never fetches it for anyone
+     lower. A revoked or expired key's rows stay visible (its bindings are facts an operator
+     checks, the Keys page's own table rule) and say so. -->
+<div xmlns:th="http://www.thymeleaf.org" th:fragment="keys" class="dp-keys">
+  <div class="ds-card">
+    <div class="app-card-h">
+      <h3>Keys</h3>
+      <span class="app-card-note" th:text="${#lists.size(keyRows)} + (${#lists.size(keyRows)} == 1 ? ' dashboard key serves this dashboard' : ' dashboard keys serve this dashboard')">1 dashboard key serves this dashboard</span>
+    </div>
+    <div class="app-card-b">
+      <p class="ds-empty-description" th:if="${#lists.isEmpty(keyRows)}">
+        No <code>dashboard</code> key is bound to this dashboard's folders — an external
+        application's backend can serve nothing here until a workspace admin binds one on the
+        <a th:href="@{/api-keys}">Keys page</a>.
+      </p>
+      <div class="dt-frame dt-scroll dt-h-sm" th:unless="${#lists.isEmpty(keyRows)}">
+      <div class="dt-viewport" tabindex="-1">
+      <table class="ds-table">
+        <thead>
+          <tr><th>Key</th><th>Bound folders</th><th>State</th><th><span class="u-sr-only">Edit</span></th></tr>
+        </thead>
+        <tbody>
+          <tr th:each="k : ${keyRows}">
+            <td class="u-mono" th:text="${k.keyName}">partner-proxy</td>
+            <td>
+              <ul class="dp-pin-list">
+                <li th:each="p : ${k.prefixes}"><span class="u-mono" th:text="${p}">finance/dashboards</span></li>
+              </ul>
+            </td>
+            <td>
+              <span class="ds-badge ds-badge-success" th:if="${k.live}">live</span>
+              <span class="ds-badge ds-badge-danger" th:if="${k.revoked}">revoked</span>
+              <span class="ds-badge ds-badge-danger" th:if="${k.expired}">expired</span>
+            </td>
+            <td>
+              <!-- The binding editor is the Keys page's — linked, never duplicated. -->
+              <a class="ds-button ds-button-ghost ds-button-sm" th:href="@{/api-keys}">Edit bindings</a>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      </div>
+      </div>
+    </div>
+  </div>
+</div>

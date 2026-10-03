@@ -1,0 +1,27 @@
+<!-- One test run's detail (#399): the run's cases, environment and mechanical report as READ-ONLY
+     text (th:text into <pre> — the stored JSON is agent-supplied and never leaves the text channel),
+     and the screenshot. The image is the EXISTING REST route's (`GET /api/v1/visualizations/{id}/
+     tests/runs/{runId}/screenshot`, visualization.read, same-origin so the CSP's img-src 'self'
+     admits it); it renders ONLY when the service's probe found a stored screenshot — a run without
+     one says "no screenshot", never a broken image. -->
+<div xmlns:th="http://www.thymeleaf.org" th:fragment="run" class="ds-card viz-run-detail"
+     th:attr="data-viz-run=${run.runId}">
+  <div class="app-card-h">
+    <h3 th:text="'Run ' + ${#strings.substring(run.runId.toString(), 0, 8)}" th:title="${run.runId}">Run 0b1c2d3e</h3>
+    <span class="app-card-note" th:text="'v' + ${run.version} + ' · ' + ${run.status.toLowerCase()}">v2 · green</span>
+  </div>
+  <div class="app-card-b">
+    <figure class="viz-screenshot">
+      <img th:if="${hasScreenshot}" class="viz-screenshot-img" data-viz-screenshot
+           th:src="@{/api/v1/visualizations/{id}/tests/runs/{run}/screenshot(id=${visualizationId}, run=${run.runId})}"
+           th:alt="'Screenshot of run ' + ${run.runId}" loading="lazy">
+      <p th:unless="${hasScreenshot}" class="u-secondary u-text-sm" data-viz-no-screenshot>no screenshot</p>
+    </figure>
+    <h4 class="u-text-sm u-semibold">Cases</h4>
+    <pre class="viz-json" th:text="${casesJson ?: '—'}">[]</pre>
+    <h4 class="u-text-sm u-semibold">Environment</h4>
+    <pre class="viz-json" th:text="${environmentJson ?: '—'}">{}</pre>
+    <h4 class="u-text-sm u-semibold">Mechanical</h4>
+    <pre class="viz-json" th:text="${mechanicalJson ?: '—'}">{}</pre>
+  </div>
+</div>

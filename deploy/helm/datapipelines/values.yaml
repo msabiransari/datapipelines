@@ -26,6 +26,18 @@ existingSecret: ""
 #   DATAPIPELINES_WORKSPACES_PROVISIONING_MODE: auto-per-user
 extraEnv: {}
 
+# configuration.md §3.25 — the two DuckDB operator keys (#140). Both EMPTY by default, and an
+# empty value renders NO env entry: the image's own
+# DATAPIPELINES_DUCKDB_EXTENSION_DIRECTORY=/opt/duckdb/extensions (Dockerfile) stays in force.
+# A literal "" rendered into env would OVERRIDE it and send every LAKE pool back to
+# INSTALL+LOAD — egress plus a writable home the read-only root filesystem does not have.
+duckdb:
+  # Absolute path of a self-populated extension directory (DATAPIPELINES_DUCKDB_EXTENSION_DIRECTORY).
+  extensionDirectory: ""
+  # Deployment-wide default memory_limit for LAKE engines, a DuckDB size such as 8GB
+  # (DATAPIPELINES_DUCKDB_MEMORY_LIMIT). An invalid value fails the pod's boot by design.
+  memoryLimit: ""
+
 service:
   type: ClusterIP
   port: 8080

@@ -4,12 +4,9 @@ import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.WorkspaceContext
-import co.datapipelines.pipeline.AuthoringGuard
-import co.datapipelines.pipeline.DatasourceRegistry
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineRecord
 import co.datapipelines.pipeline.PipelineReleaseService
-import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.pipeline.PipelineVersionDetail
 import co.datapipelines.pipeline.PipelineVersionStatus
@@ -24,6 +21,7 @@ import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.http.MediaType
+import org.springframework.mock.web.MockHttpSession
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.test.web.servlet.MockMvc
@@ -38,8 +36,10 @@ import java.util.UUID
  * The lifecycle dialog POSTs' HTTP contract (ui-screens §4.3d, 102), through MockMvc with the
  * session principal the house partial tests use — the delivery shapes are the whole subject:
  *
- * - happy ⇒ Shape A: the re-rendered detail, the toast that names what happened, and the
- *   `HX-Trigger: lifecycle-changed` payload the tree badge reads;
+ * - happy ⇒ `HX-Redirect` (the workspace reloads; the layout's flash bin renders the toast —
+ *   #401 removed the explorer legs, and with them the Shape A re-render and its
+ *   `HX-Trigger: lifecycle-changed` payload; #407's cascade names are held ONCE in the
+ *   actor's session and asserted here on the session, the markup's render suite);
  * - refusal ⇒ Shape C through [UiExceptionHandler]: the REAL 4xx the catalog assigns, the
  *   `HX-Retarget`/`HX-Reswap` pair, and the §13 code in the toast body;
  * - entity purge ⇒ `HX-Redirect` (the tree must lose the leaf);
@@ -49,22 +49,9 @@ import java.util.UUID
  */
 class PipelineLifecycleDialogControllerTest {
     private val pipelines = mockk<PipelineService>()
-    private val repository = mockk<PipelineRepository>()
     private val dialogs = mockk<PipelineLifecycleDialogModel>()
     private val audit = RecordingAudit()
-    private val browse =
-        PipelineBrowseModel(
-            pipelines,
-            repository,
-            mockk(relaxed = true),
-            mockk(relaxed = true),
-            DatasourceRegistry.EMPTY,
-            mockk(relaxed = true),
-            mockk(relaxed = true),
-            AuthoringGuard(enabled = true),
-            mockk(relaxed = true), // the scheduler's by-target read — the dialogs never read it
-            co.datapipelines.web.NO_DASHBOARDS,
-        )
+    private val releaseFlash = ReleaseFlash()
 
     private lateinit var mvc: MockMvc
 
@@ -84,7 +71,7 @@ class PipelineLifecycleDialogControllerTest {
             )
         mvc =
             MockMvcBuilders
-                .standaloneSetup(PipelineLifecycleDialogController(pipelines, dialogs, browse, audit))
+                .standaloneSetup(PipelineLifecycleDialogController(pipelines, dialogs, audit, releaseFlash))
                 .setControllerAdvice(UiExceptionHandler())
                 .build()
     }
@@ -95,151 +82,26 @@ class PipelineLifecycleDialogControllerTest {
     }
 
     @Test
-    fun `release - Shape A with the toast, the detail region and the lifecycle-changed payload`() {
-        happyPathReads(record(currentVersion = 3))
-        // The draft exists FOR the release and is GONE after it — the payload's hasDraft
-        // reads the post-state, and a mock that keeps answering "draft" would lie about it.
-        every { pipelines.findDraft(WORKSPACE, any(), PIPELINE) } returns draftDetail() andThen null
-        every { pipelines.release(WORKSPACE, PIPELINE, "h3", USER) } returns
-            PipelineReleaseService.Released(
-                record = record(currentVersion = 3),
-                version = draftDetail().copy(status = PipelineVersionStatus.RELEASED),
-                bodyJson = "{}",
-            )
-
-        // Standalone MockMvc renders no templates; the Shape A CONTRACT here is the view the
-        // region re-renders, the toast riding its model, and the trigger header — the markup
-        // itself is the render suite's (PipelineLifecycleDialogRenderTest + the wrapper's).
-        mvc
-            .perform(
-                post("/partials/pipelines/$PIPELINE/lifecycle/release")
-                    .contentType(MediaType.APPLICATION_FORM_URLENCODED)
-                    .header("HX-Request", "true"),
-            ).andExpect(status().isOk)
-            .andExpect(
-                org.springframework.test.web.servlet.result.MockMvcResultMatchers
-                    .view()
-                    .name("partials/pipeline-lifecycle-applied"),
-            ).andExpect(
-                org.springframework.test.web.servlet.result.MockMvcResultMatchers
-                    .model()
-                    .attribute("lifecycleToastTitle", "Released v3"),
-            ).andExpect(
-                org.springframework.test.web.servlet.result.MockMvcResultMatchers.model().attribute(
-                    "lifecycleToastMessage",
-                    "v3 is the current version now, and it is locked.",
-                ),
-            )
-        // T187 — released on the dialog surface is audited like every other lifecycle verb.
-        audit.events shouldBe listOf("pipeline.version.released")
-    }
-
-    /**
-     * 114 — Shape A's re-rendered detail carries the ROLE attributes its verbs are guarded on.
-     *
-     * The re-render is the third caller of `PipelineBrowseModel.fillDetail`, and it was the one
-     * that forgot: the pane came back from a Release with no role attributes at all, so every
-     * verb on it — Release, Switch, Discard, Purge — silently vanished until the next selection
-     * re-fetched it. The stamp lives in `fillDetail` now, which is why this asserts the MODEL
-     * rather than the controller: whoever calls it next gets the same answer without knowing to.
-     */
-    @Test
-    fun `release - the re-rendered detail carries the role attributes its verbs are guarded on`() {
-        happyPathReads(record(currentVersion = 3))
-        every { pipelines.findDraft(WORKSPACE, any(), PIPELINE) } returns draftDetail() andThen null
-        every { pipelines.release(WORKSPACE, PIPELINE, "h3", USER) } returns
-            PipelineReleaseService.Released(
-                record = record(currentVersion = 3),
-                version = draftDetail().copy(status = PipelineVersionStatus.RELEASED),
-                bodyJson = "{}",
-            )
-
-        val result =
-            mvc
-                .perform(
-                    post("/partials/pipelines/$PIPELINE/lifecycle/release")
-                        .contentType(MediaType.APPLICATION_FORM_URLENCODED)
-                        .header("HX-Request", "true"),
-                ).andExpect(status().isOk)
-                .andReturn()
-
-        val model = result.modelAndView?.model.orEmpty()
-        listOf("canRead", "canExecute", "canAuthor", "canPromote", "canAdminWorkspace", "isSuperAdmin", "roleLabel")
-            .forEach { attribute -> model.keys shouldContain attribute }
-    }
-
-    @Test
-    fun `release - the HX-Trigger payload carries the POST's own working-version facts`() {
-        happyPathReads(record(currentVersion = 3))
+    fun `release - the editor surface answers HX-Redirect, and a release that cascaded nothing holds no names`() {
         every { pipelines.findDraft(WORKSPACE, any(), PIPELINE) } returns draftDetail() andThen null
         every { pipelines.release(WORKSPACE, PIPELINE, "h3", USER) } returns
             PipelineReleaseService.Released(record(currentVersion = 3), draftDetail().copy(status = PipelineVersionStatus.RELEASED), "{}")
+        val session = MockHttpSession()
 
         mvc
             .perform(
                 post("/partials/pipelines/$PIPELINE/lifecycle/release")
+                    .session(session)
                     .contentType(MediaType.APPLICATION_FORM_URLENCODED)
-                    .header("HX-Request", "true"),
-            ).andExpect(
-                header().string(
-                    "HX-Trigger",
-                    "{\"lifecycle-changed\":{\"leafId\":\"$PIPELINE\",\"workingVersion\":3,\"hasDraft\":false}}",
-                ),
-            )
-    }
-
-    @Test
-    fun `release - the editor surface answers HX-Redirect, the reload the editor needs`() {
-        happyPathReads(record(currentVersion = 3))
-        every { pipelines.findDraft(WORKSPACE, any(), PIPELINE) } returns draftDetail() andThen null
-        every { pipelines.release(WORKSPACE, PIPELINE, "h3", USER) } returns
-            PipelineReleaseService.Released(record(currentVersion = 3), draftDetail().copy(status = PipelineVersionStatus.RELEASED), "{}")
-
-        mvc
-            .perform(
-                post("/partials/pipelines/$PIPELINE/lifecycle/release")
-                    .contentType(MediaType.APPLICATION_FORM_URLENCODED)
-                    .param("from", "editor")
                     .header("HX-Request", "true"),
             ).andExpect(header().string("HX-Redirect", "/pipelines/$PIPELINE?ok=released"))
-    }
 
-    @Test
-    fun `release - 142 - the consent checkbox posts the flag, the toast lists the templates, the audit is templates first`() {
-        happyPathReads(record(currentVersion = 3))
-        every { pipelines.findDraft(WORKSPACE, any(), PIPELINE) } returns draftDetail() andThen null
-        // Answers only for releasePinnedTemplates = true: a controller that dropped the flag
-        // would hit an unstubbed call, not a silently-passing default.
-        every { pipelines.release(WORKSPACE, PIPELINE, "h3", USER, null, true) } returns
-            PipelineReleaseService.Released(
-                record = record(currentVersion = 3),
-                version = draftDetail().copy(status = PipelineVersionStatus.RELEASED),
-                bodyJson = "{}",
-                templatesReleased = listOf(co.datapipelines.pipeline.TemplateRef("test/a.sql", 2)),
-            )
-
-        mvc
-            .perform(
-                post("/partials/pipelines/$PIPELINE/lifecycle/release")
-                    .contentType(MediaType.APPLICATION_FORM_URLENCODED)
-                    .param("releasePinnedTemplates", "true")
-                    .header("HX-Request", "true"),
-            ).andExpect(status().isOk)
-            .andExpect(
-                org.springframework.test.web.servlet.result.MockMvcResultMatchers.model().attribute(
-                    "lifecycleToastMessage",
-                    "v3 is the current version now, and it is locked. Also released: test/a.sql@2.",
-                ),
-            )
-        audit.events shouldBe listOf("template.version.released", "pipeline.version.released")
-        audit.details[0]["cascade_from_pipeline_id"] shouldBe PIPELINE.toString()
-        audit.details[0]["cascade_from_version"] shouldBe 3
-        audit.details[1]["templates_released"] shouldBe listOf(mapOf("template_id" to "test/a.sql", "version" to 2))
+        // #407: no cascade — the flash stays the layout's generic sentence, nothing is held.
+        session.getAttribute(ReleaseFlash.SESSION_KEY) shouldBe null
     }
 
     @Test
     fun `release - 142 - the editor surface names the cascade in its flash code`() {
-        happyPathReads(record(currentVersion = 3))
         every { pipelines.findDraft(WORKSPACE, any(), PIPELINE) } returns draftDetail() andThen null
         every { pipelines.release(WORKSPACE, PIPELINE, "h3", USER, null, true) } returns
             PipelineReleaseService.Released(
@@ -248,15 +110,25 @@ class PipelineLifecycleDialogControllerTest {
                 "{}",
                 templatesReleased = listOf(co.datapipelines.pipeline.TemplateRef("test/a.sql", 2)),
             )
+        val session = MockHttpSession()
 
         mvc
             .perform(
                 post("/partials/pipelines/$PIPELINE/lifecycle/release")
+                    .session(session)
                     .contentType(MediaType.APPLICATION_FORM_URLENCODED)
-                    .param("from", "editor")
                     .param("releasePinnedTemplates", "true")
                     .header("HX-Request", "true"),
             ).andExpect(header().string("HX-Redirect", "/pipelines/$PIPELINE?ok=released_with_templates"))
+
+        // #407 — the names are held ONCE for this actor's session, derived from the release's
+        // own list; ReleaseFlashAdvice renders them on the next GET of THIS pipeline that
+        // carries ok=released_with_templates (ReleaseFlashTest covers the consume, the
+        // browser walk the rendered toast). Nothing travels in the redirect URL.
+        val held = session.getAttribute(ReleaseFlash.SESSION_KEY) as ReleaseFlash.Held
+        held.pipelineId shouldBe PIPELINE
+        held.actorId shouldBe USER
+        held.templates shouldBe listOf("test/a.sql@2")
     }
 
     @Test
@@ -322,7 +194,6 @@ class PipelineLifecycleDialogControllerTest {
                     .contentType(MediaType.APPLICATION_FORM_URLENCODED)
                     .param("version", "4")
                     .param("confirm", "v4")
-                    .param("from", "editor")
                     .header("HX-Request", "true"),
             ).andExpect(header().string("HX-Redirect", "/pipelines/$PIPELINE?ok=draft_purged"))
     }
@@ -376,37 +247,6 @@ class PipelineLifecycleDialogControllerTest {
         verify(exactly = 0) { pipelines.purgeEntity(any(), any(), any()) }
     }
 
-    @Test
-    fun `switch - Shape A names the served version in the toast`() {
-        every { pipelines.switchCurrent(WORKSPACE, PIPELINE, 1) } returns record(currentVersion = 1)
-        happyPathReads(record(currentVersion = 1))
-
-        // Standalone MockMvc renders no templates; the Shape A CONTRACT here is the view the
-        // region re-renders, the toast riding its model, and the trigger header — the markup
-        // itself is the render suite's (PipelineLifecycleDialogRenderTest + the wrapper's).
-        mvc
-            .perform(
-                post("/partials/pipelines/$PIPELINE/lifecycle/switch")
-                    .contentType(MediaType.APPLICATION_FORM_URLENCODED)
-                    .param("version", "1")
-                    .header("HX-Request", "true"),
-            ).andExpect(status().isOk)
-            .andExpect(
-                org.springframework.test.web.servlet.result.MockMvcResultMatchers
-                    .view()
-                    .name("partials/pipeline-lifecycle-applied"),
-            ).andExpect(
-                org.springframework.test.web.servlet.result.MockMvcResultMatchers
-                    .model()
-                    .attribute("lifecycleToastTitle", "Switched to v1"),
-            ).andExpect(
-                org.springframework.test.web.servlet.result.MockMvcResultMatchers.model().attribute(
-                    "lifecycleToastMessage",
-                    "Endpoints published on this pipeline serve v1 after this.",
-                ),
-            )
-    }
-
     // ------------------------------------------------------------------ #395: the workspace's legs
 
     @Test
@@ -419,7 +259,6 @@ class PipelineLifecycleDialogControllerTest {
                 post("/partials/pipelines/$PIPELINE/lifecycle/discard")
                     .contentType(MediaType.APPLICATION_FORM_URLENCODED)
                     .param("version", "1")
-                    .param("from", "editor")
                     .header("HX-Request", "true"),
             ).andExpect(status().isOk)
             .andExpect(header().string("HX-Redirect", "/pipelines/$PIPELINE?tab=versions&ok=discarded"))
@@ -436,7 +275,6 @@ class PipelineLifecycleDialogControllerTest {
                 post("/partials/pipelines/$PIPELINE/lifecycle/restore")
                     .contentType(MediaType.APPLICATION_FORM_URLENCODED)
                     .param("version", "1")
-                    .param("from", "editor")
                     .header("HX-Request", "true"),
             ).andExpect(status().isOk)
             .andExpect(header().string("HX-Redirect", "/pipelines/$PIPELINE?tab=versions&ok=restored"))
@@ -444,7 +282,7 @@ class PipelineLifecycleDialogControllerTest {
     }
 
     @Test
-    fun `#395 - switch from the workspace answers HX-Redirect onto its Versions tab - the explorer leg keeps Shape A`() {
+    fun `#395 - switch from the workspace answers HX-Redirect onto its Versions tab`() {
         every { pipelines.switchCurrent(WORKSPACE, PIPELINE, 1) } returns record(currentVersion = 1)
 
         mvc
@@ -452,12 +290,10 @@ class PipelineLifecycleDialogControllerTest {
                 post("/partials/pipelines/$PIPELINE/lifecycle/switch")
                     .contentType(MediaType.APPLICATION_FORM_URLENCODED)
                     .param("version", "1")
-                    .param("from", "editor")
                     .header("HX-Request", "true"),
-            ).andExpect(status().isOk)
-            .andExpect(header().string("HX-Redirect", "/pipelines/$PIPELINE?tab=versions&ok=switched"))
+            ).andExpect(header().string("HX-Redirect", "/pipelines/$PIPELINE?tab=versions&ok=switched"))
         verify(exactly = 1) { pipelines.switchCurrent(WORKSPACE, PIPELINE, 1) }
-        // (The explorer leg without `from` is `switch - Shape A names the served version`.)
+        // #401: the no-`from` POST is the SAME redirect now — the explorer Shape A leg is gone.
     }
 
     @Test
@@ -486,20 +322,25 @@ class PipelineLifecycleDialogControllerTest {
                     .model()
                     .attribute("from", "editor"),
             )
+
+        // #401 — no `from` at all is the editor too: the explorer default is gone, and an
+        // unknown `from` lands the editor shape rather than a 500.
+        mvc
+            .perform(
+                org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                    .get("/partials/pipelines/$PIPELINE/lifecycle/switch")
+                    .param("version", "1")
+                    .param("from", "explorer")
+                    .header("HX-Request", "true"),
+            ).andExpect(status().isOk)
+            .andExpect(
+                org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                    .model()
+                    .attribute("from", "editor"),
+            )
     }
 
     // ------------------------------------------------------------------ fixtures
-
-    /** The reads `applied` performs through the browse model and its own re-reads. */
-    private fun happyPathReads(record: PipelineRecord) {
-        every { repository.findById(WORKSPACE, PIPELINE) } returns record
-        every { pipelines.findRecord(WORKSPACE, any(), PIPELINE) } returns record
-        every { pipelines.findWorking(WORKSPACE, any(), PIPELINE) } returns null
-        every { pipelines.listVersions(WORKSPACE, any(), PIPELINE) } returns emptyList()
-        every { repository.listVersions(WORKSPACE, PIPELINE) } returns emptyList()
-        every { repository.findDraftDetail(WORKSPACE, PIPELINE) } returns null
-        every { pipelines.findDraft(WORKSPACE, any(), PIPELINE) } returns null
-    }
 
     private fun record(currentVersion: Int?) =
         PipelineRecord(

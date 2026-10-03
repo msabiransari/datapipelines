@@ -1,5 +1,6 @@
 package co.datapipelines.parameters
 
+import co.datapipelines.parameters.EvaluatorFixtures.attempt
 import co.datapipelines.parameters.EvaluatorFixtures.templateSelect
 import co.datapipelines.parameters.EvaluatorFixtures.version
 import co.datapipelines.typesystem.ColumnSchema
@@ -25,7 +26,7 @@ class SelectorRowsTest {
         set: ParameterSetVersion,
         config: ParametersConfig = ParametersConfig(),
     ): EvaluateResponse =
-        ParameterEvaluator(selectors, SelectorPool(4, 64), config).evaluateBlocking(EvaluatorFixtures.WORKSPACE, set, emptyMap())
+        ParameterEvaluator(selectors, SelectorPool(4, 64), config).evaluateBlocking(EvaluatorFixtures.WORKSPACE, set, emptyMap(), attempt())
 
     /** The one error [run] earns `pick` (null when accepted), with its options empty on refusal. */
     private fun judged(

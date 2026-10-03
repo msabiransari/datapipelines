@@ -1,0 +1,32 @@
+<!-- The Discard dialog (#400) — reversible, but it can move the served pointer (D60), so it
+     says where to: the survivor the fallback names, or the no-release sentence when nothing
+     eligible remains. The POST re-runs the service's guard; this dialog only decides what to
+     say. -->
+<div xmlns:th="http://www.thymeleaf.org" class="u-backdrop" data-lifecycle-dialog="dashboard-discard">
+  <div class="ds-card app-modal app-modal-md" role="dialog" aria-modal="true" aria-labelledby="dp-discard-title">
+    <button type="button" class="ds-button ds-button-ghost ds-button-sm app-modal-close u-text-xl"
+            aria-label="Close" data-lifecycle-close>
+      <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#x"></use></svg>
+    </button>
+    <h2 class="ds-title u-m0 u-mb-md" id="dp-discard-title"
+        th:text="'Discard v' + ${dlg.version} + '?'">Discard v1?</h2>
+
+    <p class="u-secondary u-text-sm">
+      v<span th:text="${dlg.version}">1</span> stops serving. Discarding is reversible —
+      Restore brings it back as a released version.
+    </p>
+
+    <div class="u-text-sm u-mb-md" th:if="${dlg.isServed}">
+      <p class="u-mb-xs">This is the version the board serves now. After the discard:</p>
+      <p class="u-secondary" th:text="${dlg.fallback}">v2 becomes the served version.</p>
+    </div>
+
+    <form th:attr="hx-post=@{'/partials/dashboards/{id}/lifecycle/discard'(id=${dlg.id}, version=${dlg.version})},
+                     hx-swap='none'">
+      <input type="hidden" name="from" th:value="${from}">
+      <button th:if="${canAuthor == true}" type="submit" data-verb="dashboard-discard-confirm"
+              class="ds-button ds-button-danger u-full" hx-disabled-elt="this"
+              th:text="'Discard v' + ${dlg.version}">Discard v1</button>
+    </form>
+  </div>
+</div>

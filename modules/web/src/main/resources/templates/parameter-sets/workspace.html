@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{layouts/default :: page(~{::content})}">
+<th:block th:fragment="content">
+
+  <!--/* #374 — the global sidebar's current-leaf hook (nav-tree.js): which parameter set this page shows, by id AND
+          full path, so the rail's Parameter Sets tree can mark the leaf and reveal its folders. It rides inside
+          #app-main, so a full-document entry, a boosted arrival and a history restore all carry it. The record is
+          the one this page already resolved through the caller's lens — nothing here is new information. */-->
+  <span hidden data-nav-current="parameter-sets"
+        th:attr="data-nav-current-id=${parameterSetId},data-nav-current-path=${navCurrentPath}"></span>
+
+  <!--/* The vendors and modules load through the runtime (parameter-workspace/runtime.js), not as bare tags: htmx
+          re-executes every <script> it restores from the history cache (#358). This catalog is INERT — <template>
+          content neither parses nor restores as executable script — and the runtime loads it in order, once per
+          document. The renderer is the SAME datapipelines-dashboard.js the board uses (one renderer, one copy of
+          the attempt logic); Plotly and the visualization adapters are not part of this page. Nothing in here may
+          carry an inline script body (InlineScriptAuditTest). */-->
+  <template id="ps-runtime-scripts">
+    <script th:src="@{/vendor/dagre/dagre.min.js}"></script>
+    <script th:src="@{/vendor/cytoscape/cytoscape.min.js}"></script>
+    <script th:src="@{/vendor/cytoscape/cytoscape-dagre.js}"></script>
+    <script th:src="@{/js/datapipelines-dashboard.js}"></script>
+    <script th:src="@{/js/parameter-workspace/model.js}"></script>
+    <script th:src="@{/js/parameter-workspace/graph.js}"></script>
+    <script th:src="@{/js/parameter-workspace/inspector.js}"></script>
+    <script th:src="@{/js/parameter-workspace/workspace.js}"></script>
+  </template>
+
+  <div class="ps-root" th:attr="data-parameter-set-id=${parameterSetId}, data-active-tab=${activeTab}">
+
+    <div class="app-page-h">
+      <div>
+        <h1 class="ds-headline" th:text="${parameterSetDisplayName}">Geo filters</h1>
+        <!-- The FULL path rides as text AND on `title` (a deep path truncates in a narrow pane). -->
+        <p class="ps-path" th:text="${parameterSetName}" th:title="${parameterSetName}">finance/parameters/geo_filters</p>
+      </div>
+      <div class="ps-header">
+        <!-- The viewed version: `vN · status · current`, each clause only when the caller's view carries it. A
+             draft is LABELLED (versioning §7) — never shown as if it were the released view. -->
+        <span class="ds-badge" data-ps-viewed-label
+              th:classappend="${viewedIsDraft} ? 'ds-badge-warning' : 'ds-badge-default'"
+              th:text="${viewedLabel}">v2 · released · current</span>
+      </div>
+    </div>
+
+    <!-- #376 — the page's two sections, one canonical URL each (`?tab=` is the closed set workspace | history; the viewed
+         version rides along so the header above keeps naming it). Full-document links, not client tabs: the History
+         arm renders no live form, so opening it never issues an evaluate (it would be a history row of its own). -->
+    <nav class="ps-tabs" aria-label="Workspace sections">
+      <a class="ps-tab" hx-boost="false" data-ps-tab="workspace"
+         th:classappend="${activeTab == 'workspace'} ? 'is-on'"
+         th:href="${viewedVersion != null} ? @{/parameter-sets/{id}(id=${parameterSetId}, version=${viewedVersion})} : @{/parameter-sets/{id}(id=${parameterSetId})}"
+         th:attr="aria-current=${activeTab == 'workspace'} ? 'page' : null">Workspace</a>
+      <a class="ps-tab" hx-boost="false" data-ps-tab="history"
+         th:classappend="${activeTab == 'history'} ? 'is-on'"
+         th:href="${viewedVersion != null} ? @{/parameter-sets/{id}(id=${parameterSetId}, version=${viewedVersion}, tab='history')} : @{/parameter-sets/{id}(id=${parameterSetId}, tab='history')}"
+         th:attr="aria-current=${activeTab == 'history'} ? 'page' : null">History</a>
+    </nav>
+
+    <!-- The version selector: every version the caller's lens admits, each link naming its EXACT version
+         (?version=N — never a clamp). Under a narrowing lens only released versions are listed. -->
+    <nav class="ps-versions" aria-label="Versions" th:unless="${#lists.isEmpty(versions)}">
+      <a th:each="v : ${versions}" class="ds-button ds-button-sm" hx-boost="false"
+         th:classappend="${v.isViewed} ? 'ds-button-primary' : 'ds-button-secondary'"
+         th:href="@{/parameter-sets/{id}(id=${parameterSetId}, version=${v.version})}"
+         th:attr="aria-current=${v.isViewed} ? 'page' : null"
+         th:text="'v' + ${v.version} + ' — ' + ${v.status.name().toLowerCase()} + (${v.isCurrent} ? ' · current' : '')">v2 — released · current</a>
+    </nav>
+
+    <!-- The choose-a-version state (workspace spec §3.1, rule 4): no body resolved for this caller, so there is
+         nothing to render a graph OF. The admitted history is the affordance; no form, no evaluate. -->
+    <div class="ds-empty" th:if="${!hasSelectedBody and activeTab == 'workspace'}">
+      <p class="ds-empty-title" th:text="${#lists.isEmpty(versions)} ? 'No viewable version' : 'Choose a version'">Choose a version</p>
+      <p class="ds-empty-description">
+        <span th:if="${#lists.isEmpty(versions)}">This parameter set has no version your role can view yet — ask an author to release one.</span>
+        <span th:unless="${#lists.isEmpty(versions)}">This parameter set has several versions and none is current — pick one above to view its parameters.</span>
+      </p>
+    </div>
+
+    <!--/* The two JSON blocks (ScriptSafeJson.forScriptBlock): `</script>`, `<!--` and U+2028/9 inside a set's
+            display_name, description or labels cannot close the block they ride in. th:utext is correct ONLY
+            because the controller escaped these strings for a script block. */-->
+    <script type="application/json" id="ps-data" th:if="${hasSelectedBody and activeTab == 'workspace'}" th:utext="${parameterSetJson}"></script>
+    <script type="application/json" id="ps-workspace" th:utext="${workspaceJson}"></script>
+
+    <div class="ps-body" th:if="${hasSelectedBody and activeTab == 'workspace'}">
+      <!-- THE FORM: the live controls. A role that may not evaluate (the promoter) gets NO control and the page
+           issues NO request — the server stamps `canEvaluate` and the glue never calls initParameters without it. -->
+      <section class="ps-card" aria-labelledby="ps-form-title">
+        <h2 class="ps-card-title" id="ps-form-title">Parameters</h2>
+        <div th:if="${canEvaluate}">
+          <div id="ps-form-error" class="ps-form-error" role="alert" hidden>
+            <code id="ps-form-error-code"></code>
+            <span id="ps-form-error-message"></span>
+          </div>
+          <div id="ps-form-host" class="ps-form-host" data-ps-form></div>
+          <p id="ps-form-status" class="ps-form-status" role="status"></p>
+        </div>
+        <p class="ps-hint" th:unless="${canEvaluate}" data-ps-read-only>
+          Your role can read this parameter set but not evaluate it — the structure is shown, no control is offered.
+        </p>
+        <!-- The error region exists for a read-only page too: a malformed block is refused visibly, never silently. -->
+        <div th:unless="${canEvaluate}" id="ps-form-error" class="ps-form-error" role="alert" hidden>
+          <code id="ps-form-error-code"></code>
+          <span id="ps-form-error-message"></span>
+        </div>
+      </section>
+
+      <div class="ps-stack">
+        <section class="ps-card" aria-labelledby="ps-graph-title">
+          <h2 class="ps-card-title" id="ps-graph-title">Dependencies</h2>
+          <!-- Keyboard: Tab focuses the graph; Up/Down walk the parameters in display order, Left/Right follow the
+               dependency edges, Home/End jump. The selection is announced through the live region below. -->
+          <div id="ps-graph" class="ps-graph" tabindex="0" role="group"
+               aria-label="Parameter dependency graph. Arrow keys move between parameters."></div>
+          <p id="ps-graph-live" class="ps-visually-hidden" role="status" aria-live="polite"></p>
+        </section>
+        <section class="ps-card" aria-labelledby="ps-inspector-title">
+          <h2 class="ps-card-title" id="ps-inspector-title">Inspector</h2>
+          <div id="ps-inspector" role="region" aria-label="Parameter inspector"></div>
+        </section>
+      </div>
+    </div>
+
+    <!-- #376 — the History arm (workspace spec §6.4): every evaluation record of this set, whoever ran it, in the house
+         table; a row opens its record below. The first page is painted here by the same browse model the pager's
+         partial uses. Readable by every role that reads the set (promoter included, through the lens). -->
+    <section class="ps-card" aria-labelledby="ps-history-title" th:if="${activeTab == 'history'}" data-ps-history>
+      <h2 class="ps-card-title" id="ps-history-title">Evaluation history</h2>
+      <div th:replace="~{partials/parameter-set-evaluations :: history}"></div>
+      <div id="ps-history-detail" class="ps-history-detail-host" aria-live="polite"></div>
+    </section>
+  </div>
+
+  <!-- The guarded bootstrap: the ONE executable script a history restore replays (it turns the replay into another
+       `enter()` on the restored root). -->
+  <script th:src="@{/js/parameter-workspace/runtime.js}"></script>
+</th:block>
+</html>

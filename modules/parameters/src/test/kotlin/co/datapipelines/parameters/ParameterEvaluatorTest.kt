@@ -1,6 +1,7 @@
 package co.datapipelines.parameters
 
 import co.datapipelines.datasources.DatasourceErrorCodes
+import co.datapipelines.parameters.EvaluatorFixtures.attempt
 import co.datapipelines.parameters.EvaluatorFixtures.selections
 import co.datapipelines.parameters.EvaluatorFixtures.templateSelect
 import co.datapipelines.parameters.EvaluatorFixtures.version
@@ -53,7 +54,7 @@ class ParameterEvaluatorTest {
         set: ParameterSetVersion,
         vararg selections: Pair<String, Any?>,
         with: ParameterEvaluator = evaluator(),
-    ): EvaluateResponse = with.evaluateBlocking(EvaluatorFixtures.WORKSPACE, set, selections(*selections))
+    ): EvaluateResponse = with.evaluateBlocking(EvaluatorFixtures.WORKSPACE, set, selections(*selections), attempt())
 
     private fun EvaluateResponse.state(name: String): ParameterState = parameters.single { it.definition.name == name }.state
 
@@ -110,7 +111,7 @@ class ParameterEvaluatorTest {
         fun `(a) then the client submits the form back unchanged - every chosen value is kept as the client's`() {
             val first = evaluate(twenty)
 
-            val second = evaluator().evaluateBlocking(EvaluatorFixtures.WORKSPACE, twenty, first.wireValues())
+            val second = evaluator().evaluateBlocking(EvaluatorFixtures.WORKSPACE, twenty, first.wireValues(), attempt())
 
             second.values shouldBe first.values
             second.parameters
@@ -163,7 +164,7 @@ class ParameterEvaluatorTest {
             all["state"] = ParameterSetJson.mapper.valueToTree("NJ")
             all["city"] = ParameterSetJson.mapper.valueToTree("NWK")
 
-            val response = evaluator().evaluateBlocking(EvaluatorFixtures.WORKSPACE, twenty, all)
+            val response = evaluator().evaluateBlocking(EvaluatorFixtures.WORKSPACE, twenty, all, attempt())
 
             response.valid shouldBe true
             (response.state("state").value to response.state("state").reset) shouldBe ("ON" to true)

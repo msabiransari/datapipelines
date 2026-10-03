@@ -67,8 +67,20 @@ class ReadFloorTest {
         // …and the sharp ones by name, so the classifier has to get the DIRECTION right.
         familyOf("/api/v1/parameter-sets") shouldBeFamily Family.PARAMETER_SETS
         familyOf("/api/v1/parameter-sets/{id}/versions/{version}") shouldBeFamily Family.PARAMETER_SETS
+        familyOf("/parameter-sets") shouldBeFamily Family.PARAMETER_SETS
+        familyOf("/parameter-sets/{id}") shouldBeFamily Family.PARAMETER_SETS
+        familyOf("/partials/parameter-sets/tree") shouldBeFamily Family.PARAMETER_SETS
+        familyOf("/partials/parameter-sets/{id}/evaluations") shouldBeFamily Family.PARAMETER_SETS
+        familyOf("/partials/parameter-sets/{id}/evaluations/{evaluationId}") shouldBeFamily Family.PARAMETER_SETS
         familyOf("/api/v1/visualizations") shouldBeFamily Family.VISUALIZATIONS
         familyOf("/api/v1/visualizations/{id}/versions/{version}") shouldBeFamily Family.VISUALIZATIONS
+        // #399 — the visualization pages and partials are the family's reads; its dialogs floor at their verbs.
+        familyOf("/visualizations") shouldBeFamily Family.VISUALIZATIONS
+        familyOf("/visualizations/{id}") shouldBeFamily Family.VISUALIZATIONS
+        familyOf("/partials/visualizations") shouldBeFamily Family.VISUALIZATIONS
+        familyOf("/partials/visualizations/tree") shouldBeFamily Family.VISUALIZATIONS
+        familyOf("/partials/visualizations/{id}/evidence/{runId}") shouldBeFamily Family.VISUALIZATIONS
+        familyOf("/partials/visualizations/{id}/lifecycle/switch") shouldBeFamily Family.LIFECYCLE_DIALOGS
         familyOf("/api/v1/dashboards") shouldBeFamily Family.DASHBOARDS
         familyOf("/api/v1/dashboards/{id}/versions") shouldBeFamily Family.DASHBOARDS
         familyOf("/api/v1/dashboards/{id}") shouldBeFamily Family.DASHBOARDS
@@ -81,11 +93,25 @@ class ReadFloorTest {
         // #10 L3b: the dashboards PAGES are the family's reads (DASHBOARD_READ — D50 makes
         // every reader an executor, and the page must not "simplify" into execute), while the
         // events-pane partial is the refresh routes' data and floors with them. #369: the
-        // draft preview page is the family's read too — never an execute declaration.
+        // draft preview page is the family's read too — never an execute declaration. #400:
+        // the catalog partial, the Overview partial and the Versions partial are the same
+        // read surface (`/partials/dashboards/…` — the workspace's lazy tabs).
         familyOf("/dashboards") shouldBeFamily Family.DASHBOARDS
         familyOf("/dashboards/{id}") shouldBeFamily Family.DASHBOARDS
         familyOf("/dashboards/{id}/preview") shouldBeFamily Family.DASHBOARDS
+        familyOf("/partials/dashboards") shouldBeFamily Family.DASHBOARDS
         familyOf("/partials/dashboards/tree") shouldBeFamily Family.DASHBOARDS
+        familyOf("/partials/dashboards/{id}/overview") shouldBeFamily Family.DASHBOARDS
+        familyOf("/partials/dashboards/{id}/versions") shouldBeFamily Family.DASHBOARDS
+        // #400 — the Keys tab is the ONE dashboard surface below every role: its route floors
+        // at `dashboard.key.bind` (the lowest row whose cells match the tab's visibility), so
+        // it is its OWN family — an every-role read row would show workspace-admin facts to
+        // an author, and the family rule refuses exactly that.
+        familyOf("/partials/dashboards/{id}/keys") shouldBeFamily Family.DASHBOARD_KEYS
+        // #400 — a dialog fetched by a verb's route floors at that verb's permission (the
+        // record's rule, the dashboard family's rows now named here).
+        familyOf("/partials/dashboards/{id}/lifecycle/release") shouldBeFamily Family.LIFECYCLE_DIALOGS
+        familyOf("/partials/dashboards/{id}/lifecycle/purge-entity") shouldBeFamily Family.LIFECYCLE_DIALOGS
         familyOf("/partials/dashboards/{id}/refreshes") shouldBeFamily Family.DASHBOARD_RUNTIME
         familyOf("/workspaces") shouldBeFamily Family.WORKSPACES
         familyOf("/api/v1/workspaces") shouldBeFamily Family.WORKSPACES_LIST_OWN
@@ -176,7 +202,10 @@ class ReadFloorTest {
 
         /** The lifecycle dialogs: a GET that returns the FORM of a verb floors at that verb's permission. */
         LIFECYCLE_DIALOGS(
-            floor = 10,
+            // #400 — the dashboard family's dialogs join the pipeline and template ones: each
+            // GET floors at the verb's own permission, the same rule one more family over.
+            // #399 — the visualization family's seven join on the same rule.
+            floor = 24,
             permissions =
                 setOf(
                     Permission.PIPELINE_VERSION_MANAGE,
@@ -186,6 +215,14 @@ class ReadFloorTest {
                     Permission.TEMPLATE_VERSION_MANAGE,
                     Permission.TEMPLATE_DELETE,
                     Permission.TEMPLATE_RELEASE,
+                    Permission.DASHBOARD_VERSION_MANAGE,
+                    Permission.DASHBOARD_DELETE,
+                    Permission.DASHBOARD_RELEASE,
+                    Permission.DASHBOARD_SWITCH_VERSION,
+                    Permission.VISUALIZATION_VERSION_MANAGE,
+                    Permission.VISUALIZATION_DELETE,
+                    Permission.VISUALIZATION_RELEASE,
+                    Permission.VISUALIZATION_SWITCH_VERSION,
                 ),
             matches = { path -> path.contains("/lifecycle/") },
         ),
@@ -236,19 +273,33 @@ class ReadFloorTest {
             matches = { path -> path.startsWith("/api/{") },
         ),
 
-        /** #194 lane D: the parameter sets — an every-role read (the lens aside, one row shape). */
+        /** #194 lane D: the parameter sets — an every-role read (the lens aside, one row shape). #374 added the
+         * three pages (catalog, workspace, tree partial): the family's reads, never an evaluate declaration. #376
+         * added the History tab's two partials (the list and the record detail) — reads of the set, §11.2. */
         PARAMETER_SETS(
-            floor = 4,
+            floor = 9,
             permissions = setOf(Permission.PARAMETER_SET_READ),
-            matches = { path -> path.startsWith("/api/v1/parameter-sets") },
+            matches = { path ->
+                path.startsWith("/api/v1/parameter-sets") ||
+                    path == "/parameter-sets" ||
+                    path.startsWith("/parameter-sets/") ||
+                    path.startsWith("/partials/parameter-sets/")
+            },
         ),
 
-        /** #10 L1b: the visualizations — an every-role read (the lens aside); floor = the family's six GET handlers
-         * (L1c's export joined). */
+        /** #10 L1b: the visualizations — an every-role read (the lens aside); the family's six API GET handlers (L1c's
+         * export joined), and #399's two pages and eight partials (the sidebar tree, the catalog's swap root, the five
+         * workspace tabs and the run detail). The public capability preview is not a reader. */
         VISUALIZATIONS(
-            floor = 6,
+            floor = 16,
             permissions = setOf(Permission.VISUALIZATION_READ),
-            matches = { path -> path.startsWith("/api/v1/visualizations") },
+            matches = { path ->
+                path.startsWith("/api/v1/visualizations") ||
+                    path == "/visualizations" ||
+                    path.startsWith("/visualizations/") ||
+                    path == "/partials/visualizations" ||
+                    path.startsWith("/partials/visualizations/")
+            },
         ),
 
         /**
@@ -270,17 +321,27 @@ class ReadFloorTest {
             },
         ),
 
-        /** #10 L1b the API family (six GET handlers, L1c's export joined), L3b the three pages, #369 the preview:
-         * the dashboards — the same row shape; the family's reads. */
+        /** #10 L1b the API family (six GET handlers, L1c's export joined), L3b the three pages, #369 the preview,
+         * #400 the catalog and the Overview/Versions tabs: the dashboards — the same row shape; the family's reads. */
         DASHBOARDS(
-            floor = 10,
+            floor = 13,
             permissions = setOf(Permission.DASHBOARD_READ),
             matches = { path ->
                 path.startsWith("/api/v1/dashboards") ||
                     path == "/dashboards" ||
                     path.startsWith("/dashboards/") ||
-                    path == "/partials/dashboards/tree"
+                    path == "/partials/dashboards" ||
+                    (path.startsWith("/partials/dashboards/") && !path.endsWith("/keys"))
             },
+        ),
+
+        /** #400 — the workspace's Keys tab: `dashboard.key.bind` is the lowest row whose cells
+         * match the tab's visibility (workspace admin and super admin only), so the partial is
+         * its own family and can never drift into an every-role read. */
+        DASHBOARD_KEYS(
+            floor = 1,
+            permissions = setOf(Permission.DASHBOARD_KEY_BIND),
+            matches = { path -> path.startsWith("/partials/dashboards/") && path.endsWith("/keys") },
         ),
 
         /** Everything else a signed-in person reads: the every-role reads (the lens aside, one row shape). */

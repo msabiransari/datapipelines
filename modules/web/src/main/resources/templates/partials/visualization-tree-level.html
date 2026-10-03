@@ -1,0 +1,79 @@
+<!-- ONE level of the sidebar's Visualizations tree (#399) — partials/dashboard-tree-level.html's
+     shape down to the class names (template-tree.css dresses every tree): server-side prefix
+     queries, one level per request, the root a directory of folders only, nothing assembled in JS.
+
+     Folders are virtual (a name prefix): no folder CRUD anywhere. A leaf NAVIGATES to the
+     workspace /visualizations/{id} as a FULL navigation — hx-boost="false": the workspace page
+     declares one Plotly bundle for the viewed version (dashboards.md §6.4's one-bundle rule).
+
+     Folder expansion is <details>/<summary>; htmx loads the level on the summary's FIRST click
+     only. ARIA: the root list is role=tree; a nested level's container is role=group. -->
+<div xmlns:th="http://www.thymeleaf.org" th:fragment="level"
+     th:id="${levelId}" class="tpl-level"
+     th:attr="role=${#strings.isEmpty(prefix)} ? null : 'group'">
+
+  <!-- The empty state belongs to the ROOT level only. A lensed principal whose higher
+       environment could not be read gets the promotion page's own sentence instead (178). -->
+  <th:block th:if="${lensUnavailable != null and #lists.isEmpty(folders) and #lists.isEmpty(visualizations)}">
+    <div th:replace="~{partials/lens-unavailable :: notice(${lensUnavailable})}"></div>
+  </th:block>
+  <th:block th:if="${lensUnavailable == null and #lists.isEmpty(folders) and #lists.isEmpty(visualizations)}">
+    <div class="ds-empty">
+      <p class="ds-empty-title">No visualizations yet</p>
+      <p class="ds-empty-description">
+        Visualizations are authored through the MCP server — ask your agent to create one. Give it
+        a folder path like <code>finance/charts/revenue_by_region</code> — a folder is required,
+        and the folders appear here on their own.
+      </p>
+    </div>
+  </th:block>
+
+  <ul class="tpl-tree"
+      th:unless="${#lists.isEmpty(folders) and #lists.isEmpty(visualizations)}"
+      th:attr="role=${#strings.isEmpty(prefix)} ? 'tree' : null,
+               aria-label=${#strings.isEmpty(prefix)} ? 'Visualizations' : null">
+
+    <li class="tpl-node" role="none" th:each="f : ${folders}">
+      <details class="tpl-folder">
+        <summary class="tpl-summary" role="treeitem" aria-expanded="false"
+                 th:attr="hx-get=@{/partials/visualizations/tree(prefix=${f.path}, scope=${scope})}"
+                 hx-trigger="click once"
+                 hx-target="next .tpl-level" hx-swap="outerHTML">
+          <svg class="ds-icon ds-icon-xs tpl-chevron" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#chevron-right"></use></svg>
+          <svg class="ds-icon ds-icon-sm tpl-row-icon tpl-icon-folder" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#folder"></use></svg>
+          <svg class="ds-icon ds-icon-sm tpl-row-icon tpl-icon-folder-open" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#folder-open"></use></svg>
+          <span class="tpl-label" th:text="${f.segment}" th:title="${f.path}">charts</span>
+          <span class="ds-badge ds-badge-default tpl-count" th:text="${f.count}">6</span>
+        </summary>
+        <div class="tpl-level tpl-level-pending" th:id="${f.levelId}">
+          <span class="ds-spinner htmx-indicator" aria-hidden="true"></span>
+        </div>
+      </details>
+    </li>
+
+    <!-- LEAVES: the leaf's own segment, the full path on `title`; the badge names the WORKING
+         version, and an unreleased one carries the draft badge (versioning §7). -->
+    <li class="tpl-node" role="none" th:each="v : ${visualizations}">
+      <a th:href="@{'/visualizations/' + ${v.id}}" class="tpl-leaf" role="treeitem" aria-selected="false"
+         hx-boost="false"
+         th:attr="data-leaf-id=${v.id}">
+        <svg class="ds-icon ds-icon-sm tpl-row-icon" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#chart-line"></use></svg>
+        <span class="tpl-label" th:text="${v.segment}" th:title="${v.name}">revenue_by_region</span>
+        <span class="ds-badge ds-badge-default tpl-leaf-version"
+              th:text="${'v' + v.version}">v1</span>
+        <span th:if="${!v.released}" class="ds-badge ds-badge-warning tpl-leaf-draft"
+              th:title="'v' + ${v.version} + ' is not released yet.'">draft</span>
+      </a>
+    </li>
+  </ul>
+
+  <p class="tpl-overflow" th:if="${folders.size() > 200}">
+    Only the first 200 sub-folders of this level are shown.
+  </p>
+
+  <th:block th:if="${!#lists.isEmpty(visualizations) and (offset > 0 or hasMore)}"
+            th:with="prevUrl=@{/partials/visualizations/tree(prefix=${prefix}, scope=${scope}, offset=${offset - 25})},
+                     nextUrl=@{/partials/visualizations/tree(prefix=${prefix}, scope=${scope}, offset=${offset + 25})}">
+    <div th:replace="~{partials/pager :: pager('#' + ${levelId}, ${prevUrl}, ${nextUrl}, ${offset}, ${hasMore}, ${visualizations.size()}, ${total})}"></div>
+  </th:block>
+</div>

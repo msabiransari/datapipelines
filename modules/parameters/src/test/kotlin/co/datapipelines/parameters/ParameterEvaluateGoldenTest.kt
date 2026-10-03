@@ -1,5 +1,6 @@
 package co.datapipelines.parameters
 
+import co.datapipelines.parameters.EvaluatorFixtures.attempt
 import co.datapipelines.parameters.EvaluatorFixtures.templateSelect
 import co.datapipelines.parameters.EvaluatorFixtures.version
 import co.datapipelines.pipeline.OrgContext
@@ -76,14 +77,24 @@ class ParameterEvaluateGoldenTest {
     /** The bytes `/evaluate` wraps in its envelope — the evaluate's one writer, compact, as served. */
     private fun actual(): String {
         val response =
-            evaluator.evaluateBlocking(EvaluatorFixtures.WORKSPACE, set, EvaluatorFixtures.selections("country" to "USA", "state" to "XX"))
+            evaluator.evaluateBlocking(
+                EvaluatorFixtures.WORKSPACE,
+                set,
+                EvaluatorFixtures.selections("country" to "USA", "state" to "XX"),
+                attempt(),
+            )
         return String(EvaluateResponseJson.bytes(response), Charsets.UTF_8) + "\n"
     }
 
     @Test
     fun `the fixture exercises every branch the golden claims - a reset, a hidden, a disabled, a sourced input, a default`() {
         val response =
-            evaluator.evaluateBlocking(EvaluatorFixtures.WORKSPACE, set, EvaluatorFixtures.selections("country" to "USA", "state" to "XX"))
+            evaluator.evaluateBlocking(
+                EvaluatorFixtures.WORKSPACE,
+                set,
+                EvaluatorFixtures.selections("country" to "USA", "state" to "XX"),
+                attempt(),
+            )
         val states = response.parameters.associate { it.definition.name to it.state }
 
         states.getValue("state").reset shouldBe true

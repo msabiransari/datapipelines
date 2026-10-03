@@ -1,6 +1,6 @@
 # Enumerations Reference
 
-**Status:** v1.31 (living document — updated as enums evolve)
+**Status:** v1.32 (living document — updated as enums evolve)
 **Owner:** datapipelines.co core
 **Purpose:** Single source of truth for every enum value used across the system. Prevents spelling drift across specs and across the codebase.
 
@@ -949,6 +949,58 @@ The CHECK (`chk_executions_executed_by_key_kind`) admits these four and NULL. V3
 
 ---
 
+## 39. `EvaluationCaller` — who ran a parameter-set evaluation (#376)
+
+**Source:** the [parameter-set workspace spec](superpowers/specs/2026-10-02-parameter-set-workspace-spec.md) §2.1 (R2) and the owner's §11.10 ruling; the Kotlin enum is `EvaluationCaller` (`parameters`) — the CHECK of `parameter_evaluations.caller` (V48). Every evaluate names one in its REQUIRED `EvaluationAttempt`.
+**Used by:** the parameter engine's recorder, the History tab's Caller column, metadata-db §4.37.
+
+| Value | Meaning |
+|---|---|
+| `PAGE` | The Parameter Sets page's observed evaluation (`POST /api/v1/parameter-sets/{id}/evaluations`, rest-api §21.5) — the record's id is the client-minted `evaluation_id` |
+| `DASHBOARD` | The dashboard runtime — its parameters route, or a refresh's evaluation (the record's `correlation_id` is then the refresh id) |
+| `PIPELINE` | **Dormant.** Declared so no migration widens the CHECK later; the recorder refuses it until a pipeline binds a parameter set (the engine record's §13) |
+| `REST` | `POST /api/v1/parameter-sets/{id}/evaluate` |
+| `MCP` | The `parameter_sets_evaluate` tool |
+
+**Closed.** The value is code-chosen per call site, never read from a request.
+
+---
+
+## 40. `ParameterEvaluationStatus` — a parameter-set evaluation record's state (#376)
+
+**Source:** the workspace spec §2.1 with the owner's §11.7 ruling (`ABORTED`); the Kotlin enum is `ParameterEvaluationStatus` (`parameters`) — the CHECK of `parameter_evaluations.status` (V48). Its four terminal words are `EvaluationOutcome`'s (#375).
+**Used by:** the recorder, the stale sweep (metadata-db §8.5), the History tab, metadata-db §4.37.
+
+| Value | Meaning |
+|---|---|
+| `RUNNING` | Admitted, not yet ended. The only non-terminal value; a row with `finished_at` NULL |
+| `COMPLETED` | A response was produced; `valid` carries its flag (an invalid form is COMPLETED with `valid = false`, never a failure) |
+| `ABORTED` | The caller stopped it — the observed route's disconnect grace or a shutdown |
+| `TIMEOUT` | The whole-request `parameter.evaluate.timeout` (`outcome_code` names it) |
+| `FAILED` | A whole-request refusal after work began (`outcome_code`, e.g. `parameter.evaluate.response_too_large`), or a defect (`outcome_code` NULL) |
+| `INCOMPLETE` | No terminal write ever landed (an instance crash, a refused write) — written ONLY by the stale sweep; never claims a timeout |
+
+**Closed.** A request refused before admission (`parameter.evaluate.unknown_parameter`) has NO status: it writes no row.
+
+---
+
+## 41. `QueryAttemptOutcome` — one statement attempt's outcome (#376)
+
+**Source:** the workspace spec §2.2 with the owner's §11.7 ruling (`ABORTED`); the Kotlin enum is `QueryAttemptOutcome` (`parameters`) — the CHECK of `parameter_evaluation_queries.outcome` (V48). NULL while the statement is in flight.
+**Used by:** the recorder, the record detail's attempt table, metadata-db §4.38.
+
+| Value | Meaning |
+|---|---|
+| `EXECUTED` | The statement ran and its rows were read (`row_count`) — whatever the parameter then made of them |
+| `REFUSED` | It never ran: a render failure, a datasource the workspace cannot see or reach, a missing bind, too many binds, the read-only gate, a full bulkhead — `refusal_code` names which |
+| `FAILED` | It ran and failed — a driver error, its own statement timeout, a forbidden table (`error_code`; none for a runtime defect) |
+| `TIMEOUT` | The evaluate deadline abandoned it (cancel + discard); the worker may still be running — no end stamp |
+| `ABORTED` | Its evaluation's caller stopped it, so it was abandoned the same way — never claimed as a TIMEOUT |
+
+**Closed.** A constants selector and a plain-default input run no statement and have no row.
+
+---
+
 ## Cross-Reference: Where Each Enum Is Authored
 
 | Enum | Authoring spec | Consuming specs |
@@ -982,6 +1034,7 @@ The CHECK (`chk_executions_executed_by_key_kind`) admits these four and NULL. V3
 | `ParameterCardinality` | pipeline-contract §6.1 (`typesystem` declares it; §26 here is the wire table) | the parameter engine (#194), rest-api, mcp-server |
 | `ParameterKind`, `SelectorSourceKind`, `PresentationControl`, `NumericFormatKind` | the [parameter-engine record §3](superpowers/specs/2026-09-21-parameter-engine-design.md) (`parameters` declares them; §27–§30 here are the wire tables) | rest-api, mcp-server (#194 lane D) |
 | `RefreshStatus` | [Dashboards §5](dashboards.md#5-the-runtime) (`visualization` declares it; §38 here is the wire table) | metadata-db (the V43 CHECK), rest-api §23.3, the dashboard runtime |
+| `EvaluationCaller`, `ParameterEvaluationStatus`, `QueryAttemptOutcome` | the [parameter-set workspace spec §2](superpowers/specs/2026-10-02-parameter-set-workspace-spec.md) (`parameters` declares them; §39–§41 here are the wire tables) | metadata-db (the V48 CHECKs), the History tab (ui-screens §4.23) |
 | `RendererKind`, `AssertionKind`, `TestRunStatus`, `DashboardObjectType`, `ActionScope`, `StateSetting`, `LayoutPosition` | the [dashboard implementation spec §3](superpowers/specs/2026-09-28-dashboard-implementation-spec.md) (`visualization` declares them; §31–§37 here are the wire tables) | [Dashboards](dashboards.md), metadata-db (the V42 CHECK), rest-api and mcp-server (L1b) |
 
 ---
@@ -1005,6 +1058,7 @@ This document itself is **additive-only** — values are never removed (only mar
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-02 | v1.32 | S3 (#376) the parameter-set evaluation history | **§39 `EvaluationCaller`** (PAGE, DASHBOARD, PIPELINE — dormant, REST, MCP; the owner's §11.10 ruling), **§40 `ParameterEvaluationStatus`** (the spec's five plus `ABORTED`, the §11.7 ruling) and **§41 `QueryAttemptOutcome`** (the spec's four plus `ABORTED`) — the three V48 CHECKs, each pinned to its Kotlin enum by `ParameterEnumsSpecDriftTest`. No audit event (§15 unchanged): recording is the evaluate's side effect, visible through the History tab; the spec names an awaited `parameter.evaluation` row only if review rules one necessary. |
 | 2026-10-02 | v1.31 | 372 (#372, #373) the families' lifecycle rows carry the mould's full shape | §15's three family rows now promise the pointer pair `current_version_before`/`current_version_after` on a discard AND a restore, `from`/`to` on a switch and `scope` on every purge — produced by the verbs' own results inside the write's transaction (the artifact services' discard/restore/switch statements answer the pair; the purge's own version-count branch is the scope), never a controller re-read. The false "the artifact services answer no record read" clause is gone. Authority: rest-api §21/§22/§23; versioning §7. |
 | 2026-10-02 | v1.30 | 235 (#164) the screenshot upload's audit row | §15 gains **`visualization.test.screenshot_uploaded`** — the one audited write an agent makes over REST: actor = the run's starter, no key, ids/size/type only, never the token. The Status line read v1.27 under a v1.28 row (332); it now reads the current version. |
 | 2026-10-01 | v1.29 | L5 (#367, #10) the `dashboard` key kind | **§8A gains `dashboard`** (V45) — the runtime routes' credential, `dashboard_key_bindings` folders are its reach, unbound = unservable; **§8D gains `dashboard_viewer`** — exactly `dashboard.read` (bindings as the lens) and `dashboard.execute`; **§15 gains `dashboard.key_bound` / `dashboard.key_unbound`**; **§18A gains `dashboard`** (V45) — a delegated refresh's attribution (`executed_by` the key's identity), the CHECK widens with it. |

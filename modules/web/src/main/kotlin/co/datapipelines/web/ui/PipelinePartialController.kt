@@ -77,35 +77,6 @@ class PipelinePartialController(
     }
 
     /**
-     * The SELECTED pipeline, for the explorer's right pane — 106's three regions: the header
-     * (folder path, leaf name, Open in editor and the lifecycle verbs 101 shipped), the
-     * READING column (Overview + Parameters) and the ACTING column (the tabbed card, whose
-     * first paint is Versions).
-     *
-     * A selection swaps this fragment into `#pipeline-detail` with `innerHTML` and touches
-     * nothing else: the tree pane's DOM is never re-rendered by a selection, which is the
-     * whole point of the two-pane layout.
-     *
-     * Everything the three regions need arrives in ONE model call ([PipelineBrowseModel.fillDetail]);
-     * Runs and Usage are separate fragments below, because a tab the user never opens should
-     * cost nothing.
-     *
-     * The id travels as a QUERY parameter for symmetry with the templates pane, not out of
-     * necessity — a pipeline is UUID-addressed everywhere (§9.6's `%2F` problem cannot arise
-     * for a UUID).
-     */
-    @GetMapping("/partials/pipelines/detail")
-    @RequiredScope(Permission.PIPELINE_READ)
-    fun detail(
-        model: Model,
-        @RequestParam id: UUID,
-    ): String {
-        RoleModel.stamp(model)
-        val principal = currentPrincipal()
-        return browse.fillDetail(model, principal.requireWorkspace().id, lens.viewFor(principal), id)
-    }
-
-    /**
      * The acting column's **Runs** tab — this pipeline's last 20 executions, loaded on the
      * tab's first click and then swapped in place.
      *

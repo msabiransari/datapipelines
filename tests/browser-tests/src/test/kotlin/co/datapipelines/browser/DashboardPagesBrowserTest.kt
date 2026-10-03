@@ -23,44 +23,30 @@ import org.junit.jupiter.api.TestMethodOrder
  */
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
 class DashboardPagesBrowserTest : DashboardBrowserSuite() {
-    private fun openTree() {
+    private fun openCatalog() {
         page.navigate("$baseUrl/dashboards")
-        page.waitForSelector("#dashboards-tree-pane .tpl-level")
-    }
-
-    /** Expands the folder whose FULL path is [path], waiting for its child level to land. */
-    private fun expandFolder(path: String) {
-        page.click(".tpl-summary:has(span[title='$path'])")
-        page.waitForSelector(".tpl-folder:has(span[title='$path']) .tpl-level .tpl-tree")
+        page.waitForSelector("#dash-list-wrapper")
     }
 
     @Test
     @Order(1)
-    fun `the tree page lists folders, a folder's level lists its child, and a leaf navigates un-boosted`() {
+    fun `the catalog lists rows - not folders - and a row navigates un-boosted into the workspace`() {
         startTrace()
         val root = ready("dpageto")
         val board = seedBoard(root)
-        openTree()
+        openCatalog()
 
-        // The root lists FOLDERS ONLY (a dashboard name needs a folder) — this workspace's
-        // first segment, and no leaf.
-        page.waitForSelector("#dash-tree-page .tpl-tree")
-        page.locator("#dash-tree-page > .ds-empty").count() shouldBe 0
-        page.locator("#dash-tree-page a.tpl-leaf").count() shouldBe 0
-        page.locator("#dash-tree-page .tpl-summary").count() shouldBe 1
+        // #400: the catalog is a FLAT list of the dashboards the caller may read — folders
+        // are NOT its axis (the tree is the sidebar's). One row, linking the workspace.
+        page.waitForSelector("#dash-list-wrapper a.tpl-result")
+        page.locator("#dash-list-wrapper a.tpl-result").count() shouldBe 1
+        page.locator("#dash-list-wrapper a[data-leaf-id='$board']").count() shouldBe 1
+        // No tree anywhere on the page: the L3b tree page is retired.
+        page.locator("#dash-list-wrapper .tpl-summary").count() shouldBe 0
 
-        // The sidebar's branch is INDEPENDENT state: closed until its own disclosure is
-        // clicked, and its lazy level carries the NAV scope's ids.
-        page.locator("#dash-tree-nav .tpl-tree").count() shouldBe 0
-
-        expandFolder(root)
-        expandFolder("$root/boards")
-        page.waitForSelector("a.tpl-leaf:has(span[title='$root/boards/overview'])")
-
-        // A leaf NAVIGATES — the URL moves to the board page and the document is a FULL
-        // navigation (the landing is not replaced under it: the shell's brand is a fresh
-        // document's, not a boosted swap's residue).
-        page.click("a.tpl-leaf:has(span[title='$root/boards/overview'])")
+        // A row NAVIGATES — the URL moves to the workspace and the document is a FULL
+        // navigation (the one-bundle rule: the workspace loads a Plotly bundle).
+        page.click("#dash-list-wrapper a[data-leaf-id='$board']")
         page.waitForURL("**/dashboards/$board")
         page.waitForFunction("() => window.__dpPage && window.__dpPage.ready === true")
         page.locator("#dp-board .plotly .main-svg").first().waitFor()
@@ -68,7 +54,7 @@ class DashboardPagesBrowserTest : DashboardBrowserSuite() {
 
     @Test
     @Order(2)
-    fun `the sidebar's Dashboards branch expands lazily into the tree`() {
+    fun `the sidebar's Dashboards branch expands lazily, searches flat, and clearing returns the tree`() {
         startTrace()
         val root = ready("dpbranch")
         seedBoard(root)
@@ -76,12 +62,22 @@ class DashboardPagesBrowserTest : DashboardBrowserSuite() {
         page.waitForSelector("[data-nav-branch='dashboards']")
 
         // Closed until its own toggle is clicked (#350: the rail's one navigating-tree pattern —
-        // a toggle beside the link, a panel below); the page tree's id does not exist here.
+        // a toggle beside the link, a panel below).
         page.locator("#dash-tree-nav .tpl-tree").count() shouldBe 0
         page.click("[data-nav-branch='dashboards'] [data-nav-tree-toggle]")
         page.waitForSelector("#dash-tree-nav .tpl-tree")
         page.waitForSelector("#dash-tree-nav .tpl-summary")
         page.locator("[data-nav-branch='dashboards'] [data-nav-tree-toggle]").getAttribute("aria-expanded") shouldBe "true"
+
+        // #400 — the branch's search: a non-empty query swaps the FLAT results into the same
+        // nav root (role=listbox), the shared engine serving it with no JS change.
+        page.fill("[data-nav-branch='dashboards'] [data-nav-tree-search]", root)
+        page.waitForSelector("#dash-tree-nav a.tpl-result")
+        page.locator("#dash-tree-nav a.tpl-result").count() shouldBe 1
+        // Clearing the box returns the tree, by construction: the dispatcher answers the
+        // empty query with the root level again.
+        page.fill("[data-nav-branch='dashboards'] [data-nav-tree-search]", "")
+        page.waitForSelector("#dash-tree-nav .tpl-summary")
         // The shared engine's NAV context: the arrows move focus through the tree and navigate
         // nowhere (L3b left this tree unwired for exactly that reason; the context solves it).
         val start = page.url()
@@ -143,11 +139,11 @@ class DashboardPagesBrowserTest : DashboardBrowserSuite() {
         page.navigate("$baseUrl/dashboards/$board")
         page.waitForFunction("() => window.__dpPage && window.__dpPage.ready === true")
 
-        // AWAY: the nav's Dashboards link is a BOOSTED navigation (the tree page is an
+        // AWAY: the nav's Dashboards link is a BOOSTED navigation (the catalog is an
         // ordinary page); the board document is left.
         page.click("a[data-nav-section='/dashboards']")
         page.waitForURL("**/dashboards")
-        page.waitForSelector("#dashboards-tree-pane")
+        page.waitForSelector("#dash-list-wrapper")
 
         // BACK: htmx restores its snapshot first (the glue disposed on the way out, so the
         // snapshot is the unmarked shell) and then fetches the page — the settled state is
@@ -167,7 +163,7 @@ class DashboardPagesBrowserTest : DashboardBrowserSuite() {
         // fresh fetch re-mounts exactly once. Each hop is synchronised on the DOM the hop
         // lands (a boosted restore swaps; no load event fires), never on the URL alone.
         page.goForward()
-        page.waitForSelector("#dashboards-tree-pane")
+        page.waitForSelector("#dash-list-wrapper")
         page.waitForTimeout(250.0) // the boosted swap's own settle before the next history hop
         page.goBack()
         page.waitForURL("**/dashboards/$board")
@@ -214,9 +210,9 @@ class DashboardPagesBrowserTest : DashboardBrowserSuite() {
         ppage.waitForURL("**/dashboard")
         switchWorkspace(ppage, rootWorkspaceName())
         ppage.navigate("$baseUrl/dashboards")
-        // The lens's own sentence (the fail-closed notice), and no leaf anywhere.
+        // The lens's own sentence (the fail-closed notice), and no row anywhere.
         ppage.waitForSelector("#app-main [data-lens-unavailable]")
-        ppage.locator("#app-main a.tpl-leaf").count() shouldBe 0
+        ppage.locator("#app-main a.tpl-result").count() shouldBe 0
         val hidden = ppage.navigate("$baseUrl/dashboards/$board")
         // The family's 404 for a hidden dashboard — the error page, never a board.
         hidden!!.status() shouldBe 404
@@ -265,10 +261,9 @@ class DashboardPagesBrowserTest : DashboardBrowserSuite() {
         val root = ready("dpshots")
         val board = seedBoardWithGrid(root)
 
-        // The tree page, light then dark.
-        openTree()
-        expandFolder(root)
-        expandFolder("$root/boards")
+        // The catalog, light then dark.
+        openCatalog()
+        page.waitForSelector("#dash-list-wrapper a.tpl-result")
         ensureTheme("light")
         page.waitForTimeout(300.0)
         page.screenshot(
@@ -276,7 +271,7 @@ class DashboardPagesBrowserTest : DashboardBrowserSuite() {
                 .ScreenshotOptions()
                 .setPath(
                     java.nio.file.Paths
-                        .get("build", "reports", "dashboards-tree-light.png"),
+                        .get("build", "reports", "dashboards-catalog-light.png"),
                 ),
         )
         ensureTheme("dark")
@@ -286,7 +281,7 @@ class DashboardPagesBrowserTest : DashboardBrowserSuite() {
                 .ScreenshotOptions()
                 .setPath(
                     java.nio.file.Paths
-                        .get("build", "reports", "dashboards-tree-dark.png"),
+                        .get("build", "reports", "dashboards-catalog-dark.png"),
                 ),
         )
 

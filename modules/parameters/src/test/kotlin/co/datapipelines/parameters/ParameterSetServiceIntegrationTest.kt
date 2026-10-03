@@ -380,6 +380,98 @@ class ParameterSetServiceIntegrationTest {
             h.service.listAll(WORKSPACE, lens, 0, 50).shouldBeEmpty()
             h.service.countAll(WORKSPACE, lens) shouldBe 0
         }
+
+        private fun setWith(
+            name: String,
+            displayName: String,
+            description: String,
+        ) = h.document(
+            """
+            { "name": "$name", "display_name": "$displayName",
+              "description": "$description",
+              "parameters": [ ${ParameterSetFixtures.countryJson()} ] }
+            """.trimIndent(),
+        )
+
+        @Test
+        fun `the name search matches name, display name or description, case-insensitively, paged name-ordered (#415)`() {
+            h.create(setWith("acme/sales/west_grid", "West grid", "Load for the western grid."))
+            h.create(setWith("acme/sales/east_fees", "East fees", "WEST surcharges by zone."))
+            h.create(setWith("acme/ops/pump_watch", "Pump watch", "Telemetry for pump 7."))
+
+            // Every column matches, case-insensitively on BOTH sides; the name orders the page.
+            h.service.search(WORKSPACE, ReadLens.Everything, "west", 0, 50).map { it.record.name } shouldBe
+                listOf("acme/sales/east_fees", "acme/sales/west_grid")
+            h.service.search(WORKSPACE, ReadLens.Everything, "fees", 0, 50).map { it.record.name } shouldBe
+                listOf("acme/sales/east_fees")
+            h.service.search(WORKSPACE, ReadLens.Everything, "pump 7", 0, 50).map { it.record.name } shouldBe
+                listOf("acme/ops/pump_watch")
+            h.service.countSearch(WORKSPACE, ReadLens.Everything, "west") shouldBe 2
+            // Paging is stable: the same ORDER BY name as the flat listing, so page two never repeats page one.
+            h.service.search(WORKSPACE, ReadLens.Everything, "acme", 0, 2).map { it.record.name } shouldBe
+                listOf("acme/ops/pump_watch", "acme/sales/east_fees")
+            h.service.search(WORKSPACE, ReadLens.Everything, "acme", 2, 2).map { it.record.name } shouldBe
+                listOf("acme/sales/west_grid")
+        }
+
+        @Test
+        fun `the search's LIKE metacharacters are LITERAL - percent, underscore, backslash and a quote never widen it nor error`() {
+            h.create(setWith("acme/sales/one_percent", "One % discount", "A 100%_off sale."))
+            h.create(setWith("acme/sales/plain", "Plain", "No metacharacters."))
+
+            // A bare `%` matches only the row holding a literal percent — never every row.
+            h.service.search(WORKSPACE, ReadLens.Everything, "%", 0, 50).map { it.record.name } shouldBe
+                listOf("acme/sales/one_percent")
+            // An underscore matches only the names/spellings that hold one.
+            h.service.search(WORKSPACE, ReadLens.Everything, "_", 0, 50).map { it.record.name } shouldBe
+                listOf("acme/sales/one_percent")
+            // A backslash and a single quote error nowhere and match nothing — they are ordinary text.
+            h.service.search(WORKSPACE, ReadLens.Everything, "\\", 0, 50).shouldBeEmpty()
+            h.service.search(WORKSPACE, ReadLens.Everything, "'", 0, 50).shouldBeEmpty()
+            h.service.countSearch(WORKSPACE, ReadLens.Everything, "%") shouldBe 1
+        }
+
+        @Test
+        fun `the search is lens-true - a set the lens hides is never a hit, not a page and not a total (#415)`() {
+            val admitted = h.create(setWith("acme/sales/admitted", "Admitted", "Says cascade too."))
+            h.service.release(WORKSPACE, admitted.record.id, admitted.detail.bodyHash, AUTHOR)
+            val hidden = h.create(setWith("acme/sales/hidden", "Hidden", "Says cascade too."))
+            h.service.release(WORKSPACE, hidden.record.id, hidden.detail.bodyHash, AUTHOR)
+
+            // One term, two textual hits; the lens admits one. Her answer is the admitted one —
+            // the hidden set is not filtered out in the template, it never leaves the service.
+            val lens = ReadLens.Only(setOf("acme/sales/admitted"))
+            h.service.search(WORKSPACE, lens, "cascade", 0, 50).map { it.record.name } shouldBe listOf("acme/sales/admitted")
+            h.service.countSearch(WORKSPACE, lens, "cascade") shouldBe 1
+            // The everything lens answers both; the difference is the lens's, never the search's.
+            h.service.countSearch(WORKSPACE, ReadLens.Everything, "cascade") shouldBe 2
+        }
+
+        @Test
+        fun `a blank q IS the flat listing - the same page and the same total, both lenses`() {
+            val a = h.create(setWith("acme/sales/a", "A", "First."))
+            h.service.release(WORKSPACE, a.record.id, a.detail.bodyHash, AUTHOR)
+            h.create(setWith("acme/sales/b", "B", "Second."))
+
+            for (q in listOf<String?>(null, "", "   ")) {
+                h.service.search(WORKSPACE, ReadLens.Everything, q, 0, 50).map { it.record.name } shouldBe
+                    h.service.listAll(WORKSPACE, ReadLens.Everything, 0, 50).map { it.record.name }
+                h.service.countSearch(WORKSPACE, ReadLens.Everything, q) shouldBe h.service.countAll(WORKSPACE, ReadLens.Everything)
+                h.service.search(WORKSPACE, ReadLens.Only(setOf("acme/sales/a")), q, 0, 50).map { it.record.name } shouldBe
+                    h.service.listAll(WORKSPACE, ReadLens.Only(setOf("acme/sales/a")), 0, 50).map { it.record.name }
+            }
+        }
+
+        @Test
+        fun `the search keeps the listing's D55 rule - a draft-only set matches under the everything lens and is absent under the lens`() {
+            h.create(setWith("acme/sales/draft_hit", "Draft hit", "Never released."))
+
+            val hit = h.service.search(WORKSPACE, ReadLens.Everything, "draft_hit", 0, 50).single()
+            hit.detail.status shouldBe PipelineVersionStatus.DRAFT
+            // A draft is never a promoter's, so her search cannot answer it either.
+            h.service.search(WORKSPACE, ReadLens.Only(setOf("acme/sales/draft_hit")), "draft_hit", 0, 50).shouldBeEmpty()
+            h.service.countSearch(WORKSPACE, ReadLens.Only(setOf("acme/sales/draft_hit")), "draft_hit") shouldBe 0
+        }
     }
 
     @Nested

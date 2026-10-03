@@ -436,6 +436,27 @@ class ArtifactLifecycle<B : Any>(
         lens: ReadLens,
     ): Int = if (lens.isEverything) repository.countAll(workspaceId) else admitted(workspaceId, lens).size
 
+    /**
+     * The name search (#399) — [listAll]'s two paths over the repository's ONE matching predicate: under the everything
+     * lens the page and its total are taken in SQL; under a narrowing lens the matches are intersected with the admitted
+     * set (current RELEASED, admitted names) and paged in memory, each at its current version — so a hidden artifact or a
+     * promoter's draft is never matched, counted or paged. [query] is matched literally; the caller trims it.
+     */
+    fun search(
+        workspaceId: UUID,
+        lens: ReadLens,
+        query: String,
+        offset: Int = 0,
+        limit: Int = ArtifactRepository.DEFAULT_PAGE_LIMIT,
+    ): ArtifactPage<B> {
+        if (lens.isEverything) {
+            return ArtifactPage(repository.search(workspaceId, query, offset, limit), repository.countSearch(workspaceId, query))
+        }
+        val matches = repository.searchIds(workspaceId, query)
+        val admitted = admitted(workspaceId, lens).filter { it.id in matches }
+        return ArtifactPage(page(admitted, offset, limit).mapNotNull { repository.findCurrent(workspaceId, it.id) }, admitted.size)
+    }
+
     /** The promoter lens's input — every live artifact's current RELEASED version (versioning §10.2). */
     fun currentVersions(workspaceId: UUID): List<CurrentArtifactVersion> = repository.findCurrentVersions(workspaceId)
 

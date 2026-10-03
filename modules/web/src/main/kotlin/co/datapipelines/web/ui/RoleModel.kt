@@ -56,6 +56,11 @@ object RoleModel {
      * dashboard's runs and every runs panel render by it. [canReadPromotion] is the
      * `PROMOTION_READ` row (owner rule 13): the author who released sees the promotion page,
      * the promote verb on it still renders by [canPromote].
+     *
+     * [canEvaluateParameterSets] (#374) is the `PARAMETER_SET_EVALUATE` row — viewer, author,
+     * workspace admin and super admin; never the promoter — and decides ONLY whether the Parameter
+     * Sets workspace renders its live form. It is a RENDER flag: the evaluate route stays
+     * permission-gated on the wire, and a UI permission is never inferred from this boolean.
      */
     data class Roles(
         val canRead: Boolean,
@@ -67,6 +72,7 @@ object RoleModel {
         val canAdminWorkspace: Boolean,
         val isSuperAdmin: Boolean,
         val roleLabel: String,
+        val canEvaluateParameterSets: Boolean = false,
     )
 
     /**
@@ -94,6 +100,7 @@ object RoleModel {
             canAdminWorkspace = principal.isWorkspaceAdmin,
             isSuperAdmin = principal.isSuperAdmin,
             roleLabel = label(principal.isSuperAdmin, context.role),
+            canEvaluateParameterSets = context.permits(Permission.PARAMETER_SET_EVALUATE),
         )
     }
 
@@ -174,6 +181,7 @@ object RoleModel {
         model.addAttribute("canAdminWorkspace", roles.canAdminWorkspace)
         model.addAttribute("isSuperAdmin", roles.isSuperAdmin)
         model.addAttribute("roleLabel", roles.roleLabel)
+        model.addAttribute("canEvaluateParameterSets", roles.canEvaluateParameterSets)
     }
 
     /**

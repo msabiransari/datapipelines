@@ -63,7 +63,7 @@
     "package": "lucide-static",
     "version": "1.39.0",
     "file": "vendor/icons/lucide-sprite.svg",
-    "sha256": "fe4173395fb55490d3a442b5a7d03eea4f1ac9275bae4c0c66775dabb0b775ad",
+    "sha256": "b0c094724bfaf8be8ed250f16ef39be23419ebed5341d28e19ba75253a26f335",
     "source": "https://unpkg.com/lucide-static@1.39.0/icons/{name}.svg",
     "license": "ISC",
     "subset": [
@@ -109,7 +109,9 @@
       "file",
       "menu",
       "bug",
-      "calendar-clock"
+      "calendar-clock",
+      "sliders-horizontal",
+      "chart-line"
     ],
     "note": "059 — subset ONLY (glyphs assembled into one sprite, symbol ids left of the mapping); stroke=currentColor so tokens colour them. No vendor logos (trademarks). 085 §B: the sprite now covers EVERY icon the app references — the nav, the actions and the tree glyphs were ad-hoc inline copies at mixed weights until now; IconSpriteAuditTest keeps referenced, vendored and this subset list equal. db/table/boxes/workflow are the 059 legacy ids (db = lucide's database; its subset_sha256 is database.svg's). The upstream LICENSE is vendored verbatim as LICENSE.lucide (ISC, with the Feather-derived MIT appendix).",
     "license_file": "vendor/icons/LICENSE.lucide",
@@ -156,7 +158,9 @@
       "file": "fe93aa65c1fbfc2d00b3c1d59ce3da94fd2245716e694128688d6c50adc0768e",
       "menu": "8a1841a0766152e1165ce5c401e29e15c170e71df3a9d9c8ad5e96322052e1c9",
       "bug": "111a60d1747fcc7671bf7afdd8334ba815fe1d99b7d764fdb72caed8611e20d9",
-      "calendar-clock": "991bc4e6b93a534eb406346a342ffc0b7ea3dc70ed74476fc9255fa157ace17a"
+      "calendar-clock": "991bc4e6b93a534eb406346a342ffc0b7ea3dc70ed74476fc9255fa157ace17a",
+      "sliders-horizontal": "3553f5e026f5bdf7e512e57ae54a672ced42df62d1dd2b8de0fc1a898d56e7d5",
+      "chart-line": "3b83d3bc804083413091262ea77af17a4a0ce2d9dddfe87b0ddfa9a8a4155983"
     }
   },
   "plotly": {
@@ -198,8 +202,8 @@
       "js/datapipelines-dashboard-kpi.js"
     ],
     "sha256": {
-      "js/datapipelines-dashboard.js": "adc57c182fcb8feffcae91ad81f34bb58fae2072ce2f8c6e9e44aac89f8bd72b",
-      "js/datapipelines-dashboard-plotly.js": "527c8135296f1ce24976dac6a6e995b215de78acb7e1a9f4f85d0760e0ba5938",
+      "js/datapipelines-dashboard.js": "cabf26ee798594a77876a5eb72cc3b3ea61ae6745847f99790f75ca544e2f6bd",
+      "js/datapipelines-dashboard-plotly.js": "7b2037acad21c27d980a854e704d754f244bdb9972ee7342bacd01cef327759d",
       "js/datapipelines-dashboard-table.js": "84e0a5476389b6ea887e4c03d8a95e6bfab5822a97520a57a37532f7a0a005e6",
       "js/datapipelines-dashboard-kpi.js": "910122e6ded8791ec7a42167b9107a7e433623c0204c8321f1e3abfd7a723687"
     },

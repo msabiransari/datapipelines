@@ -156,7 +156,7 @@ declare -A GUARDS
 GUARDS[":modules:auth"]="co.datapipelines.auth.ScopeMatrixSpecDriftTest co.datapipelines.auth.PublicPathsTest co.datapipelines.auth.RoleMatrixTest co.datapipelines.auth.PermissionResolutionTest"
 GUARDS[":modules:pipeline-contract"]="co.datapipelines.pipeline.PipelineErrorCodesSpecDriftTest"
 GUARDS[":modules:mcp-server"]="co.datapipelines.mcp.SkillDistributionTest co.datapipelines.mcp.McpToolSurfaceSpecDriftTest"
-GUARDS[":modules:app"]="co.datapipelines.config.OrgConfigKeysSpecDriftTest co.datapipelines.config.ConfigValidatorCheckCountTest co.datapipelines.config.RemoveMemberRollbackIntegrationTest"
+GUARDS[":modules:app"]="co.datapipelines.config.OrgConfigKeysSpecDriftTest co.datapipelines.config.ConfigValidatorCheckCountTest co.datapipelines.config.RemoveMemberRollbackIntegrationTest co.datapipelines.config.HelmDuckDbValuesSpecDriftTest"
 # 242a's merge gate went red on the datasources doc-drift guard its pregate never ran (the lane
 # had repointed paths the checklist parses); 242b adds it so a docs lane sees it here.
 GUARDS[":modules:datasources"]="co.datapipelines.datasources.DialectChecklistDriftTest"

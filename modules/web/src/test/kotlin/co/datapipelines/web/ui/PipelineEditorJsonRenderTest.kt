@@ -63,7 +63,6 @@ class PipelineEditorJsonRenderTest {
             mockk(relaxed = true),
             mockk(relaxed = true),
             mockk(relaxed = true),
-            mockk(relaxed = true),
         )
     private val controller =
         PipelineWorkspaceController(

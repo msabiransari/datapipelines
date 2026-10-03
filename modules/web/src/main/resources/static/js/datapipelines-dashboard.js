@@ -67,6 +67,15 @@
     "dispose",
   ];
 
+  /** #374 — the value-origin words the parameter form shows (record P26's `state.origin` wire values). */
+  var ORIGIN_LABELS = {
+    client: "your selection",
+    default: "default",
+    first: "first option",
+    source: "from source",
+    none: "no value",
+  };
+
   function isPlainObject(value) {
     return !!value && typeof value === "object" && !Array.isArray(value);
   }
@@ -228,6 +237,10 @@
     this._parameters = null;
     this._baseline = null;
     this._lock = null;
+    // #374 — the parameters-only entry (initParameters): a parameter SET is evaluated by id and version, with no
+    // dashboard configuration behind it. `_generation` numbers every attempt so a superseded one is nameable.
+    this._parametersOnly = false;
+    this._generation = 0;
     this._refreshes = {};
     this._streams = {};
     this._occurrences = {};
@@ -278,7 +291,18 @@
     return this._runtimePath("parameters");
   };
 
+  /** #383 — the parameters-only instance's stream route: the OBSERVED evaluation (rest-api §21.5). */
+  DashboardInstance.prototype._parameterSetEvaluationsPath = function () {
+    return "/api/v1/parameter-sets/" + encodeURIComponent(this._init.parameterSet.id) + "/evaluations";
+  };
+
+  /**
+   * The stream route. The board refreshes ride the dashboard runtime's visualization stream; a parameters-only
+   * instance streams the OBSERVED evaluation instead — the same decision `_parametersPath` makes, in the same
+   * place, so the route choice lives with the other route choices and `_openStream`'s one caller is untouched.
+   */
   DashboardInstance.prototype._streamPath = function () {
+    if (this._parametersOnly) return this._parameterSetEvaluationsPath();
     return this._runtimePath("visualizations");
   };
 
@@ -583,6 +607,52 @@
     return this._ready;
   };
 
+  /**
+   * #374 — the parameters-only barrier: the same ordered steps minus the dashboard's (no configuration read, no
+   * renderer judgement, no occurrences, no actions). The layout is mounted (the composite builds `container` there), then
+   * the FIRST evaluation — selections `{}` — is awaited and rendered. Resolves `ready`; a failure is published
+   * VERBATIM (the server's code and message) and disposes the instance, exactly as the board's bootstrap does.
+   */
+  DashboardInstance.prototype._bootstrapParameters = function () {
+    var self = this;
+    var steps = [];
+    this._readySteps = steps;
+    // The lock window a parameter attempt is given: the option, else the dashboard runtime's own default.
+    var lockSeconds = this._options.parameterLockSeconds;
+    this._config = {
+      timeouts: { parameter_lock_seconds: typeof lockSeconds === "number" && lockSeconds > 0 ? lockSeconds : 30 },
+      parameter_set: { name: this._init.parameterSet.id },
+      layout: {},
+      visualizations: [],
+      actions: [],
+    };
+    this._ready = (async function () {
+      steps.push("adapter_validated");
+      await withDeadline(Promise.resolve(self._adapter.mountLayout({})), self._renderTimeoutMs(), function () {
+        return self._fail("render.layout_timeout", "the host did not mount the layout in time");
+      });
+      steps.push("layout_mounted");
+      var evaluated = await self._evaluateParameters("bootstrap");
+      steps.push("parameters_rendered");
+      self._parameters = evaluated;
+      self._baseline = { selections: self._snapshotSelections(evaluated), revision: evaluated.parameter_revision };
+      self._bootstrapped = true;
+      return undefined;
+    })();
+    this._ready.catch(function (error) {
+      self._publishNotification({
+        scope: "bootstrap",
+        severity: "error",
+        code: isDashboardError(error) ? error.code : "bootstrap.failed",
+        message: isDashboardError(error) && error.message ? error.message : "the parameter set could not be evaluated",
+        retryable: !!(isDashboardError(error) && error.retryable),
+        recover: isDashboardError(error) && error.retryable ? "retry" : null,
+      });
+      self._dispose("bootstrap_failed");
+    });
+    return this._ready;
+  };
+
   /** Adapter validation (§10.3): a missing function is refused at registration — synchronously, in init. */
   function validateAdapter(adapter) {
     if (!isPlainObject(adapter)) {
@@ -690,7 +760,19 @@
    */
   DashboardInstance.prototype._evaluateParameters = function (intent) {
     if (this._lock) {
-      return Promise.reject(this._fail("parameters.locked", "a parameter evaluation is already pending"));
+      // #374 — a parameter SET's form SUPERSEDES: the person's newest selection is the one worth answering, and a
+      // refused change would be a lost one. The pending attempt is finished here, so its response (n) arriving after
+      // this one (n+1) was minted passes neither admission point and changes nothing. A dashboard keeps the refusal.
+      if (!this._parametersOnly) {
+        return Promise.reject(this._fail("parameters.locked", "a parameter evaluation is already pending"));
+      }
+      var prior = this._lock;
+      prior.finished = true;
+      this._clearLockTimer(prior);
+      // #383 — the supersede also CLOSES the prior attempt's stream (the AbortController fires; the server's
+      // disconnect grace then aborts the evaluation — the owner's §11.7 ruling over the spec's "never cancels").
+      this._closeParameterStream(prior, "superseded");
+      this._lock = null;
     }
     var self = this;
     var startedAt = this._env.now();
@@ -700,22 +782,42 @@
         : 30;
     var attempt = {
       intent: intent,
+      generation: ++this._generation,
       startedAt: startedAt,
       deadline: startedAt + lockSeconds * 1000,
       finished: false,
       timer: null,
+      // #383 — the observed evaluation's identity, minted per attempt and never stored: every frame carries it and
+      // a frame of ANY other id is dropped before it can touch state or DOM.
+      evaluationId: null,
+      stream: null,
+      streamClosed: false,
+      resolve: null,
+      reject: null,
     };
     this._lock = attempt;
     attempt.timer = this._env.setTimeout(function () {
       self._lockExpired(attempt);
     }, attempt.deadline - startedAt);
 
-    return this._call(this._parametersPath(), {
+    if (this._parametersOnly) {
+      // The OBSERVED evaluation's body (rest-api §21.5): the version ALWAYS present, the WHOLE selection set
+      // (P27), a fresh v4 evaluation_id per attempt and the instance id for diagnostics. The first render submits `{}`.
+      attempt.evaluationId = this._env.uuid();
+      return this._streamEvaluateParameters(attempt, {
+        version: this._init.parameterSet.version,
+        selections: this._committedSelections(),
+        evaluation_id: attempt.evaluationId,
+        instance_id: this._instanceId,
+      });
+    }
+    var request = {
       configuration_id: this._config.configuration_id,
       instance_id: this._instanceId,
       selections: this._committedSelections(),
       intent: intent,
-    }).then(function (evaluated) {
+    };
+    return this._call(this._parametersPath(), request).then(function (evaluated) {
       // A response arriving after its attempt expired (or was superseded) changes nothing (§5.6).
       if (attempt.finished) {
         throw self._fail("parameters.superseded", "a late parameter response after its deadline changes nothing");
@@ -729,6 +831,151 @@
       }
       return self._acceptParameterResponse(attempt, evaluated);
     });
+  };
+
+  /**
+   * #383 — a parameters-only attempt as an OBSERVED evaluation (rest-api §21.5): the stream POST opens with the
+   * attempt's id and the frames drive it; `evaluation_completed`'s response resolves the attempt through the SAME
+   * admission path the plain evaluate used (`_acceptParameterResponse` — byte-identical semantics, the E2E proves
+   * the server's side, this path proves the page applies it). The attempt owns its stream; the supersede, the
+   * deadline and disposal close it, and the server's disconnect grace then aborts the evaluation.
+   */
+  DashboardInstance.prototype._streamEvaluateParameters = function (attempt, body) {
+    var self = this;
+    return new Promise(function (resolve, reject) {
+      attempt.resolve = resolve;
+      attempt.reject = reject;
+      attempt.stream = self._openStream(body, {
+        onFrame: function (event, payload) {
+          self._onParameterFrame(attempt, event, payload);
+        },
+        onRevoked: function () {
+          self._onParameterStreamRevoked(attempt);
+        },
+        onEnd: function () {
+          self._onParameterStreamEnd(attempt);
+        },
+        onFailure: function (error) {
+          self._onParameterStreamFailure(attempt, error);
+        },
+      });
+    });
+  };
+
+  /** The host's optional frame witness (`initParameters`' `onStreamEvent`): every frame and stream fact, once. */
+  DashboardInstance.prototype._streamEvent = function (info) {
+    var host = this._options.onStreamEvent;
+    if (typeof host !== "function") return;
+    try {
+      host(info);
+    } catch (e) {
+      /* the host's handler failing is the host's business */
+    }
+  };
+
+  /** Closes the attempt's stream once, announcing the close (the AbortController firing is a fact the page logs). */
+  DashboardInstance.prototype._closeParameterStream = function (attempt, reason) {
+    if (!attempt.stream || attempt.streamClosed) return;
+    attempt.streamClosed = true;
+    this._streamEvent({ evaluation_id: attempt.evaluationId, event: "stream_closed", reason: reason, applied: false });
+    attempt.stream.close();
+  };
+
+  /**
+   * One stream frame of a parameters-only attempt. The SUPERSEDE rule (§6.2, the plant-7 defence): a frame whose
+   * `evaluation_id` is not the CURRENT attempt's is dropped before any state or DOM change — the current attempt
+   * is the lock's, so a frame of an attempt the deadline released (its stream not yet closed) or of a superseded
+   * generation changes nothing. The page's graph states are the page's business: this path ends the attempt on
+   * the terminal frames and hands every applied frame to the host's witness.
+   */
+  DashboardInstance.prototype._onParameterFrame = function (attempt, event, payload) {
+    if (this._disposed) return;
+    var lock = this._lock;
+    var currentId = lock && lock.evaluationId ? lock.evaluationId : null;
+    var applied = currentId !== null && !!payload && payload.evaluation_id === currentId;
+    this._streamEvent({
+      evaluation_id: payload ? payload.evaluation_id : null,
+      event: event,
+      name: payload ? payload.parameter : undefined,
+      code: payload && payload.code ? payload.code : undefined,
+      detail: payload && payload.detail ? payload.detail : undefined,
+      response: event === "evaluation_completed" && payload ? payload.response : undefined,
+      applied: applied,
+    });
+    if (!applied) return; // dropped BEFORE any state or DOM change
+    if (event === "evaluation_completed") {
+      this._completeParameterStream(attempt, payload.response);
+      return;
+    }
+    if (event === "evaluation_failed") {
+      this._failParameterStream(attempt, payload.code);
+    }
+  };
+
+  /**
+   * The terminal frame on success: close the stream (nothing follows a terminal frame), then the plain path's
+   * admission — the absolute clock first (an overdue completion expires the attempt and changes nothing), else
+   * the response resolves through `_acceptParameterResponse` exactly as the plain evaluate's did.
+   */
+  DashboardInstance.prototype._completeParameterStream = function (attempt, response) {
+    var self = this;
+    this._closeParameterStream(attempt, "terminal");
+    if (attempt.finished) return;
+    if (this._env.now() > attempt.deadline) {
+      this._lockExpired(attempt);
+      if (attempt.reject) {
+        attempt.reject(self._fail("parameters.superseded", "a late parameter response after its deadline changes nothing"));
+      }
+      return;
+    }
+    this._acceptParameterResponse(attempt, response).then(attempt.resolve, attempt.reject);
+  };
+
+  /**
+   * The terminal frame on failure: the attempt ends with the catalogued code — the plain path's refusal shape
+   * (the host shows the code verbatim). The applied state is unchanged and stays shown; the lock holds until its
+   * deadline (or the next attempt's supersede), so a half-known state is never submitted silently.
+   */
+  DashboardInstance.prototype._failParameterStream = function (attempt, code) {
+    this._closeParameterStream(attempt, "terminal");
+    if (attempt.reject) {
+      attempt.reject(this._fail(code || "parameters.failed", code || "the parameter evaluation failed"));
+    }
+  };
+
+  /** The stream ended WITHOUT a terminal frame — the dashboards §6.6 transport-failure path: content is retained, the lock is released by the deadline, never earlier. */
+  DashboardInstance.prototype._onParameterStreamEnd = function (attempt) {
+    if (this._disposed || attempt.finished || this._lock !== attempt) return;
+    this._closeParameterStream(attempt, "ended");
+    this._publishNotification({
+      scope: "parameters",
+      severity: "error",
+      code: "transport.disconnected",
+      message: "the connection to the evaluation was lost",
+      retryable: true,
+      recover: "retry",
+    });
+  };
+
+  /** The authority guard cut the READ (`: revoked`): the runtime's revoked notice — content kept, retry offered. */
+  DashboardInstance.prototype._onParameterStreamRevoked = function (attempt) {
+    if (this._disposed || attempt.finished || this._lock !== attempt) return;
+    this._closeParameterStream(attempt, "revoked");
+    this._publishNotification({
+      scope: "parameters",
+      severity: "error",
+      code: "stream.revoked",
+      message: "the session lost its authority to read this evaluation",
+      retryable: true,
+      recover: "retry",
+    });
+  };
+
+  /** The stream failed at the transport (or the POST was refused): the attempt rejects; the host's notification path shows it. */
+  DashboardInstance.prototype._onParameterStreamFailure = function (attempt, error) {
+    if (this._disposed || attempt.finished || this._lock !== attempt) return;
+    this._closeParameterStream(attempt, "failed");
+    if (attempt.reject) attempt.reject(error);
   };
 
   /** Every parameter's current value, hidden and disabled included (D23). */
@@ -787,6 +1034,9 @@
         self._lock = null;
         self._parameters = evaluated;
         self._baseline = { selections: self._snapshotSelections(evaluated), revision: evaluated.parameter_revision };
+        // #374 — the form's failure notice is a STATE, not an event: an applied response retires it, so the same
+        // failure twice in a row (with a success between) is shown twice rather than deduplicated into silence.
+        if (self._parametersOnly) self._notifications = {};
         self._publishNotification({
           scope: "parameters",
           severity: "info",
@@ -828,6 +1078,9 @@
     if (attempt.finished) return;
     attempt.finished = true;
     if (this._lock === attempt) this._lock = null;
+    // #383 — the expired attempt's stream closes with it: the deadline releases the lock and stops the frames
+    // (the evaluation itself runs on server-side; the grace governs its abort, as for every disconnect).
+    this._closeParameterStream(attempt, "expired");
     this._publishNotification({
       scope: "parameters",
       severity: "error",
@@ -1327,6 +1580,12 @@
     // An invalid state is also a reason to re-evaluate: the commit's fresh selections are the way
     // back to a valid state (§5.6 — submission stays blocked until then).
     var invalid = this._parameters.valid === false;
+    // #374 — a parameter SET re-evaluates on EVERY commit: the whole selection set goes to the server whatever
+    // changed (P27), and an INPUT's own validation answer arrives the same way a parent's re-resolution does.
+    if (this._parametersOnly) {
+      this._safeEvaluate(null, "parent_change");
+      return;
+    }
     if (parents.indexOf(name) !== -1 || bound || invalid) {
       this._safeEvaluate(bound && !invalid ? bound.action : null, invalid ? "retry" : "parent_change");
       return;
@@ -1353,7 +1612,8 @@
           scope: "parameters",
           severity: "error",
           code: error && error.code ? error.code : "parameters.failed",
-          message: "the parameter evaluation failed",
+          // #374 — the form shows the SERVER's code and message as received; the dashboard's generic sentence stays.
+          message: self._parametersOnly && error && error.message ? error.message : "the parameter evaluation failed",
           retryable: !!(error && error.retryable),
           recover: "retry",
           configurationStale: !!(error && error.configurationStale),
@@ -1576,6 +1836,8 @@
     for (var s = 0; s < streamIds.length; s++) this._streams[streamIds[s]].close();
     this._streams = {};
     if (this._lock) {
+      // #383 — a parameters-only attempt's stream closes with the instance (the page left; the grace decides).
+      this._closeParameterStream(this._lock, "disposed");
       this._clearLockTimer(this._lock);
       this._lock.finished = true;
       this._lock = null;
@@ -1713,6 +1975,65 @@
     return instance;
   }
 
+  /**
+   * #374 — `initParameters` (the parameter-set workspace's entry, workspace spec §6.3): the SAME instance machinery
+   * (adapter contract, attempt generation, lock, absolute deadline, supersede-by-newest) pointed at a parameter SET
+   * instead of a dashboard, so there is one renderer and one copy of the attempt logic. Differences from `init`,
+   * all of them narrowings: `parameterSet: { id, version }` replaces `dashboard` (the version is a positive integer,
+   * ALWAYS — a form never relies on the server's served-version default), and there is no configuration, no
+   * visualization and no action. #383 — the one call is the OBSERVED evaluation `POST
+   * /api/v1/parameter-sets/{id}/evaluations` (rest-api §21.5) with `{ version, selections, evaluation_id,
+   * instance_id }`: the cascade arrives as frames (`evaluation_started` … `evaluation_completed`), a frame whose
+   * `evaluation_id` is not the current attempt's is dropped before it touches anything, `evaluation_completed`'s
+   * response resolves the attempt exactly as the plain evaluate's did, a superseded attempt's stream is closed
+   * (the server's disconnect grace then aborts it), and a stream that ends without a terminal frame is the
+   * dashboards §6.6 transport-failure path. Credentials are the session's, exactly as `init` carries them (the
+   * double-submit CSRF cookie read by `_openStream`); a proxy or fixture transport is refused — this entry has
+   * neither. `options.onStreamEvent(info)` is the host's optional frame witness (every frame and stream fact,
+   * `{evaluation_id, event, name?, applied, …}`) for the page's frame log. Re-initialising an OWNED container
+   * is refused (`DashboardAlreadyMounted`).
+   */
+  function initParameters(options) {
+    if (!isPlainObject(options)) throw DashboardError("init.invalid", "initParameters requires an options object");
+    if (!isPlainObject(options.server)) throw DashboardError("init.invalid", "initParameters requires server");
+    if (!isPlainObject(options.parameterSet) || typeof options.parameterSet.id !== "string" || options.parameterSet.id === "") {
+      throw DashboardError("init.invalid", "initParameters requires parameterSet.id");
+    }
+    var version = options.parameterSet.version;
+    if (typeof version !== "number" || !isFinite(version) || version < 1 || version % 1 !== 0) {
+      throw DashboardError("init.version_unsupported", "initParameters requires a positive integer parameterSet.version", {
+        requested: String(version),
+      });
+    }
+    if (!options.container || typeof options.container.setAttribute !== "function") {
+      throw DashboardError("init.invalid", "initParameters requires a container element");
+    }
+    if (options.container.getAttribute(MOUNTED_ATTRIBUTE)) {
+      var mounted = new Error("the container already mounts a dashboard instance");
+      mounted.name = "DashboardAlreadyMounted";
+      throw mounted;
+    }
+    if (options.server.credentials !== "session" || options.server.fixtures !== undefined) {
+      throw DashboardError("init.invalid", 'initParameters takes credentials: "session" and no fixtures');
+    }
+    validateAdapter(options.adapter);
+    var env = {
+      uuid: randomUuid,
+      now: nowMillis,
+      fetchImpl: typeof fetch === "function" ? function (url, init) { return fetch(url, init); } : null,
+      setTimeout: function (fn, ms) { return setTimeout(fn, ms); },
+      clearTimeout: function (id) { clearTimeout(id); },
+      renderers: REGISTERED_RENDERERS,
+      declaredPlotlyBundles: declaredPlotlyBundles,
+    };
+    var instance = new DashboardInstance(options, env);
+    instance._parametersOnly = true;
+    options.container.setAttribute(MOUNTED_ATTRIBUTE, instance._instanceId);
+    instance._wrapCallbacks();
+    instance._bootstrapParameters();
+    return instance;
+  }
+
   /** The `<script data-dp-plotly-bundle="2d|3d">` declarations — the host names the bundle it loaded. */
   function declaredPlotlyBundles() {
     if (typeof document === "undefined" || !document.querySelectorAll) return [];
@@ -1743,6 +2064,81 @@
     return api;
   }
 
+  // ------------------------------------------------------------- the composite's viewport rule (#387)
+
+  /** The spec's §3.2: below `layout.breakpoint_px` every item spans the full width in grid order. */
+  var DEFAULT_BREAKPOINT_PX = 768;
+
+  /** The server's range (DashboardRules: 1..MAX_BREAKPOINT_PX); a value outside it never reaches a query. */
+  var MIN_BREAKPOINT_PX = 1;
+  var MAX_BREAKPOINT_PX = 10000;
+
+  /** The grid's gap: the design system's spacing step, inline (CSSOM is CSP-clean); `1rem` where no tokens load. */
+  var GRID_GAP = "var(--space-4, 1rem)";
+
+  /**
+   * The breakpoint as a NUMBER, clamped to the server's range: absent (the wire omits a null) or not
+   * a finite number is the default. Only this number is ever written into a media query.
+   */
+  function layoutBreakpointPx(layout) {
+    var value = layout ? layout.breakpoint_px : undefined;
+    if (typeof value !== "number" || !isFinite(value)) return DEFAULT_BREAKPOINT_PX;
+    return Math.min(MAX_BREAKPOINT_PX, Math.max(MIN_BREAKPOINT_PX, Math.round(value)));
+  }
+
+  /**
+   * "Below N px", exactly: `not all and (min-width: N px)` matches every viewport narrower than N,
+   * a fractional one (767.5 under a zoom) included, and never N itself. Null without `matchMedia`
+   * (a non-browser host): the stored grid then always holds.
+   */
+  function narrowViewportQuery(breakpointPx) {
+    if (typeof window === "undefined" || !window || typeof window.matchMedia !== "function") return null;
+    return window.matchMedia("not all and (min-width: " + breakpointPx + "px)");
+  }
+
+  /**
+   * Each slot's placement. Stored: the item's own column and row span. Collapsed: every item spans all
+   * `columns`, stacked in GRID ORDER — by row (`y`), then column (`x`), the configuration's order
+   * breaking a tie — each keeping its own row span `h`, so the row unit and every slot's height stand.
+   */
+  function placeGridSlots(items, slots, defaultSlot, columns, collapsed) {
+    // The default slot (occurrences with no grid entry) auto-places after the items; collapsed, it
+    // spans the full width like them. Empty, dashboards.css hides it either way.
+    defaultSlot.style.gridColumnEnd = collapsed ? "span " + Number(columns) : "";
+    if (!collapsed) {
+      for (var i = 0; i < items.length; i++) {
+        var item = items[i];
+        var style = slots[i].style;
+        style.gridColumnStart = typeof item.x === "number" ? String(item.x + 1) : "";
+        style.gridColumnEnd = typeof item.w === "number" ? "span " + Number(item.w) : "";
+        style.gridRowStart = typeof item.y === "number" ? String(item.y + 1) : "";
+        style.gridRowEnd = typeof item.h === "number" ? "span " + Number(item.h) : "";
+      }
+      return;
+    }
+    var order = [];
+    for (var j = 0; j < items.length; j++) order.push(j);
+    order.sort(function (a, b) {
+      var ya = Number(items[a].y) || 0;
+      var yb = Number(items[b].y) || 0;
+      if (ya !== yb) return ya - yb;
+      var xa = Number(items[a].x) || 0;
+      var xb = Number(items[b].x) || 0;
+      return xa !== xb ? xa - xb : a - b;
+    });
+    var row = 1;
+    for (var k = 0; k < order.length; k++) {
+      var stacked = items[order[k]];
+      var rows = typeof stacked.h === "number" && stacked.h > 0 ? Number(stacked.h) : 1;
+      var placed = slots[order[k]].style;
+      placed.gridColumnStart = "1";
+      placed.gridColumnEnd = "span " + Number(columns);
+      placed.gridRowStart = String(row);
+      placed.gridRowEnd = "span " + rows;
+      row += rows;
+    }
+  }
+
   /**
    * The first-party composite adapter (§10.3): the object a host passes to `init` when it wants the
    * shipped renderers. `adapters(container)` takes the SAME element init will mount — the composite
@@ -1751,7 +2147,10 @@
    * layout, parameters, callbacks and notifications are the composite's own (a grid host for the
    * layout, text-only controls for the parameters, `textContent` everywhere).
    */
-  function adapters(container) {
+  function adapters(container, adapterOptions) {
+    // #374 — `provenance: true` (the parameter-set workspace's form) adds each row's value ORIGIN and RESET marks;
+    // absent, the board's rows render exactly as before.
+    var provenance = !!(adapterOptions && adapterOptions.provenance === true);
     if (typeof document === "undefined") {
       throw DashboardError("adapter.no_dom", "the first-party adapter needs a DOM");
     }
@@ -1772,33 +2171,74 @@
       return implementation;
     }
 
+    // The viewport listener mountLayout added (#387); removed by dispose, replaced by a second mountLayout.
+    var viewport = null;
+
+    function stopViewport() {
+      if (!viewport) return;
+      viewport.query.removeEventListener("change", viewport.listener);
+      viewport = null;
+    }
+
+    /** Every mounted handle re-measures its host, each isolated — one renderer's throw stops no other. */
+    function resizeMounted() {
+      for (var name in implemented) {
+        if (!Object.prototype.hasOwnProperty.call(implemented, name)) continue;
+        var handle = implemented[name];
+        if (handle && typeof handle.resize === "function") {
+          try {
+            handle.resize();
+          } catch (e) {
+            /* isolated */
+          }
+        }
+      }
+    }
+
     return {
-      /** The layout: a CSS grid container from the system layout (columns, breakpoint §3.2). */
+      /**
+       * The layout: a CSS grid container from the system layout (columns, breakpoint §3.2). Below
+       * `breakpoint_px` (768 when absent) every item spans the full width in grid order (#387); a
+       * viewport crossing the breakpoint re-places the slots and resizes every mounted renderer — the
+       * listener is the composite's, removed by its `dispose`.
+       */
       mountLayout: function (layout) {
         this.root = document.createElement("div");
         this.root.className = "dp-dashboard";
         var columns = layout && layout.columns ? layout.columns : 12;
         this.root.style.display = "grid";
         this.root.style.gridTemplateColumns = "repeat(" + Number(columns) + ", minmax(0, 1fr))";
-        this.root.style.gap = "16px";
+        this.root.style.gap = GRID_GAP;
         this.grid = {};
         var items = (layout && layout.grid) || [];
+        var slots = [];
         for (var i = 0; i < items.length; i++) {
           var item = items[i];
           var slot = document.createElement("div");
           slot.className = "dp-dashboard-slot";
           slot.setAttribute("data-dp-slot", item.name);
-          if (typeof item.x === "number") slot.style.gridColumnStart = String(item.x + 1);
-          if (typeof item.w === "number") slot.style.gridColumnEnd = "span " + Number(item.w);
-          if (typeof item.y === "number") slot.style.gridRowStart = String(item.y + 1);
-          if (typeof item.h === "number") slot.style.gridRowEnd = "span " + Number(item.h);
           this.root.appendChild(slot);
           this.grid[item.name] = slot;
+          slots.push(slot);
         }
         // Occurrences and controls without a grid entry flow into the default slot order.
-        this.defaultSlot = document.createElement("div");
-        this.defaultSlot.className = "dp-dashboard-slot";
-        this.root.appendChild(this.defaultSlot);
+        var defaultSlot = document.createElement("div");
+        defaultSlot.className = "dp-dashboard-slot";
+        this.root.appendChild(defaultSlot);
+        this.defaultSlot = defaultSlot;
+        stopViewport();
+        var narrow = narrowViewportQuery(layoutBreakpointPx(layout));
+        placeGridSlots(items, slots, defaultSlot, columns, !!(narrow && narrow.matches));
+        if (narrow && typeof narrow.addEventListener === "function") {
+          var onViewport = function () {
+            placeGridSlots(items, slots, defaultSlot, columns, narrow.matches);
+            // The slots changed width: each renderer re-measures its host (Plotly's Plots.resize) —
+            // the same handles the instance's resize walks; the composite holds no instance.
+            resizeMounted();
+          };
+          narrow.addEventListener("change", onViewport);
+          viewport = { query: narrow, listener: onViewport };
+        }
         this.container = container;
         container.appendChild(this.root);
         return Promise.resolve(undefined);
@@ -1999,6 +2439,25 @@
             row.appendChild(free);
           }
           if (hidden) row.style.display = "none";
+          if (provenance) {
+            // #374 — where the shown value came from (P26) and whether the walk dropped the person's own value.
+            // Both are the response's facts, rendered as text and a data attribute — never invented client-side.
+            if (definitionState.origin) {
+              let origin = document.createElement("span");
+              origin.className = "dp-dashboard-parameter-origin";
+              origin.setAttribute("data-dp-origin", String(definitionState.origin));
+              origin.textContent = ORIGIN_LABELS[definitionState.origin] || String(definitionState.origin);
+              row.appendChild(origin);
+            }
+            if (definitionState.reset === true) {
+              let reset = document.createElement("span");
+              reset.className = "dp-dashboard-parameter-reset";
+              reset.setAttribute("data-dp-reset", "true");
+              reset.setAttribute("role", "status");
+              reset.textContent = "reset — the previous selection is no longer valid";
+              row.appendChild(reset);
+            }
+          }
           if (definitionState.errors && definitionState.errors.length) {
             let problem = document.createElement("div");
             problem.className = "dp-dashboard-parameter-error";
@@ -2081,8 +2540,11 @@
       notify: function (notification) {
         notifications.push(notification);
       },
+      // The instance's resize walks the renderers itself and then calls this; the grid's placement is
+      // the viewport listener's (mountLayout), so the composite has nothing more to re-measure here.
       resize: function () {},
       dispose: function () {
+        stopViewport();
         for (var name in implemented) {
           if (Object.prototype.hasOwnProperty.call(implemented, name)) {
             var handle = implemented[name];
@@ -2105,6 +2567,7 @@
 
   var api = {
     init: init,
+    initParameters: initParameters,
     registerRenderer: registerRenderer,
     adapters: adapters,
     DashboardError: DashboardError,
@@ -2127,6 +2590,8 @@
         return registerRenderer(Object.assign({ kind: kind }, spec));
       },
       MOUNTED_ATTRIBUTE: MOUNTED_ATTRIBUTE,
+      /** #383 — the one parser, exported for the unit tests only; the page never copies it. */
+      SseParser: SseParser,
     },
   };
 

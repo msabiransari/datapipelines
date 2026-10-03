@@ -61,10 +61,9 @@
       </th:block>
 
       <form th:attr="hx-post=@{'/partials/pipelines/{id}/lifecycle/discard'(id=${dlg.id}, version=${dlg.version})},
-                       hx-target=${from == 'editor'} ? null : '#pipeline-detail',
-                       hx-swap=${from == 'editor'} ? 'none' : 'innerHTML'">
-        <!-- #395: the workspace's Versions tab (from=editor) reloads onto that tab with a flash; the
-             explorer keeps its in-place re-render. Release and purge have answered this way since 102. -->
+                       hx-swap='none'">
+        <!-- #395/#401: the POST answers HX-Redirect onto the workspace's Versions tab with a flash;
+             the explorer's in-place re-render is gone (no page renders its pane). -->
         <input type="hidden" name="from" th:value="${from}">
         <button th:if="${canAuthor == true}" type="submit" data-verb="pipeline-discard-confirm" class="ds-button ds-button-danger u-full" hx-disabled-elt="this"
                 th:text="'Discard v' + ${dlg.version}">Discard v2</button>

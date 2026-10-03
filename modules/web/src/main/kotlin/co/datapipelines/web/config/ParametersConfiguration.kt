@@ -1,5 +1,7 @@
 package co.datapipelines.web.config
 
+import co.datapipelines.parameters.ParameterEvaluationRecorder
+import co.datapipelines.parameters.ParameterEvaluationRepository
 import co.datapipelines.parameters.ParameterEvaluator
 import co.datapipelines.parameters.ParameterSetRepository
 import co.datapipelines.parameters.ParameterSetService
@@ -8,6 +10,7 @@ import co.datapipelines.parameters.ParametersConfig
 import co.datapipelines.parameters.ParametersProperties
 import co.datapipelines.parameters.SelectorPool
 import co.datapipelines.parameters.SelectorRunner
+import co.datapipelines.parameters.StoredParameterEvaluationRecorder
 import co.datapipelines.pipeline.TemplateDryRenderer
 import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.pipeline.TemplateReleaser
@@ -96,13 +99,23 @@ class ParametersConfiguration {
             transactions = TransactionTemplate(transactionManager) as TransactionOperations,
         )
 
+    /** #376 — the durable evaluation history's tables (V48), read by the History tab and the hourly housekeeping. */
+    @Bean
+    fun parameterEvaluationRepository(jdbc: NamedParameterJdbcTemplate): ParameterEvaluationRepository = ParameterEvaluationRepository(jdbc)
+
+    /** #376 — every evaluation records through this one recorder; a storage fault never fails the evaluation. */
+    @Bean
+    fun parameterEvaluationRecorder(repository: ParameterEvaluationRepository): ParameterEvaluationRecorder =
+        StoredParameterEvaluationRecorder(repository)
+
     @Bean
     fun parameterEvaluator(
         runner: SelectorRunner,
         pool: SelectorPool,
         config: ParametersConfig,
         org: co.datapipelines.pipeline.OrgContext,
-    ): ParameterEvaluator = ParameterEvaluator(runner, pool, config, org, Clock.systemUTC())
+        recorder: ParameterEvaluationRecorder,
+    ): ParameterEvaluator = ParameterEvaluator(runner, pool, config, org, Clock.systemUTC(), recorder)
 
     /**
      * The REST import/export path (the `PipelineImportService` precedent — the import is never

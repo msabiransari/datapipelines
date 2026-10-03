@@ -1,0 +1,34 @@
+<!-- The Purge-draft dialog (#400) — THE irreversible one (versioning §5.4): the draft is
+     deleted; a sole draft takes the DASHBOARD with it. The button needs the typed confirm
+     `v<n>` (§5.1's convention): disabled client-side until the field matches, refused
+     server-side before the service runs. -->
+<div xmlns:th="http://www.thymeleaf.org" class="u-backdrop" data-lifecycle-dialog="dashboard-purge">
+  <div class="ds-card app-modal app-modal-md" role="dialog" aria-modal="true" aria-labelledby="dp-purge-title">
+    <button type="button" class="ds-button ds-button-ghost ds-button-sm app-modal-close u-text-xl"
+            aria-label="Close" data-lifecycle-close>
+      <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#x"></use></svg>
+    </button>
+    <h2 class="ds-title u-m0 u-mb-md" id="dp-purge-title"
+        th:text="'Purge v' + ${dlg.version} + '?'">Purge v2?</h2>
+
+    <p class="u-secondary u-text-sm">
+      The draft is deleted permanently — this cannot be undone, and a sole draft takes the
+      dashboard with it.
+    </p>
+
+    <form th:attr="hx-post=@{'/partials/dashboards/{id}/lifecycle/purge'(id=${dlg.id}, version=${dlg.version})},
+                     hx-swap='none'">
+      <input type="hidden" name="from" th:value="${from}">
+      <label class="ds-form-label u-mt-md" th:for="'dp-purge-confirm'">
+        Type <span class="u-mono" th:text="${dlg.expected}">v2</span> to confirm
+      </label>
+      <input class="ds-input u-mono" id="dp-purge-confirm" data-confirm-input name="confirm" autocomplete="off"
+             spellcheck="false" th:attr="data-confirm-expect=${dlg.expected}">
+      <button th:if="${canAuthor == true}" type="submit" data-verb="dashboard-purge-confirm" class="ds-button ds-button-danger u-full u-mt-md" data-typed-confirm
+              disabled hx-disabled-elt="this"
+              th:text="'Purge v' + ${dlg.version}">
+        Purge v2
+      </button>
+    </form>
+  </div>
+</div>

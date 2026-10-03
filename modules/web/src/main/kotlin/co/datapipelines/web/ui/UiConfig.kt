@@ -120,7 +120,29 @@ class UiConfig {
     fun dashboardBrowseModel(
         dashboards: co.datapipelines.visualization.DashboardService,
         runtime: co.datapipelines.web.dashboards.runtime.DashboardRuntime,
-    ): DashboardBrowseModel = DashboardBrowseModel(dashboards, runtime)
+        pipelines: co.datapipelines.visualization.PipelineReleaseFacts,
+        sets: co.datapipelines.visualization.ParameterSetFacts,
+        visualizations: co.datapipelines.visualization.VisualizationRepository,
+        apiKeys: co.datapipelines.auth.ApiKeyRepository,
+        dashboardBindings: co.datapipelines.application.dashboards.DashboardKeyBindingRepository,
+    ): DashboardBrowseModel = DashboardBrowseModel(dashboards, runtime, pipelines, sets, visualizations.pins, apiKeys, dashboardBindings)
+
+    /** #374: the Parameter Sets screens' browse model — the rail tree's levels and the catalog's flat list. */
+    @Bean
+    fun parameterSetsBrowseModel(sets: co.datapipelines.parameters.ParameterSetService): ParameterSetsBrowseModel =
+        ParameterSetsBrowseModel(sets)
+
+    /** #376: the Parameter Sets workspace's History tab — the page's first page and its pager partial, one model. */
+    @Bean
+    fun parameterSetEvaluationsBrowseModel(
+        sets: co.datapipelines.parameters.ParameterSetService,
+        evaluations: co.datapipelines.parameters.ParameterEvaluationRepository,
+    ): ParameterSetEvaluationsBrowseModel = ParameterSetEvaluationsBrowseModel(sets, evaluations)
+
+    /** #374: the canonical Parameter Sets workspace page's version-resolution model. */
+    @Bean
+    fun parameterSetsWorkspaceModel(sets: co.datapipelines.parameters.ParameterSetService): ParameterSetsWorkspaceModel =
+        ParameterSetsWorkspaceModel(sets)
 
     /**
      * 161: the shell search palette's one model (#155) — pipelines, templates and executions,
@@ -148,9 +170,71 @@ class UiConfig {
         actors: ActorNames,
     ): TemplateWorkspaceModel = TemplateWorkspaceModel(reads, usage, actors)
 
-    /** 067: the pipelines explorer's one model, shared by the page and the partial controllers. */
+    /** #400: the canonical dashboard workspace read page's version-resolution model. */
     @Bean
-    @Suppress("LongParameterList") // 106: the detail's three regions in one call need their sources
+    fun dashboardWorkspaceModel(dashboards: co.datapipelines.visualization.DashboardService): DashboardWorkspaceModel =
+        DashboardWorkspaceModel(dashboards)
+
+    /** #400: the dashboard lifecycle dialogs' facts — the same dependency reads the release guard runs. */
+    @Bean
+    fun dashboardLifecycleDialogModel(
+        dashboards: co.datapipelines.visualization.DashboardService,
+        pipelines: co.datapipelines.visualization.PipelineReleaseFacts,
+        sets: co.datapipelines.visualization.ParameterSetFacts,
+        visualizations: co.datapipelines.visualization.VisualizationRepository,
+        actorNames: ActorNames,
+        authoring: co.datapipelines.pipeline.AuthoringGuard,
+    ): DashboardLifecycleDialogModel =
+        DashboardLifecycleDialogModel(dashboards, pipelines, sets, visualizations.pins, actorNames, authoring)
+
+    /** #399: the Visualizations screens' browse model — the rail tree's levels, its search and the catalog. */
+    @Bean
+    fun visualizationBrowseModel(visualizations: co.datapipelines.visualization.VisualizationService): VisualizationBrowseModel =
+        VisualizationBrowseModel(visualizations)
+
+    /** #399: the canonical visualization workspace page's version-resolution model. */
+    @Bean
+    fun visualizationWorkspaceModel(visualizations: co.datapipelines.visualization.VisualizationService): VisualizationWorkspaceModel =
+        VisualizationWorkspaceModel(visualizations)
+
+    /**
+     * #399: the visualization workspace's read tabs — the Preview evaluates cases through the SAME
+     * [co.datapipelines.visualization.PreviewCaseEvaluator] the capability preview builds over the fixture port.
+     */
+    @Bean
+    fun visualizationTabModel(
+        visualizations: co.datapipelines.visualization.VisualizationService,
+        workspace: VisualizationWorkspaceModel,
+        fixtures: co.datapipelines.visualization.TestFixtureEvaluator,
+        sessions: co.datapipelines.visualization.VisualizationTestSessionService,
+        dashboards: co.datapipelines.visualization.DashboardService,
+        templateStatuses: co.datapipelines.pipeline.TemplateVersionStatuses,
+    ): VisualizationTabModel =
+        VisualizationTabModel(
+            visualizations,
+            workspace,
+            co.datapipelines.visualization.PreviewCaseEvaluator(fixtures),
+            sessions,
+            dashboards,
+            templateStatuses,
+        )
+
+    /** #399: the visualization lifecycle dialogs' facts — the same reads the service's guards and the release gate make. */
+    @Bean
+    @Suppress("LongParameterList") // one collaborator per guard the dialogs pre-read
+    fun visualizationLifecycleDialogModel(
+        visualizations: co.datapipelines.visualization.VisualizationService,
+        dashboards: co.datapipelines.visualization.DashboardService,
+        templateStatuses: co.datapipelines.pipeline.TemplateVersionStatuses,
+        evidence: co.datapipelines.visualization.ReleaseEvidence,
+        actorNames: ActorNames,
+        authoring: co.datapipelines.pipeline.AuthoringGuard,
+    ): VisualizationLifecycleDialogModel =
+        VisualizationLifecycleDialogModel(visualizations, dashboards, templateStatuses, evidence, actorNames, authoring)
+
+    /** 067: the pipelines screen's one model, shared by the page and the partial controllers. */
+    @Bean
+    @Suppress("LongParameterList") // one collaborator per read the screen's fragments make
     fun pipelineBrowseModel(
         pipelines: co.datapipelines.pipeline.PipelineService,
         repository: co.datapipelines.pipeline.PipelineRepository,
@@ -159,7 +243,6 @@ class UiConfig {
         datasources: co.datapipelines.pipeline.DatasourceRegistry,
         actorNames: ActorNames,
         runStats: PipelineRunStats,
-        authoring: co.datapipelines.pipeline.AuthoringGuard,
         schedules: co.datapipelines.scheduler.ScheduleService,
         // #320 — the dashboards that pin a release; the Usage tab lists what the discard would be refused over.
         dashboards: co.datapipelines.pipeline.PipelineVersionConsumers,
@@ -172,7 +255,6 @@ class UiConfig {
             datasources,
             actorNames,
             runStats,
-            authoring,
             schedules,
             dashboards,
         )
@@ -218,4 +300,11 @@ class UiConfig {
         actorNames: ActorNames,
         authoring: co.datapipelines.pipeline.AuthoringGuard,
     ): TemplateLifecycleDialogModel = TemplateLifecycleDialogModel(templates, usage, actorNames, authoring)
+
+    /**
+     * #407 — the release flash's one-shot, session-held cascade names, shared by the
+     * lifecycle dialog's release POST (the hold) and [ReleaseFlashAdvice] (the consume).
+     */
+    @Bean
+    fun releaseFlash(): ReleaseFlash = ReleaseFlash()
 }

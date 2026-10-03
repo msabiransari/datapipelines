@@ -1,6 +1,7 @@
 package co.datapipelines.web.ui
 
 import co.datapipelines.web.ui.site.REPORT_PROBLEM_URL
+import io.kotest.matchers.comparables.shouldBeLessThan
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -433,6 +434,12 @@ class ShellRenderTest {
         html shouldContain "data-nav-tree=\"dashboards\""
         html shouldContain "data-nav-root-url=\"/partials/dashboards/tree?scope=nav\""
         html shouldContain "id=\"dash-tree-nav\""
+        // #400 — the branch gains the search input in the Pipelines branch's exact markup:
+        // the shared engine (nav-tree.js) serves it with no JS change, and the results swap
+        // into THIS panel's root (clearing returns to the tree by construction).
+        html shouldContain "data-nav-tree-search"
+        html shouldContain "hx-target=\"#dash-tree-nav\""
+        html shouldContain "placeholder=\"Search dashboards…\""
         html shouldNotContain "data-nav-label=\"Dashboard\""
         // The second tree engine is gone: no <details> disclosure of its own.
         html shouldNotContain "app-nav-branch-tree"
@@ -485,6 +492,64 @@ class ShellRenderTest {
         branch shouldContain "hx-target=\"#template-nav-root\""
         branch shouldContain "data-nav-tree-scroll"
         branch shouldContain "id=\"template-nav-root\""
+    }
+
+    @Test
+    fun `#415 - Parameter Sets carries the same branch in Build - link, a separate toggle, the lazy nav-scope tree and its search`() {
+        val html = engine.process("pipelines/list", webContext().apply { fillList() })
+        val branch =
+            html
+                .substringAfter("data-nav-branch=\"parameter-sets\"")
+                .substringBefore("<div class=\"app-nav-section app-rail-label\">Operate")
+
+        branch shouldContain "href=\"/parameter-sets\" class=\"app-nav-link"
+        branch shouldContain "data-nav-group=\"Build\" data-nav-label=\"Parameter Sets\""
+        // The lucide sliders-horizontal glyph, from the vendored sprite (icons-from-lucide-only).
+        branch shouldContain "/vendor/icons/lucide-sprite.svg#sliders-horizontal"
+        branch shouldContain "<button type=\"button\" class=\"app-nav-branch-toggle app-rail-label\" data-nav-tree-toggle"
+        branch shouldContain "aria-expanded=\"false\" aria-controls=\"nav-tree-parameter-sets\" aria-label=\"Parameter set folders\""
+        branch shouldContain "id=\"nav-tree-parameter-sets\" data-nav-tree=\"parameter-sets\" hidden"
+        branch shouldContain "data-nav-root-url=\"/partials/parameter-sets/tree?scope=nav\""
+        branch shouldContain "data-nav-workspace=\"acme\""
+        branch shouldContain "id=\"params-tree-nav\""
+        // #415 — the branch gains the search input in the Pipelines branch's exact markup:
+        // the shared engine (nav-tree.js) serves it with no JS change, and the results swap
+        // into THIS panel's root (clearing returns to the tree by construction).
+        branch shouldContain "data-nav-tree-search"
+        branch shouldContain "hx-get=\"/partials/parameter-sets/tree?scope=nav\""
+        branch shouldContain "hx-target=\"#params-tree-nav\""
+        branch shouldContain "placeholder=\"Search parameter sets…\""
+        // The branch sits in Build, before Operate, and is one more item - not a second tree engine.
+        html.indexOf("data-nav-branch=\"parameter-sets\"") shouldBeLessThan html.indexOf(">Operate<")
+    }
+
+    @Test
+    fun `#399 - Visualizations carries the same branch between Dashboards and Parameter Sets - link, toggle, lazy tree and search`() {
+        val html = engine.process("pipelines/list", webContext().apply { fillList() })
+        val branch =
+            html
+                .substringAfter("data-nav-branch=\"visualizations\"", missingDelimiterValue = "")
+                .substringBefore("data-nav-branch=\"parameter-sets\"")
+
+        branch shouldContain "href=\"/visualizations\" class=\"app-nav-link"
+        branch shouldContain "data-nav-group=\"Build\" data-nav-label=\"Visualizations\""
+        // The lucide chart-line glyph, from the vendored sprite (icons-from-lucide-only).
+        branch shouldContain "/vendor/icons/lucide-sprite.svg#chart-line"
+        branch shouldContain "<button type=\"button\" class=\"app-nav-branch-toggle app-rail-label\" data-nav-tree-toggle"
+        branch shouldContain "aria-expanded=\"false\" aria-controls=\"nav-tree-visualizations\" aria-label=\"Visualization folders\""
+        branch shouldContain "id=\"nav-tree-visualizations\" data-nav-tree=\"visualizations\" hidden"
+        branch shouldContain "data-nav-root-url=\"/partials/visualizations/tree?scope=nav\""
+        branch shouldContain "data-nav-workspace=\"acme\""
+        // The Pipelines branch's search box, addressing THIS panel's root.
+        branch shouldContain "data-nav-tree-search"
+        branch shouldContain "hx-get=\"/partials/visualizations/tree?scope=nav\""
+        branch shouldContain "hx-target=\"#viz-tree-nav\""
+        branch shouldContain "placeholder=\"Search visualizations…\""
+        branch shouldContain "id=\"viz-tree-nav\""
+        // Order in Build: Dashboards → Visualizations → Parameter Sets → Operate.
+        html.indexOf("data-nav-branch=\"dashboards\"") shouldBeLessThan html.indexOf("data-nav-branch=\"visualizations\"")
+        html.indexOf("data-nav-branch=\"visualizations\"") shouldBeLessThan html.indexOf("data-nav-branch=\"parameter-sets\"")
+        html.indexOf("data-nav-branch=\"parameter-sets\"") shouldBeLessThan html.indexOf(">Operate<")
     }
 
     private fun webContext(): WebContext =

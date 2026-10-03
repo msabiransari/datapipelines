@@ -1,0 +1,30 @@
+<!-- The Restore dialog (#400) — a DISCARDED version becomes RELEASED again; the pointer moves
+     only above-served-or-NULL (D60), and the dialog says whether it follows. The POST
+     re-runs the service's dependency check (#320: a version whose pins went dangling refuses
+     restore) — this dialog only decides what to say. -->
+<div xmlns:th="http://www.thymeleaf.org" class="u-backdrop" data-lifecycle-dialog="dashboard-restore">
+  <div class="ds-card app-modal app-modal-md" role="dialog" aria-modal="true" aria-labelledby="dp-restore-title">
+    <button type="button" class="ds-button ds-button-ghost ds-button-sm app-modal-close u-text-xl"
+            aria-label="Close" data-lifecycle-close>
+      <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#x"></use></svg>
+    </button>
+    <h2 class="ds-title u-m0 u-mb-md" id="dp-restore-title"
+        th:text="'Restore v' + ${dlg.version} + '?'">Restore v1?</h2>
+
+    <p class="u-secondary u-text-sm">
+      v<span th:text="${dlg.version}">1</span> becomes RELEASED again
+      <span th:if="${dlg.movesPointer}">and becomes the served version — its pins are judged
+      against today's state first.</span>
+      <span th:if="${!dlg.movesPointer}">and stays a released version; the pointer stays at
+      v<span th:text="${dlg.servedVersion}">2</span>.</span>
+    </p>
+
+    <form th:attr="hx-post=@{'/partials/dashboards/{id}/lifecycle/restore'(id=${dlg.id}, version=${dlg.version})},
+                     hx-swap='none'">
+      <input type="hidden" name="from" th:value="${from}">
+      <button th:if="${canAuthor == true}" type="submit" data-verb="dashboard-restore-confirm"
+              class="ds-button ds-button-primary u-full" hx-disabled-elt="this"
+              th:text="'Restore v' + ${dlg.version}">Restore v1</button>
+    </form>
+  </div>
+</div>
