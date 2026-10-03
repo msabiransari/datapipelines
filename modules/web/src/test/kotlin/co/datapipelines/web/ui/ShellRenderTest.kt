@@ -475,7 +475,13 @@ class ShellRenderTest {
     @Test
     fun `#398 - Templates carries the same branch - link, a separate toggle, and the lazy sidebar tree with its search`() {
         val html = engine.process("pipelines/list", webContext().apply { fillList() })
-        val branch = html.substringAfter("data-nav-branch=\"templates\"").substringBefore("data-nav-branch=\"dashboards\"")
+        // missingDelimiterValue = "": an ABSENT branch must leave `branch` empty (substringAfter
+        // returns the WHOLE page when its delimiter is missing, and every assertion below would
+        // then be satisfied by some other part of the page — the 398b F7 re-plant found this).
+        val branch =
+            html
+                .substringAfter("data-nav-branch=\"templates\"", missingDelimiterValue = "")
+                .substringBefore("data-nav-branch=\"dashboards\"")
 
         // The item LINK is unchanged: the catalog page, the active section, the crumb pair.
         branch shouldContain "href=\"/templates\" class=\"app-nav-link"
