@@ -1,6 +1,6 @@
 # Dashboards
 
-**Status:** v0.30 — the pipeline editor runs the shared tab core (§7, #420) beside the Versions tables' created/released relative with the UTC stamp on hover (§7, #422) beside Back/Forward across the dashboards workspace's tab switches (§7, #402) beside the visualizations workspace (§7, #399) beside the dashboards workspace (§5.2's `version`, §7's workspace, #400; #409 closes with it) beside the
+**Status:** v0.31 — the visualizations workspace's tab switches on the shared history helper, the parameter-set decision (§7, #426) beside the pipeline editor runs the shared tab core (§7, #420) beside the Versions tables' created/released relative with the UTC stamp on hover (§7, #422) beside Back/Forward across the dashboards workspace's tab switches (§7, #402) beside the visualizations workspace (§7, #399) beside the dashboards workspace (§5.2's `version`, §7's workspace, #400; #409 closes with it) beside the
 board's small-slot margins and its breakpoint collapse (§6.2, §6.3, #386/#387), 328's release-record judgement (§4.3)
 permissions (§4, lane L1b); the transfer routes and their limits' honest contract (§3.3, lanes L1c/L1c-b/L1c-c: the
 import's atomicity, the RELEASE rules on a landing, the aggregate count ceiling, the wire's per-family arms); the server
@@ -908,10 +908,20 @@ version a 400 that never echoes it. Its five tabs ([ui-screens §4.24](ui-screen
 Every version switch is a full navigation (the one-bundle rule, §6.4): the workspace declares the
 ONE Plotly bundle the viewed version's traces need, and the choose-a-version state loads none.
 
+The visualizations workspace's tab switches go through the same history helper as the dashboards'
+(`static/js/workspace/history.js`, family `visualizations`, tab only — the pushed-entry wording of §7's
+dashboards workspace above; the shared pane glue `workspace/panes.js` carries it, so Back/Forward
+re-select the tab in page and a cached restore re-wires the strip once, #426). The parameter-set
+workspace deliberately does NOT adopt the helper: its sections are full-document links
+(`hx-boost="false"`, `?version=&tab=history` — the History arm renders no live form), there is no in-page
+switch to make navigable, and the browser's own history already carries every section and version
+change (#426). The templates workspace adopts the helper after #398's rework lands (follow-up to #426).
+
 ## Appendix A: Change Log
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-03 | v0.31 | #426 the visualizations workspace on the shared history helper — renumbered at merge after 420's v0.30 | **§7:** the visualizations workspace's tab switches push tab-only `visualizations` entries through `workspace/history.js` (via `workspace/panes.js`), Back/Forward re-select in page, a restored root re-wires once; the parameter-set workspace stays on full-document section links — the helper is not adopted there (decision recorded); the templates workspace follows after #398's rework. |
 | 2026-10-03 | v0.30 | #420 the pipeline editor re-adopts the shared tab core | **§7:** the tab-core sentence no longer says the editor keeps its own copy — `pipeline-editor/tabs.js` delegates admission and transition to `workspace/tabs.js` (its 18 getters keep reading `this`, so Alpine's proxy tracks them), so the dashboards, visualizations and pipeline workspaces run one machine. No dashboards behaviour changes. |
 | 2026-10-03 | v0.29 | #422 the Versions tables' time shape | **§7:** the dashboards and visualizations Versions tabs render created/released relative in the cell with the absolute UTC stamp on `title` (the keys page's shape, computed in the model's fill); the dashboards partial gains its own `dp-versions-pane` class so the framed table scrolls inside its viewport at 390 px. |
 | 2026-10-03 | v0.28 | #402 Back/Forward across the dashboards workspace's tab switches | **§7:** a tab switch PUSHES a tab-only entry through `workspace/history.js` (it was `replaceState`, so Back left the page); Back/Forward re-select in page through the helper's one window listener; a cached restore re-wires the strip once and re-paints the tab it left. |
