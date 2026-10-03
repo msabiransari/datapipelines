@@ -29,9 +29,12 @@ import kotlin.concurrent.withLock
  *   store accepted the item; nothing is acknowledged from memory. The only non-awaited entry
  *   point is [submit], whose items are lost if the process dies before they are written (the
  *   documented loss window) — it has no production caller yet (the dashboard refresh event, D27).
- * - **The commit hook precedes the caller's release** (#363): `hooks.onCommitted` runs before
+ * - **The commit hook precedes the caller's release** (#363): the commit hook runs before
  *   `record` answers, so a metric a caller reads once the call has returned already counts this
- *   commit. Hooks are cheap and never throw by contract ([BatchingContract]).
+ *   commit. Hooks are cheap and never throw by contract ([BatchingContract]) — and a hook that
+ *   does throw is contained (#393): every hook call goes through [hook], which logs the throw and
+ *   lets the item's outcome stand, so a metric can never strand a claimed entry, re-write a
+ *   committed batch or end a writer thread.
  * - **Per-key order.** One key, one partition, one writer, FIFO, one batch at a time; a failed
  *   batch is retried one item at a time IN ORDER.
  * - **A bad item costs itself only.** A batch that throws is retried as singles: the item the
@@ -69,7 +72,8 @@ class BatchingWriter<T : Any>(
     private var admittedBytes = 0L
 
     private val accepting = AtomicBoolean(true)
-    private val saturationWarn = IntervalWarn(SATURATION_WARN_INTERVAL_NANOS)
+    private val saturationWarn = IntervalWarn(WARN_INTERVAL_NANOS)
+    private val hookWarn = IntervalWarn(WARN_INTERVAL_NANOS)
     private val partitions = List(config.writers) { Partition(it) }
     private val threads = partitions.map { p -> threadFactory.newThread { p.run() }.also { it.start() } }
 
@@ -169,17 +173,17 @@ class BatchingWriter<T : Any>(
      */
     fun submit(item: T): Boolean {
         if (!accepting.get()) {
-            hooks.onDropped()
+            hook("onDropped") { it.onDropped() }
             return false
         }
         val bytes = sink.sizeOf(item)
         if (!tryReserve(bytes)) {
-            hooks.onDropped()
+            hook("onDropped") { it.onDropped() }
             saturated()
             return false
         }
         if (enqueue(item, bytes) == null) {
-            hooks.onDropped()
+            hook("onDropped") { it.onDropped() }
             return false
         }
         return true
@@ -207,7 +211,7 @@ class BatchingWriter<T : Any>(
         val lost = partitions.sumOf { it.abandonQueued() }
         val inFlight = queueDepth()
         if (lost > 0 || inFlight > 0) {
-            if (lost > 0) hooks.onFailure(FailureKinds.DRAIN_LOST, lost)
+            if (lost > 0) hook("onFailure") { it.onFailure(FailureKinds.DRAIN_LOST, lost) }
             log.warn(
                 "event=persistence.drain_incomplete writer={} lost={} in_flight={} drain_ms={} " +
                     "message=\"the store did not take the queue before the drain deadline; lost items were never written, " +
@@ -319,6 +323,44 @@ class BatchingWriter<T : Any>(
         }
     }
 
+    // ------------------------------------------------------------------ hooks
+
+    /**
+     * The one way a [BatchingHooks] method is called (#393). A hook that throws is a metric that
+     * broke, never a store failure: left to propagate it would strand a claimed entry (from
+     * [finish]), be read by `commit` as the batch's failure and re-write rows already stored, or
+     * escape the writer's catch and end its thread. An [Exception] is logged — the hook's name and
+     * the exception's class, never its message — and the item's outcome stands. An [Error] is not
+     * contained: it ends the thread exactly as `run` documents. [hooks] is read once per call,
+     * because the wiring may swap it.
+     */
+    @Suppress("TooGenericExceptionCaught") // a metric's failure, of whatever type, never becomes the item's outcome
+    private inline fun hook(
+        name: String,
+        call: (BatchingHooks) -> Unit,
+    ) {
+        try {
+            call(hooks)
+        } catch (e: Exception) {
+            hookFailed(name, e)
+        }
+    }
+
+    private fun hookFailed(
+        hookName: String,
+        failure: Exception,
+    ) {
+        hookWarn.maybe {
+            log.warn(
+                "event=persistence.hook_failed writer={} hook={} cause={} " +
+                    "message=\"a metrics hook threw; the writer contained it and the item's outcome is unchanged\"",
+                name,
+                hookName,
+                FailureShape.cause(failure),
+            )
+        }
+    }
+
     // ------------------------------------------------------------------ outcomes
 
     private fun enqueue(
@@ -353,7 +395,7 @@ class BatchingWriter<T : Any>(
         item: T,
         reason: FallbackReason,
     ): Outcome {
-        hooks.onFallback(reason)
+        hook("onFallback") { it.onFallback(reason) }
         return writeDirect(item)
     }
 
@@ -364,7 +406,7 @@ class BatchingWriter<T : Any>(
             Outcome.Committed
         } catch (e: Exception) {
             val kind = sink.classify(e)
-            hooks.onFailure(kind, 1)
+            hook("onFailure") { it.onFailure(kind, 1) }
             // The class and the SQLState, never the Throwable: a store's message can carry the row (FailureShape).
             log.warn(
                 "event=persistence.direct_write_failed writer={} kind={} item={} cause={} sql_state={}",
@@ -382,7 +424,7 @@ class BatchingWriter<T : Any>(
         reason: FallbackReason,
         executor: Executor,
     ): Outcome {
-        hooks.onFallback(reason)
+        hook("onFallback") { it.onFallback(reason) }
         val started = AtomicBoolean(false)
         val write =
             CompletableFuture.supplyAsync({
@@ -403,7 +445,7 @@ class BatchingWriter<T : Any>(
             }
 
             else -> {
-                hooks.onFailure(FailureKinds.ABANDONED, 1)
+                hook("onFailure") { it.onFailure(FailureKinds.ABANDONED, 1) }
                 log.warn("event=persistence.direct_write_abandoned writer={} item={}", name, sink.describe(item))
                 Outcome.Failed(FailureKinds.ABANDONED, null)
             }
@@ -411,7 +453,7 @@ class BatchingWriter<T : Any>(
     }
 
     private fun indeterminate(items: List<T>): Outcome {
-        hooks.onFailure(FailureKinds.INDETERMINATE, items.size)
+        hook("onFailure") { it.onFailure(FailureKinds.INDETERMINATE, items.size) }
         log.warn(
             "event=persistence.indeterminate writer={} items={} wait_ms={} " +
                 "message=\"the store did not answer in time; the write may still land\"",
@@ -435,7 +477,7 @@ class BatchingWriter<T : Any>(
         now: Long,
     ) {
         if (entry.finishOnce()) {
-            if (outcome == Outcome.Committed) hooks.onCommitted(now - entry.enqueuedAt)
+            if (outcome == Outcome.Committed) hook("onCommitted") { it.onCommitted(now - entry.enqueuedAt) }
             release(entry)
             entry.done.complete(outcome)
         }
@@ -553,7 +595,7 @@ class BatchingWriter<T : Any>(
             try {
                 sink.write(batch.map { it.item })
                 val now = System.nanoTime()
-                hooks.onBatch(batch.size, batch.sumOf { it.bytes.toLong() }, now - t0)
+                hook("onBatch") { it.onBatch(batch.size, batch.sumOf { e -> e.bytes.toLong() }, now - t0) }
                 batch.forEach { finish(it, Outcome.Committed, now) }
             } catch (e: Exception) {
                 if (batch.size == 1) failSingle(batch.single(), e) else retryAsSingles(batch, e)
@@ -565,18 +607,18 @@ class BatchingWriter<T : Any>(
             batch: List<Entry<T>>,
             batchFailure: Exception,
         ) {
-            hooks.onBatchRetried(batch.size)
+            hook("onBatchRetried") { it.onBatchRetried(batch.size) }
             val failed = mutableListOf<String>()
             batch.forEach { entry ->
                 try {
                     val t0 = System.nanoTime()
                     sink.write(listOf(entry.item))
                     val now = System.nanoTime()
-                    hooks.onBatch(1, entry.bytes.toLong(), now - t0)
+                    hook("onBatch") { it.onBatch(1, entry.bytes.toLong(), now - t0) }
                     finish(entry, Outcome.Committed, now)
                 } catch (e: Exception) {
                     val kind = sink.classify(e)
-                    hooks.onFailure(kind, 1)
+                    hook("onFailure") { it.onFailure(kind, 1) }
                     failed += "${sink.describe(entry.item)}($kind)"
                     finish(entry, Outcome.Failed(kind, e), System.nanoTime())
                 }
@@ -598,7 +640,7 @@ class BatchingWriter<T : Any>(
             e: Exception,
         ) {
             val kind = sink.classify(e)
-            hooks.onFailure(kind, 1)
+            hook("onFailure") { it.onFailure(kind, 1) }
             log.warn(
                 "event=persistence.write_failed writer={} kind={} item={} cause={} sql_state={}",
                 name,
@@ -665,7 +707,7 @@ class BatchingWriter<T : Any>(
 
         /** Items waiting when a writer becomes free that mark it busy (see `take`). */
         const val BUSY_QUEUE = 2
-        val SATURATION_WARN_INTERVAL_NANOS: Long = TimeUnit.SECONDS.toNanos(10)
+        val WARN_INTERVAL_NANOS: Long = TimeUnit.SECONDS.toNanos(10)
 
         fun nanosToMillisCeil(nanos: Long): Long = (nanos + NANOS_PER_MILLI - 1) / NANOS_PER_MILLI
 
