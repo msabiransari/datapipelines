@@ -260,7 +260,7 @@ class ShellBusyBrowserTest : BrowserSuite() {
             page.fill("#template-filter-q", "zzz-no-such-template")
             throttle.awaitCaptured(4)
             throttle.releaseAll()
-            val clear = "$catalog button:has-text('Clear search')"
+            val clear = "$catalog .ds-empty-actions button" // plain CSS: it is also handed to document.querySelector
             page.waitForSelector(clear)
             barHidden()
             page.click(clear)
@@ -436,13 +436,13 @@ class ShellBusyBrowserTest : BrowserSuite() {
             }
             throttle.awaitCaptured(2)
 
-            // (4) The abort's effects, read once B is in flight (htmx aborts A before it sends
-            // B, so A's terminal event has run by the time B is captured): the bar STAYS active
-            // and the target keeps its aria-busy and exactly ONE skeleton — the counts, not
-            // booleans: B still holds all three, and A's abort must neither hide them early nor
-            // leave a second skeleton behind.
-            page.locator("#app-progress.active").count() shouldBe 1
-            page.locator("$catalog[aria-busy='true']").count() shouldBe 1
+            // (4) The abort's effects, read once B is in flight. htmx aborts A BEFORE it sends B,
+            // so A's terminal event has already torn A's busy state down (bar, aria-busy,
+            // skeleton) and B's begin re-arms them: the bar is active again, the target gets its
+            // aria-busy after B's own 150ms, and there is exactly ONE skeleton — A's did not
+            // outlive its request and B did not stack a second one on top of it.
+            page.waitForSelector("#app-progress.active")
+            page.waitForSelector("$catalog[aria-busy='true']")
             page.locator("$catalog .app-target-skeleton").count() shouldBe 1
 
             throttle.releaseAll()
