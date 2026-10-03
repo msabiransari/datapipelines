@@ -187,6 +187,25 @@ class ScopeInterceptorTest {
         body(response)["code"] shouldBe "auth.api_key.missing"
     }
 
+    /**
+     * #404 — the ASYNC re-dispatch renders the result of a request the REQUEST dispatch already
+     * judged; its SecurityContext is empty on the wire, and refusing it turned a stream's
+     * pre-first-frame 429/410 into this 401. It proceeds untouched: nothing written, nothing
+     * audited — the same scoped handler and the same empty context as the 401 case above.
+     */
+    @Test
+    fun `the async re-dispatch of a scoped handler proceeds with nothing written or audited (404)`() {
+        val handler = HandlerMethod(ProbeController(), ProbeController::class.java.getMethod("adminOnly"))
+        val request = MockHttpServletRequest("GET", "/api/v1/probe").apply { dispatcherType = jakarta.servlet.DispatcherType.ASYNC }
+        val response = MockHttpServletResponse()
+
+        interceptor.preHandle(request, response, handler).shouldBeTrue()
+
+        response.status shouldBe 200
+        response.contentAsString shouldBe ""
+        verify(exactly = 0) { auditLogger.log(any(), any(), any(), any(), any(), any()) }
+    }
+
     @Test
     fun `an unannotated handler under the api prefix is denied by default`() {
         authenticate()

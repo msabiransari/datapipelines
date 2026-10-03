@@ -1,6 +1,6 @@
 # Auth & Security Specification
 
-**Status:** v3.39 (revised — see Change Log)
+**Status:** v3.40 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System](type-system.md)
 **Last updated:** 2026-10-03
@@ -1152,11 +1152,19 @@ class SecurityConfig(
  8. OAuth2LoginAuthenticationFilter — handles /oauth2/** and /login/oauth2/code/** redirects (wired only when a provider is configured)
  9. AuthorizationFilter             — checks the §8.3 allowlist, then authenticated() for everything else
 10. ForcedPasswordChangeInterceptor — §5A.4, every handler except EXCLUDE_PATTERNS
-11. ScopeInterceptor (MVC)          — kind confinement (§7.7), then @RequiredScope; default-deny for unannotated handlers outside the §8.3 allowlist
+11. ScopeInterceptor (MVC)          — kind confinement (§7.7), then @RequiredScope; default-deny for unannotated handlers outside the §8.3 allowlist;
+                                      an ASYNC re-dispatch passes untouched — the REQUEST dispatch judged it (§8.3, #404)
 12. Controller                      — handles the request
 ```
 
 If neither API key nor JWT is present (and the path requires auth), the AuthorizationFilter routes to the entry point, which splits by client shape (T31): a request whose `Accept` includes `text/html` — a browser navigating a UI route — gets a `302` to `/login` (the `Location` is a relative header, never `sendRedirect`'s Host-derived absolute URL); `/api/**` and `/mcp` NEVER redirect (their 401 JSON envelope is contract, byte-pinned), and non-HTML clients (`curl`'s `Accept: */*`, JSON API callers) keep the exact current envelope whatever path they hit. If authenticated but scope insufficient, the ScopeInterceptor returns `403`.
+
+A streaming response's completion (an SSE emitter, a CSV body) re-enters the servlet as an
+ASYNC dispatch. Steps 5–7 are `OncePerRequestFilter`s that skip it, so its `SecurityContext` is
+empty; step 9 permits it by dispatcher type, step 10 finds no principal and passes, and step 11
+returns at once. The handler is not invoked again on that dispatch
+— only the result or exception the REQUEST dispatch's handler produced is rendered, by the
+`@ControllerAdvice` — so nothing new is authorized and the D-R8 audit row stays one per request.
 
 ### 8.3 Public endpoints (no auth required)
 
@@ -1174,7 +1182,14 @@ Two things are deliberately **not** rows in this table:
 - The `DispatcherType.ASYNC` / `ERROR` permit (§8.1). It is not a path rule: it says that a
   re-dispatch of a request the REQUEST dispatch already authenticated and authorized is not
   re-authorized from an empty `SecurityContext`. Without it every completed SSE stream dies
-  as Access Denied on its completion dispatch.
+  as Access Denied on its completion dispatch. `ScopeInterceptor` holds the same premise for
+  the ASYNC dispatch (§8.2 step 11): until v3.40 it judged the re-dispatch against the empty
+  context, so a stream completed with an error BEFORE its first frame answered
+  `401 auth.api_key.missing` in place of the error's envelope — the execute route's
+  `429 pipeline.execution.concurrency_limit` and the idempotent retry's never-started
+  `410 result.expired` (rest-api §6.1) — while every later completion hid the refusal behind
+  the committed response (#404). The ERROR dispatch needs no exemption there: its handler is
+  `/error`, a row of the table below, which the interceptor already passes.
 - Anything reached only with a credential. Being on this list means *anonymous* access, not
   "unscoped": an annotated handler on a public path is still enforced by `ScopeInterceptor`.
 
@@ -1810,6 +1825,7 @@ All auth tables accessed via `JdbcTemplate` + `RowMapper`. No JPA. See [Metadata
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-03 | v3.40 | #404 the async re-dispatch is not judged again | **No route, permission, role or §7.6 row changes.** `ScopeInterceptor.preHandle` returns at once on a `DispatcherType.ASYNC` dispatch (§8.2 step 11, §8.3's dispatcher-type note): the REQUEST dispatch already judged the request, the handler is not invoked again, and the re-dispatch's `SecurityContext` is empty (the credential filters skip async dispatches). Judging it anyway wrote `401 auth.api_key.missing` on every streaming completion — unseen once a frame had committed the response, but the WHOLE answer of a stream completed with an error before its first frame, so the execute route's `429 pipeline.execution.concurrency_limit` and the never-started `410 result.expired` (rest-api §6.1) never reached the wire. Wire-proven by `IdempotentAttachRowOrderE2eTest` (both statuses, and the unkeyed 429), unit-pinned by `SseErrorCompletionTest` (the interceptor named as the writer by its control) and `ScopeInterceptorTest`; the D-R8 audit stays one row per request. The ERROR dispatch is unchanged: its handler is the public `/error`. |
 | 2026-10-03 | v3.39 | #399 the visualizations workspace — renumbered at merge after 376's v3.38 | **§7.6: no new row, no cell change — the existing visualization rows' Surfaces cells gain the workspace's routes**, and `visualization.read` drops "no UI page yet". `visualization.read`: `GET /visualizations` (the flat catalog), `GET /visualizations/{id}` (the tabbed, version-explicit WORKSPACE, `?version=&tab=`; a DISCARDED or lens-hidden version is the family's 404), `GET /partials/visualizations/tree` (the sidebar's lazy branch; `q` searches it flat), `GET /partials/visualizations` (the catalog's swap root) and the six lazy tabs `…/{id}/preview`, `…/{id}/overview`, `…/{id}/evidence`, `…/{id}/evidence/{runId}`, `…/{id}/used-by`, `…/{id}/versions`. The Preview tab renders the version's test-case FIXTURES — it executes nothing, so no execute row is consulted; the public `/visualizations/{id}/preview` capability page (§8.3) is unchanged and admits none of these routes. `visualization.release`, `visualization.version.manage` (purge-draft, purge-version, discard, restore), `visualization.switch_version`, `visualization.delete` (purge-entity): each gains its workspace dialog pair (`GET`+`POST /partials/visualizations/{id}/lifecycle/…`, session-only, the POST calling the same service, refusals the family's 4xx). No new permission; no key-kind surface change. |
 | 2026-10-03 | v3.38 | S3 (#376) the parameter-set evaluation history — renumbered at merge after 400's v3.37 | **§7.6: no new row, no cell change — `parameter_set.read`'s Surfaces and prose gain the History tab's two partials**, `GET /partials/parameter-sets/{id}/evaluations` (the paged house table, 25 a page) and `GET /partials/parameter-sets/{id}/evaluations/{evaluationId}` (one record's detail): both declare the row's permission (the owner's §11.2 ruling — no new permission; `ReadFloorTest`'s family rule names them), a set the caller's lens hides is the workspace page's own 404 on both, and a narrowing lens lists only the records of the versions it admits (a draft's record names the draft's parameters). The spec's §5 spells the list route `GET /parameter-sets/{id}/evaluations`; every htmx fragment lives under `/partials/`, so the routes do too. **Recording is no action**: it is a side effect of the evaluate row's act (and of `dashboard.execute` and the MCP tool's row), checked by nothing new. **§8.6**: the retention sweep's row names six steps — the evaluation history's stale sweep (`INCOMPLETE`, metadata-db §8.5) and its retention (the event cutoff, one bounded batch) between the dashboard refreshes and the keys purge. No REST or MCP history surface (§11.6), no permission, key kind or role cell changed. |
 | 2026-10-02 | v3.37 | #400 the dashboards workspace (#409 closes with it) | **§7.6: no new row, no cell change — the existing rows' Surfaces cells gain the workspace's routes.** `dashboard.read`: `GET /dashboards/{id}` is the tabbed, version-explicit WORKSPACE (`?version=&tab=`; the no-release case is the choose-a-version state, #409 — never a 404 for a record the caller can see); `GET /dashboards/{id}/preview` stays as a 303 redirect onto it; `GET /dashboards` is the flat catalog; the tree route gains `q`; `GET /partials/dashboards` (the catalog's swap root), `…/{id}/overview` and `…/{id}/versions` (the lazy tabs) join the cell. `dashboard.release`, `dashboard.version.manage`, `dashboard.switch_version`, `dashboard.delete`: each gains its workspace dialog pair (`GET`+`POST /partials/dashboards/{id}/lifecycle/…`, session-only, the POST calling the same service, refusals the family's 4xx). `dashboard.key.bind`: gains the read-only Keys tab `GET /partials/dashboards/{id}/keys` — the lowest row whose cells match the tab's visibility. No new permission; no key-kind surface change. |
