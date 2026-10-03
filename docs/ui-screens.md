@@ -240,11 +240,14 @@ lens). The pattern, normative:
   lucide `sliders-horizontal` glyph, every role: `parameter_set.read`, the promoter through the
   lens). The link opens the flat catalog (`/parameter-sets`, §4.23); the toggle opens a panel
   whose tree is the Dashboards branch's shape — `/partials/parameter-sets/tree?scope=nav` under
-  `#params-tree-nav`, **no search box** (the set service has no name search), a leaf a full-document
+  `#params-tree-nav` — with the search box in the Pipelines branch's exact markup (#415: a
+  non-empty `q` swaps the flat results into the panel's root — a set the lens hides is never a
+  hit, because the service filters it — and clearing returns the tree), a leaf a full-document
   link (`hx-boost="false"`) to the canonical workspace `/parameter-sets/{id}`, the current leaf marked
   through the workspace page's `[data-nav-current]` hook, the response stamped
   `DP-Nav-Stamp: <workspace>|<lens>`, the state key `dp-nav:parameter-sets:<workspace>`. Nothing in
-  the engine changed: `nav-tree.js` reads the branch's `data-nav-branch` and root URL.
+  the engine changed: `nav-tree.js` reads the branch's `data-nav-branch` and root URL, and serves
+  the third search box with zero JS lines changed.
 
 - **The brand mark (163, #157, "D1").** Three rings converging into an outlined tile with three
   rising bars — the tile is a 4-unit `currentColor` stroke and the bars are `currentColor`
@@ -1957,19 +1960,24 @@ start → preview → screenshot → submit → upload → release flow), `Publi
 
 | Attribute | Value |
 |---|---|
-| URL | `GET /parameter-sets` (`?offset=` pages it) |
-| Auth required | Yes — `parameter_set.read`, every role (a promoter through the lens: only sets whose current version is RELEASED and admitted; a hidden set is absent — not listed, not counted, not paged) |
+| URL | `GET /parameter-sets` (`?q=` searches it, `?offset=` pages it) |
+| Auth required | Yes — `parameter_set.read`, every role (a promoter through the lens: only sets whose current version is RELEASED and admitted; a hidden set is absent — not listed, not counted, not paged, not a search hit) |
 | Purpose | Find a parameter set and open its workspace |
 | Design primitives | The house list: `.ds-empty` for the empty state, the shared §5 pager; `parameter-sets.css` (`ps-*`), head-loaded (§3.0 is normative) |
 | JS | None of its own |
 | htmx | The route's rows are the same read the sidebar's tree is built from; a row is a full-document link (`hx-boost="false"`) |
 
 Content: a flat, server-paged list (25 rows per page) of every set the lens admits — folder-path name,
-display name and the version chip. It is the page `/parameter-sets` always meant to be (owner ruling
-2026-10-02 for the artifact families: the page is a CATALOG, the tree lives in the rail, §3.4). There is no
-search box: the set service reads by path prefix and offers no name search, so the control is not drawn.
-`GET /partials/parameter-sets/tree` serves both presentations — `scope=nav` (or any `prefix`) is the
-sidebar level, anything else the catalog — one route, one permission, one lens.
+display name and the version chip — or, under `?q=`, the matches: a case-insensitive substring of the
+name, the display name or the description (#415), `ParameterSetService.search`'s answer, the same lensed
+read the sidebar's branch searches with. It is the page `/parameter-sets` always meant to be (owner ruling
+2026-10-02 for the artifact families: the page is a CATALOG, the tree lives in the rail, §3.4). The SPA
+search control re-fetches ONLY the list fragment into the stable `#parameter-set-list-wrapper` root
+(§4.3's contract: the control is never re-rendered, so focus and value survive); `?q=` stays the deep
+link every "find this parameter set" link uses.
+`GET /partials/parameter-sets/tree` serves the presentations — `scope=nav` (or any `prefix`) is the
+sidebar level (with a non-empty `q`, the branch's flat search), anything else the catalog — one route,
+one permission, one lens.
 
 **The workspace page.**
 
@@ -2012,13 +2020,18 @@ refusal instead, `parameters.locked`); a refused evaluate renders the server's c
 
 Guards: `ParameterSetsWorkspaceModelTest` (the resolution order, never-clamp, the lens-hidden 404, the draft
 arms, the tab set), `ParameterSetsBrowseModelTest`, `ParameterSetsUiControllerTest` (the routes' scopes, the 400/404,
-the evaluate flag per role), `ParameterSetsRenderTest` (the page's markup contract: the blocks, the form only
+the evaluate flag per role), `ParameterSetsPartialControllerTest` (the tree route's dispatch and the nav stamp,
+#415), `ParameterSetsRenderTest` (the page's markup contract: the blocks, the form only
 for an evaluator, the promoter's page, the draft label, the choose-a-version state, the script-safe
-blocks), `ShellRenderTest` (the Parameter Sets branch), `ReadFloorTest` (the `PARAMETER_SETS` family and
+blocks; #415: the search fragment's listbox, its pager's `q`, the two empty states),
+`ParameterSetServiceIntegrationTest` (the search's columns, its literal metacharacters, its lens truth and
+its blank-`q`-is-`listAll` rule, #415), `ShellRenderTest` (the Parameter Sets branch and its search input),
+`ReadFloorTest` (the `PARAMETER_SETS` family and
 its floor), `BrowseModelConventionTest`, `MatrixRowReachabilityTest`/`RoleWalkE2eTest` (the §7.6 Surfaces
 cells), `parameter-set-init.test.mjs` (the runtime's parameters-only entry), `SampleDataParameterSetsContentTest`
 and `ExampleContentSeederTest` (the demo set `nyc/parameters/geo_filters` is seeded through the seeder, §4.23's
-demo content), and the browser suite `ParameterSetPagesBrowserTest`.
+demo content), and the browser suite `ParameterSetPagesBrowserTest` (the catalog search, the branch search and
+the keyboard, #415).
 
 **Demo content.** Every personal workspace seeded with the NYC demo family gets `nyc/parameters/geo_filters`
 (RELEASED v1): a year → month → pickup-zone cascade over the `sample-trips` Postgres datasource through three
@@ -2189,6 +2202,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-02 | v1.106 | #415 the Parameter Sets name search (follow-up to #374) | **§3.4**: the Parameter Sets panel gains the search box in the Pipelines branch's exact markup — the third branch the shared engine serves with zero JS lines changed; a non-empty `q` swaps the flat results into the panel's root (`#params-tree-nav`), clearing returns the tree, and a set the lens hides is never a hit (the service filters it, never the template). **§4.23**: `GET /parameter-sets` gains `?q=` and the SPA search control — a case-insensitive substring of name, display name or description through the new `ParameterSetService.search` (everything lens → SQL `ILIKE … ESCAPE '\'` with the term's `%`/`_`/`\` literal; a narrowing lens → in memory over the admitted sets); `partials/parameter-set-list` is retired for the `partials/parameter-sets` dispatcher + `partials/parameter-set-search` (the dashboards' shape, one family over). No new route, permission, scope row or role changed: the same two routes on `parameter_set.read` gained a query parameter. Guards: `ParameterSetServiceIntegrationTest`, `ParameterSetsBrowseModelTest`, `ParameterSetsPartialControllerTest` (new), `ParameterSetsUiControllerTest`, `ParameterSetsRenderTest`, `ShellRenderTest`, `ParameterSetPagesBrowserTest`, the falsifications in the handback. |
 | 2026-10-02 | v1.105 | #400 the Dashboards workspace — the searchable sidebar tree, the flat catalog, the tabbed version-explicit workspace (#409 closes with it) | **§3.4**: the Dashboards panel gains the search box in the Pipelines branch's exact markup (the shared engine serves it with no JS change; a non-empty `q` swaps the flat results into the panel's root, clearing returns the tree). **§4.21 rewritten**: `GET /dashboards` is the flat CATALOG in §4.3's shape (owner ruling 2026-10-02 — the L3b tree page retired; folders are the sidebar's axis), each row a full-document link into the workspace, a draft-only dashboard's row saying so; `GET /dashboards/{id}?version=&tab=` is the tabbed, version-explicit WORKSPACE — Board (today's board page exactly: the same bundle block, the unchanged `dashboards-page.js`, the events pane beside the board), Overview (the definition, read-only, with each pin's status and the R1 release hint), Refreshes, Versions (the history and the seven lifecycle dialogs into `#dp-dialog`, `HX-Redirect` back with a flash) and Keys (`dashboard.key.bind`, read-only, linking the Keys page); #409: a dashboard with no served release opens the choose-a-version state — the heading NAMES it, the draft is offered, the runtime config never called, no `not_found`; the preview route answers 303 onto the workspace (the deep links survive); every version switch a full navigation (the one-bundle rule), tab switches in-page over the SHARED tab core (`static/js/workspace/tabs.js` — pipeline-editor/tabs.js runs the same machine), the hidden Board re-fitting through the runtime's own `resize()`. **§4.21's preview gap closed**: the #369 draft preview is documented here for the first time, as the workspace's named-version view (the chip succeeded the banner). `dashboards-page.js` unchanged; no new permission; no REST route changed. Guards: the falsifications in the handback. |
 | 2026-10-02 | v1.104 | #374 the Parameter Sets screens (workspace spec §6.2/§6.3, #357 S1) — renumbered at merge after 386's v1.103 | **§3.4**: Build gains **Parameter Sets**, the navigating-tree pattern's third use (lucide `sliders-horizontal`; link → the catalog, lazy tree beside it with no search box, leaf → the workspace). **New §4.23**: the flat paged catalog `GET /parameter-sets` and the canonical workspace `GET /parameter-sets/{id}?version=N&tab=` — the version-explicit resolve order (explicit admitted version, never clamped → the lens-visible current → an accessible draft, labelled → choose-a-version), the house 404/400, a static Cytoscape graph + inspector and the live parameter form through the dashboard runtime's new parameters-only `initParameters` entry against the EXISTING evaluate route (role-hidden: a promoter's page has no control and no request). The demo family seeds `nyc/parameters/geo_filters`. No permission, scope row or role changed; the routes are listed in auth.md §7.6's `parameter_set.read` Surfaces cell. Guards: the render/controller/model tests, `ReadFloorTest`, `SampleDataParameterSetsContentTest`, `ParameterSetPagesBrowserTest`, the falsifications in the handback. |
 | 2026-10-02 | v1.103 | #386/#387 the board's small slots and its breakpoint | **§4.21's Grid rows row** gains the collapse below `breakpoint_px` (768 px default; every item full width in grid order, the row unit kept, a crossing re-places and resizes) and the 2-row chart's plot-area floor (compact margins + `automargin`, dashboards.md §6.3). |

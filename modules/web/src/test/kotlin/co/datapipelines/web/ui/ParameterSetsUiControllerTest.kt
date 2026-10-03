@@ -160,12 +160,23 @@ class ParameterSetsUiControllerTest {
     @Test
     fun `the catalog page stamps the roles and the active theme and fills the flat list`() {
         authenticate(WorkspaceRole.AUTHOR, everything)
-        every { sets.listAll(ws, ReadLens.Everything, 0, ParameterSetsBrowseModel.PAGE_SIZE) } returns emptyList()
-        every { sets.countAll(ws, ReadLens.Everything) } returns 0
+        every { sets.search(ws, ReadLens.Everything, null, 0, ParameterSetsBrowseModel.PAGE_SIZE) } returns emptyList()
+        every { sets.countSearch(ws, ReadLens.Everything, null) } returns 0
         val m = ExtendedModelMap()
-        controller.list(m, request, null) shouldBe "parameter-sets/list"
+        controller.list(m, request, null, null) shouldBe "parameter-sets/list"
         m["activeTheme"] shouldBe "saas"
         m["canEvaluateParameterSets"] shouldBe true
         m["rootId"] shouldBe ParameterSetsBrowseModel.CATALOG_ROOT_ID
+    }
+
+    @Test
+    fun `the catalog page carries the caller's q - a deep link searches like the box does (#415)`() {
+        authenticate(WorkspaceRole.AUTHOR, everything)
+        every { sets.search(ws, ReadLens.Everything, "geo", 0, ParameterSetsBrowseModel.PAGE_SIZE) } returns emptyList()
+        every { sets.countSearch(ws, ReadLens.Everything, "geo") } returns 0
+        val m = ExtendedModelMap()
+        controller.list(m, request, "  geo  ", null) shouldBe "parameter-sets/list"
+        m["q"] shouldBe "geo"
+        m["searching"] shouldBe true
     }
 }

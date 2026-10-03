@@ -561,6 +561,73 @@ class ParameterSetService(
             repository.findCurrentVersions(workspaceId).count { lens.admits(it.name) }
         }
 
+    /**
+     * The flat listing's name search (#415) — [listAll] with a `q`: every set the lens admits whose
+     * name, display name or description contains [query], case-insensitively. A blank `q` IS
+     * [listAll] — literally the same call, so "no search" and "cleared search" can never drift into
+     * two listings. The everything lens asks the repository's SQL search
+     * ([ParameterSetRepository.searchAll]); a narrowing lens filters the admitted sets in memory —
+     * the [listAll] lensed shape, the per-request admitted set being something no SQL pager can
+     * take — matching the SAME three columns the SQL matches, so the two arms answer one predicate.
+     * Name-ordered, stable paging; the truthful total is [countSearch]'s, never the page's size.
+     */
+    fun search(
+        workspaceId: UUID,
+        lens: ReadLens,
+        query: String?,
+        offset: Int = 0,
+        limit: Int = ParameterSetRepository.DEFAULT_PAGE_LIMIT,
+    ): List<ParameterSetVersion> {
+        val needle = query?.trim()?.takeIf { it.isNotEmpty() } ?: return listAll(workspaceId, lens, offset, limit)
+        if (lens.isEverything) return repository.searchAll(workspaceId, needle, offset, limit)
+        return searchInMemory(workspaceId, lens, needle)
+            .drop(maxOf(0, offset))
+            .take(limit.coerceIn(1, ParameterSetRepository.MAX_PAGE_LIMIT + 1))
+    }
+
+    /**
+     * The truthful total of [search] over the WHOLE workspace — the [countAll] shape, lens-true:
+     * the everything lens counts in SQL, a narrowing lens counts in memory with the very predicate
+     * [search] filters by, so the count and the listing can never drift apart. A blank `q` is
+     * [countAll].
+     */
+    fun countSearch(
+        workspaceId: UUID,
+        lens: ReadLens,
+        query: String?,
+    ): Int {
+        val needle = query?.trim()?.takeIf { it.isNotEmpty() } ?: return countAll(workspaceId, lens)
+        return if (lens.isEverything) {
+            repository.countSearchAll(workspaceId, needle)
+        } else {
+            searchInMemory(workspaceId, lens, needle).size
+        }
+    }
+
+    /**
+     * The narrowing lens's search read — every admitted set with a current version, q-matched in
+     * memory ([ParameterSetService.countChildSets]'s shape). A promoter learns what HER LENS admits
+     * that matches, never that a hidden set exists.
+     */
+    private fun searchInMemory(
+        workspaceId: UUID,
+        lens: ReadLens,
+        needle: String,
+    ): List<ParameterSetVersion> {
+        val q = needle.lowercase()
+        return repository
+            .findCurrentVersions(workspaceId)
+            .filter { lens.admits(it.name) }
+            .mapNotNull { repository.findCurrent(workspaceId, it.id) }
+            .filter { it.matchesSearch(q) }
+    }
+
+    /** The `q` rule, in one place: a case-insensitive substring of name, display name or description (PipelineService's rule). */
+    private fun ParameterSetVersion.matchesSearch(lowercaseQuery: String): Boolean =
+        record.name.lowercase().contains(lowercaseQuery) ||
+            record.displayName.lowercase().contains(lowercaseQuery) ||
+            record.description.lowercase().contains(lowercaseQuery)
+
     /** The promoter lens's input — every live set's current RELEASED version (versioning §10.2). */
     fun currentVersions(workspaceId: UUID): List<CurrentParameterSetVersion> = repository.findCurrentVersions(workspaceId)
 

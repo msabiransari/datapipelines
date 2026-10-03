@@ -365,8 +365,10 @@
              LINK is the flat catalog page, the TOGGLE opens the lazy panel, and a LEAF is a plain
              link to the canonical workspace /parameter-sets/{id} (hx-boost="false" — a full
              document load, never a swap into the page). Its fragment is
-             /partials/parameter-sets/tree (scope=nav); it carries no search box because the
-             parameter-set service has no name search to back one. -->
+             /partials/parameter-sets/tree (scope=nav). #415: the branch gains the search input in
+             the Pipelines branch's exact markup — the shared engine serves it with no JS change
+             (a non-empty `q` renders the flat results into this panel's root; clearing returns
+             to the tree). -->
         <div class="app-nav-branch" data-nav-branch="parameter-sets">
           <a th:href="@{/parameter-sets}" class="app-nav-link" data-nav-section="/parameter-sets"
              data-nav-group="Build" data-nav-label="Parameter Sets"
@@ -378,6 +380,14 @@
           </button>
           <div class="app-nav-tree app-rail-label" id="nav-tree-parameter-sets" data-nav-tree="parameter-sets" hidden
                th:attr="data-nav-workspace=${activeWorkspace},data-nav-root-url=@{/partials/parameter-sets/tree(scope='nav')}">
+            <div class="app-nav-tree-search">
+              <input type="search" name="q" class="ds-input app-nav-tree-input" autocomplete="off"
+                     placeholder="Search parameter sets…" aria-label="Search parameter sets in the tree"
+                     data-nav-tree-search
+                     th:attr="hx-get=@{/partials/parameter-sets/tree(scope='nav')}"
+                     hx-target="#params-tree-nav" hx-swap="outerHTML"
+                     hx-trigger="input changed delay:300ms, search" hx-sync="this:replace">
+            </div>
             <div class="app-nav-tree-scroll" data-nav-tree-scroll>
               <div class="tpl-level tpl-level-pending" id="params-tree-nav" data-nav-tree-root>
                 <span class="ds-spinner htmx-indicator" aria-hidden="true"></span>
