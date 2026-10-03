@@ -830,6 +830,58 @@ class PipelineWorkspaceHistoryBrowserTest : BrowserSuite() {
     }
 
     @Test
+    fun `#402 - Forward from the list onto a workspace entry is handed to htmx and restores the workspace`() {
+        val id = seedSqlVersions("pwhf" + generatedPassword("s").take(6).lowercase())
+        page.navigate("$baseUrl/pipelines")
+        page.waitForSelector("#pipeline-list-wrapper")
+        seedHistoryCounters()
+        // A boosted entry into the workspace: htmx's own entry, which the first switch converts.
+        page.evaluate(
+            """(url) => {
+              const a = document.createElement('a');
+              a.href = url;
+              a.id = 'pe-boosted-entry';
+              a.textContent = 'workspace';
+              document.querySelector('#app-main').appendChild(a);
+              window.htmx.process(a); // an anchor added after load is boosted only once processed
+            }""",
+            "/pipelines/$id?version=1",
+        )
+        page.locator("#pe-boosted-entry").click()
+        page.waitForSelector(".pe-root")
+        waitActivated()
+        // The entry IS boosted: the same window (the counters survive) and htmx's own state.
+        (page.evaluate("() => !!window.__peHistoryShape && !!(history.state && history.state.htmx)") as Boolean) shouldBe true
+        switchVersionInPage(2, "sql_v2")
+        page.goBack()
+        expectView(1, "flow", "v1 · released · current", "sql_v1")
+
+        // Back to the list: htmx's entry, htmx's restore.
+        val beforeList = counter("restore")
+        page.goBack()
+        waitForRestore(beforeList)
+        page.waitForSelector("#pipeline-list-wrapper")
+
+        // Forward onto OUR entry while the list is showing: nothing here can replay it, so the
+        // helper hands it to htmx — a cache HIT that restores the workspace the reader left.
+        val handed = (page.evaluate("() => window.WorkspaceHistory.stats().handedToHtmx") as Number).toInt()
+        val beforeWorkspace = counter("restore")
+        page.goForward()
+        waitForRestore(beforeWorkspace)
+        waitActivated()
+        expectView(1, "flow", "v1 · released · current", "sql_v1")
+        stackDepth() shouldBe 1
+        counter("miss") shouldBe 0
+        (page.evaluate("() => window.WorkspaceHistory.stats().handedToHtmx") as Number).toInt() shouldBe handed + 1
+        val restored = runtimeIdentity()
+
+        // And Forward again replays v2 IN the restored instance.
+        page.goForward()
+        expectView(2, "flow", "v2 · released", "sql_v2")
+        sameInstanceAs(restored)
+    }
+
+    @Test
     fun `#402 - a run started on v1 keeps its stream and identity across a switch to v2 and Back`() {
         val id = seedSlowRunPipeline()
         seedSecondChainVersion(id)
