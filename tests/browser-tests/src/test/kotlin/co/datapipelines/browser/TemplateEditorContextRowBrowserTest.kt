@@ -31,8 +31,19 @@ class TemplateEditorContextRowBrowserTest : BrowserSuite() {
         seedTemplate(author.page, name)
 
         val offenders = mutableListOf<String>()
+
+        /** [BrowserSuite.ensureTheme], for the session's own page (the toggle flips light ↔ dark). */
+        fun ensureThemeOnSession(mode: String) {
+            val wanted = "/themes/$mode.css"
+            val current = author.page.locator("#theme-link").first().getAttribute("href") ?: ""
+            if (current.contains(wanted)) return
+            author.page.waitForResponse("**/partials/profile/theme") { author.page.locator("#mode-toggle").click() }
+            author.page.waitForFunction("() => document.getElementById('theme-link').getAttribute('href').includes('$wanted')")
+        }
+
         for (theme in listOf("light", "dark")) {
-            ensureTheme(theme)
+            openWorkspace(author.page, name)
+            ensureThemeOnSession(theme)
             for (width in DESKTOP_WIDTHS) {
                 author.page.setViewportSize(width, 900)
                 openWorkspace(author.page, name)

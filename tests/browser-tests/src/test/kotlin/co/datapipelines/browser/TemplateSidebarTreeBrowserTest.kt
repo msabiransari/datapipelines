@@ -93,18 +93,40 @@ class TemplateSidebarTreeBrowserTest : BrowserSuite() {
         page.evaluate("() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))")
     }
 
+    /**
+     * Ensures the Templates panel is OPEN and its root level has landed. The toggle is a
+     * TOGGLE: after a navigation that restored the remembered open state, the panel is
+     * already open and clicking it would CLOSE it — so the click is conditional on the
+     * panel's own state, and the wait is scoped to the OPEN panel.
+     */
     private fun openTree() {
-        page.click("[data-nav-branch='templates'] [data-nav-tree-toggle]")
-        page.waitForSelector("#template-nav-root .tpl-tree, #template-nav-root .ds-empty")
+        val alreadyOpen =
+            page.evaluate("() => { const p = document.getElementById('nav-tree-templates'); return !!p && !p.hidden; }") as Boolean
+        if (!alreadyOpen) {
+            page.click("[data-nav-branch='templates'] [data-nav-tree-toggle]")
+        }
+        page.waitForSelector("#nav-tree-templates:not([hidden]) .tpl-tree, #nav-tree-templates:not([hidden]) .ds-empty")
         settle()
     }
 
     private fun folder(path: String) = "$panel details.tpl-folder:has(> summary > span.tpl-label[title='$path'])"
 
-    /** Expands the sidebar folder whose FULL path is [path], waiting for its level to land. */
+    /** Expands the sidebar folder whose FULL path is [path], waiting for its level to land.
+     * Idempotent: a folder the tree's restore already opened has its level in place — the
+     * summary click would CLOSE it (the toggle), so it is skipped. */
     private fun expand(path: String) {
-        page.click("${folder(path)} > summary")
-        page.waitForSelector("${folder(path)} > .tpl-level:not(.tpl-level-pending)")
+        val open =
+            page.evaluate(
+                """(sel) => {
+                  const d = document.querySelector(sel);
+                  return !!d && d.open && !!d.querySelector(':scope > .tpl-level:not(.tpl-level-pending)');
+                }""",
+                folder(path),
+            ) as Boolean
+        if (!open) {
+            page.click("${folder(path)} > summary")
+            page.waitForSelector("${folder(path)} > .tpl-level:not(.tpl-level-pending)")
+        }
         settle()
     }
 
@@ -232,7 +254,7 @@ class TemplateSidebarTreeBrowserTest : BrowserSuite() {
         // its search (nav-tree.js's reveal).
         page.click("[data-nav-tree-reveal='templates']")
         page.waitForSelector("#template-nav-root .tpl-tree")
-        page.waitForSelector("#template-nav-root .tpl-leaf")
+        page.waitForSelector("#template-nav-root .tpl-folder")
         page.evaluate("() => document.activeElement?.matches('#nav-tree-templates [data-nav-tree-search]')") shouldBe true
 
         // The keyboard: ArrowDown moves focus among the rows (the nav context moves FOCUS only).
