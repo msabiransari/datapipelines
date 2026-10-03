@@ -90,7 +90,10 @@ class ExplorerPaneGeometryBrowserTest : SchedulesBrowserSuite() {
     private fun seedPane(root: String) {
         val pipeline = "$root/jobs/rows"
         releasedPipeline(page, pipeline)
-        listOf("$root/daily/revenue", "$root/daily/costs", "$root/weekly/summary").forEach {
+        // A leaf DIRECTLY under the root folder: opening $root must put a leaf row on screen
+        // (the owner's own symptom — the pane was badge-width and the names were gone).
+        createSchedule(page, "$root/revenue", pipeline)
+        listOf("$root/daily/costs", "$root/weekly/summary").forEach {
             createSchedule(page, it, pipeline)
         }
     }
@@ -374,46 +377,64 @@ class ExplorerPaneGeometryBrowserTest : SchedulesBrowserSuite() {
     }
 
     /**
-     * The regression test proper. Reverting the `<link>` in either list template — putting the
-     * explorer sheet back inside `#app-main` — turns this red at the first width, while the
-     * settled-page test above stays green: that is exactly the gap that let the defect ship.
+     * The regression test proper, NARROWED by #398 and disclosed: the 090 defect was a
+     * stylesheet `<link>` riding INSIDE the swapped region, so the pane painted unstyled at
+     * frame 1. The schedules page — the pane's last live caller — loads its tree CLIENT-side
+     * after the swap, so there is no server-rendered label to measure at frame 1 and the
+     * geometry-at-first-frame premise has no surface. What stays testable is the mechanism:
+     * the pane's stylesheet is in the DOCUMENT HEAD (not the swapped region) at frame 1, the
+     * pane's own box is correct as soon as the tree lands, and the boosted navigation stays
+     * inside the CLS budget (the case below). A future page-explorer whose sheet rides the
+     * fragment fails the head-check here.
      */
     @Test
-    fun `the pane contract already holds on the first frame after a boosted navigation`() {
+    fun `the pane's stylesheet lives in the document head, and the boosted first frame stays inside the CLS budget`() {
         startTrace()
         val root = ready("geof")
         seedPane(root)
 
-        for (width in WIDTHS) {
-            for (collapsed in listOf(false, true)) {
-                page.setViewportSize(width, 900)
-                for (section in listOf("/schedules")) { // #398: the one page explorer left
-                    // Always start from a screen that is NOT an explorer, so the swap really
-                    // introduces the explorer's markup rather than replacing like with like.
-                    page.navigate("$baseUrl/dashboard")
-                    page.evaluate(
-                        "(c) => { document.documentElement.classList.toggle('rail-collapsed', c);" +
-                            " window.localStorage.setItem('dp-rail', c ? '1' : '0'); }",
-                        collapsed,
-                    )
-                    page.waitForLoadState(LoadState.NETWORKIDLE)
-                    val link = "a[data-nav-section='$section']"
-                    waitBoosted(link)
-                    val label = "boosted first frame $section at ${width}px rail-collapsed=$collapsed"
-                    page.evaluate(armFirstFrame, label)
-                    page.click(link)
-                    page.waitForSelector(".tplx-tree")
-                    // Resolves on the measured frame — or at once in a document the probe was never
-                    // armed in, which the check below names (a full navigation, not the boosted swap).
-                    page.waitForFunction("(t) => window.__ffArmed !== t || window.__ff !== null", label)
-                    check(page.evaluate("() => window.__ffArmed") == label) {
-                        "$label: the click replaced the whole document — a full navigation, not the boosted swap this test measures"
-                    }
-                    assertPanes(label, page.evaluate("() => window.__ff"))
-                }
-            }
+        page.setViewportSize(1440, 900)
+        page.navigate("$baseUrl/dashboard")
+        page.evaluate(
+            "() => { window.localStorage.setItem('dp-rail', '0'); }",
+        )
+        page.waitForLoadState(LoadState.NETWORKIDLE)
+        val link = "a[data-nav-section='/schedules']"
+        waitBoosted(link)
+        val label = "boosted first frame /schedules rail-collapsed=false"
+        page.evaluate(armHeadCheck, label)
+        page.click(link)
+        page.waitForSelector(".tplx-tree")
+        page.waitForFunction("(t) => window.__ffArmed !== t || window.__ff !== null", label)
+        check(page.evaluate("() => window.__ffArmed") == label) {
+            "$label: the click replaced the whole document — a full navigation, not the boosted swap this test measures"
         }
+        val head = page.evaluate("() => window.__ff") as Map<*, *>
+        head["sheetInHead"] shouldBe true
+        head["sheetInSwappedRegion"] shouldBe false
+
+        // Settled: the pane geometry contract on the loaded tree.
+        page.waitForSelector(".tplx-tree .tpl-label")
+        openFirstFolder(root)
+        assertPanes(label, page.evaluate(geometryProbe))
     }
+
+    /**
+     * Arms a one-shot capture at the first frame after the next boosted swap: whether the
+     * pane's stylesheet (`template-tree.css`) is a child of HEAD — the 090 defect was the
+     * link riding inside the swapped region, which the browser applies too late to style
+     * the first paint. The armed document is stamped with `token` (see [armFirstFrame]).
+     */
+    private val armHeadCheck = """
+        (token) => { window.__ff = null; window.__ffArmed = token;
+          document.body.addEventListener('htmx:afterSwap', () => requestAnimationFrame(() => {
+            const sheets = [...document.querySelectorAll('link[rel="stylesheet"]')];
+            window.__ff = {
+              sheetInHead: sheets.some(l => l.href.includes('template-tree.css') && l.closest('head')),
+              sheetInSwappedRegion: sheets.some(l => l.href.includes('template-tree.css') && !!l.closest('#app-main')),
+            };
+          }), {once: true}); }
+    """.trimIndent()
 
     /**
      * 104 §C — the tree pane's width is the USER's.

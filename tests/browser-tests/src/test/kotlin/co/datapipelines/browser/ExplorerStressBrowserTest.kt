@@ -241,10 +241,25 @@ class ExplorerStressBrowserTest : BrowserSuite() {
     private fun levelOf(path: String) =
         "$tree details.tpl-folder:has(> summary.tpl-summary:has(span.tpl-label[title='$path'])) > div.tpl-level"
 
-    /** Expands one folder and waits until its level request has actually fired (held or not). */
+    /** Expands one folder and waits until its level request has actually fired (held or not).
+     * The summary is waited for FIRST (a search-and-clear restore re-renders the level the
+     * folder sits in — the click must land on the LIVE element), and a folder the restore
+     * already opened with its level in place is skipped: its `click once` is consumed and a
+     * click here would only CLOSE it. */
     private fun expandFolder(path: String) {
-        page.waitForRequest({ req -> req.url().contains("/partials/") && req.url().contains("prefix=") }) {
-            page.click(folderSummary(path))
+        page.waitForSelector(folderSummary(path))
+        // folderSummary(path) is a scoped SUMMARY selector; the open-check needs the details,
+        // through Playwright's locator engine (a nested :has(>:has()) is not a valid
+        // querySelector, but it is a valid Playwright selector).
+        val open =
+            page
+                .locator("details.tpl-folder:has(> summary.tpl-summary:has(span.tpl-label[title='$path']))[open]")
+                .locator(":scope > .tpl-level:not(.tpl-level-pending)")
+                .count() > 0
+        if (!open) {
+            page.waitForRequest({ req -> req.url().contains("/partials/") && req.url().contains("prefix=") }) {
+                page.click(folderSummary(path))
+            }
         }
     }
 
