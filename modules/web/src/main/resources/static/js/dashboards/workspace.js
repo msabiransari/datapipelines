@@ -13,9 +13,11 @@
    *    an inline style), re-selecting the active tab is inert;
    *  - the LAZY panes: Overview/Refreshes/Versions/Keys load their partial ONCE, on the
    *    tab's first activation (a hidden tab causes no fetch — the pipeline editor's rule);
-   *  - the URL: a tab change replaceStates `?tab=` onto the current history entry, and a
-   *    popstate re-selects from the URL — Back/Forward across IN-PAGE tab switches works as
-   *    #350 left it for the pipeline editor;
+   *  - the URL: a tab change PUSHES a history entry of the workspace's own (#402 —
+   *    workspace/history.js, family `dashboards`, tab only: `?tab=` with every other
+   *    parameter kept), and Back/Forward re-select the entry's tab IN PAGE through the
+   *    helper's ONE window listener; an entry this root cannot replay (it left the
+   *    document) is handed to htmx's own restore;
    *  - the Board pane's reveal: a chart the runtime booted while the pane was hidden (a
    *    `?tab=versions` deep link, a lifecycle redirect) recovers its slot size through the
    *    runtime instance's OWN resize (`window.__dpPage.instance.resize()` — the page's
@@ -60,7 +62,12 @@
 
   function wire() {
     var root = document.querySelector(".dp-ws-root");
-    if (!root || root.getAttribute("data-dp-ws-wired") === "1") return;
+    // The guard is an EXPANDO, never the attribute (#402): htmx's history snapshot is the
+    // region's innerHTML, so a restored root carries `data-dp-ws-wired="1"` from the page it
+    // was cloned from — an attribute guard left every restored strip unwired (dead tabs).
+    // The attribute stays as the visible marker.
+    if (!root || root.__dpWsWired === true) return;
+    root.__dpWsWired = true;
     root.setAttribute("data-dp-ws-wired", "1");
 
     var buttons = Array.prototype.slice.call(root.querySelectorAll("[data-dp-tab]"));
@@ -102,8 +109,15 @@
       if (window.htmx) window.htmx.process(pane);
     }
 
+    var active = null;
+
     function apply(tab, options) {
+      var previous = active;
       var next = tabs ? tabs.select(tab) : (rendered.indexOf(tab) !== -1 ? tab : DEFAULT_TAB);
+      active = next;
+      // #402: the root's tab attribute is what a restored root's first paint re-reads — kept
+      // on the ACTIVE tab (the resolved name only), so a cached restore shows the tab it left.
+      root.setAttribute("data-active-tab", next);
       buttons.forEach(function (button) {
         var name = button.getAttribute("data-dp-tab");
         button.setAttribute("aria-selected", name === next ? "true" : "false");
@@ -121,8 +135,11 @@
         }
       });
       if (!options || options.url !== false) {
-        var url = logic.urlWithTab(window.location.href, next);
-        window.history.replaceState({ dpTab: next }, "", url);
+        if (window.WorkspaceHistory) {
+          window.WorkspaceHistory.push("dashboards", { version: null, tab: previous }, { version: null, tab: next });
+        } else {
+          window.history.replaceState({ dpTab: next }, "", logic.urlWithTab(window.location.href, next));
+        }
       }
     }
 
@@ -132,9 +149,17 @@
       });
     });
 
-    window.addEventListener("popstate", function () {
-      apply(logic.tabFromUrl(window.location.href, rendered), { url: false });
-    });
+    // #402: the helper's ONE window listener replays this family's entries; the LIVE root
+    // answers (re-registering replaces an earlier root's handler), and a root that left the
+    // document — or a URL that is not this page's — answers false (htmx restores it).
+    var wiredPath = window.location.pathname;
+    if (window.WorkspaceHistory) {
+      window.WorkspaceHistory.listen("dashboards", function (version, tab) {
+        if (!root.isConnected || window.location.pathname !== wiredPath) return false;
+        apply(typeof tab === "string" ? tab : DEFAULT_TAB, { url: false });
+        return true;
+      });
+    }
 
     // First paint: the server resolved the tab; a non-default one loads its pane now.
     apply(root.getAttribute("data-active-tab") || DEFAULT_TAB, { url: false });

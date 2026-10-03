@@ -3,6 +3,7 @@ package co.datapipelines.browser
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.MethodOrderer
 import org.junit.jupiter.api.Order
 import org.junit.jupiter.api.Test
@@ -211,6 +212,80 @@ class DashboardWorkspaceBrowserTest : DashboardBrowserSuite() {
                 ),
         )
         ensureTheme("light")
+    }
+
+    @Test
+    @Order(6)
+    fun `#402 - Back and Forward re-select in-page tab switches, and a boosted leave and Back wires once`() {
+        startTrace()
+        val root = ready("dphist")
+        val board = seedBoardWithGrid(root)
+        seedDraftVersion(board)
+
+        // A blocked inline style or script on any walk below fails the class's after-each (zero CSP):
+        // the in-page walk runs light, the leave-and-restore dark.
+        ensureTheme("light")
+        page.navigate("$baseUrl/dashboards/$board?version=2")
+        page.waitForSelector("#dp-pane-board:not([hidden])")
+        val length = historyLength()
+
+        // Board → Overview → Versions: two entries of the workspace's own (tab only).
+        page.click("#dp-tab-overview")
+        expectTab("overview")
+        page.click("#dp-tab-versions")
+        expectTab("versions")
+        historyLength() shouldBe length + 2
+        page.url() shouldContain "version=2"
+
+        // Back ×2, Forward ×2 — IN PAGE: the same document, no entry minted.
+        val marker = page.evaluate("() => (window.__p402Doc = Math.random().toString(36).slice(2))")
+        for ((back, tab) in listOf(true to "overview", true to "board", false to "overview", false to "versions")) {
+            if (back) page.goBack() else page.goForward()
+            expectTab(tab)
+            historyLength() shouldBe length + 2
+            page.evaluate("() => window.__p402Doc") shouldBe marker
+        }
+        historyStat("replayed.dashboards") shouldBe 4
+        historyStat("listeners") shouldBe 1
+
+        ensureTheme("dark")
+        page.navigate("$baseUrl/dashboards/$board?version=2&tab=versions")
+        page.waitForSelector("#dp-pane-versions:not([hidden])")
+        // A boosted leave and Back: htmx restores the page; it is wired ONCE (one root marker,
+        // one window listener) and its strip still switches and replays.
+        page.click(".app-nav-link[data-nav-section='/templates']")
+        page.waitForSelector("[data-explorer-pane] .tpl-tree, [data-explorer-pane] .ds-empty")
+        page.goBack()
+        page.waitForSelector("#dp-pane-versions:not([hidden])")
+        page.waitForFunction("() => document.querySelectorAll('.dp-ws-root[data-dp-ws-wired=\"1\"]').length === 1")
+        historyStat("listeners") shouldBe 1
+        page.click("#dp-tab-refreshes")
+        expectTab("refreshes")
+        page.goBack()
+        expectTab("versions")
+        page.evaluate("() => document.querySelectorAll('.dp-ws-root').length") shouldBe 1
+    }
+
+    private fun historyLength(): Int = (page.evaluate("() => history.length") as Number).toInt()
+
+    private fun historyStat(path: String): Int =
+        (
+            page.evaluate(
+                "p => p.split('.').reduce((o, k) => (o == null ? o : o[k]), window.WorkspaceHistory.stats()) || 0",
+                path,
+            ) as Number
+        ).toInt()
+
+    /**
+     * One tab, asserted whole: the strip, the ONE visible pane, and the URL's `tab` — the
+     * arrival entry keeps its own URL (no `tab=` when the page was entered on Board).
+     */
+    private fun expectTab(tab: String) {
+        page.waitForSelector("#dp-pane-$tab:not([hidden])")
+        page.locator("#dp-tab-$tab").getAttribute("aria-selected") shouldBe "true"
+        page.evaluate("() => document.querySelectorAll('.dp-ws-tab[aria-selected=\"true\"]').length") shouldBe 1
+        page.evaluate("() => document.querySelectorAll('[data-dp-pane]:not([hidden])').length") shouldBe 1
+        if (tab == "board") page.url() shouldNotContain "tab=" else page.url() shouldContain "tab=$tab"
     }
 
     // ------------------------------------------------------------------ fixtures

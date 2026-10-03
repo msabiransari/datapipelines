@@ -1,6 +1,6 @@
 # Dashboards
 
-**Status:** v0.27 — the visualizations workspace (§7, #399) beside the dashboards workspace (§5.2's `version`, §7's workspace, #400; #409 closes with it) beside the
+**Status:** v0.28 — Back/Forward across the dashboards workspace's tab switches (§7, #402) beside the visualizations workspace (§7, #399) beside the dashboards workspace (§5.2's `version`, §7's workspace, #400; #409 closes with it) beside the
 board's small-slot margins and its breakpoint collapse (§6.2, §6.3, #386/#387), 328's release-record judgement (§4.3)
 permissions (§4, lane L1b); the transfer routes and their limits' honest contract (§3.3, lanes L1c/L1c-b/L1c-c: the
 import's atomicity, the RELEASE rules on a landing, the aggregate count ceiling, the wire's per-family arms); the server
@@ -15,7 +15,7 @@ page, the screenshot upload and the two test tools — §3.4.1 (lane L4b, #353).
 [MCP Server](mcp-server.md) (§6.2.50–§6.2.62 — the tools), [Auth](auth.md) (§7.6 — the permissions)
 **Design:** the [dashboard implementation spec](superpowers/specs/2026-09-28-dashboard-implementation-spec.md) and
 the [design record](superpowers/specs/2026-09-25-dashboard-authoring-design-draft.md) (decisions D1–D63)
-**Last updated:** 2026-10-02
+**Last updated:** 2026-10-03
 
 A dashboard presents released pipeline results. It is built from two versioned artifacts: **visualizations** —
 a chart, table or KPI bound to named inputs, reusable across dashboards — and **dashboards**, which pin released
@@ -864,7 +864,10 @@ tree had just linked; it does not any more. The five tabs:
 Tab state is IN-PAGE (`static/js/dashboards/workspace.js` over the SHARED tab core
 `static/js/workspace/tabs.js`, built to be the one admission and transition rule; the pipeline
 editor keeps its own `pipeline-editor/tabs.js` until #420 adopts the core): a tab switch swaps no version and cancels no poll, the
-URL's `?tab=` is replaceState'd so Back/Forward re-select, and lazy tabs (Overview,
+URL's `?tab=` moves with a pushed history entry of the workspace's own (#402,
+`static/js/workspace/history.js`, tab only — the version switch stays a full navigation) so
+Back/Forward re-select the tab in page (a cached restore re-wires the strip once and shows the
+tab it left), and lazy tabs (Overview,
 Refreshes, Versions, Keys) load their fragment once, on the tab's first activation — a
 hidden tab causes no fetch. The Board pane's reveal runs the runtime instance's OWN
 `resize()`, so a chart that booted while the pane was hidden (a `?tab=versions` deep link, a
@@ -907,6 +910,7 @@ ONE Plotly bundle the viewed version's traces need, and the choose-a-version sta
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-03 | v0.28 | #402 Back/Forward across the dashboards workspace's tab switches | **§7:** a tab switch PUSHES a tab-only entry through `workspace/history.js` (it was `replaceState`, so Back left the page); Back/Forward re-select in page through the helper's one window listener; a cached restore re-wires the strip once and re-paints the tab it left. |
 | 2026-10-02 | v0.27 | #399 the visualizations workspace (#396) | **§4:** "There is no UI page yet (L3)" leaves — a person reads both families and drives their lifecycle verbs from §7's pages. **§7:** the visualizations workspace subsection — the catalog and the searchable sidebar branch, and the version-explicit workspace's five tabs: Preview (test FIXTURES only, §3.4.1's builder keyed by the version), Overview, Evidence (the 100-run cap; the screenshot or "no screenshot"), Used by (through the dashboard lens) and Versions (the seven dialogs, the one `release_pinned_templates` consent, the Export link). No route, permission, code or lifecycle rule changed. |
 | 2026-10-02 | v0.26 | #400 the dashboards workspace (#409 closes with it) | **§5.2:** the version routes' page is the session workspace (the preview route a 303 redirect onto it). **§5.8:** the draft preview named where it lives now. **§6.1:** `init`'s `"released"` is the workspace's DEFAULT (no version attribute unless the URL named one). **§7 rewritten:** the flat catalog (`GET /dashboards`, the tree retired to the sidebar, the branch gaining the Pipelines branch's search), the tabbed version-explicit workspace (`?version=&tab=`; Board = the L3b page exactly with the glue unchanged; Overview read-only with the pins' statuses and the R1 hint; Refreshes; Versions with the seven lifecycle dialogs — the ONE D61 consent, no #397; Keys on `dashboard.key.bind`), #409's choose-a-version state (the name, the draft, "no release yet" — never the empty `h1` and the "not found"), the 303 preview redirect, in-page tab state over the shared `workspace/tabs.js` core, full-navigation version switches (the one-bundle rule). No MCP tool, no migration, no new permission row. |
 | 2026-10-02 | v0.25 | 386 (#386, #387) the small-slot margins and the breakpoint collapse | **§6.3:** the Plotly adapter's size defaults — a compact margin (`t` opens for a title only) and `automargin` on the axes, UNDER the author's stored `margin`/`automargin` key by key, beside the theme's colours OVER the author (both precedences side by side); a 2-row slot keeps a plot area of at least half its height (measured by `DashboardGridRowUnitBrowserTest`). **§6.2:** the first-party adapter implements §2.2's promise — below `breakpoint_px` (768 when absent) every item spans the 12 columns in grid order with its own row span, the row unit kept; a viewport crossing re-places and resizes; the grid gap is the `--space-4` token. §2.2 is unchanged: its sentence is now true. |

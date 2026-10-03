@@ -36,6 +36,8 @@
         this page is never a boosted SWAP TARGET, so the tag cannot replay from a history
         cache the way an editor page's would (#358's lesson does not apply). -->
   <script th:src="@{/js/workspace/tabs.js}"></script>
+  <!-- #402: the workspaces' own history entries — a tab switch pushes, Back/Forward re-selects. -->
+  <script th:src="@{/js/workspace/history.js}"></script>
   <script th:src="@{/js/dashboards/workspace.js}" defer></script>
   <!-- 102: the lifecycle dialogs' client half — the ONE per-screen container is #dp-dialog. -->
   <script th:src="@{/js/lifecycle-dialog.js}" defer></script>
