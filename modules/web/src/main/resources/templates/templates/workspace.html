@@ -12,11 +12,9 @@
   <span hidden data-nav-current="templates"
         th:attr="data-nav-current-id=${templateName},data-nav-current-path=${navCurrentPath}"></span>
 
-  <link th:href="@{/css/template-editor.css}" rel="stylesheet">
-  <link th:href="@{/css/template-workspace.css}" rel="stylesheet">
-  <!-- 059b: the icon system the cards and controls draw from; without this link every
-       .ds-icon on the page falls to the replaced-element default. -->
-  <link th:href="@{/vendor/design-system/icons.css}" rel="stylesheet">
+  <!--/* #398 — no stylesheet link here: §3.0 (ui-screens, normative) puts every sheet in the
+          layout head — template-editor.css and template-workspace.css included — because this
+          page is a boosted arrival and a link inside #app-main paints a frame late. */-->
 
   <!--/* D4: the shared, dependency-free SQL tokenizer (032) — consumed, not modified. It
           highlights the read-only preview output on the Render tab; the editable textarea

@@ -62,6 +62,25 @@ class ViewerEditorRenderTest {
     }
 
     /** The exact interactive surface of a viewer's workspace page — by element, not by grep. */
+    /**
+     * §3.0 (ui-screens, normative; 090): a page template carries no `<link rel="stylesheet">`.
+     * The workspace is a BOOSTED arrival, and a sheet inside `#app-main` is discovered after the
+     * first frame has painted — the unstyled-first-frame defect. #398's first round shipped the
+     * two workspace sheets inside `content`; they ride the layout head now. The probe is the
+     * rendered page: both sheets before `</head>`, no `<link` stylesheet inside `<main>`.
+     */
+    @Test
+    fun `the workspace's stylesheets load from the document head - none rides inside main`() {
+        val html = render("templates/workspace") { page(viewedEditable = true) }
+        val head = html.substringBefore("</head>")
+
+        listOf("/css/template-editor.css", "/css/template-workspace.css").forEach { sheet ->
+            head shouldContain "href=\"$sheet\""
+            mainOf(html) shouldNotContain sheet
+        }
+        mainOf(html) shouldNotContain "rel=\"stylesheet\""
+    }
+
     @Test
     fun `a viewer's workspace carries exactly its tab strip and nothing else`() {
         val html =

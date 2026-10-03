@@ -70,8 +70,8 @@
        sheet on a boosted route is the defect; the head is where it stops being one.
        The pages' own links are gone — this is the only copy.
 
-       The same exposure remains, unfixed, for `pipeline-editor.css`, `template-editor.css`
-       and `docs.css`, which are page-scoped on boosted routes for the same reason. They
+       The same exposure remains, unfixed, for `pipeline-editor.css` and `docs.css`
+       (`template-editor.css` was hoisted below by #398), which are page-scoped on boosted routes for the same reason. They
        belong to the editor and docs surfaces (090's fence excludes both); the fix is
        identical — hoist the link here — and the round is told so. */-->
   <link th:href="@{/css/template-tree.css}" rel="stylesheet">
@@ -92,6 +92,14 @@
   <!-- #399 — the Visualizations workspace's own panes (design tokens only; the frame is dashboards.css's).
        Head-loaded for 090's reason: the catalog is a boosted route. -->
   <link th:href="@{/css/visualizations.css}" rel="stylesheet">
+  <!-- #398 — the template workspace's rules (design tokens only) over the editor sheet its
+       panes still draw from (`template-editor.css`: the source column, the transform face,
+       the render panel). Head-loaded for 090's reason, §3.0 normative: /templates/{name} is a
+       boosted arrival (the pipeline Details and search links reach it boosted, as does a
+       history restore), and a `<link>` inside `#app-main` is discovered only after the first
+       frame paints. This closes the exposure the line above names for `template-editor.css`. -->
+  <link th:href="@{/css/template-editor.css}" rel="stylesheet">
+  <link th:href="@{/css/template-workspace.css}" rel="stylesheet">
   <!-- 079 §A — the rail's collapsed state, applied BEFORE the first paint.
 
        Until 188 this was the ONE inline script in the layout — the round's only
