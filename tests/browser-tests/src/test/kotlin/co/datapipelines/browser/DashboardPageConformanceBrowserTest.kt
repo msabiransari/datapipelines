@@ -33,6 +33,40 @@ class DashboardPageConformanceBrowserTest : DashboardBrowserSuite() {
         }
     }
 
+    /**
+     * The wait for the acknowledged chip to read `abort`, its failure NAMED (#435): a bare timeout told nothing about
+     * what the chip read instead. The SUCCESS condition is the old one — the occurrence's chip reaches
+     * `data-dp-state='abort'`, under the same default timeout; on a timeout this throws with the chip's state and
+     * text (state, reason code), the row's status off the real read route and the time since the ack.
+     */
+    private fun awaitAbortChip(
+        occurrence: String,
+        board: String,
+        refreshId: String,
+    ) {
+        val ackedAt = System.nanoTime()
+        try {
+            page.waitForSelector("[data-dp-viz='$occurrence'] .dp-dashboard-status[data-dp-state='abort']")
+        } catch (e: com.microsoft.playwright.TimeoutError) {
+            val chip =
+                page.evaluate(
+                    """() => { const el = document.querySelector('[data-dp-viz="$occurrence"] .dp-dashboard-status');
+                         return el ? { state: el.getAttribute('data-dp-state'), text: el.textContent } : null; }""",
+                ) as Map<*, *>?
+            val row = readRow(board, refreshId)
+            val sinceAck =
+                java.time.Duration
+                    .ofNanos(System.nanoTime() - ackedAt)
+                    .toMillis()
+            throw AssertionError(
+                "the chip of $occurrence never read abort after the acknowledged abort: chip data-dp-state=${chip?.get("state")}" +
+                    " text='${chip?.get("text")}' | row status=${row["status"]} finished=${row["finished"]}" +
+                    " | $sinceAck ms since the ack",
+                e,
+            )
+        }
+    }
+
     @Test
     @Order(1)
     fun `bootstrap order - the initial action renders chart, table and kpi on the real page`() {
@@ -129,7 +163,7 @@ class DashboardPageConformanceBrowserTest : DashboardBrowserSuite() {
         awaitRefreshStatus(board, refreshId, "RUNNING")
         // A false ack names the row's status and the client path that answered, not a bare boolean (#366 red 2).
         abortAndNameAck("window.__dpPage.instance", board, refreshId)
-        page.waitForSelector("[data-dp-viz='hungcells'] .dp-dashboard-status[data-dp-state='abort']")
+        awaitAbortChip("hungcells", board, refreshId)
         // The DURABLE outcome, read off the real route.
         awaitRefreshStatus(board, refreshId, "ABORTED")
     }
