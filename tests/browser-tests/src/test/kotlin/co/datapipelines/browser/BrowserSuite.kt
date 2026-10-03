@@ -228,8 +228,12 @@ abstract class BrowserSuite {
      * unit suite in parallel, the screenshot-set tests (`the handback screenshots`, `the seven
      * widths…`, `the dialog screenshot set`) — dozens of navigations each — exceeded it on a
      * single page load (2026-09-11, every GitHub run) while every assertion they make held.
-     * Under `CI=true` (GitHub sets it) the same assertions get 90 s of patience per action;
-     * locally the 30 s stays, because on a laptop a 30 s wait IS the defect.
+     * The same assertions get 90 s of patience per action under `CI=true` (GitHub sets it) OR
+     * under the gates' `dp.browser.ciPatience` (scripts/gate.sh and scripts/pregate.sh pass
+     * `-Pdp.browser.ciPatience=true`, #438): a loaded local gate and a 2-vCPU runner are the
+     * same condition, and the setting is dedicated rather than an exported `CI=true` because a
+     * third-party reader of `CI` would flip too. A plain local run keeps the 30 s, because on a
+     * laptop a 30 s wait IS the defect.
      *
      * One class of action is exempt from that principle and always gets
      * [FIRST_RENDER_TIMEOUT_MS]: the FIRST appearance of a page's chrome after a navigation or
@@ -241,7 +245,11 @@ abstract class BrowserSuite {
      * on a local gate's clean build under load ~11; the incremental run passed minutes
      * later). A genuinely broken render still fails the same assertion, 90 s later, once.
      */
-    private fun Page.patient(): Page = apply { if (System.getenv("CI") == "true") setDefaultTimeout(CI_ACTION_TIMEOUT_MS) }
+    private fun Page.patient(): Page =
+        apply {
+            actionTimeoutMillis(System.getenv("CI"), System.getProperty(CI_PATIENCE_PROPERTY))
+                ?.let { setDefaultTimeout(it) }
+        }
 
     /** A per-test local user: its one-time password, its chosen password, its unique email. */
     protected class LocalUser(
@@ -333,6 +341,32 @@ abstract class BrowserSuite {
 
     companion object {
         const val CI_ACTION_TIMEOUT_MS = 90_000.0
+
+        /**
+         * The setting that gives a plain local run GitHub's per-action patience (#438). ONE
+         * name for both the Gradle project property the gates pass (`-Pdp.browser.ciPatience=true`)
+         * and the system property the browser module's `test` task forwards from it.
+         */
+        internal const val CI_PATIENCE_PROPERTY = "dp.browser.ciPatience"
+
+        /**
+         * The per-action default for a page: [CI_ACTION_TIMEOUT_MS] under `CI=true` (GitHub
+         * sets it) or under the gates' [CI_PATIENCE_PROPERTY], `null` — Playwright's 30 s
+         * stays — when both are absent or `"false"`. CI wins over `"false"` so a stray flag
+         * never makes GitHub's runner impatient. Any OTHER value of the setting is a typo and
+         * REFUSES here (loud at the entry point) rather than silently running at 30 s.
+         */
+        internal fun actionTimeoutMillis(
+            ciEnv: String?,
+            gatePatience: String?,
+        ): Double? {
+            // check() throws IllegalStateException (detekt's UseCheckOrError), which is the
+            // contract this entry point wants: a mistyped setting refuses loudly.
+            check(gatePatience == null || gatePatience == "true" || gatePatience == "false") {
+                "$CI_PATIENCE_PROPERTY must be 'true' or 'false', not '$gatePatience'"
+            }
+            return if (ciEnv == "true" || gatePatience == "true") CI_ACTION_TIMEOUT_MS else null
+        }
 
         /**
          * The bound for FIRST-RENDER waits (see [patient]'s KDoc for which waits and why):

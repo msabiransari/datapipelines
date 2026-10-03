@@ -398,6 +398,9 @@ class RequestNestingDepthE2eTest {
                 registry.add("datapipelines.auth.oidc.providers[$index].issuer-uri") { oidc.issuer }
                 registry.add("datapipelines.auth.oidc.providers[$index].display-name") { "Test $name" }
             }
+            // #394 sweeps many routes per user; the per-user limiter must not mask named 400s with a 429.
+            registry.add("datapipelines.rate-limit.requests-per-second") { "100000" }
+            registry.add("datapipelines.rate-limit.requests-per-minute") { "1000000" }
             registry.add("datapipelines.auth.base-url") { "http://localhost:8080" }
         }
 
