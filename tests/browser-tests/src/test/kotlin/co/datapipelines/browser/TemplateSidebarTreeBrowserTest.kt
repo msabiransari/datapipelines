@@ -166,8 +166,9 @@ class TemplateSidebarTreeBrowserTest : BrowserSuite() {
         // The full label: its text is the whole segment (no ellipsis) — the region scrolls.
         page.locator("${leaf(deepLeaf)} .tpl-label").innerText() shouldBe deepLeaf.substringAfterLast('/')
 
-        // Folding the deep branch back: the visible content shrinks and the rail follows.
-        page.click("${folder(deepFolders[2])} > summary")
+        // Folding the SHORT mid-level hides the whole deep subtree (its own labels were the
+        // width); the visible rows are back under the minimum and the rail follows.
+        page.click("${folder(deepFolders[1])} > summary")
         settle()
         railWidth() shouldBe 320.0
 
@@ -231,6 +232,7 @@ class TemplateSidebarTreeBrowserTest : BrowserSuite() {
         // its search (nav-tree.js's reveal).
         page.click("[data-nav-tree-reveal='templates']")
         page.waitForSelector("#template-nav-root .tpl-tree")
+        page.waitForSelector("#template-nav-root .tpl-leaf")
         page.evaluate("() => document.activeElement?.matches('#nav-tree-templates [data-nav-tree-search]')") shouldBe true
 
         // The keyboard: ArrowDown moves focus among the rows (the nav context moves FOCUS only).
