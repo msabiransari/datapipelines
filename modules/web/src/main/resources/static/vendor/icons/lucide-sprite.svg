@@ -266,4 +266,13 @@
     <path d="M8 10v4" />
     <path d="M8 12H3" />
   </symbol>
+  <!-- #399 (the Visualizations workspace): the rail's Visualizations item and its tree leaves
+       (layouts/default.html, partials/visualization-tree-level.html) — a line chart, the glyph
+       for "a chart" (chart-column, chart-bar and chart-pie also exist at 1.39.0; a line chart
+       names no one renderer kind). Vendored from lucide-static 1.39.0 icons/chart-line.svg,
+       sha256 recorded in vendor-manifest.json (owner ruling 2026-10-02: lucide only). -->
+  <symbol id="chart-line" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M3 3v16a2 2 0 0 0 2 2h16" />
+    <path d="m19 9-5 5-4-4-3 3" />
+  </symbol>
 </svg>

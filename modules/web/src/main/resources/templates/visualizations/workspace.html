@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{layouts/default :: page(~{::content})}">
+<th:block th:fragment="content">
+  <!-- #399 — the visualization WORKSPACE (the parent ruling #396's tabbed, version-explicit page,
+        ui-screens.md §4.24): one URL names one visualization, one viewed version and one tab.
+        Preview (fixture mode, the default) | Overview | Evidence | Used by | Versions — every pane
+        a lazy, read-only partial on visualization.read; Versions carries the lifecycle verbs'
+        dialogs. The browser never authors a visualization (#396): no create/update/import here.
+
+        The ONE-bundle rule (dashboards.md §6.4) governs this page as it does the dashboard's:
+        every link ONTO it carries hx-boost="false" (tree leaf, catalog rows, the selector, the
+        choose-a-version links), so the scripts below run on full document loads alone. Tab
+        switches are in-page (visualizations/workspace.js); version switches are full
+        navigations (a version's renderer chooses its Plotly bundle); lifecycle dialogs answer
+        HX-Redirect (a full navigation back onto the Versions tab).
+
+        The runtime's scripts ride ONLY a page whose version resolved. The Preview pane mounts
+        in the runtime's FIXTURE mode — no server base URL, no credentials, so the preview can
+        reach no /api/v1 route (the capability page's own contract, visualization-preview.js). -->
+  <th:block th:if="${bundle != null}">
+    <script th:src="@{/vendor/plotly/plotly-{bundle}.min.js(bundle=${bundle})}"
+            th:attr="data-dp-plotly-bundle=${bundle}"></script>
+    <script th:src="@{/js/datapipelines-dashboard.js}"></script>
+    <script th:src="@{/js/datapipelines-dashboard-plotly.js}"></script>
+    <script th:src="@{/js/datapipelines-dashboard-table.js}"></script>
+    <script th:src="@{/js/datapipelines-dashboard-kpi.js}"></script>
+    <script th:src="@{/js/visualization-preview.js}"></script>
+  </th:block>
+  <!-- The tab machine's shared core (#400) and the shared pane glue; this family's glue over both. -->
+  <script th:src="@{/js/workspace/tabs.js}"></script>
+  <script th:src="@{/js/workspace/panes.js}"></script>
+  <script th:src="@{/js/visualizations/workspace.js}" defer></script>
+  <!-- 102: the lifecycle dialogs' client half — the ONE per-screen container is #dp-dialog. -->
+  <script th:src="@{/js/lifecycle-dialog.js}" defer></script>
+
+  <!-- #350 — the sidebar's current-leaf hook: the rail's Visualizations tree marks this leaf and
+        reveals its folders. -->
+  <span hidden data-nav-current="visualizations"
+        th:attr="data-nav-current-id=${visualizationId},data-nav-current-path=${navCurrentPath}"></span>
+
+  <div class="dp-workspace viz-workspace">
+    <div class="dp-ws-topbar">
+      <a th:href="@{/visualizations}" class="dp-back"><svg class="ds-icon ds-icon-xs" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#arrow-left"></use></svg> Visualizations</a>
+      <div class="dp-crumb">
+        <!-- THE h1 is always the name — the choose-a-version state too. -->
+        <h1 class="dp-crumb-name" th:text="${visualizationName}">finance/charts/revenue_by_region</h1>
+        <!-- The chip names the VIEWED version and its own status — never "latest release". -->
+        <span class="ds-badge dp-vchip" data-viz-viewed-label
+              th:classappend="${viewedIsDraft} ? 'ds-badge-warning' : 'ds-badge-default'"
+              th:text="${viewedLabel}">v1 · released · current</span>
+      </div>
+      <nav class="dp-versions" aria-label="View another version"
+           th:if="${!#lists.isEmpty(versions)}">
+        <a th:each="row : ${versions}" class="ds-button ds-button-ghost ds-button-sm" hx-boost="false"
+           th:href="@{/visualizations/{id}(id=${visualizationId}, version=${row.version}, tab=${activeTab})}"
+           th:attr="aria-current=${row.isSelected} ? 'true' : null"
+           th:title="${'v' + row.version + ' — ' + row.status.toLowerCase() + (row.isCurrent ? ' · current' : '')}"
+           th:text="'v' + ${row.version}">v1</a>
+      </nav>
+    </div>
+    <p class="u-secondary u-text-sm" th:if="${displayName != null and displayName != visualizationName}"
+       th:text="${displayName}">Revenue by region</p>
+
+    <!-- The choose-a-version state: the record exists but no version resolved for this caller and
+          none was named. The heading keeps the NAME; the admitted versions are offered. -->
+    <div class="ds-empty app-center u-modal-tall" th:if="${!hasSelected}" data-viz-choose-version>
+      <p class="ds-empty-title" th:text="${#lists.isEmpty(versions)} ? 'No viewable version yet' : 'Choose a version'">Choose a version</p>
+      <p class="ds-empty-description">
+        <span th:text="${visualizationName}">finance/charts/revenue_by_region</span>
+        <span>has no version to show by default — pick one below.</span>
+      </p>
+      <p class="ds-empty-actions">
+        <a th:each="row : ${versions}" class="ds-button ds-button-secondary" hx-boost="false"
+           th:href="@{/visualizations/{id}(id=${visualizationId}, version=${row.version}, tab='preview')}"
+           th:text="'v' + ${row.version} + ' — ' + ${row.status.toLowerCase()} + (${row.isCurrent} ? ' · current' : '')">v2 — draft</a>
+      </p>
+    </div>
+
+    <div th:if="${hasSelected}" class="dp-ws-root"
+         th:attr="data-active-tab=${activeTab}">
+      <nav class="dp-ws-tabs" role="tablist" aria-label="Visualization workspace tabs">
+        <!-- The Preview tab's LABEL says what it shows: the version's test-case fixtures, never live data. -->
+        <button type="button" class="dp-ws-tab" role="tab" id="viz-tab-preview" aria-controls="viz-pane-preview"
+                data-dp-tab="preview" th:attr="aria-selected=${activeTab == 'preview'} ? 'true' : 'false'">Preview (test fixtures)</button>
+        <button type="button" class="dp-ws-tab" role="tab" id="viz-tab-overview" aria-controls="viz-pane-overview"
+                data-dp-tab="overview" th:attr="aria-selected=${activeTab == 'overview'} ? 'true' : 'false'">Overview</button>
+        <button type="button" class="dp-ws-tab" role="tab" id="viz-tab-evidence" aria-controls="viz-pane-evidence"
+                data-dp-tab="evidence" th:attr="aria-selected=${activeTab == 'evidence'} ? 'true' : 'false'">Evidence</button>
+        <button type="button" class="dp-ws-tab" role="tab" id="viz-tab-used-by" aria-controls="viz-pane-used-by"
+                data-dp-tab="used-by" th:attr="aria-selected=${activeTab == 'used-by'} ? 'true' : 'false'">Used by</button>
+        <button type="button" class="dp-ws-tab" role="tab" id="viz-tab-versions" aria-controls="viz-pane-versions"
+                data-dp-tab="versions" th:attr="aria-selected=${activeTab == 'versions'} ? 'true' : 'false'">Versions</button>
+      </nav>
+
+      <!-- Every pane is LAZY: its partial loads once, on the tab's first activation, for the
+           version the PAGE resolved (a hidden tab causes no fetch). Panes hide through the
+           `hidden` ATTRIBUTE, never an inline style. -->
+      <div class="dp-ws-panes">
+        <div class="dp-ws-pane" id="viz-pane-preview" role="tabpanel" aria-labelledby="viz-tab-preview"
+             data-dp-pane="preview" th:attr="hidden=${activeTab != 'preview'} ? 'hidden' : null, data-lazy-url=@{/partials/visualizations/{id}/preview(id=${visualizationId}, version=${viewedVersion})}">
+          <p class="dp-tab-note">Loading preview…</p>
+        </div>
+        <div class="dp-ws-pane" id="viz-pane-overview" role="tabpanel" aria-labelledby="viz-tab-overview"
+             data-dp-pane="overview" th:attr="hidden=${activeTab != 'overview'} ? 'hidden' : null, data-lazy-url=@{/partials/visualizations/{id}/overview(id=${visualizationId}, version=${viewedVersion})}">
+          <p class="dp-tab-note">Loading overview…</p>
+        </div>
+        <div class="dp-ws-pane" id="viz-pane-evidence" role="tabpanel" aria-labelledby="viz-tab-evidence"
+             data-dp-pane="evidence" th:attr="hidden=${activeTab != 'evidence'} ? 'hidden' : null, data-lazy-url=@{/partials/visualizations/{id}/evidence(id=${visualizationId})}">
+          <p class="dp-tab-note">Loading evidence…</p>
+        </div>
+        <div class="dp-ws-pane" id="viz-pane-used-by" role="tabpanel" aria-labelledby="viz-tab-used-by"
+             data-dp-pane="used-by" th:attr="hidden=${activeTab != 'used-by'} ? 'hidden' : null, data-lazy-url=@{/partials/visualizations/{id}/used-by(id=${visualizationId})}">
+          <p class="dp-tab-note">Loading dashboards…</p>
+        </div>
+        <div class="dp-ws-pane" id="viz-pane-versions" role="tabpanel" aria-labelledby="viz-tab-versions"
+             data-dp-pane="versions" th:attr="hidden=${activeTab != 'versions'} ? 'hidden' : null, data-lazy-url=@{/partials/visualizations/{id}/versions(id=${visualizationId}, version=${viewedVersion})}">
+          <p class="dp-tab-note">Loading versions…</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- 102: the lifecycle dialogs' single per-screen container. -->
+    <div id="dp-dialog"></div>
+  </div>
+</th:block>
+</html>

@@ -1,0 +1,69 @@
+/* The Visualizations workspace (#399, ui-screens §4.24). The page reuses the dashboard workspace's frame
+ * (dashboards.css: .dp-workspace, .dp-ws-*, .dp-preview-*, the dialogs' .dp-cascade-* and .dp-switch-*);
+ * these are only the family's own panes. Every colour, radius, space and font is a design-system or app
+ * token — nothing lands as a literal. The one number is LAYOUT geometry, declared once as a custom property
+ * (parameter-sets.css's convention). */
+
+:root {
+  --viz-json-max-h: 24rem;
+}
+
+.viz-preview,
+.viz-evidence,
+.viz-overview,
+.viz-used-by,
+.viz-versions {
+  display: grid;
+  gap: var(--gap-md);
+  min-width: 0;
+}
+
+/* A grid item's automatic minimum is its min-content: without this a card holding a framed table
+   (Versions, Evidence) took the TABLE's width and pushed <main> into a sideways scroll at 390px,
+   when the table's own viewport is the box meant to scroll (data-table.css). */
+.viz-preview > *,
+.viz-evidence > *,
+.viz-overview > *,
+.viz-used-by > *,
+.viz-versions > * {
+  min-width: 0;
+}
+
+.viz-preview-note {
+  margin: 0;
+}
+
+.viz-case-picker {
+  align-items: center;
+}
+
+.viz-case-select {
+  max-width: 100%;
+  width: auto;
+}
+
+/* The run detail's stored JSON: read-only text, scrolling inside its own box on a narrow screen. */
+.viz-json {
+  background: var(--surface-inset);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  margin: 0 0 var(--gap-md);
+  max-height: var(--viz-json-max-h);
+  overflow: auto;
+  padding: var(--gap-sm);
+  white-space: pre;
+}
+
+.viz-screenshot {
+  margin: 0 0 var(--gap-md);
+}
+
+.viz-screenshot-img {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  display: block;
+  height: auto;
+  max-width: 100%;
+}

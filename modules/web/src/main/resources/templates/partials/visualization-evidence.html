@@ -1,0 +1,48 @@
+<!-- The workspace's EVIDENCE tab (#399) — the visualization's test runs whose version the caller may
+     see (the same runs the REST route lists, filtered by the lensed version list), newest first and
+     capped at the route's 100 — the cap is stated, never silent. A row's "Details" loads the run's
+     cases, environment and mechanical JSON (read-only text) and its screenshot into the detail
+     region below. -->
+<div xmlns:th="http://www.thymeleaf.org" th:fragment="evidence" class="viz-evidence">
+  <div class="ds-card">
+    <div class="app-card-h">
+      <h3>Evidence</h3>
+      <span class="app-card-note" data-viz-runs-cap
+            th:text="'the newest ' + ${runsCap} + ' runs at most'">the newest 100 runs at most</span>
+    </div>
+    <div class="app-card-b">
+      <p class="u-secondary u-text-sm" th:if="${#lists.isEmpty(runs)}" data-viz-evidence-empty>
+        No test runs yet — an agent runs the visualization's tests over MCP, and each run lands here.
+      </p>
+      <div class="dt-frame dt-scroll dt-h-sm" th:unless="${#lists.isEmpty(runs)}">
+      <div class="dt-viewport" tabindex="-1">
+      <table class="ds-table">
+        <thead>
+          <tr><th>Run</th><th>Version</th><th>Status</th><th>Started</th><th>Completed</th><th>Mechanical</th><th><span class="u-sr-only">Details</span></th></tr>
+        </thead>
+        <tbody>
+          <tr th:each="r : ${runs}" th:attr="data-run-row=${r.runId}">
+            <td class="u-mono u-text-sm" th:text="${#strings.substring(r.runId.toString(), 0, 8)}" th:title="${r.runId}">0b1c2d3e</td>
+            <td class="u-mono" th:text="'v' + ${r.version}">v2</td>
+            <td>
+              <span class="ds-badge"
+                    th:classappend="${r.status == 'GREEN'} ? 'ds-badge-success' : (${r.status == 'RED'} ? 'ds-badge-danger' : 'ds-badge-default')"
+                    th:text="${r.status.toLowerCase()}">green</span>
+            </td>
+            <td class="u-text-sm" th:text="${r.startedAt}">2026-10-01T09:00:00Z</td>
+            <td class="u-text-sm" th:text="${r.completedAt ?: '—'}">2026-10-01T09:01:00Z</td>
+            <td class="u-text-sm" th:text="${r.mechanical ?: '—'}">passed</td>
+            <td>
+              <button type="button" class="ds-button ds-button-ghost ds-button-sm"
+                      th:attr="hx-get=@{/partials/visualizations/{id}/evidence/{run}(id=${visualizationId}, run=${r.runId})},
+                               hx-target='#viz-evidence-run', hx-swap='innerHTML'">Details</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      </div>
+      </div>
+    </div>
+  </div>
+  <div id="viz-evidence-run" class="viz-evidence-run" aria-live="polite"></div>
+</div>

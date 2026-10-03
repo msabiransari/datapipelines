@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{layouts/default :: page(~{::content})}">
+<th:block th:fragment="content">
+  <!-- #399 — the visualizations CATALOG (ui-screens.md §4.24, the /dashboards catalog's shape):
+       the flat, server-paged catalog — every visualization the caller may read, or the matches of
+       the search — each row a link into the workspace /visualizations/{id}. The folder tree lives
+       in the global sidebar, beneath Visualizations (#396; #350's pattern). The browser never
+       authors a visualization: there is no create or import control here. -->
+  <div class="app-page-h">
+    <div>
+      <h1 class="ds-headline">Visualizations</h1>
+      <p class="app-page-sub">
+        Visualizations are authored through agents over the
+        <a th:href="@{/docs/mcp-server}">MCP server</a> — ask your agent to create one, giving it a
+        folder path like <code>finance/charts/revenue_by_region</code>. Browse the folders in the
+        sidebar's Visualizations tree, or search the whole catalog here; a visualization opens in
+        its workspace, where its test cases preview, its evidence and the dashboards that pin it
+        are listed, and its versions are released.
+      </p>
+    </div>
+    <div class="app-page-actions">
+      <button type="button" class="ds-button ds-button-secondary"
+              data-nav-tree-reveal="visualizations" aria-controls="nav-tree-visualizations">Browse folders</button>
+    </div>
+  </div>
+
+  <!-- SPA search control (ui-screens.md §4.3's contract): it re-fetches ONLY the list fragment
+       into the stable #viz-list-wrapper root, so the control keeps focus and value. -->
+  <div class="u-row-md app-catalog-search">
+    <input type="search" id="visualization-filter-q" name="q" th:value="${q}"
+           placeholder="Search visualizations..." aria-label="Search visualizations"
+           th:attr="hx-get=@{/partials/visualizations}, hx-target='#viz-list-wrapper', hx-swap='outerHTML'"
+           hx-trigger="input changed delay:300ms, search"
+           hx-sync="this:replace"
+           hx-indicator="#visualization-filter-spinner"
+           class="ds-input app-search-input">
+    <span id="visualization-filter-spinner" class="htmx-indicator ds-spinner" aria-hidden="true"></span>
+  </div>
+
+  <div class="app-catalog-list">
+    <div th:replace="~{partials/visualizations :: fragment}"></div>
+  </div>
+</th:block>
+</html>

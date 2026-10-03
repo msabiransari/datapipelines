@@ -289,6 +289,18 @@ class VisualizationService(
         lens: ReadLens,
     ): Int = lifecycle.countAll(workspaceId, lens)
 
+    /**
+     * The lensed name search (#399, the sidebar tree's and the catalog's `q`): name, display name or description contains
+     * [query] literally and case-insensitively — [ArtifactLifecycle.search]'s two paths.
+     */
+    fun search(
+        workspaceId: UUID,
+        lens: ReadLens,
+        query: String,
+        offset: Int = 0,
+        limit: Int = ArtifactRepository.DEFAULT_PAGE_LIMIT,
+    ): ArtifactPage<VisualizationBody> = lifecycle.search(workspaceId, lens, query, offset, limit)
+
     fun currentVersions(workspaceId: UUID): List<CurrentArtifactVersion> = lifecycle.currentVersions(workspaceId)
 
     // ---- rules ----------------------------------------------------------------------------------------
