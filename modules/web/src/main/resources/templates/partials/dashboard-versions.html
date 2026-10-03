@@ -11,7 +11,7 @@
        - Switch (make current)                               dashboard.switch_version
        - Purge dashboard                                     dashboard.delete
      A viewer and a promoter draw no verb at all (RoleVisibilityRenderTest pins the ladder). -->
-<div xmlns:th="http://www.thymeleaf.org" th:fragment="versions" class="dp-versions"
+<div xmlns:th="http://www.thymeleaf.org" th:fragment="versions" class="dp-versions dp-versions-pane"
      th:with="dialogTarget='#dp-dialog', dialogFrom='versions'">
   <div class="ds-card">
     <div class="app-card-h">
@@ -35,10 +35,11 @@
               <span class="ds-badge ds-badge-default" th:if="${v.isDiscarded}">discarded</span>
             </td>
             <td th:text="${v.status.toLowerCase()}">released</td>
-            <td th:text="${v.createdAt}">2026-10-01T09:00:00Z</td>
+            <!-- Relative in the cell, absolute UTC on hover — the keys page's shape (ui-screens §3.7). -->
+            <td><span th:title="${v.createdAbsolute}" th:text="${v.createdAgo}">3 days ago</span></td>
             <td>
               <span th:if="${v.releasedAt == null}">—</span>
-              <span th:if="${v.releasedAt != null}" th:text="${v.releasedAt}">2026-10-01T10:00:00Z</span>
+              <span th:if="${v.releasedAt != null}" th:title="${v.releasedAbsolute}" th:text="${v.releasedAgo}">3 days ago</span>
             </td>
             <td class="dp-version-actions">
               <!-- RELEASE — an author's verb over the WORKING DRAFT; the dialog names the

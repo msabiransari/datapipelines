@@ -343,6 +343,14 @@
   gap: var(--gap-xs);
 }
 
+/* The Versions pane's root also carries .dp-versions (the flex row above), and a flex item's automatic
+   minimum is its min-content: the card holding the framed history table took the TABLE's width and pushed
+   <main> into a sideways scroll at 390px, when the table's own viewport is the box meant to scroll
+   (data-table.css). The pane's OWN class, never a rule on .dp-versions — that is the header nav's too. */
+.dp-versions-pane > * {
+  min-width: 0;
+}
+
 /* The tab strip and its panes. The panes hide through the `hidden` attribute (the template
    writes it; nothing here display-toggles), so the Board pane is laid out the moment it is
    revealed — what the runtime's own resize then re-fits. */

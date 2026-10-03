@@ -42,8 +42,12 @@
               <span class="ds-badge ds-badge-default" th:if="${v.isDiscarded}">discarded</span>
             </td>
             <td th:text="${v.status.toLowerCase()}">released</td>
-            <td th:text="${v.createdAt}">2026-10-01T09:00:00Z</td>
-            <td th:text="${v.releasedAt ?: '—'}">2026-10-01T10:00:00Z</td>
+            <!-- Relative in the cell, absolute UTC on hover — the keys page's shape (ui-screens §3.7). -->
+            <td><span th:title="${v.createdAbsolute}" th:text="${v.createdAgo}">3 days ago</span></td>
+            <td>
+              <span th:if="${v.releasedAt == null}">—</span>
+              <span th:if="${v.releasedAt != null}" th:title="${v.releasedAbsolute}" th:text="${v.releasedAgo}">3 days ago</span>
+            </td>
             <td class="dp-version-actions">
               <th:block th:if="${v.isDraft}">
                 <button th:if="${canRelease}" type="button" class="ds-button ds-button-primary ds-button-sm" data-verb="visualization-release"

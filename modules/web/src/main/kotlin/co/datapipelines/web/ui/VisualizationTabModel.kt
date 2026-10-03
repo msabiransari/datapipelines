@@ -18,6 +18,7 @@ import co.datapipelines.web.ui.site.ScriptSafeJson
 import co.datapipelines.web.visualizations.PreviewViews
 import com.fasterxml.jackson.databind.JsonNode
 import org.springframework.ui.Model
+import java.time.Instant
 import java.util.UUID
 
 /**
@@ -200,6 +201,7 @@ class VisualizationTabModel(
         view: LensedView,
         id: UUID,
         viewedVersion: Int?,
+        now: Instant = Instant.now(),
     ): String {
         val working = visualizations.findWorking(workspaceId, view.visualizations, id) ?: throw VisualizationWorkspaceModel.notFound(id)
         val current = working.record.currentVersion
@@ -214,8 +216,12 @@ class VisualizationTabModel(
                 VersionRow(
                     version = it.version,
                     status = it.status.name,
-                    createdAt = it.createdAt.toString(),
-                    releasedAt = it.releasedAt?.toString(),
+                    createdAt = it.createdAt,
+                    createdAgo = RelativeTime.since(it.createdAt, now),
+                    createdAbsolute = RelativeTime.absolute(it.createdAt),
+                    releasedAt = it.releasedAt,
+                    releasedAgo = it.releasedAt?.let { released -> RelativeTime.since(released, now) },
+                    releasedAbsolute = it.releasedAt?.let { released -> RelativeTime.absolute(released) },
                     isCurrent = it.version == current,
                     isDraft = it.status == PipelineVersionStatus.DRAFT,
                     isDiscarded = it.status == PipelineVersionStatus.DISCARDED,
@@ -310,8 +316,13 @@ class VisualizationTabModel(
     data class VersionRow(
         val version: Int,
         val status: String,
-        val createdAt: String,
-        val releasedAt: String?,
+        val createdAt: Instant,
+        /** `3 days ago`, and [createdAbsolute] (`2026-10-01 09:00 UTC`) for the cell's `title` — the keys page's shape ([RelativeTime]). */
+        val createdAgo: String,
+        val createdAbsolute: String,
+        val releasedAt: Instant?,
+        val releasedAgo: String?,
+        val releasedAbsolute: String?,
         val isCurrent: Boolean,
         val isDraft: Boolean,
         val isDiscarded: Boolean,
