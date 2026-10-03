@@ -42,8 +42,9 @@ import java.util.concurrent.TimeUnit
  *
  * [limit] is CLAMPED to [MAX_LIMIT] rather than refused — a probe asking for more rows than the
  * cap is a sizing error, not a defect, and the truncated flag already says the rest exists;
- * [timeoutSeconds] clamps likewise, to the datasource dialect's ceiling ([maxTimeoutSecondsFor]),
- * and the result reports the timeout the statement actually ran under.
+ * [timeoutSeconds] clamps likewise, to the datasource's bound ([timeoutBoundFor]: the dialect's
+ * ceiling, tightened by the datasource's own `query_timeout_seconds`), and the result reports the
+ * timeout the statement actually ran under.
  *
  * ## The timeout ceiling is the node's (#167)
  *
@@ -52,11 +53,20 @@ import java.util.concurrent.TimeUnit
  * the operator set one (LAKE ships 180), else `node-query-timeout-seconds` (60). A probe exists to
  * verify what a node is about to run; a ceiling below the node's own budget refused exactly the
  * verification scans the node itself completes (#167's acceptance run: a percentile probe over
- * the lake table timed out at the old static 30 s while the same scan ran as a node). A
- * datasource's own `query_timeout_seconds` is deliberately NOT consulted: `0` there means "no
- * limit", and a probe is never unbounded. Every constructor passes the executor's two values —
- * there is no fallback default, so a new construction site cannot silently take a ceiling nobody
- * configured.
+ * the lake table timed out at the old static 30 s while the same scan ran as a node). Every
+ * constructor passes the executor's two values — there is no fallback default, so a new
+ * construction site cannot silently take a ceiling nobody configured.
+ *
+ * ## A datasource's own timeout tightens it, never loosens it (#405)
+ *
+ * A datasource that declares `query_timeout_seconds` BELOW the ceiling gives its nodes exactly
+ * that (the executor's datasource tier), so its probe gets no more: the bound is
+ * `min(ceiling, query_timeout_seconds)`. A value above the ceiling changes nothing — a probe is
+ * never longer than the dialect's default node budget, whatever a datasource declares. A STORED
+ * value is always ≥ 1 (V1's `chk_datasource_query_timeout`, and [DatasourceValidator] refuses
+ * anything lower with `query_timeout_invalid`); only an in-memory [Datasource] can carry `0` or a
+ * negative, and that falls back to the ceiling — defensive, neither a 1 s probe nor an unbounded
+ * one. The tempdb scratch ([probeScratch]) has no datasource and keeps the H2 ceiling.
  *
  * @param nodeQueryTimeoutSeconds the executor's `nodeQueryTimeoutSeconds` — the ceiling for any
  *   dialect without its own entry.
@@ -84,6 +94,15 @@ class SqlProbe(
     fun maxTimeoutSecondsFor(dialect: Dialect): Int = nodeQueryTimeoutSecondsByDialect[dialect] ?: nodeQueryTimeoutSeconds
 
     /**
+     * The statement-timeout bound for a probe on [datasource]: its dialect's ceiling, tightened by its
+     * own positive `query_timeout_seconds` (the class KDoc, #405). Never above the ceiling.
+     */
+    private fun timeoutBoundFor(datasource: Datasource): Int {
+        val ceiling = maxTimeoutSecondsFor(datasource.dialect)
+        return datasource.queryTimeoutSeconds?.takeIf { it > 0 }?.let { minOf(it, ceiling) } ?: ceiling
+    }
+
+    /**
      * Runs [sql] against [datasource] (already visibility-gated by the caller) with named
      * `:name` parameters, returning at most [limit] rows.
      *
@@ -102,7 +121,7 @@ class SqlProbe(
     ): SqlProbeResult {
         val statement = SqlStatementClassifier.classify(sql, datasource.dialect)
         val rowCap = limit.coerceIn(1, MAX_LIMIT)
-        val timeout = timeoutSeconds.coerceIn(1, maxTimeoutSecondsFor(datasource.dialect))
+        val timeout = timeoutSeconds.coerceIn(1, timeoutBoundFor(datasource))
         val values = parameters.mapValues { (name, parameter) -> parameter.toJdbcValue(name) }
         val (positionalSql, bindValues) = translateBinds(statement, values)
         val explainSql = DialectAdapters.forDialect(datasource.dialect).explainSelectSql(positionalSql)

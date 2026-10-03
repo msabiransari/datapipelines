@@ -40,7 +40,8 @@ purpose: Step 5 judgment — the two check shapes, the independent reconciliatio
   exactly what was compared: which rows, which quantity, what matched, what did not. A
   derivation that scans as much as the node does may ask `sql_probe` for the node's own
   budget — `timeout_seconds` defaults to 10 and is clamped to the instance's node query
-  timeout for that dialect, which the payload reports — rather than being reshaped to fit the
+  timeout for that dialect, which the datasource's own `query_timeout_seconds` tightens, and
+  the payload reports the timeout it ran under — rather than being reshaped to fit the
   default.
 - **Report what you did not verify.** "Row counts match the previous version" is not "the
   numbers are right". Name the independent check you ran — or that you ran none. A proxy is

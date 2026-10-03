@@ -11,7 +11,8 @@ import org.junit.jupiter.api.assertAll
 
 /**
  * #167 — the probe's timeout ceiling is the executor's node statement timeout, per dialect, and
- * the result reports the timeout the statement ran under.
+ * the result reports the timeout the statement ran under; #405 — a datasource's own
+ * `query_timeout_seconds` tightens that ceiling, never loosens it.
  *
  * Observed by the ENGINE, never modelled: H2 turns a statement's `queryTimeout` into the
  * session's `QUERY_TIMEOUT` (milliseconds), and the probe's own SELECT reads it back from
@@ -21,8 +22,9 @@ import org.junit.jupiter.api.assertAll
 class SqlProbeTimeoutCeilingTest {
     private val registry = mockk<DatasourceRegistry>()
 
-    private fun wireDatasource(): Datasource {
-        val datasource = Fixtures.h2(name = "h2-ceiling", jdbcUrl = "jdbc:h2:mem:sqlprobe_ceiling")
+    private fun wireDatasource(queryTimeoutSeconds: Int? = null): Datasource {
+        val datasource =
+            Fixtures.h2(name = "h2-ceiling", jdbcUrl = "jdbc:h2:mem:sqlprobe_ceiling", queryTimeoutSeconds = queryTimeoutSeconds)
         every { registry.poolFor(datasource) } returns JdbcUrlPool(datasource.jdbcUrl, datasource.name)
         return datasource
     }
@@ -40,8 +42,9 @@ class SqlProbeTimeoutCeilingTest {
     private fun probed(
         probe: SqlProbe,
         requested: Int,
+        datasourceTimeoutSeconds: Int? = null,
     ): Pair<Int, Int> {
-        val result = probe.probe(wireDatasource(), SESSION_TIMEOUT_SQL, timeoutSeconds = requested)
+        val result = probe.probe(wireDatasource(datasourceTimeoutSeconds), SESSION_TIMEOUT_SQL, timeoutSeconds = requested)
         return observedTimeoutSeconds(result.rows) to result.timeoutSeconds
     }
 
@@ -72,6 +75,50 @@ class SqlProbeTimeoutCeilingTest {
             { lower.maxTimeoutSecondsFor(Dialect.H2) shouldBe 20 },
             { otherDialect.maxTimeoutSecondsFor(Dialect.LAKE) shouldBe 180 },
             { otherDialect.maxTimeoutSecondsFor(Dialect.POSTGRES) shouldBe 60 },
+        )
+    }
+
+    /** #405 — a node on this datasource gets 20 s (ExecutorConfig's datasource tier); its probe gets no more. */
+    @Test
+    fun `a datasource's own lower query timeout bounds the probe`() {
+        probed(SqlProbe(registry, nodeQueryTimeoutSeconds = 60), requested = 45, datasourceTimeoutSeconds = 20) shouldBe (20 to 20)
+    }
+
+    @Test
+    fun `a datasource's own query timeout above the ceiling never loosens it`() {
+        probed(SqlProbe(registry, nodeQueryTimeoutSeconds = 60), requested = 90, datasourceTimeoutSeconds = 120) shouldBe (60 to 60)
+    }
+
+    @Test
+    fun `a datasource without its own query timeout leaves the ceiling`() {
+        probed(SqlProbe(registry, nodeQueryTimeoutSeconds = 60), requested = 90, datasourceTimeoutSeconds = null) shouldBe (60 to 60)
+    }
+
+    /**
+     * DEFENSIVE: unreachable for a stored datasource — V1's `chk_datasource_query_timeout` and
+     * `DatasourceValidator` (`query_timeout_invalid`) both refuse anything below 1. Only an in-memory
+     * [Datasource] can carry it, and it must neither tighten the probe to 1 s nor unbound it.
+     */
+    @Test
+    fun `a non-positive datasource query timeout leaves the ceiling (defensive)`() {
+        val probe = SqlProbe(registry, nodeQueryTimeoutSeconds = 60)
+        assertAll(
+            { probed(probe, requested = 90, datasourceTimeoutSeconds = 0) shouldBe (60 to 60) },
+            { probed(probe, requested = 90, datasourceTimeoutSeconds = -5) shouldBe (60 to 60) },
+        )
+    }
+
+    @Test
+    fun `a request below the datasource's own query timeout wins`() {
+        probed(SqlProbe(registry, nodeQueryTimeoutSeconds = 60), requested = 15, datasourceTimeoutSeconds = 20) shouldBe (15 to 15)
+    }
+
+    @Test
+    fun `the datasource's own query timeout tightens a dialect's own ceiling too`() {
+        val probe = SqlProbe(registry, nodeQueryTimeoutSeconds = 60, nodeQueryTimeoutSecondsByDialect = mapOf(Dialect.H2 to 30))
+        assertAll(
+            { probed(probe, requested = 45, datasourceTimeoutSeconds = 25) shouldBe (25 to 25) },
+            { probed(probe, requested = 45, datasourceTimeoutSeconds = 40) shouldBe (30 to 30) },
         )
     }
 
