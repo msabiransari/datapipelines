@@ -119,13 +119,83 @@
   }
 
   /**
+   * The observed evaluation's node-state machine (#383, workspace spec §4.2/§6.2): pure frames → per-parameter
+   * states. A frame moves its parameter FORWARD only (idle → waiting → admitted → running → resolved | failed);
+   * a backwards step, an unknown event or a frame without a name changes nothing. `evaluation_failed` fails every
+   * parameter without a terminal state (#375 D3); `evaluation_started` and `evaluation_completed` change no
+   * per-parameter state (the terminal response is the one truth for values). Returns a NEW map; never mutates.
+   */
+  var STREAM_NEXT = {
+    parameter_waiting: "waiting",
+    parameter_admitted: "admitted",
+    parameter_running: "running",
+    parameter_resolved: "resolved",
+    parameter_failed: "failed",
+  };
+  var STREAM_ORDER = { waiting: 1, admitted: 2, running: 3, resolved: 4, failed: 4 };
+
+  function applyFrame(states, frame) {
+    var out = {};
+    for (var name in states) {
+      if (Object.prototype.hasOwnProperty.call(states, name)) out[name] = states[name];
+    }
+    if (!frame || typeof frame.event !== "string") return out;
+    if (frame.event === "evaluation_failed") {
+      for (var key in out) {
+        if (Object.prototype.hasOwnProperty.call(out, key) && out[key] !== "resolved" && out[key] !== "failed") {
+          out[key] = "failed";
+        }
+      }
+      return out;
+    }
+    var next = STREAM_NEXT[frame.event];
+    var parameter = frame.name;
+    if (!next || typeof parameter !== "string" || parameter === "") return out;
+    var current = STREAM_ORDER[out[parameter]] || 0;
+    if (STREAM_ORDER[next] < current) return out; // the server never rewinds a parameter
+    out[parameter] = next;
+    return out;
+  }
+
+  /** Convenience: a whole applied-frame list → the states map (the same machine, one call). */
+  function reduceFrames(frames) {
+    var states = {};
+    (Array.isArray(frames) ? frames : []).forEach(function (frame) {
+      states = applyFrame(states, frame);
+    });
+    return states;
+  }
+
+  /**
+   * The names of [allNames] without a terminal state — the set's D3 complement on `evaluation_failed` (#375 D3):
+   * a parameter cancelled before its first frame has no state entry and still counts as unfinished.
+   */
+  function unfinishedNames(allNames, states) {
+    return (Array.isArray(allNames) ? allNames : []).filter(function (name) {
+      return states[name] !== "resolved" && states[name] !== "failed";
+    });
+  }
+
+  /** The parameters the TERMINAL response reset (its per-parameter `state.reset === true`) — the graph's reset marks. */
+  function resetNames(evaluated) {
+    var out = [];
+    ((evaluated && Array.isArray(evaluated.parameters) && evaluated.parameters) || []).forEach(function (parameter) {
+      if (parameter && typeof parameter.name === "string" && parameter.state && parameter.state.reset === true) {
+        out.push(parameter.name);
+      }
+    });
+    return out;
+  }
+
+  /**
    * One parameter's inspector, as plain data the DOM layer renders with `textContent` only. Rows are
    * `{label, kind: "text"|"code"|"table"|"links", ...}` in the spec's order: identity, type/kind/cardinality,
    * required, default, constraints, presentation, the source (constants table, or the template pin and
    * datasource name — as LINKS to their own routes, never inlined), the dependency lines, the two stored
-   * expression ASTs (labelled as stored), and the last outcome once an evaluation ran.
+   * expression ASTs (labelled as stored), the last outcome once an evaluation ran, and — while a live stream
+   * has marked this parameter failed (#383) — the frame's catalogued code and detail, before the response lands.
    */
-  function inspect(parameter, set, last) {
+  function inspect(parameter, set, last, stream) {
     var rows = [];
     function text(label, value) {
       rows.push({ label: label, kind: "text", value: String(value) });
@@ -200,6 +270,9 @@
       });
       code("Last evaluation", outcome.join("\n"));
     }
+    if (stream && stream.code) {
+      code("Evaluation stream", stream.detail ? "failed: " + stream.code + " — " + stream.detail : "failed: " + stream.code);
+    }
     return rows;
   }
 
@@ -229,6 +302,10 @@
     sourceKind: sourceKind,
     graphElements: graphElements,
     dependentsOf: dependentsOf,
+    applyFrame: applyFrame,
+    reduceFrames: reduceFrames,
+    unfinishedNames: unfinishedNames,
+    resetNames: resetNames,
     inspect: inspect,
     neighbour: neighbour,
   };

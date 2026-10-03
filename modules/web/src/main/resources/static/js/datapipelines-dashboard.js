@@ -288,16 +288,21 @@
   };
 
   DashboardInstance.prototype._parametersPath = function () {
-    if (this._parametersOnly) return this._parameterSetEvaluatePath();
     return this._runtimePath("parameters");
   };
 
-  /** #374 — the parameters-only entry's ONE route: the FROZEN evaluate, by id (the version rides the body, always). */
-  DashboardInstance.prototype._parameterSetEvaluatePath = function () {
-    return "/api/v1/parameter-sets/" + encodeURIComponent(this._init.parameterSet.id) + "/evaluate";
+  /** #383 — the parameters-only instance's stream route: the OBSERVED evaluation (rest-api §21.5). */
+  DashboardInstance.prototype._parameterSetEvaluationsPath = function () {
+    return "/api/v1/parameter-sets/" + encodeURIComponent(this._init.parameterSet.id) + "/evaluations";
   };
 
+  /**
+   * The stream route. The board refreshes ride the dashboard runtime's visualization stream; a parameters-only
+   * instance streams the OBSERVED evaluation instead — the same decision `_parametersPath` makes, in the same
+   * place, so the route choice lives with the other route choices and `_openStream`'s one caller is untouched.
+   */
   DashboardInstance.prototype._streamPath = function () {
+    if (this._parametersOnly) return this._parameterSetEvaluationsPath();
     return this._runtimePath("visualizations");
   };
 
@@ -764,6 +769,9 @@
       var prior = this._lock;
       prior.finished = true;
       this._clearLockTimer(prior);
+      // #383 — the supersede also CLOSES the prior attempt's stream (the AbortController fires; the server's
+      // disconnect grace then aborts the evaluation — the owner's §11.7 ruling over the spec's "never cancels").
+      this._closeParameterStream(prior, "superseded");
       this._lock = null;
     }
     var self = this;
@@ -779,22 +787,36 @@
       deadline: startedAt + lockSeconds * 1000,
       finished: false,
       timer: null,
+      // #383 — the observed evaluation's identity, minted per attempt and never stored: every frame carries it and
+      // a frame of ANY other id is dropped before it can touch state or DOM.
+      evaluationId: null,
+      stream: null,
+      streamClosed: false,
+      resolve: null,
+      reject: null,
     };
     this._lock = attempt;
     attempt.timer = this._env.setTimeout(function () {
       self._lockExpired(attempt);
     }, attempt.deadline - startedAt);
 
-    var request = this._parametersOnly
-      ? // The frozen evaluate's body: `version` ALWAYS present (never the served-default fallback) and the WHOLE
-        // selection set, hidden and disabled included (P27). The first render submits `{}`.
-        { version: this._init.parameterSet.version, selections: this._committedSelections() }
-      : {
-          configuration_id: this._config.configuration_id,
-          instance_id: this._instanceId,
-          selections: this._committedSelections(),
-          intent: intent,
-        };
+    if (this._parametersOnly) {
+      // The OBSERVED evaluation's body (rest-api §21.5): the version ALWAYS present, the WHOLE selection set
+      // (P27), a fresh v4 evaluation_id per attempt and the instance id for diagnostics. The first render submits `{}`.
+      attempt.evaluationId = this._env.uuid();
+      return this._streamEvaluateParameters(attempt, {
+        version: this._init.parameterSet.version,
+        selections: this._committedSelections(),
+        evaluation_id: attempt.evaluationId,
+        instance_id: this._instanceId,
+      });
+    }
+    var request = {
+      configuration_id: this._config.configuration_id,
+      instance_id: this._instanceId,
+      selections: this._committedSelections(),
+      intent: intent,
+    };
     return this._call(this._parametersPath(), request).then(function (evaluated) {
       // A response arriving after its attempt expired (or was superseded) changes nothing (§5.6).
       if (attempt.finished) {
@@ -809,6 +831,151 @@
       }
       return self._acceptParameterResponse(attempt, evaluated);
     });
+  };
+
+  /**
+   * #383 — a parameters-only attempt as an OBSERVED evaluation (rest-api §21.5): the stream POST opens with the
+   * attempt's id and the frames drive it; `evaluation_completed`'s response resolves the attempt through the SAME
+   * admission path the plain evaluate used (`_acceptParameterResponse` — byte-identical semantics, the E2E proves
+   * the server's side, this path proves the page applies it). The attempt owns its stream; the supersede, the
+   * deadline and disposal close it, and the server's disconnect grace then aborts the evaluation.
+   */
+  DashboardInstance.prototype._streamEvaluateParameters = function (attempt, body) {
+    var self = this;
+    return new Promise(function (resolve, reject) {
+      attempt.resolve = resolve;
+      attempt.reject = reject;
+      attempt.stream = self._openStream(body, {
+        onFrame: function (event, payload) {
+          self._onParameterFrame(attempt, event, payload);
+        },
+        onRevoked: function () {
+          self._onParameterStreamRevoked(attempt);
+        },
+        onEnd: function () {
+          self._onParameterStreamEnd(attempt);
+        },
+        onFailure: function (error) {
+          self._onParameterStreamFailure(attempt, error);
+        },
+      });
+    });
+  };
+
+  /** The host's optional frame witness (`initParameters`' `onStreamEvent`): every frame and stream fact, once. */
+  DashboardInstance.prototype._streamEvent = function (info) {
+    var host = this._options.onStreamEvent;
+    if (typeof host !== "function") return;
+    try {
+      host(info);
+    } catch (e) {
+      /* the host's handler failing is the host's business */
+    }
+  };
+
+  /** Closes the attempt's stream once, announcing the close (the AbortController firing is a fact the page logs). */
+  DashboardInstance.prototype._closeParameterStream = function (attempt, reason) {
+    if (!attempt.stream || attempt.streamClosed) return;
+    attempt.streamClosed = true;
+    this._streamEvent({ evaluation_id: attempt.evaluationId, event: "stream_closed", reason: reason, applied: false });
+    attempt.stream.close();
+  };
+
+  /**
+   * One stream frame of a parameters-only attempt. The SUPERSEDE rule (§6.2, the plant-7 defence): a frame whose
+   * `evaluation_id` is not the CURRENT attempt's is dropped before any state or DOM change — the current attempt
+   * is the lock's, so a frame of an attempt the deadline released (its stream not yet closed) or of a superseded
+   * generation changes nothing. The page's graph states are the page's business: this path ends the attempt on
+   * the terminal frames and hands every applied frame to the host's witness.
+   */
+  DashboardInstance.prototype._onParameterFrame = function (attempt, event, payload) {
+    if (this._disposed) return;
+    var lock = this._lock;
+    var currentId = lock && lock.evaluationId ? lock.evaluationId : null;
+    var applied = currentId !== null && !!payload && payload.evaluation_id === currentId;
+    this._streamEvent({
+      evaluation_id: payload ? payload.evaluation_id : null,
+      event: event,
+      name: payload ? payload.parameter : undefined,
+      code: payload && payload.code ? payload.code : undefined,
+      detail: payload && payload.detail ? payload.detail : undefined,
+      response: event === "evaluation_completed" && payload ? payload.response : undefined,
+      applied: applied,
+    });
+    if (!applied) return; // dropped BEFORE any state or DOM change
+    if (event === "evaluation_completed") {
+      this._completeParameterStream(attempt, payload.response);
+      return;
+    }
+    if (event === "evaluation_failed") {
+      this._failParameterStream(attempt, payload.code);
+    }
+  };
+
+  /**
+   * The terminal frame on success: close the stream (nothing follows a terminal frame), then the plain path's
+   * admission — the absolute clock first (an overdue completion expires the attempt and changes nothing), else
+   * the response resolves through `_acceptParameterResponse` exactly as the plain evaluate's did.
+   */
+  DashboardInstance.prototype._completeParameterStream = function (attempt, response) {
+    var self = this;
+    this._closeParameterStream(attempt, "terminal");
+    if (attempt.finished) return;
+    if (this._env.now() > attempt.deadline) {
+      this._lockExpired(attempt);
+      if (attempt.reject) {
+        attempt.reject(self._fail("parameters.superseded", "a late parameter response after its deadline changes nothing"));
+      }
+      return;
+    }
+    this._acceptParameterResponse(attempt, response).then(attempt.resolve, attempt.reject);
+  };
+
+  /**
+   * The terminal frame on failure: the attempt ends with the catalogued code — the plain path's refusal shape
+   * (the host shows the code verbatim). The applied state is unchanged and stays shown; the lock holds until its
+   * deadline (or the next attempt's supersede), so a half-known state is never submitted silently.
+   */
+  DashboardInstance.prototype._failParameterStream = function (attempt, code) {
+    this._closeParameterStream(attempt, "terminal");
+    if (attempt.reject) {
+      attempt.reject(this._fail(code || "parameters.failed", code || "the parameter evaluation failed"));
+    }
+  };
+
+  /** The stream ended WITHOUT a terminal frame — the dashboards §6.6 transport-failure path: content is retained, the lock is released by the deadline, never earlier. */
+  DashboardInstance.prototype._onParameterStreamEnd = function (attempt) {
+    if (this._disposed || attempt.finished || this._lock !== attempt) return;
+    this._closeParameterStream(attempt, "ended");
+    this._publishNotification({
+      scope: "parameters",
+      severity: "error",
+      code: "transport.disconnected",
+      message: "the connection to the evaluation was lost",
+      retryable: true,
+      recover: "retry",
+    });
+  };
+
+  /** The authority guard cut the READ (`: revoked`): the runtime's revoked notice — content kept, retry offered. */
+  DashboardInstance.prototype._onParameterStreamRevoked = function (attempt) {
+    if (this._disposed || attempt.finished || this._lock !== attempt) return;
+    this._closeParameterStream(attempt, "revoked");
+    this._publishNotification({
+      scope: "parameters",
+      severity: "error",
+      code: "stream.revoked",
+      message: "the session lost its authority to read this evaluation",
+      retryable: true,
+      recover: "retry",
+    });
+  };
+
+  /** The stream failed at the transport (or the POST was refused): the attempt rejects; the host's notification path shows it. */
+  DashboardInstance.prototype._onParameterStreamFailure = function (attempt, error) {
+    if (this._disposed || attempt.finished || this._lock !== attempt) return;
+    this._closeParameterStream(attempt, "failed");
+    if (attempt.reject) attempt.reject(error);
   };
 
   /** Every parameter's current value, hidden and disabled included (D23). */
@@ -911,6 +1078,9 @@
     if (attempt.finished) return;
     attempt.finished = true;
     if (this._lock === attempt) this._lock = null;
+    // #383 — the expired attempt's stream closes with it: the deadline releases the lock and stops the frames
+    // (the evaluation itself runs on server-side; the grace governs its abort, as for every disconnect).
+    this._closeParameterStream(attempt, "expired");
     this._publishNotification({
       scope: "parameters",
       severity: "error",
@@ -1666,6 +1836,8 @@
     for (var s = 0; s < streamIds.length; s++) this._streams[streamIds[s]].close();
     this._streams = {};
     if (this._lock) {
+      // #383 — a parameters-only attempt's stream closes with the instance (the page left; the grace decides).
+      this._closeParameterStream(this._lock, "disposed");
       this._clearLockTimer(this._lock);
       this._lock.finished = true;
       this._lock = null;
@@ -1808,11 +1980,18 @@
    * (adapter contract, attempt generation, lock, absolute deadline, supersede-by-newest) pointed at a parameter SET
    * instead of a dashboard, so there is one renderer and one copy of the attempt logic. Differences from `init`,
    * all of them narrowings: `parameterSet: { id, version }` replaces `dashboard` (the version is a positive integer,
-   * ALWAYS — a form never relies on the server's served-version default), there is no configuration, no
-   * visualization, no action and no stream, and the one call is `POST /api/v1/parameter-sets/{id}/evaluate` with
-   * `{ version, selections }`. Credentials are the session's, exactly as `init` carries them (the double-submit CSRF
-   * cookie read by `_callEvenDisposed`); a proxy or fixture transport is refused — S1 has neither. Re-initialising an
-   * OWNED container is refused (`DashboardAlreadyMounted`).
+   * ALWAYS — a form never relies on the server's served-version default), and there is no configuration, no
+   * visualization and no action. #383 — the one call is the OBSERVED evaluation `POST
+   * /api/v1/parameter-sets/{id}/evaluations` (rest-api §21.5) with `{ version, selections, evaluation_id,
+   * instance_id }`: the cascade arrives as frames (`evaluation_started` … `evaluation_completed`), a frame whose
+   * `evaluation_id` is not the current attempt's is dropped before it touches anything, `evaluation_completed`'s
+   * response resolves the attempt exactly as the plain evaluate's did, a superseded attempt's stream is closed
+   * (the server's disconnect grace then aborts it), and a stream that ends without a terminal frame is the
+   * dashboards §6.6 transport-failure path. Credentials are the session's, exactly as `init` carries them (the
+   * double-submit CSRF cookie read by `_openStream`); a proxy or fixture transport is refused — this entry has
+   * neither. `options.onStreamEvent(info)` is the host's optional frame witness (every frame and stream fact,
+   * `{evaluation_id, event, name?, applied, …}`) for the page's frame log. Re-initialising an OWNED container
+   * is refused (`DashboardAlreadyMounted`).
    */
   function initParameters(options) {
     if (!isPlainObject(options)) throw DashboardError("init.invalid", "initParameters requires an options object");
@@ -2411,6 +2590,8 @@
         return registerRenderer(Object.assign({ kind: kind }, spec));
       },
       MOUNTED_ATTRIBUTE: MOUNTED_ATTRIBUTE,
+      /** #383 — the one parser, exported for the unit tests only; the page never copies it. */
+      SseParser: SseParser,
     },
   };
 
