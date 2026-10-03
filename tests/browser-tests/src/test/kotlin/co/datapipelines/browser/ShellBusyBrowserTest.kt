@@ -29,13 +29,19 @@ import org.junit.jupiter.api.Test
  *     hx-indicator (verified against the vendored dist, `addRequestIndicatorClasses`),
  *     and the tree leaves do. The `disabled` property is deliberately NOT used either —
  *     a really-disabled button would drop focus mid-flight.
- *  3. **The delayed skeleton** — a held (>150ms) detail swap marks `#template-detail`
- *     aria-busy and shows `.app-target-skeleton`; a fast swap must never flash either.
+ *  3. **The delayed skeleton** — a held (>150ms) swap marks its target aria-busy and shows
+ *     `.app-target-skeleton`; a fast swap must never flash either.
  *  4. **The bar never sticks on after an abort** — htmx 2.0.10 fires NO `htmx:afterSettle`
  *     for an aborted request (verified against the vendored dist: `xhr.onabort` →
  *     `htmx:afterRequest` + `htmx:sendAbort` only), which is exactly why shell.js counts on
  *     `htmx:afterRequest` instead. The hx-sync replace abort (two leaves selected quickly)
  *     is the probe, and the abort itself is pinned through the failed-request count.
+ *
+ * #398: the Templates page lost its explorer (a tree beside a detail pane), so the surfaces
+ * this spec drives are the ones that remain: the SIDEBAR tree's folder summaries (the partial
+ * request, the busy summary), and the catalog's search and "Clear search" button (the clicked
+ * BUTTON, the swap target `#template-list-wrapper`, the hx-sync replace abort). A tree leaf is
+ * a link now — a full navigation, no request for the shell to mark.
  *
  * ## The throttle
  *
@@ -182,29 +188,30 @@ class ShellBusyBrowserTest : BrowserSuite() {
 
     // ------------------------------------------------------------------ tree driving
 
-    private fun folderSummary(path: String) = "summary.tpl-summary:has(span.tpl-label[title='$path'])"
+    private val navRoot = "#template-nav-root"
 
-    private fun leafButton(path: String) = "button.tpl-leaf:has(span.tpl-label[title='$path'])"
+    private val catalog = "#template-list-wrapper"
+
+    private fun folderSummary(path: String) = "$navRoot summary.tpl-summary:has(span.tpl-label[title='$path'])"
+
+    private fun leafLink(path: String) = "$navRoot a.tpl-leaf:has(span.tpl-label[title='$path'])"
+
+    /** The catalog page, its sidebar Templates branch open and its root level loaded. */
+    private fun openCatalogAndSidebarTree() {
+        page.navigate("$baseUrl/templates")
+        page.waitForSelector(catalog)
+        page.click("[data-nav-branch='templates'] [data-nav-tree-toggle]")
+        page.waitForSelector(folderSummary("nyc"))
+    }
+
+    /** One catalog result row, by the template's full path (it rides on `title`, §9.4). */
+    private fun catalogRow(path: String) = "$catalog a.tpl-result:has(.tpl-path[title='$path'])"
 
     /** Expands one folder and waits until its level request has actually fired (held or not). */
     private fun expandFolder(path: String) {
         page.waitForRequest({ req -> req.url().contains("/partials/") && req.url().contains("prefix=") }) {
             page.click(folderSummary(path))
         }
-    }
-
-    /** Drills nyc → nyc/lib → nyc/lib/mobility, awaiting the capture and releasing per level. */
-    private fun drillToMobility(throttle: PartialThrottle) {
-        expandFolder("nyc")
-        throttle.awaitCaptured(1)
-        throttle.releaseAll()
-        expandFolder("nyc/lib")
-        throttle.awaitCaptured(2)
-        throttle.releaseAll()
-        expandFolder("nyc/lib/mobility")
-        throttle.awaitCaptured(3)
-        throttle.releaseAll()
-        page.waitForSelector(leafButton("nyc/lib/mobility/trips"))
     }
 
     private fun barHidden() =
@@ -220,18 +227,16 @@ class ShellBusyBrowserTest : BrowserSuite() {
         startTrace()
         loginReadyUser("busyt")
         seedTemplates()
+        openCatalogAndSidebarTree()
         val throttle = PartialThrottle(holdMillis = 600).apply { install() }
         try {
-            page.navigate("$baseUrl/templates")
-            page.waitForSelector(folderSummary("nyc"))
-
-            // (1) A plain PARTIAL request (a tree expand, not a boosted navigation) activates
-            // the bar, and the requesting summary carries the shell's .app-busy marker —
-            // the hook the §D CSS spins the chevron on. The computed animation pins the spin
-            // without relying on motion.
+            // (1) A plain PARTIAL request (a sidebar tree expand, not a boosted navigation)
+            // activates the bar, and the requesting summary carries the shell's .app-busy
+            // marker — the hook the §D CSS spins the chevron on. The computed animation pins
+            // the spin without relying on motion.
             expandFolder("nyc")
             page.waitForSelector("#app-progress.active")
-            page.waitForSelector("summary.tpl-summary.app-busy")
+            page.waitForSelector("$navRoot summary.tpl-summary.app-busy")
             page.evaluate(
                 "() => getComputedStyle(document.querySelector('summary.tpl-summary.app-busy > .tpl-chevron')).animationName",
             ) shouldBe "ds-spin"
@@ -240,53 +245,52 @@ class ShellBusyBrowserTest : BrowserSuite() {
             page.waitForSelector(folderSummary("nyc/lib"))
             barHidden()
 
-            // Drill to the leaves (each level captured, held and released), then select
-            // trips held.
+            // Drill to the leaves (each level captured, held and released): a leaf is a link
+            // and carries no request of its own.
             expandFolder("nyc/lib")
             throttle.awaitCaptured(2)
             throttle.releaseAll()
             expandFolder("nyc/lib/mobility")
             throttle.awaitCaptured(3)
             throttle.releaseAll()
-            page.waitForSelector(leafButton("nyc/lib/mobility/trips"))
+            page.waitForSelector(leafLink("nyc/lib/mobility/trips"))
 
-            page.waitForRequest({ req -> req.url().contains("/partials/templates/versions") }) {
-                page.click(leafButton("nyc/lib/mobility/trips"))
-            }
+            // The catalog's search with no hit ends on a "Clear search" BUTTON whose own request
+            // is the clicked-control probe.
+            page.fill("#template-filter-q", "zzz-no-such-template")
             throttle.awaitCaptured(4)
+            throttle.releaseAll()
+            val clear = "$catalog button:has-text('Clear search')"
+            page.waitForSelector(clear)
+            barHidden()
+            page.click(clear)
+            throttle.awaitCaptured(5)
 
             // (2) The clicked control is busy for the flight: the .app-busy marker AND
             // aria-disabled (both shell.js) AND computed pointer-events:none (app.css) —
             // and it is the ATTRIBUTE, never the disabled property, so focus survives.
-            page.waitForSelector(leafButton("nyc/lib/mobility/trips") + ".app-busy[aria-disabled='true']")
+            page.waitForSelector("$clear.app-busy[aria-disabled='true']")
             page.evaluate(
                 """(sel) => {
                   const b = document.querySelector(sel);
                   return getComputedStyle(b).pointerEvents + '/' + b.disabled;
                 }""",
-                leafButton("nyc/lib/mobility/trips"),
+                clear,
             ) shouldBe "none/false"
 
-            // (3) The held (>150ms) swap marks the detail pane aria-busy and shows ONE
-            // skeleton row — the design system's family plus the app marker class.
-            page.waitForSelector("#template-detail[aria-busy='true']")
-            page.locator("#template-detail .ds-skeleton.app-target-skeleton").count() shouldBe 1
+            // (3) The held (>150ms) swap marks the target aria-busy and shows ONE skeleton
+            // row — the design system's family plus the app marker class.
+            page.waitForSelector("$catalog[aria-busy='true']")
+            page.locator("$catalog .ds-skeleton.app-target-skeleton").count() shouldBe 1
 
-            // Settle: every marker comes off — bar, aria-disabled, aria-busy, the skeleton —
-            // and the real content lands.
+            // Settle: every marker comes off — bar, aria-busy, the skeleton, the busy class —
+            // and the real content lands (the button went with the swapped-out empty state).
             throttle.releaseAll()
-            page.waitForSelector("#template-detail h2.tplx-detail-title")
-            page.locator("#template-detail h2.tplx-detail-title").getAttribute("title") shouldBe "nyc/lib/mobility/trips"
+            page.waitForSelector(catalogRow("nyc/lib/mobility/trips"))
             barHidden()
-            page.waitForSelector("#template-detail[aria-busy='true']", Page.WaitForSelectorOptions().setState(WaitForSelectorState.HIDDEN))
+            page.waitForSelector("$catalog[aria-busy='true']", Page.WaitForSelectorOptions().setState(WaitForSelectorState.HIDDEN))
             page.locator(".app-target-skeleton").count() shouldBe 0
-            page.evaluate(
-                """(sel) => {
-                  const b = document.querySelector(sel);
-                  return b.hasAttribute('aria-disabled') + '/' + b.classList.contains('app-busy');
-                }""",
-                leafButton("nyc/lib/mobility/trips"),
-            ) shouldBe "false/false"
+            page.locator(".app-busy").count() shouldBe 0
         } finally {
             throttle.releaseAll()
         }
@@ -392,23 +396,21 @@ class ShellBusyBrowserTest : BrowserSuite() {
         loginReadyUser("busyf")
         seedTemplates()
         // No throttle: the in-process server answers in milliseconds, far under the 150ms arm.
-        page.navigate("$baseUrl/templates")
-        page.waitForSelector(folderSummary("nyc"))
+        openCatalogAndSidebarTree()
         page.click(folderSummary("nyc"))
         page.waitForSelector(folderSummary("nyc/lib"))
         page.click(folderSummary("nyc/lib"))
         page.waitForSelector(folderSummary("nyc/lib/mobility"))
         page.click(folderSummary("nyc/lib/mobility"))
-        page.waitForSelector(leafButton("nyc/lib/mobility/trips"))
+        page.waitForSelector(leafLink("nyc/lib/mobility/trips"))
 
-        page.click(leafButton("nyc/lib/mobility/trips"))
-        page.waitForSelector("#template-detail h2.tplx-detail-title")
-        page.locator("#template-detail h2.tplx-detail-title").getAttribute("title") shouldBe "nyc/lib/mobility/trips"
-        // The whole point of the 150ms arm: fast swaps pay nothing. After settle the pane
+        page.fill("#template-filter-q", "mobility/trips")
+        page.waitForSelector(catalogRow("nyc/lib/mobility/trips"))
+        // The whole point of the 150ms arm: fast swaps pay nothing. After settle the target
         // carries neither the busy marker nor a skeleton — and with the server this fast the
         // timer can never have fired.
         page.locator(".app-target-skeleton").count() shouldBe 0
-        page.evaluate("() => document.getElementById('template-detail').hasAttribute('aria-busy')") shouldBe false
+        page.evaluate("() => document.getElementById('template-list-wrapper').hasAttribute('aria-busy')") shouldBe false
         barHidden()
     }
 
@@ -417,38 +419,35 @@ class ShellBusyBrowserTest : BrowserSuite() {
         startTrace()
         loginReadyUser("busya")
         seedTemplates()
+        page.navigate("$baseUrl/templates")
+        page.waitForSelector(catalog)
         val throttle = PartialThrottle(holdMillis = 600).apply { install() }
         try {
-            page.navigate("$baseUrl/templates")
-            page.waitForSelector(folderSummary("nyc"))
-            drillToMobility(throttle)
-
-            // Select trips (A) held; its skeleton and busy markers arm. Then select
-            // stations (B): hx-sync="#template-detail:replace" ABORTS A's in-flight request.
+            // Search A held; its skeleton and busy markers arm. Then search B:
+            // hx-sync="this:replace" on the search box ABORTS A's in-flight request.
             val failuresBefore = throttle.failedPartials.get()
-            page.waitForRequest({ req -> req.url().contains("/partials/templates/versions") }) {
-                page.click(leafButton("nyc/lib/mobility/trips"))
+            page.waitForRequest({ req -> req.url().contains("/partials/templates") && req.url().contains("q=trips") }) {
+                page.fill("#template-filter-q", "trips")
             }
-            throttle.awaitCaptured(4)
-            page.waitForSelector("#template-detail[aria-busy='true']")
-            page.waitForRequest({ req -> req.url().contains("/partials/templates/versions") }) {
-                page.click(leafButton("nyc/lib/mobility/stations"))
+            throttle.awaitCaptured(1)
+            page.waitForSelector("$catalog[aria-busy='true']")
+            page.waitForRequest({ req -> req.url().contains("/partials/templates") && req.url().contains("q=stations") }) {
+                page.fill("#template-filter-q", "stations")
             }
-            throttle.awaitCaptured(5)
+            throttle.awaitCaptured(2)
 
-            // (4) The abort's effects, synchronized on the DOM: A's own busy state goes away
-            // even though B is still in flight (the HIDDEN wait retries until A's aborted
-            // afterRequest has cleaned up), and the bar STAYS active — the count, not a
-            // boolean: B is still holding it.
-            page.waitForSelector(
-                leafButton("nyc/lib/mobility/trips") + "[aria-disabled='true']",
-                Page.WaitForSelectorOptions().setState(WaitForSelectorState.HIDDEN),
-            )
-            page.waitForSelector("#app-progress.active")
+            // (4) The abort's effects, read once B is in flight (htmx aborts A before it sends
+            // B, so A's terminal event has run by the time B is captured): the bar STAYS active
+            // and the target keeps its aria-busy and exactly ONE skeleton — the counts, not
+            // booleans: B still holds all three, and A's abort must neither hide them early nor
+            // leave a second skeleton behind.
+            page.locator("#app-progress.active").count() shouldBe 1
+            page.locator("$catalog[aria-busy='true']").count() shouldBe 1
+            page.locator("$catalog .app-target-skeleton").count() shouldBe 1
 
             throttle.releaseAll()
-            page.waitForSelector("#template-detail h2.tplx-detail-title")
-            page.locator("#template-detail h2.tplx-detail-title").getAttribute("title") shouldBe "nyc/lib/mobility/stations"
+            page.waitForSelector(catalogRow("nyc/lib/mobility/stations"))
+            page.locator("$catalog a.tpl-result").count() shouldBe 1
 
             // The abort itself, pinned: A's held request FAILED (cancelled by the app via
             // hx-sync replace), not merely ordered behind B's. Asserted after the release —
@@ -456,21 +455,14 @@ class ShellBusyBrowserTest : BrowserSuite() {
             throttle.failedPartials.get() shouldBeGreaterThanOrEqual (failuresBefore + 1)
 
             // The terminal state is fully clean: no stuck bar, no orphaned skeleton or
-            // aria-busy (A's abort cleaned its half; B's settle cleaned the rest).
+            // aria-busy, no control left marked busy (A's abort cleaned its half; B's settle
+            // cleaned the rest).
             barHidden()
             page.locator(".app-target-skeleton").count() shouldBe 0
-            page.evaluate("() => document.getElementById('template-detail').hasAttribute('aria-busy')") shouldBe false
-            page.evaluate(
-                "(sel) => document.querySelector(sel).hasAttribute('aria-disabled')",
-                leafButton("nyc/lib/mobility/stations"),
-            ) shouldBe false
+            page.evaluate("() => document.getElementById('template-list-wrapper').hasAttribute('aria-busy')") shouldBe false
+            page.locator(".app-busy").count() shouldBe 0
         } finally {
             throttle.releaseAll()
         }
-    }
-
-    private companion object {
-        /** awaitCaptured's hard deadline — a capture that never comes is a test bug, named. */
-        const val AWAIT_CAPTURED_TIMEOUT_MILLIS = 10_000L
     }
 }
