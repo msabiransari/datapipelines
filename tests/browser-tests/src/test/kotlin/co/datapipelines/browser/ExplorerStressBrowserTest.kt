@@ -477,7 +477,22 @@ class ExplorerStressBrowserTest : BrowserSuite() {
             // Search, then clear, with the search response held (the sidebar box is
             // `hx-sync="this:replace"` — the clear ABORTS the held search); the generation
             // guard drops anything older. Back to browsing: the tree re-opens what was open.
-            searchClearPass(throttle, PIPELINES_TREE, "/partials/pipelines", "pipeline-nav-root", "p350Old")
+            try {
+                searchClearPass(throttle, PIPELINES_TREE, "/partials/pipelines", "pipeline-nav-root", "p350Old")
+            } catch (e: IllegalStateException) {
+                val dump =
+                    page.evaluate(
+                        """() => {
+                          const root = document.getElementById('pipeline-nav-root');
+                          return { rootClass: root ? root.className : 'no root',
+                                   rootHtml: root ? root.innerHTML.slice(0, 400) : '',
+                                   stamp: root ? root.dataset.dp350Old : 'gone',
+                                   err: [...document.querySelectorAll('.app-nav-tree-error')].map(e2 => e2.textContent) };
+                        }""",
+                    )
+                println("searchClearPass dump: $dump")
+                throw e
+            }
             duplicatedRowTitles().shouldBeEmpty()
 
             // The restore after the clear re-opens the remembered folders ONE level per
