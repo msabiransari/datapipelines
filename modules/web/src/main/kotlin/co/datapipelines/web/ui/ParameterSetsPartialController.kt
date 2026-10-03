@@ -14,11 +14,13 @@ import org.springframework.web.bind.annotation.RequestParam
  * The Parameter Sets tree fragment (#374) — [DashboardPartialController]'s `/dashboards/tree` for the
  * third artifact family, in its OWN controller so no other family's partial controller grows a method.
  *
- * ONE route, two presentations chosen by `scope` ([ParameterSetsBrowseModel]): the sidebar's lazy tree
- * (`scope=nav`, or any `prefix` request — a level is always a sidebar level) and the `/parameter-sets`
- * catalog's flat, server-paged list (any other value, absent included). The route is
- * `parameter_set.read`, the floor the page routes declare; every read goes through the caller's lens, so
- * a set the lens hides is not rendered, not counted and not paged. Every sidebar response carries
+ * ONE route, three presentations chosen by the request ([ParameterSetsBrowseModel]): the sidebar's
+ * lazy tree (`scope=nav`, or any `prefix` request — a level is always a sidebar level), the branch's
+ * flat search (`scope=nav` with a non-empty `q`, #415 — clearing returns the tree by construction)
+ * and the `/parameter-sets` catalog's flat list (`scope=page`: every set the lens admits, or the
+ * matches of `q`). The route is `parameter_set.read`, the floor the page routes declare; every read
+ * goes through the caller's lens, so a set the lens hides is not rendered, not counted, not paged —
+ * and not a search hit. Every sidebar response carries
  * [ParameterSetsBrowseModel.NAV_STAMP_HEADER] so the rail refuses a level rendered under another
  * workspace or lens.
  */
@@ -36,17 +38,29 @@ class ParameterSetsPartialController(
         @RequestParam(required = false) prefix: String?,
         // The pager's offset (the level and catalog templates' prev/next links); page one when absent.
         @RequestParam(required = false) offset: Int?,
+        // #415 — the branch's and the catalog's name search. A `prefix` request is unambiguously a
+        // browse and ignores it (browse and search are different presentations, §9.2).
+        @RequestParam(required = false) q: String?,
         @RequestParam(required = false) scope: String?,
     ): String {
         val principal = currentPrincipal()
         val workspace = principal.requireWorkspace()
         val view = lens.viewFor(principal)
         val nav = prefix != null || scope == ParameterSetsBrowseModel.SCOPE_NAV
-        return if (nav) {
+        if (nav) {
             response.setHeader(ParameterSetsBrowseModel.NAV_STAMP_HEADER, ParameterSetsBrowseModel.navStamp(workspace.name, view))
+        }
+        return if (prefix != null) {
             browse.fillLevel(model, workspace.id, view, prefix, offset ?: 0)
         } else {
-            browse.fillCatalog(model, workspace.id, view, offset ?: 0)
+            browse.fillWrapper(
+                model,
+                workspace.id,
+                view,
+                q,
+                offset ?: 0,
+                if (nav) ParameterSetsBrowseModel.SCOPE_NAV else ParameterSetsBrowseModel.SCOPE_PAGE,
+            )
         }
     }
 }

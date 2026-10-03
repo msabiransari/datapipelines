@@ -19,11 +19,13 @@ import java.util.UUID
  * Two presentations, chosen by the request's `scope` (the pipelines catalog's shape, #350):
  *
  * - [SCOPE_NAV] — the sidebar's tree: ONE prefix level per request (folders, then the sets directly
- *   under the prefix), through [ParameterSetService.listChildFolders]/`listChildSets`/`countChildSets`.
- *   A level's id is derived per prefix so a folder's placeholder and the fragment that replaces it
- *   cannot disagree ([levelId]).
+ *   under the prefix), through [ParameterSetService.listChildFolders]/`listChildSets`/`countChildSets`;
+ *   a non-empty `q` is instead the branch's flat search through [fillSearch]. A level's id is derived
+ *   per prefix so a folder's placeholder and the fragment that replaces it cannot disagree
+ *   ([levelId]).
  * - [SCOPE_PAGE] — the catalog page: ONE flat, server-paged list of full paths, every set the
- *   caller's lens admits, through `listAll`/`countAll`, rooted at the stable [CATALOG_ROOT_ID].
+ *   caller's lens admits or the matches of `q` (#415), through `search`/`countSearch`, rooted at
+ *   the stable [CATALOG_ROOT_ID].
  *
  * Every read passes the caller's `view.parameterSets` lens — under the promoter's narrowing lens the
  * service derives levels from the admitted current RELEASED sets, so a set the lens hides is absent
@@ -77,27 +79,65 @@ class ParameterSetsBrowseModel(
     }
 
     /**
-     * Fills [model] for the **catalog page's flat list** — every set the lens admits, [PAGE_SIZE] per
-     * page — and returns the view name. The catalog has no folder cut and no search: the sidebar is
-     * the folder browser, and the parameter-set service has no name search to back a query box.
+     * Fills [model] for a **flat list of sets** — the sidebar search's results ([SCOPE_NAV], `q`
+     * non-empty) or the `/parameter-sets` catalog ([SCOPE_PAGE], where an absent `q` lists every set
+     * the caller may read) — and returns the view name. [PipelineBrowseModel.fillSearch]'s shape:
+     * the lensed flat listing through [ParameterSetService.search], the truthful total through
+     * [ParameterSetService.countSearch], the pager bound to the scope's stable root (`rootId`).
      */
-    fun fillCatalog(
+    fun fillSearch(
         model: Model,
         workspaceId: UUID,
         view: LensedView,
+        q: String?,
         offset: Int,
+        scope: String = SCOPE_NAV,
     ): String {
         val page = maxOf(0, offset)
-        val loaded = sets.listAll(workspaceId, view.parameterSets, page, PAGE_SIZE)
-        val total = sets.countAll(workspaceId, view.parameterSets)
+        // The trim is the model's, in one place: a blank `q` is no search (the dispatcher's level,
+        // or the catalog's plain listing), and what renders back into the box is the trimmed term.
+        // The length is bounded because this `q` becomes a bound ILIKE pattern (#415's new SQL
+        // path): a needle is at most [MAX_QUERY_LENGTH] characters, longer input truncated to what
+        // a search box is for. The sibling searches predate the bound and carry none — this is the
+        // new path's stated posture, not a copied house rule.
+        val needle = q?.trim()?.takeIf { it.isNotEmpty() }?.take(MAX_QUERY_LENGTH)
+        val loaded = sets.search(workspaceId, view.parameterSets, needle, page, PAGE_SIZE)
+        val total = sets.countSearch(workspaceId, view.parameterSets, needle)
         model.addAttribute("lensUnavailable", view.unavailable)
-        model.addAttribute("scope", SCOPE_PAGE)
-        model.addAttribute("rootId", CATALOG_ROOT_ID)
+        model.addAttribute("searching", true)
+        model.addAttribute("scope", scope)
+        model.addAttribute("rootId", rootIdOf(scope))
+        model.addAttribute("q", needle.orEmpty())
         model.addAttribute("parameterSets", loaded.map(::ParameterSetLeafView))
         model.addAttribute("offset", page)
         model.addAttribute("hasMore", page + loaded.size < total)
         model.addAttribute("total", total)
-        return CATALOG_VIEW
+        return SEARCH_VIEW
+    }
+
+    /**
+     * Fills [model] for whichever presentation [q] and [scope] select, and returns the
+     * **dispatcher** view whose one root element is the scope's stable swap root either way
+     * ([PipelineBrowseModel.fillWrapper]'s shape). In the sidebar ([SCOPE_NAV]) an empty `q` is the
+     * tree's ROOT level and a non-empty one the flat search, so clearing the box returns to the tree
+     * by construction. The catalog ([SCOPE_PAGE]) has no tree to return to: it is always the flat
+     * list — every set the lens admits when `q` is empty, the matches otherwise.
+     */
+    fun fillWrapper(
+        model: Model,
+        workspaceId: UUID,
+        view: LensedView,
+        q: String?,
+        offset: Int,
+        scope: String = SCOPE_NAV,
+    ): String {
+        val needle = q?.trim()?.takeIf { it.isNotEmpty() }
+        if (scope == SCOPE_NAV && needle == null) {
+            fillLevel(model, workspaceId, view, prefix = null, offset = offset)
+        } else {
+            fillSearch(model, workspaceId, view, needle, offset, scope)
+        }
+        return WRAPPER_VIEW
     }
 
     /** A level that cannot exist: rendered as an ordinary empty level, never as an error. */
@@ -157,14 +197,21 @@ class ParameterSetsBrowseModel(
         /** The explorers' page size — the value the three sibling trees use. */
         const val PAGE_SIZE = 25
 
+        /** The search needle's length bound (#415) — a search box is not a text field. */
+        const val MAX_QUERY_LENGTH = 200
+
         const val LEVEL_VIEW = "partials/parameter-set-tree-level"
-        const val CATALOG_VIEW = "partials/parameter-set-list"
+        const val SEARCH_VIEW = "partials/parameter-set-search"
+        const val WRAPPER_VIEW = "partials/parameter-sets"
 
         /** The DOM id of the NAV instance's root level — the sidebar tree's lazy container. */
         const val NAV_ROOT_ID = "params-tree-nav"
 
-        /** The catalog page's stable swap root: its pager targets it. */
+        /** The catalog page's stable swap root: its search box and pager target it. */
         const val CATALOG_ROOT_ID = "parameter-set-list-wrapper"
+
+        /** The swap root a presentation renders into: the sidebar's tree panel or the catalog's list. */
+        fun rootIdOf(scope: String): String = if (scope == SCOPE_NAV) NAV_ROOT_ID else CATALOG_ROOT_ID
 
         /** Hex characters of a nested level's id digest — 64 bits, over one screen's folders. */
         private const val LEVEL_ID_HEX_LENGTH = 16

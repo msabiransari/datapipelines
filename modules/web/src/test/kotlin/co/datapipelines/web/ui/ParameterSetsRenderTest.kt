@@ -94,6 +94,63 @@ class ParameterSetsRenderTest {
         html shouldNotContain "<button"
     }
 
+    private fun search(
+        scope: String,
+        leaves: List<ParameterSetsBrowseModel.ParameterSetLeafView>,
+        q: String,
+    ): String =
+        engine.process(
+            "partials/parameter-set-search",
+            webContext("/parameter-sets").apply {
+                setVariable("searching", true)
+                setVariable("scope", scope)
+                setVariable("rootId", ParameterSetsBrowseModel.rootIdOf(scope))
+                setVariable("q", q)
+                setVariable("parameterSets", leaves)
+                setVariable("offset", 0)
+                setVariable("hasMore", false)
+                setVariable("total", leaves.size)
+                setVariable("lensUnavailable", null)
+            },
+        )
+
+    @Test
+    fun `#415 - the nav search results are a listbox of full-path rows under the tree's root id, so clearing returns the tree`() {
+        val html = search("nav", listOf(released), "geo")
+        html shouldContain "id=\"params-tree-nav\""
+        html shouldContain "role=\"listbox\""
+        html shouldContain "aria-label=\"Parameter set search results\""
+        html shouldContain "href=\"/parameter-sets/$setId\""
+        html shouldContain "hx-boost=\"false\""
+        html shouldContain "title=\"acme/geo_filters\""
+        // The pager keeps the query AND the nav scope: a page two that lost either would lie.
+        html shouldContain "/partials/parameter-sets/tree?q=geo&amp;scope=nav&amp;offset=25"
+    }
+
+    @Test
+    fun `#415 - the catalog's search results are plain links whose pager keeps q`() {
+        val html = search("page", listOf(released), "geo")
+        html shouldContain "id=\"parameter-set-list-wrapper\""
+        html shouldNotContain "role=\"listbox\""
+        html shouldContain "/partials/parameter-sets/tree?q=geo&amp;offset=25"
+    }
+
+    @Test
+    fun `#415 - a failed search and an empty catalog say different things`() {
+        // A nav search with no hits: the match-miss state, whose clear is nav-tree.js's (it empties the box).
+        val miss = search("nav", emptyList(), "geo")
+        miss shouldContain "No parameter sets match your search"
+        miss shouldContain "data-nav-tree-clear"
+        // The catalog's no-hit search: the clear re-fetches the route bare (the box is the page's own).
+        val pageMiss = search("page", emptyList(), "geo")
+        pageMiss shouldContain "No parameter sets match your search"
+        pageMiss shouldContain "hx-get=\"/partials/parameter-sets/tree\""
+        // The catalog with no query and no rows is the EMPTY state, not a failed search.
+        val empty = search("page", emptyList(), "")
+        empty shouldContain "No parameter sets yet"
+        empty shouldNotContain "match your search"
+    }
+
     private fun workspace(
         canEvaluate: Boolean = true,
         hasBody: Boolean = true,

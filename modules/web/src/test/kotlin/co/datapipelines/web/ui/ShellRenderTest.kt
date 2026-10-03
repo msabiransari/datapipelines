@@ -473,7 +473,7 @@ class ShellRenderTest {
     }
 
     @Test
-    fun `#374 - Parameter Sets carries the same branch in Build - link, a separate toggle, the lazy nav-scope tree and no search`() {
+    fun `#415 - Parameter Sets carries the same branch in Build - link, a separate toggle, the lazy nav-scope tree and its search`() {
         val html = engine.process("pipelines/list", webContext().apply { fillList() })
         val branch =
             html
@@ -490,8 +490,13 @@ class ShellRenderTest {
         branch shouldContain "data-nav-root-url=\"/partials/parameter-sets/tree?scope=nav\""
         branch shouldContain "data-nav-workspace=\"acme\""
         branch shouldContain "id=\"params-tree-nav\""
-        // No search box: the parameter-set service has no name search to back one.
-        branch shouldNotContain "hx-get="
+        // #415 — the branch gains the search input in the Pipelines branch's exact markup:
+        // the shared engine (nav-tree.js) serves it with no JS change, and the results swap
+        // into THIS panel's root (clearing returns to the tree by construction).
+        branch shouldContain "data-nav-tree-search"
+        branch shouldContain "hx-get=\"/partials/parameter-sets/tree?scope=nav\""
+        branch shouldContain "hx-target=\"#params-tree-nav\""
+        branch shouldContain "placeholder=\"Search parameter sets…\""
         // The branch sits in Build, before Operate, and is one more item - not a second tree engine.
         html.indexOf("data-nav-branch=\"parameter-sets\"") shouldBeLessThan html.indexOf(">Operate<")
     }

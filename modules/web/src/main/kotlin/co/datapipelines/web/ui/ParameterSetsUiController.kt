@@ -51,18 +51,26 @@ class ParameterSetsUiController(
     // Guarded by ObjectMapperDefaultParameterKonsistTest.
     private val mapper: ObjectMapper = ParameterSetJson.mapper
 
-    /** The catalog page — a flat, server-paged list over the same read the sidebar's tree is built from. */
+    /** The catalog page — a flat, server-paged list over the same read the sidebar's tree is built from, searched by `q` (#415). */
     @GetMapping("/parameter-sets")
     @RequiredScope(Permission.PARAMETER_SET_READ)
     fun list(
         model: Model,
         request: HttpServletRequest,
+        @RequestParam(required = false) q: String?,
         @RequestParam(required = false) offset: Int?,
     ): String {
         model.addAttribute("activeTheme", themeResolver.resolve(request))
         RoleModel.stamp(model)
         val principal = currentPrincipal()
-        browse.fillCatalog(model, principal.requireWorkspace().id, lens.viewFor(principal), offset ?: 0)
+        browse.fillWrapper(
+            model,
+            principal.requireWorkspace().id,
+            lens.viewFor(principal),
+            q,
+            offset ?: 0,
+            ParameterSetsBrowseModel.SCOPE_PAGE,
+        )
         return LIST_VIEW
     }
 
