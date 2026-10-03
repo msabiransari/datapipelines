@@ -480,6 +480,14 @@ class ExplorerStressBrowserTest : BrowserSuite() {
             searchClearPass(throttle, PIPELINES_TREE, "/partials/pipelines", "pipeline-nav-root", "p350Old")
             duplicatedRowTitles().shouldBeEmpty()
 
+            // The restore after the clear re-opens the remembered folders ONE level per
+            // released response: nyc/lib's summary exists as soon as nyc's level lands, but it
+            // is INVISIBLE while nyc is still closed mid-restore. Wait for VISIBLE before the
+            // open-guard below (count>0 alone sees the folded row).
+            throttle.releaseUntil {
+                page.locator(folderSummary("nyc/lib")).isVisible
+            }
+
             // Boosted navigation with a level request held: the rail is NOT swapped by a boosted
             // navigation (it lives outside #app-main), so the held level — a folder never
             // fetched before — lands in the SAME live tree after the navigation, whole and once.
