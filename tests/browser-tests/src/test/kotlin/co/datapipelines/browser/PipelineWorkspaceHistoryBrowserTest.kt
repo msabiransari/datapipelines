@@ -35,7 +35,13 @@ import org.junit.jupiter.api.Test
  * events) — never "looks fine". The non-vacuity floor is the pre-fix red run: at
  * `37556e18` the same class reads 2 panes, a stacked component and 2 POSTs per click
  * after one restore (the lane's witnessed defect, kept in the evidence record).
+ *
+ * #402 adds the workspace's OWN entries beside htmx's: in-page version and tab switches push,
+ * Back/Forward replay them on the live instance, and a boosted leave after a switch is a cache
+ * HIT whose restored instance replays the rest. The base's reds (Back left the workspace; the
+ * leave-and-Back was a MISS) are in the lane's evidence record.
  */
+@Suppress("LargeClass") // #358's restore cases and #402's replay cases share one fixture set and its probes
 class PipelineWorkspaceHistoryBrowserTest : BrowserSuite() {
     private fun loginReadyUser(
         slug: String,
@@ -630,6 +636,270 @@ class PipelineWorkspaceHistoryBrowserTest : BrowserSuite() {
         stackDepth() shouldBe 1
         completed.count() shouldBeLessThanOrEqual 1
         deletes.shouldBeEmpty()
+    }
+
+    // ------------------------------------------------------------------ #402
+
+    private fun historyLength(): Int = (page.evaluate("() => history.length") as Number).toInt()
+
+    private fun openTree() {
+        page.click("[data-nav-branch='pipelines'] [data-nav-tree-toggle]")
+        page.waitForSelector("#pipeline-nav-root .tpl-tree, #pipeline-nav-root .ds-empty")
+    }
+
+    /** The sidebar tree's current leaf — #350's own history proof, read, never driven here. */
+    private fun currentLeaves(): Int =
+        (page.evaluate("() => document.querySelectorAll(\"#nav-tree-pipelines a.tpl-leaf[aria-current='page']\").length") as Number)
+            .toInt()
+
+    /** An IN-PAGE version switch through the header selector, synced on the landed body. */
+    private fun switchVersionInPage(
+        version: Int,
+        bodyMarker: String,
+    ) {
+        page.locator(".pe-versions a[data-version='$version']").click()
+        page.waitForFunction(
+            "([v, m]) => window.PEWorkspace && window.PEWorkspace.viewedVersion === v && " +
+                "(document.getElementById('pipeline-data')?.textContent ?? '').includes(m)",
+            arrayOf<Any>(version, bodyMarker),
+        )
+    }
+
+    /**
+     * One view, asserted whole: the URL's canonical version/tab, the viewed pin, the body
+     * block, the chip, the tab strip and the root's tab attribute (what a restore re-reads).
+     */
+    private fun expectView(
+        version: Int,
+        tab: String,
+        chip: String,
+        bodyMarker: String,
+    ) {
+        page.waitForFunction(
+            "([v, t, m]) => window.PEWorkspace && window.PEWorkspace.viewedVersion === v && " +
+                "document.getElementById('pe-tab-' + t)?.getAttribute('aria-selected') === 'true' && " +
+                "(document.getElementById('pipeline-data')?.textContent ?? '').includes(m)",
+            arrayOf<Any>(version, tab, bodyMarker),
+        )
+        val url = page.url()
+        url shouldContain "version=$version"
+        if (tab == "flow") url shouldNotContain "tab=" else url shouldContain "tab=$tab"
+        page.locator(".pe-vchip").innerText() shouldBe chip
+        page.locator(".pe-root").getAttribute("data-active-tab") shouldBe tab
+        val selected = "() => [...document.querySelectorAll('.pe-tab')].filter(b => b.getAttribute('aria-selected') === 'true').length"
+        (page.evaluate(selected) as Number).toInt() shouldBe 1
+    }
+
+    /** No reload, no re-activation: the SAME Alpine, runtime epoch and activation count. */
+    private fun sameInstanceAs(identity: Map<*, *>) {
+        val now = runtimeIdentity()
+        now["alpineMark"] shouldBe identity["alpineMark"]
+        now["epoch"] shouldBe identity["epoch"]
+        now["activations"] shouldBe identity["activations"]
+        stackDepth() shouldBe 1
+    }
+
+    @Test
+    fun `#402 - Back and Forward replay in-page version and tab switches on the live instance`() {
+        val id = seedSqlVersions("pwhb" + generatedPassword("s").take(6).lowercase())
+        ensureTheme("light")
+        openTree()
+        page.navigate("$baseUrl/pipelines/$id?version=1")
+        page.waitForSelector(".pe-root")
+        waitActivated()
+        page.waitForSelector("#nav-tree-pipelines a.tpl-leaf[aria-current='page']")
+        seedHistoryCounters()
+        val identity = runtimeIdentity()
+        val length = historyLength()
+        val v1 = "v1 · released · current"
+        val v2 = "v2 · released"
+
+        // v1 → v2 → Overview: two user switches, two entries of the workspace's own.
+        switchVersionInPage(2, "sql_v2")
+        page.locator("#pe-tab-overview").click()
+        expectView(2, "overview", v2, "sql_v2")
+        historyLength() shouldBe length + 2
+
+        // Back twice lands on v2/Flow, then v1/Flow; Forward replays both — all IN PAGE.
+        val walk =
+            listOf(
+                { page.goBack() } to listOf<Any>(2, "flow", v2, "sql_v2"),
+                { page.goBack() } to listOf<Any>(1, "flow", v1, "sql_v1"),
+                { page.goForward() } to listOf<Any>(2, "flow", v2, "sql_v2"),
+                { page.goForward() } to listOf<Any>(2, "overview", v2, "sql_v2"),
+            )
+        for ((move, view) in walk) {
+            move()
+            expectView(view[0] as Int, view[1] as String, view[2] as String, view[3] as String)
+            sameInstanceAs(identity)
+            historyLength() shouldBe length + 2 // a replay never mints
+            counter("restore") shouldBe 0
+            counter("miss") shouldBe 0
+            currentLeaves() shouldBe 1
+        }
+        (page.evaluate("() => window.WorkspaceHistory.stats().replayed.pipelines") as Number).toInt() shouldBe 4
+        (page.evaluate("() => window.WorkspaceHistory.stats().listeners") as Number).toInt() shouldBe 1
+    }
+
+    @Test
+    fun `#402 - a version the read refuses is the house banner on a switch and on a replay, and mints nothing`() {
+        val id = seedSqlVersions("pwhr" + generatedPassword("s").take(6).lowercase())
+        page.navigate("$baseUrl/pipelines/$id?version=2")
+        page.waitForSelector(".pe-root")
+        waitActivated()
+        val length = historyLength()
+        val refuse = { route: Route ->
+            route.fulfill(
+                Route
+                    .FulfillOptions()
+                    .setStatus(404)
+                    .setContentType("application/json")
+                    .setBody("{}"),
+            )
+        }
+
+        // The lens-hidden read, stood in by the read's own refusal: a USER's switch to it is the
+        // house banner, the body stays v2, and no entry is pushed.
+        page.route("**/api/v1/pipelines/$id/versions/1", refuse)
+        page.locator(".pe-versions a[data-version='1']").click()
+        page.locator(".pe-banner:has-text('Version v1 is not available')").waitFor()
+        historyLength() shouldBe length
+        page.url() shouldContain "version=2"
+        (page.evaluate("() => document.getElementById('pipeline-data').textContent") as String) shouldContain "sql_v2"
+        page.unroute("**/api/v1/pipelines/$id/versions/1")
+        page.locator(".pe-banner-dismiss").click()
+
+        // A REPLAY onto a version the read now refuses: the same banner, the body unchanged.
+        switchVersionInPage(1, "sql_v1")
+        historyLength() shouldBe length + 1
+        page.route("**/api/v1/pipelines/$id/versions/2", refuse)
+        page.goBack()
+        page.locator(".pe-banner:has-text('Version v2 is not available')").waitFor()
+        (page.evaluate("() => window.PEWorkspace.viewedVersion") as Number).toInt() shouldBe 1
+        (page.evaluate("() => document.getElementById('pipeline-data').textContent") as String) shouldContain "sql_v1"
+        historyLength() shouldBe length + 1
+        page.unroute("**/api/v1/pipelines/$id/versions/2")
+    }
+
+    @Test
+    fun `#402 - after an in-page switch a boosted leave is a cache HIT with its selector, and Back replays in the restored instance`() {
+        val id = seedSqlVersions("pwhc" + generatedPassword("s").take(6).lowercase())
+        ensureTheme("dark")
+        page.navigate("$baseUrl/pipelines/$id?version=1")
+        page.waitForSelector(".pe-root")
+        waitActivated()
+        seedHistoryCounters()
+        val arrival = runtimeIdentity()
+        val arrivalActivations = (arrival["activations"] as Number).toInt()
+        page.locator(".pe-versions a").count() shouldBe 3
+        val v2 = "v2 · released"
+
+        switchVersionInPage(2, "sql_v2")
+        page.locator("#pe-tab-overview").click()
+        expectView(2, "overview", v2, "sql_v2")
+
+        leaveThroughTheUi()
+        val restoresBefore = counter("restore")
+        page.goBack()
+        waitForRestore(restoresBefore)
+        waitActivated()
+        page.waitForSelector(".pe-root")
+
+        // htmx's snapshot was keyed by the URL the user returned to: a HIT, one restore, one
+        // activation, one component — and the page is the one that was left, selector included.
+        counter("hit") shouldBe 1
+        counter("miss") shouldBe 0
+        counter("restore") shouldBe 1
+        expectView(2, "overview", v2, "sql_v2")
+        val restored = runtimeIdentity()
+        (restored["activations"] as Number).toInt() shouldBe arrivalActivations + 1
+        restored["epoch"] shouldBe arrival["epoch"]
+        stackDepth() shouldBe 1
+        page.locator(".pe-versions a").count() shouldBe 3
+        page.locator(".pe-versions a[aria-current='page']").getAttribute("data-version") shouldBe "2"
+
+        // Back again: the workspace's own entries replay IN the restored instance.
+        page.goBack()
+        expectView(2, "flow", v2, "sql_v2")
+        page.goBack()
+        expectView(1, "flow", "v1 · released · current", "sql_v1")
+        counter("restore") shouldBe 1
+        sameInstanceAs(restored)
+        page.locator(".pe-versions a[aria-current='page']").getAttribute("data-version") shouldBe "1"
+        ensureTheme("light")
+    }
+
+    @Test
+    fun `#402 - a run started on v1 keeps its stream and identity across a switch to v2 and Back`() {
+        val id = seedSlowRunPipeline()
+        seedSecondChainVersion(id)
+        page.navigate("$baseUrl/pipelines/$id?version=1")
+        page.waitForSelector(".pe-root")
+        waitActivated()
+        seedHistoryCounters()
+        val identity = runtimeIdentity()
+
+        val deletes = mutableListOf<String>()
+        page.route("**/api/v1/executions/*") { route ->
+            if (route.request().method() == "DELETE") deletes += route.request().url()
+            route.resume()
+        }
+        page.locator("[data-verb='pipeline-execute']").click()
+        page.locator(".pe-status:has-text('Running')").waitFor()
+        val strip = page.locator(".pe-run-strip span").nth(1)
+        val runVersion = strip.innerText()
+
+        // In page to v2 while the run streams, then Back: v1 replayed, the stream untouched.
+        switchVersionInPage(2, "p402 second")
+        page.goBack()
+        page.waitForFunction(
+            "() => window.PEWorkspace && window.PEWorkspace.viewedVersion === 1 && " +
+                "!(document.getElementById('pipeline-data')?.textContent ?? '').includes('p402 second')",
+        )
+        sameInstanceAs(identity)
+        strip.innerText() shouldBe runVersion
+
+        page.locator(".pe-status:has-text('Completed')").waitFor(Locator.WaitForOptions().setTimeout(180_000.0))
+        val completed = page.locator(".ds-toast:has-text('Pipeline completed')")
+        completed.first().waitFor(Locator.WaitForOptions().setState(WaitForSelectorState.VISIBLE))
+        completed.count() shouldBe 1
+        deletes.shouldBeEmpty()
+        counter("restore") shouldBe 0
+        sameInstanceAs(identity)
+        page.unroute("**/api/v1/executions/*")
+    }
+
+    /** v2 of the slow chain: the same nodes as a draft over the released v1 ("p402 second" marks its body). */
+    private fun seedSecondChainVersion(id: String) {
+        val status =
+            page.evaluate(
+                """async (id) => {
+                  const csrf = document.cookie.match(/(?:^|;\s*)dp_csrf=([^;]*)/);
+                  const token = csrf ? decodeURIComponent(csrf[1]) : '';
+                  const get = async () => { const r = await fetch('/api/v1/pipelines/' + id, { credentials: 'same-origin' }); const e = await r.json(); return e.data || e; };
+                  let d = await get();
+                  // The chain's templates are drafts: a release pins RELEASED template versions.
+                  for (const tid of [...new Set(d.nodes.map((n) => n.template && n.template.id).filter(Boolean))]) {
+                    const tr = await fetch('/api/v1/templates?name=' + encodeURIComponent(tid), { credentials: 'same-origin' });
+                    const te = await tr.json();
+                    const t = te.data || te;
+                    const trel = await fetch('/api/v1/templates/release', { method: 'POST', credentials: 'same-origin',
+                      headers: { 'Content-Type': 'application/json', 'DP-CSRF-Token': token, 'If-Match': t.body_hash },
+                      body: JSON.stringify({ name: tid }) });
+                    if (trel.status !== 200) return 'template ' + tid + ' ' + trel.status;
+                  }
+                  const rel = await fetch('/api/v1/pipelines/' + id + '/release', { method: 'POST', credentials: 'same-origin',
+                    headers: { 'DP-CSRF-Token': token, 'If-Match': d.body_hash } });
+                  if (rel.status !== 200) return 'release ' + rel.status + ' ' + (await rel.text()).slice(0, 300);
+                  d = await get();
+                  const put = await fetch('/api/v1/pipelines/' + id, { method: 'PUT', credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json', 'DP-CSRF-Token': token, 'If-Match': d.body_hash },
+                    body: JSON.stringify({ name: d.name, display_name: 'p402 second', nodes: d.nodes }) });
+                  return 'put ' + put.status;
+                }""",
+                id,
+            )
+        status shouldBe "put 200"
     }
 
     private companion object {
