@@ -1,9 +1,9 @@
 # UI Screens Inventory
 
-**Status:** v1.106
+**Status:** v1.107
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
-**Last updated:** 2026-10-03 (#376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
+**Last updated:** 2026-10-03 (#383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
 
 ---
 
@@ -1995,20 +1995,36 @@ the history surface lands (S3).
 **Content.** Two script-safe JSON blocks (`#ps-data`, the set's body through `ScriptSafeJson`; `#ps-workspace`,
 the ONE source of the displayed and the submitted version — a malformed block is a visible refusal with ZERO
 requests, never a default); the **graph** (`#ps-graph`: one node per parameter, an edge per `depends_on`, the
-badge the source kind — static: it shows the set's STRUCTURE and does not animate an evaluation, which is
-#383's) with a text live region for its selection; the **inspector** (`#ps-inspector`: the selected
+badge the source kind) with a text live region for its selection — and, since #383, with the evaluation's LIVE
+STATE: each applied frame moves its parameter's node through waiting → admitted → running → resolved (a failed
+selector → failed, carrying the frame's catalogued code; a parameter without a terminal state fails from the
+`evaluation_failed` terminal frame), the terminal response's `reset` parameters carry a dashed reset mark, the
+live region announces one short sentence per frame (`city is running`, never the frame's JSON), and the page
+keeps a frame log (`window.PSWorkspace.frames`, in memory only, reset per mount — never persisted) the guards
+read; the **inspector** (`#ps-inspector`: the selected
 parameter's definition and, once evaluated, its state — value, origin, reset, hidden, disabled, options,
-errors — as TEXT only); and the **live form** (`#ps-form-host`).
+errors — as TEXT only, plus the stream's code and detail for a parameter a live frame marked failed); and the
+**live form** (`#ps-form-host`).
 
 **The live form — roles.** The form is rendered, and `initParameters` is called, only for a role that may
 evaluate (`parameter_set.evaluate`: viewer, author, workspace admin, super admin). A promoter's page renders
 the structure (graph and inspector) and **no control and no request** — `[data-ps-read-only]` carries the
-hint; the markup is not a CSS-hidden control. The form POSTs the existing `POST /api/v1/parameter-sets/{id}/evaluate`
-with the VIEWED version, the session credential and the `DP-CSRF-Token` double-submit header; the page adds no route, no scope row
-and no permission. A parameter VALUE leaves the form only in that POST body — never a URL, history state,
+hint; the markup is not a CSS-hidden control. The form POSTs the OBSERVED evaluation
+`POST /api/v1/parameter-sets/{id}/evaluations` (rest-api §21.5 — §21.3's act streamed as Server-Sent Events)
+with the VIEWED version, the WHOLE selection set, a fresh v4 `evaluation_id` per attempt (minted by the
+runtime, never stored) and the `instance_id`, the session credential and the `DP-CSRF-Token` double-submit
+header; the page adds no route, no scope row and no permission. The frames drive the graph's live state
+(above); `evaluation_completed`'s response applies the form state exactly as the plain evaluate's did. A
+parameter VALUE leaves the form only in that POST body — never a URL, history state,
 storage or log line. A change made while an evaluate is pending SUPERSEDES it — the person's newest selection is the one worth
-answering, so the pending attempt is finished and its late response changes nothing (a dashboard's form keeps the
-refusal instead, `parameters.locked`); a refused evaluate renders the server's code and message in `#ps-form-error`.
+answering, so the pending attempt is finished and its STREAM is closed (the server's disconnect grace then
+aborts the evaluation, §21.5), and every frame whose `evaluation_id` is not the current attempt's is dropped
+before it can touch state or DOM (a dashboard's form keeps
+the refusal instead, `parameters.locked`). A stream that ends without a terminal frame is the transport
+failure ([Dashboards §6.6](dashboards.md#66-the-states-notifications-and-the-csp)'s rule): the form keeps its
+last committed selections and the lock is released by the deadline, never earlier; a `: revoked` comment shows
+the runtime's revoked notice the same way. A refused evaluate renders the server's code and message in `#ps-form-error`;
+`evaluation_failed` ends the attempt with its catalogued code and every unfinished node fails on the graph.
 
 Guards: `ParameterSetsWorkspaceModelTest` (the resolution order, never-clamp, the lens-hidden 404, the draft
 arms, the tab set), `ParameterSetsBrowseModelTest`, `ParameterSetsUiControllerTest` (the routes' scopes, the 400/404,
@@ -2016,7 +2032,12 @@ the evaluate flag per role), `ParameterSetsRenderTest` (the page's markup contra
 for an evaluator, the promoter's page, the draft label, the choose-a-version state, the script-safe
 blocks), `ShellRenderTest` (the Parameter Sets branch), `ReadFloorTest` (the `PARAMETER_SETS` family and
 its floor), `BrowseModelConventionTest`, `MatrixRowReachabilityTest`/`RoleWalkE2eTest` (the §7.6 Surfaces
-cells), `parameter-set-init.test.mjs` (the runtime's parameters-only entry), `SampleDataParameterSetsContentTest`
+cells), `parameter-set-init.test.mjs` (the runtime's parameters-only entry),
+`parameter-set-stream.test.mjs` and `ParameterWorkspaceStreamBrowserTest` (#383 — the streamed evaluation:
+the observed route's transport, the supersede that closes the prior attempt's stream, the id check that drops
+another attempt's frames, the §6.6 path, `: revoked`, the state machine in `parameter-workspace-graph-state.test.mjs`,
+and the browser witness for spec §12's scenarios 3, 6, 7 and 10 with the promoter arm),
+`parameter-workspace-model.test.mjs`, `SampleDataParameterSetsContentTest`
 and `ExampleContentSeederTest` (the demo set `nyc/parameters/geo_filters` is seeded through the seeder, §4.23's
 demo content), and the browser suite `ParameterSetPagesBrowserTest`.
 
@@ -2221,6 +2242,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-03 | v1.107 | #383 the workspace's observed evaluation — the client half (workspace spec §4.2/§6.2/§6.3, #357 S2b) — renumbered at merge after 376's v1.106 | **§4.23**: the live form now STREAMS `POST /api/v1/parameter-sets/{id}/evaluations` (rest-api §21.5 — the observed evaluation; the version, the whole selection set, a fresh v4 `evaluation_id` per attempt, the CSRF header) through the same `initParameters` entry; the graph is the evaluation's LIVE STATE (waiting → admitted → running → resolved, failed with the frame's catalogued code, D3's unfinished sweep from `evaluation_failed`, the terminal response's reset marks), the live region announces one sentence per frame, a supersede CLOSES the prior attempt's stream (the server's grace aborts it), another attempt's frames are dropped before any state or DOM change, a stream ending without a terminal frame takes dashboards §6.6 (lock released by the deadline, never earlier), and the page keeps an in-memory frame log (`window.PSWorkspace.frames`) the guards read. No route, permission, scope row or role changed; no new page markup (the log is data, not a pane). Guards: `parameter-set-stream.test.mjs`, `parameter-workspace-graph-state.test.mjs`, `ParameterWorkspaceStreamBrowserTest` (scenarios 3/6/7/10 + the promoter arm), `ParameterSetFormBrowserTest`'s captures tightened to the exact `/evaluations` path. |
 | 2026-10-03 | v1.106 | #376 the Parameter Sets History tab (workspace spec §6.4, #357 S3) — renumbered at merge after 400's v1.105 | **§4.23** gains **History**: the `Workspace` / `History` section links (one canonical URL each, `?tab=`), the History arm with no live form, graph or body block (so the tab evaluates nothing), the house table of the set's evaluation records — every caller's, 25 a page, newest first — its pager partial and the record detail partial (header, per-parameter outcomes, the statement attempts to the millisecond); `parameter_set.read`, the lens server-side (the page's own 404 on both partials; a narrowing lens lists only the versions it admits). |
 | 2026-10-02 | v1.105 | #400 the Dashboards workspace — the searchable sidebar tree, the flat catalog, the tabbed version-explicit workspace (#409 closes with it) | **§3.4**: the Dashboards panel gains the search box in the Pipelines branch's exact markup (the shared engine serves it with no JS change; a non-empty `q` swaps the flat results into the panel's root, clearing returns the tree). **§4.21 rewritten**: `GET /dashboards` is the flat CATALOG in §4.3's shape (owner ruling 2026-10-02 — the L3b tree page retired; folders are the sidebar's axis), each row a full-document link into the workspace, a draft-only dashboard's row saying so; `GET /dashboards/{id}?version=&tab=` is the tabbed, version-explicit WORKSPACE — Board (today's board page exactly: the same bundle block, the unchanged `dashboards-page.js`, the events pane beside the board), Overview (the definition, read-only, with each pin's status and the R1 release hint), Refreshes, Versions (the history and the seven lifecycle dialogs into `#dp-dialog`, `HX-Redirect` back with a flash) and Keys (`dashboard.key.bind`, read-only, linking the Keys page); #409: a dashboard with no served release opens the choose-a-version state — the heading NAMES it, the draft is offered, the runtime config never called, no `not_found`; the preview route answers 303 onto the workspace (the deep links survive); every version switch a full navigation (the one-bundle rule), tab switches in-page over the SHARED tab core (`static/js/workspace/tabs.js`; the pipeline editor's adoption was reverted at merge — #420), the hidden Board re-fitting through the runtime's own `resize()`. **§4.21's preview gap closed**: the #369 draft preview is documented here for the first time, as the workspace's named-version view (the chip succeeded the banner). `dashboards-page.js` unchanged; no new permission; no REST route changed. Guards: the falsifications in the handback. |
 | 2026-10-02 | v1.104 | #374 the Parameter Sets screens (workspace spec §6.2/§6.3, #357 S1) — renumbered at merge after 386's v1.103 | **§3.4**: Build gains **Parameter Sets**, the navigating-tree pattern's third use (lucide `sliders-horizontal`; link → the catalog, lazy tree beside it with no search box, leaf → the workspace). **New §4.23**: the flat paged catalog `GET /parameter-sets` and the canonical workspace `GET /parameter-sets/{id}?version=N&tab=` — the version-explicit resolve order (explicit admitted version, never clamped → the lens-visible current → an accessible draft, labelled → choose-a-version), the house 404/400, a static Cytoscape graph + inspector and the live parameter form through the dashboard runtime's new parameters-only `initParameters` entry against the EXISTING evaluate route (role-hidden: a promoter's page has no control and no request). The demo family seeds `nyc/parameters/geo_filters`. No permission, scope row or role changed; the routes are listed in auth.md §7.6's `parameter_set.read` Surfaces cell. Guards: the render/controller/model tests, `ReadFloorTest`, `SampleDataParameterSetsContentTest`, `ParameterSetPagesBrowserTest`, the falsifications in the handback. |

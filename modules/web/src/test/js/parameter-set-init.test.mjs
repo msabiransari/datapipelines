@@ -1,8 +1,9 @@
 // The parameters-only entry (#374, workspace spec §6.3): `initParameters` points the runtime's instance machinery
-// at a parameter SET — `POST /api/v1/parameter-sets/{id}/evaluate` with `{ version, selections }`, `version` ALWAYS
-// present, the first render submitting `{}`, a newer attempt superseding a pending one, the server's errors shown
+// at a parameter SET — #383: the OBSERVED evaluation `POST /api/v1/parameter-sets/{id}/evaluations`, the first
+// render submitting `{}`, a newer attempt superseding a pending one (its stream closed), the server's errors shown
 // verbatim. Same harness decision as the sibling tests: no packages; a hand-rolled fake DOM and a scripted fetch
-// installed before the IIFE is required.
+// installed before the IIFE is required. The stream-specific facts (the id check, the §6.6 path, `: revoked`) are
+// `parameter-set-stream.test.mjs`'s; this file keeps the form's rules over the streamed transport.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -13,6 +14,8 @@ import path from "node:path";
 const require = createRequire(import.meta.url);
 const here = path.dirname(fileURLToPath(import.meta.url));
 const runtimePath = path.resolve(here, "../../main/resources/static/js/datapipelines-dashboard.js");
+
+const V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 function fakeElement(tag) {
   const listeners = {};
@@ -153,6 +156,7 @@ function evaluated(values, extra) {
 /** A fetch whose every answer is held until the test releases it, so ordering is the test's. */
 function heldFetch() {
   const calls = [];
+  const encoder = new TextEncoder();
   const impl = (url, init) =>
     new Promise((resolve) => {
       calls.push({ url, init, body: init.body ? JSON.parse(init.body) : null, resolve });
@@ -164,6 +168,39 @@ function heldFetch() {
       status: status || 200,
       text: async () => JSON.stringify(status >= 400 ? data : { data }),
     });
+  impl.answerStream = (call, payload) => {
+    const id = call.body.evaluation_id;
+    const chunks = [
+      `event: evaluation_started\nid: 1\ndata: ${JSON.stringify({
+        evaluation_id: id,
+        parameter_set_id: "ps-1",
+        version: 2,
+        deadline_at: "2026-10-02T22:00:00Z",
+      })}\n\n`,
+      `event: evaluation_completed\nid: 2\ndata: ${JSON.stringify({ evaluation_id: id, response: payload })}\n\n`,
+    ];
+    call.resolve({
+      ok: true,
+      status: 200,
+      text: async () => "",
+      body: {
+        getReader() {
+          let index = 0;
+          return {
+            read: async () => {
+              if (index < chunks.length) {
+                const value = chunks[index];
+                index += 1;
+                return { done: false, value: encoder.encode(value) };
+              }
+              return { done: true, value: undefined };
+            },
+            cancel: async () => {},
+          };
+        },
+      },
+    });
+  };
   return impl;
 }
 
@@ -179,7 +216,10 @@ function boot(options) {
     parameterSet: { id: "ps-1", version: 2 },
     container,
     adapter,
-    options: { onNotification: (n) => adapter.hostNotifications.push(n) },
+    options: {
+      onNotification: (n) => adapter.hostNotifications.push(n),
+      ...(options && options.lockSeconds ? { parameterLockSeconds: options.lockSeconds } : {}),
+    },
   });
   live = instance;
   return { runtime, fetchImpl, adapter, container, instance };
@@ -216,18 +256,22 @@ test("initParameters refuses a missing or non-integer version and any credential
   }
 });
 
-test("the first render submits {} with the version, to the frozen evaluate route, carrying the session's CSRF token", async () => {
+test("the first render streams {} with the version, to the observed evaluations route, carrying the session's CSRF token", async () => {
   const { fetchImpl, adapter, instance } = boot({ cookie: "dp_csrf=tok%2B1" });
   try {
     await tick();
     assert.equal(fetchImpl.calls.length, 1);
     const call = fetchImpl.calls[0];
-    assert.equal(call.url, "/api/v1/parameter-sets/ps-1/evaluate");
+    assert.equal(call.url, "/api/v1/parameter-sets/ps-1/evaluations");
     assert.equal(call.init.method, "POST");
     assert.equal(call.init.credentials, "same-origin");
     assert.equal(call.init.headers["DP-CSRF-Token"], "tok+1");
-    assert.deepEqual(call.body, { version: 2, selections: {} });
-    fetchImpl.answer(call, evaluated({ country: "NL" }));
+    assert.equal(call.init.headers["Accept"], "text/event-stream");
+    assert.equal(call.body.version, 2);
+    assert.deepEqual(call.body.selections, {});
+    assert.match(call.body.evaluation_id, V4);
+    assert.match(call.body.instance_id, V4);
+    fetchImpl.answerStream(call, evaluated({ country: "NL" }));
     await instance.ready;
     assert.equal(adapter.rendered.length, 1);
   } finally {
@@ -235,40 +279,76 @@ test("the first render submits {} with the version, to the frozen evaluate route
   }
 });
 
-test("a commit submits the WHOLE selection set with the version, hidden and disabled values included", async () => {
+test("a commit streams the WHOLE selection set with the version, hidden and disabled values included", async () => {
   const { fetchImpl, adapter, instance } = boot();
   try {
     await tick();
-    fetchImpl.answer(fetchImpl.calls[0], evaluated({ country: "NL", city: null, hiddenOne: "x" }));
+    fetchImpl.answerStream(fetchImpl.calls[0], evaluated({ country: "NL", city: null, hiddenOne: "x" }));
     await instance.ready;
     adapter.selections = { country: "DE", city: null, hiddenOne: "x" };
     adapter.listeners.commit({ name: "country", type: "parameter" });
     await tick();
     assert.equal(fetchImpl.calls.length, 2);
-    assert.deepEqual(fetchImpl.calls[1].body, { version: 2, selections: { country: "DE", city: null, hiddenOne: "x" } });
+    const body = fetchImpl.calls[1].body;
+    assert.equal(body.version, 2);
+    assert.deepEqual(body.selections, { country: "DE", city: null, hiddenOne: "x" });
+    assert.match(body.evaluation_id, V4);
+    assert.notEqual(body.evaluation_id, fetchImpl.calls[0].body.evaluation_id);
   } finally {
     uninstallDom();
   }
 });
 
-test("a late response of attempt n after attempt n+1 was minted touches nothing", async () => {
+test("a late frame of superseded attempt n, planted on attempt n+1's stream, changes nothing", async () => {
   const { fetchImpl, adapter, instance } = boot();
   try {
     await tick();
-    fetchImpl.answer(fetchImpl.calls[0], evaluated({ country: "NL" }));
+    fetchImpl.answerStream(fetchImpl.calls[0], evaluated({ country: "NL" }));
     await instance.ready;
     const rendersBefore = adapter.rendered.length;
     adapter.selections = { country: "DE" };
     adapter.listeners.commit({ name: "country", type: "parameter" }); // attempt n
     await tick();
+    const staleId = fetchImpl.calls[1].body.evaluation_id;
+    assert.equal(fetchImpl.calls[1].init.signal.aborted, false);
     adapter.selections = { country: "FR" };
     adapter.listeners.commit({ name: "country", type: "parameter" }); // attempt n+1 supersedes n
     await tick();
-    assert.equal(fetchImpl.calls.length, 3);
-    // n+1 answers first, then the late n.
-    fetchImpl.answer(fetchImpl.calls[2], evaluated({ country: "FR" }));
-    await tick();
-    fetchImpl.answer(fetchImpl.calls[1], evaluated({ country: "DE" }));
+    assert.equal(fetchImpl.calls[1].init.signal.aborted, true, "the supersede closed attempt n's stream");
+    // n's terminal frame arrives anyway — planted on n+1's stream, ahead of n+1's own.
+    const currentId = fetchImpl.calls[2].body.evaluation_id;
+    const encoder = new TextEncoder();
+    const chunks = [
+      `event: evaluation_completed\nid: 9\ndata: ${JSON.stringify({
+        evaluation_id: staleId,
+        response: evaluated({ country: "DE" }),
+      })}\n\n`,
+      `event: evaluation_completed\nid: 10\ndata: ${JSON.stringify({
+        evaluation_id: currentId,
+        response: evaluated({ country: "FR" }),
+      })}\n\n`,
+    ];
+    fetchImpl.calls[2].resolve({
+      ok: true,
+      status: 200,
+      text: async () => "",
+      body: {
+        getReader() {
+          let index = 0;
+          return {
+            read: async () => {
+              if (index < chunks.length) {
+                const value = chunks[index];
+                index += 1;
+                return { done: false, value: encoder.encode(value) };
+              }
+              return { done: true, value: undefined };
+            },
+            cancel: async () => {},
+          };
+        },
+      },
+    });
     await tick();
     const renders = adapter.rendered.slice(rendersBefore);
     assert.equal(renders.length, 1, "only the newest attempt's response may render");
@@ -279,35 +359,11 @@ test("a late response of attempt n after attempt n+1 was minted touches nothing"
   }
 });
 
-test("a late response arriving BEFORE the newer one is answered changes nothing either", async () => {
-  const { fetchImpl, adapter, instance } = boot();
-  try {
-    await tick();
-    fetchImpl.answer(fetchImpl.calls[0], evaluated({ country: "NL" }));
-    await instance.ready;
-    const rendersBefore = adapter.rendered.length;
-    adapter.selections = { country: "DE" };
-    adapter.listeners.commit({ name: "country", type: "parameter" });
-    await tick();
-    adapter.selections = { country: "FR" };
-    adapter.listeners.commit({ name: "country", type: "parameter" });
-    await tick();
-    fetchImpl.answer(fetchImpl.calls[1], evaluated({ country: "DE" })); // the superseded one, first
-    await tick();
-    assert.equal(adapter.rendered.length, rendersBefore, "a superseded response rendered");
-    fetchImpl.answer(fetchImpl.calls[2], evaluated({ country: "FR" }));
-    await tick();
-    assert.equal(adapter.rendered.length, rendersBefore + 1);
-  } finally {
-    uninstallDom();
-  }
-});
-
 test("a server error reaches the form verbatim — the server's code and message, not a sentence of the renderer's", async () => {
   const { fetchImpl, adapter, instance } = boot();
   try {
     await tick();
-    fetchImpl.answer(fetchImpl.calls[0], evaluated({ country: "NL" }));
+    fetchImpl.answerStream(fetchImpl.calls[0], evaluated({ country: "NL" }));
     await instance.ready;
     adapter.selections = { country: "DE" };
     adapter.listeners.commit({ name: "country", type: "parameter" });
@@ -328,7 +384,7 @@ test("the same failure twice with a success between is shown twice", async () =>
   const { fetchImpl, adapter, instance } = boot();
   try {
     await tick();
-    fetchImpl.answer(fetchImpl.calls[0], evaluated({ country: "NL" }));
+    fetchImpl.answerStream(fetchImpl.calls[0], evaluated({ country: "NL" }));
     await instance.ready;
     const fail = async (index) => {
       adapter.selections = { country: "DE" };
@@ -341,7 +397,7 @@ test("the same failure twice with a success between is shown twice", async () =>
     adapter.selections = { country: "NL" };
     adapter.listeners.commit({ name: "country", type: "parameter" });
     await tick();
-    fetchImpl.answer(fetchImpl.calls[2], evaluated({ country: "NL" }));
+    fetchImpl.answerStream(fetchImpl.calls[2], evaluated({ country: "NL" }));
     await tick();
     await fail(3);
     assert.equal(adapter.notifications.filter((n) => n.code === "x.y").length, 2);
