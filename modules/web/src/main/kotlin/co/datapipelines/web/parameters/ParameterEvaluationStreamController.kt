@@ -9,6 +9,7 @@ import co.datapipelines.parameters.ParameterEvaluationRepository
 import co.datapipelines.parameters.ParameterEvaluator
 import co.datapipelines.parameters.ParameterSetService
 import co.datapipelines.parameters.SelectionKeys
+import co.datapipelines.persistence.FailureShape
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.web.api.ApiErrors
 import co.datapipelines.web.api.currentPrincipal
@@ -110,8 +111,16 @@ class ParameterEvaluationStreamController(
                 } catch (
                     @Suppress("TooGenericExceptionCaught") e: Exception,
                 ) {
-                    // A defect, never an author's problem: the frame carried the stand-in code only; the cause is logged here.
-                    log.error("event=parameter.evaluation_failed evaluation_id={} error={}", request.evaluationId, e.javaClass.name, e)
+                    // A defect, never an author's problem: the frame carried the stand-in code only. The ERROR line names the
+                    // cause by class and SQLState and attaches no throwable (its message may carry SQL or a value, §3.4M);
+                    // the stack is the DEBUG line's.
+                    log.error(
+                        "event=parameter.evaluation_failed evaluation_id={} error={} sql_state={}",
+                        request.evaluationId,
+                        e.javaClass.name,
+                        FailureShape.sqlState(e),
+                    )
+                    log.debug("event=parameter.evaluation_failed_cause evaluation_id={}", request.evaluationId, e)
                 }
             }
         streams.attach(request.evaluationId, job)

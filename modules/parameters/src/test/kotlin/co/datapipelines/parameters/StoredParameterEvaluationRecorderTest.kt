@@ -69,6 +69,19 @@ class StoredParameterEvaluationRecorderTest {
     }
 
     @Test
+    fun `a storage fault with no SQLException in its chain logs sql_state=none, never the string null`() {
+        val repository = mockk<ParameterEvaluationRepository>()
+        every { repository.insertRunning(any()) } throws DataAccessResourceFailureException("SECRET-ROW-TEXT")
+
+        StoredParameterEvaluationRecorder(repository).started(EvaluationStarted(key, attempt(), 4, Instant.EPOCH))
+
+        val line = errors().single().formattedMessage
+        line shouldContain "error=DataAccessResourceFailureException sql_state=none"
+        withClue("an absent SQLState is spelled like FailureShape's, never Kotlin's null") { line shouldNotContain "sql_state=null" }
+        line shouldNotContain "SECRET"
+    }
+
+    @Test
     fun `a failed terminal write is one structured ERROR and never throws`() {
         val repository = mockk<ParameterEvaluationRepository>()
         every { repository.finish(any()) } throws fault()
