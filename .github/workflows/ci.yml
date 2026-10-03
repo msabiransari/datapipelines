@@ -8,6 +8,16 @@
 # WHAT RUNS WHERE —
 #
 #   gate (ubuntu-latest, REQUIRES the runner's Docker daemon; 90-minute budget, #290):
+#     ./scripts/helm-check.sh               — the reference Helm chart (deploy/helm/datapipelines)
+#         is linted and rendered by a PINNED helm binary (#411): `helm lint --strict` plus four
+#         template cases — defaults render no `env:` block at all, both `duckdb.*` values render
+#         exactly their two quoted entries, an `extraEnv` double-mapping of either DuckDB key is
+#         refused with the template's own `fail` message, and a missing `existingSecret` is
+#         refused — the render-TIME behaviour the Kotlin drift test can only pin textually.
+#         The binary is downloaded from get.helm.sh and SHA-256-verified against an in-repo pin
+#         of the release's checksum file before first use and every run
+#         (scripts/helm-check.sh; bump: DEVELOPMENT.md §10.2, "Bumping helm"). Needs network.
+#         CI-only: the pregate has no helm; a chart-check failure exits 1, tooling exits 2.
 #     ./gradlew build ktlintCheck detekt   — the standard gate: assemble, unit tests,
 #         ktlint, detekt, module-dependency verification, Kover. Only the E2E
 #         integration suite is EXCLUDED (-x :tests:integration-tests:test); the rest
@@ -127,6 +137,8 @@ jobs:
           EOF
       - name: every pinned test image still exists at its registry (cold — never the cache)
         run: ./scripts/verify-image-pins.sh
+      - name: render the reference Helm chart (pinned helm — lint + the five template cases)
+        run: ./scripts/helm-check.sh
       - name: build, ktlint, detekt (full unit suite incl. Testcontainers — Docker required, see header)
         id: build
         # --continue: one red module must not stop the others — every module's tests and

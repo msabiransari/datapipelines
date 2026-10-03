@@ -25,8 +25,9 @@ import java.io.File
  * image's path would drift the day the image moves it.
  *
  * The [MailConfigKeysSpecDriftTest] shape for the doc pin and the [ShutdownGraceArithmeticTest]
- * shape for the text-level template assertions. `helm` itself is not a dependency anywhere in
- * this repo, so the guard is textual — it reads the chart files, it does not render them.
+ * shape for the text-level template assertions. CI renders the chart with a pinned `helm`
+ * (`scripts/helm-check.sh`); this guard stays textual so the pregate, which has no `helm`,
+ * still pins the shape — it reads the chart files, it does not render them.
  */
 class HelmDuckDbValuesSpecDriftTest {
     private val shipped: Map<String, Any?> by lazy { load("deploy/helm/datapipelines/values.yaml") }
