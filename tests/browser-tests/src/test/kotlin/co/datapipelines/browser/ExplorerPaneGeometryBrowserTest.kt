@@ -425,7 +425,8 @@ class ExplorerPaneGeometryBrowserTest : SchedulesBrowserSuite() {
      * link riding inside the swapped region, which the browser applies too late to style
      * the first paint. The armed document is stamped with `token` (see [armFirstFrame]).
      */
-    private val armHeadCheck = """
+    private val armHeadCheck =
+        """
         (token) => { window.__ff = null; window.__ffArmed = token;
           document.body.addEventListener('htmx:afterSwap', () => requestAnimationFrame(() => {
             const sheets = [...document.querySelectorAll('link[rel="stylesheet"]')];
@@ -434,7 +435,7 @@ class ExplorerPaneGeometryBrowserTest : SchedulesBrowserSuite() {
               sheetInSwappedRegion: sheets.some(l => l.href.includes('template-tree.css') && !!l.closest('#app-main')),
             };
           }), {once: true}); }
-    """.trimIndent()
+        """.trimIndent()
 
     /**
      * 104 §C — the tree pane's width is the USER's.

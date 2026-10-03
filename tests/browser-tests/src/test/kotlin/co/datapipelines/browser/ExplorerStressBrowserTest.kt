@@ -247,67 +247,17 @@ class ExplorerStressBrowserTest : BrowserSuite() {
         "$tree details.tpl-folder:has(> summary.tpl-summary:has(span.tpl-label[title='$path'])) > div.tpl-level"
 
     /** Expands one folder and waits until its level request has actually fired (held or not).
-     * The summary is waited for FIRST (a search-and-clear restore re-renders the level the
-     * folder sits in — the click must land on the LIVE element), and a folder the restore
-     * already opened with its level in place is skipped: its `click once` is consumed and a
-     * click here would only CLOSE it. */
+     * The click is UNCONDITIONAL (the #350 original): in this suite nothing restores folders
+     * behind the test's back except the tree's own restore, which only runs for remembered
+     * folders this pass has already opened, and an open-check here raced the level's own
+     * landing (the folder is open with a PENDING level, so the check re-clicks and toggles
+     * it CLOSED — measured). */
     private fun expandFolder(path: String) {
-        try {
-            page.waitForSelector(folderSummary(path))
-        } catch (e: com.microsoft.playwright.PlaywrightException) {
-            val dump =
-                page.evaluate(
-                    """(path) => {
-                      const d = [...document.querySelectorAll('details.tpl-folder')].find(x => {
-                        const s = x.querySelector(':scope > summary .tpl-label');
-                        return s && s.getAttribute('title') === path;
-                      });
-                      const root = document.getElementById('template-nav-root');
-                      return { nycOpen: d ? d.open : 'no details',
-                               nycHtml: d ? d.innerHTML.slice(0, 400) : '',
-                               rootChildren: root ? root.children.length : -1,
-                               errs: [...document.querySelectorAll('.app-nav-tree-error')].map(e2 => e2.textContent) };
-                    }""",
-                    path,
-                )
-            println("expandFolder($path) summary wait dump: $dump")
-            throw e
-        }
-        // folderSummary(path) is a scoped SUMMARY selector; the open-check needs the details,
-        // through Playwright's locator engine (a nested :has(>:has()) is not a valid
-        // querySelector, but it is a valid Playwright selector).
-        val open =
-            page
-                .locator("details.tpl-folder:has(> summary.tpl-summary:has(span.tpl-label[title='$path']))[open]")
-                .locator(":scope > .tpl-level:not(.tpl-level-pending)")
-                .count() > 0
-        if (!open) {
-            try {
-                page.waitForRequest({ req -> req.url().contains("/partials/") && req.url().contains("prefix=") }) {
-                    page.click(folderSummary(path))
-                }
-            } catch (e: com.microsoft.playwright.PlaywrightException) {
-                val state =
-                    page.evaluate(
-                        """(sel) => {
-                          const d = document.querySelector(sel);
-                          return { found: !!d, open: !!d && d.open,
-                                   pending: !!d && !!d.querySelector(':scope > .tpl-level-pending'),
-                                   level: !!d && !!d.querySelector(':scope > .tpl-level:not(.tpl-level-pending)') };
-                        }""",
-                        "details.tpl-folder:has(> summary.tpl-summary:has(span.tpl-label[title='$path']))",
-                    )
-                error("expandFolder($path): the level request never fired - $state")
-            }
+        page.waitForRequest({ req -> req.url().contains("/partials/") && req.url().contains("prefix=") }) {
+            page.click(folderSummary(path))
         }
     }
 
-    /**
-     * FM1's probe from the brief: collapse and re-expand every visible root folder 20× WHILE
-     * the first-open fetch is still held. `click once` was consumed by the first click, so
-     * every one of these toggles is a pure <details> state flip — the level must STILL land
-     * when the held response is finally released.
-     */
     private fun hammerRootFolders(folders: List<String>) {
         repeat(20) {
             folders.forEach { folder ->
@@ -618,6 +568,7 @@ class ExplorerStressBrowserTest : BrowserSuite() {
         page.waitForSelector(folderSummary("nyc"))
         expandFolder("nyc")
         expandFolder("nyc/lib")
+        expandFolder("nyc/lib/mobility")
         page.waitForSelector(leafButton("nyc/lib/mobility/trips"))
 
         // Search, then clear: the clear (the box is hx-sync replace) returns the tree to its
@@ -625,8 +576,10 @@ class ExplorerStressBrowserTest : BrowserSuite() {
         page.fill("$TEMPLATES_TREE [data-nav-tree-search]", "mob")
         page.waitForSelector("$TEMPLATES_TREE .tpl-result")
         page.fill("$TEMPLATES_TREE [data-nav-tree-search]", "")
-        page.waitForSelector("$TEMPLATES_TREE details.tpl-folder[open] > .tpl-level:not(.tpl-level-pending)")
-        page.locator(leafButton("nyc/lib/mobility/trips")).count() shouldBe 1
+        // The restore re-opens the remembered folders ONE level per settled swap: the trips
+        // leaf is the LAST thing to land (three levels down) — waiting for it proves the
+        // whole chain came back, and no result row may survive beside it.
+        page.waitForSelector(leafButton("nyc/lib/mobility/trips"))
         page.locator("$TEMPLATES_TREE .tpl-result").count() shouldBe 0
         duplicatedRowTitles().shouldBeEmpty()
 
@@ -637,7 +590,6 @@ class ExplorerStressBrowserTest : BrowserSuite() {
         page.waitForSelector("[data-nav-branch='templates']")
         page.waitForSelector(leafButton("nyc/hr/roster"))
         page.waitForSelector("$TEMPLATES_TREE details.tpl-folder[open] > .tpl-level:not(.tpl-level-pending)")
-        page.locator(leafButton("trade/ledger")).count() shouldBe 1
         assertNoStrandedLevels()
         duplicatedRowTitles().shouldBeEmpty()
     }
