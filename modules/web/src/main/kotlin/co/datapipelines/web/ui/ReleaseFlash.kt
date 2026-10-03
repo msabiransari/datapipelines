@@ -67,12 +67,12 @@ class ReleaseFlash {
     ): String? {
         val held = session.getAttribute(SESSION_KEY) as? Held ?: return null
         session.removeAttribute(SESSION_KEY)
-        if (System.currentTimeMillis() - held.atEpochMs > TTL_MS) return null
+        val fresh = System.currentTimeMillis() - held.atEpochMs <= TTL_MS
         val principal = SecurityContextHolder.getContext().authentication?.principal as? AuthenticatedPrincipal
-        if (principal == null || principal.userId != held.actorId) return null
+        val actors = principal != null && principal.userId == held.actorId
         val pathId = (request.getAttribute(HandlerMapping.URI_TEMPLATE_VARIABLES_ATTRIBUTE) as? Map<*, *>)?.get("id")?.toString()
-        if (pathId != held.pipelineId.toString()) return null
-        return MESSAGE_PREFIX + held.templates.joinToString(", ") + "."
+        val onThePipeline = pathId == held.pipelineId.toString()
+        return if (fresh && actors && onThePipeline) MESSAGE_PREFIX + held.templates.joinToString(", ") + "." else null
     }
 
     companion object {

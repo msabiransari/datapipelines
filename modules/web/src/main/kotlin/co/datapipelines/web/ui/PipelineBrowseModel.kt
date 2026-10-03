@@ -72,7 +72,6 @@ class PipelineBrowseModel(
     private val datasources: DatasourceRegistry,
     private val actors: ActorNames,
     private val runStats: PipelineRunStats,
-    private val authoring: co.datapipelines.pipeline.AuthoringGuard,
     /** #259 — the Usage tab's Schedules list, the scheduler's one transport-facing type. */
     private val schedules: co.datapipelines.scheduler.ScheduleService,
     /** #320 — the dashboards whose sources pin a version of the pipeline: the port `PipelineService.refuseIfPinned` asks. */

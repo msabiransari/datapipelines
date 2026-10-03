@@ -602,10 +602,6 @@ class PipelineExplorerRenderTest {
         setVariable("scopes", setOf("ADMIN"))
     }
 
-    /** 138: the sectioned shape the skill teaches, with a markup-shaped line that must stay text. */
-    private val sectionedDescription =
-        "Question\nWhat the pipeline answers.\n\nWindow and door\nOne year, chosen by year.\n\nCaveats\n<b>none</b>"
-
     private fun record(name: String) =
         PipelineRecord(
             id = LEAF_ID,

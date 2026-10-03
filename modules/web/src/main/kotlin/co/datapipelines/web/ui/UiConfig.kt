@@ -224,9 +224,9 @@ class UiConfig {
     ): VisualizationLifecycleDialogModel =
         VisualizationLifecycleDialogModel(visualizations, dashboards, templateStatuses, evidence, actorNames, authoring)
 
-    /** 067: the pipelines explorer's one model, shared by the page and the partial controllers. */
+    /** 067: the pipelines screen's one model, shared by the page and the partial controllers. */
     @Bean
-    @Suppress("LongParameterList") // 106: the detail's three regions in one call need their sources
+    @Suppress("LongParameterList") // one collaborator per read the screen's fragments make
     fun pipelineBrowseModel(
         pipelines: co.datapipelines.pipeline.PipelineService,
         repository: co.datapipelines.pipeline.PipelineRepository,
@@ -235,7 +235,6 @@ class UiConfig {
         datasources: co.datapipelines.pipeline.DatasourceRegistry,
         actorNames: ActorNames,
         runStats: PipelineRunStats,
-        authoring: co.datapipelines.pipeline.AuthoringGuard,
         schedules: co.datapipelines.scheduler.ScheduleService,
         // #320 — the dashboards that pin a release; the Usage tab lists what the discard would be refused over.
         dashboards: co.datapipelines.pipeline.PipelineVersionConsumers,
@@ -248,7 +247,6 @@ class UiConfig {
             datasources,
             actorNames,
             runStats,
-            authoring,
             schedules,
             dashboards,
         )
