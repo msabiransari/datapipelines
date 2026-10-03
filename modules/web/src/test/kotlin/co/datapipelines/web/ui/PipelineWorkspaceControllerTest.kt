@@ -6,6 +6,10 @@ import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.auth.WorkspaceRole
+import co.datapipelines.executor.ExecutionRecord
+import co.datapipelines.executor.ExecutionRepository
+import co.datapipelines.executor.ExecutionStatus
+import co.datapipelines.executor.ExecutionTrigger
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineRecord
 import co.datapipelines.pipeline.PipelineRepository
@@ -19,6 +23,7 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.springframework.http.HttpStatus
@@ -74,23 +79,24 @@ class PipelineWorkspaceControllerTest {
     @AfterEach
     fun clearContext() = SecurityContextHolder.clearContext()
 
-    private fun authenticate() {
+    private fun authenticate(role: WorkspaceRole = WorkspaceRole.VIEWER): AuthenticatedPrincipal {
         val principal =
             AuthenticatedPrincipal(
                 UUID.randomUUID(),
                 "a@b.c",
                 "A",
                 AuthMethod.OIDC,
-                workspace = WorkspaceContext(workspaceId, "acme"),
+                workspace = WorkspaceContext(workspaceId, "acme", role = role),
             )
         SecurityContextHolder.getContext().authentication =
             UsernamePasswordAuthenticationToken(principal, null, emptyList())
         every { lens.viewFor(any()) } returns everything
         every { themeResolver.resolve(any()) } returns "saas"
+        return principal
     }
 
     /** Re-aims the lens AND the role at the promoter for one test's later opens: the lens narrows the reads, the role gates the verbs. */
-    private fun becomePromoter() {
+    private fun becomePromoter(): AuthenticatedPrincipal {
         val principal =
             AuthenticatedPrincipal(
                 UUID.randomUUID(),
@@ -102,6 +108,8 @@ class PipelineWorkspaceControllerTest {
         SecurityContextHolder.getContext().authentication =
             UsernamePasswordAuthenticationToken(principal, null, emptyList())
         every { lens.viewFor(any()) } returns narrowed
+        every { themeResolver.resolve(any()) } returns "saas"
+        return principal
     }
 
     private val record =
@@ -176,10 +184,97 @@ class PipelineWorkspaceControllerTest {
     private fun open(
         version: String? = null,
         tab: String? = null,
+        targetController: PipelineWorkspaceController = controller,
     ): ExtendedModelMap {
         val m = ExtendedModelMap()
-        controller.workspace(pipelineId, version, tab, m, mockk())
+        targetController.workspace(pipelineId, version, tab, m, mockk())
         return m
+    }
+
+    private fun controllerWithExecutions(executions: ExecutionRepository) =
+        PipelineWorkspaceController(
+            PipelineWorkspaceModel(co.datapipelines.web.pipelineServiceOver(repository)),
+            themeResolver,
+            lens,
+            PipelineBrowseModel(
+                co.datapipelines.web.pipelineServiceOver(repository),
+                mockk(relaxed = true),
+                executions,
+                mockk(relaxed = true),
+                mockk(relaxed = true),
+                mockk(relaxed = true),
+                mockk(relaxed = true),
+                mockk(relaxed = true),
+                mockk(relaxed = true),
+            ),
+        )
+
+    private fun execution(executedBy: UUID = UUID.randomUUID()) =
+        ExecutionRecord(
+            executionId = UUID.randomUUID(),
+            pipelineId = pipelineId,
+            pipelineVersion = 1,
+            status = ExecutionStatus.SUCCESS,
+            parametersJson = "{}",
+            executedBy = executedBy,
+            triggeredVia = ExecutionTrigger.UI,
+            startedAt = Instant.parse("2026-10-03T12:00:00Z"),
+            completedAt = Instant.parse("2026-10-03T12:00:01Z"),
+            durationMs = 1,
+            resultRowCount = 4,
+        )
+
+    private fun lastRunJson(model: ExtendedModelMap) =
+        co.datapipelines.pipeline.PipelineJson
+            .objectMapper()
+            .readTree(model["workspaceJson"] as String)
+            .path("pageFacts")
+            .path("lastRun")
+
+    @Test
+    fun `the Overview last run uses the viewer's visible runs and never findAll`() {
+        val principal = authenticate()
+        seedThreeVersions()
+        val visibleRun = execution()
+        val executions = mockk<ExecutionRepository>()
+        every { executions.findVisible(workspaceId, principal.userId, pipelineId, null, null, null, 1, 0) } returns listOf(visibleRun)
+
+        val facts = lastRunJson(open(targetController = controllerWithExecutions(executions)))
+
+        facts.path("executionId").asText() shouldBe visibleRun.executionId.toString()
+        verify(exactly = 1) { executions.findVisible(workspaceId, principal.userId, pipelineId, null, null, null, 1, 0) }
+        verify(exactly = 0) { executions.findAll(workspaceId, pipelineId, null, null, null, 1, 0) }
+    }
+
+    @Test
+    fun `the Overview last run leaves a promoter with no visible runs empty`() {
+        val principal = becomePromoter()
+        seedThreeVersions()
+        val executions = mockk<ExecutionRepository>()
+        every { executions.findByUser(workspaceId, principal.userId, pipelineId, null, null, null, 1, 0) } returns emptyList()
+
+        val facts = lastRunJson(open(targetController = controllerWithExecutions(executions)))
+
+        facts.isNull shouldBe true
+        facts.has("executionId") shouldBe false
+        facts.has("by") shouldBe false
+        verify(exactly = 1) { executions.findByUser(workspaceId, principal.userId, pipelineId, null, null, null, 1, 0) }
+        verify(exactly = 0) { executions.findAll(workspaceId, pipelineId, null, null, null, 1, 0) }
+    }
+
+    @Test
+    fun `the Overview last run lets a workspace admin see the newest workspace run`() {
+        authenticate(WorkspaceRole.WORKSPACE_ADMIN)
+        seedThreeVersions()
+        val visibleRun = execution()
+        val executions = mockk<ExecutionRepository>()
+        every { executions.findAll(workspaceId, pipelineId, null, null, null, 1, 0) } returns listOf(visibleRun)
+
+        val facts = lastRunJson(open(targetController = controllerWithExecutions(executions)))
+
+        facts.path("executionId").asText() shouldBe visibleRun.executionId.toString()
+        verify(exactly = 1) { executions.findAll(workspaceId, pipelineId, null, null, null, 1, 0) }
+        verify(exactly = 0) { executions.findVisible(workspaceId, any(), pipelineId, null, null, null, 1, 0) }
     }
 
     @Test

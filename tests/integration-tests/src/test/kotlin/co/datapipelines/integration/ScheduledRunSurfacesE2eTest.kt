@@ -3,10 +3,12 @@ package co.datapipelines.integration
 import co.datapipelines.DatapipelinesApplication
 import com.sun.net.httpserver.HttpServer
 import io.kotest.assertions.withClue
+import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import io.restassured.RestAssured.given
 import io.restassured.http.ContentType
+import io.restassured.path.json.JsonPath
 import io.restassured.specification.RequestSpecification
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.Test
@@ -79,6 +81,31 @@ class ScheduledRunSurfacesE2eTest {
         withClue("the pipeline Runs tab as a viewer") {
             html shouldContain RUN_SCHEDULED
             html shouldNotContain RUN_ALICE
+        }
+    }
+
+    @Test
+    fun `the workspace Overview last run follows the caller's execution visibility`() {
+        ensureSeeded()
+        val promoterPalette = partial(PAM, "/partials/search?q=scheduled_surfaces")
+        withClue("the promoter's lens admits the fixture") {
+            promoterPalette shouldContain PIPE_NAME
+            promoterPalette shouldContain TPL_NAME
+        }
+
+        val viewerLastRun = workspaceLastRun(VERA)
+        withClue("the viewer's Overview last run") {
+            viewerLastRun shouldBe RUN_SCHEDULED
+        }
+
+        val promoterLastRun = workspaceLastRun(PAM)
+        withClue("the promoter's admitted workspace Overview") {
+            promoterLastRun shouldBe null
+        }
+
+        val adminLastRun = workspaceLastRun(WANDA)
+        withClue("the workspace admin's Overview last run") {
+            adminLastRun shouldBe RUN_ALICE
         }
     }
 
@@ -157,6 +184,24 @@ class ScheduledRunSurfacesE2eTest {
             .extract()
             .asString()
 
+    private fun workspaceLastRun(userId: String): String? {
+        val html =
+            session(userId)
+                .accept("text/html")
+                .get("/pipelines/$PIPE_ID")
+                .then()
+                .statusCode(200)
+                .extract()
+                .asString()
+        val workspaceJson =
+            requireNotNull(WORKSPACE_JSON.find(html)?.groupValues?.get(1)) {
+                "workspace response has no #pipeline-workspace JSON block"
+            }
+        val jsonPath = JsonPath(workspaceJson)
+        val pageFacts = jsonPath.getMap<String, Any?>("pageFacts")
+        return (pageFacts["lastRun"] as? Map<*, *>)?.get("executionId") as? String
+    }
+
     private fun resourcesList(key: String): String = rpc(key, """{"jsonrpc":"2.0","id":1,"method":"resources/list","params":{}}""")
 
     private fun tool(
@@ -197,6 +242,7 @@ class ScheduledRunSurfacesE2eTest {
         private const val API_KEY_HEADER = "DP-API-Key"
         private const val SECRET_BYTES = 32
         private const val TOKEN_TTL_SECONDS = 3600L
+        private val WORKSPACE_JSON = Regex("""<script[^>]*id=["']pipeline-workspace["'][^>]*>(.*?)</script>""", RegexOption.DOT_MATCHES_ALL)
 
         private const val WS_ACME = "aca00000-0000-0000-0000-000000000275"
         private const val ALICE = "aaa00000-0000-0000-0000-000000000275"
@@ -323,7 +369,7 @@ class ScheduledRunSurfacesE2eTest {
                 INSERT INTO pipeline_versions
                     (pipeline_id, version, body_json, body_hash, status, created_by, released_by, released_at)
                 VALUES ('$PIPE_ID', 1,
-                        '{"schema_version":1,"name":"scheduled_surfaces","nodes":[{"id":"q","template":{"id":"$TPL_NAME","version":1}}]}'::jsonb,
+                        '{"schema_version":1,"name":"scheduled_surfaces","nodes":[{"id":"q","type":"DQL","template":{"id":"$TPL_NAME","version":1}}]}'::jsonb,
                         'pipe-275-hash', 'RELEASED', '$ALICE', '$ALICE', NOW())
                 """.trimIndent(),
                 // Alice's own interactive run, and a run a schedule fired as the system identity.
@@ -333,7 +379,7 @@ class ScheduledRunSurfacesE2eTest {
                                                  started_at, completed_at, duration_ms) VALUES
                     ('$RUN_ALICE', '$PIPE_ID', 1, 'SUCCESS', '{}'::jsonb, '$ALICE', NULL, 'UI', '$RUN_ALICE', NOW(), NOW(), 12),
                     ('$RUN_SCHEDULED', '$PIPE_ID', 1, 'SUCCESS', '{}'::jsonb, '$SCHEDULER', NULL, 'SCHEDULE',
-                     '$RUN_SCHEDULED', NOW(), NOW(), 12)
+                     '$RUN_SCHEDULED', NOW() - INTERVAL '1 minute', NOW(), 12)
                 """.trimIndent(),
             )
 

@@ -1,6 +1,6 @@
 # Observability Specification
 
-**Status:** v1.34 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
+**Status:** v1.35 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-10-03
@@ -203,6 +203,7 @@ The batching writers in front of the audit log, the execution-event record and t
 | WARN | `persistence.indeterminate` | The emitter stopped waiting after `2 × record-max-wait-ms` while a write of the item was still running — it may yet land | `writer`, `items`, `wait_ms` |
 | WARN | `persistence.direct_write_abandoned` | The emitter's direct write never started within its bound and never will — the item is NOT written | `writer`, `item` |
 | WARN | `persistence.saturated` | The queue is full: callers are writing directly, `submit` is refusing. At most once per 10 s per writer — a state, not an event per item | `writer`, `queued`, `max_events`, `queued_bytes`, `max_bytes` |
+| WARN | `persistence.hook_failed` | A metrics hook threw; the writer contained it — the item's outcome is unchanged, only that hook's own count is lost. At most once per 10 s per writer | `writer`, `hook`, `cause` |
 | ERROR | `persistence.writer_died` | A writer thread ended on an `Error`; its batch was failed so no caller waits on it, and its partition's later items are written directly by their callers | `writer`, `partition` |
 | DEBUG | `audit.write` | Every audit row, the path it takes: `transactional` (inside the caller's transaction, on its connection), `batched` (the audit writer), `direct` (no writer — the default, `datapipelines.persistence.audit.enabled: false`, or `enabled: false`) | `audit_event`, `path` |
 | INFO | `shutdown.persistence_drain_started` | Shutdown, after the web server's graceful drain: every writer starts its bounded drain, in parallel | `writers` |
@@ -588,6 +589,7 @@ This is a construction rule, not a filter — the redacting encoder covers logs,
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-03 | v1.35 | 393 (#393) a throwing metrics hook is contained | **§3.4G** gains `persistence.hook_failed` (WARN; `writer`, `hook`, `cause` — the hook's method name and the exception's simple class name, never its message): every `BatchingHooks` call in `BatchingWriter` goes through one guarded call, so a hook that throws can no longer strand a claimed entry, make `commit` re-write a batch the store already holds, or end a writer thread. The item's outcome stands; the hook still runs before the caller's release (#363). At most once per 10 s per writer, on the interval `persistence.saturated` uses. |
 | 2026-10-03 | v1.34 | 429 (#429) the two `parameter.*` failure lines follow the class-and-SQLState rule — renumbered at merge after 425's v1.33 | **§3.4M**: `parameter.evaluation_failed` no longer attaches the throwable (its message and stack could carry SQL or a value) — it names `error` (binary class name) and `sql_state`, and the stack moves to ONE new DEBUG row, `parameter.evaluation_failed_cause` (`evaluation_id`); `parameter.evaluation_record_failed` spells an absent SQLState `none` (`FailureShape`'s spelling), where it logged the string `null`. |
 | 2026-10-03 | v1.33 | 425 (#425, #385) the selector abandon event namespaced and worded | §3.4M gains its 19th row: `parameter.selector_statement_abandoned` (the bare `event=selector_statement_abandoned` of `SelectorPool.abandon`, which the audit's namespaced extraction could not catalogue). The line gains `cause` (`deadline` when the cancellation is the evaluate's own `withTimeout`, `caller` otherwise — #375's disconnect-grace abort, a shutdown) and no longer says "the evaluate's deadline passed" for a cancellation that was not one; it stays ONE error line with no throwable and no SQL or bind. |
 | 2026-10-03 | v1.32 | 418 (#418) the parameter evaluation events catalogued | New **§3.4M**: the 18 `event=parameter.*` names the code logs (#376's history writes, the sweep and retention, the observed stream and its grace), each with its level, trigger and fields; a failed history write is ERROR and the evaluation continues unrecorded. The docs audit's §3.4 event extraction admits the `parameter` namespace in the same commit (`scripts/docs-audit.sh`; the `execution`/`dashboard` precedent) — without it every backticked name fails check C against the error-code catalog. metadata-db §8.1/§8.5 cite the rows. |
