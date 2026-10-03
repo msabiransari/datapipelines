@@ -32,7 +32,7 @@
     <script th:src="@{/js/dashboards-page.js}" defer></script>
   </th:block>
   <!-- #400 — the workspace's tab state (the shared core, and the dashboards glue over it; the
-        pipeline editor adopts the core under #420). A bare tag here is safe by the one-bundle rule:
+        pipeline editor runs the same core since #420). A bare tag here is safe by the one-bundle rule:
         this page is never a boosted SWAP TARGET, so the tag cannot replay from a history
         cache the way an editor page's would (#358's lesson does not apply). -->
   <script th:src="@{/js/workspace/tabs.js}"></script>

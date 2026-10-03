@@ -1,6 +1,6 @@
 // #400 — the workspace tab machine's SHARED CORE (static/js/workspace/tabs.js): the closed
 // set, the default, the admission predicate and the transition table — the rule
-// dashboards/workspace.js runs (pipeline-editor/tabs.js adopts it under #420). The family
+// dashboards/workspace.js runs (pipeline-editor/tabs.js runs it too since #420). The family
 // clients own their own vocabulary (their tests cover it); this file owns the RULE.
 
 import test from "node:test";
