@@ -1,6 +1,6 @@
 # Dashboards
 
-**Status:** v0.29 — the pipeline editor runs the shared tab core (§7, #420) beside Back/Forward across the dashboards workspace's tab switches (§7, #402) beside the visualizations workspace (§7, #399) beside the dashboards workspace (§5.2's `version`, §7's workspace, #400; #409 closes with it) beside the
+**Status:** v0.30 — the pipeline editor runs the shared tab core (§7, #420) beside the Versions tables' created/released relative with the UTC stamp on hover (§7, #422) beside Back/Forward across the dashboards workspace's tab switches (§7, #402) beside the visualizations workspace (§7, #399) beside the dashboards workspace (§5.2's `version`, §7's workspace, #400; #409 closes with it) beside the
 board's small-slot margins and its breakpoint collapse (§6.2, §6.3, #386/#387), 328's release-record judgement (§4.3)
 permissions (§4, lane L1b); the transfer routes and their limits' honest contract (§3.3, lanes L1c/L1c-b/L1c-c: the
 import's atomicity, the RELEASE rules on a landing, the aggregate count ceiling, the wire's per-family arms); the server
@@ -845,7 +845,8 @@ tree had just linked; it does not any more. The five tabs:
   never authors a dashboard (#396) — agents author over MCP, and a person releases from the
   Versions tab.
 - **Refreshes** — the events pane full width; the board pane keeps its own beside the board.
-- **Versions** — the admitted history (newest first, served/draft/discarded markers) and the
+- **Versions** — the admitted history (newest first, served/draft/discarded markers; created and
+  released relative in the cell, absolute UTC on hover — the keys page's shape, #422) and the
   lifecycle verbs' dialogs in the pipeline dialogs' shape: Release (the ONE D61 consent —
   "Also release these N draft visualizations" — cascading a DRAFT visualization pin through
   its own gate in the dashboard's transaction; the set and the sources have no cascade and
@@ -895,7 +896,8 @@ version a 400 that never echoes it. Its five tabs ([ui-screens §4.24](ui-screen
   run's screenshot through the existing screenshot route, else "no screenshot".
 - **Used by** — the dashboard versions pinning this visualization, read through the caller's
   dashboard lens, each linking its dashboard's workspace.
-- **Versions** — the history and the lifecycle verbs' dialogs: Release (the refusals before the
+- **Versions** — the history (created and released relative in the cell, absolute UTC on hover,
+  #422) and the lifecycle verbs' dialogs: Release (the refusals before the
   button, in the service's order — §3.1's test case and transform pin, then §3.4's evidence gate —
   and the ONE `release_pinned_templates` consent for a DRAFT transform pin, D61), Purge draft,
   Discard (naming the D60 fallback), Restore, Purge version, Switch, Purge visualization (typed
@@ -910,7 +912,8 @@ ONE Plotly bundle the viewed version's traces need, and the choose-a-version sta
 
 | Date | Version | Author | Change |
 |---|---|---|---|
-| 2026-10-03 | v0.29 | #420 the pipeline editor re-adopts the shared tab core | **§7:** the tab-core sentence no longer says the editor keeps its own copy — `pipeline-editor/tabs.js` delegates admission and transition to `workspace/tabs.js` (its 18 getters keep reading `this`, so Alpine's proxy tracks them), so the dashboards, visualizations and pipeline workspaces run one machine. No dashboards behaviour changes. |
+| 2026-10-03 | v0.30 | #420 the pipeline editor re-adopts the shared tab core | **§7:** the tab-core sentence no longer says the editor keeps its own copy — `pipeline-editor/tabs.js` delegates admission and transition to `workspace/tabs.js` (its 18 getters keep reading `this`, so Alpine's proxy tracks them), so the dashboards, visualizations and pipeline workspaces run one machine. No dashboards behaviour changes. |
+| 2026-10-03 | v0.29 | #422 the Versions tables' time shape | **§7:** the dashboards and visualizations Versions tabs render created/released relative in the cell with the absolute UTC stamp on `title` (the keys page's shape, computed in the model's fill); the dashboards partial gains its own `dp-versions-pane` class so the framed table scrolls inside its viewport at 390 px. |
 | 2026-10-03 | v0.28 | #402 Back/Forward across the dashboards workspace's tab switches | **§7:** a tab switch PUSHES a tab-only entry through `workspace/history.js` (it was `replaceState`, so Back left the page); Back/Forward re-select in page through the helper's one window listener; a cached restore re-wires the strip once and re-paints the tab it left. |
 | 2026-10-02 | v0.27 | #399 the visualizations workspace (#396) | **§4:** "There is no UI page yet (L3)" leaves — a person reads both families and drives their lifecycle verbs from §7's pages. **§7:** the visualizations workspace subsection — the catalog and the searchable sidebar branch, and the version-explicit workspace's five tabs: Preview (test FIXTURES only, §3.4.1's builder keyed by the version), Overview, Evidence (the 100-run cap; the screenshot or "no screenshot"), Used by (through the dashboard lens) and Versions (the seven dialogs, the one `release_pinned_templates` consent, the Export link). No route, permission, code or lifecycle rule changed. |
 | 2026-10-02 | v0.26 | #400 the dashboards workspace (#409 closes with it) | **§5.2:** the version routes' page is the session workspace (the preview route a 303 redirect onto it). **§5.8:** the draft preview named where it lives now. **§6.1:** `init`'s `"released"` is the workspace's DEFAULT (no version attribute unless the URL named one). **§7 rewritten:** the flat catalog (`GET /dashboards`, the tree retired to the sidebar, the branch gaining the Pipelines branch's search), the tabbed version-explicit workspace (`?version=&tab=`; Board = the L3b page exactly with the glue unchanged; Overview read-only with the pins' statuses and the R1 hint; Refreshes; Versions with the seven lifecycle dialogs — the ONE D61 consent, no #397; Keys on `dashboard.key.bind`), #409's choose-a-version state (the name, the draft, "no release yet" — never the empty `h1` and the "not found"), the 303 preview redirect, in-page tab state over the shared `workspace/tabs.js` core, full-navigation version switches (the one-bundle rule). No MCP tool, no migration, no new permission row. |

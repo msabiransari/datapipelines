@@ -238,6 +238,6 @@ class DashboardPartialControllerTest {
         verify(exactly = 1) { browse.fillOverview(model, workspaceId, any(), id, 2) }
 
         controller.dashboardVersions(model, id)
-        verify(exactly = 1) { browse.fillVersions(model, workspaceId, any(), id, any()) }
+        verify(exactly = 1) { browse.fillVersions(model, workspaceId, any(), id, any(), any()) }
     }
 }

@@ -18,6 +18,7 @@ import org.thymeleaf.web.servlet.JakartaServletWebApplication
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
+import java.time.Instant
 
 /**
  * 114 §E.2 — the role-visibility guard for the screens whose fixtures are small enough to build
@@ -431,6 +432,27 @@ class RoleVisibilityRenderTest {
         author shouldContain "data-verb=\"dashboard-restore\""
     }
 
+    /**
+     * #422 — the keys page's house shape (ui-screens §3.7): created/released are RELATIVE in the
+     * cell and the absolute UTC stamp rides `title`. A raw ISO instant in the markup is the defect.
+     */
+    @Test
+    fun `the dashboard versions tab shows created and released relative with the UTC stamp on hover`() {
+        val html =
+            render("partials/dashboard-versions") {
+                dashboardVersionsModel()
+                setVariable("canRelease", false)
+                setVariable("canManageVersions", false)
+                setVariable("canSwitch", false)
+                setVariable("canDelete", false)
+            }
+        html shouldNotContain Regex("""\d{4}-\d\d-\d\dT\d\d:\d\d""")
+        html shouldContain "<span title=\"2026-10-01 09:00 UTC\">3 days ago</span>"
+        html shouldContain "<span title=\"2026-10-01 10:00 UTC\">3 days ago</span>"
+        // The draft was never released: the em dash, and no title for a stamp that does not exist.
+        html shouldContain "<span>—</span>"
+    }
+
     @Test
     fun `the dashboard workspace renders the Keys pane only for a caller with the binding permission`() {
         val author =
@@ -477,41 +499,57 @@ class RoleVisibilityRenderTest {
         )
     }
 
-    /** The dashboard Versions tab's model — three rows, one of each live status. */
+    /**
+     * The dashboard Versions tab's model — three rows, one of each live status. The relative text is
+     * what `fillVersions` produced at `now` = 2026-10-04T09:00Z (the model's own test pins the arithmetic).
+     */
     private fun WebContext.dashboardVersionsModel() {
         setVariable("dashboardId", "00000000-0000-0000-0000-000000000001")
         setVariable("servedVersion", 1)
         setVariable(
             "versions",
             listOf(
-                DashboardBrowseModel.VersionDetailView(
-                    1,
-                    "RELEASED",
-                    "2026-10-01T09:00:00Z",
-                    "2026-10-01T10:00:00Z",
-                    isServed = true,
-                    isDraft = false,
-                    isDiscarded = false,
-                ),
-                DashboardBrowseModel.VersionDetailView(
-                    2,
-                    "DRAFT",
-                    "2026-10-02T09:00:00Z",
-                    null,
-                    isServed = false,
-                    isDraft = true,
-                    isDiscarded = false,
-                ),
-                DashboardBrowseModel.VersionDetailView(
+                versionDetail(1, "RELEASED", "2026-10-01T09:00:00Z", "3 days ago", "2026-10-01T10:00:00Z", "3 days ago", isServed = true),
+                versionDetail(2, "DRAFT", "2026-10-02T09:00:00Z", "2 days ago", null, null, isDraft = true),
+                versionDetail(
                     0,
                     "DISCARDED",
                     "2026-09-30T09:00:00Z",
+                    "4 days ago",
                     "2026-09-30T10:00:00Z",
-                    isServed = false,
-                    isDraft = false,
+                    "4 days ago",
                     isDiscarded = true,
                 ),
             ),
+        )
+    }
+
+    @Suppress("LongParameterList") // a fixture row: every column of the table, named at the call site
+    private fun versionDetail(
+        version: Int,
+        status: String,
+        created: String,
+        createdAgo: String,
+        released: String?,
+        releasedAgo: String?,
+        isServed: Boolean = false,
+        isDraft: Boolean = false,
+        isDiscarded: Boolean = false,
+    ): DashboardBrowseModel.VersionDetailView {
+        val createdAt = Instant.parse(created)
+        val releasedAt = released?.let { Instant.parse(it) }
+        return DashboardBrowseModel.VersionDetailView(
+            version = version,
+            status = status,
+            createdAt = createdAt,
+            createdAgo = createdAgo,
+            createdAbsolute = RelativeTime.absolute(createdAt),
+            releasedAt = releasedAt,
+            releasedAgo = releasedAgo,
+            releasedAbsolute = releasedAt?.let { RelativeTime.absolute(it) },
+            isServed = isServed,
+            isDraft = isDraft,
+            isDiscarded = isDiscarded,
         )
     }
 

@@ -267,6 +267,7 @@ class DashboardBrowseModel(
         view: LensedView,
         id: UUID,
         servedVersion: Int?,
+        now: Instant = Instant.now(),
     ): String {
         val versions = dashboards.listVersions(workspaceId, view.dashboards, id)
         model.addAttribute("dashboardId", id.toString())
@@ -277,8 +278,12 @@ class DashboardBrowseModel(
                 VersionDetailView(
                     version = detail.version,
                     status = detail.status.name,
-                    createdAt = detail.createdAt.toString(),
-                    releasedAt = detail.releasedAt?.toString(),
+                    createdAt = detail.createdAt,
+                    createdAgo = RelativeTime.since(detail.createdAt, now),
+                    createdAbsolute = RelativeTime.absolute(detail.createdAt),
+                    releasedAt = detail.releasedAt,
+                    releasedAgo = detail.releasedAt?.let { RelativeTime.since(it, now) },
+                    releasedAbsolute = detail.releasedAt?.let { RelativeTime.absolute(it) },
                     isServed = detail.version == servedVersion,
                     isDraft = detail.status == co.datapipelines.pipeline.PipelineVersionStatus.DRAFT,
                     isDiscarded = detail.status == co.datapipelines.pipeline.PipelineVersionStatus.DISCARDED,
@@ -343,8 +348,13 @@ class DashboardBrowseModel(
     data class VersionDetailView(
         val version: Int,
         val status: String,
-        val createdAt: String,
-        val releasedAt: String?,
+        val createdAt: Instant,
+        /** `3 days ago`, and [createdAbsolute] (`2026-10-01 09:00 UTC`) for the cell's `title` — the keys page's shape ([RelativeTime]). */
+        val createdAgo: String,
+        val createdAbsolute: String,
+        val releasedAt: Instant?,
+        val releasedAgo: String?,
+        val releasedAbsolute: String?,
         val isServed: Boolean,
         val isDraft: Boolean,
         val isDiscarded: Boolean,

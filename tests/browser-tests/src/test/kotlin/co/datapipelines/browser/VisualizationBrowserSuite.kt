@@ -81,17 +81,6 @@ abstract class VisualizationBrowserSuite : DashboardBrowserSuite() {
         return session
     }
 
-    /**
-     * True when the page scrolls sideways — a page must never, at any width. `<main>` is the shell's scroll container
-     * (`overflow-x: auto`), so a too-wide card scrolls MAIN while the document stays put: both are read.
-     */
-    protected fun documentOverflowsX(target: Page = page): Boolean =
-        target.evaluate(
-            "() => { const m = document.querySelector('.app-main');" +
-                " return document.documentElement.scrollWidth > window.innerWidth || document.body.scrollWidth > window.innerWidth" +
-                " || (m !== null && m.scrollWidth > m.clientWidth); }",
-        ) as Boolean
-
     /** Two test cases over one input: a three-month two-series case and an empty one (`no_data`). */
     private fun document(
         name: String,
