@@ -186,15 +186,17 @@ class ParameterSetPagesBrowserTest : ParameterSetBrowserSuite() {
         promoter.page.fill("[data-nav-branch='parameter-sets'] [data-nav-tree-search]", "_")
         promoter.page.waitForSelector("#params-tree-nav a.tpl-result")
         promoter.page.locator("#params-tree-nav a.tpl-result").count() shouldBe 1
-        (promoter.page.locator("#params-tree-nav").innerText().contains("draft_miss")) shouldBe false
+        val branchPanel = promoter.page.locator("#params-tree-nav").innerText()
+        branchPanel.contains("draft_miss") shouldBe false
 
         // The catalog's search agrees with the branch's.
         promoter.page.navigate("$baseUrl/parameter-sets")
         promoter.page.waitForSelector("#parameter-set-list-wrapper .tpl-result")
         promoter.page.fill("#parameter-set-filter-q", "_")
         promoter.page.waitForFunction("() => document.querySelectorAll('#parameter-set-list-wrapper .tpl-result').length === 1")
-        promoter.page.locator("#parameter-set-list-wrapper").innerText() shouldContain "Showing 1 of 1"
-        (promoter.page.locator("#parameter-set-list-wrapper").innerText().contains("draft_miss")) shouldBe false
+        val catalogList = promoter.page.locator("#parameter-set-list-wrapper").innerText()
+        catalogList shouldContain "Showing 1 of 1"
+        catalogList.contains("draft_miss") shouldBe false
         promoter.close()
     }
 
