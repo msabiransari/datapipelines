@@ -31,6 +31,35 @@ class ExecutionLauncherTest {
     private val launcher = ExecutionLauncher(store, TTL_SECONDS, metrics)
 
     @Test
+    fun `release frees the reservation for a new launch and a delayed release keeps that new id`() {
+        val first = launcher.decide(launch(key = "released")) as LaunchDecision.Start
+        launcher.releaseNeverStarted(USER, "released", first.executionId)
+        val next = launcher.decide(launch(key = "released")) as LaunchDecision.Start
+        (next.executionId != first.executionId) shouldBe true
+
+        launcher.releaseNeverStarted(USER, "released", first.executionId)
+
+        launcher.decide(launch(key = "released")) shouldBe LaunchDecision.Attach(requireNotNull(next.executionId))
+    }
+
+    @Test
+    fun `release with no key or no execution id never touches the store`() {
+        releaseNeverStartedReservation(store, USER, null, UUID.randomUUID())
+        releaseNeverStartedReservation(store, USER, "key", null)
+
+        store.releases shouldBe 0
+    }
+
+    @Test
+    fun `release failure is contained by the shared helper`() {
+        store.failRelease = true
+
+        releaseNeverStartedReservation(store, USER, "key", UUID.randomUUID())
+
+        store.releases shouldBe 1
+    }
+
+    @Test
     fun `no idempotency key means no reservation at all`() {
         val decision = launcher.decide(launch(key = null))
 
@@ -128,6 +157,21 @@ class ExecutionLauncherTest {
     /** `SET NX` semantics in a map: first writer wins, an identical retry reads it, a different one is refused. */
     private class RecordingIdempotencyStore : IdempotencyStore {
         private val claims = mutableMapOf<String, Pair<String, UUID>>()
+        var releases = 0
+            private set
+        var failRelease = false
+
+        override fun release(
+            userId: UUID,
+            idempotencyKey: String,
+            executionId: UUID,
+        ): Boolean {
+            releases++
+            if (failRelease) error("Redis unavailable")
+            val key = "$userId:$idempotencyKey"
+            if (claims[key]?.second != executionId) return false
+            return claims.remove(key) != null
+        }
 
         var reservations = 0
             private set

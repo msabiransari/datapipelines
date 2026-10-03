@@ -1,5 +1,6 @@
 package co.datapipelines.web.pipelines
 
+import co.datapipelines.application.releaseNeverStartedReservation
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.executor.CancellationFlags
 import co.datapipelines.executor.CancellationRegistry
@@ -14,6 +15,7 @@ import co.datapipelines.executor.ExecutorConfig
 import co.datapipelines.executor.ExecutorDispatcher
 import co.datapipelines.executor.ExecutorJson
 import co.datapipelines.executor.ExecutorMetrics
+import co.datapipelines.executor.IdempotencyStore
 import co.datapipelines.executor.PipelineExecutor
 import co.datapipelines.executor.ResultStore
 import co.datapipelines.executor.ResultUrlFactory
@@ -92,6 +94,7 @@ class RecordingExecutionRunner(
     private val eventLog: SseEventLog,
     private val eventRepository: ExecutionEventRepository,
     private val executionRepository: ExecutionRepository,
+    private val idempotencyStore: IdempotencyStore,
     /**
      * The composition port (design 2026-08-13-pipeline-node-type §4.1) an MCP-run pipeline's
      * PIPELINE nodes dispatch to — passed through to the per-run executor, as in
@@ -160,8 +163,17 @@ class RecordingExecutionRunner(
                 onRecorded = onRecorded,
             )
         val result =
-            (executorFactory?.invoke(emitter) ?: newExecutor(emitter, workspaceId))
-                .execute(request.copy(triggeredVia = trigger))
+            try {
+                (executorFactory?.invoke(emitter) ?: newExecutor(emitter, workspaceId))
+                    .execute(request.copy(triggeredVia = trigger))
+            } catch (
+                @Suppress("TooGenericExceptionCaught") error: Throwable,
+            ) {
+                if (!emitter.emittedAny()) {
+                    releaseNeverStartedReservation(idempotencyStore, request.userId, request.idempotencyKey, request.executionId)
+                }
+                throw error
+            }
         recordResultColumns(result)
         return result
     }

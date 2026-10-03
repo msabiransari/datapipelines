@@ -1,6 +1,6 @@
 # Observability Specification
 
-**Status:** v1.35 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
+**Status:** v1.36 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-10-03
@@ -228,6 +228,7 @@ The executor's two scheduled jobs on the `dp-scheduled` thread (§3.4H) — the 
 | Level | `event=` | When | Fields |
 |---|---|---|---|
 | INFO | `execution.events_purged` | A retention tick deleted at least one `execution_events` row for executions completed before the cutoff (nothing is logged for an empty tick) | `count`, `cutoff` |
+| WARN | `execution.idempotency_release_failed` | One release attempt for a never-started REST or MCP execution failed; the original refusal still reaches the client and the key expires by TTL | `user`, `execution`, `error` (class only; no key or exception message) |
 | WARN | `execution.sweep_failed` | The stale sweep's UPDATE threw; the tick is skipped and the next one retries | `cutoff`, `heartbeat_cutoff`, `error`, `sql_state` |
 | WARN | `execution.event_retention_failed` | The retention tick's DELETE threw; the next tick retries | `cutoff`, `error`, `sql_state` |
 
@@ -589,6 +590,7 @@ This is a construction rule, not a filter — the redacting encoder covers logs,
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-03 | v1.36 | #403 failed pre-start release | **§3.4I** gains `execution.idempotency_release_failed`: one WARN per failed cleanup attempt, user/execution ids and error class only; the original refusal is preserved. |
 | 2026-10-03 | v1.35 | 393 (#393) a throwing metrics hook is contained | **§3.4G** gains `persistence.hook_failed` (WARN; `writer`, `hook`, `cause` — the hook's method name and the exception's simple class name, never its message): every `BatchingHooks` call in `BatchingWriter` goes through one guarded call, so a hook that throws can no longer strand a claimed entry, make `commit` re-write a batch the store already holds, or end a writer thread. The item's outcome stands; the hook still runs before the caller's release (#363). At most once per 10 s per writer, on the interval `persistence.saturated` uses. |
 | 2026-10-03 | v1.34 | 429 (#429) the two `parameter.*` failure lines follow the class-and-SQLState rule — renumbered at merge after 425's v1.33 | **§3.4M**: `parameter.evaluation_failed` no longer attaches the throwable (its message and stack could carry SQL or a value) — it names `error` (binary class name) and `sql_state`, and the stack moves to ONE new DEBUG row, `parameter.evaluation_failed_cause` (`evaluation_id`); `parameter.evaluation_record_failed` spells an absent SQLState `none` (`FailureShape`'s spelling), where it logged the string `null`. |
 | 2026-10-03 | v1.33 | 425 (#425, #385) the selector abandon event namespaced and worded | §3.4M gains its 19th row: `parameter.selector_statement_abandoned` (the bare `event=selector_statement_abandoned` of `SelectorPool.abandon`, which the audit's namespaced extraction could not catalogue). The line gains `cause` (`deadline` when the cancellation is the evaluate's own `withTimeout`, `caller` otherwise — #375's disconnect-grace abort, a shutdown) and no longer says "the evaluate's deadline passed" for a cancellation that was not one; it stays ONE error line with no throwable and no SQL or bind. |

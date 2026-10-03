@@ -335,6 +335,7 @@ class WebSurfaceConfiguration {
     @Suppress("LongParameterList")
     @Bean
     fun recordingExecutionRunner(
+        idempotencyStore: IdempotencyStore,
         transformSupport: co.datapipelines.executor.TransformSupport,
         templateEngines: WorkspaceTemplateEngines,
         datasourceRegistry: DatasourceRegistry,
@@ -379,6 +380,7 @@ class WebSurfaceConfiguration {
             subPipelineRunner = subPipelineRunner,
             transformSupport = transformSupport,
             eventRecorder = eventRecorder,
+            idempotencyStore = idempotencyStore,
         )
 
     /**

@@ -8,6 +8,7 @@ import co.datapipelines.pipeline.Pipeline
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
 import com.fasterxml.jackson.databind.JsonNode
+import org.slf4j.LoggerFactory
 import java.util.UUID
 
 /**
@@ -107,6 +108,15 @@ class ExecutionLauncher(
     private val idempotencyTtlSeconds: Long,
     private val metrics: IdempotencyMetrics = IdempotencyMetrics.NONE,
 ) {
+    /** Releases a never-started REST reservation; cleanup failure cannot replace the execution refusal. */
+    fun releaseNeverStarted(
+        userId: UUID,
+        idempotencyKey: String?,
+        executionId: UUID?,
+    ) {
+        releaseNeverStartedReservation(idempotencyStore, userId, idempotencyKey, executionId)
+    }
+
     /**
      * D6 steps 2–3 — binds the parameters, then settles the reservation.
      *
@@ -159,4 +169,30 @@ class ExecutionLauncher(
             if (e.code == PipelineErrorCodes.Limits.IDEMPOTENCY_KEY_REUSED) metrics.reservationConflict()
             throw e
         }
+}
+
+/**
+ * Shared REST/MCP cleanup AFTER the surface establishes that no event was emitted.
+ * The store call is synchronous, so cancellation cannot skip a suspend hop during cleanup.
+ * No client key or exception message is logged; a failed release leaves the TTL as the fallback.
+ */
+fun releaseNeverStartedReservation(
+    store: IdempotencyStore,
+    userId: UUID,
+    idempotencyKey: String?,
+    executionId: UUID?,
+) {
+    if (idempotencyKey == null || executionId == null) return
+    try {
+        store.release(userId, idempotencyKey, executionId)
+    } catch (
+        @Suppress("TooGenericExceptionCaught") error: Throwable,
+    ) {
+        LoggerFactory.getLogger(ExecutionLauncher::class.java).warn(
+            "event=execution.idempotency_release_failed user={} execution={} error={}",
+            userId,
+            executionId,
+            error.javaClass.simpleName,
+        )
+    }
 }
