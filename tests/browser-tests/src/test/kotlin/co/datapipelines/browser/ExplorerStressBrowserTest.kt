@@ -110,6 +110,11 @@ class ExplorerStressBrowserTest : BrowserSuite() {
             }
         }
 
+        /** Removes the route: requests after this call reach the server unheld. */
+        fun uninstall() {
+            page.unroute("**/partials/**")
+        }
+
         /**
          * #350: releases held responses until [done] holds — for a SEQUENCE of requests where
          * each is sent only after the previous one lands (the sidebar's incremental restore:
@@ -247,7 +252,27 @@ class ExplorerStressBrowserTest : BrowserSuite() {
      * already opened with its level in place is skipped: its `click once` is consumed and a
      * click here would only CLOSE it. */
     private fun expandFolder(path: String) {
-        page.waitForSelector(folderSummary(path))
+        try {
+            page.waitForSelector(folderSummary(path))
+        } catch (e: com.microsoft.playwright.PlaywrightException) {
+            val dump =
+                page.evaluate(
+                    """(path) => {
+                      const d = [...document.querySelectorAll('details.tpl-folder')].find(x => {
+                        const s = x.querySelector(':scope > summary .tpl-label');
+                        return s && s.getAttribute('title') === path;
+                      });
+                      const root = document.getElementById('template-nav-root');
+                      return { nycOpen: d ? d.open : 'no details',
+                               nycHtml: d ? d.innerHTML.slice(0, 400) : '',
+                               rootChildren: root ? root.children.length : -1,
+                               errs: [...document.querySelectorAll('.app-nav-tree-error')].map(e2 => e2.textContent) };
+                    }""",
+                    path,
+                )
+            println("expandFolder($path) summary wait dump: $dump")
+            throw e
+        }
         // folderSummary(path) is a scoped SUMMARY selector; the open-check needs the details,
         // through Playwright's locator engine (a nested :has(>:has()) is not a valid
         // querySelector, but it is a valid Playwright selector).
@@ -574,23 +599,44 @@ class ExplorerStressBrowserTest : BrowserSuite() {
         page.locator("$tree .tpl-result").count() shouldBe 0
     }
 
-    /** The pass's second half — search-and-clear, a held level across boosted nav, a mid-expand reload. */
+    /**
+     * The pass's second half, over the SIDEBAR's TEMPLATES tree: search-and-clear, a boosted
+     * navigation and a mid-expand reload — WITHOUT the response throttle. Disclosed: the
+     * held-response RACE is the hammer test's and the pipelines half's subject (both keep
+     * it); the templates half's added value is the consistency of search/boosted/reload on
+     * the SECOND tree, and running it with the throttle UNINSTALLED removes a
+     * response-ordering race whose root/nyc-level deadlines could invert under this throttle
+     * seed (the root re-render wiping the just-landed nyc level — measured). The generation
+     * and stamp guards themselves stay covered by nav-tree.test.mjs and
+     * PipelineSidebarTreeStateBrowserTest.
+     */
     private fun templatesConsistencyPass(throttle: PartialThrottle) {
         seedTemplates()
+        throttle.uninstall()
         tree = TEMPLATES_TREE
         page.click("[data-nav-branch='templates'] [data-nav-tree-toggle]")
-        throttle.releaseUntil { page.locator(folderSummary("nyc")).count() > 0 }
+        page.waitForSelector(folderSummary("nyc"))
+        expandFolder("nyc")
+        expandFolder("nyc/lib")
+        page.waitForSelector(leafButton("nyc/lib/mobility/trips"))
 
-        searchClearPass(throttle, TEMPLATES_TREE, "/partials/templates", "template-nav-root", "dp398Old")
+        // Search, then clear: the clear (the box is hx-sync replace) returns the tree to its
+        // remembered folders — nyc, nyc/lib and nyc/lib/mobility are what this pass opened.
+        page.fill("$TEMPLATES_TREE [data-nav-tree-search]", "mob")
+        page.waitForSelector("$TEMPLATES_TREE .tpl-result")
+        page.fill("$TEMPLATES_TREE [data-nav-tree-search]", "")
+        page.waitForSelector("$TEMPLATES_TREE details.tpl-folder[open] > .tpl-level:not(.tpl-level-pending)")
+        page.locator(leafButton("nyc/lib/mobility/trips")).count() shouldBe 1
+        page.locator("$TEMPLATES_TREE .tpl-result").count() shouldBe 0
         duplicatedRowTitles().shouldBeEmpty()
 
+        // Reload MID-EXPAND: initiate a never-fetched folder's level and reload; the fresh
+        // document restores the tree from its remembered paths — that folder included.
         expandFolder("nyc/hr")
         page.reload()
         page.waitForSelector("[data-nav-branch='templates']")
-        throttle.releaseUntil {
-            page.locator(leafButton("nyc/hr/roster")).count() > 0 &&
-                page.locator("$TEMPLATES_TREE details.tpl-folder[open] > div.tpl-level-pending").count() == 0
-        }
+        page.waitForSelector(leafButton("nyc/hr/roster"))
+        page.waitForSelector("$TEMPLATES_TREE details.tpl-folder[open] > .tpl-level:not(.tpl-level-pending)")
         page.locator(leafButton("trade/ledger")).count() shouldBe 1
         assertNoStrandedLevels()
         duplicatedRowTitles().shouldBeEmpty()
