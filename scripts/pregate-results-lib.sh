@@ -150,7 +150,8 @@ pgres::manifest_stage() {
 }
 
 pgres::manifest_verdict() {
-  printf 'verdict=%s run=%s\n' "$1" "$2" >> "$3" || return 1
+  local mf="$1" verdict="$2" run_id="$3"
+  printf 'verdict=%s run=%s\n' "$verdict" "$run_id" >> "$mf" || return 1
 }
 
 # pgres::capture <root> <run-dir> <stage> <status> <stage-exit> <log> [module-root...]
@@ -334,6 +335,7 @@ pgres::self_test() {
   ck_ok "manifest-stage3-executed" grep -q '^stage=stage-3 status=executed exit=0 ' "$rd/MANIFEST.txt"
   ck_ok "manifest-has-base-head-time" grep -q '^head=' "$rd/MANIFEST.txt"
   ck_ok "provenance-written" test -f "$rd/2/PROVENANCE.txt"
+  ck_eq "manifest-final-verdict" "verdict=PASS run=$run_id" "$(tail -n 1 "$rd/MANIFEST.txt")"
 
   # ---- 2. a failing stage 2 keeps its failing XML even though stage 3 is green --
   local FF frd fc
