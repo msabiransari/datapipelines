@@ -14,12 +14,12 @@ import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.RequestParam
 
 /**
- * The templates screen (ui-screens.md §4.6, template-hierarchy-design §9.2).
- *
- * Renders the shell **and** the first fragment; every later refresh hits
- * [TemplatePartialController] and swaps `#template-list-wrapper` only. The model the
- * fragment needs is filled by the one [TemplateBrowseModel] both controllers share, so the
- * page's first render and an htmx refresh cannot disagree about what a level contains.
+ * The templates CATALOG page (#398, ui-screens.md §4.6 in §4.3's shape): `GET /templates` is
+ * one flat, server-paged list of full paths — every template the caller may read when `q` is
+ * empty, or the matches of `q` — with the dialect and type filters, and (an author's) the
+ * create modal. Each row links into the template workspace; the folder TREE is the sidebar's
+ * (`data-nav-branch="templates"`, §3.4). The old two-pane explorer body is gone with #398:
+ * a template is read, rendered and version-managed in ONE place, its workspace.
  */
 @Controller
 class TemplateUiController(
@@ -52,17 +52,17 @@ class TemplateUiController(
         // design record's example they start from (the create runs its suite, so it must pass).
         model.addAttribute("transformTypes", TemplateType.entries.filter { it.isTransform }.joinToString(",") { it.wire })
         model.addAttribute("skeleton", TransformSkeleton)
-        val query = q?.trim()?.takeIf { it.isNotEmpty() }
         model.addAttribute("q", q ?: "")
         val principal = currentPrincipal()
         browse.fillWrapper(
             model,
             principal.requireWorkspace().id,
             lens.viewFor(principal),
-            q = query,
+            q = q?.trim()?.takeIf { it.isNotEmpty() },
             dialect = TemplateFilters.dialect(dialect),
             type = TemplateFilters.type(type),
             offset = offset ?: 0,
+            scope = TemplateListScope.CATALOG,
         )
         return "templates/list"
     }

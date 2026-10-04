@@ -759,18 +759,10 @@ a.tpl-result {
   margin-top: 0;
 }
 
-/* The templates twin's source excerpt — the first lines of the current body, with the full
-   text one tab away. It is a READ, so it is a <pre>, never a control. */
-.tplx-excerpt {
-  margin: 0;
-  padding: var(--gap-sm);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-base, 6px);
-  background: var(--surface-inset);
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  overflow-x: auto;
-}
+/* The templates twin's source excerpt retired with the detail pane (#398): the workspace's
+   Source tab IS the body, so there is no excerpt to style and no rule left for it. The rest
+   of the tplx- chrome stays — schedules' screens and the pipelines Overview share these
+   classes (the stylesheet is global, linked from the layout). */
 
 /* The explorer's search row, and the two reasons it overflowed the page at 390px — both
    measured by ExplorerDetailBrowserTest's 390 case, which named the element each time.

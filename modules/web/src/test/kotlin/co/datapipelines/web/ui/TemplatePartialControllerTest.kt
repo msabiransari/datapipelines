@@ -21,6 +21,7 @@ import io.mockk.verify
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.springframework.http.HttpStatus
+import org.springframework.mock.web.MockHttpServletResponse
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.ui.ExtendedModelMap
@@ -31,11 +32,12 @@ import java.util.UUID
  * [TemplatePartialController] — the browse/search routing and the modal's create path,
  * not the fragments (TemplateCreatePartialTest already pins the created fragment's model).
  *
- * The behaviors pinned: one route chooses its fragment shape by `prefix` (a folder
- * expansion never returns the whole list), `q` is ignored while browsing a level, the
- * versions pane's model (draft pointer + in-use counts), and the create path's refusal
- * ladder — unknown type, duplicate name, authoring gate, validator rejection — every one
- * an inline 400 fragment, never an error page.
+ * The behaviors pinned: one route chooses its instance by `prefix` and `scope` (a folder
+ * expansion never returns the whole list; the catalog's flat list answers without a prefix;
+ * every sidebar answer carries the `DP-Nav-Stamp`), `q` is ignored while browsing a level,
+ * and the create path's refusal ladder — unknown type, duplicate name, authoring gate,
+ * validator rejection — every one an inline 400 fragment, never an error page. The explorer's
+ * detail route retired with the pane (#398); the workspace's own model has its tests.
  */
 class TemplatePartialControllerTest {
     private val templates = mockk<TemplateRepository>()
@@ -81,49 +83,83 @@ class TemplatePartialControllerTest {
     // ------------------------------------------------------------ list
 
     @Test
-    fun `no prefix - the wrapper fragment with the trimmed query`() {
-        controller.list(model, q = "  rev  ", dialect = null, type = null, prefix = null, offset = 0)
+    fun `no prefix - the catalog's flat list with the trimmed query`() {
+        val response = MockHttpServletResponse()
+        controller.list(model, response, q = "  rev  ", dialect = null, type = null, prefix = null, offset = 0)
 
-        verify { browse.fillWrapper(model, workspaceId, any(), q = "rev", dialect = null, type = null, offset = 0) }
+        verify {
+            browse.fillWrapper(
+                model,
+                workspaceId,
+                any(),
+                q = "rev",
+                dialect = null,
+                type = null,
+                offset = 0,
+                scope = TemplateListScope.CATALOG,
+            )
+        }
     }
 
     @Test
-    fun `a prefix - exactly one tree level, and q is ignored while browsing`() {
-        controller.list(model, q = "rev", dialect = null, type = null, prefix = "acme/finance", offset = 0)
+    fun `scope=nav without a query is the SIDEBAR's tree root, stamped with the workspace and lens`() {
+        val response = MockHttpServletResponse()
+        controller.list(model, response, q = null, dialect = null, type = null, prefix = null, offset = 0, scope = "nav")
+
+        verify {
+            browse.fillWrapper(
+                model,
+                workspaceId,
+                any(),
+                q = null,
+                dialect = null,
+                type = null,
+                offset = 0,
+                scope = TemplateListScope.NAV,
+            )
+        }
+        // #350's admission guard: a level rendered under another workspace or lens can never
+        // join this tree's rows, so every sidebar answer carries the stamp.
+        response.getHeader(PipelineBrowseModel.NAV_STAMP_HEADER) shouldBe "acme|all"
+    }
+
+    @Test
+    fun `a prefix - exactly one tree level, q is ignored while browsing, and the stamp rides along`() {
+        val response = MockHttpServletResponse()
+        controller.list(model, response, q = "rev", dialect = null, type = null, prefix = "acme/finance", offset = 0)
 
         verify {
             browse.fillLevel(model, workspaceId, any(), prefix = "acme/finance", dialect = null, type = null, offset = 0)
         }
-        verify(exactly = 0) { browse.fillWrapper(any(), any(), any(), any(), any(), any(), any()) }
+        response.getHeader(PipelineBrowseModel.NAV_STAMP_HEADER) shouldBe "acme|all"
     }
 
     @Test
     fun `an empty-string prefix is the root level - still the level fragment`() {
-        controller.list(model, q = null, dialect = null, type = null, prefix = "", offset = 0)
+        controller.list(model, MockHttpServletResponse(), q = null, dialect = null, type = null, prefix = "", offset = 0)
 
         verify { browse.fillLevel(model, workspaceId, any(), prefix = "", dialect = null, type = null, offset = 0) }
     }
 
     @Test
     fun `a blank query is not a query`() {
-        controller.list(model, q = "   ", dialect = null, type = null, prefix = null, offset = 0)
+        controller.list(model, MockHttpServletResponse(), q = "   ", dialect = null, type = null, prefix = null, offset = 0)
 
-        verify { browse.fillWrapper(model, workspaceId, any(), q = null, dialect = null, type = null, offset = 0) }
+        verify {
+            browse.fillWrapper(
+                model,
+                workspaceId,
+                any(),
+                q = null,
+                dialect = null,
+                type = null,
+                offset = 0,
+                scope = TemplateListScope.CATALOG,
+            )
+        }
     }
 
-    // ------------------------------------------------------------ versions
-
-    @Test
-    fun `the detail route is the model's fillDetail over the active workspace, and nothing else`() {
-        // 106 moved the detail's every read into TemplateBrowseModel.fillDetail — one call, all
-        // three regions. What this controller still owns is the workspace it asks about, so
-        // that is what is asserted; the fill's own contents are TemplateBrowseModel's tests.
-        every { browse.fillDetail(model, workspaceId, any(), "acme/rev") } returns "partials/template-detail"
-
-        controller.versions(model, name = "acme/rev") shouldBe "partials/template-detail"
-
-        io.mockk.verify(exactly = 1) { browse.fillDetail(model, workspaceId, any(), "acme/rev") }
-    }
+    // ------------------------------------------------------------ runs
 
     @Test
     fun `the runs route passes the caller's principal, so the pane reads the caller's visibility and nobody else's`() {

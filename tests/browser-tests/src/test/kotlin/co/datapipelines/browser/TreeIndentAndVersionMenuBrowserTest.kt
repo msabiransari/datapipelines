@@ -17,6 +17,9 @@ import kotlin.math.abs
  * in a real browser, on both explorers, because one stylesheet and one partial family dress
  * both trees and both version lists.
  *
+ * #398: both trees measured here are the SIDEBAR's (the page pane retired with the
+ * templates explorer); the version menus are both WORKSPACES' Versions tabs.
+ *
  * 1. THE TREE. A leaf row carried no chevron slot, so its file glyph sat where a folder's
  *    chevron sits and its label landed at the PARENT folder's label x — a leaf read as a
  *    sibling of its own folder, at every depth, in every tree. The invariant is what a
@@ -80,10 +83,12 @@ class TreeIndentAndVersionMenuBrowserTest : BrowserSuite() {
 
     /**
      * The root level shows FOLDERS; the `test` folder must be open before its leaf exists.
-     * #350: [root] scopes the tree — the templates explorer's pane, or the SIDEBAR's Pipelines
-     * tree (whose leaves are links: `.tpl-leaf`, either element).
+     * #398: [root] scopes the tree — BOTH trees are the SIDEBAR's now (whose leaves are
+     * links: `.tpl-leaf`, either element), so each needs its branch toggle first.
      */
-    private fun openTestFolder(root: String = TEMPLATES) {
+    private fun openTestFolder(root: String) {
+        val branch = if (root == PIPELINES) "pipelines" else "templates"
+        page.click("[data-nav-branch='$branch'] [data-nav-tree-toggle]")
         page.waitForSelector("$root summary.tpl-summary")
         if (page.locator("$root details.tpl-folder[open]").count() == 0) {
             page.waitForResponse({ it.url().contains("prefix=test") }) {
@@ -91,13 +96,6 @@ class TreeIndentAndVersionMenuBrowserTest : BrowserSuite() {
             }
         }
         page.waitForSelector("$root .tpl-leaf")
-    }
-
-    private fun selectLeaf(leafSegment: String) {
-        openTestFolder()
-        val leaf = page.locator("$TEMPLATES button.tpl-leaf", Page.LocatorOptions().setHasText(leafSegment)).first()
-        page.waitForResponse({ it.url().contains("/detail") || it.url().contains("/versions") }) { leaf.click() }
-        page.waitForSelector(".tplx-detail-header")
     }
 
     @Suppress("UNCHECKED_CAST")
@@ -127,19 +125,11 @@ class TreeIndentAndVersionMenuBrowserTest : BrowserSuite() {
         seedPipeline("test/indent_leaf")
         seedPipeline("test/sub/indent_nested")
 
-        // #350: the pipeline tree is the SIDEBAR's — the same rows, measured there.
+        // #350/#398: BOTH trees are the SIDEBAR's — the same rows, measured in the rail.
         for ((screen, root) in listOf("pipelines" to PIPELINES, "templates" to TEMPLATES)) {
             page.setViewportSize(1280, 900)
-            if (screen == "pipelines") {
-                named(page, "the dashboard navigation to $baseUrl/dashboard") {
-                    page.navigate("$baseUrl/dashboard")
-                }
-                page.click("[data-nav-branch='pipelines'] [data-nav-tree-toggle]")
-            } else {
-                named(page, "the explorer navigation to $baseUrl/$screen") {
-                    page.navigate("$baseUrl/$screen")
-                }
-                page.waitForSelector(".tplx-tree")
+            named(page, "the dashboard navigation to $baseUrl/dashboard") {
+                page.navigate("$baseUrl/dashboard")
             }
             page.waitForLoadState(LoadState.NETWORKIDLE)
             openTestFolder(root)
@@ -182,8 +172,9 @@ class TreeIndentAndVersionMenuBrowserTest : BrowserSuite() {
         seedTemplate("test/menu_probe")
         seedPipeline("test/menu_probe")
 
-        // #350: the pipeline's version rows are its WORKSPACE's Versions tab (the same fragment).
-        for ((screen, panel) in listOf("pipelines" to "#pe-pane-versions", "templates" to "#template-tab-versions")) {
+        // #350/#398: BOTH families' version rows are their WORKSPACE's Versions tab (the same
+        // house-table fragment and the same ⋯ menu).
+        for ((screen, panel) in listOf("pipelines" to "#pe-pane-versions", "templates" to "#tw-pane-versions")) {
             // 700 tall, so the versions card sits BELOW the fold and the click on its ⋯ must
             // scroll it into view first — the exact shape that closed the menu before the fix.
             page.setViewportSize(1280, 700)
@@ -195,10 +186,13 @@ class TreeIndentAndVersionMenuBrowserTest : BrowserSuite() {
                 page.locator("#pe-tab-versions").click()
                 page.waitForSelector("$panel tr[data-version-row]")
             } else {
-                page.navigate("$baseUrl/$screen")
-                page.waitForSelector(".tplx-tree")
-                page.waitForLoadState(LoadState.NETWORKIDLE)
-                selectLeaf("menu_probe")
+                page.navigate("$baseUrl/templates?q=menu_probe")
+                page.waitForSelector("#template-list-wrapper a.tpl-result")
+                page.locator("a.tpl-result", Page.LocatorOptions().setHasText("menu_probe")).first().click()
+                page.waitForURL("**/templates/**")
+                page.waitForSelector(".tw-root")
+                page.locator("#tw-tab-versions").click()
+                page.waitForSelector("$panel tr[data-version-row]")
             }
 
             page.locator("$panel details.tplx-vmenu summary").first().click()
@@ -233,59 +227,17 @@ class TreeIndentAndVersionMenuBrowserTest : BrowserSuite() {
                 m.px("right") shouldBeLessThanOrEqual m.px("vw")
             }
 
-            // The follow-the-scroll arm asks the shell's <main> scroller to move — the explorer's
-            // layout. The workspace's Versions pane fills the page and, one row tall, has nothing
-            // to scroll (#350: measured scrolled=0), so the arm stays the templates explorer's.
-            if (screen == "templates") assertMenuFollowsScroll(screen, panel)
-        }
-    }
-
-    /**
-     * A scroll while the menu is open FOLLOWS the ⋯, it does not close the menu: the browser
-     * delivers `scroll` asynchronously, so the scroll-into-view that precedes a click on a ⋯
-     * below the fold lands AFTER the click opened the menu — closing on scroll shut every such
-     * menu before its first item could be clicked (LifecycleDialogBrowserTest, 2026-09-12).
-     * The shell's scroller is <main>.
-     */
-    private fun assertMenuFollowsScroll(
-        screen: String,
-        panel: String,
-    ) {
-        val after =
-            measure(
-                """async () => {
-                  const list = document.querySelector('$panel .tplx-vmenu-list');
-                  const summary = list.closest('details').querySelector('summary');
-                  const before = { list: list.getBoundingClientRect().top, anchor: summary.getBoundingClientRect().top };
-                  const scroller = document.querySelector('main');
-                  scroller.scrollTop = 0;
-                  await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
-                  before.list = list.getBoundingClientRect().top; before.anchor = summary.getBoundingClientRect().top;
-                  scroller.scrollTop = 40;
-                  await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
-                  const moved = summary.getBoundingClientRect().top - before.anchor;
-                  return {
-                    scrolled: scroller.scrollTop,
-                    anchorMoved: moved,
-                    listMoved: list.getBoundingClientRect().top - before.list,
-                    open: list.closest('details').open,
-                    shown: list.matches(':popover-open'),
-                  };
-                }""",
-            )
-        withClue("$screen: the scroller must actually have moved for this to test anything: $after") {
-            after.px("scrolled") shouldBeGreaterThanOrEqual 1.0
-            abs(after.px("anchorMoved")) shouldBeGreaterThanOrEqual 1.0
-        }
-        withClue("$screen: after a scroll the menu is still open, still shown, and moved WITH its ⋯: $after") {
-            after["open"] shouldBe true
-            after["shown"] shouldBe true
-            after.px("listMoved").shouldBeWithinOnePxOf(after.px("anchorMoved"), "$screen: menu follows the anchor")
+            // The follow-the-scroll arm asked the shell's <main> scroller to move — the page
+            // explorer's layout. Both workspaces' Versions panes are page-flow cards that, one
+            // row tall, have nothing to scroll (measured scrolled=0 at #350; the same shape on
+            // the template workspace), so the arm has no surface left and is retired with the
+            // pane. The menu-visibility invariants above are the ones the phone layout needs.
         }
     }
 
     private companion object {
-        const val TEMPLATES = "[data-explorer-pane]"
+        /** #398: both trees are the sidebar's — the page pane retired with the explorer. */
+        const val TEMPLATES = "#nav-tree-templates"
         const val PIPELINES = "#nav-tree-pipelines"
     }
 }

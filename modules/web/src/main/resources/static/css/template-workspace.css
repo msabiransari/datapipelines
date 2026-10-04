@@ -1,0 +1,201 @@
+/*
+ * #398 — the template workspace's own chrome: the top bar, the version selector, the tab
+ * strip and the panes. Design tokens only — every colour, size and gap resolves a token
+ * first (with the house's literal fallback for the pre-token case), and the layout reuses
+ * the source column's existing template-editor.css rules rather than restating them.
+ * The pipelines workspace's pipeline-editor.css is NOT loaded here: a template page does
+ * not need the graph's stylesheet, so the chip/tab classes are this file's own (tw-*),
+ * shaped like their pipeline twins.
+ */
+
+/* ---- the root: one column of chrome, the panes below ------------------------------ */
+
+.tw-root {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-md, 12px);
+  /* The viewport fill the source column's math expects: the editor's `--header-height`
+     contract counts from the shell header, and the workspace adds one bar of its own. */
+  min-height: calc(100vh - var(--header-height, 56px) - var(--gap-lg, 16px) * 2);
+}
+
+/* ---- the top bar ----------------------------------------------------------------- */
+
+.tw-topbar {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-md, 12px);
+  flex-wrap: wrap;
+}
+
+.tw-back {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gap-xs, 4px);
+  color: var(--text-muted, #64748b);
+  font-size: var(--text-sm, 13px);
+  white-space: nowrap;
+}
+
+.tw-back:hover {
+  color: var(--text, #0f172a);
+}
+
+.tw-crumb {
+  display: flex;
+  align-items: baseline;
+  gap: var(--gap-xs, 4px);
+  min-width: 0;
+}
+
+.tw-crumb-path {
+  color: var(--text-muted, #64748b);
+  font-family: var(--font-mono, monospace);
+  font-size: var(--text-sm, 13px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tw-crumb-name {
+  font-weight: var(--weight-semibold, 600);
+  white-space: nowrap;
+}
+
+/* The viewed-version chip names the VIEWED row: green while it is the release, amber while
+   it is the draft — the pipeline chip's contract, this page's classes. */
+.tw-vchip {
+  font-size: 11.5px;
+  font-weight: var(--weight-semibold, 600);
+  letter-spacing: 0.02em;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill, 999px);
+  background: var(--accent-success-bg, #dcfce7);
+  color: var(--accent-success, #15803d);
+  white-space: nowrap;
+}
+
+.tw-vchip-draft {
+  background: var(--accent-warning-bg, #fef9c3);
+  color: var(--accent-warning, #a16207);
+}
+
+/* The version selector: READ navigation over the admitted history. The viewed row carries
+   aria-current="true"; the house button shape does the rest. */
+.tw-versions {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-xs, 4px);
+  flex-wrap: wrap;
+}
+
+.tw-version-link[aria-current="true"] {
+  background: var(--accent-soft, #e0e7ff);
+  color: var(--accent, #4338ca);
+}
+
+.tw-topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-xs, 4px);
+  margin-left: auto;
+}
+
+/* ---- the tab strip ---------------------------------------------------------------- */
+
+.tw-tabs {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-2xs, 2px);
+  border-bottom: 1px solid var(--border, #e2e8f0);
+}
+
+.tw-tab {
+  appearance: none;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  padding: var(--gap-sm, 8px) var(--gap-md, 12px);
+  color: var(--text-muted, #64748b);
+  font-size: var(--text-sm, 13px);
+  font-weight: var(--weight-medium, 500);
+  cursor: pointer;
+}
+
+.tw-tab:hover {
+  color: var(--text, #0f172a);
+}
+
+.tw-tab[aria-selected="true"] {
+  color: var(--accent, #4338ca);
+  border-bottom-color: var(--accent, #4338ca);
+}
+
+.tw-tab:focus-visible {
+  outline: var(--focus-width, 2px) solid var(--accent, #4338ca);
+  outline-offset: -2px;
+  border-radius: var(--radius-sm, 6px);
+}
+
+/* ---- the panes -------------------------------------------------------------------- */
+
+.tw-panes {
+  flex: 1;
+  min-height: 0;
+}
+
+.tw-pane {
+  min-height: 0;
+}
+
+.tw-doc {
+  max-width: var(--measure-wide, 60rem);
+}
+
+/* The Source pane keeps the editor's two-region shape: the column fragments, then the
+   imports table. One scroll container, so a long body scrolls inside the pane. */
+.tw-pane-source {
+  overflow: auto;
+  max-height: calc(100vh - var(--header-height, 56px) - 12rem);
+}
+
+.tw-source-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-md, 12px);
+}
+
+.tw-imports {
+  flex-shrink: 0;
+}
+
+/* The Overview's reading measures like the explorer's Overview did. */
+.tw-measure {
+  max-width: var(--measure, 44rem);
+}
+
+.tw-kv {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--gap-xs, 4px) var(--gap-md, 12px);
+  margin: var(--gap-md, 12px) 0 0;
+}
+
+.tw-kv dt {
+  color: var(--text-muted, #64748b);
+  font-size: var(--text-sm, 13px);
+}
+
+.tw-kv dd {
+  margin: 0;
+  font-size: var(--text-sm, 13px);
+  overflow-wrap: anywhere;
+}
+
+/* The Used by tab's card body scrolls like the detail card's did (the same rule class the
+   fragment's rows expect to sit inside). */
+.tw-scroll {
+  max-height: 24rem;
+  overflow: auto;
+}

@@ -24,9 +24,10 @@
         resolves to, and locks it.
       </p>
 
-      <form th:attr="hx-post=@{'/partials/templates/lifecycle/release'(name=${dlg.id})},
-                       hx-target=${from == 'editor'} ? null : '#template-detail',
-                       hx-swap=${from == 'editor'} ? 'none' : 'innerHTML'">
+      <form th:attr="hx-post=@{'/partials/templates/lifecycle/release'(name=${dlg.id})}">
+        <!-- #398: the POST answers HX-Redirect onto the workspace's Versions tab (or the
+             catalog, when the verb removed the template) — there is no detail pane left to
+             re-render in place. `from` rides along for the surface's own audit. -->
         <input type="hidden" name="from" th:value="${from}">
         <button th:if="${canAuthor == true}" type="submit" data-verb="template-release-confirm" class="ds-button ds-button-primary u-full" hx-disabled-elt="this"
                 th:text="'Release v' + ${dlg.version}">Release v2</button>
