@@ -1,10 +1,10 @@
 # Scheduler Specification
 
-**Status:** v1.5 (slices 1–3 of #9 — the core, the Schedules page, and the bindings; notifications and the application credential are later slices)
+**Status:** v1.7 (slices 1–3 and slice 4 part a of #9 — notification settings saved; delivery and the application credential pending)
 **Owner:** datapipelines.co core
 **Depends on:** [REST API §20](rest-api.md#20-schedules), [Auth](auth.md), [DAG Executor](dag-executor.md), [Metadata DB §4.22–§4.25](metadata-db.md#422-schedules), [Configuration §3.29](configuration.md#329-scheduler-9)
 **Design record:** [scheduler design revision](superpowers/specs/2026-09-22-scheduler-design-revision.md) (ratified 2026-09-25) — the why; this page is the what
-**Last updated:** 2026-09-28
+**Last updated:** 2026-10-03
 
 ---
 
@@ -66,6 +66,16 @@ The rules an operator can rely on:
 Each run's detail shows `prepared.resolved_parameters` — the literal map the execution actually launched with, bindings already resolved to dates — beside the frozen `parameters` the schedule holds. A keyword binding is checked structurally at save (the keyword exists, the type fits) and resolved fresh at every run, so a schedule saved on Friday resolves each day's value when it fires.
 
 ---
+
+### 2.3 Notification settings (#442)
+
+Each schedule stores recipients as a list (entered comma-separated in the form); an empty list means off. The five event checkboxes are **start, success, failure, unknown, blocked**. Failure, unknown and blocked default on; start and success default off. Addresses are validated and deduplicated server-side, with the configured recipient limit (default 20), one WHATWG valid e-mail address grammar and at most 254 characters. Invalid settings report only a field/index and reason, never an address.
+
+The delivery policy for part b is the owner's 2026-10-03 ruling: start means execution confirmed running, success means successful completion; failure covers `failed`, every `not_started` reason (Could not start), `cancelled` (Stopped — cancelled) and `aborted` (Stopped — instance shut down), each with its own subject. Unknown is never described as a stop; its later reconciled outcome is an update about the same run under the unknown checkbox. Blocked is a separate schedule-level notice only on the actual transition to blocked. No mail for skipped ticks or pause/resume. Manual runs use the same policy.
+
+Recipient addresses are visible only to roles with `schedule.update` (author, workspace admin, super admin and their MCP counterparts). Every other schedule reader sees a count and the event set; details never display addresses. Writing settings uses the existing schedule create/update permissions. Audit rows carry counts/events, never addresses. PUT omission preserves stored settings, including omitted members of a present object (the frozen additive REST contract).
+
+**Settings are delivered in part a; mail delivery is pending part b. Nothing sends yet.** The form and schedule details state plainly that scheduler mail is not enabled. Part b will supply the enable flag (default off), development recipient restrictions, outbox, transport and delivery states; saved settings are never described as successful delivery.
 
 ## 3. Occurrences and the DST rule
 
@@ -195,7 +205,7 @@ People manage schedules on the **Schedules** page (`/schedules`, in the rail's O
 ## 9. Not in slice 1
 
 - ~~**The Schedules page.**~~ Delivered by slice 2 — §8.4.
-- **Notifications** — mail on start, failure, unknown and blocked — slice 4.
+- **Notifications** — settings delivered in slice 4 part a (§2.3); delivery pending part b. Until then nothing sends.
 - ~~**Parameter bindings** (values computed per run, e.g. "the day before the occurrence").~~ Delivered by slice 3 — §2.2.
 - **An application credential.** Slice 1's routes are session-only; organizations that offer scheduling to their own customers call them from a backend with a management credential in slice 5.
 - **Background one-time runs** of a pipeline — slice 6.
@@ -206,6 +216,7 @@ People manage schedules on the **Schedules** page (`/schedules`, in the rail's O
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-03 | v1.7 | 442a (#442) | Saved schedule notification settings: recipients and five event choices, validated and shown by role; omitted PUT settings preserved; mail remains off pending part b. |
 | 2026-09-30 | v1.6 | lane 336 (#336 D6) | §5's tables: `unknown` gains the `outcome_unreadable` reason (an ABORTED row whose `error_json` — where the sweeper's `instance_lost` marker lives — is unreadable; blocks, because "not instance_lost" cannot be concluded), and `aborted` states the unreadable-payload case (state `aborted`, no reason — the record proves the abort; `unknown` would block an outcome that IS known). The executor logs `scheduler.outcome_evidence_unreadable` (observability §3.4E). Reasons are strings, not a closed enum (enums §24); no migration — the V38 CHECK constrains `state`, never `reason`. |
 | 2026-09-28 | v1.5 | 301 (#273) | §8.4: the pipelines discard dialog pre-reads §5.2's consequence before the fact — it lists the schedules whose target names the pipeline (the Usage tab's by-target read, UI Screens §4.3d), because the discard succeeds and each of them then blocks (`pointer_null` / `target_not_found`) at its next run. No scheduler code, route or query changed. |
 | 2026-09-28 | v1.4 | 286 (#277) | §8.2: the stop grace is 50 s in both shipped files, with the arithmetic at the configured maximum (admission ≤ 15 + drain 20 + Tomcat 10, + Helm's 5 s preStop); at 40 s Tomcat had nothing left under Helm. §6: the promoter's list reads its windows by keyset (`ScheduleRepository.listLiveAfter`): a create or delete committing between two windows of one walk can no longer duplicate or drop a visible row. |

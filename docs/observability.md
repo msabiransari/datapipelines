@@ -1,6 +1,6 @@
 # Observability Specification
 
-**Status:** v1.37 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
+**Status:** v1.38 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-10-04
@@ -232,6 +232,7 @@ The executor's two scheduled jobs on the `dp-scheduled` thread (§3.4H) — the 
 | Level | `event=` | When | Fields |
 |---|---|---|---|
 | INFO | `execution.events_purged` | A retention tick deleted at least one `execution_events` row for executions completed before the cutoff (nothing is logged for an empty tick) | `count`, `cutoff` |
+| WARN | `execution.idempotency_release_failed` | One release attempt for a never-started REST or MCP execution failed; the original refusal still reaches the client and the key expires by TTL | `user`, `execution`, `error` (class only; no key or exception message) |
 | WARN | `execution.sweep_failed` | The stale sweep's UPDATE threw; the tick is skipped and the next one retries | `cutoff`, `heartbeat_cutoff`, `error`, `sql_state` |
 | WARN | `execution.event_retention_failed` | The retention tick's DELETE threw; the next tick retries | `cutoff`, `error`, `sql_state` |
 
@@ -593,7 +594,8 @@ This is a construction rule, not a filter — the redacting encoder covers logs,
 
 | Date | Version | Author | Change |
 |---|---|---|---|
-| 2026-10-04 | v1.37 | 329a (#329), store-failure log shapes | §3.4C lake outcome-recorder field list gains `sql_state` and defines `error` as the exception class; §3.4G records the narrow reuse of its rule at four existing failure lines. Event names and failure behavior stay unchanged; the remaining inventory stays open on #329. |
+| 2026-10-04 | v1.38 | 329a (#329), store-failure log shapes | §3.4C lake outcome-recorder field list gains `sql_state` and defines `error` as the exception class; §3.4G records the narrow reuse of its rule at four existing failure lines. Event names and failure behavior stay unchanged; the remaining inventory stays open on #329. |
+| 2026-10-03 | v1.37 | #403 failed pre-start release | **§3.4I** gains `execution.idempotency_release_failed`: one WARN per failed cleanup attempt, user/execution ids and error class only; the original refusal is preserved. |
 | 2026-10-03 | v1.36 | 439 (#439) an event-catalogue parity guard | **§3.4's intro** states that `ObservabilityEventCatalogParityTest` fails the build when an `event=<namespace>.<name>` literal in `modules/<module>/src/main/kotlin` and the event column of these tables disagree for the namespaces whose tables are already complete (`parameter`, `lake`, `mail`, `persistence`, `scheduler`); its non-vacuity floor pins each namespace's count, and the catalogued namespaces still drifting are tracked in #443. No event row changes. |
 | 2026-10-03 | v1.35 | 393 (#393) a throwing metrics hook is contained | **§3.4G** gains `persistence.hook_failed` (WARN; `writer`, `hook`, `cause` — the hook's method name and the exception's simple class name, never its message): every `BatchingHooks` call in `BatchingWriter` goes through one guarded call, so a hook that throws can no longer strand a claimed entry, make `commit` re-write a batch the store already holds, or end a writer thread. The item's outcome stands; the hook still runs before the caller's release (#363). At most once per 10 s per writer, on the interval `persistence.saturated` uses. |
 | 2026-10-03 | v1.34 | 429 (#429) the two `parameter.*` failure lines follow the class-and-SQLState rule — renumbered at merge after 425's v1.33 | **§3.4M**: `parameter.evaluation_failed` no longer attaches the throwable (its message and stack could carry SQL or a value) — it names `error` (binary class name) and `sql_state`, and the stack moves to ONE new DEBUG row, `parameter.evaluation_failed_cause` (`evaluation_id`); `parameter.evaluation_record_failed` spells an absent SQLState `none` (`FailureShape`'s spelling), where it logged the string `null`. |

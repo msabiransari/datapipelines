@@ -36,6 +36,7 @@ data class SchedulerProperties(
     val minIntervalSeconds: Long = 300,
     /** B18 guard (L4): live schedules per workspace. */
     val maxSchedulesPerWorkspace: Int = 100,
+    val notifications: Notifications = Notifications(),
 ) {
     init {
         require(threads >= 1) { "datapipelines.scheduler.threads must be at least 1, was $threads" }
@@ -75,6 +76,21 @@ data class SchedulerProperties(
      * the reconciler never judges a claim the library would still consider alive.
      */
     val startGrace: Duration get() = Duration.ofSeconds(heartbeatIntervalSeconds * MISSED_HEARTBEATS_LIMIT)
+
+    /** Limits on stored notification settings; the sender belongs to slice 4 part b. */
+    data class Notifications(
+        val maxRecipients: Int = 20,
+    ) {
+        init {
+            require(maxRecipients in 1..MAX_RECIPIENTS) {
+                "datapipelines.scheduler.notifications.max-recipients must be 1..$MAX_RECIPIENTS"
+            }
+        }
+
+        companion object {
+            const val MAX_RECIPIENTS = 100
+        }
+    }
 
     companion object {
         /** db-scheduler's `missed-heartbeats-limit` — the record's "six missed heartbeats" (§7.2), fixed. */

@@ -37,6 +37,8 @@ data class Schedule(
     val createdAt: Instant,
     val updatedAt: Instant,
     val deletedAt: Instant?,
+    val notificationRecipients: List<String> = emptyList(),
+    val notificationEvents: Set<NotificationEvent> = NotificationEvent.DEFAULT,
 ) {
     /** Blocked takes display precedence over paused (record §1.1). */
     val blocked: Boolean get() = blockedAt != null
@@ -49,6 +51,24 @@ data class Schedule(
                 !enabled -> "paused"
                 else -> "enabled"
             }
+}
+
+/** The five per-schedule notification choices, serialized in declaration order (#442). */
+enum class NotificationEvent(
+    val wire: String,
+) {
+    START("start"),
+    SUCCESS("success"),
+    FAILURE("failure"),
+    UNKNOWN("unknown"),
+    BLOCKED("blocked"),
+    ;
+
+    companion object {
+        val DEFAULT: Set<NotificationEvent> = setOf(FAILURE, UNKNOWN, BLOCKED)
+
+        fun fromWire(value: String): NotificationEvent? = entries.firstOrNull { it.wire == value }
+    }
 }
 
 /** `schedules.missed_run_policy` (record §3): `skip` records a missed occurrence, `latest` catches up the newest one. */

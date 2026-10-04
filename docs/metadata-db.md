@@ -1,6 +1,6 @@
 # Metadata Database Schema Specification
 
-**Status:** v1.42 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
+**Status:** v1.43 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
 **Owner:** datapipelines.co core
 **Depends on:** all specs (this is the physical schema for every logical model)
 **Last updated:** 2026-10-03
@@ -908,6 +908,8 @@ CREATE TABLE schedules (
     cron                    TEXT        NOT NULL,       -- five-field Unix
     timezone                TEXT        NOT NULL,       -- an IANA region id
     missed_run_policy       TEXT        NOT NULL DEFAULT 'skip',
+    notification_recipients TEXT[]      NOT NULL DEFAULT '{}',  -- V49, #442a; empty = off
+    notification_events     TEXT[]      NOT NULL DEFAULT '{failure,unknown,blocked}',
     enabled                 BOOLEAN     NOT NULL DEFAULT TRUE,
     blocked_reason          TEXT,
     blocked_at              TIMESTAMPTZ,
@@ -924,6 +926,7 @@ CREATE TABLE schedules (
     CONSTRAINT chk_schedules_missed_run_policy CHECK (missed_run_policy IN ('skip', 'latest')),
     CONSTRAINT chk_schedules_blocked CHECK ((blocked_reason IS NULL) = (blocked_at IS NULL)),
     CONSTRAINT chk_schedules_idempotency CHECK ((idempotency_key IS NULL) = (idempotency_hash IS NULL)),
+    CONSTRAINT chk_schedules_notification_events CHECK (notification_events <@ ARRAY['start','success','failure','unknown','blocked']::TEXT[]),
     CONSTRAINT chk_schedules_revision CHECK (revision >= 1)
 );
 
@@ -1986,6 +1989,7 @@ Three pieces of execution state that a reader might reasonably expect to find he
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-03 | v1.43 | 442a (#442) | Saved schedule notification settings: recipients and five event choices, validated and shown by role; omitted PUT settings preserved; mail remains off pending part b. |
 | 2026-10-03 | v1.42 | 418 (#418) the evaluation jobs' log events cited | **§8.1** and **§8.5** name the log events the parameter-evaluation retention and sweep write (`parameter.evaluations_purged`, `parameter.evaluation_retention_failed`, `parameter.evaluation_retention_incomplete`, `parameter.evaluation_swept`, `parameter.evaluation_sweep_failed`) and cite [Observability §3.4M](observability.md#34m-the-parameter-evaluation-events-376), where the rows are defined. No schema change. |
 | 2026-10-02 | v1.41 | V48 (#376, parameter-set workspace S3) the evaluation history | **§4.37 `parameter_evaluations` and §4.38 `parameter_evaluation_queries`** — the spec's §2.1/§2.2 verbatim with the owner's rulings: the status CHECK carries `ABORTED` beside the spec's five (§11.7), the query outcome CHECK carries `ABORTED` too, the caller CHECK all five values with `PIPELINE` dormant (§11.10); plus three CHECKs that pin the state machine (`finished_at` iff not `RUNNING`, `valid` iff `COMPLETED`, each code only on its own outcome) and the `parameter_set_version >= 1` floor. `principal_key_id` takes NO foreign key (the keys purge must not be blocked by a diagnostic row), and `outcome` is NULL while a statement is in flight. §5 gains six indexes (the spec's two, the §2.3 cutoff index, the queries' FK index the cascade and the detail need, two PKs); §5A classifies both tables **derived**. **§8.1** gains the evaluation retention (the event cutoff on `started_at`, one bounded batch of 5,000 per tick); **new §8.5** the stale sweep (`INCOMPLETE` past `evaluate-timeout-seconds` + 60 s, on the same hourly tick). Up-and-down rehearsal on a copy of the demo database is the lane's evidence. |
 | 2026-10-02 | v1.40 | V47 (#328) the release records its caller node's result columns | **Two nullable JSONB columns, no backfill:** §4.6 `pipeline_executions.result_schema_json` — every execution's caller-output schema, an array of `{name, type, nullable}`, written by `recordResult` beside `result_row_count` (history, durable past the Redis TTL; NULL for no caller node, no record, or past the 256-column / 128-character record bounds — record nothing + `warn`, never fail); §4.5 `pipeline_versions.caller_output_json` — the release's copy, written ONLY by the release flip's D1 subselect (the latest SUCCESS root execution started after the last draft write; a never-run release records NULL and still succeeds). Both outside `body_hash`. Pipeline-contract §3.3.1 is the shape and precedence source of truth. Up-and-down rehearsal on the shared test container: ALTER, ALTER, DROP, DROP, ALTER, ALTER. |
