@@ -7,6 +7,7 @@ import co.datapipelines.datasources.pooling.ConnectionPoolManager
 import co.datapipelines.datasources.pooling.LakeViewInit
 import co.datapipelines.datasources.pooling.PoolLifecycleMetrics
 import co.datapipelines.datasources.pooling.ReapOutcome
+import co.datapipelines.persistence.FailureShape
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.Dialect
 import com.zaxxer.hikari.HikariDataSource
@@ -238,11 +239,12 @@ class DefaultDatasourceRegistry(
             lakeViewRecorder.record(datasourceName, view.table.namespace, view.table.name, view.emissionError)
         } catch (e: RuntimeException) {
             log.warn(
-                "event=lake.view_outcome_record_failed datasource={} table={} error=\"{}\" " +
+                "event=lake.view_outcome_record_failed datasource={} table={} error={} sql_state={} " +
                     "message=\"the emission refusal could not be recorded; the pool build is refused regardless\"",
                 datasourceName,
                 view.qualifiedName,
-                e.message,
+                FailureShape.cause(e),
+                FailureShape.sqlState(e),
             )
         }
     }

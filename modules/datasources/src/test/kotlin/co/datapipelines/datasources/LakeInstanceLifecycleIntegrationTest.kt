@@ -1,19 +1,25 @@
 package co.datapipelines.datasources
 
+import ch.qos.logback.classic.Level
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
 import co.datapipelines.datasources.pooling.ConnectionPoolManager
 import co.datapipelines.datasources.pooling.HikariConnectionPool
+import co.datapipelines.datasources.pooling.LakeInstanceInitializer
 import co.datapipelines.datasources.pooling.LakeViewInit
+import co.datapipelines.persistence.FailureShape
 import co.datapipelines.typesystem.Dialect
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertAll
 import org.junit.jupiter.api.io.TempDir
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 import java.io.File
@@ -21,6 +27,7 @@ import java.sql.Connection
 import java.sql.DriverManager
 import java.sql.SQLException
 import java.time.Instant
+import java.util.concurrent.CopyOnWriteArrayList
 
 /**
  * 152 (#128) — the LIFECYCLE and ISOLATION rules of a LAKE pool generation's shared DuckDB
@@ -217,20 +224,67 @@ class LakeInstanceLifecycleIntegrationTest {
         }
     }
 
-    @Test
-    fun `a recorder that throws does not fail the build - the healthy view still serves`() {
+    @ParameterizedTest
+    @ValueSource(booleans = [true, false])
+    fun `initializer recorder failure logs only its shape and the healthy view still serves`(sqlFailure: Boolean) {
         val trips = parquet("trips.parquet", "SELECT 1 AS id")
         val broken = tempDir.resolve("broken.parquet").apply { writeText("not parquet") }
         val rows = listOf(table("hvfhv_trips", trips), table("hvfhv_broken", broken))
-        val recorder = LakeViewOutcomeRecorder { _, _, _, _ -> throw IllegalStateException("registry write failed") }
-
-        poolManager({ rows }, recorder).use { manager ->
-            manager.poolFor(lakeDatasource("lake_recorder")).leaseConnection().use { connection ->
-                assertAll(
-                    { countOf(connection, "SELECT count(*) FROM hvfhv_trips") shouldBe 1 },
-                    { runsSql(connection, "SELECT count(*) FROM hvfhv_broken") shouldBe false },
-                )
+        val marker = "synthetic_initializer_row_329a"
+        val failure =
+            IllegalStateException(
+                "$marker wrapper",
+                if (sqlFailure) SQLException("$marker nested", "23514") else IllegalArgumentException("$marker nested"),
+            )
+        val recorded = mutableListOf<String>()
+        val recorder =
+            LakeViewOutcomeRecorder { name, namespace, table, error ->
+                recorded += (listOf(name) + namespace + table).joinToString(".")
+                requireNotNull(error)
+                throw failure
             }
+
+        val events =
+            capturingRecorderLogs {
+                poolManager({ rows }, recorder).use { manager ->
+                    manager.poolFor(lakeDatasource("lake_recorder")).leaseConnection().use { connection ->
+                        assertAll(
+                            { countOf(connection, "SELECT count(*) FROM hvfhv_trips") shouldBe 1 },
+                            { runsSql(connection, "SELECT count(*) FROM hvfhv_broken") shouldBe false },
+                        )
+                    }
+                }
+            }
+        recorded shouldBe listOf("lake_recorder.nyc.mobility.hvfhv_broken")
+        val event = events.single { it.formattedMessage.startsWith("event=lake.view_outcome_record_failed ") }
+        event.level shouldBe Level.WARN
+        event.formattedMessage shouldNotContain marker
+        event.throwableProxy shouldBe null
+        event.formattedMessage shouldContain "datasource=lake_recorder"
+        event.formattedMessage shouldContain "table=nyc.mobility.hvfhv_broken"
+        event.formattedMessage shouldContain "error=${FailureShape.cause(failure)}"
+        event.formattedMessage shouldContain "sql_state=${FailureShape.sqlState(failure)}"
+        FailureShape.sqlState(failure) shouldBe if (sqlFailure) "23514" else "none"
+        event.formattedMessage shouldContain "the instance still serves the surviving views"
+    }
+
+    private fun capturingRecorderLogs(block: () -> Unit): List<ILoggingEvent> {
+        val logger = LoggerFactory.getLogger(LakeInstanceInitializer::class.java) as ch.qos.logback.classic.Logger
+        val previousLevel = logger.level
+        val appender =
+            ListAppender<ILoggingEvent>().apply {
+                list = CopyOnWriteArrayList()
+                start()
+            }
+        logger.level = Level.WARN
+        logger.addAppender(appender)
+        return try {
+            block()
+            appender.list.toList()
+        } finally {
+            logger.detachAppender(appender)
+            logger.level = previousLevel
+            appender.stop()
         }
     }
 

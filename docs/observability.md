@@ -1,9 +1,9 @@
 # Observability Specification
 
-**Status:** v1.36 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
+**Status:** v1.37 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
-**Last updated:** 2026-10-03
+**Last updated:** 2026-10-04
 
 ---
 
@@ -147,7 +147,7 @@ A `LAKE` datasource's pool owns one embedded DuckDB instance per pool generation
 | DEBUG | `lake.instance_refused_duplicate_close_failed` | A duplicate created just as its generation retired was refused at registration and its creator's close of it failed; the handle stays registered — the release (if it has not run) or the creator's own retry (if it has) takes it, and exhaustion is reported by `lake.instance_handle_exhausted` | `datasource`, `generation`, `error` |
 | WARN | `lake.instance_handles_closed` | At the generation's release, physical connections were still registered to it — ones HikariCP never accepted (their creation straddled the shutdown and the closed bag refused them), abandoned to a borrower at its shutdown ceiling, or whose earlier close the driver refused — and the generation released them. The counts distinguish what happened: `closed` (the generation's own close was confirmed), `already_closed` (found closed by something the wrapper never saw, e.g. an executor-driven abort), `in_flight` (a borrower's close was mid-flight on another thread; the last word was handed to it), `close_failures` (the driver refused — the honest residual, still registered) | `datasource`, `generation`, `handles`, `closed`, `already_closed`, `in_flight`, `close_failures`, `error` (the last driver refusal, empty when none), `message` |
 | WARN | `lake.view_failed` | One registered table's view could not be created at instance init (109 §A); it is recorded on the table's registry row and skipped, the surviving views serve | `datasource`, `table`, `error`, `message` |
-| WARN | `lake.view_outcome_record_failed` | The registry write of a view outcome threw; the instance still serves the surviving views, the row keeps its previous state | `datasource`, `table`, `error`, `message` |
+| WARN | `lake.view_outcome_record_failed` | The registry write of a view outcome threw; the instance still serves the surviving views, or an all-refused registry still refuses the pool build; the row keeps its previous state | `datasource`, `table`, `error` (exception class), `sql_state`, `message` (static explanation) |
 
 **`instance_owner_lost` is the one to alert on**: it is a datasource whose engine went away underneath a live pool, and it does not self-heal — retire-and-rebuild (a datasource save, a table registration, or the reconcile) is the remedy, and the message says so. `view_failed` is the existing per-table isolation working (the table's row carries the error; the UI shows it); a burst of them after a registry change is a bad location or credential, not the engine. Nothing here is an audit row.
 
@@ -213,6 +213,8 @@ The batching writers in front of the audit log, the execution-event record and t
 | WARN | `persistence.drain_incomplete` | A writer's drain reached `shutdown-drain-ms` with items left: `lost` were never written (only `submit` items can be — nothing awaits them), `in_flight` were inside a commit and may or may not have landed | `writer`, `lost`, `in_flight`, `drain_ms` |
 
 A failure is named by `cause` (the exception's simple class name) and `sql_state` (the first SQLState in its cause chain, `none` without one) — never by the exception's message or its cause chain, which a store fills with the refused row (Postgres's DETAIL and CONTEXT; PgJDBC's batch exception quotes the bound values). `23xxx` is a row the store refuses, `08xxx` a connection lost (#266b). The emitter and the audit sink keep their own lines too — `Durable event … not written (kind)`, `SSE event log append failed … (replay will be incomplete)`, `audit_log write failed … kind=…` (on the direct path `… cause=… sql_state=…`) — the ones operators have always searched for. A steady `persistence.saturated` or a rising `datapipelines.persistence.fallbacks{reason=timeout}` (§4.1) means the store cannot keep up; `batch_retried` with `kind=poison` means rows the store refuses, which no retry will fix.
+
+The same class/SQLState rule applies to both lake outcome-recorder failure paths (§3.4C), the write-back rollback warning and the example-content import failure line (#329, first slice): their `error` field uses `FailureShape.cause`, with `sql_state=none` when absent, and no exception message or throwable attachment. This slice leaves the remaining #329 inventory for separate review.
 
 #### 3.4H The scheduled jobs' thread (#316)
 
@@ -591,6 +593,7 @@ This is a construction rule, not a filter — the redacting encoder covers logs,
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-04 | v1.37 | 329a (#329), store-failure log shapes | §3.4C lake outcome-recorder field list gains `sql_state` and defines `error` as the exception class; §3.4G records the narrow reuse of its rule at four existing failure lines. Event names and failure behavior stay unchanged; the remaining inventory stays open on #329. |
 | 2026-10-03 | v1.36 | 439 (#439) an event-catalogue parity guard | **§3.4's intro** states that `ObservabilityEventCatalogParityTest` fails the build when an `event=<namespace>.<name>` literal in `modules/<module>/src/main/kotlin` and the event column of these tables disagree for the namespaces whose tables are already complete (`parameter`, `lake`, `mail`, `persistence`, `scheduler`); its non-vacuity floor pins each namespace's count, and the catalogued namespaces still drifting are tracked in #443. No event row changes. |
 | 2026-10-03 | v1.35 | 393 (#393) a throwing metrics hook is contained | **§3.4G** gains `persistence.hook_failed` (WARN; `writer`, `hook`, `cause` — the hook's method name and the exception's simple class name, never its message): every `BatchingHooks` call in `BatchingWriter` goes through one guarded call, so a hook that throws can no longer strand a claimed entry, make `commit` re-write a batch the store already holds, or end a writer thread. The item's outcome stands; the hook still runs before the caller's release (#363). At most once per 10 s per writer, on the interval `persistence.saturated` uses. |
 | 2026-10-03 | v1.34 | 429 (#429) the two `parameter.*` failure lines follow the class-and-SQLState rule — renumbered at merge after 425's v1.33 | **§3.4M**: `parameter.evaluation_failed` no longer attaches the throwable (its message and stack could carry SQL or a value) — it names `error` (binary class name) and `sql_state`, and the stack moves to ONE new DEBUG row, `parameter.evaluation_failed_cause` (`evaluation_id`); `parameter.evaluation_record_failed` spells an absent SQLState `none` (`FailureShape`'s spelling), where it logged the string `null`. |

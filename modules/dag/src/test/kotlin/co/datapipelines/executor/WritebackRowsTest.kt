@@ -1,8 +1,12 @@
 package co.datapipelines.executor
 
+import ch.qos.logback.classic.Level
+import ch.qos.logback.classic.spi.ILoggingEvent
+import ch.qos.logback.core.read.ListAppender
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.pooling.ConnectionPool
+import co.datapipelines.persistence.FailureShape
 import co.datapipelines.pipeline.NodeOutput
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.WriteMode
@@ -12,11 +16,16 @@ import co.datapipelines.typesystem.LogicalType
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
+import org.slf4j.LoggerFactory
 import java.sql.Connection
 import java.sql.DriverManager
 import java.sql.SQLException
 import java.util.UUID
+import java.util.concurrent.CopyOnWriteArrayList
 
 /**
  * `WritebackRunner.writebackRows` — the composition write-back path (design §4.2): a parent
@@ -232,6 +241,7 @@ class WritebackRowsTest {
     /** A registry whose target connections misbehave at the commit boundary, and nowhere else. */
     private class CommitFaultRegistry(
         private val inner: FakeDatasourceRegistry,
+        private val rollbackFault: (Connection) -> Unit = { it.rollback() },
         private val commitFault: (Connection) -> Unit,
     ) : DatasourceRegistry by inner {
         override fun poolFor(datasource: Datasource): ConnectionPool {
@@ -241,9 +251,72 @@ class WritebackRowsTest {
                     val c = pool.leaseConnection()
                     return object : Connection by c {
                         override fun commit() = commitFault(c)
+
+                        override fun rollback() = rollbackFault(c)
                     }
                 }
             }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = [true, false])
+    fun `rollback failure logs only its shape and preserves the original write failure`(sqlStatePresent: Boolean) {
+        val datasource = h2Datasource("wb", listOf("CREATE TABLE tgt (id INT)"))
+        val original = lostAck()
+        val marker = "synthetic_rollback_row_329a"
+        val rollback =
+            SQLException(
+                "$marker wrapper",
+                null as String?,
+                SQLException("$marker nested", if (sqlStatePresent) "08006" else null),
+            )
+        var rollbackCalls = 0
+        val registry =
+            CommitFaultRegistry(
+                FakeDatasourceRegistry(mapOf("wb" to datasource)),
+                rollbackFault = {
+                    rollbackCalls++
+                    throw rollback
+                },
+                commitFault = { throw original },
+            )
+        val evidence = CommitEvidence()
+        val events =
+            capturingRollbackLogs {
+                val thrown = writeThrough(registry, evidence)
+                thrown.cause shouldBe original
+                thrown.code shouldBe PipelineErrorCodes.Node.WRITEBACK_FAILED
+            }
+        rollbackCalls shouldBe 1
+        evidence.committed shouldBe false
+        evidence.rolledBack shouldBe false
+        val event = events.single { it.formattedMessage.startsWith("Write-back rollback failed") }
+        event.level shouldBe Level.WARN
+        event.formattedMessage shouldNotContain marker
+        event.throwableProxy shouldBe null
+        event.formattedMessage shouldContain "error=${FailureShape.cause(rollback)}"
+        event.formattedMessage shouldContain "sql_state=${FailureShape.sqlState(rollback)}"
+        FailureShape.sqlState(rollback) shouldBe if (sqlStatePresent) "08006" else "none"
+    }
+
+    private fun capturingRollbackLogs(block: () -> Unit): List<ILoggingEvent> {
+        val logger = LoggerFactory.getLogger(JdbcWritebackRunner::class.java) as ch.qos.logback.classic.Logger
+        val previousLevel = logger.level
+        val appender =
+            ListAppender<ILoggingEvent>().apply {
+                list = CopyOnWriteArrayList()
+                start()
+            }
+        logger.level = Level.WARN
+        logger.addAppender(appender)
+        return try {
+            block()
+            appender.list.toList()
+        } finally {
+            logger.detachAppender(appender)
+            logger.level = previousLevel
+            appender.stop()
         }
     }
 
