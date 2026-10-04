@@ -5,6 +5,7 @@ import com.microsoft.playwright.Page
 import com.microsoft.playwright.PlaywrightException
 import com.microsoft.playwright.Route
 import com.microsoft.playwright.options.WaitForSelectorState
+import com.microsoft.playwright.options.WaitUntilState
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.ints.shouldBeGreaterThanOrEqual
 import io.kotest.matchers.shouldBe
@@ -54,6 +55,22 @@ import java.util.Random
  * mid-expand reload) is observed through `onRequestFailed` — fulfilling it does NOT throw in
  * Playwright-Java (measured), so the abort cannot be pinned at release time. The throttle
  * counts those failures, and the detail-pane test asserts on the count.
+ *
+ * ## Why the first navigation waits for `DOMCONTENTLOADED`, not `load` (#428)
+ *
+ * A gate once saw `page.navigate("$baseUrl/dashboard")` time out at 30 s with this throttle
+ * already installed. The question was whether a HELD partial can delay the document `load`
+ * the navigate waits for. Measured (isolated Playwright-Java probe, htmx-faithful: two
+ * XMLHttpRequests fired at DOMContentLoaded, intercepted and held in this throttle's exact
+ * fetch-then-hold shape, over a 900 ms parser-blocking shell script): `load` fires ~1 ms
+ * after DOMContentLoaded whether the partials are held or not — document `load` does not
+ * wait for XHR/fetch, and a paused route is invisible to it. The 30 s budget was the BOX's
+ * (the gate's clean build ran beside the test), not the throttle's. So the two first
+ * navigations wait for `DOMCONTENTLOADED` — the earliest point at which the shell is parsed
+ * and the click targets exist — and synchronize on the explicit selector wait each case
+ * already performs, rather than on `load`, which additionally waits for every non-critical
+ * subresource and is the first thing a loaded box stretches. Throttle semantics and every
+ * assertion are unchanged.
  *
  * ## The seeded tree
  *
@@ -355,7 +372,7 @@ class ExplorerStressBrowserTest : BrowserSuite() {
         try {
             // #398: the templates tree is the SIDEBAR's — the same server fragments, the same
             // prefix requests, opened from any page through the branch toggle.
-            page.navigate("$baseUrl/dashboard")
+            page.navigate("$baseUrl/dashboard", Page.NavigateOptions().setWaitUntil(WaitUntilState.DOMCONTENTLOADED))
             page.click("[data-nav-branch='templates'] [data-nav-tree-toggle]")
             throttle.releaseUntil { page.locator(folderSummary("nyc")).count() > 0 }
 
@@ -437,7 +454,7 @@ class ExplorerStressBrowserTest : BrowserSuite() {
             // #350: the pipelines half of the hammer runs on the SIDEBAR's tree — the explorer
             // page it used to drive is the flat catalog now.
             tree = PIPELINES_TREE
-            page.navigate("$baseUrl/dashboard")
+            page.navigate("$baseUrl/dashboard", Page.NavigateOptions().setWaitUntil(WaitUntilState.DOMCONTENTLOADED))
             page.click("[data-nav-branch='pipelines'] [data-nav-tree-toggle]")
             throttle.releaseUntil { page.locator(folderSummary("nyc")).count() > 0 }
 
