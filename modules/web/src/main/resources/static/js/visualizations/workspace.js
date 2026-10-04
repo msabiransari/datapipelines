@@ -15,6 +15,9 @@
    * server base URL — so a ten-case visualization boots one Plotly instance, not ten. A case
    * revealed again re-fits through the instance's own resize.
    *
+   * The Preview partial arrives by an htmx swap into the pane: ONE document listener (a window
+   * registry, #437) answers it for the workspace on show, resolved at event time.
+   *
    * Version state does NOT live here: every version switch is a full navigation (the
    * one-bundle rule). The pure half (caseIndexFrom) is exported for `node --test`.
    */
@@ -31,6 +34,9 @@
       return n >= 0 && n < count ? n : 0;
     },
   };
+
+  /** The document-wide registry key of the ONE afterSwap listener (see registerPreviewSwap). */
+  var SWAP_REGISTRY = "__dpVizPreviewSwap";
 
   var preview = { instances: {}, data: null, notifications: [] };
 
@@ -81,6 +87,44 @@
     if (count > 0) showCase(pane, initial);
   }
 
+  /**
+   * The Preview pane of the visualization workspace on show NOW, or null: resolved at EVENT time
+   * from the document, scoped to this family (`.viz-workspace`) so another family's pane carrying
+   * the same `data-dp-pane` marker is never matched, and never a pane that left the document.
+   */
+  function livePreviewPane() {
+    var root = document.querySelector(".viz-workspace .dp-ws-root");
+    if (!root || root.isConnected === false) return null;
+    return root.querySelector('[data-dp-pane="preview"]');
+  }
+
+  /** The current evaluation's answer to a swap: wires the live Preview pane, and only that pane. */
+  function onPreviewSwap(event) {
+    var target = event && event.detail ? event.detail.target : null;
+    if (!target) return;
+    var live = livePreviewPane();
+    if (live && target === live) wirePreview(live);
+  }
+
+  /**
+   * ONE htmx:afterSwap listener per document, however many times this glue is evaluated (#437): a
+   * restored (cloned) root re-runs the script (#426), and a listener per wiring would stay bound to
+   * the previous root's pane. The listener dispatches through the REGISTRY's handler, so the latest
+   * evaluation answers with ITS state — the same `preview` its select and onReveal handlers read —
+   * and never the evaluation that registered first (the pattern of workspace/history.js).
+   */
+  function registerPreviewSwap(handler) {
+    var reg = window[SWAP_REGISTRY];
+    if (!reg) reg = window[SWAP_REGISTRY] = { handler: null, listeners: 0 };
+    reg.handler = handler;
+    if (reg.listeners === 0) {
+      reg.listeners = 1;
+      document.body.addEventListener("htmx:afterSwap", function (event) {
+        if (typeof reg.handler === "function") reg.handler(event);
+      });
+    }
+  }
+
   function wire() {
     if (!window.WorkspacePanes) return;
     var wired = window.WorkspacePanes.wireWorkspace({
@@ -98,9 +142,10 @@
     if (!wired) return;
     var previewPane = wired.root.querySelector('[data-dp-pane="preview"]');
     if (!previewPane) return;
-    document.body.addEventListener("htmx:afterSwap", function (event) {
-      if (event.detail && event.detail.target === previewPane) wirePreview(previewPane);
-    });
+    // Only an evaluation that WIRED a root answers swaps: a second pass over a root an earlier
+    // evaluation already wired returns null above and leaves that evaluation's handler (and its
+    // select/onReveal state) in charge.
+    registerPreviewSwap(onPreviewSwap);
     // A partial that landed before this listener existed (a fast first paint).
     wirePreview(previewPane);
   }
