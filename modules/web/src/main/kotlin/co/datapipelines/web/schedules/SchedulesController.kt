@@ -81,7 +81,7 @@ class SchedulesController(
         val found = schedules.list(workspaceOf(principal), prefix?.trim(), size + 1, page, PrincipalTargetViewer(principal))
         val items = found.take(size)
         val names = namesOf(items.flatMap { listOf(it.createdBy, it.updatedBy) })
-        val mayReadRecipients = principal.workspace?.permits(Permission.SCHEDULE_UPDATE) == true
+        val mayReadRecipients = principal.holds(Permission.SCHEDULE_UPDATE)
         val mapped = items.map { scheduleJson(it, names, mayReadRecipients) }
         return ApiResponse.of(PagedData(mapped, Pagination.unknownTotal(page, size, mapped.size, found.size > size)))
     }
@@ -316,7 +316,7 @@ class SchedulesController(
                     scheduleJson(
                         schedule,
                         namesOf(listOf(schedule.createdBy, schedule.updatedBy)),
-                        currentPrincipal().workspace?.permits(Permission.SCHEDULE_UPDATE) == true,
+                        currentPrincipal().holds(Permission.SCHEDULE_UPDATE),
                     ),
                 ),
             )

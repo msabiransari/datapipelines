@@ -1,8 +1,10 @@
 package co.datapipelines.web.schedules
 
+import co.datapipelines.auth.ApiKeyKind
 import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.KeyRole
 import co.datapipelines.auth.PermissionResolverInstallation
 import co.datapipelines.auth.RolePermissionsResolver
 import co.datapipelines.auth.WorkspaceContext
@@ -130,6 +132,62 @@ class SchedulesControllerTest {
             notifications["delivery"] shouldBe mapOf("state" to "off", "reason" to "disabled")
             notifications.containsKey("recipients") shouldBe (role == WorkspaceRole.AUTHOR)
             if (role == WorkspaceRole.AUTHOR) {
+                notifications["recipients"] shouldBe stored.notificationRecipients
+            } else {
+                mapper.writeValueAsString(data).contains("private@example.com") shouldBe false
+            }
+        }
+    }
+
+    // #442 review F1: a key's authority is its KEY ROLE — its workspace context is the VIEWER floor
+    // that is never consulted (ApiKeyService.identityContext) — so an mcp author or workspace-admin
+    // key reads the addresses, and a promoter or endpoint key does not.
+    @ParameterizedTest
+    @CsvSource(
+        "AUTHOR,MCP,true,false",
+        "AUTHOR,MCP,true,true",
+        "WORKSPACE_ADMIN,MCP,true,false",
+        "WORKSPACE_ADMIN,MCP,true,true",
+        "PROMOTER,MCP,false,false",
+        "PROMOTER,MCP,false,true",
+        "API_CALLER,ENDPOINT,false,false",
+        "API_CALLER,ENDPOINT,false,true",
+    )
+    fun `notification addresses follow the key role for a key principal on get and list`(
+        keyRoleName: String,
+        kindName: String,
+        reads: Boolean,
+        list: Boolean,
+    ) {
+        PermissionResolverInstallation(RolePermissionsResolver).use {
+            val stored = schedule().copy(notificationRecipients = listOf("private@example.com", "other@example.org"))
+            every { service.get(workspace, scheduleId, any()) } returns stored
+            every { service.list(workspace, any(), any(), any(), any()) } returns listOf(stored)
+            val principal =
+                AuthenticatedPrincipal(
+                    userId = user,
+                    email = "dpk_key@keys.invalid",
+                    displayName = "key",
+                    authMethod = AuthMethod.API_KEY,
+                    keyId = "dpk_KEY",
+                    workspace = WorkspaceContext(workspace, "acme", WorkspaceRole.VIEWER),
+                    keyKind = ApiKeyKind.valueOf(kindName),
+                    keyRole = KeyRole.valueOf(keyRoleName),
+                )
+            SecurityContextHolder.getContext().authentication = UsernamePasswordAuthenticationToken(principal, null, emptyList())
+            val data =
+                if (list) {
+                    controller
+                        .list(null, null, null)
+                        .data.items
+                        .single()
+                } else {
+                    controller.get(scheduleId).body!!.data
+                }
+            val notifications = data["notifications"] as Map<*, *>
+            notifications["recipient_count"] shouldBe 2
+            notifications.containsKey("recipients") shouldBe reads
+            if (reads) {
                 notifications["recipients"] shouldBe stored.notificationRecipients
             } else {
                 mapper.writeValueAsString(data).contains("private@example.com") shouldBe false
