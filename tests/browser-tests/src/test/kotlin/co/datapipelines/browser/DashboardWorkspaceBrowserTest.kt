@@ -1,5 +1,10 @@
 package co.datapipelines.browser
 
+import com.microsoft.playwright.Page
+import com.microsoft.playwright.PlaywrightException
+import com.microsoft.playwright.Request
+import com.microsoft.playwright.Response
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldNotBeEmpty
@@ -11,6 +16,10 @@ import org.junit.jupiter.api.MethodOrderer
 import org.junit.jupiter.api.Order
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestMethodOrder
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
+import java.net.URI
+import java.util.function.Consumer
 
 /**
  * #400 — the dashboard WORKSPACE in a real browser (ui-screens.md §4.21): the tab strip over
@@ -29,33 +38,87 @@ class DashboardWorkspaceBrowserTest : DashboardBrowserSuite() {
         val board = seedBoardWithGrid(root)
         seedDraftVersion(board)
 
-        // A Versions deep link at a NAMED version (the lifecycle redirects' shape): the Board
-        // pane is HIDDEN at load, its lazy rows load, and the strip marks Versions.
-        page.navigate("$baseUrl/dashboards/$board?version=2&tab=versions")
-        page.waitForSelector("#dp-pane-versions:not([hidden]) .ds-table")
-        page.locator("#dp-pane-board").getAttribute("hidden") shouldBe "hidden"
-        page.locator("#dp-tab-versions").getAttribute("aria-selected") shouldBe "true"
-        // The lazy pane shows the history: the released v1 serving, the draft v2 beside it.
-        page.locator("#dp-pane-versions [data-version-row='2']").count() shouldBe 1
+        VersionsDiagnostics(page, board).use { diagnostics ->
+            // A Versions deep link at a NAMED version (the lifecycle redirects' shape): the Board
+            // pane is HIDDEN at load, its lazy rows load, and the strip marks Versions.
+            diagnostics.navigation("first Versions deep link")
+            page.navigate("$baseUrl/dashboards/$board?version=2&tab=versions")
+            diagnostics.arrived()
+            diagnostics.waitForTable()
+            page.locator("#dp-pane-board").getAttribute("hidden") shouldBe "hidden"
+            page.locator("#dp-tab-versions").getAttribute("aria-selected") shouldBe "true"
+            // The lazy pane shows the history: the released v1 serving, the draft v2 beside it.
+            page.locator("#dp-pane-versions [data-version-row='2']").count() shouldBe 1
 
-        // IN PAGE to Board: no navigation (the document is the same), the pane reveals, and
-        // the runtime's OWN resize re-fits the chart that booted into the hidden pane.
-        page.click("#dp-tab-board")
-        page.waitForSelector("#dp-pane-board:not([hidden])")
-        page.waitForFunction(
-            "() => { const s = document.querySelector('#dp-board .plotly .main-svg'); return s && s.getBoundingClientRect().width > 100; }",
-        )
-        page.locator("#dp-tab-board").getAttribute("aria-selected") shouldBe "true"
-        page.url() shouldContain "tab=board"
-        page.url() shouldContain "version=2"
+            // IN PAGE to Board: no navigation (the document is the same), the pane reveals, and
+            // the runtime's OWN resize re-fits the chart that booted into the hidden pane.
+            page.click("#dp-tab-board")
+            page.waitForSelector("#dp-pane-board:not([hidden])")
+            page.waitForFunction(
+                "() => { const s = document.querySelector('#dp-board .plotly .main-svg');" +
+                    " return s && s.getBoundingClientRect().width > 100; }",
+            )
+            page.locator("#dp-tab-board").getAttribute("aria-selected") shouldBe "true"
+            page.url() shouldContain "tab=board"
+            page.url() shouldContain "version=2"
 
-        // The URL IS the state (replaceState, the pipeline editor's #349 rule): a reload of
-        // the deep link re-selects Board, and the Versions deep link re-selects Versions —
-        // Back after a replaceState'd switch leaves the document, as #350 left it.
-        page.reload()
-        page.waitForSelector("#dp-pane-board:not([hidden])")
-        page.navigate("$baseUrl/dashboards/$board?version=2&tab=versions")
-        page.waitForSelector("#dp-pane-versions:not([hidden]) .ds-table")
+            // The URL IS the state: the tab switch pushes history (#402); a reload re-selects
+            // Board, and a full Versions deep link re-selects Versions in its new document.
+            diagnostics.navigation("Board reload")
+            page.reload()
+            diagnostics.arrived()
+            page.waitForSelector("#dp-pane-board:not([hidden])")
+            diagnostics.navigation("second Versions deep link")
+            page.navigate("$baseUrl/dashboards/$board?version=2&tab=versions")
+            diagnostics.arrived()
+            diagnostics.waitForTable()
+        }
+    }
+
+    /** Diagnostic coverage only: these plants do not establish the cause of #436. */
+    @ParameterizedTest
+    @ValueSource(strings = ["missing", "failed"])
+    fun `#436 - a missing or failed Versions read names its navigation and pane state`(plant: String) {
+        val root = ready("dp436")
+        val board = seedBoardWithGrid(root)
+        if (plant == "missing") {
+            page.route("**/js/dashboards/workspace.js*") { route ->
+                val response = route.fetch()
+                val original = response.text()
+                val causalCall = "window.htmx.ajax(\"GET\", url, { target: pane, swap: \"innerHTML\" });"
+                original.split(causalCall).size shouldBe 2
+                route.fulfill(
+                    com.microsoft.playwright.Route
+                        .FulfillOptions()
+                        .setResponse(response)
+                        .setBody(original.replace(causalCall, "/* diagnostic plant: no request */")),
+                )
+            }
+        } else {
+            page.route("**/partials/dashboards/$board/versions") { route ->
+                route.fulfill(
+                    com.microsoft.playwright.Route
+                        .FulfillOptions()
+                        .setStatus(503)
+                        .setBody(""),
+                )
+            }
+        }
+        VersionsDiagnostics(page, board).use { diagnostics ->
+            diagnostics.navigation("forced $plant Versions deep link")
+            page.navigate("$baseUrl/dashboards/$board?tab=versions")
+            diagnostics.arrived()
+            page.waitForSelector("#dp-pane-versions[data-lazy-loaded='1']")
+            // Only the forced diagnostic failure gets a short wait; the original case keeps
+            // BrowserSuite's inherited action budget, including CI's 90 seconds.
+            val failure = shouldThrow<AssertionError> { diagnostics.waitForTable(DIAGNOSTIC_WAIT_MS) }
+            val message = requireNotNull(failure.message)
+            message shouldContain "forced $plant Versions deep link"
+            message shouldContain "placeholder=true"
+            message shouldContain "table=false"
+            message shouldContain if (plant == "missing") "requests=[]" else "status=503"
+            println("#436 diagnostic plant verified: $message")
+        }
     }
 
     @Test
@@ -424,7 +487,176 @@ class DashboardWorkspaceBrowserTest : DashboardBrowserSuite() {
         return value!!
     }
 
+    /** No bodies, headers, arbitrary query values or raw browser errors enter CI's XML. */
+    private class VersionsDiagnostics(
+        private val on: Page,
+        board: String,
+    ) : AutoCloseable {
+        private val path = "/partials/dashboards/$board/versions"
+        private var currentNavigation = "not started"
+        private val navigations = mutableListOf<String>()
+        private val requests = linkedMapOf<Request, String>()
+        private val starts = mutableMapOf<Request, Long>()
+        private val errors = mutableListOf<String>()
+        private val requestListener =
+            Consumer<Request> { request ->
+                if (matches(request) && requests.size < MAX_EVENTS) {
+                    starts[request] = System.nanoTime()
+                    requests[request] = "navigation=$currentNavigation start status=pending"
+                }
+            }
+        private val responseListener =
+            Consumer<Response> { response ->
+                val request = response.request()
+                if (requests.containsKey(request)) {
+                    requests[request] += " status=${response.status()} headersAfterMs=${elapsed(request)}"
+                }
+            }
+        private val finishedListener =
+            Consumer<Request> { request ->
+                if (requests.containsKey(request)) requests[request] += " finishedAfterMs=${elapsed(request)}"
+            }
+        private val failedListener =
+            Consumer<Request> { request ->
+                if (requests.containsKey(request)) {
+                    // Playwright's network failure is a Chromium code, never a response body.
+                    val code = request.failure()?.takeIf { it.matches(Regex("net::ERR_[A-Z_]+")) } ?: "network failure"
+                    requests[request] += " failedAfterMs=${elapsed(request)} failure=$code"
+                }
+            }
+        private val errorListener =
+            Consumer<String> { error ->
+                if (errors.size < MAX_EVENTS) {
+                    // Classification deliberately excludes arbitrary strings that could carry data.
+                    val kind =
+                        listOf("ReferenceError", "TypeError", "SyntaxError", "htmx").firstOrNull { error.contains(it) } ?: "page error"
+                    errors += "navigation=$currentNavigation kind=$kind"
+                }
+            }
+        private val frameListener =
+            Consumer<com.microsoft.playwright.Frame> { frame ->
+                if (frame == on.mainFrame() && navigations.size < MAX_EVENTS) {
+                    navigations += "$currentNavigation committed=${safeUrl(frame.url())}"
+                }
+            }
+
+        init {
+            // The request's actual target can differ from the live pane at failure time.
+            // This document-local observer records flags only, including a detached target.
+            on.addInitScript(
+                """
+                (() => {
+                  const events = [];
+                  const types = ['htmx:beforeRequest', 'htmx:afterRequest', 'htmx:afterSwap',
+                    'htmx:targetError', 'htmx:responseError', 'htmx:sendError'];
+                  const record = event => {
+                    const detail = event.detail || {};
+                    if (!detail.pathInfo || detail.pathInfo.requestPath !== '$path' || events.length >= $MAX_EVENTS) return;
+                    const target = detail.target;
+                    events.push({event: event.type, document: performance.timeOrigin,
+                      targetPresent: !!target, targetConnected: !!(target && target.isConnected),
+                      targetIsLivePane: target === document.querySelector('#dp-pane-versions'),
+                      targetHasTable: !!(target && target.querySelector('.ds-table'))});
+                  };
+                  types.forEach(type => document.addEventListener(type, record));
+                  window.__dpVersionsDiagnostics = {events,
+                    stop: () => types.forEach(type => document.removeEventListener(type, record))};
+                })();
+                """.trimIndent(),
+            )
+            on.onRequest(requestListener)
+            on.onResponse(responseListener)
+            on.onRequestFinished(finishedListener)
+            on.onRequestFailed(failedListener)
+            on.onPageError(errorListener)
+            on.onFrameNavigated(frameListener)
+        }
+
+        fun navigation(name: String) {
+            currentNavigation = name
+            if (navigations.size < MAX_EVENTS) navigations += "$name from=${safeUrl(on.url())}"
+        }
+
+        fun arrived() {
+            if (navigations.size < MAX_EVENTS) {
+                navigations += "$currentNavigation document=" + on.evaluate("() => performance.timeOrigin")
+            }
+        }
+
+        fun waitForTable(timeout: Double? = null) {
+            try {
+                val options = Page.WaitForSelectorOptions()
+                timeout?.let { options.setTimeout(it) }
+                on.waitForSelector("#dp-pane-versions:not([hidden]) .ds-table", options)
+            } catch (failure: PlaywrightException) {
+                throw AssertionError(report(), failure)
+            }
+        }
+
+        private fun report(): String {
+            val state =
+                try {
+                    on.evaluate(
+                        """
+                        () => {
+                          const root = document.querySelector('.dp-ws-root');
+                          const pane = document.querySelector('#dp-pane-versions');
+                          const table = pane && pane.querySelector('.ds-table');
+                          const button = document.querySelector('#dp-tab-versions');
+                          const visible = table && table.getClientRects().length > 0 && getComputedStyle(table).visibility !== 'hidden';
+                          return 'document=' + performance.timeOrigin + ' ready=' + document.readyState
+                            + ' active=' + (root && root.getAttribute('data-active-tab'))
+                            + ' selected=' + (button && button.getAttribute('aria-selected'))
+                            + ' hidden=' + (pane && pane.hasAttribute('hidden'))
+                            + ' loaded=' + (pane && pane.getAttribute('data-lazy-loaded'))
+                            + ' wired=' + (root && root.getAttribute('data-dp-ws-wired'))
+                            + ' expando=' + (root && root.__dpWsWired === true)
+                            + ' connected=' + (pane && pane.isConnected)
+                            + ' htmx=' + !!window.htmx + ' ajax=' + !!(window.htmx && window.htmx.ajax)
+                            + ' placeholder=' + !!(pane && pane.querySelector('.dp-tab-note'))
+                            + ' table=' + !!table + ' tableVisible=' + !!visible
+                            + ' fragment=' + (pane && pane.querySelector('.dp-versions') ? 'versions' : 'other-or-empty')
+                            + ' htmxEvents=' + JSON.stringify(window.__dpVersionsDiagnostics && window.__dpVersionsDiagnostics.events);
+                        }
+                        """.trimIndent(),
+                    )
+                } catch (_: PlaywrightException) {
+                    "state unavailable (document left or page closed)"
+                }
+            return "Versions lazy read failed: navigation=$currentNavigation url=${safeUrl(on.url())}; $state; " +
+                "navigations=$navigations; requests=${requests.values.toList()}; pageErrors=$errors"
+        }
+
+        private fun matches(request: Request): Boolean = request.method() == "GET" && URI(request.url()).path == path
+
+        private fun elapsed(request: Request): Long = (System.nanoTime() - requireNotNull(starts[request])) / NANOS_PER_MS
+
+        private fun safeUrl(url: String): String {
+            val uri = URI(url)
+            val safeQuery =
+                uri.rawQuery.orEmpty().split('&').filter {
+                    it.matches(Regex("version=[0-9]+|tab=(board|overview|refreshes|versions|keys)"))
+                }
+            return uri.path.orEmpty() + if (safeQuery.isEmpty()) "" else "?" + safeQuery.joinToString("&")
+        }
+
+        override fun close() {
+            on.offRequest(requestListener)
+            on.offResponse(responseListener)
+            on.offRequestFinished(finishedListener)
+            on.offRequestFailed(failedListener)
+            on.offPageError(errorListener)
+            on.offFrameNavigated(frameListener)
+            // BrowserSuite destroys this case's context after close; no init script or DOM
+            // observer survives into another test. Remove the live listeners now as well.
+            if (!on.isClosed) on.evaluate("() => { if (window.__dpVersionsDiagnostics) window.__dpVersionsDiagnostics.stop(); }")
+        }
+    }
+
     private companion object {
+        const val DIAGNOSTIC_WAIT_MS = 1000.0
+        const val MAX_EVENTS = 12
+        const val NANOS_PER_MS = 1_000_000
         const val PHONE_W = 390
         const val PHONE_H = 844
 
