@@ -113,8 +113,8 @@ class ScheduleNotificationSettingsE2eTest {
         sql(
             """
             INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin) VALUES
-                ('$ADMIN_ID', 'author@example.com', 'PP Admin', 'test', 'pp-admin-sub', TRUE, FALSE),
-                ('$PROMOTER_ID', 'promoter@example.com', 'PP Promoter', 'test', 'pp-promoter-sub', TRUE, FALSE),
+                ('$ADMIN_ID', 'author@example.com', 'Notification Author', 'test', 'notification-author-sub', TRUE, FALSE),
+                ('$PROMOTER_ID', 'promoter@example.com', 'Notification Promoter', 'test', 'notification-promoter-sub', TRUE, FALSE),
                 ('$VIEWER_ID', 'viewer@example.com', 'Viewer', 'test', 'notification-viewer', TRUE, FALSE)
             """.trimIndent(),
         )
