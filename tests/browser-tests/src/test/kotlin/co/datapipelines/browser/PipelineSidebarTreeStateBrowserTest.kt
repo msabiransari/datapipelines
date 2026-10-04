@@ -453,7 +453,7 @@ class PipelineSidebarTreeStateBrowserTest : BrowserSuite() {
 
     @Test
     @Suppress("LongMethod") // one session on purpose: the listener counts are only meaningful across ONE document
-    fun `A12 - boosted and history navigation keep ONE set of tree handlers and re-mark the leaf - the templates tree keeps its keyboard`() {
+    fun `A12 - boosted and history navigation keep ONE set of tree handlers and re-mark the leaf, templates keyboard kept`() {
         page.setViewportSize(1440, 900)
         loginReadyUser("p350hist")
         val id = seedPipeline("acme/hist/current")

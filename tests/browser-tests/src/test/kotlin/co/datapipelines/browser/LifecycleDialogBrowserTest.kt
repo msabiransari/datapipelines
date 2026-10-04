@@ -158,32 +158,6 @@ class LifecycleDialogBrowserTest : BrowserSuite() {
     }
 
     /**
-     * The success toast lands OOB in the stack; this waits for a NEW one (the previous
-     * toast may still be inside its 6s auto-dismiss window) and hands its text back. A
-     * refusal shows up here too: the stack's full text rides the timeout message, so a
-     * Shape C refusal names its code instead of just timing out.
-     *
-     * The baseline is counted BEFORE the action that earns the toast, never after: a local
-     * POST answers in ~30 ms, inside the click's own settle window, so a count taken after
-     * the click already included the new toast and the wait for "one more" ran out its 30 s
-     * while the toast auto-dismissed (traced at the 2026-09-12 gate: response done 38 ms into
-     * a 109 ms click, baseline taken 10 ms after it).
-     */
-    private fun successToastAfter(action: () -> Unit): String {
-        val before = toastCount()
-        action()
-        page.waitForFunction(
-            "(n) => document.querySelectorAll('#toast .ds-toast').length > n",
-            before,
-        )
-        // The NEW toast is the one at index `before` — earlier toasts may still be inside
-        // their 6s window, and reading `.last()` would hand back a stale sibling's text.
-        return page.locator("#toast .ds-toast").nth(before).innerText()
-    }
-
-    private fun toastCount(): Int = page.locator("#toast .ds-toast").count()
-
-    /**
      * The redirect legs' toast: it arrives from the flash BIN via toast.js's init adoption,
      * which races this call on a freshly navigated document — so this waits for ANY toast
      * rather than counting past a baseline the adoption may already have passed.

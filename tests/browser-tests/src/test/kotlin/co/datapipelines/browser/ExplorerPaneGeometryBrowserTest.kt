@@ -162,33 +162,6 @@ class ExplorerPaneGeometryBrowserTest : SchedulesBrowserSuite() {
         """.trimIndent()
 
     /**
-     * Arms a one-shot capture of the first animation frame, after the next boosted swap, in
-     * which the explorer's panes MEASURE (#294): a `requestAnimationFrame` loop from
-     * `htmx:afterSwap` that stops on the first frame whose probe finds both panes with a tree
-     * of non-zero width. One fixed frame after the swap was a bet the swap's own frame had
-     * painted the explorer; on a 2-vCPU runner it had not. The loop still catches the defect
-     * this test pins — a tree painted in the wrong geometry MEASURES, wrongly, on that frame.
-     * The armed document is stamped with the `token` argument: a click that replaced the whole document
-     * (a full navigation, not the boosted swap) leaves a document without the stamp, which
-     * the caller reports as exactly that instead of as "no geometry".
-     *
-     * The probe is spliced into the evaluated source here, in Kotlin, rather than handed
-     * to an in-page `eval`: the app's CSP has no `'unsafe-eval'` (188), so an `eval` that
-     * runs INSIDE the page is refused — only the expression Playwright compiles through
-     * CDP is exempt.
-     */
-    private val armFirstFrame =
-        """
-        (token) => { window.__ff = null; window.__ffArmed = token;
-          const probe = $geometryProbe;
-          const frame = () => {
-            const g = probe();
-            if (g && g.treeWidth > 0) { window.__ff = g; } else { requestAnimationFrame(frame); }
-          };
-          document.body.addEventListener('htmx:afterSwap', () => requestAnimationFrame(frame), {once: true}); }
-        """.trimIndent()
-
-    /**
      * True once htmx has BOOSTED the link the `sel` argument selects (htmx 2 keeps it on the element's
      * internal data): a click before that is an ordinary full navigation, and the first-frame probe
      * lives in the document that navigation throws away.
@@ -423,7 +396,8 @@ class ExplorerPaneGeometryBrowserTest : SchedulesBrowserSuite() {
      * Arms a one-shot capture at the first frame after the next boosted swap: whether the
      * pane's stylesheet (`template-tree.css`) is a child of HEAD — the 090 defect was the
      * link riding inside the swapped region, which the browser applies too late to style
-     * the first paint. The armed document is stamped with `token` (see [armFirstFrame]).
+     * the first paint. The armed document is stamped with `token`: a click that replaced the
+     * whole document (a full navigation, not the boosted swap) leaves a document without it.
      */
     private val armHeadCheck =
         """

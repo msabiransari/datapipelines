@@ -61,7 +61,6 @@ class ViewerEditorRenderTest {
         html shouldContain ">read-only<"
     }
 
-    /** The exact interactive surface of a viewer's workspace page — by element, not by grep. */
     /**
      * §3.0 (ui-screens, normative; 090): a page template carries no `<link rel="stylesheet">`.
      * The workspace is a BOOSTED arrival, and a sheet inside `#app-main` is discovered after the
@@ -105,6 +104,7 @@ class ViewerEditorRenderTest {
         runsTab.find(later)?.value shouldContain "hx-trigger=\"click once\""
     }
 
+    /** The exact interactive surface of a viewer's workspace page — by element, not by grep. */
     @Test
     fun `a viewer's workspace carries exactly its tab strip and nothing else`() {
         val html =
