@@ -36,6 +36,43 @@ import java.util.concurrent.atomic.AtomicInteger
  */
 class ApiExceptionHandlerTest {
     @Test
+    fun `stream constraints retain safe limit guidance without reflecting the converter message`() {
+        val mapper =
+            co.datapipelines.templates.TransformBlocks.mapper
+                .copy()
+        mapper.factory.setStreamReadConstraints(
+            com.fasterxml.jackson.core.StreamReadConstraints
+                .builder()
+                .maxNestingDepth(2)
+                .build(),
+        )
+        val cause =
+            io.kotest.assertions.throwables.shouldThrow<com.fasterxml.jackson.core.exc.StreamConstraintsException> {
+                mapper.readTree("[[[\"sentinel987654321\"]]]")
+            }
+        val error =
+            org.springframework.http.converter.HttpMessageNotReadableException(
+                "sentinel987654321",
+                cause,
+                org.springframework.mock.http
+                    .MockHttpInputMessage(byteArrayOf()),
+            )
+        val response =
+            ApiExceptionHandler().onUnreadableBody(
+                error,
+                org.springframework.mock.web
+                    .MockHttpServletRequest("POST", "/api/v1/pipelines"),
+            )
+        response.statusCode.value() shouldBe 400
+        val tree = mapper.valueToTree<JsonNode>(response.body)
+        tree["error"]["code"].asText() shouldBe PipelineErrorCodes.Validation.SCHEMA_VERSION_UNSUPPORTED
+        tree["error"]["details"] shouldBe mapper.valueToTree<JsonNode>(mapOf("reason" to "malformed_json"))
+        tree["error"]["message"].asText() shouldContain "nesting depth"
+        mapper.writeValueAsString(response.body).contains("987654321") shouldBe false
+        mapper.readTree("[[\"sentinel987654321\"]]").isArray shouldBe true
+    }
+
+    @Test
     fun `raw and converter wrapped mapping refusals hide values and preserve the body envelope`() {
         val strictMvc =
             MockMvcBuilders

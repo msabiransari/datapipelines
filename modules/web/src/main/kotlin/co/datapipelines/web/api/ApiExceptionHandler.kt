@@ -5,6 +5,7 @@ import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.templates.BindFailure
 import co.datapipelines.typesystem.CauseChain
 import co.datapipelines.typesystem.DatapipelinesException
+import com.fasterxml.jackson.core.exc.StreamConstraintsException
 import com.fasterxml.jackson.databind.JsonMappingException
 import com.fasterxml.jackson.databind.exc.MismatchedInputException
 import com.fasterxml.jackson.databind.exc.UnrecognizedPropertyException
@@ -126,17 +127,23 @@ class ApiExceptionHandler {
     ): ResponseEntity<ApiErrorResponse> {
         log.debug("400 {} {}: unreadable body", request.method, request.requestURI, error)
         val code = malformedBodyCodeFor(request.requestURI)
-        val mapping =
+        val causes =
             generateSequence<Throwable>(error) { it.cause }
                 .take(MAX_BODY_CAUSE_DEPTH)
-                .filterIsInstance<JsonMappingException>()
-                .firstOrNull()
+                .toList()
+        val mapping = causes.filterIsInstance<JsonMappingException>().firstOrNull()
         val failure = mapping?.let(BindFailure::of)
         val lead = "Request body could not be read"
         val message =
             when {
                 failure?.rule == BindFailure.RULE_WRONG_TYPE -> failure.messageFor(lead)
+
                 mapping is UnrecognizedPropertyException -> "$lead: '${failure?.field}' is not a recognized field."
+
+                causes.any {
+                    it is StreamConstraintsException
+                } -> "$lead: JSON exceeds a nesting depth, string length or number length limit."
+
                 else -> "$lead. Use valid JSON with the declared field types."
             }
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).contentType(JSON).body(
