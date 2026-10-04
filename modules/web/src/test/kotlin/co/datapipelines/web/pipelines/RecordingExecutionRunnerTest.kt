@@ -1,11 +1,13 @@
 package co.datapipelines.web.pipelines
 
 import co.datapipelines.auth.WorkspaceContext
+import co.datapipelines.events.ExecutionStarted
 import co.datapipelines.executor.ExecuteRequest
 import co.datapipelines.executor.ExecutionProgress
 import co.datapipelines.executor.ExecutionResult
 import co.datapipelines.executor.ExecutionStatus
 import co.datapipelines.executor.ExecutionTrigger
+import co.datapipelines.executor.IdempotencyStore
 import co.datapipelines.executor.NodeStats
 import co.datapipelines.executor.PipelineExecutor
 import co.datapipelines.executor.ResultStore
@@ -15,6 +17,8 @@ import co.datapipelines.templates.WorkspaceTemplateEngines
 import co.datapipelines.typesystem.ColumnSchema
 import co.datapipelines.typesystem.LogicalType
 import co.datapipelines.web.sse.ExecutionStreamRegistry
+import co.datapipelines.web.sse.WebEventEmitter
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -24,6 +28,8 @@ import io.mockk.verify
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
 import java.time.Instant
 import java.util.UUID
 
@@ -43,36 +49,130 @@ class RecordingExecutionRunnerTest {
     private val resultStore = mockk<ResultStore>()
     private val streams = mockk<ExecutionStreamRegistry>(relaxed = true)
     private val executionRepository = mockk<co.datapipelines.executor.ExecutionRepository>(relaxed = true)
+    private val idempotencyStore = mockk<IdempotencyStore>()
 
     private val workspaceId = UUID.randomUUID()
     private val executionId = UUID.randomUUID()
 
-    private fun runner(executor: PipelineExecutor) =
-        RecordingExecutionRunner(
-            templateEngines = templateEngines,
-            datasourceRegistry = mockk(),
-            stagingFactory = mockk(),
-            writebackRunner = mockk(),
-            resultStore = resultStore,
-            cancellationRegistry = mockk(),
-            cancellationFlags = mockk(),
-            executionSlots = mockk(),
-            executorDispatcher = mockk(),
-            // The runner reads the #311 lifecycle bound off the config at emit construction.
-            executorConfig =
-                mockk {
-                    every { lifecycleWriteTimeoutSeconds } returns 10
-                },
-            resultUrls = mockk(),
-            executorMetrics = mockk(),
-            executionProgress = ExecutionProgress.NONE,
-            persistenceDispatcher = Dispatchers.Unconfined,
-            streams = streams,
-            eventLog = mockk(relaxed = true),
-            eventRepository = mockk(relaxed = true),
-            executionRepository = executionRepository,
-            executorFactory = { executor },
-        )
+    private fun runner(
+        executor: PipelineExecutor,
+        capture: (WebEventEmitter) -> Unit = {},
+    ) = RecordingExecutionRunner(
+        templateEngines = templateEngines,
+        datasourceRegistry = mockk(),
+        stagingFactory = mockk(),
+        writebackRunner = mockk(),
+        resultStore = resultStore,
+        cancellationRegistry = mockk(),
+        cancellationFlags = mockk(),
+        executionSlots = mockk(),
+        executorDispatcher = mockk(),
+        // The runner reads the #311 lifecycle bound off the config at emit construction.
+        executorConfig =
+            mockk {
+                every { lifecycleWriteTimeoutSeconds } returns 10
+            },
+        resultUrls = mockk(),
+        executorMetrics = mockk(),
+        executionProgress = ExecutionProgress.NONE,
+        persistenceDispatcher = Dispatchers.Unconfined,
+        streams = streams,
+        eventLog = mockk(relaxed = true),
+        eventRepository = mockk(relaxed = true),
+        executionRepository = executionRepository,
+        idempotencyStore = idempotencyStore,
+        executorFactory = {
+            capture(it)
+            executor
+        },
+    )
+
+    @ParameterizedTest
+    @ValueSource(strings = ["exception", "cancellation", "error"])
+    fun `any throwable before the first event releases the MCP reservation and is rethrown unchanged`(kind: String) {
+        runTest {
+            val request = request().copy(idempotencyKey = "retry", executionId = executionId)
+            val error =
+                when (kind) {
+                    "cancellation" -> kotlinx.coroutines.CancellationException("cancelled before start")
+                    "error" -> AssertionError("failed before start")
+                    else -> IllegalStateException("refused before start")
+                }
+            val executor = mockk<PipelineExecutor>()
+            coEvery { executor.execute(any()) } throws error
+            every { idempotencyStore.release(request.userId, "retry", executionId) } returns true
+
+            shouldThrow<Throwable> { runner(executor).run(request, workspaceId, ExecutionTrigger.MCP) } shouldBe error
+
+            verify(exactly = 1) { idempotencyStore.release(request.userId, "retry", executionId) }
+        }
+    }
+
+    @Test
+    fun `an MCP execution that emitted then failed keeps its reservation`() {
+        runTest {
+            val request = request().copy(idempotencyKey = "retry", executionId = executionId)
+            val error = IllegalStateException("failed after start")
+            val executor = mockk<PipelineExecutor>()
+            lateinit var emitter: WebEventEmitter
+            coEvery { executor.execute(any()) } coAnswers {
+                emitter.emit(ExecutionStarted(executionId, request.pipelineId, 1, emptyMap(), startedAt = Instant.now()))
+                throw error
+            }
+
+            shouldThrow<IllegalStateException> {
+                runner(executor) { emitter = it }.run(request, workspaceId, ExecutionTrigger.MCP)
+            } shouldBe error
+
+            verify(exactly = 0) { idempotencyStore.release(any(), any(), any()) }
+        }
+    }
+
+    @Test
+    fun `a scheduler failure with no key never releases`() {
+        runTest {
+            val request = request(ExecutionTrigger.SCHEDULE).copy(executionId = executionId)
+            val error = IllegalStateException("refused before start")
+            val executor = mockk<PipelineExecutor>()
+            coEvery { executor.execute(any()) } throws error
+
+            shouldThrow<IllegalStateException> {
+                runner(executor).run(request, workspaceId, ExecutionTrigger.SCHEDULE)
+            } shouldBe error
+
+            verify(exactly = 0) { idempotencyStore.release(any(), any(), any()) }
+        }
+    }
+
+    @Test
+    fun `a request with no reserved execution id never releases`() {
+        runTest {
+            val error = IllegalStateException("refused before start")
+            val executor = mockk<PipelineExecutor>()
+            coEvery { executor.execute(any()) } throws error
+
+            shouldThrow<IllegalStateException> {
+                runner(executor).run(request().copy(idempotencyKey = "retry"), workspaceId, ExecutionTrigger.MCP)
+            } shouldBe error
+
+            verify(exactly = 0) { idempotencyStore.release(any(), any(), any()) }
+        }
+    }
+
+    @Test
+    fun `a failed release cannot mask the MCP refusal`() {
+        runTest {
+            val request = request().copy(idempotencyKey = "retry", executionId = executionId)
+            val error = IllegalStateException("refused before start")
+            val executor = mockk<PipelineExecutor>()
+            coEvery { executor.execute(any()) } throws error
+            every { idempotencyStore.release(request.userId, "retry", executionId) } throws IllegalStateException("Redis unavailable")
+
+            shouldThrow<IllegalStateException> { runner(executor).run(request, workspaceId, ExecutionTrigger.MCP) } shouldBe error
+
+            verify(exactly = 1) { idempotencyStore.release(request.userId, "retry", executionId) }
+        }
+    }
 
     private fun request(trigger: ExecutionTrigger = ExecutionTrigger.REST) =
         ExecuteRequest(
