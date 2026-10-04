@@ -61,7 +61,8 @@ fun interface RateLimiter {
  * The Redis-backed per-user limiter (rest-api §12.1, module-structure §5.9).
  *
  * ## Why Redis and not an in-process counter
- * §12.1 is explicit: "Counters are tracked in Redis, so limits hold across instances". A local
+ * §12.1 is explicit: "The request-rate counters … are tracked in Redis, so those limits hold
+ * across instances" (the SSE stream counts are instance-local, #384). A local
  * counter would multiply every limit by the instance count — a deployment scaled to four pods
  * would silently allow 400 rps against a documented 100.
  *

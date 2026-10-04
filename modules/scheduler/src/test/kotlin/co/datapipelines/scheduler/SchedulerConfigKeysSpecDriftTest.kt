@@ -36,8 +36,13 @@ class SchedulerConfigKeysSpecDriftTest {
         val bound =
             SchedulerProperties::class.java.declaredFields
                 .filterNot { Modifier.isStatic(it.modifiers) }
-                .map { "$PREFIX.${kebab(it.name)}" }
-                .sorted()
+                .flatMap { field ->
+                    if (field.name == "notifications") {
+                        listOf("$PREFIX.notifications.max-recipients")
+                    } else {
+                        listOf("$PREFIX.${kebab(field.name)}")
+                    }
+                }.sorted()
 
         documented shouldContainExactly EXPECTED
         inYaml shouldContainExactly EXPECTED
@@ -51,6 +56,8 @@ class SchedulerConfigKeysSpecDriftTest {
             SchedulerProperties::class.java.declaredFields
                 .filterNot { Modifier.isStatic(it.modifiers) }
                 .associate { field -> "$PREFIX.${kebab(field.name)}" to field.apply { isAccessible = true }.get(defaults).toString() }
+                .filterKeys { it != "$PREFIX.notifications" } +
+                mapOf("$PREFIX.notifications.max-recipients" to defaults.notifications.maxRecipients.toString())
 
         EXPECTED.forEach { key -> "$key=${defaultOf(key)}" shouldBe "$key=${byKey.getValue(key)}" }
     }
@@ -88,7 +95,7 @@ class SchedulerConfigKeysSpecDriftTest {
 
     private companion object {
         const val PREFIX = "datapipelines.scheduler"
-        val KEY_REGEX = Regex("""datapipelines\.scheduler\.[a-z0-9-]+""")
+        val KEY_REGEX = Regex("""datapipelines\.scheduler\.[a-z0-9-]+(?:\.[a-z0-9-]+)*""")
         val PLACEHOLDER_DEFAULT = Regex("""^\$\{[A-Z0-9_]+:([^}]*)\}$""")
         val UPPER = Regex("[A-Z]")
 
@@ -102,6 +109,7 @@ class SchedulerConfigKeysSpecDriftTest {
                 "$PREFIX.max-concurrent-runs",
                 "$PREFIX.max-schedules-per-workspace",
                 "$PREFIX.min-interval-seconds",
+                "$PREFIX.notifications.max-recipients",
                 "$PREFIX.polling-interval-seconds",
                 "$PREFIX.shutdown-wait-seconds",
                 "$PREFIX.threads",

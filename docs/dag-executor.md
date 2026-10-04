@@ -1,9 +1,9 @@
 # DAG Executor Specification
 
-**Status:** v1.30 (revised — see Change Log)
+**Status:** v1.31 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Contract spec](pipeline-contract.md), [Templates spec](templates.md), [Datasources spec](datasources.md), [Staging spec](staging.md)
-**Last updated:** 2026-10-02
+**Last updated:** 2026-10-03
 
 ---
 
@@ -1416,15 +1416,16 @@ A node executes at most once. No internal retries.
 
 Client-supplied `Idempotency-Key` on the REST request is hashed with `pipeline_id + version + parameters` to form a cache key. The cache stores the execution ID for that key ([REST API §3.5](rest-api.md#35-idempotency)).
 
-- Same key + same request body → server returns the original execution instead of re-executing. A retry landing before the original's first frame — inside the start window, up to the 10 s lifecycle write bound — WAITS for it (the attach follows the log for ~15 s, above the bound) and then streams the original's events; a retry whose original never started answers `410 result.expired` with `reason: original_not_started` and NO `execution_id`, one whose log expired keeps `reason: event_log_expired` with the id (#324).
+- Same key + same request body → server returns the original execution instead of re-executing. A retry landing before the original's first frame — inside the start window, up to the 10 s lifecycle write bound — WAITS for it (the attach follows the log for ~15 s, above the bound) and then streams the original's events; a follower that attached before a pre-start release, or whose original died without releasing, answers `410 result.expired` with `reason: original_not_started` and NO `execution_id`, one whose log expired keeps `reason: event_log_expired` with the id (#324).
 - Same key + different request body → server rejects with `idempotency.key_reused_for_different_request`.
+- An execution refused before its first emitted event releases its reservation immediately on REST and MCP; a same-key retry reserves a new execution. An execution that emitted any event retains its reservation, including when it subsequently fails. A scheduler run with no key performs no release. A release failure is logged once and never replaces the original refusal; its reservation expires by TTL.
 - Cache TTL: `datapipelines.idempotency.ttl-seconds` ([Configuration](configuration.md)).
 
 Idempotency deduplicates **executions**, not streams: a retry after a disconnect attaches to the original execution's record and result (if it is still within its TTL), but it does not resume a dropped SSE stream — there is no stream resumption, and a disconnected execution is on the abort clock (§8.3). A retry arriving after the original was aborted gets that aborted execution's status, not a fresh run.
 
 ### 11.3 Storage
 
-Idempotency cache stored in Redis. Key: `idem:{user_id}:{idempotency_key_hash}`. Value: `{execution_id, request_hash, expires_at}`.
+Idempotency cache stored in Redis. Key: `idem:{user_id}:{idempotency_key_hash}`. Value: `{executionId, requestHash, expiresAt}` (the stored JSON uses camelCase). Release is one atomic Lua compare-and-delete: delete only when the stored `executionId` equals the refusing execution’s id. An absent key or a newer reservation is left untouched; KEYS/ARGV carry the caller-scoped hashed key and the expected id.
 
 ---
 
@@ -1619,6 +1620,7 @@ document a customer can read before they need it.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-03 | v1.31 | #403 never-started reservation release | **§11.2/§11.3**: REST and MCP release before-start failures using atomic execution-id compare-and-delete; started reservations stay claimed. Stored JSON field names corrected to camelCase; crashed originals and attached followers retain the id-free 410. |
 | 2026-10-02 | v1.30 | 328 (#328) the result history gains the schema | **The result-history bookkeeping** (`recordResult` — the surfaces' write that fills `result_row_count` / `result_size_bytes` after `execute` returns the result ref) now also records `result_schema_json` (V47) — the materialized result's columns as the driver reported them, `{name, type, nullable}` (pipeline-contract §3.3.1). History, not availability: it survives the Redis TTL, and the release flip copies it. Past the record bounds (256 columns, 128 characters per name) the record is NULL with a `warn` — never a failed execution. A `direct`/`directSink` delivery (a PIPELINE child, a dashboard refresh) writes no stored result and therefore no record, exactly as it writes no row count. |
 | 2026-10-02 | v1.29 | lane 324 (#324) | §11.2: the retry's behaviour inside the original's start window is stated — a retry landing before the original's first event (up to the 10 s lifecycle write bound) waits for it (the attach follows the log for ~15 s, above the bound) and then streams the original's events, instead of the premature `410` with an id whose row did not resolve yet; a never-started original answers the id-free `410 result.expired` (`reason: original_not_started`), an expired log keeps `reason: event_log_expired` with the id. The attach consults the execution row; no new config key (the wait is the log follower's existing give-up patience). |
 | 2026-09-30 | v1.28 | lane 336 (#336 D5) | §10.1's Failures paragraph: the terminal row's two degraded diagnostics are now stated — an unserializable context snapshot logs the failure's class (the row keeps its insert-time `parameters_json`, unchanged), and an unreadable aborted-duration read records 0 with a WARN that the duration is unknown (metadata-db §8.3's terminal-row rule kept; never a fabricated duration). |

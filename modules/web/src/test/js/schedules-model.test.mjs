@@ -293,3 +293,11 @@ test("collectBindings sends presetted keywords and passes literal bindings throu
   assert.deepEqual(M.collectBindings({}, {}), {});
   assert.deepEqual(M.collectBindings({ x: "", y: "" }, {}), {});
 });
+
+ test("recipient text handles spaces trailing commas and empty values", () => {
+   assert.deepEqual(M.recipientsFromText(" a@example.com, b@example.org, ,"), ["a@example.com", "b@example.org"]);
+   assert.deepEqual(M.recipientsFromText(""), []);
+   assert.equal(M.recipientsText(["a@example.com", "b@example.org"]), "a@example.com, b@example.org");
+   assert.equal(M.recipientsText([]), "");
+   assert.deepEqual(M.fieldForError({ code: "schedule.validation.notifications_invalid" }), { field: "notifications" });
+ });

@@ -26,10 +26,12 @@ import co.datapipelines.persistence.BatchingWriter
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.staging.StagingFactory
 import co.datapipelines.templates.WorkspaceTemplateEngines
+import co.datapipelines.web.dashboards.runtime.RefreshStreamRegistry
 import co.datapipelines.web.executions.ExecutionVisibility
 import co.datapipelines.web.executions.ResultCursor
 import co.datapipelines.web.health.StagingHealthIndicator
 import co.datapipelines.web.metrics.WebMetrics
+import co.datapipelines.web.parameters.stream.ParameterEvaluationStreamRegistry
 import co.datapipelines.web.pipelines.ExecutionStreamLauncher
 import co.datapipelines.web.pipelines.McpRecordingExecutionRunner
 import co.datapipelines.web.pipelines.RecordingExecutionRunner
@@ -136,16 +138,34 @@ class WebSurfaceConfiguration {
         co.datapipelines.web.sse
             .ExecutionStreamAuthority(executions, principalLiveness, workspaceService, userService)
 
+    /**
+     * The execution registry plus the one per-user SSE cap's other two terms (#384). Both are read
+     * through [ObjectProvider] — the refresh and evaluation registries take THIS bean eagerly, so an
+     * eager reference back would close a cycle; the providers resolve inside [atStreamLimit]'s
+     * callback, long after the context is built. The callbacks read each registry's OWN
+     * `activeStreamsFor`, never its `atStreamLimit`: summing totals would recurse.
+     */
     @Bean
     fun executionStreamRegistry(
         properties: SseProperties,
         cancellationService: ExecutionCancellationService,
+        refreshStreams: ObjectProvider<RefreshStreamRegistry>,
+        evaluationStreams: ObjectProvider<ParameterEvaluationStreamRegistry>,
         // SseJson, not ExecutorJson: this mapper is the SSE WIRE encoder (ExecutionStream.send).
         // A DATE/TIME parameter reaches execution_started as java.time, and ExecutorJson has no
         // jsr310 — worse, InvalidDefinitionException IS an IOException, which send() catches as
         // "client disconnected", so the stream dies AND cancel-on-disconnect aborts a healthy
         // execution ~30s later. T36, second path (the f659f4a fix covered only the replay log).
-    ): ExecutionStreamRegistry = ExecutionStreamRegistry(properties, cancellationService, SseJson.mapper)
+    ): ExecutionStreamRegistry =
+        ExecutionStreamRegistry(
+            properties,
+            cancellationService,
+            SseJson.mapper,
+            otherStreams = { userId ->
+                refreshStreams.getObject().activeStreamsFor(userId) +
+                    evaluationStreams.getObject().activeStreamsFor(userId)
+            },
+        )
 
     @Bean
     fun webMetrics(
@@ -335,6 +355,7 @@ class WebSurfaceConfiguration {
     @Suppress("LongParameterList")
     @Bean
     fun recordingExecutionRunner(
+        idempotencyStore: IdempotencyStore,
         transformSupport: co.datapipelines.executor.TransformSupport,
         templateEngines: WorkspaceTemplateEngines,
         datasourceRegistry: DatasourceRegistry,
@@ -379,6 +400,7 @@ class WebSurfaceConfiguration {
             subPipelineRunner = subPipelineRunner,
             transformSupport = transformSupport,
             eventRecorder = eventRecorder,
+            idempotencyStore = idempotencyStore,
         )
 
     /**

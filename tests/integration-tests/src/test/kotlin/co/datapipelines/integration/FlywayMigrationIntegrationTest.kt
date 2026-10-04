@@ -161,6 +161,7 @@ class FlywayMigrationIntegrationTest {
                 "47|release result columns|true",
                 // #376 (V48) — the parameter-set evaluation history: parameter_evaluations + parameter_evaluation_queries.
                 "48|parameter evaluations|true",
+                "49|schedule notification settings|true",
             )
     }
 
@@ -838,6 +839,25 @@ class FlywayMigrationIntegrationTest {
             }
         }
         return run
+    }
+
+    @Test
+    fun `V49 adds non-null notification arrays with defaults and the five-event constraint`() {
+        query(
+            "SELECT column_name || '|' || udt_name || '|' || is_nullable || '|' || column_default " +
+                "FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'schedules' " +
+                "AND column_name IN ('notification_recipients', 'notification_events') ORDER BY column_name",
+        ) { it.getString(1) } shouldContainExactly
+            listOf(
+                "notification_events|_text|NO|'{failure,unknown,blocked}'::text[]",
+                "notification_recipients|_text|NO|'{}'::text[]",
+            )
+        query(
+            "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'chk_schedules_notification_events'",
+        ) { it.getString(1) } shouldContainExactly
+            listOf(
+                "CHECK ((notification_events <@ ARRAY['start'::text, 'success'::text, 'failure'::text, 'unknown'::text, 'blocked'::text]))",
+            )
     }
 
     /**
@@ -1690,6 +1710,7 @@ class FlywayMigrationIntegrationTest {
                 "chk_schedules_blocked",
                 "chk_schedules_idempotency",
                 "chk_schedules_missed_run_policy",
+                "chk_schedules_notification_events",
                 "chk_schedules_revision",
                 "chk_status",
                 "chk_template_type",

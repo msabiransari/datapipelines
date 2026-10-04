@@ -37,6 +37,9 @@ object ScheduleErrorCodes {
     /** 400 — a missing or ill-typed request field; `details.field` names it. */
     const val REQUEST_INVALID = "schedule.validation.request_invalid"
 
+    /** 400 — invalid notification settings; details name only the field/index and reason. */
+    const val NOTIFICATIONS_INVALID = "schedule.validation.notifications_invalid"
+
     /** 400 — the name breaks the pipeline/template path grammar (record §6). */
     const val NAME_INVALID = "schedule.validation.name_invalid"
 
@@ -90,6 +93,7 @@ object ScheduleErrorCodes {
             NOT_BLOCKED,
             LIMIT_PER_WORKSPACE,
             REQUEST_INVALID,
+            NOTIFICATIONS_INVALID,
             NAME_INVALID,
             CRON_INVALID,
             TIMEZONE_INVALID,

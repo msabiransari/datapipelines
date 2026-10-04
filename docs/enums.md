@@ -1,6 +1,6 @@
 # Enumerations Reference
 
-**Status:** v1.32 (living document — updated as enums evolve)
+**Status:** v1.33 (living document — updated as enums evolve)
 **Owner:** datapipelines.co core
 **Purpose:** Single source of truth for every enum value used across the system. Prevents spelling drift across specs and across the codebase.
 
@@ -490,7 +490,7 @@ Pre-created and fixed: the three member roles are the ONLY roles an `mcp` key ca
 
 | Value | Trigger |
 |---|---|
-| `schedule.created` | A schedule was created (an idempotent replay writes no second row). `details` carries `schedule_id`, `name`, `revision` — never the payload or the parameters |
+| `schedule.created` | A schedule was created (an idempotent replay writes no second row). `details` carries `schedule_id`, `name`, `revision`, `recipient_count` and notification `events` (#442a) — never recipient addresses, the payload or the parameters |
 | `schedule.updated` | A schedule was edited (rename/move included). Same `details` |
 | `schedule.paused` | Paused. Same `details` (an already-paused schedule's pause still writes one — the act happened) |
 | `schedule.resumed` | Resumed. Same `details` |
@@ -1054,10 +1054,27 @@ This document itself is **additive-only** — values are never removed (only mar
 
 ---
 
+## 42. `NotificationEvent` — a schedule's notification choices (#442)
+
+Stored in `schedules.notification_events` (Metadata DB §4.22), serialized in declaration order by REST §20. These settings select part b's delivery policy; part a sends nothing (Scheduler §2.3).
+
+| Enum | Wire value | Meaning | Default |
+|---|---|---|---|
+| `START` | `start` | Execution confirmed running | Off |
+| `SUCCESS` | `success` | Successful completion | Off |
+| `FAILURE` | `failure` | Failed, not started, cancelled or aborted | On |
+| `UNKNOWN` | `unknown` | Outcome unknown and its later reconciled update | On |
+| `BLOCKED` | `blocked` | Transition of the schedule to blocked | On |
+
+No mail for skipped ticks or pause/resume. Empty recipients means off; recipient addresses are never audit fields.
+
+---
+
 ## Appendix A: Change Log
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-03 | v1.33 | 442a (#442) | §15 audit details gain counts/events without addresses; new §42 defines NotificationEvent and its defaults. Settings delivered; mail remains off pending part b. |
 | 2026-10-02 | v1.32 | S3 (#376) the parameter-set evaluation history | **§39 `EvaluationCaller`** (PAGE, DASHBOARD, PIPELINE — dormant, REST, MCP; the owner's §11.10 ruling), **§40 `ParameterEvaluationStatus`** (the spec's five plus `ABORTED`, the §11.7 ruling) and **§41 `QueryAttemptOutcome`** (the spec's four plus `ABORTED`) — the three V48 CHECKs, each pinned to its Kotlin enum by `ParameterEnumsSpecDriftTest`. No audit event (§15 unchanged): recording is the evaluate's side effect, visible through the History tab; the spec names an awaited `parameter.evaluation` row only if review rules one necessary. |
 | 2026-10-02 | v1.31 | 372 (#372, #373) the families' lifecycle rows carry the mould's full shape | §15's three family rows now promise the pointer pair `current_version_before`/`current_version_after` on a discard AND a restore, `from`/`to` on a switch and `scope` on every purge — produced by the verbs' own results inside the write's transaction (the artifact services' discard/restore/switch statements answer the pair; the purge's own version-count branch is the scope), never a controller re-read. The false "the artifact services answer no record read" clause is gone. Authority: rest-api §21/§22/§23; versioning §7. |
 | 2026-10-02 | v1.30 | 235 (#164) the screenshot upload's audit row | §15 gains **`visualization.test.screenshot_uploaded`** — the one audited write an agent makes over REST: actor = the run's starter, no key, ids/size/type only, never the token. The Status line read v1.27 under a v1.28 row (332); it now reads the current version. |

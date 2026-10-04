@@ -10,8 +10,7 @@ import org.junit.jupiter.api.Test
  * #9 slice 2, A.3 — the schedule form's skeleton (`schedules/form.html`): the author's only (the
  * whole template sits in the `canAuthor` guard — a reader's page has no form to open), the zones
  * the scheduler accepts grouped by region, the version fixed to `current` (slice 1 refuses a
- * number — scheduler.md §2.1), and nothing of the slices that are not this one (no recipients —
- * slice 4; no key — R2).
+ * number — scheduler.md §2.1), saved notification choices (#442a), and no key (R2).
  */
 class SchedulesFormRenderTest {
     @Test
@@ -42,9 +41,15 @@ class SchedulesFormRenderTest {
     }
 
     @Test
-    fun `nothing from later slices - no recipients, no key`() {
+    fun `notifications have five choices defaults and an explicit mail off note`() {
         val form = SchedulesRender.skeleton(SchedulesRender.page(), "sch-tpl-form").lowercase()
-        listOf("recipient", "e-mail list", "api key", "name=\"role\"").forEach { needle ->
+        form shouldContain "id=\"sch-f-recipients\""
+        form shouldContain "data-field-error=\"notifications\""
+        form shouldContain "scheduler mail is not enabled on this deployment"
+        listOf("start", "success", "failure", "unknown", "blocked").forEach { event ->
+            form shouldContain "name=\"notification_event\" value=\"$event\""
+        }
+        listOf("api key", "name=\"role\"").forEach { needle ->
             withClue(needle) { form shouldNotContain needle }
         }
     }
