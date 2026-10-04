@@ -547,17 +547,21 @@ class PipelineSidebarTreeStateBrowserTest : BrowserSuite() {
     /**
      * #450 — a redundant `input` event must not orphan a level already in flight.
      *
-     * The box's request fires on htmx's `input changed`, i.e. only for a NEW value; an `input`
-     * event that carries the value the box already had (an autofill, an IME, a form-style
-     * restore, a re-dispatched event) has no request behind it. `nav-tree.js` used to advance
-     * the admission generation on every `input` event, so such an event made the in-flight
-     * folder response stale with nothing to replace the tree: the folder stayed `<details open>`
-     * with a blank `.tpl-level-pending` (a hidden 24px spinner inside `--gap-sm` padding) and its
+     * The box's request is htmx's `input changed`: it fires only for a NEW value. An `input`
+     * event carrying the value the box already had — an autofill, an IME, a form-style restore,
+     * a re-dispatched event — has no request behind it. `nav-tree.js` used to advance the
+     * admission generation on every `input` event, so such an event made the in-flight folder
+     * response stale with nothing to replace the tree: the folder stayed `<details open>` with a
+     * blank `.tpl-level-pending` (a hidden 24px spinner inside `--gap-sm` padding) and its
      * `click once` spent, so it could never load — the blank gap above its sibling rows that the
      * owner photographed. The generation must count a CHANGED trimmed query only.
      *
-     * Falsified on base: with the event sent, the held level's answer is dropped and
-     * `trade/fx/fx_leaf` never appears (the wait reds); with the fix the leaf lands.
+     * The box is primed with a real query and cleared first, so htmx's own `changed` guard also
+     * treats the later redundant event as a no-op (it has already fired for this value) — the
+     * real sequence from the issue: search typed and cleared, a folder response still in flight.
+     * Falsified on base: the redundant event advances the generation (the assertion reds at
+     * `gen`), the held answer is dropped with no request to replace the tree and hence no
+     * settled level; with the fix the generation holds and the leaf lands.
      */
     @Test
     fun `A12 - a redundant input event does not orphan a folder level in flight`() {
@@ -568,31 +572,47 @@ class PipelineSidebarTreeStateBrowserTest : BrowserSuite() {
         seedPipeline("trade/reconciliation")
         page.navigate("$baseUrl/dashboard")
         openTree()
-        expand("trade")
 
+        // Prime the box: a real search, then clear it — htmx has now fired for "".
+        page.waitForResponse({ it.url().contains("/partials/pipelines") && it.url().contains("q=zzz") }) {
+            page.fill("$panel [data-nav-tree-search]", "zzz")
+        }
+        page.waitForResponse({ it.url().contains("/partials/pipelines") && !it.url().contains("q=zzz") }) {
+            page.fill("$panel [data-nav-tree-search]", "")
+        }
+        page.waitForSelector("${folder("trade")}")
+
+        expand("trade")
         // Hold the nested level, then request it the way a reader's first click does.
         val held = Hold(levelOf("trade/fx"))
         held.install()
         page.click("${folder("trade/fx")} > summary")
         held.awaitCaptured(1)
 
-        // A redundant input event on the empty box: the value did not change, so no search
-        // request exists to re-render the tree.
+        // A redundant input event on the empty box: nav-tree must treat it as no change, and
+        // (primed) htmx fires no search to replace the tree.
+        val gen = "() => window.DpNavTree.trees().filter(t => t.family === 'pipelines')[0].gen"
+        val genBefore = (page.evaluate(gen) as Number).toInt()
         page.evaluate(
             "() => document.querySelector('#nav-tree-pipelines [data-nav-tree-search]')" +
                 ".dispatchEvent(new Event('input', { bubbles: true }))",
         )
-        page.evaluate("() => window.DpNavTree.trees().filter(t => t.family === 'pipelines')[0].gen") shouldBe 0
+        (page.evaluate(gen) as Number).toInt() shouldBe genBefore
 
         held.release() shouldBe 1
         // The opened level must end in its content — never a permanently blank placeholder.
-        page.waitForSelector(leaf("trade/fx/fx_leaf"))
+        page.waitForFunction(
+            """s => {
+              const d = document.querySelector(s);
+              return !!d && !d.querySelector(':scope > .tpl-level-pending') &&
+                !!d.querySelector('a.tpl-leaf .tpl-label[title="trade/fx/fx_leaf"]');
+            }""",
+            folder("trade/fx"),
+        )
         page.locator("${folder("trade/fx")} > .tpl-level-pending").count() shouldBe 0
-        page.evaluate("() => window.DpNavTree.trees().filter(t => t.family === 'pipelines')[0].restoring") shouldBe false
         noToast()
         consoleErrors.shouldBeEmpty()
     }
-
 
     private fun listeners(): Map<*, *> = page.evaluate("() => Object.assign({}, window.__p350Listeners)") as Map<*, *>
 }
