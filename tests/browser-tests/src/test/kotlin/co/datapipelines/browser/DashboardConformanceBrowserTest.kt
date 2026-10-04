@@ -5,6 +5,8 @@ import org.junit.jupiter.api.MethodOrderer
 import org.junit.jupiter.api.Order
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestMethodOrder
+import java.sql.DriverManager
+import java.util.UUID
 
 /**
  * #10 L3a — the dashboard client runtime's conformance cases over a plain-JavaScript host page
@@ -128,44 +130,110 @@ class DashboardConformanceBrowserTest : DashboardBrowserSuite() {
         chipStateIs("hungcells", "in-progress")
         // The abort needs the server's row to exist: an abort that outruns the stream POST's row
         // write is 404 not_found (the finding recorded on #10) — wait for the row, deterministically.
-        page.waitForFunction(
-            """async () => {
-              const res = await fetch('/api/v1/dashboards/$board/refreshes/$refreshId', { credentials: 'same-origin' });
-              if (!res.ok) return false;
-              const doc = await res.json();
-              return doc.data && doc.data.status === 'RUNNING';
-            }""",
-        )
-        // Abort it; the chip flips to abort locally and the REAL handler answers 202 (the runtime's
-        // own abort promise resolving is the acknowledgement, not a stub's). A false ack names the
-        // row's status and the client path that answered instead of a bare boolean (#366 red 2).
-        abortAndNameAck("window.__dp.instance", board, refreshId)
-        chipStateIs("hungcells", "abort")
-        // The DURABLE outcome: the refresh row the server owns reads ABORTED (poll the real read route).
-        page.waitForFunction(
-            """async () => {
-              const res = await fetch('/api/v1/dashboards/$board/refreshes/$refreshId', { credentials: 'same-origin' });
-              if (!res.ok) return false;
-              const doc = await res.json();
-              return doc.data && doc.data.status === 'ABORTED';
-            }""",
-        )
-        // A genuine ALREADY-FINISHED abort against the real route: the finished refresh is the 404
-        // idempotence — no substring stub answers for the handler here.
-        val finished =
-            page.evaluate(
-                """async () => {
-                  const csrf = document.cookie.match(/(?:^|;\s*)dp_csrf=([^;]*)/);
-                  const res = await fetch('/api/v1/dashboards/$board/runtime/refreshes/$refreshId/abort', {
-                    method: 'POST', credentials: 'same-origin',
-                    headers: { 'Content-Type': 'application/json', 'DP-CSRF-Token': csrf ? decodeURIComponent(csrf[1]) : '' },
-                    body: JSON.stringify({ instance_id: window.__dp.instance._instanceId }) });
-                  const doc = await res.json();
-                  return { status: res.status, code: (doc.error && doc.error.code) || null };
-                }""",
-            ) as Map<*, *>
-        (finished["status"] as Number).toInt() shouldBe 404
-        finished["code"] shouldBe "dashboard.refresh.not_found"
+        page.waitForCondition { readRow(board, refreshId)["status"] == "RUNNING" }
+        // Hold the terminal UPDATE so the first post-abort GET is genuinely RUNNING.
+        // Release only on the next GET, or after a premature second abort has answered.
+        DriverManager.getConnection(SharedBrowserE2e.jdbcUrl, SharedBrowserE2e.username, SharedBrowserE2e.password).use { lock ->
+            lock.autoCommit = false
+            lock
+                .prepareStatement(
+                    "SELECT status, workspace_id, principal_user_id, instance_id FROM dashboard_refreshes WHERE id = ? FOR UPDATE",
+                ).use { statement ->
+                    statement.setObject(1, UUID.fromString(refreshId))
+                    statement.executeQuery().use { row ->
+                        check(row.next())
+                        row.getString("status") shouldBe "RUNNING"
+                        println(
+                            "388 persisted refresh=$refreshId status=${row.getString("status")}" +
+                                " workspace=${row.getString("workspace_id")} principal=${row.getString("principal_user_id")}" +
+                                " instance=${row.getString("instance_id")}",
+                        )
+                    }
+                }
+            val readUrl = "**/api/v1/dashboards/$board/refreshes/$refreshId"
+            val abortUrl = "**/api/v1/dashboards/$board/runtime/refreshes/$refreshId/abort"
+            var reads = 0
+            var aborts = 0
+            page.route(readUrl) { route ->
+                reads++
+                if (reads > 1) lock.rollback()
+                val response = route.fetch()
+                val data =
+                    page.evaluate(
+                        "text => { const d = JSON.parse(text).data; return { id: d.refresh_id, instance: d.instance_id, status: d.status }; }",
+                        response.text(),
+                    ) as Map<*, *>
+                println(
+                    "388 GET sequence=$reads http=${response.status()} refresh=${data["id"]}" +
+                        " instance=${data["instance"]} status=${data["status"]}",
+                )
+                if (reads == 1) data["status"] shouldBe "RUNNING"
+                route.fulfill(
+                    com.microsoft.playwright.Route
+                        .FulfillOptions()
+                        .setResponse(response),
+                )
+                response.dispose()
+            }
+            page.route(abortUrl) { route ->
+                aborts++
+                val response = route.fetch()
+                val instance = page.evaluate("text => JSON.parse(text).instance_id", route.request().postData())
+                println("388 POST refresh=$refreshId instance=$instance sequence=$aborts http=${response.status()}")
+                route.fulfill(
+                    com.microsoft.playwright.Route
+                        .FulfillOptions()
+                        .setResponse(response),
+                )
+                response.dispose()
+                if (aborts > 1) lock.rollback()
+            }
+            try {
+                // Abort it; the chip flips to abort locally and the REAL handler answers 202 (the runtime's
+                // own abort promise resolving is the acknowledgement, not a stub's). A false ack names the
+                // row's status and the client path that answered instead of a bare boolean (#366 red 2).
+                abortAndNameAck("window.__dp.instance", board, refreshId)
+                chipStateIs("hungcells", "abort")
+                // waitForFunction tests the Promise's truthiness, then resolves even when its value is
+                // false. A Java condition awaits each real GET through evaluate and retries FALSE.
+                // The held row forces that false observation before the terminal write can commit.
+                var observed: Map<*, *> = emptyMap<String, Any>()
+                page.waitForCondition {
+                    observed =
+                        page.evaluate(
+                            """async () => {
+                          const res = await fetch('/api/v1/dashboards/$board/refreshes/$refreshId', { credentials: 'same-origin' });
+                          const doc = await res.json();
+                          return { http: res.status, id: doc.data && doc.data.refresh_id,
+                            status: doc.data && doc.data.status, finished: doc.data && doc.data.finished_at };
+                        }""",
+                        ) as Map<*, *>
+                    observed["http"] == 200 && observed["id"] == refreshId && observed["status"] == "ABORTED"
+                }
+                check(observed["finished"] != null) { "ABORTED must be durable: $observed" }
+                println("388 observed terminal refresh=$refreshId status=${observed["status"]} reads=$reads")
+                // A genuine ALREADY-FINISHED abort against the real route: the finished refresh is the 404
+                // idempotence — no substring stub answers for the handler here.
+                val finished =
+                    page.evaluate(
+                        """async () => {
+                          const csrf = document.cookie.match(/(?:^|;\s*)dp_csrf=([^;]*)/);
+                          const res = await fetch('/api/v1/dashboards/$board/runtime/refreshes/$refreshId/abort', {
+                            method: 'POST', credentials: 'same-origin',
+                            headers: { 'Content-Type': 'application/json', 'DP-CSRF-Token': csrf ? decodeURIComponent(csrf[1]) : '' },
+                            body: JSON.stringify({ instance_id: window.__dp.instance._instanceId }) });
+                          const doc = await res.json();
+                          return { status: res.status, code: (doc.error && doc.error.code) || null };
+                        }""",
+                    ) as Map<*, *>
+                (finished["status"] as Number).toInt() shouldBe 404
+                finished["code"] shouldBe "dashboard.refresh.not_found"
+            } finally {
+                lock.rollback()
+                page.unroute(readUrl)
+                page.unroute(abortUrl)
+            }
+        }
         drainCspViolations().filter { !it.contains("'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='") } shouldBe emptyList()
     }
 
