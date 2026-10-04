@@ -23,6 +23,29 @@ class TransformFaceModelTest {
     private val identity = TransformFace.Identity(TransformFixtures.NAME, "jsonata", Template.NONE_ENGINE, "Order lines", "d")
 
     @Test
+    fun `syntax refusals never reflect a pane value in the message or line`() {
+        val panes = TransformFixtures.skeletonPanes
+        listOf(
+            panes.copy(contract = "sentinel987654321"),
+            panes.copy(invariants = "sentinel987654321"),
+            panes.copy(tests = "sentinel987654321"),
+        ).forEachIndexed { index, malformed ->
+            val refusal =
+                TransformFace
+                    .bind(identity, malformed)
+                    .shouldBeInstanceOf<TransformFace.Bound.Refused>()
+                    .refusals
+                    .single()
+            refusal.code shouldBe PipelineErrorCodes.Template.CONTRACT_INVALID
+            refusal.pane shouldBe listOf(TransformFace.CONTRACT, TransformFace.INVARIANTS, TransformFace.TESTS)[index]
+            refusal.detail shouldBe null
+            refusal.message shouldContain "not valid JSON"
+            refusal.message shouldNotContain "987654321"
+            refusal.line shouldNotContain "987654321"
+        }
+    }
+
+    @Test
     fun `the create skeleton - the record's example - passes 7b's real save gate, suite included`() {
         val bound = TransformFace.bind(identity, TransformFixtures.skeletonPanes)
         val draft = bound.shouldBeInstanceOf<TransformFace.Bound.Draft>().draft

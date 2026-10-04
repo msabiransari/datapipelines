@@ -6,6 +6,7 @@ import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.pipeline.WriteSurface
+import co.datapipelines.templates.BindFailure
 import co.datapipelines.templates.Template
 import co.datapipelines.templates.TemplateDraft
 import co.datapipelines.templates.TemplateDraftService
@@ -22,6 +23,8 @@ import co.datapipelines.templates.TransformTestCase
 import co.datapipelines.templates.WorkspaceTemplateEngines
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.Dialect
+import com.fasterxml.jackson.databind.JsonMappingException
+import com.fasterxml.jackson.databind.exc.UnrecognizedPropertyException
 import com.fasterxml.jackson.databind.node.ObjectNode
 import io.modelcontextprotocol.spec.McpSchema
 
@@ -99,7 +102,7 @@ private fun parseBlocks(args: McpArguments): Triple<TransformContract?, List<Tra
             // mapping error rides as its cause.
             throw DatapipelinesException(
                 code = PipelineErrorCodes.Template.CONTRACT_INVALID,
-                message = "The '$name' block does not bind: ${err.message}. A typo is a refusal, never a silent drop.",
+                message = safeTemplateBindMessage(err.cause as? JsonMappingException, "The '$name' block does not bind"),
                 details = mapOf("rule" to "unknown_field"),
                 cause = err,
             )
@@ -121,6 +124,19 @@ private fun parseBlocks(args: McpArguments): Triple<TransformContract?, List<Tra
         )
             as List<TransformTestCase>?
     return Triple(contract, invariants, tests)
+}
+
+/** Safe binding prose only; each caller retains its existing code and detail shape. */
+internal fun safeTemplateBindMessage(
+    error: JsonMappingException?,
+    lead: String,
+): String {
+    val failure = error?.let(BindFailure::of)
+    return when {
+        failure?.rule == BindFailure.RULE_WRONG_TYPE -> failure.messageFor(lead)
+        error is UnrecognizedPropertyException -> "$lead: '${failure?.field}' is not a recognized field."
+        else -> "$lead: a field is missing or does not match its declared type."
+    }
 }
 
 /**

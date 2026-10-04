@@ -2,9 +2,13 @@ package co.datapipelines.web.api
 
 import co.datapipelines.auth.AuthException
 import co.datapipelines.pipeline.PipelineErrorCodes
+import co.datapipelines.templates.BindFailure
 import co.datapipelines.typesystem.CauseChain
 import co.datapipelines.typesystem.DatapipelinesException
+import com.fasterxml.jackson.core.exc.StreamConstraintsException
+import com.fasterxml.jackson.databind.JsonMappingException
 import com.fasterxml.jackson.databind.exc.MismatchedInputException
+import com.fasterxml.jackson.databind.exc.UnrecognizedPropertyException
 import jakarta.servlet.http.HttpServletRequest
 import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
@@ -123,10 +127,29 @@ class ApiExceptionHandler {
     ): ResponseEntity<ApiErrorResponse> {
         log.debug("400 {} {}: unreadable body", request.method, request.requestURI, error)
         val code = malformedBodyCodeFor(request.requestURI)
+        val causes =
+            generateSequence<Throwable>(error) { it.cause }
+                .take(MAX_BODY_CAUSE_DEPTH)
+                .toList()
+        val mapping = causes.filterIsInstance<JsonMappingException>().firstOrNull()
+        val failure = mapping?.let(BindFailure::of)
+        val lead = "Request body could not be read"
+        val message =
+            when {
+                failure?.rule == BindFailure.RULE_WRONG_TYPE -> failure.messageFor(lead)
+
+                mapping is UnrecognizedPropertyException -> "$lead: '${failure?.field}' is not a recognized field."
+
+                causes.any {
+                    it is StreamConstraintsException
+                } -> "$lead: JSON exceeds a nesting depth, string length or number length limit."
+
+                else -> "$lead. Use valid JSON with the declared field types."
+            }
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).contentType(JSON).body(
             ApiErrorResponse.of(
                 code = code,
-                message = "Request body could not be read: ${error.message?.take(MAX_MESSAGE_CHARS)}",
+                message = message,
                 details = mapOf(ApiErrors.REASON to ApiErrors.MALFORMED_JSON),
             ),
         )
@@ -368,7 +391,7 @@ class ApiExceptionHandler {
         val JSON: MediaType = MediaType.APPLICATION_JSON
 
         const val API_PREFIX = "/api/v1"
-        const val MAX_MESSAGE_CHARS = 200
+        const val MAX_BODY_CAUSE_DEPTH = 8
 
         /**
          * The stand-in for failures §13 catalogues no code for (405, unexpected internal errors).
