@@ -93,6 +93,7 @@ class PipelineLifecycleDialogControllerTest {
                 post("/partials/pipelines/$PIPELINE/lifecycle/release")
                     .session(session)
                     .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                    .param("bodyHash", "h3")
                     .header("HX-Request", "true"),
             ).andExpect(header().string("HX-Redirect", "/pipelines/$PIPELINE?ok=released"))
 
@@ -117,6 +118,7 @@ class PipelineLifecycleDialogControllerTest {
                 post("/partials/pipelines/$PIPELINE/lifecycle/release")
                     .session(session)
                     .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                    .param("bodyHash", "h3")
                     .param("releasePinnedTemplates", "true")
                     .header("HX-Request", "true"),
             ).andExpect(header().string("HX-Redirect", "/pipelines/$PIPELINE?ok=released_with_templates"))
@@ -129,6 +131,93 @@ class PipelineLifecycleDialogControllerTest {
         held.pipelineId shouldBe PIPELINE
         held.actorId shouldBe USER
         held.templates shouldBe listOf("test/a.sql@2")
+    }
+
+    @Test
+    fun `release - 416 - a stale dialog hash is passed to the service, never replaced by the fresh draft's, and answers the 409 conflict`() {
+        // The draft is at h3 NOW; the dialog that was submitted read h2 earlier.
+        every { pipelines.findDraft(WORKSPACE, any(), PIPELINE) } returns draftDetail()
+        every { pipelines.release(WORKSPACE, PIPELINE, "h2-stale", USER, null, false) } throws
+            DatapipelinesException(
+                code = PipelineErrorCodes.Versioning.VERSION_CONFLICT,
+                message = "The draft changed since you loaded it.",
+                details = mapOf("current_body_hash" to "h3"),
+            )
+
+        val response =
+            mvc
+                .perform(
+                    post("/partials/pipelines/$PIPELINE/lifecycle/release")
+                        .session(MockHttpSession())
+                        .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                        .param("bodyHash", "h2-stale")
+                        .header("HX-Request", "true"),
+                ).andExpect(status().isConflict)
+                .andExpect(header().string("HX-Retarget", "#toast"))
+                .andReturn()
+                .response.contentAsString
+
+        response shouldContain "pipeline.version.conflict"
+        verify(exactly = 1) { pipelines.release(WORKSPACE, PIPELINE, "h2-stale", USER, null, false) }
+        verify(exactly = 0) { pipelines.release(any(), any(), "h3", any(), any(), any()) }
+        audit.events shouldBe emptyList()
+    }
+
+    @Test
+    fun `release - 416 - a missing hash is a 400 at binding and neither the draft read nor the service runs`() {
+        mvc
+            .perform(
+                post("/partials/pipelines/$PIPELINE/lifecycle/release")
+                    .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                    .header("HX-Request", "true"),
+            ).andExpect(status().isBadRequest)
+
+        verify(exactly = 0) { pipelines.findDraft(any(), any(), any()) }
+        verify(exactly = 0) { pipelines.release(any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `release - 416 - a hostile hash value reaches the service verbatim and is the conflict, never a 500`() {
+        val hostile = "'\"; DROP TABLE pipeline_version; --<script>" + "x".repeat(5000)
+        every { pipelines.findDraft(WORKSPACE, any(), PIPELINE) } returns draftDetail()
+        every { pipelines.release(WORKSPACE, PIPELINE, hostile, USER, null, false) } throws
+            DatapipelinesException(
+                code = PipelineErrorCodes.Versioning.VERSION_CONFLICT,
+                message = "The draft changed since you loaded it.",
+            )
+
+        val response =
+            mvc
+                .perform(
+                    post("/partials/pipelines/$PIPELINE/lifecycle/release")
+                        .session(MockHttpSession())
+                        .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                        .param("bodyHash", hostile)
+                        .header("HX-Request", "true"),
+                ).andExpect(status().isConflict)
+                .andReturn()
+                .response.contentAsString
+
+        response shouldContain "pipeline.version.conflict"
+    }
+
+    @Test
+    fun `release - 416 - the no-draft refusal is kept and the posted hash releases nothing`() {
+        every { pipelines.findDraft(WORKSPACE, any(), PIPELINE) } returns null
+
+        val response =
+            mvc
+                .perform(
+                    post("/partials/pipelines/$PIPELINE/lifecycle/release")
+                        .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                        .param("bodyHash", "h3")
+                        .header("HX-Request", "true"),
+                ).andExpect(status().is4xxClientError)
+                .andReturn()
+                .response.contentAsString
+
+        response shouldContain PipelineErrorCodes.Versioning.NOT_DRAFT
+        verify(exactly = 0) { pipelines.release(any(), any(), any(), any(), any(), any()) }
     }
 
     @Test

@@ -67,18 +67,21 @@ class TemplateLifecycleDialogController(
     @RequiredScope(Permission.TEMPLATE_RELEASE)
     fun release(
         @RequestParam name: String,
+        @RequestParam bodyHash: String,
     ): ResponseEntity<String> {
         val principal = LifecycleVerbs.requireSession()
         val workspaceId = principal.requireWorkspace().id
-        // The hash the DIALOG read (§4.2); a stale hash is the service's version.conflict.
-        val draft =
-            templates.findDraftDetail(workspaceId, name)
-                ?: throw DatapipelinesException(
-                    code = PipelineErrorCodes.Template.VERSION_NOT_DRAFT,
-                    message = "This template has no draft to release.",
-                    details = mapOf("template_id" to name),
-                )
-        val released = releases.release(workspaceId, name, draft.bodyHash, principal.userId)
+        // #416 — [bodyHash] is the hash the DIALOG read (§4.2). The draft is read here only to
+        // refuse the no-draft case; its CURRENT hash is never the one released, so a draft that
+        // changed after the dialog opened is a stale hash and the service answers
+        // template.version.conflict.
+        templates.findDraftDetail(workspaceId, name)
+            ?: throw DatapipelinesException(
+                code = PipelineErrorCodes.Template.VERSION_NOT_DRAFT,
+                message = "This template has no draft to release.",
+                details = mapOf("template_id" to name),
+            )
+        val released = releases.release(workspaceId, name, bodyHash, principal.userId)
         // T187 — the release is the D4 human step; it is audited on every surface that offers it.
         LifecycleVerbs.audit(
             audit,

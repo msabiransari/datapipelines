@@ -57,6 +57,11 @@
              flash (which names the cascaded templates, #407); the explorer's in-place
              re-render is gone (no page renders its pane). -->
         <input type="hidden" name="from" th:value="${from}">
+        <!-- #416: the hash of the draft THIS dialog read. The POST releases AT it, so a draft
+             changed after the dialog opened answers pipeline.version.conflict instead of being
+             released silently. It sits in the form, so the check-override footer the run
+             splices in below submits it too. -->
+        <input type="hidden" name="bodyHash" th:value="${dlg.bodyHash}" data-release-body-hash>
 
         <th:block th:if="${!#lists.isEmpty(dlg.pins)}">
           <p class="u-text-sm u-mb-xs">Template pins this release locks:</p>

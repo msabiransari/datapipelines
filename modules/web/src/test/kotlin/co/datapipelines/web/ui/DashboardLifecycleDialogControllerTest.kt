@@ -5,6 +5,7 @@ import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.auth.WorkspaceRole
+import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.typesystem.DatapipelinesException
@@ -18,6 +19,7 @@ import co.datapipelines.visualization.Purged
 import co.datapipelines.visualization.Switched
 import co.datapipelines.visualization.VersionMoved
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -25,9 +27,13 @@ import io.mockk.verifySequence
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
+import org.springframework.http.MediaType
 import org.springframework.http.ResponseEntity
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
 import org.springframework.security.core.context.SecurityContextHolder
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
+import org.springframework.test.web.servlet.setup.MockMvcBuilders
 import org.springframework.ui.ExtendedModelMap
 import java.util.UUID
 
@@ -93,9 +99,10 @@ class DashboardLifecycleDialogControllerTest {
         )
 
     @Test
-    fun `the release calls the service with the draft's hash and the consent, and answers the versions tab`() {
+    fun `the release calls the service with the DIALOG's hash and the consent, and answers the versions tab`() {
         authenticate()
-        val draft = working()
+        // #416: the draft is at hash-9 NOW; the form posted hash-2, the one the dialog read.
+        val draft = working(hash = "hash-9")
         every { dashboards.findWorking(workspaceId, ReadLens.Everything, dashboardId) } returns draft
         val released =
             DashboardReleased(
@@ -106,7 +113,7 @@ class DashboardLifecycleDialogControllerTest {
             dashboards.release(workspaceId, dashboardId, "hash-2", any(), releasePinnedVisualizations = true)
         } returns released
 
-        val answer = controller.release(dashboardId, releasePinnedVisualizations = true)
+        val answer = controller.release(dashboardId, bodyHash = "hash-2", releasePinnedVisualizations = true)
 
         answer.headers["HX-Redirect"] shouldBe listOf("/dashboards/$dashboardId?tab=versions&ok=released_with_visualizations")
         // #332 — one cascaded visualization event FIRST, then the dashboard's own.
@@ -124,10 +131,92 @@ class DashboardLifecycleDialogControllerTest {
             dashboards.release(workspaceId, dashboardId, "hash-2", any(), releasePinnedVisualizations = false)
         } returns DashboardReleased(working(version = 2, status = PipelineVersionStatus.RELEASED), emptyList())
 
-        val answer = controller.release(dashboardId, releasePinnedVisualizations = false)
+        val answer = controller.release(dashboardId, bodyHash = "hash-2", releasePinnedVisualizations = false)
 
         answer.headers["HX-Redirect"] shouldBe listOf("/dashboards/$dashboardId?tab=versions&ok=released")
     }
+
+    @Test
+    fun `416 - a stale dialog hash is forwarded as posted, never replaced by the fresh draft's, and is the version conflict`() {
+        authenticate()
+        every { dashboards.findWorking(workspaceId, ReadLens.Everything, dashboardId) } returns working(hash = "hash-fresh")
+        every {
+            dashboards.release(workspaceId, dashboardId, "hash-stale", any(), releasePinnedVisualizations = false)
+        } throws DatapipelinesException(PipelineErrorCodes.Dashboard.VERSION_CONFLICT, "The draft changed since you loaded it.")
+
+        val thrown =
+            assertThrows<DatapipelinesException> {
+                controller.release(dashboardId, bodyHash = "hash-stale", releasePinnedVisualizations = false)
+            }
+
+        thrown.code shouldBe "dashboard.version.conflict"
+        verify(exactly = 1) { dashboards.release(workspaceId, dashboardId, "hash-stale", any(), any()) }
+        verify(exactly = 0) { dashboards.release(any(), any(), "hash-fresh", any(), any()) }
+        verify(exactly = 0) { audit.log(any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `416 - over HTTP the form's bodyHash binds, and a stale one answers the 409 toast`() {
+        authenticate()
+        every { dashboards.findWorking(workspaceId, ReadLens.Everything, dashboardId) } returns working(hash = "hash-fresh")
+        every {
+            dashboards.release(workspaceId, dashboardId, "hash-stale", any(), releasePinnedVisualizations = false)
+        } throws DatapipelinesException(PipelineErrorCodes.Dashboard.VERSION_CONFLICT, "The draft changed since you loaded it.")
+
+        val response =
+            mvc()
+                .perform(
+                    post("/partials/dashboards/$dashboardId/lifecycle/release")
+                        .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                        .param("bodyHash", "hash-stale")
+                        .header("HX-Request", "true"),
+                ).andExpect(status().isConflict)
+                .andReturn()
+                .response.contentAsString
+
+        response shouldContain "dashboard.version.conflict"
+        verify(exactly = 1) { dashboards.release(workspaceId, dashboardId, "hash-stale", any(), any()) }
+        verify(exactly = 0) { dashboards.release(any(), any(), "hash-fresh", any(), any()) }
+    }
+
+    @Test
+    fun `416 - over HTTP a missing hash is a 400 at binding and neither the draft read nor the service runs`() {
+        authenticate()
+
+        mvc()
+            .perform(
+                post("/partials/dashboards/$dashboardId/lifecycle/release")
+                    .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                    .header("HX-Request", "true"),
+            ).andExpect(status().isBadRequest)
+
+        verify(exactly = 0) { dashboards.findWorking(any(), any(), any()) }
+        verify(exactly = 0) { dashboards.release(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `416 - over HTTP a hostile hash value reaches the service verbatim and is the conflict, never a 500`() {
+        authenticate()
+        val hostile = "'\"; DROP TABLE dashboard_version; --<script>" + "x".repeat(5000)
+        every { dashboards.findWorking(workspaceId, ReadLens.Everything, dashboardId) } returns working(hash = "hash-fresh")
+        every {
+            dashboards.release(workspaceId, dashboardId, hostile, any(), releasePinnedVisualizations = false)
+        } throws DatapipelinesException(PipelineErrorCodes.Dashboard.VERSION_CONFLICT, "The draft changed since you loaded it.")
+
+        mvc()
+            .perform(
+                post("/partials/dashboards/$dashboardId/lifecycle/release")
+                    .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                    .param("bodyHash", hostile)
+                    .header("HX-Request", "true"),
+            ).andExpect(status().isConflict)
+    }
+
+    private fun mvc() =
+        MockMvcBuilders
+            .standaloneSetup(controller)
+            .setControllerAdvice(UiExceptionHandler())
+            .build()
 
     @Test
     fun `a dashboard with no draft refuses before the service runs`() {
@@ -137,7 +226,7 @@ class DashboardLifecycleDialogControllerTest {
 
         val thrown =
             assertThrows<DatapipelinesException> {
-                controller.release(dashboardId, releasePinnedVisualizations = false)
+                controller.release(dashboardId, bodyHash = "hash-2", releasePinnedVisualizations = false)
             }
         thrown.code shouldBe "dashboard.version.not_draft"
         verify(exactly = 0) { dashboards.release(any(), any(), any(), any(), any()) }
@@ -148,7 +237,7 @@ class DashboardLifecycleDialogControllerTest {
         authenticate(method = AuthMethod.API_KEY)
         val thrown =
             assertThrows<DatapipelinesException> {
-                controller.release(dashboardId, releasePinnedVisualizations = false)
+                controller.release(dashboardId, bodyHash = "hash-2", releasePinnedVisualizations = false)
             }
         thrown.code shouldBe "auth.session.required"
         verify(exactly = 0) { dashboards.findWorking(any(), any(), any()) }
