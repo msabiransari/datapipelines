@@ -61,7 +61,11 @@ Build in this order — each step's refusal names the path to fix.
 
 A visualization's `tests.cases` are its proof: fixture rows for every input and the assertions a
 reader checks (`rendered`, `trace_count`, `no_console_errors`, `text_visible`, `no_data`,
-`value_visible`). Run them against the real renderer before you hand the work over:
+`value_visible`). The server's mechanical feasibility check scans configuration strings and bound
+strings or INTEGER/DECIMAL scalar numeric text (for example, `42` and `10.5`) by substring, without
+numeric normalization. Locale, currency, percent and rounded display text still need your visual
+check in the preview; the mechanical rendered state is `not_available`. Run the cases against the
+real renderer before you hand the work over:
 
 1. **Start** with `visualizations_test_start` (`id`). It tests the WORKING version (the draft) and
    answers `preview_url`, the case names and `expires_at`. Any edit afterwards voids the session —

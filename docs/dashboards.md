@@ -1,6 +1,6 @@
 # Dashboards
 
-**Status:** v0.31 — the visualizations workspace's tab switches on the shared history helper, the parameter-set decision (§7, #426) beside the pipeline editor runs the shared tab core (§7, #420) beside the Versions tables' created/released relative with the UTC stamp on hover (§7, #422) beside Back/Forward across the dashboards workspace's tab switches (§7, #402) beside the visualizations workspace (§7, #399) beside the dashboards workspace (§5.2's `version`, §7's workspace, #400; #409 closes with it) beside the
+**Status:** v0.32 — numeric bound-value assertion feasibility (§3.4, #377) beside the visualizations workspace's tab switches on the shared history helper, the parameter-set decision (§7, #426) beside the pipeline editor runs the shared tab core (§7, #420) beside the Versions tables' created/released relative with the UTC stamp on hover (§7, #422) beside Back/Forward across the dashboards workspace's tab switches (§7, #402) beside the visualizations workspace (§7, #399) beside the dashboards workspace (§5.2's `version`, §7's workspace, #400; #409 closes with it) beside the
 board's small-slot margins and its breakpoint collapse (§6.2, §6.3, #386/#387), 328's release-record judgement (§4.3)
 permissions (§4, lane L1b); the transfer routes and their limits' honest contract (§3.3, lanes L1c/L1c-b/L1c-c: the
 import's atomicity, the RELEASE rules on a landing, the aggregate count ceiling, the wire's per-family arms); the server
@@ -303,7 +303,10 @@ the preview page, the upload and the two tools — is §3.4.1 (#353).
   transform pin is valid here — authoring; the runtime keeps its RELEASED-only rule), every projected bound
   column present in every row, and static assertion feasibility (`trace_count` against `config.data.length`,
   `no_data` against zero produced rows, `text_visible`/`value_visible` strings present in the configuration or
-  the bound values). The rendered-state check records `not_available` today — a headless render check is a later
+  the bound values). Bound strings and INTEGER/DECIMAL values participate by their existing scalar text
+  (for example, `42` and `10.5`), using substring matching without numeric normalization. Locale, currency,
+  percent and rounded display text still need the agent's visual check in the preview. The rendered-state
+  check records `not_available` today — a headless render check is a later
   lane, and nothing here claims a browser saw anything. The report is stored on the run and RE-RUN at release.
 - **At a successful submission the server mints a SECOND, separate capability** for the screenshot upload —
   random, hash-only, bound to the exact run and purpose, expiring no later than the session's original deadline,
@@ -921,6 +924,7 @@ change (#426). The templates workspace adopts the helper after #398's rework lan
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-03 | v0.32 | #377 numeric bound-value assertion feasibility | **§3.4:** bound INTEGER/DECIMAL scalar text joins strings in the static substring scan; `42` and `10.5` can satisfy `text_visible`/`value_visible`. Browser formatting remains the agent's preview check; rendered state remains `not_available`. |
 | 2026-10-03 | v0.31 | #426 the visualizations workspace on the shared history helper — renumbered at merge after 420's v0.30 | **§7:** the visualizations workspace's tab switches push tab-only `visualizations` entries through `workspace/history.js` (via `workspace/panes.js`), Back/Forward re-select in page, a restored root re-wires once; the parameter-set workspace stays on full-document section links — the helper is not adopted there (decision recorded); the templates workspace follows after #398's rework. |
 | 2026-10-03 | v0.30 | #420 the pipeline editor re-adopts the shared tab core | **§7:** the tab-core sentence no longer says the editor keeps its own copy — `pipeline-editor/tabs.js` delegates admission and transition to `workspace/tabs.js` (its 18 getters keep reading `this`, so Alpine's proxy tracks them), so the dashboards, visualizations and pipeline workspaces run one machine. No dashboards behaviour changes. |
 | 2026-10-03 | v0.29 | #422 the Versions tables' time shape | **§7:** the dashboards and visualizations Versions tabs render created/released relative in the cell with the absolute UTC stamp on `title` (the keys page's shape, computed in the model's fill); the dashboards partial gains its own `dp-versions-pane` class so the framed table scrolls inside its viewport at 390 px. |
