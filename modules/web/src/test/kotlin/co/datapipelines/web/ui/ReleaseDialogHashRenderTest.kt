@@ -30,10 +30,34 @@ import java.util.UUID
 class ReleaseDialogHashRenderTest {
     private val families =
         listOf(
-            Family("pipeline", "partials/pipeline-lifecycle-release", "bodyHash", pipelineDialog(HASH), pipelineDialog(HASH, refused = true)),
-            Family("template", "partials/template-lifecycle-release", "bodyHash", templateDialog(HASH), templateDialog(HASH, refused = true)),
-            Family("dashboard", "partials/dashboard-lifecycle-release", "bodyHash", dashboardDialog(HASH), dashboardDialog(HASH, refused = true)),
-            Family("visualization", "partials/visualization-lifecycle-release", "body_hash", vizDialog(HASH), vizDialog(HASH, refused = true)),
+            Family(
+                name = "pipeline",
+                view = "partials/pipeline-lifecycle-release",
+                field = "bodyHash",
+                open = pipelineDialog(HASH),
+                refused = pipelineDialog(HASH, refused = true),
+            ),
+            Family(
+                name = "template",
+                view = "partials/template-lifecycle-release",
+                field = "bodyHash",
+                open = templateDialog(HASH),
+                refused = templateDialog(HASH, refused = true),
+            ),
+            Family(
+                name = "dashboard",
+                view = "partials/dashboard-lifecycle-release",
+                field = "bodyHash",
+                open = dashboardDialog(HASH),
+                refused = dashboardDialog(HASH, refused = true),
+            ),
+            Family(
+                name = "visualization",
+                view = "partials/visualization-lifecycle-release",
+                field = "body_hash",
+                open = vizDialog(HASH),
+                refused = vizDialog(HASH, refused = true),
+            ),
         )
 
     @Test

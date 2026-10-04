@@ -134,7 +134,7 @@ class PipelineLifecycleDialogControllerTest {
     }
 
     @Test
-    fun `release - 416 - a stale dialog hash is passed to the service, never replaced by the fresh draft's, and answers the 409 conflict`() {
+    fun `release - 416 - a stale dialog hash reaches the service as posted, never the fresh draft's, and answers 409`() {
         // The draft is at h3 NOW; the dialog that was submitted read h2 earlier.
         every { pipelines.findDraft(WORKSPACE, any(), PIPELINE) } returns draftDetail()
         every { pipelines.release(WORKSPACE, PIPELINE, "h2-stale", USER, null, false) } throws
