@@ -23,20 +23,7 @@ class DatasourceRefusalLogTest {
     @ParameterizedTest
     @ValueSource(booleans = [true, false])
     fun `registry recorder failure logs only its shape and still refuses the pool`(sqlFailure: Boolean) {
-        val jdbc = NamedParameterJdbcTemplate(SharedPostgres.pooledDataSource())
-        jdbc.jdbcTemplate.execute("TRUNCATE datasources, users CASCADE")
-        val owner =
-            requireNotNull(
-                jdbc.queryForObject(
-                    """
-                    INSERT INTO users (email, display_name, provider, provider_subject)
-                    VALUES ('owner@example.com', 'Owner', 'google', 'sub-1')
-                    RETURNING id
-                    """.trimIndent(),
-                    emptyMap<String, Any>(),
-                    UUID::class.java,
-                ),
-            )
+        val (jdbc, owner) = metadataFixture()
         val marker = "synthetic_refused_row_329a"
         val failure =
             IllegalStateException(
@@ -87,6 +74,24 @@ class DatasourceRefusalLogTest {
         event.formattedMessage shouldContain "sql_state=${FailureShape.sqlState(failure)}"
         FailureShape.sqlState(failure) shouldBe if (sqlFailure) "23514" else "none"
         event.formattedMessage shouldContain "the pool build is refused regardless"
+    }
+
+    private fun metadataFixture(): Pair<NamedParameterJdbcTemplate, UUID> {
+        val jdbc = NamedParameterJdbcTemplate(SharedPostgres.pooledDataSource())
+        jdbc.jdbcTemplate.execute("TRUNCATE datasources, users CASCADE")
+        val owner =
+            requireNotNull(
+                jdbc.queryForObject(
+                    """
+                    INSERT INTO users (email, display_name, provider, provider_subject)
+                    VALUES ('owner@example.com', 'Owner', 'google', 'sub-1')
+                    RETURNING id
+                    """.trimIndent(),
+                    emptyMap<String, Any>(),
+                    UUID::class.java,
+                ),
+            )
+        return jdbc to owner
     }
 
     private fun capturingFailureLogs(block: () -> Unit): List<ILoggingEvent> {
