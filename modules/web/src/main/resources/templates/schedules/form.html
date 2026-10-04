@@ -127,6 +127,22 @@
             <p class="ds-field-error" data-field-error="parameters" hidden></p>
           </fieldset>
 
+          <fieldset class="sch-fieldset">
+            <legend class="ds-field-label">Notifications</legend>
+            <div class="ds-field">
+              <label class="ds-field-label" for="sch-f-recipients">Recipients</label>
+              <input class="ds-input" id="sch-f-recipients" type="text" aria-describedby="sch-f-recipients-help">
+              <p class="ds-field-help" id="sch-f-recipients-help">Comma-separated email addresses. Leave empty for no mail.</p>
+            </div>
+            <label class="sch-radio"><input type="checkbox" name="notification_event" value="start"> <span>Started</span></label>
+            <label class="sch-radio"><input type="checkbox" name="notification_event" value="success"> <span>Succeeded</span></label>
+            <label class="sch-radio"><input type="checkbox" name="notification_event" value="failure" checked> <span>Failed, cancelled or could not start</span></label>
+            <label class="sch-radio"><input type="checkbox" name="notification_event" value="unknown" checked> <span>Outcome unknown</span></label>
+            <label class="sch-radio"><input type="checkbox" name="notification_event" value="blocked" checked> <span>Schedule blocked</span></label>
+            <p class="ds-field-error" data-field-error="notifications" hidden></p>
+            <div class="app-alert app-alert-warning" role="note" th:if="${notificationDelivery == null or notificationDelivery.state == 'off'}">Scheduler mail is not enabled on this deployment — these settings are saved, but no mail is sent.</div>
+          </fieldset>
+
           <div class="u-row u-gap-sm u-right sch-form-actions">
             <button type="button" class="ds-button ds-button-secondary" data-sch-action="close-dialog">Cancel</button>
             <button th:if="${canAuthor == true}" data-verb="schedule-save" type="submit"

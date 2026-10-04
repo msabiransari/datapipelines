@@ -3,6 +3,8 @@ package co.datapipelines.web.schedules
 import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.PermissionResolverInstallation
+import co.datapipelines.auth.RolePermissionsResolver
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.scheduler.MissedRunPolicy
@@ -33,6 +35,8 @@ import io.mockk.verify
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.CsvSource
 import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatus
 import org.springframework.jdbc.core.RowMapper
@@ -89,6 +93,61 @@ class SchedulesControllerTest {
 
     @AfterEach
     fun signOut() = SecurityContextHolder.clearContext()
+
+    @ParameterizedTest
+    @CsvSource("AUTHOR,false", "AUTHOR,true", "VIEWER,false", "VIEWER,true", "PROMOTER,false", "PROMOTER,true")
+    fun `notification addresses follow the real permission resolver on get and list`(
+        roleName: String,
+        list: Boolean,
+    ) {
+        PermissionResolverInstallation(RolePermissionsResolver).use {
+            val role = WorkspaceRole.valueOf(roleName)
+            val stored = schedule().copy(notificationRecipients = listOf("private@example.com", "other@example.org"))
+            every { service.get(workspace, scheduleId, any()) } returns stored
+            every { service.list(workspace, any(), any(), any(), any()) } returns listOf(stored)
+            val principal =
+                AuthenticatedPrincipal(
+                    user,
+                    "author@example.com",
+                    "Author",
+                    AuthMethod.OIDC,
+                    "session",
+                    workspace = WorkspaceContext(workspace, "acme", role),
+                )
+            SecurityContextHolder.getContext().authentication = UsernamePasswordAuthenticationToken(principal, null, emptyList())
+            val data =
+                if (list) {
+                    controller
+                        .list(null, null, null)
+                        .data.items
+                        .single()
+                } else {
+                    controller.get(scheduleId).body!!.data
+                }
+            val notifications = data["notifications"] as Map<*, *>
+            notifications["recipient_count"] shouldBe 2
+            notifications["events"] shouldBe listOf("failure", "unknown", "blocked")
+            notifications["delivery"] shouldBe mapOf("state" to "off", "reason" to "disabled")
+            notifications.containsKey("recipients") shouldBe (role == WorkspaceRole.AUTHOR)
+            if (role == WorkspaceRole.AUTHOR) {
+                notifications["recipients"] shouldBe stored.notificationRecipients
+            } else {
+                mapper.writeValueAsString(data).contains("private@example.com") shouldBe false
+            }
+        }
+    }
+
+    @Test
+    fun `PUT without notifications reaches service as null and audit has no addresses`() {
+        val request = slot<ScheduleRequest>()
+        every { service.update(workspace, scheduleId, user, 3, capture(request)) } returns
+            schedule().copy(notificationRecipients = listOf("private@example.com"))
+        controller.update(scheduleId, BODY, "3")
+        request.captured.notifications shouldBe null
+        audit.events.single().second["recipient_count"] shouldBe 1
+        audit.events.single().second["events"] shouldBe listOf("failure", "unknown", "blocked")
+        mapper.writeValueAsString(audit.events).contains("private@example.com") shouldBe false
+    }
 
     // ------------------------------------------------------------------------------ create
 

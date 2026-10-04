@@ -31,6 +31,45 @@ class SchedulesFormBrowserTest : SchedulesBrowserSuite() {
     /** The catalogue's `schedule.validation.target_not_released` line (#280) — the words at the pipeline field. */
     private val releaseFirst = "This pipeline has no released version yet. Release it (or switch its current version), then schedule it."
 
+    @Test
+    fun `notification settings round trip and refusal appears beside the field while mail stays off`() {
+        startTrace()
+        val root = ready("schnotify")
+        val pipeline = "$root/jobs/rows"
+        releasedPipeline(page, pipeline)
+        openSchedules()
+        page.locator("[data-verb='schedule-create']").first().click()
+        val form = page.locator("#sch-dialog [data-sch-form]")
+        form.waitFor()
+        page.fill("#sch-f-name", "$root/nightly/rows")
+        page.fill("#sch-f-pipeline", pipeline)
+        page.locator("#sch-f-param-$PARAMETER").waitFor()
+        page.waitForLoadState(com.microsoft.playwright.options.LoadState.NETWORKIDLE)
+        page.fill("#sch-f-param-$PARAMETER", "50")
+        page.locator("#sch-dialog [role='note']").textContent() shouldContain "no mail is sent"
+        page.isChecked("input[name='notification_event'][value='start']") shouldBe false
+        page.isChecked("input[name='notification_event'][value='failure']") shouldBe true
+        page.fill("#sch-f-recipients", "invalid")
+        page.locator("[data-verb='schedule-save']").click()
+        page.locator("[data-field-error='notifications']:not([hidden])").waitFor()
+        page.fill("#sch-f-recipients", "first@example.com, second@example.com")
+        page.check("input[name='notification_event'][value='start']")
+        page.uncheck("input[name='notification_event'][value='failure']")
+        page.locator("[data-verb='schedule-save']").click()
+        form.waitFor(Locator.WaitForOptions().setState(WaitForSelectorState.DETACHED))
+        detail().waitFor()
+        val summary = page.locator("#schedule-detail [data-slot='notifications']").textContent()
+        summary shouldContain "2 recipients · Started, Outcome unknown, Schedule blocked"
+        summary shouldContain "mail not enabled on this deployment"
+        summary.contains("example.com") shouldBe false
+        page.locator("[data-verb='schedule-edit']").click()
+        form.waitFor()
+        page.inputValue("#sch-f-recipients") shouldBe "first@example.com, second@example.com"
+        page.isChecked("input[name='notification_event'][value='start']") shouldBe true
+        page.isChecked("input[name='notification_event'][value='failure']") shouldBe false
+        page.locator("#sch-dialog [role='note']").textContent() shouldContain "no mail is sent"
+    }
+
     // ------------------------------------------------------------------ A.3 create, A.2 detail
 
     @Test

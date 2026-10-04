@@ -38,6 +38,8 @@ class SchedulesDetailRenderTest {
         val detail = SchedulesRender.skeleton(html, "sch-tpl-detail")
         detail shouldContain "An author or a workspace admin can unblock it."
         detail shouldContain "data-slot=\"blocked\""
+        detail shouldContain "<dt>Notifications</dt>"
+        detail shouldContain "data-slot=\"notifications\""
         SchedulesRender.skeleton(html, "sch-tpl-run-row") shouldContain "data-slot=\"execution\""
     }
 

@@ -1,6 +1,6 @@
 # REST API + SSE Specification
 
-**Status:** v2.80 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
+**Status:** v2.81 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
 **Last updated:** 2026-10-03
@@ -2351,6 +2351,7 @@ A **schedule** runs a registered executor's job — in v1 the `pipeline` executo
 | `cron` | string | Five fields, Unix style (`minute hour day-of-month month day-of-week`) |
 | `timezone` | string | IANA region id (`America/New_York`) |
 | `missed_run_policy` | string | `skip` (default) \| `latest` |
+| `notifications` | object | `{recipient_count, events, delivery: {state: "off", reason: "disabled"}}`; `recipients` is present ONLY when the workspace context permits `schedule.update`. Every other reader gets count/events/delivery and no addresses. Events serialize in order `start`, `success`, `failure`, `unknown`, `blocked` (#442a) |
 | `enabled` | bool | `false` while paused |
 | `condition` | string | `enabled` \| `paused` \| `blocked` — blocked wins |
 | `blocked` | object \| null | `{reason, at, run_id}` while blocked (`run_unknown`, or an executor refusal such as `pointer_null`) |
@@ -2388,6 +2389,10 @@ A **schedule** runs a registered executor's job — in v1 the `pipeline` executo
 
 `POST /schedules` — `schedule.create`. Body: `name`, `payload`, `cron`, `timezone` (required); `executor` (default `pipeline`), `parameters` (default `{}`), `missed_run_policy` (default `skip`). Optional `Idempotency-Key`, held durably: a replay of the same request answers `200` with the original schedule; a replay with a different body is `409 idempotency.key_reused_for_different_request`. `201` with the schedule and its `ETag`. Refusals: the `schedule.validation.*` family, `409 schedule.name_taken`, `409 schedule.limit.per_workspace`, and a parameter refusal exactly as an interactive run's (§13.4).
 
+**`notifications`** (#442a) is optional: absent or JSON null creates no recipients and events `failure`, `unknown`, `blocked` (start/success off). A present object accepts optional `recipients` (list of strings) and `events` (list of the five event names); an omitted member uses its create default. Example: `{"recipients":["a@example.com"],"events":["failure","unknown","blocked"]}`. Addresses are trimmed, domains lower-cased and duplicates removed case-insensitively, preserving first spelling and order; events deduplicate. One WHATWG valid e-mail address grammar, at most 254 characters, refuses header injection. The configured recipient limit defaults to 20. The idempotency hash includes normalized effective settings; case-only duplicates and reordered event choices replay the same meaning. Pre-V49 create keys still replay when the effective notification settings are the old defaults (no recipients and the three default events); different settings cannot match that legacy hash. Mail remains off: settings are saved, nothing sends until part b.
+
+| `schedule.validation.notifications_invalid` | 400 | Notification settings refused (#442a). `details` contains only `{field, reason}`: `notifications`, `notifications.recipients`, an indexed recipient or event field; `not_an_object`, `not_a_list`, `not_a_string`, `syntax`, `too_long`, `too_many`, `unknown_event`. No address is echoed |
+
 **`payload.parameter_bindings`** (#9 slice 3) — an optional, ADDITIVE key of payload schema 1. One binding per declared `DATE` parameter:
 
 ```json
@@ -2414,6 +2419,8 @@ Keywords are an exact allowlist — `TODAY` and `YESTERDAY`, uppercase — and a
 ### 20.5 Edit a schedule
 
 `PUT /schedules/{id}` with `If-Match: "<revision>"` — `schedule.update`. Body as §20.2 (the whole schedule), `parameter_bindings` included — replacing the saved bindings wholesale, like every other body field. A stale revision is `409 schedule.revision_conflict` (`details.current_revision`); a missing `If-Match` is refused as on §5.5. Changing the cron or timezone recomputes `next_due_at` from now — occurrences of the old pattern are not "missed". Runs already recorded keep the revision they were recorded under.
+
+**Additive frozen-contract rule (#442a):** absent or JSON-null `notifications` KEEPS the stored settings, so clients written before this field cannot wipe them. A present object replaces each supplied member; an omitted member keeps its stored value. `recipients: []` turns mail off; `events: []` selects no events. Neither omission resets a member to its create default.
 
 ### 20.6 Delete a schedule
 
@@ -2776,6 +2783,7 @@ window. A dashboard execution has no stored result: `GET /api/v1/executions/{id}
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-03 | v2.81 | 442a (#442) | Saved schedule notification settings: recipients and five event choices, validated and shown by role; omitted PUT settings preserved; mail remains off pending part b. |
 | 2026-10-02 | v2.75 | #369 the dashboard draft preview — renumbered at merge (main sat at v2.74) | Additive. **§23.3:** the four runtime routes take an optional `version` query parameter naming a DRAFT or RELEASED version (R2, owner-confirmed) — absent is byte-identical with the previous behaviour; three new refusals (`pipeline.execution.invalid_parameter_type` for a non-positive-integer value, `dashboard.not_found` naming `details.version` for a version the caller may not see, `dashboard.key.kind_refused`/`version_is_session_only` for a `dashboard` key naming one). The pin rule is unchanged on a draft (R1): a draft pinning a DRAFT pin is the existing `dashboard.runtime.dependency_missing`/`not_released`, its message now carrying the release hint. The preview PAGE (`GET /dashboards/{id}/preview?version=`) is a first-party page on `dashboard.read` — [auth.md §7.6](auth.md), not this section. |
 | 2026-09-27 | v2.42 | 274 (#274) legacy endpoint rows, retired never fatal | **§19.5's listing carries legacy rows.** A stored `published_endpoints` row whose path predates R-EP5 (fewer than three segments — the shape that made the row mapper throw inside the demo seeder's conflict check and refuse the boot) is now retired: the `GET /api/v1/endpoints` listing answers it flagged (`legacy: true`, `reason`, `enabled`) after the valid rows, in the MCP listing too; a single read (`?path=`) and the serve path answer it `404`; the existing `DELETE /api/v1/endpoints` removes it — the one verb the row supports, offered by the API console with its reason. No route, permission or status code changed; the wire shape of a valid row is byte-identical to v2.40. V40 (metadata-db §4.13) disables such rows in the database and records `retired_reason`; the repository's defensive mapping makes the boot itself immune regardless. |
 | 2026-09-27 | v2.41 | scheduler follow-ups (#258, #261) — numbered after origin/main's v2.38 (scheduler-3) at dispatch | Additive. **§20's run object carries the EXECUTION's own timing** — `execution_started_at`, `execution_completed_at`, `execution_duration_ms` — copied by the reconciler from the execution row it already reads (V40's two nullable columns on `schedule_runs`); the run's own `finished_at` stays the reconciler's stamp and is documented as never answering "how long did it take". A runs list answers duration per run in one read, for every member who may read the schedule, including readers without `execution.read`. **§20 names people beside their ids** — `created_by_name` / `updated_by_name` on the schedule, `requested_by_name` on the run (#261): display names resolved in one batched read per response (the pipelines explorer's `ActorNames`), a stamp whose user row is gone falling back to the id's short form. The trail JSON no longer carries `worker` (#253). |

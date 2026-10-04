@@ -314,8 +314,10 @@ class ApiErrorCatalogSpecDriftTest {
          * 374 → 375 with L5 (#367): §13.23 gains `dashboard.binding.path_invalid` (400 — a dashboard
          * binding's folder fails the grammar, or names no folder of the caller's own tree), landed in
          * the SAME commit as its constants (pipeline-contract v1.49).
+         *
+         * 375 → 376 with #442a: schedule.validation.notifications_invalid (400).
          */
-        const val SECTION_13_ROW_COUNT = 375
+        const val SECTION_13_ROW_COUNT = 376
 
         /**
          * §12's distinct validation codes.

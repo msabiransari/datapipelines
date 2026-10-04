@@ -55,9 +55,16 @@ class ScheduleService(
         request: ScheduleRequest,
         idempotencyKey: String?,
     ): Written<Schedule> {
+        val notifications = NotificationSettings.resolve(request.notifications, null, properties.notifications.maxRecipients)
         val key = idempotencyKey?.let(::checkedKey)
-        val hash = key?.let { hashOf(request) }
-        key?.let { replayCreate(workspaceId, actor, it, hash!!) }?.let { return it }
+        val hash = key?.let { hashOf(request, notifications) }
+        // Pre-V49 keys hashed the same request without notification fields. Only the old defaults
+        // may match that hash; a request for different settings must still be refused.
+        val legacyHash =
+            key
+                ?.takeIf { notifications.recipients.isEmpty() && notifications.events == NotificationEvent.DEFAULT }
+                ?.let { hashOf(request, null) }
+        key?.let { replayCreate(workspaceId, actor, it, hash!!, legacyHash) }?.let { return it }
         val validated = validate(workspaceId, request)
         return try {
             transactions.execute {
@@ -90,6 +97,8 @@ class ScheduleService(
                             createdBy = actor,
                             idempotencyKey = key,
                             idempotencyHash = hash,
+                            notificationRecipients = notifications.recipients,
+                            notificationEvents = notifications.events,
                         ),
                     ),
                     replayed = false,
@@ -98,7 +107,7 @@ class ScheduleService(
         } catch (e: DuplicateKeyException) {
             // Two uniquenesses can refuse the insert: the create key (a concurrent replay) and the
             // live name. Re-read the key first — it is the one whose answer is not an error.
-            key?.let { replayCreate(workspaceId, actor, it, hash!!) } ?: throw nameTaken(request.name, e)
+            key?.let { replayCreate(workspaceId, actor, it, hash!!, legacyHash) } ?: throw nameTaken(request.name, e)
         }
     }
 
@@ -113,6 +122,7 @@ class ScheduleService(
         val current = schedules.findLive(workspaceId, id) ?: throw notFound(id)
         if (current.revision != expectedRevision) throw revisionConflict(current)
         val validated = validate(workspaceId, request)
+        val notifications = NotificationSettings.resolve(request.notifications, current, properties.notifications.maxRecipients)
         val timingChanged = validated.pattern.pattern != current.cron || validated.zone.id != current.timezone
         val edit =
             ScheduleEdit(
@@ -125,6 +135,8 @@ class ScheduleService(
                 cron = validated.pattern.pattern,
                 timezone = validated.zone.id,
                 missedRunPolicy = validated.policy,
+                notificationRecipients = notifications.recipients,
+                notificationEvents = notifications.events,
                 // An edit of the cron or timezone recomputes from now: old-pattern occurrences are not missed.
                 nextDueAt = if (timingChanged) OccurrenceFunction.next(validated.pattern, validated.zone, clock.instant()) else null,
             )
@@ -505,9 +517,10 @@ class ScheduleService(
         actor: UUID,
         key: String,
         hash: String,
+        legacyHash: String?,
     ): Written<Schedule>? {
         val (existing, storedHash) = schedules.findByIdempotencyKey(workspaceId, actor, key) ?: return null
-        if (storedHash != hash) throw keyReused(key)
+        if (storedHash != hash && storedHash != legacyHash) throw keyReused(key)
         return Written(existing, replayed = true)
     }
 
@@ -523,7 +536,10 @@ class ScheduleService(
     }
 
     /** The request's canonical hash (sorted keys), so a replay compares meaning, not whitespace. */
-    private fun hashOf(request: ScheduleRequest): String {
+    private fun hashOf(
+        request: ScheduleRequest,
+        notifications: NotificationSettings?,
+    ): String {
         val canonical = mapper.createObjectNode()
         canonical.put("name", request.name.trim())
         canonical.put("executor", request.executor)
@@ -532,6 +548,21 @@ class ScheduleService(
         canonical.put("cron", request.cron.trim())
         canonical.put("timezone", request.timezone.trim())
         canonical.put("missed_run_policy", request.missedRunPolicy)
+        notifications?.let { settings ->
+            canonical.set<JsonNode>(
+                "notification_recipients",
+                mapper.valueToTree(settings.recipients.map { it.lowercase(java.util.Locale.ROOT) }),
+            )
+            canonical.set<JsonNode>(
+                "notification_events",
+                mapper.valueToTree(
+                    NotificationEvent.entries
+                        .filter {
+                            it in settings.events
+                        }.map { it.wire },
+                ),
+            )
+        }
         return sha256(mapper.writeValueAsString(canonical))
     }
 
@@ -637,6 +668,7 @@ data class ScheduleRequest(
     val cron: String,
     val timezone: String,
     val missedRunPolicy: String,
+    val notifications: NotificationSettingsRequest? = null,
 )
 
 /** A write's result; [replayed] when an idempotent replay answered an earlier write (L1). */
