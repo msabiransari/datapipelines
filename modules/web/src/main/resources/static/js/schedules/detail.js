@@ -178,7 +178,7 @@
     S.text(root, "policy", POLICY_TEXT[s.missed_run_policy] || s.missed_run_policy);
     var notifications = s.notifications || { recipient_count: 0, events: [], delivery: { state: "off" } };
     var eventLabels = { start: "Started", success: "Succeeded", failure: "Failed", unknown: "Outcome unknown", blocked: "Schedule blocked" };
-    var notificationText = notifications.recipient_count ? notifications.recipient_count + " recipients · " + (notifications.events.map(function (event) { return eventLabels[event]; }).join(", ") || "no events selected") : "Off — no recipients";
+    var notificationText = notifications.recipient_count ? notifications.recipient_count + (notifications.recipient_count === 1 ? " recipient · " : " recipients · ") + (notifications.events.map(function (event) { return eventLabels[event]; }).join(", ") || "no events selected") : "Off — no recipients";
     if (notifications.delivery.state === "off") notificationText += " · mail not enabled on this deployment";
     S.text(root, "notifications", notificationText);
     if (s.condition !== "enabled") {
