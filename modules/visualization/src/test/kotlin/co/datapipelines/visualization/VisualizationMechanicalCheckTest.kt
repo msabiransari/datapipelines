@@ -10,6 +10,7 @@ import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
+import java.math.BigDecimal
 import java.util.UUID
 
 /**
@@ -262,6 +263,170 @@ class VisualizationMechanicalCheckTest {
         // "Feb" is a bound value of the case's evaluation; "Revenue" is the layout title text.
         check.run(WORKSPACE, body { objAssertion(it, 0, """{"kind":"text_visible","text":"Feb"}""") }).ok shouldBe true
         check.run(WORKSPACE, body { objAssertion(it, 0, """{"kind":"text_visible","text":"Revenue"}""") }).ok shouldBe true
+    }
+
+    @Test
+    fun `an INTEGER KPI bound fixture makes 42 feasible without configuration text`() {
+        val candidate = directKpi("INTEGER", "42", "42")
+        assertFixtureScalar(candidate, "Integer", "42")
+        assertFeasible(candidate, "rows")
+    }
+
+    @Test
+    fun `a direct DECIMAL fixture makes 10 point 5 feasible for both text assertion kinds`() {
+        listOf("value_visible", "text_visible").forEach { kind ->
+            val candidate = directKpi("DECIMAL", "10.5", "10.5", kind)
+            assertFixtureScalar(candidate, "Double", "10.5")
+            assertFeasible(candidate, "rows")
+        }
+    }
+
+    @Test
+    fun `transformed Double and BigDecimal preserve their scalar spelling and substring matching`() {
+        val specimens =
+            listOf(
+                10.5 to "10.5",
+                0 to "0",
+                -42 to "-42",
+                BigDecimal("10.50") to "10.50",
+                BigDecimal("1E+8") to "1E+8",
+                1.0e20 to "1.0E20",
+            )
+        specimens.forEach { (value, text) ->
+            withClue("${value.javaClass.simpleName}: $text") {
+                value.toString() shouldBe text
+                Fakes.evaluatorReturnsRows.clear()
+                Fakes.evaluatorReturnsRows += mapOf("month_labels" to "Jan", "amounts" to value)
+                listOf("value_visible", "text_visible").forEach { kind ->
+                    assertFeasible(body { objAssertion(it, 0, """{"kind":"$kind","text":"$text"}""") }, "twelve months")
+                }
+            }
+        }
+        Fakes.evaluatorReturnsRows.clear()
+        Fakes.evaluatorReturnsRows += mapOf("month_labels" to "Jan", "amounts" to BigDecimal("10.50"))
+        assertFeasible(body { objAssertion(it, 0, """{"kind":"value_visible","text":"0.50"}""") }, "twelve months")
+        Fakes.reset()
+    }
+
+    @Test
+    fun `absent numeric text and numeric text from only an unbound column are refused on both paths`() {
+        assertTextRefused(directKpi("INTEGER", "42", "987654"), "rows", 1)
+        val direct = directKpi("INTEGER", "42", "987654")
+        val fixture = direct.tests?.cases?.single()?.fixtures?.getValue("revenue")?.single()
+        requireNotNull(fixture).put("unbound", 987654)
+        assertTextRefused(direct, "rows", 1)
+
+        Fakes.evaluatorReturnsRows.clear()
+        Fakes.evaluatorReturnsRows += mapOf("month_labels" to "Jan", "amounts" to 10.5, "unbound" to 987654)
+        listOf("987654", "876543").forEach { text ->
+            assertTextRefused(body { objAssertion(it, 0, """{"kind":"value_visible","text":"$text"}""") }, "twelve months", 2)
+        }
+        Fakes.reset()
+    }
+
+    @Test
+    fun `bound booleans containers and arbitrary objects are not assertion text`() {
+        val specimens =
+            listOf(
+                true to "true",
+                listOf("container-only") to "container-only",
+                mapOf("key" to "object-only") to "object-only",
+                object {
+                    override fun toString(): String = "arbitrary-only"
+                } to "arbitrary-only",
+            )
+        specimens.forEach { (value, text) ->
+            Fakes.evaluatorReturnsRows.clear()
+            Fakes.evaluatorReturnsRows += mapOf("month_labels" to "Jan", "amounts" to value)
+            assertTextRefused(body { objAssertion(it, 0, """{"kind":"value_visible","text":"$text"}""") }, "twelve months", 2)
+        }
+        Fakes.reset()
+    }
+
+    @Test
+    fun `a nullable null supplies no text while a missing required fixture column still fails`() {
+        assertTextRefused(directKpi("INTEGER", "null", "null", nullable = true), "rows", 1)
+        val missing = directKpi("INTEGER", "42", "42")
+        requireNotNull(missing.tests).cases.single().fixtures.getValue("revenue").single().remove("amount")
+        val report = check.run(WORKSPACE, missing)
+        report.ok shouldBe false
+        report.cases.getValue("rows").ok shouldBe false
+        report.failures.single { it.step == "fixtures" }.let {
+            it.code shouldBe VisualizationErrorCodes.TEST_CASE_INVALID
+            it.path shouldBe "tests.cases[0].fixtures[revenue][0].amount"
+            it.case shouldBe "rows"
+        }
+    }
+
+    @Test
+    fun `BIGDECIMAL string wire values keep trailing zeros and are not normalized`() {
+        assertFeasible(directKpi("BIGDECIMAL", "\"10.50\"", "10.50"), "rows")
+        assertTextRefused(directKpi("BIGDECIMAL", "\"10.5\"", "10.50"), "rows", 1)
+    }
+
+    private fun directKpi(
+        type: String,
+        value: String,
+        text: String,
+        kind: String = "value_visible",
+        nullable: Boolean = false,
+    ): VisualizationBody =
+        ValidatorFakes.visualizationDocument(
+            DocumentFixtures.tree(
+                """
+                {"name":"finance/visualizations/direct","display_name":"Direct",
+                 "renderer":{"kind":"kpi","version":"1"},
+                 "inputs":{"revenue":{"columns":[{"name":"amount","type":"$type","nullable":$nullable}]}},
+                 "config":{"label":"Total","value":"$.amount"},"bindings":{"value":"amount"},
+                 "tests":{"cases":[{"name":"rows","fixtures":{"revenue":[{"amount":$value}]},
+                                    "assertions":[{"kind":"rendered"},{"kind":"$kind","text":"$text"}]}]}}
+                """.trimIndent(),
+            ),
+        ).body
+
+    private fun assertFixtureScalar(
+        candidate: VisualizationBody,
+        className: String,
+        text: String,
+    ) {
+        // Inspect the same Jackson conversion the direct-fixture path uses, without changing its mapper.
+        val row = requireNotNull(candidate.tests).cases.single().fixtures.getValue("revenue").single()
+        val converted: Map<String, Any?> =
+            ArtifactJson.mapper.convertValue(row, object : com.fasterxml.jackson.core.type.TypeReference<Map<String, Any?>>() {})
+        val value = requireNotNull(converted["amount"])
+        value.javaClass.simpleName shouldBe className
+        value.toString() shouldBe text
+    }
+
+    private fun assertFeasible(
+        candidate: VisualizationBody,
+        case: String,
+    ) {
+        val report = check.run(WORKSPACE, candidate)
+        withClue(report.failures) { report.ok shouldBe true }
+        report.failures.shouldBeEmpty()
+        report.cases.getValue(case).ok shouldBe true
+        report.cases.getValue(case).rows shouldBe 1
+        report.cases.getValue(case).rendered shouldBe "not_available"
+    }
+
+    private fun assertTextRefused(
+        candidate: VisualizationBody,
+        case: String,
+        assertionIndex: Int,
+    ) {
+        val report = check.run(WORKSPACE, candidate)
+        report.ok shouldBe false
+        // Case ok describes the fixture run; assertion refusals live on the overall report.
+        report.cases.getValue(case).ok shouldBe true
+        report.cases.getValue(case).rendered shouldBe "not_available"
+        report.failures.single().let {
+            it.step shouldBe "assertions"
+            it.code shouldBe VisualizationErrorCodes.TEST_CASE_INVALID
+            it.path shouldBe "tests.cases[0].assertions[$assertionIndex]"
+            it.case shouldBe case
+            it.message shouldBe "The text appears neither in the configuration nor in the bound values."
+        }
     }
 
     // ---- step 5: rendered state -----------------------------------------------------------------------
