@@ -255,6 +255,7 @@ class PipelineBrowseModel(
         record: PipelineRecord,
         versions: List<PipelineVersionRecord>,
         viewedVersion: Int?,
+        principal: AuthenticatedPrincipal,
     ): WorkspaceTabFacts {
         model.addAttribute("pipeline", record)
         model.addAttribute("versions", versionRows(record, versions, viewedVersion))
@@ -265,7 +266,7 @@ class PipelineBrowseModel(
         return WorkspaceTabFacts(
             createdBy = actorName(record.ownerId),
             createdVia = versions.minByOrNull { it.version }?.createdVia,
-            lastRun = lastRunView(workspaceId, record.id),
+            lastRun = lastRunView(workspaceId, record.id, principal),
             datasourceDialects = workspaceDialects(workspaceId, view, record, versions),
         )
     }
@@ -434,14 +435,16 @@ class PipelineBrowseModel(
     private fun lastRun(
         workspaceId: UUID,
         pipelineId: UUID,
-    ) = executions.findAll(workspaceId, pipelineId, limit = 1).firstOrNull()
+        principal: AuthenticatedPrincipal,
+    ) = executions.listVisibleTo(principal, workspaceId, pipelineId, status = null, limit = 1).firstOrNull()
 
     /** The Overview's last-run line, as the workspace's JSON facts carry it (#349). */
     private fun lastRunView(
         workspaceId: UUID,
         pipelineId: UUID,
+        principal: AuthenticatedPrincipal,
     ): WorkspaceLastRunView? =
-        lastRun(workspaceId, pipelineId)?.let { last ->
+        lastRun(workspaceId, pipelineId, principal)?.let { last ->
             WorkspaceLastRunView(
                 executionId = last.executionId,
                 status = last.status.name,

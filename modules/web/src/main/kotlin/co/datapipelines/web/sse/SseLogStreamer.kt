@@ -169,12 +169,9 @@ class SseLogStreamer(
                 // never started: the id does not resolve (there is no row to GET), so the give-up
                 // is the ID-FREE 410 (`reason: original_not_started`), completed with an error
                 // the way `ExecutionStreamLauncher.failBeforeStart` completes — nothing was sent,
-                // so the response is uncommitted. On this base the security chain renders an
-                // emitter completed with an error before any frame as `401 auth.api_key.missing`
-                // instead of the exception's envelope (#404, which also hides failBeforeStart's
-                // 429); the envelope reaches the wire once #404 lands — the unit witness pins the
-                // completion's exception. A follow that HAS served events keeps the quiet
-                // completion below.
+                // so the response is uncommitted and the advice renders the envelope on the async
+                // dispatch (wire-proven since #404, `IdempotentAttachRowOrderE2eTest`). A follow
+                // that HAS served events keeps the quiet completion below.
                 completeWithErrorQuietly(
                     emitter,
                     executionId,
@@ -291,9 +288,8 @@ class SseLogStreamer(
 
     /**
      * [completeQuietly]'s error twin (#324): the completion carries [error] to the servlet
-     * container while the response is still uncommitted — the never-started 410. Until #404 lands
-     * the security chain renders that completion as `401 auth.api_key.missing`, not the
-     * `@ControllerAdvice` envelope; the exception itself is what the unit witness pins.
+     * container while the response is still uncommitted — the never-started 410, which the
+     * `@ControllerAdvice` renders as its envelope on the async dispatch (#404).
      */
     private fun completeWithErrorQuietly(
         emitter: SseEmitter,

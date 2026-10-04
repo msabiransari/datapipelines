@@ -1,5 +1,6 @@
 package co.datapipelines.auth
 
+import jakarta.servlet.DispatcherType
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.servlet.http.HttpServletResponse
 import org.slf4j.LoggerFactory
@@ -38,6 +39,23 @@ import org.springframework.web.util.pattern.PathPatternParser
  * the marketing site, the packaged docs and the health probes are gated by the filter chain's
  * `permitAll` list ([PublicPaths]), not by the scope matrix. An ANNOTATED handler is enforced
  * on any path, public included — the allowlist governs only the default-deny.
+ *
+ * ## The async re-dispatch is not judged again (#404)
+ * A streaming handler (an `SseEmitter`, a `DeferredResult`) returns on the REQUEST dispatch and
+ * its completion re-enters the DispatcherServlet as an ASYNC dispatch, which runs every
+ * interceptor again before the concurrent result is rendered. The handler method is NOT invoked
+ * on that dispatch — the adapter only renders the value or exception the REQUEST dispatch's
+ * handler produced — so there is nothing left to authorize. And the SecurityContext is empty
+ * there: the credential filters are `OncePerRequestFilter`s that skip async dispatches, and no
+ * filter saves the context for one. Judging it anyway refused every completion as `401
+ * auth.api_key.missing` — invisible after the first frame (the response is committed and the
+ * writer stands down), but the WHOLE answer of a stream completed with an error before its first
+ * frame: the execute route's `429` slot refusal and the idempotent follow's `410` never-started
+ * give-up both reached the wire as that 401. The chain's `dispatcherTypeMatchers(ASYNC,
+ * ERROR).permitAll()` (SecurityConfig) rests on the same premise; this is its twin. Only an
+ * ASYNC dispatch passes: the ERROR dispatch's handler is Boot's unannotated `/error`, which the
+ * §8.3 allowlist already lets through, and a REQUEST dispatch keeps every check below — the kind
+ * confinement, the matrix, the 401 and the D-R8 audit, once per request.
  */
 class ScopeInterceptor(
     private val errorWriter: AuthErrorWriter,
@@ -50,6 +68,8 @@ class ScopeInterceptor(
         response: HttpServletResponse,
         handler: Any,
     ): Boolean {
+        // #404 — the REQUEST dispatch judged this request; an ASYNC dispatch only renders its result.
+        if (request.dispatcherType == DispatcherType.ASYNC) return true
         if (handler !is HandlerMethod) return true
         val principal = SecurityContextHolder.getContext().authentication?.principal as? AuthenticatedPrincipal
 

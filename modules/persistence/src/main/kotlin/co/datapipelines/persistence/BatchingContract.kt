@@ -148,7 +148,9 @@ object FailureKinds {
 /**
  * What a writer tells its metrics. Every method has a no-op default, so a binding overrides only
  * what it records; the web layer binds these to Micrometer (observability §4). Called on writer
- * and caller threads — implementations must be thread-safe and must not throw.
+ * and caller threads — implementations must be thread-safe and should not throw; a throw is
+ * contained by the writer and logged (`persistence.hook_failed`, #393), and costs only that hook's
+ * own count: the item's outcome is unchanged.
  */
 interface BatchingHooks {
     /** One batch committed: its size, its bytes, and how long the store took. */
