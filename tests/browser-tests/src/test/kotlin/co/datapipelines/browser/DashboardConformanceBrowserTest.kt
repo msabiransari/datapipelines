@@ -115,6 +115,7 @@ class DashboardConformanceBrowserTest : DashboardBrowserSuite() {
 
     @Test
     @Order(4)
+    @Suppress("LongMethod") // one locked refresh: each observation depends on the preceding abort and read
     fun `abort is acknowledged by the real handler, ends durably ABORTED, and a finished refresh is a genuine 404`() {
         val root = ready("dpabort")
         // The 60 s hang source: the refresh is RUNNING BY CONSTRUCTION while the abort lands —
@@ -160,7 +161,8 @@ class DashboardConformanceBrowserTest : DashboardBrowserSuite() {
                 val response = route.fetch()
                 val data =
                     page.evaluate(
-                        "text => { const d = JSON.parse(text).data; return { id: d.refresh_id, instance: d.instance_id, status: d.status }; }",
+                        "text => { const d = JSON.parse(text).data;" +
+                            " return { id: d.refresh_id, instance: d.instance_id, status: d.status }; }",
                         response.text(),
                     ) as Map<*, *>
                 println(
