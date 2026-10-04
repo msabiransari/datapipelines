@@ -44,6 +44,32 @@ class ExecutionStreamRegistryTest {
         return stream to emitter
     }
 
+    /**
+     * A registry whose shared cap reads [otherCounts] for the refresh + evaluation sides (#384),
+     * the production wiring's shape with the two beans collapsed into one function.
+     */
+    private fun registryWithOther(
+        max: Int,
+        otherCounts: (UUID) -> Int,
+    ): ExecutionStreamRegistry =
+        ExecutionStreamRegistry(
+            properties = SseProperties(heartbeatIntervalSeconds = 15, disconnectGraceSeconds = 30, maxStreamsPerUser = max),
+            cancellationService = cancellation,
+            mapper = mapper,
+            scheduler = tick,
+            otherStreams = otherCounts,
+            nowMillis = clock::get,
+        )
+
+    private fun registerOn(
+        target: ExecutionStreamRegistry,
+        userId: UUID,
+    ): ExecutionStream {
+        val stream = ExecutionStream(UUID.randomUUID(), userId, CapturingSseEmitter(), mapper, clock::get)
+        target.register(stream)
+        return stream
+    }
+
     @Test
     fun `a busy stream gets no heartbeat while a quiet one does`() {
         val (stream, emitter) = openCapturing()
@@ -75,6 +101,68 @@ class ExecutionStreamRegistryTest {
         registry.close(first.executionId)
         registry.atStreamLimit(user) shouldBe false
         registry.activeStreamsFor(user) shouldBe 1
+    }
+
+    @Test
+    fun `the one cap counts execution plus refresh plus evaluation streams - each family reaches it (#384)`() {
+        val refresh = mutableMapOf<UUID, Int>()
+        val evaluation = mutableMapOf<UUID, Int>()
+        val capped = registryWithOther(3) { userId -> (refresh[userId] ?: 0) + (evaluation[userId] ?: 0) }
+
+        // own-only: execution streams alone reach the configured cap.
+        val own = UUID.randomUUID()
+        capped.atStreamLimit(own) shouldBe false
+        registerOn(capped, own)
+        registerOn(capped, own)
+        capped.atStreamLimit(own) shouldBe false // 2 of 3
+        registerOn(capped, own)
+        capped.atStreamLimit(own) shouldBe true // 3 of 3 execution only
+
+        // refresh-only: two refresh streams plus one execution reaches it; two alone is below.
+        val refresher = UUID.randomUUID()
+        refresh[refresher] = 2
+        capped.atStreamLimit(refresher) shouldBe false // 2 of 3
+        registerOn(capped, refresher)
+        capped.atStreamLimit(refresher) shouldBe true // 2 refresh + 1 execution
+
+        // evaluation-only: evaluation streams alone reach it.
+        val evaluator = UUID.randomUUID()
+        evaluation[evaluator] = 3
+        capped.atStreamLimit(evaluator) shouldBe true
+
+        // mixed: one refresh + one evaluation + one execution is exactly the cap.
+        val mixed = UUID.randomUUID()
+        refresh[mixed] = 1
+        evaluation[mixed] = 1
+        capped.atStreamLimit(mixed) shouldBe false // 2 of 3
+        registerOn(capped, mixed)
+        capped.atStreamLimit(mixed) shouldBe true // 1 refresh + 1 evaluation + 1 execution
+    }
+
+    @Test
+    fun `the shared cap is per user - another user's streams never count (#384)`() {
+        val strangerStreams = mutableMapOf<UUID, Int>()
+        val capped = registryWithOther(3) { userId -> strangerStreams[userId] ?: 0 }
+        val user = UUID.randomUUID()
+        val stranger = UUID.randomUUID()
+        strangerStreams[stranger] = 3
+
+        capped.atStreamLimit(user) shouldBe false
+        capped.atStreamLimit(stranger) shouldBe true
+    }
+
+    @Test
+    fun `closing a held other-family stream admits again (#384)`() {
+        val refresh = mutableMapOf<UUID, Int>()
+        val capped = registryWithOther(2) { userId -> refresh[userId] ?: 0 }
+        val user = UUID.randomUUID()
+        refresh[user] = 2
+
+        capped.atStreamLimit(user) shouldBe true // 2 refresh, no execution
+        refresh[user] = 1
+        capped.atStreamLimit(user) shouldBe false // one refresh closed: one below
+        registerOn(capped, user)
+        capped.atStreamLimit(user) shouldBe true // 1 refresh + 1 execution
     }
 
     @Test

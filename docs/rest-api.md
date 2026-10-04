@@ -1,9 +1,9 @@
 # REST API + SSE Specification
 
-**Status:** v2.80 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
+**Status:** v2.81 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
-**Last updated:** 2026-10-03
+**Last updated:** 2026-10-04
 
 ---
 
@@ -1711,9 +1711,11 @@ All limits are **per principal** — a signed-in person, or a key acting as its 
 
 - Requests: `rate-limit.requests-per-second` (100), `rate-limit.requests-per-minute` (1000).
 - Pipeline execution: `executor.max-concurrent-executions-per-user` (10) → `pipeline.execution.concurrency_limit`.
-- SSE connections: `sse.max-streams-per-user` (50) concurrent streams per user — execution, refresh (§23.3) and observed-evaluation (§21.5) streams count together.
+- SSE connections: `sse.max-streams-per-user` (50) concurrent streams per user — execution (§6), refresh (§23.3) and observed-evaluation (§21.5) streams count together. Each of the three registries counts the other two families' open streams, so the one cap holds whichever family a user's streams belong to.
 
-Counters are tracked in Redis, so limits hold across instances in a multi-instance deployment.
+The SSE counters are **per instance**: each of the three registries keeps its open streams in memory, so in a multi-instance deployment `sse.max-streams-per-user` is a per-instance cap, not a cluster-wide one. The check and the later stream registration are not atomic, and neither are the cross-family reads, so under simultaneous admissions a user can briefly exceed the cap (a bounded overshoot, each extra stream ending with its run's timeout or the disconnect grace).
+
+The request-rate counters (`rate-limit.requests-per-second`, `rate-limit.requests-per-minute`) are tracked in Redis, so those limits hold across instances in a multi-instance deployment. The executor concurrency limit is the executor's own (`executor.max-concurrent-executions-per-user`).
 
 ### 12.2 Headers
 
@@ -2736,6 +2738,7 @@ window. A dashboard execution has no stored result: `GET /api/v1/executions/{id}
 
 ## Appendix A: Change Log
 
+| 2026-10-04 | v2.81 | #384 the one SSE cap spans all three families | **§12.1** — the execution registry now counts refresh and observed-evaluation streams beside its own, so `sse.max-streams-per-user` is the one per-user cap the sentence already promised (#375 D7): a user at the cap through refresh or evaluation streams is refused a new execution stream (`rate_limit.exceeded`), and the doc stops claiming every counter lives in Redis — the request-rate counters are Redis-backed, but the three SSE registries count **per instance**, so the SSE cap is per-instance in a multi-instance deployment, and check-then-open (the cross-family reads included) is non-atomic, a bounded overshoot. No route, field, code or permission changed. Wire-proven by `CrossFamilySseCapE2eTest`. |
 | 2026-10-03 | v2.80 | #404 the pre-first-event refusals reach the wire | **New §6.1.3** names the execute route's two refusals decided after the stream opened and before its first event — `429 pipeline.execution.concurrency_limit` (no execution slot, §12.1) and the idempotent retry's never-started `410 result.expired` (`reason: original_not_started`, no `execution_id`, §3.5) — as §4.2 JSON envelopes with their own status, also under an SSE-only `Accept`. Both were documented before (§3.5, §12.1) but answered `401 auth.api_key.missing` on the wire: the authorization interceptor judged the stream's async completion dispatch against an empty security context (auth v3.40 §8.2). A bug fix, not a contract change: no route, field or code is added. Wire-proven by `IdempotentAttachRowOrderE2eTest`. |
 | 2026-10-03 | v2.79 | #417 the observed evaluation refuses a recorded `evaluation_id` | **§21.5** — a reused `evaluation_id` is now also an id the caller's workspace history already holds (a closed stream's, or one recorded on another instance), refused before the stream opens and before the cap with the same `400 parameter.validation.body_invalid` (`details.path = evaluation_id`, `details.reason = reused`); the sentence "across instances it becomes the history row's key conflict when S3 (#376) lands" is corrected (the insert conflict is logged and the evaluation runs unrecorded, so the id is now refused up front), the refusal order's step 5 and the `body_invalid` row name both cases. The read is workspace-scoped: another workspace's id answers as unused. No route, field, code or permission changed. |
 | 2026-10-03 | v2.78 | #399 the Visualizations workspace — renumbered at merge after the #383 follow-up's v2.77 | **§22's intro** — the sentence "No UI page exists yet — this section and the MCP tools … are the whole surface" leaves: the first-party workspace ([ui-screens §4.24](ui-screens.md)) reads and drives the lifecycle verbs through the same services, its page and partial routes named as UI routes on the `visualization.*` rows (auth.md §7.6), outside this contract. No route, field, code or permission changed. |
