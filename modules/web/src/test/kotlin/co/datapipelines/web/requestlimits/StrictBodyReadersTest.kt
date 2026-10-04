@@ -42,8 +42,8 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders
 import java.util.UUID
 
 /**
- * #333 reader 4 - the five DTO-bodied handlers (#382 added the dashboard key binding) refuse a JSON number or boolean where the DTO declares a
- * STRING (and a string or float where it declares an integer), refuse an unknown key on the two request
+ * #333 reader 4 - the five DTO-bodied handlers (#382 added the dashboard key binding) refuse a JSON number or
+ * boolean where the DTO declares a STRING (and a string or float where it declares an integer), refuse an unknown key on the two request
  * DTOs that are not a cross-version wire, and never echo the value.
  *
  * Boot's mapper binds a scalar into a String field as text (`"name": 12` is the key named "12"), and the
