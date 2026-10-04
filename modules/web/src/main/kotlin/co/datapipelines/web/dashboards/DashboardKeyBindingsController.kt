@@ -10,7 +10,9 @@ import co.datapipelines.visualization.DashboardErrorCodes
 import co.datapipelines.web.api.ApiException
 import co.datapipelines.web.api.ApiResponse
 import co.datapipelines.web.api.currentPrincipal
+import co.datapipelines.web.requestlimits.StrictRequestBodies
 import com.fasterxml.jackson.annotation.JsonProperty
+import com.fasterxml.jackson.databind.JsonNode
 import org.springframework.http.HttpStatus
 import org.springframework.transaction.annotation.Transactional
 import org.springframework.web.bind.annotation.DeleteMapping
@@ -56,8 +58,10 @@ class DashboardKeyBindingsController(
     @RequiredScope(Permission.DASHBOARD_KEY_BIND)
     @Transactional("metadataTransactionManager")
     fun bind(
-        @RequestBody body: BindDashboardKeyRequest,
+        @RequestBody tree: JsonNode,
     ): ApiResponse<Map<String, Any?>> {
+        // #382: the strict read - see StrictRequestBodies.
+        val body = StrictRequestBodies.bind<BindDashboardKeyRequest>(tree)
         val principal = currentPrincipal()
         val key = resolveKey(body.apiKeyId, body.apiKeyName)
         dashboardKeys.bind(principal, key.id, body.namePrefix)
