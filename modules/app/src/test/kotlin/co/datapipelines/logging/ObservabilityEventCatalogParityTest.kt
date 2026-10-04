@@ -28,7 +28,6 @@ import java.io.File
  * enforced namespace is refused outright: a name the guard cannot read is not in parity.
  */
 class ObservabilityEventCatalogParityTest {
-
     @Test
     fun `each enforced namespace's event= literals are exactly its §3_4 catalogue rows`() {
         val code = codeEventsByNamespace()
@@ -72,7 +71,8 @@ class ObservabilityEventCatalogParityTest {
             val text = file.readText()
             for (namespace in ENFORCED.keys) {
                 for (match in codeEventRegex(namespace).findAll(text)) {
-                    byNamespace.getOrPut(namespace) { mutableSetOf() }
+                    byNamespace
+                        .getOrPut(namespace) { mutableSetOf() }
                         .add(match.value.removePrefix("event="))
                 }
             }
@@ -122,7 +122,8 @@ class ObservabilityEventCatalogParityTest {
         val section =
             SECTION_34.find(text)?.value
                 ?: error("observability.md §3.4A heading not found (or the next '### ' heading is missing)")
-        return section.lineSequence()
+        return section
+            .lineSequence()
             .map { it.trim() }
             .filter { it.startsWith("|") }
             .map { it.trim('|').split('|') }
@@ -146,18 +147,18 @@ class ObservabilityEventCatalogParityTest {
         return dir
     }
 
-    private fun codeEventRegex(namespace: String) =
-        Regex("event=" + Regex.escape(namespace) + "\\.[a-z0-9_]+(?:\\.[a-z0-9_]+)*")
+    private fun codeEventRegex(namespace: String) = Regex("event=" + Regex.escape(namespace) + "\\.[a-z0-9_]+(?:\\.[a-z0-9_]+)*")
 
     private companion object {
         /** Namespace to its non-vacuity floor. Every §3.4-catalogued namespace with zero drift joins. */
-        val ENFORCED = mapOf(
-            "parameter" to 20,
-            "lake" to 9,
-            "mail" to 8,
-            "persistence" to 10,
-            "scheduler" to 12,
-        )
+        val ENFORCED =
+            mapOf(
+                "parameter" to 20,
+                "lake" to 9,
+                "mail" to 8,
+                "persistence" to 10,
+                "scheduler" to 12,
+            )
 
         val SECTION_34 = Regex("(?ms)^#### 3\\.4A\\b.*?(?=^### )")
         val BACKTICKED_NAME = Regex("`([a-z0-9_]+(?:\\.[a-z0-9_]+)+)`")
