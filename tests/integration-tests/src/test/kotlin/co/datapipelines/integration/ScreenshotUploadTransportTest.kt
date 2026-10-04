@@ -85,12 +85,14 @@ class ScreenshotUploadTransportTest {
                 response.jsonPath().getString("error.code") shouldBe "visualization.test.screenshot_too_large"
                 response.jsonPath().getInt("error.details.cap_bytes") shouldBe CAP
                 println(
-                    "event=transport.declared declared=$size supplied=${body.readBytes} status=${response.statusCode} body=${response.asString()}",
+                    "event=transport.declared declared=$size supplied=${body.readBytes} " +
+                        "status=${response.statusCode} body=${response.asString()}",
                 )
             } finally {
                 wire.await()
                 println(
-                    "event=transport.writer declared=$size supplied=${body.readBytes} forwarded=${wire.forwarded.get()} response=${wire.response}",
+                    "event=transport.writer declared=$size supplied=${body.readBytes} " +
+                        "forwarded=${wire.forwarded.get()} response=${wire.response}",
                 )
             }
             wire.declared shouldBe size.toLong()
@@ -260,40 +262,38 @@ class ScreenshotUploadTransportTest {
             oidc.close()
         }
     }
-}
 
-/** Streaming HTTP/1.1 without Expect receives the final response while Tomcat applies its bounded refused-body drain. */
-internal object ScreenshotUploadTransport {
-    private const val TIMEOUT_SECONDS = 10L
-    private val client =
-        HttpClient
-            .newBuilder()
-            .version(
-                HttpClient.Version.HTTP_1_1,
-            ).connectTimeout(Duration.ofSeconds(TIMEOUT_SECONDS))
-            .build()
-
-    fun post(
-        port: Int,
-        path: String,
-        body: HttpRequest.BodyPublisher,
-        capability: String? = null,
-    ): Response {
-        val request =
-            HttpRequest
-                .newBuilder(URI("http://127.0.0.1:$port$path"))
-                .timeout(Duration.ofSeconds(TIMEOUT_SECONDS))
-                .expectContinue(false)
-                .header("Content-Type", "image/png")
-                .apply { capability?.let { header("DP-Upload-Token", it) } }
-                .POST(body)
+    /** Streaming HTTP/1.1 without Expect receives the final response while Tomcat applies its bounded refused-body drain. */
+    internal object ScreenshotUploadTransport {
+        private val client =
+            HttpClient
+                .newBuilder()
+                .version(HttpClient.Version.HTTP_1_1)
+                .connectTimeout(Duration.ofMillis(SOCKET_TIMEOUT.toLong()))
                 .build()
-        val response = client.send(request, HttpResponse.BodyHandlers.ofByteArray())
-        return ResponseBuilder()
-            .setStatusCode(response.statusCode())
-            .setBody(response.body())
-            .setHeaders(Headers(response.headers().map().flatMap { (name, values) -> values.map { Header(name, it) } }))
-            .setContentType(response.headers().firstValue("Content-Type").orElse("application/json"))
-            .build()
+
+        fun post(
+            port: Int,
+            path: String,
+            body: HttpRequest.BodyPublisher,
+            capability: String? = null,
+        ): Response {
+            val request =
+                HttpRequest
+                    .newBuilder(URI("http://127.0.0.1:$port$path"))
+                    .timeout(Duration.ofMillis(SOCKET_TIMEOUT.toLong()))
+                    .expectContinue(false)
+                    .header("Content-Type", "image/png")
+                    .apply { capability?.let { header("DP-Upload-Token", it) } }
+                    .POST(body)
+                    .build()
+            val response = client.send(request, HttpResponse.BodyHandlers.ofByteArray())
+            return ResponseBuilder()
+                .setStatusCode(response.statusCode())
+                .setBody(response.body())
+                .setHeaders(Headers(response.headers().map().flatMap { (name, values) -> values.map { Header(name, it) } }))
+                .setContentType(response.headers().firstValue("Content-Type").orElse("application/json"))
+                .build()
+        }
     }
 }

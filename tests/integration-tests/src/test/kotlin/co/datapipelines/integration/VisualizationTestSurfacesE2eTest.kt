@@ -2,6 +2,7 @@ package co.datapipelines.integration
 
 import co.datapipelines.DatapipelinesApplication
 import co.datapipelines.integration.E2eSession.asSession
+import co.datapipelines.integration.ScreenshotUploadTransportTest.ScreenshotUploadTransport
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.node.ObjectNode
