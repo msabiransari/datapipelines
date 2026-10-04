@@ -36,6 +36,61 @@ class TemplateToolsTest {
     private val authorCtx = McpFixtures.ctx()
 
     @Test
+    fun `block bind refusals hide values and bound unknown keys before validation or write`() {
+        val longKey = "bad\n\t" + "x".repeat(200)
+        val blocks =
+            listOf(
+                listOf(mapOf("name" to 987654321, "expr" to "true", "message" to "m")),
+                listOf(mapOf("name" to "safe", "expr" to "true", "message" to "m", longKey to "sentinel987654321")),
+            )
+
+        blocks.forEachIndexed { index, block ->
+            val tool = McpFixtures.createTool(templates, co.datapipelines.pipeline.AuthoringGuard(true), validator)
+            val request =
+                mapOf(
+                    "id" to "test/revenue.sql",
+                    "expected_hash" to "hash-v1",
+                    "type" to "jsonata",
+                    "display_name" to "Rules",
+                    "description" to "d",
+                    "body" to "rows",
+                    "invariants" to block,
+                )
+            val thrown =
+                shouldThrow<DatapipelinesException> {
+                    tool.call(McpArguments(request), authorCtx)
+                }
+            thrown.code shouldBe PipelineErrorCodes.Template.CONTRACT_INVALID
+            thrown.details shouldBe mapOf("rule" to "unknown_field")
+            val result =
+                McpToolDispatcher(listOf(tool), mockk(relaxed = true)).call(
+                    McpFixtures.request("templates_create", request),
+                    authorCtx,
+                )
+            result.isError() shouldBe true
+            val payload = (result.content().single() as io.modelcontextprotocol.spec.McpSchema.TextContent).text()
+            payload.contains("987654321") shouldBe false
+            val message =
+                co.datapipelines.templates.TransformBlocks.mapper
+                    .readTree(payload)["error"]["message"]
+                    .asText()
+            message.any { it.isISOControl() } shouldBe false
+            message.contains(longKey) shouldBe false
+            if (index == 0) {
+                message.contains("'name' must be a string") shouldBe true
+            } else {
+                val reflected = message.substringAfter(": '").substringBefore("' is not")
+                reflected.length shouldBe 161
+                println("381 templates_create reflected key length=${reflected.length}, controls=${reflected.any { it.isISOControl() }}")
+            }
+        }
+        verify(exactly = 0) { validator.validateOrThrow(any(), any()) }
+        verify(exactly = 0) { templates.create(any(), any(), any(), any(), any()) }
+        verify(exactly = 0) { templates.createDraft(any(), any(), any(), any(), any(), any()) }
+        verify(exactly = 0) { templates.writeDraft(any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
     fun `list projects the documented metadata and filters libraries`() {
         every { templates.list(any(), any(), any(), any(), any(), any()) } returns
             listOf(McpFixtures.template(), McpFixtures.template(id = "test/dates.ftl", isLibrary = true))

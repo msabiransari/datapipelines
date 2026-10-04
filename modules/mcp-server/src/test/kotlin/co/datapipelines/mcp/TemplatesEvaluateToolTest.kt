@@ -48,6 +48,86 @@ private class EvaluateRecordingAuditSink : co.datapipelines.auth.AuditEventSink 
  * `version` and `outcome` — never the input object or the output.
  */
 class TemplatesEvaluateToolTest {
+    @Test
+    fun `caller shape failures use invalid params with safe prose and never evaluate`() {
+        val service = mockk<TemplateEvaluateService>()
+        val sink = EvaluateRecordingAuditSink()
+        val dispatcher = McpToolDispatcher(listOf(TemplatesEvaluateTool(service)), sink)
+        val longKey = "bad\n\t" + "x".repeat(200)
+        val inputs = listOf(mapOf("now" to 987654321), mapOf("rows" to true), mapOf(longKey to "sentinel987654321"))
+        inputs.forEachIndexed { index, input ->
+            val wrapper =
+                io.kotest.assertions.throwables.shouldThrow<IllegalArgumentException> {
+                    co.datapipelines.templates.TransformBlocks.mapper.convertValue(
+                        input,
+                        co.datapipelines.templates.TransformTestInput::class.java,
+                    )
+                }
+            println("381 mapper wrapper=${wrapper.javaClass.name} cause=${wrapper.cause?.javaClass?.name}")
+            (wrapper.cause is com.fasterxml.jackson.databind.JsonMappingException) shouldBe true
+            val error =
+                io.kotest.assertions.throwables
+                    .shouldThrow<io.modelcontextprotocol.spec.McpError> {
+                        dispatcher.call(
+                            McpFixtures.request("templates_evaluate", mapOf("id" to "test/xform.jsonata", "input" to input)),
+                            McpFixtures.ctx(),
+                        )
+                    }.jsonRpcError
+            println("381 public code=${error.code()} message=${error.message()}")
+            error.code() shouldBe McpArguments.INVALID_PARAMS
+            error.data() shouldBe null
+            error.message().contains("987654321") shouldBe false
+            error.message().any { it.isISOControl() } shouldBe false
+            error.message().contains(longKey) shouldBe false
+            when (index) {
+                0 -> {
+                    error.message().contains("'now' must be a string") shouldBe true
+                }
+
+                1 -> {
+                    error.message().contains("'rows' must be an array") shouldBe true
+                }
+
+                else -> {
+                    val reflected = error.message().substringAfter(": '").substringBefore("' is not")
+                    reflected.length shouldBe 161
+                    println("381 evaluate reflected key length=${reflected.length}, controls=${reflected.any { it.isISOControl() }}")
+                }
+            }
+        }
+        io.mockk.verify(exactly = 0) { service.evaluate(any(), any(), any(), any(), any()) }
+        sink.calls().map { it.details["outcome"] } shouldBe List(3) { "invalid_params" }
+    }
+
+    @Test
+    fun `optional input members stay absent and unrelated service faults stay internal errors`() {
+        val service = mockk<TemplateEvaluateService>()
+        val input = co.datapipelines.templates.TransformTestInput(rows = emptyList())
+        every { service.evaluate(any(), any(), any(), input, null) } returns
+            TemplateEvaluateService.Evaluation(output = emptyMap<String, Any>(), rejects = emptyList(), invariants = emptyList())
+        val sink = EvaluateRecordingAuditSink()
+        val dispatcher = McpToolDispatcher(listOf(TemplatesEvaluateTool(service)), sink)
+        val request =
+            McpFixtures.request(
+                "templates_evaluate",
+                mapOf(
+                    "id" to "test/xform.jsonata",
+                    "input" to mapOf("rows" to emptyList<Any>()),
+                ),
+            )
+        dispatcher.call(request, McpFixtures.ctx()).isError() shouldBe false
+        every { service.evaluate(any(), any(), any(), input, null) } throws IllegalArgumentException("sentinel987654321")
+        val error =
+            io.kotest.assertions.throwables
+                .shouldThrow<io.modelcontextprotocol.spec.McpError> {
+                    dispatcher.call(request, McpFixtures.ctx())
+                }.jsonRpcError
+        error.code() shouldBe McpArguments.INTERNAL_ERROR
+        error.message().contains("987654321") shouldBe false
+        io.mockk.verify(exactly = 2) { service.evaluate(any(), any(), any(), input, null) }
+        sink.calls().map { it.details["outcome"] } shouldBe listOf("success", "internal_error")
+    }
+
     private val templates = mockk<TemplateRepository>()
     private val contract =
         TransformContract(

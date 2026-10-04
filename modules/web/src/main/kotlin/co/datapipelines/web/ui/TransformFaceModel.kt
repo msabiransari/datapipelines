@@ -195,8 +195,10 @@ internal object TransformFace {
         if (text.isBlank()) return null
         return try {
             TransformBlocks.mapper.readTree(text)
-        } catch (err: JsonProcessingException) {
-            ParseFailure(err.originalMessage)
+        } catch (
+            @Suppress("SwallowedException") err: JsonProcessingException,
+        ) {
+            ParseFailure("Enter a JSON document with valid syntax.")
         }
     }
 

@@ -35,6 +35,86 @@ import java.util.concurrent.atomic.AtomicInteger
  * id landing in the body.
  */
 class ApiExceptionHandlerTest {
+    @Test
+    fun `raw and converter wrapped mapping refusals hide values and preserve the body envelope`() {
+        val strictMvc =
+            MockMvcBuilders
+                .standaloneSetup(ProbeController())
+                .setMessageConverters(MappingJackson2HttpMessageConverter(co.datapipelines.templates.TransformBlocks.mapper))
+                .setControllerAdvice(ApiExceptionHandler())
+                .build()
+        val cases =
+            listOf(
+                Triple("/api/v1/endpoints", """{"path":987654321,"pipeline":"safe"}""", PipelineErrorCodes.Endpoint.PATH_INVALID),
+                Triple(
+                    "/api/v1/pipelines",
+                    """{"nodes":[{"id":"n1","source":["sentinel987654321"]}]}""",
+                    PipelineErrorCodes.Validation.SCHEMA_VERSION_UNSUPPORTED,
+                ),
+                Triple("/api/v1/parameter-sets/x/current", "sentinel987654321", PipelineErrorCodes.Parameters.BODY_INVALID),
+            )
+        cases.forEachIndexed { index, (uri, body, code) ->
+            val response =
+                strictMvc
+                    .perform(post(uri).contentType(MediaType.APPLICATION_JSON).content(body))
+                    .andExpect(status().isBadRequest)
+                    .andExpect(jsonPath("$.error.code").value(code))
+                    .andExpect(jsonPath("$.correlation_id").exists())
+                    .andReturn()
+                    .response.contentAsString
+            response.contains("987654321") shouldBe false
+            val error = jacksonObjectMapper().readTree(response)["error"]
+            error["details"] shouldBe jacksonObjectMapper().valueToTree<JsonNode>(mapOf("reason" to "malformed_json"))
+            if (index < 2) error["message"].asText().contains("must be a string") shouldBe true
+        }
+        strictMvc
+            .perform(get("/probe/unexpected"))
+            .andExpect(status().isInternalServerError)
+            .andExpect(jsonPath("$.error.message").value("Unexpected server error."))
+    }
+
+    @Test
+    fun `unreadable unknown keys are clipped and other unreadable causes use fixed prose`() {
+        val mapper = co.datapipelines.templates.TransformBlocks.mapper
+        val longKey = "bad\n\t" + "x".repeat(200)
+        val wrapper =
+            io.kotest.assertions.throwables.shouldThrow<IllegalArgumentException> {
+                mapper.convertValue(
+                    mapOf("path" to "safe", "pipeline" to "safe", longKey to "sentinel987654321"),
+                    ProbeEndpointRequest::class.java,
+                )
+            }
+        val request =
+            org.springframework.mock.web
+                .MockHttpServletRequest("POST", "/api/v1/endpoints")
+        val unreadable =
+            org.springframework.http.converter.HttpMessageNotReadableException(
+                "sentinel987654321",
+                wrapper,
+                org.springframework.mock.http
+                    .MockHttpInputMessage(byteArrayOf()),
+            )
+        val response = ApiExceptionHandler().onUnreadableBody(unreadable, request)
+        val tree = mapper.valueToTree<JsonNode>(response.body)
+        val message = tree["error"]["message"].asText()
+        message.contains("987654321") shouldBe false
+        message.contains(longKey) shouldBe false
+        message.any { it.isISOControl() } shouldBe false
+        val reflected = message.substringAfter(": '").substringBefore("' is not")
+        reflected.length shouldBe 161
+        println("381 HTTP reflected key length=${reflected.length}, controls=${reflected.any { it.isISOControl() }}")
+        tree["error"]["details"] shouldBe mapper.valueToTree<JsonNode>(mapOf("reason" to "malformed_json"))
+        val generic =
+            org.springframework.http.converter.HttpMessageNotReadableException(
+                "sentinel987654321",
+                org.springframework.mock.http
+                    .MockHttpInputMessage(byteArrayOf()),
+            )
+        mapper.writeValueAsString(ApiExceptionHandler().onUnreadableBody(generic, request).body).contains("987654321") shouldBe false
+        val media = org.springframework.web.HttpMediaTypeNotSupportedException("sentinel987654321")
+        mapper.writeValueAsString(ApiExceptionHandler().onUnreadableBody(media, request).body).contains("987654321") shouldBe false
+    }
+
     @RestController
     class ProbeController {
         @GetMapping("/probe/domain")
