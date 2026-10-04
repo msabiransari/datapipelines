@@ -21,6 +21,8 @@ import io.restassured.specification.RequestSpecification
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.MethodOrderer
 import org.junit.jupiter.api.Order
+import org.junit.jupiter.api.RepeatedTest
+import org.junit.jupiter.api.RepetitionInfo
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.junit.jupiter.api.TestMethodOrder
@@ -30,7 +32,10 @@ import org.springframework.test.annotation.DirtiesContext
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
 import java.awt.image.BufferedImage
+import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import java.net.URLEncoder
+import java.net.http.HttpRequest
 import java.sql.DriverManager
 import java.util.Base64
 import java.util.UUID
@@ -432,19 +437,35 @@ class VisualizationTestSurfacesE2eTest {
 
     // ---- the caps and CSRF -----------------------------------------------------------------------------
 
-    @Test
+    @RepeatedTest(value = 5, name = "{displayName} - repetition {currentRepetition} of {totalRepetitions}")
     @Order(30)
-    fun `C1 - 4 MiB + 1 on the screenshot route is the route's own 413, refused before the capability is read`() {
+    fun `C1 - 4 MiB + 1 on the screenshot route is the route's own 413, refused before the capability is read`(
+        repetition: RepetitionInfo,
+    ) {
         val session = greenSession(id, AUTHOR)
         val over = upload(id, session.session, session.upload, ByteArray(SCREENSHOT_CAP + 1))
         over.statusCode shouldBe 413
         over.jsonPath().getString("error.code") shouldBe "visualization.test.screenshot_too_large"
         over.jsonPath().getInt("error.details.cap_bytes") shouldBe SCREENSHOT_CAP
         over.asString() shouldNotContain "request.body_too_large"
-        println("event=cap.screenshot status=${over.statusCode} body=${envelope(over)}")
-        // Unconsumed by the refusal: a 3 MiB image — over the platform's 2 MiB — then lands on the same capability.
+        scalar("SELECT upload_consumed_at FROM visualization_test_runs WHERE session_id = '${session.session}'").shouldBeNull()
+        // Unconsumed by the refusal: a 3 MiB image — over the platform's 2 MiB — lands on the SAME capability.
         val large = upload(id, session.session, session.upload, paddedPng(3 * 1024 * 1024))
         withClue(large.asString().take(EXCERPT)) { large.statusCode shouldBe 201 }
+        println("event=cap.screenshot trial=${repetition.currentRepetition} status=${over.statusCode} followup=${large.statusCode}")
+        println("event=cap.screenshot.envelope body=${envelope(over)}")
+        val boundary = greenSession(id, AUTHOR)
+        upload(id, boundary.session, boundary.upload, paddedPng(SCREENSHOT_CAP)).statusCode shouldBe 201
+        val chunked = greenSession(id, AUTHOR)
+        val chunkedOver = upload(id, chunked.session, chunked.upload, ByteArray(SCREENSHOT_CAP + 1), chunked = true)
+        chunkedOver.statusCode shouldBe 413
+        chunkedOver.jsonPath().getString("error.code") shouldBe "visualization.test.screenshot_too_large"
+        chunkedOver.jsonPath().getInt("error.details.cap_bytes") shouldBe SCREENSHOT_CAP
+        scalar("SELECT upload_consumed_at FROM visualization_test_runs WHERE session_id = '${chunked.session}'").shouldBeNull()
+        upload(id, chunked.session, chunked.upload, paddedPng(3 * 1024 * 1024)).statusCode shouldBe 201
+        println(
+            "event=cap.screenshot.controls trial=${repetition.currentRepetition} exact_cap=201 chunked_status=${chunkedOver.statusCode}",
+        )
     }
 
     @Test
@@ -530,13 +551,35 @@ class VisualizationTestSurfacesE2eTest {
         capability: String,
         bytes: ByteArray,
         case: String? = null,
-    ): Response =
-        anonymous()
-            .header("DP-Upload-Token", capability)
-            .contentType("image/png")
-            .apply { case?.let { queryParam("case", it) } }
-            .body(bytes)
-            .post("/api/v1/visualizations/$visualization/tests/sessions/$session/screenshot")
+        chunked: Boolean = false,
+    ): Response {
+        val path = "/api/v1/visualizations/$visualization/tests/sessions/$session/screenshot"
+        val query = case?.let { "?case=" + URLEncoder.encode(it, Charsets.UTF_8) } ?: ""
+        val body =
+            if (chunked) {
+                HttpRequest.BodyPublishers.ofInputStream {
+                    ByteArrayInputStream(
+                        bytes,
+                    )
+                }
+            } else {
+                HttpRequest.BodyPublishers.fromPublisher(
+                    HttpRequest.BodyPublishers.ofInputStream { ByteArrayInputStream(bytes) },
+                    bytes.size.toLong(),
+                )
+            }
+        if (chunked) {
+            ScreenshotUploadTransportTest.WireCapture(port).use { wire ->
+                val response = ScreenshotUploadTransport.post(wire.port, path + query, body, capability)
+                wire.await()
+                wire.declared shouldBe -1L
+                wire.chunked shouldBe true
+                println("event=cap.screenshot.chunked declared=${wire.declared} chunked=${wire.chunked} forwarded=${wire.forwarded.get()}")
+                return response
+            }
+        }
+        return ScreenshotUploadTransport.post(port, path + query, body, capability)
+    }
 
     private fun edit(
         visualization: String,
