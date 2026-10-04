@@ -39,7 +39,8 @@ class ExecutionLauncherTest {
 
         launcher.releaseNeverStarted(USER, "released", first.executionId)
 
-        launcher.decide(launch(key = "released")) shouldBe LaunchDecision.Attach(requireNotNull(next.executionId))
+        val nextId = requireNotNull(next.executionId) { "the keyed retry must reserve a new execution id" }
+        launcher.decide(launch(key = "released")) shouldBe LaunchDecision.Attach(nextId)
     }
 
     @Test
