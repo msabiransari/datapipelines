@@ -134,7 +134,9 @@ class UiBoundaryShotsBrowserTest : BrowserSuite() {
     }
 
     @Test
-    fun `the template editor works with no script of its own — preview through htmx, discard asked in the page by the 102 dialog`() {
+    fun `the template workspace works with no script of its own beyond its files — preview through htmx, purge asked in the page`() {
+        // Re-aimed by #398: the editor page is the WORKSPACE now (the old route redirects);
+        // the preview lives on the Render tab, the purge draft verb in the workspace header.
         startTrace()
         loginReadyAdmin()
         val name = FIXTURE_TEMPLATE
@@ -151,8 +153,8 @@ class UiBoundaryShotsBrowserTest : BrowserSuite() {
                 page.click("#create-template-modal button[type=submit]")
             }.status() shouldBe 200
 
-        page.navigate("$baseUrl/templates/editor?name=" + java.net.URLEncoder.encode(name, "UTF-8"))
-        page.waitForSelector(".te-page")
+        page.navigate("$baseUrl/templates/$name")
+        page.waitForSelector(".tw-root")
 
         // §D: the page's own scripts are FILES — since 188 (#188) the layout's rail-collapse
         // flash preventer is one too (/js/rail.js), so an executing inline <script> here is ZERO.
@@ -162,7 +164,10 @@ class UiBoundaryShotsBrowserTest : BrowserSuite() {
         srcs.toString() shouldContain "/js/template-editor/lifecycle.js"
         srcs.toString() shouldContain "/js/csrf.js"
 
-        // The preview: htmx, not a raw fetch — and the CSRF header rides on the layout for it.
+        // The Render tab: the preview is htmx, not a raw fetch — and the CSRF header rides on
+        // the layout for it.
+        page.locator("#tw-tab-render").click()
+        page.waitForSelector("#previewBtn")
         val render =
             page.waitForResponse({ it.url().contains("/partials/templates/render") }, {
                 page.click("#previewBtn")
@@ -172,29 +177,49 @@ class UiBoundaryShotsBrowserTest : BrowserSuite() {
         page.locator("#previewPane").innerText() shouldContain "SELECT 1"
 
         shot("template-editor")
-        // The comparable shot: the editor's own region, from a FIXED template name and body,
-        // so the image can be diffed against the one taken before the script moved out.
+        // The comparable shot: the workspace's own region, from a FIXED template name and body,
+        // so the image can be diffed against the one taken before the workspace replaced the
+        // editor page.
         page.waitForFunction("() => document.fonts.ready.then(() => document.fonts.status === 'loaded')")
-        page.locator(".te-page").screenshot(
+        page.locator(".tw-root").screenshot(
             com.microsoft.playwright.Locator
                 .ScreenshotOptions()
                 .setPath(shotDir().resolve("097-template-editor-page.png")),
         )
 
-        // Discard asks IN THE PAGE. Since 102 the ask is the §4.3d purge dialog served into
-        // `#te-dialog` (a window.confirm would be auto-dismissed by Playwright and the draft
+        // Purge draft asks IN THE PAGE. Since 102 the ask is the §4.3d purge dialog served into
+        // `#tx-dialog` (a window.confirm would be auto-dismissed by Playwright and the draft
         // would be gone by the next line); closing it leaves the draft untouched.
-        page.click("#tpl-discard-draft")
-        page.waitForSelector("#te-dialog [data-lifecycle-dialog='template-purge'] .app-modal")
+        purgeDialogShot()
+        // Nothing was purged: the draft's own affordances are still there. The header's Release
+        // is the locator — the Versions tab's row menu carries its own `template-release` item
+        // (the pipelines workspace has the same pair), so the bare attribute names two controls.
+        page.locator(".tw-topbar [data-verb='template-release']").isVisible shouldBe true
+    }
+
+    /** The {D} shape's version purge, from its row's ⋯ menu on the Versions tab, photographed. */
+    private fun purgeDialogShot() {
+        page.locator("#tw-tab-versions").click()
+        page
+            .locator("#tw-pane-versions tr[data-version-row] details.tplx-vmenu summary")
+            .first()
+            .click()
+        page
+            .locator(
+                "#tw-pane-versions .tplx-vmenu-list button",
+                com.microsoft.playwright.Page
+                    .LocatorOptions()
+                    .setHasText("Purge v1"),
+            ).first()
+            .click()
+        page.waitForSelector("#tx-dialog [data-lifecycle-dialog='template-purge'] .app-modal")
         shot("template-editor-discard-confirm")
-        page.click("#te-dialog [data-lifecycle-close]")
-        page.locator("#te-dialog [data-lifecycle-dialog='template-purge']").waitFor(
+        page.click("#tx-dialog [data-lifecycle-close]")
+        page.locator("#tx-dialog [data-lifecycle-dialog='template-purge']").waitFor(
             com.microsoft.playwright.Locator
                 .WaitForOptions()
                 .setState(com.microsoft.playwright.options.WaitForSelectorState.HIDDEN),
         )
-        // Nothing was purged: the draft's own affordances are still there.
-        page.locator("#tpl-release-draft").isVisible shouldBe true
     }
 
     private fun shot(state: String) {

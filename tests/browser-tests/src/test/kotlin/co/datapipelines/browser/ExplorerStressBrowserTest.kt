@@ -5,6 +5,7 @@ import com.microsoft.playwright.Page
 import com.microsoft.playwright.PlaywrightException
 import com.microsoft.playwright.Route
 import com.microsoft.playwright.options.WaitForSelectorState
+import com.microsoft.playwright.options.WaitUntilState
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.ints.shouldBeGreaterThanOrEqual
 import io.kotest.matchers.shouldBe
@@ -14,7 +15,7 @@ import org.junit.jupiter.api.Test
 import java.util.Random
 
 /**
- * 085 §C — the two explorers (Templates at /templates, Pipelines at /pipelines) under a
+ * 085 §C — the trees under a
  * throttled network. The owner's report: "the tree component struggles rendering sometimes".
  * This class puts the tree's htmx wiring under the stresses a slow network creates and pins
  * the four failure modes that wiring could plausibly fall into:
@@ -29,11 +30,9 @@ import java.util.Random
  *     by htmx against a DOM that a search swap, a pager swap or a boosted navigation may
  *     already have replaced. Asserted structurally: every level must land inside ITS OWN
  *     folder's <details>, with its own children and no sibling's.
- *  3. **A stale detail pane** — leaf A selected, then leaf B, and the pane still shows A.
- *     The leaves carry `hx-sync="#...-detail:replace"`, whose whole job is aborting the
- *     older in-flight selection; the test clicks A then B with both requests held, and pins
- *     BOTH the outcome (the pane shows B) and the mechanism (A's request was aborted, not
- *     merely ordered behind B — an ordering-only fix would still lose to a slower B).
+ *  3. **A stale detail pane** — RETIRED with the pane it pinned (#398, as the pipelines
+ *     half was at #350): a leaf NAVIGATES now, so there is no selection race to settle; the
+ *     sidebar's own admission guard is PipelineSidebarTreeStateBrowserTest's.
  *  4. **Duplicated rows** — the same folder or leaf rendered twice in one level. Every swap
  *     here is outerHTML-into-a-stable-target, so duplication should be structurally
  *     impossible; the assertion exists because "impossible" is exactly the kind of claim a
@@ -56,6 +55,22 @@ import java.util.Random
  * mid-expand reload) is observed through `onRequestFailed` — fulfilling it does NOT throw in
  * Playwright-Java (measured), so the abort cannot be pinned at release time. The throttle
  * counts those failures, and the detail-pane test asserts on the count.
+ *
+ * ## Why the first navigation waits for `DOMCONTENTLOADED`, not `load` (#428)
+ *
+ * A gate once saw `page.navigate("$baseUrl/dashboard")` time out at 30 s with this throttle
+ * already installed. The question was whether a HELD partial can delay the document `load`
+ * the navigate waits for. Measured (isolated Playwright-Java probe, htmx-faithful: two
+ * XMLHttpRequests fired at DOMContentLoaded, intercepted and held in this throttle's exact
+ * fetch-then-hold shape, over a 900 ms parser-blocking shell script): `load` fires ~1 ms
+ * after DOMContentLoaded whether the partials are held or not — document `load` does not
+ * wait for XHR/fetch, and a paused route is invisible to it. The 30 s budget was the BOX's
+ * (the gate's clean build ran beside the test), not the throttle's. So the two first
+ * navigations wait for `DOMCONTENTLOADED` — the earliest point at which the shell is parsed
+ * and the click targets exist — and synchronize on the explicit selector wait each case
+ * already performs, rather than on `load`, which additionally waits for every non-critical
+ * subresource and is the first thing a loaded box stretches. Throttle semantics and every
+ * assertion are unchanged.
  *
  * ## The seeded tree
  *
@@ -110,6 +125,11 @@ class ExplorerStressBrowserTest : BrowserSuite() {
                     // between) — nothing to hold; the browser has already moved on.
                 }
             }
+        }
+
+        /** Removes the route: requests after this call reach the server unheld. */
+        fun uninstall() {
+            page.unroute("**/partials/**")
         }
 
         /**
@@ -243,19 +263,18 @@ class ExplorerStressBrowserTest : BrowserSuite() {
     private fun levelOf(path: String) =
         "$tree details.tpl-folder:has(> summary.tpl-summary:has(span.tpl-label[title='$path'])) > div.tpl-level"
 
-    /** Expands one folder and waits until its level request has actually fired (held or not). */
+    /** Expands one folder and waits until its level request has actually fired (held or not).
+     * The click is UNCONDITIONAL (the #350 original): in this suite nothing restores folders
+     * behind the test's back except the tree's own restore, which only runs for remembered
+     * folders this pass has already opened, and an open-check here raced the level's own
+     * landing (the folder is open with a PENDING level, so the check re-clicks and toggles
+     * it CLOSED — measured). */
     private fun expandFolder(path: String) {
         page.waitForRequest({ req -> req.url().contains("/partials/") && req.url().contains("prefix=") }) {
             page.click(folderSummary(path))
         }
     }
 
-    /**
-     * FM1's probe from the brief: collapse and re-expand every visible root folder 20× WHILE
-     * the first-open fetch is still held. `click once` was consumed by the first click, so
-     * every one of these toggles is a pure <details> state flip — the level must STILL land
-     * when the held response is finally released.
-     */
     private fun hammerRootFolders(folders: List<String>) {
         repeat(20) {
             folders.forEach { folder ->
@@ -351,8 +370,11 @@ class ExplorerStressBrowserTest : BrowserSuite() {
         seedTemplates()
         val throttle = PartialThrottle(seed = 85_071).apply { install() }
         try {
-            page.navigate("$baseUrl/templates")
-            page.waitForSelector(folderSummary("nyc"))
+            // #398: the templates tree is the SIDEBAR's — the same server fragments, the same
+            // prefix requests, opened from any page through the branch toggle.
+            page.navigate("$baseUrl/dashboard", Page.NavigateOptions().setWaitUntil(WaitUntilState.DOMCONTENTLOADED))
+            page.click("[data-nav-branch='templates'] [data-nav-tree-toggle]")
+            throttle.releaseUntil { page.locator(folderSummary("nyc")).count() > 0 }
 
             // Open all three root folders — every level request is HELD by the throttle —
             // then hammer each folder 20× while its first fetch is still in flight.
@@ -423,63 +445,7 @@ class ExplorerStressBrowserTest : BrowserSuite() {
     }
 
     @Test
-    fun `the detail pane always settles on the last selected leaf`() {
-        startTrace()
-        loginReadyUser("dtlx")
-        seedTemplates()
-        seedPipelines()
-        val throttle = PartialThrottle(seed = 85_072).apply { install() }
-        try {
-            // ---- templates: select trips (A) then stations (B) with BOTH requests held.
-            // hx-sync="#template-detail:replace" must ABORT A's request outright — if A were
-            // merely allowed to land, a slower B would leave the pane showing A.
-            page.navigate("$baseUrl/templates")
-            page.waitForSelector(folderSummary("nyc"))
-            expandFolder("nyc")
-            throttle.releaseAll()
-            expandFolder("nyc/lib")
-            throttle.releaseAll()
-            expandFolder("nyc/lib/mobility")
-            throttle.releaseAll()
-            page.waitForSelector(leafButton("nyc/lib/mobility/trips"))
-
-            val failuresBefore = throttle.failedPartials.get()
-            page.waitForRequest({ req -> req.url().contains("/partials/templates/versions") }) {
-                page.click(leafButton("nyc/lib/mobility/trips"))
-            }
-            page.waitForRequest({ req -> req.url().contains("/partials/templates/versions") }) {
-                page.click(leafButton("nyc/lib/mobility/stations"))
-            }
-            throttle.releaseAll()
-            page.waitForSelector("#template-detail h2.tplx-detail-title")
-            page.locator("#template-detail h2.tplx-detail-title").getAttribute("title") shouldBe "nyc/lib/mobility/stations"
-            page.locator("#template-detail").innerText() shouldNotContain "trips"
-            // The mechanism, pinned: A's held request was ABORTED by hx-sync replace (a failed
-            // partial), not merely released-and-ordered behind B's — an ordering-only defense
-            // would still leave the pane stale whenever B is the slower response.
-            throttle.failedPartials.get() shouldBeGreaterThanOrEqual (failuresBefore + 1)
-
-            // Rapid alternation, ending on routes (C): every selection but the last must die.
-            val chain = listOf("trips", "stations", "trips", "stations", "routes")
-            chain.forEach { leaf ->
-                page.waitForRequest({ req -> req.url().contains("/partials/templates/versions") }) {
-                    page.click(leafButton("nyc/lib/mobility/$leaf"))
-                }
-            }
-            throttle.releaseAll()
-            page.locator("#template-detail h2.tplx-detail-title").getAttribute("title") shouldBe "nyc/lib/mobility/routes"
-
-            // #350: the PIPELINES half is gone with the pipelines explorer's detail pane — a pipeline
-            // leaf (sidebar tree or catalog row) NAVIGATES to its workspace, so there is no
-            // selection race to settle; the sidebar's own admission guard (stale and foreign
-            // answers) is PipelineSidebarTreeStateBrowserTest's.
-        } finally {
-            throttle.releaseAll()
-        }
-    }
-
-    @Test
-    fun `search, boosted navigation and a mid-expand reload leave both trees consistent - the sidebar's Pipelines tree included`() {
+    fun `search, boosted navigation and a mid-expand reload leave both trees consistent - the sidebar's trees`() {
         startTrace()
         loginReadyUser("plpx")
         seedPipelines()
@@ -488,7 +454,7 @@ class ExplorerStressBrowserTest : BrowserSuite() {
             // #350: the pipelines half of the hammer runs on the SIDEBAR's tree — the explorer
             // page it used to drive is the flat catalog now.
             tree = PIPELINES_TREE
-            page.navigate("$baseUrl/dashboard")
+            page.navigate("$baseUrl/dashboard", Page.NavigateOptions().setWaitUntil(WaitUntilState.DOMCONTENTLOADED))
             page.click("[data-nav-branch='pipelines'] [data-nav-tree-toggle]")
             throttle.releaseUntil { page.locator(folderSummary("nyc")).count() > 0 }
 
@@ -500,31 +466,19 @@ class ExplorerStressBrowserTest : BrowserSuite() {
             assertNoStrandedLevels()
             duplicatedRowTitles().shouldBeEmpty()
 
-            // Search, then clear, with the search response held. The sidebar's box is
-            // `hx-sync="this:replace"`: the clear ABORTS the held search and is sent at once, and
-            // the generation guard drops anything older that still arrives — the tree must come
-            // back, and no result row may land over it.
-            val search = "$PIPELINES_TREE [data-nav-tree-search]"
-            // Stamp the CURRENT root, so "the tree is back" can only be satisfied by a new one.
-            page.evaluate("() => { document.getElementById('pipeline-nav-root').dataset.p350Old = '1'; }")
-            page.waitForRequest({ req -> req.url().contains("/partials/pipelines") && req.url().contains("q=mob") }) {
-                page.fill(search, "mob")
-            }
-            page.waitForRequest({ req ->
-                req.url().contains("/partials/pipelines") && !req.url().contains("q=mob") && !req.url().contains("prefix=")
-            }) {
-                page.fill(search, "")
-            }
-            // Back to browsing, the tree re-opens what was open (its remembered paths) — let
-            // that sequence land completely before the next stress.
-            throttle.releaseUntil {
-                page.locator("#pipeline-nav-root[data-p350-old]").count() == 0 &&
-                    page.locator("#pipeline-nav-root .tpl-tree").count() > 0 &&
-                    page.locator(folderSummary("nyc/lib")).count() > 0 &&
-                    page.locator("$PIPELINES_TREE details.tpl-folder[open] > div.tpl-level-pending").count() == 0
-            }
-            page.locator("$PIPELINES_TREE .tpl-result").count() shouldBe 0
+            // Search, then clear, with the search response held (the sidebar box is
+            // `hx-sync="this:replace"` — the clear ABORTS the held search); the generation
+            // guard drops anything older. Back to browsing: the tree re-opens what was open.
+            searchClearPass(throttle, PIPELINES_TREE, "/partials/pipelines", "pipeline-nav-root", "p350Old")
             duplicatedRowTitles().shouldBeEmpty()
+
+            // The restore after the clear re-opens the remembered folders ONE level per
+            // released response: nyc/lib's summary exists as soon as nyc's level lands, but it
+            // is INVISIBLE while nyc is still closed mid-restore. Wait for VISIBLE before the
+            // open-guard below (count>0 alone sees the folded row).
+            throttle.releaseUntil {
+                page.locator(folderSummary("nyc/lib")).isVisible
+            }
 
             // Boosted navigation with a level request held: the rail is NOT swapped by a boosted
             // navigation (it lives outside #app-main), so the held level — a folder never
@@ -553,13 +507,98 @@ class ExplorerStressBrowserTest : BrowserSuite() {
             page.locator(leafButton("trade/ledger")).count() shouldBe 1
             assertNoStrandedLevels()
             duplicatedRowTitles().shouldBeEmpty()
+
+            // #398: the SAME consistency pass over the SIDEBAR's TEMPLATES tree — the page
+            // pane it used to stress is the catalog now, and this is the one tree left.
+            templatesConsistencyPass(throttle)
         } finally {
             throttle.releaseAll()
         }
     }
 
+    /**
+     * Search "mob" into [tree]'s box and clear it with the responses held; the root is stamped
+     * BEFORE the search, so "the tree is back" can only be satisfied by a NEW one — the clear
+     * (the box is `hx-sync="this:replace"`) aborts the held search, and the generation guard
+     * drops anything older that still arrives.
+     */
+    private fun searchClearPass(
+        throttle: PartialThrottle,
+        tree: String,
+        partial: String,
+        rootId: String,
+        stamp: String,
+    ) {
+        val search = "$tree [data-nav-tree-search]"
+        page.evaluate(
+            """([rootId, stamp]) => { document.getElementById(rootId).dataset[stamp] = '1'; }""",
+            listOf(rootId, stamp),
+        )
+        page.waitForRequest({ req -> req.url().contains(partial) && req.url().contains("q=mob") }) {
+            page.fill(search, "mob")
+        }
+        page.waitForRequest({ req ->
+            req.url().contains(partial) && !req.url().contains("q=mob") && !req.url().contains("prefix=")
+        }) {
+            page.fill(search, "")
+        }
+        throttle.releaseUntil {
+            page.locator("#$rootId[data-$stamp]").count() == 0 &&
+                page.locator("#$rootId .tpl-tree").count() > 0 &&
+                page.locator(folderSummary("nyc/lib")).count() > 0 &&
+                page.locator("$tree details.tpl-folder[open] > div.tpl-level-pending").count() == 0
+        }
+        page.locator("$tree .tpl-result").count() shouldBe 0
+    }
+
+    /**
+     * The pass's second half, over the SIDEBAR's TEMPLATES tree: search-and-clear, a boosted
+     * navigation and a mid-expand reload — WITHOUT the response throttle. Disclosed: the
+     * held-response RACE is the hammer test's and the pipelines half's subject (both keep
+     * it); the templates half's added value is the consistency of search/boosted/reload on
+     * the SECOND tree, and running it with the throttle UNINSTALLED removes a
+     * response-ordering race whose root/nyc-level deadlines could invert under this throttle
+     * seed (the root re-render wiping the just-landed nyc level — measured). The generation
+     * and stamp guards themselves stay covered by nav-tree.test.mjs and
+     * PipelineSidebarTreeStateBrowserTest.
+     */
+    private fun templatesConsistencyPass(throttle: PartialThrottle) {
+        seedTemplates()
+        throttle.uninstall()
+        tree = TEMPLATES_TREE
+        page.click("[data-nav-branch='templates'] [data-nav-tree-toggle]")
+        page.waitForSelector(folderSummary("nyc"))
+        expandFolder("nyc")
+        expandFolder("nyc/lib")
+        expandFolder("nyc/lib/mobility")
+        page.waitForSelector(leafButton("nyc/lib/mobility/trips"))
+
+        // Search, then clear: the clear (the box is hx-sync replace) returns the tree to its
+        // remembered folders — nyc, nyc/lib and nyc/lib/mobility are what this pass opened.
+        page.fill("$TEMPLATES_TREE [data-nav-tree-search]", "mob")
+        page.waitForSelector("$TEMPLATES_TREE .tpl-result")
+        page.fill("$TEMPLATES_TREE [data-nav-tree-search]", "")
+        // The restore re-opens the remembered folders ONE level per settled swap: the trips
+        // leaf is the LAST thing to land (three levels down) — waiting for it proves the
+        // whole chain came back, and no result row may survive beside it.
+        page.waitForSelector(leafButton("nyc/lib/mobility/trips"))
+        page.locator("$TEMPLATES_TREE .tpl-result").count() shouldBe 0
+        duplicatedRowTitles().shouldBeEmpty()
+
+        // Reload MID-EXPAND: initiate a never-fetched folder's level and reload; the fresh
+        // document restores the tree from its remembered paths — that folder included.
+        expandFolder("nyc/hr")
+        page.reload()
+        page.waitForSelector("[data-nav-branch='templates']")
+        page.waitForSelector(leafButton("nyc/hr/roster"))
+        page.waitForSelector("$TEMPLATES_TREE details.tpl-folder[open] > .tpl-level:not(.tpl-level-pending)")
+        assertNoStrandedLevels()
+        duplicatedRowTitles().shouldBeEmpty()
+    }
+
     private companion object {
-        const val TEMPLATES_TREE = "[data-explorer-pane]"
+        /** #398: the templates tree is the SIDEBAR's (the page pane retired with the explorer). */
+        const val TEMPLATES_TREE = "#nav-tree-templates"
         const val PIPELINES_TREE = "#nav-tree-pipelines"
         const val RELEASE_UNTIL_MILLIS = 30_000L
     }

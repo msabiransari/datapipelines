@@ -1,13 +1,13 @@
 /*
  * 102 — the lifecycle dialogs' client half (ui-screens §4.3d): the ONE per-screen container
- * (#tx-dialog / #pe-dialog / #te-dialog, #dp-dialog since #400; the pipelines explorer's
- * #px-dialog is gone with its pane, #401), its close
- * paths, focus, and the typed confirm. Shared by five screens; it owns no verb, no fetch and
+ * (#tx-dialog / #pe-dialog / #dp-dialog; the explorers' #px-dialog went with the pipelines pane,
+ * #401, and the standalone template editor's #te-dialog with that page, #398), its close
+ * paths, focus, and the typed confirm. Shared by the workspaces; it owns no verb, no fetch and
  * no toast — the dialogs are
- * htmx partials whose POSTs answer Shape A / HX-Redirect / Shape C, and toast.js owns the
+ * htmx partials whose POSTs answer HX-Redirect / Shape C, and toast.js owns the
  * toasts. Everything here is chrome, in the ds-dialog lineage (094 §A/§B).
  *
- * FIVE small jobs, no framework:
+ * FOUR small jobs, no framework:
  *
  * 1. CLOSE. Emptying the container is the ONLY close path (no display toggling, so a stale
  *    form can never hide in it): the dialog's own [data-lifecycle-close] buttons, and Escape.
@@ -26,11 +26,7 @@
  *    checkbox (the release cascade's "also release these draft templates") withholds every
  *    [data-consent-submit] while unchecked, and a button that is ALSO a min-chars submit
  *    needs both — so one evaluator decides each button from every gate present.
- * 4. CLOSE ON SUCCESS. A Shape A response swaps the DETAIL pane, not the dialog; the hidden
- *    [data-lifecycle-applied] marker riding with it is what closes the dialog — a refusal
- *    (Shape C, retargeted at #toast) never carries the marker, so an error cannot close
- *    over the dialog.
- * 5. MENUS. The version rows' ⋯ overflow menus close on Escape and when a dialog opens —
+ * 4. MENUS. The version rows' ⋯ overflow menus close on Escape and when a dialog opens —
  *    and, open, they are PLACED: the list is a `popover="manual"` living in the top layer
  *    (the tab panel it sits in scrolls and used to clip it), so this script puts it under
  *    (or, out of room, above) its own ⋯ from the ⋯'s measured rect, and RE-places it on
@@ -44,7 +40,7 @@
 (function () {
   'use strict';
 
-  var CONTAINERS = ['tx-dialog', 'pe-dialog', 'te-dialog', 'dp-dialog'];
+  var CONTAINERS = ['tx-dialog', 'pe-dialog', 'dp-dialog'];
 
   function openContainer() {
     for (var i = 0; i < CONTAINERS.length; i++) {
@@ -214,19 +210,13 @@
       closeMenus();
       return;
     }
-    // A Shape A success landed in a detail pane: its marker closes the dialog.
-    // (#401 — the pipeline's pane is gone; the template explorer's is the one left.)
-    if (target.id === 'template-detail' && target.querySelector('[data-lifecycle-applied]')) {
-      closeDialog();
-      return;
-    }
     // 140 — a swap INSIDE the open dialog (the release checks' run re-rendering the list
     // and splicing the submit footer in out-of-band) re-arms the inputs it just replaced.
     var open = openContainer();
     if (open && open !== target && open.contains(target)) rearm(open);
   });
 
-  // ------------------------------------------------------------------ 5. menus
+  // ------------------------------------------------------------------ 4. menus
 
   /** Close every open ⋯ overflow menu (the rows' `<details>` popovers). */
   function closeMenus() {

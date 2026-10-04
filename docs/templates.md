@@ -586,14 +586,34 @@ The `/render` endpoint is an **editor preview affordance only** — the caller e
 
 ## 10. UI Editor Integration
 
-The UI template editor (in `web` module) provides:
+The template workspace (in `web` module, since #398 — `GET /templates/{name}`, ui-screens §4.7)
+provides:
 
-- **Syntax highlighting** for Freemarker + SQL.
-- **Live preview** via the `/render` endpoint — the author types a variable map by hand and sees the rendered SQL. Purely an authoring aid (§9).
-- **Validation feedback** — error markers for parse errors, forbidden constructs, and import-resolution failures (the §7 checks). Undefined-variable feedback is *not* available here; it appears when the template is wired into a pipeline (§7.2).
-- **Library browser** — pick library templates to import from a searchable list; picking one appends an `{id, version, alias}` entry to `imports` (the editor never writes `<#import>` into the body).
-- **Version history** — view diff between versions, restore old version (creates new version with old body).
-- **Test render against a scratch tempdb** (optional) — available for templates whose `dialect` matches the dialect of the tempdb engine. The engine is declared per pipeline in `settings.tempdb.engine` (H2 in v1; DuckDB templates become testable this way when that engine lands) — see [Pipeline Contract §12.6](pipeline-contract.md#126-template-validations). The editor does not hardcode H2.
+- **Read-only source with highlighting** — the viewed version's body renders as a read-only
+  pane; the preview output on the Render tab is highlighted with the shared dependency-free
+  SQL tokenizer. The editable textarea (an author, on the working draft) is deliberately plain:
+  highlighting an editing surface needs an overlay/contenteditable round of its own.
+- **Render preview** via the `/render` endpoint — the author types a variable map by hand in
+  the Render tab (Key/Value rows or JSON) and sees the rendered SQL against the STORED version
+  the page is viewing. Purely an authoring aid (§9).
+- **Validation feedback on write** — the transform face's Save draft runs the §7 checks (the
+  suite included) and names each refusal's pane; the create modal binds the same binder, so a
+  refusal the API would give is a refusal there. Undefined-variable feedback is *not* available
+  here; it appears when the template is wired into a pipeline (§7.2).
+- **Version history** — the workspace's Versions tab (the house table): status, provenance,
+  the per-version "N uses" phrase, and the lifecycle verbs (release, purge, discard, restore)
+  through their §4.3d dialogs. "Restore an old version" is drafting-and-releasing: a version is
+  immutable, so re-publishing copies it into a new draft (the Source tab's **Edit** on a
+  selected release does exactly that). There is no diff view between versions.
+- **Library templates** — the Imports table on the Source tab shows the version's
+  `{id, version}` import rows read-only. There is no in-browser picker: `imports` is written
+  through the API (the editor never writes `<#import>` into the body, and no UI writes it at
+  all).
+
+**What the §10 bullets below described before #398 and were never built** (they describe no
+route in the web module; listed here so the record is honest rather than carrying the claim):
+a library *browser* with import picking, a version *diff view*, and a *test render against a
+scratch tempdb*. The render preview above is the only scratch render the UI has ever had.
 
 ---
 

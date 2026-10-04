@@ -18,8 +18,8 @@ import java.util.UUID
  * face of it against a flag that read false until this lane; here a jsonata transform cites a
  * WORKSPACE rule through the REAL API (`implements` on the create, so the §2.3 citation check
  * runs), a pipeline pins it beside a SQL stage, and the rule is SUPERSEDED. The walk then reads
- * the mark wherever a person meets the version — the explorer's folder level and search row,
- * the detail's chips, the template editor's header, the pipeline editor's TRANSFORM card and
+ * the mark wherever a person meets the version — the sidebar tree's folder level, the
+ * catalog's search row, the template workspace's header chip, the pipeline editor's TRANSFORM card and
  * its Details row — and the release dialog, whose warning names the retired rule and its
  * successor above a confirm that stays enabled; the release then lands (a warning, never a
  * refusal). The SQL stage, which cites nothing, is never marked.
@@ -51,20 +51,25 @@ class TransformImplementsBrowserTest : BrowserSuite() {
 
         val successor = recordRule(user.email, datasource, "An active order names its customer and has a paid invoice.", supersedes = rule)
 
-        // 1 — the explorer: the folder level and the search row mark the transform, never the stage.
+        // 1 — the navigating surfaces: the sidebar tree's folder level and the catalog's search
+        //     row mark the transform, never the stage. (#398: the leaves are links now, `a.tpl-leaf`
+        //     and `a.tpl-result` — the buttons the explorer rendered are gone.)
         leafMarks(folder) shouldBe mapOf(stage to false, transform to true)
         page.navigate("$baseUrl/templates?q=$slug")
-        val row = page.locator("button.tpl-result", Page.LocatorOptions().setHasText("active_orders"))
+        val row = page.locator("a.tpl-result", Page.LocatorOptions().setHasText("active_orders"))
         row.locator("[data-needs-review]").waitFor()
-        page.locator("button.tpl-result", Page.LocatorOptions().setHasText("orders.sql")).locator("[data-needs-review]").count() shouldBe 0
+        page.locator("a.tpl-result", Page.LocatorOptions().setHasText("orders.sql")).locator("[data-needs-review]").count() shouldBe 0
 
-        // 2 — the detail's chips, then the template editor's header.
-        page.waitForResponse({ it.url().contains("/partials/templates/versions") }) { row.click() }
-        page.locator("#template-detail [data-needs-review]").waitFor()
-        themedShots("explorer", listOf(1440))
-        page.navigate("$baseUrl/templates/editor?name=$transform")
-        page.locator("[data-needs-review]").first().waitFor()
-        themedShots("template-editor", listOf(1440))
+        // 2 — the template's workspace: the row is a link, followed; the header chip names the
+        //     viewed version's mark (workspace.html's `.tw-crumb`), and the stage's own is clean.
+        row.click()
+        page.waitForURL("**/templates/$transform")
+        page.waitForSelector(".tw-root")
+        page.locator(".tw-crumb [data-needs-review]").waitFor()
+        themedShots("template-workspace", listOf(1440))
+        page.navigate("$baseUrl/templates/$stage")
+        page.waitForSelector(".tw-root")
+        page.locator(".tw-crumb [data-needs-review]").count() shouldBe 0
 
         // 3 — the pipeline editor: the card's kind line and the Details row, off the pin's read.
         openPipelineWorkspace(slug)
@@ -206,9 +211,9 @@ class TransformImplementsBrowserTest : BrowserSuite() {
     }
 
     /**
-     * The explorer's folder level for [prefix] as the tree's own request renders it: each leaf's
-     * full name (`data-leaf-name`) → whether it carries the needs-review marker. A fetch of the
-     * partial, not a click through `test/`'s shared, paged level — the leaves here are this
+     * The sidebar tree's folder level for [prefix] as the tree's own request renders it: each
+     * leaf's full name (`data-leaf-id`) → whether it carries the needs-review marker. A fetch of
+     * the partial, not a click through `test/`'s shared, paged level — the leaves here are this
      * test's own folder.
      */
     @Suppress("UNCHECKED_CAST")
@@ -217,8 +222,8 @@ class TransformImplementsBrowserTest : BrowserSuite() {
             """async (prefix) => {
               const r = await fetch('/partials/templates?prefix=' + encodeURIComponent(prefix), { credentials: 'same-origin' });
               const doc = new DOMParser().parseFromString(await r.text(), 'text/html');
-              return Object.fromEntries([...doc.querySelectorAll('button.tpl-leaf[data-leaf-name]')]
-                .map(b => [b.dataset.leafName, b.querySelector('[data-needs-review]') !== null]));
+              return Object.fromEntries([...doc.querySelectorAll('a.tpl-leaf[data-leaf-id]')]
+                .map(b => [b.dataset.leafId, b.querySelector('[data-needs-review]') !== null]));
             }""",
             prefix,
         ) as Map<String, Boolean>

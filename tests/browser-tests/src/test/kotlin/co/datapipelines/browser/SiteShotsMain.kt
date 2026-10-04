@@ -839,22 +839,29 @@ object SiteShotsMain {
         }
 
         private fun templateExplorer() {
+            // #398: the catalog at rest, then the SIDEBAR tree's expanded folder — the page
+            // pane, divider and detail are gone with the explorer.
             page.navigate("$baseUrl/templates")
             waitFor("#template-list-wrapper")
-            expandFolder("nyc")
-            expandFolder("nyc/mobility")
-            selectLeaf("nyc/mobility/od_matrix.sql")
             shoot("template-explorer.png")
         }
 
         private fun templateUsedBy() {
-            page.navigate("$baseUrl/templates")
+            // #398: the used-by surface is the WORKSPACE's Used by tab; the shot rides a
+            // catalog row into it.
+            page.navigate("$baseUrl/templates?q=" + SHARED_TEMPLATE.substringAfterLast('/'))
             waitFor("#template-list-wrapper")
-            selectLeaf(SHARED_TEMPLATE)
-            // The detail pane's versions list carries the per-version in-use count — the
-            // used-by surface on this screen (templates.md §5.4, ui-screens.md §4.6). The vlist
-            // is 106's reshaped markup (see selectLeaf's note).
-            waitFor("#template-detail .tplx-vlist")
+            page
+                .locator(
+                    "a.tpl-result",
+                    com.microsoft.playwright.Page
+                        .LocatorOptions()
+                        .setHasText(SHARED_TEMPLATE),
+                ).first()
+                .click()
+            waitFor(".tw-root")
+            page.locator("#tw-tab-used").click()
+            waitFor("#tw-pane-used .tplx-usage")
             shoot("template-used-by.png")
         }
 
@@ -1497,27 +1504,6 @@ object SiteShotsMain {
             // no-op the caller is allowed to ask for (a leaf's path is expanded blindly).
             if (summary.getAttribute("aria-expanded") == "true") return
             page.waitForResponse({ it.url().contains(partial) }) { summary.click() }
-        }
-
-        /**
-         * Selects a template leaf, expanding its folder path first. The expansion is NOT
-         * optional and is not inherited from a previous shot: each capture navigates, and a
-         * navigation collapses the tree back to its roots — a leaf two levels down is simply
-         * not in the DOM until the levels above it have been fetched (measured 2026-09-08: the
-         * used-by shot timed out on exactly this, waiting 30 s for a leaf nothing had loaded).
-         */
-        private fun selectLeaf(name: String) {
-            name
-                .split('/')
-                .dropLast(1)
-                .runningReduce { prefix, segment -> "$prefix/$segment" }
-                .forEach { prefix -> expandFolder(prefix) }
-            val leaf = page.locator("button.tpl-leaf:has(.tpl-label[title='$name'])").first()
-            leaf.waitFor()
-            page.waitForResponse({ it.url().contains("/partials/templates/versions") }) { leaf.click() }
-            // 106 reshaped the detail pane to the explorer's vlist markup — the versions list
-            // is .tplx-vrow rows now, not a .ds-table (109's gate run caught the stale pin).
-            waitFor("#template-detail .tplx-vlist")
         }
 
         private fun dismissSecretReveal() {

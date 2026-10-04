@@ -73,6 +73,9 @@ class TemplateCreateTransformTest {
     private fun stubWrite(): io.mockk.CapturingSlot<TemplateDraft> {
         val created = slot<TemplateDraft>()
         every { repository.existsId(any(), any()) } returns false
+        // The success node's refreshed CATALOG list rides out-of-band (#398).
+        every { repository.list(any(), any(), any(), any(), any(), any(), any()) } returns emptyList()
+        every { repository.count(any(), any(), any(), any()) } returns 0
         every { repository.create(any(), capture(created), userId, CreateLifecycle.DRAFT, WriteSurface.SESSION) } answers {
             Template(
                 id = created.captured.id ?: "x",

@@ -70,8 +70,8 @@
        sheet on a boosted route is the defect; the head is where it stops being one.
        The pages' own links are gone — this is the only copy.
 
-       The same exposure remains, unfixed, for `pipeline-editor.css`, `template-editor.css`
-       and `docs.css`, which are page-scoped on boosted routes for the same reason. They
+       The same exposure remains, unfixed, for `pipeline-editor.css` and `docs.css`
+       (`template-editor.css` was hoisted below by #398), which are page-scoped on boosted routes for the same reason. They
        belong to the editor and docs surfaces (090's fence excludes both); the fix is
        identical — hoist the link here — and the round is told so. */-->
   <link th:href="@{/css/template-tree.css}" rel="stylesheet">
@@ -92,6 +92,14 @@
   <!-- #399 — the Visualizations workspace's own panes (design tokens only; the frame is dashboards.css's).
        Head-loaded for 090's reason: the catalog is a boosted route. -->
   <link th:href="@{/css/visualizations.css}" rel="stylesheet">
+  <!-- #398 — the template workspace's rules (design tokens only) over the editor sheet its
+       panes still draw from (`template-editor.css`: the source column, the transform face,
+       the render panel). Head-loaded for 090's reason, §3.0 normative: /templates/{name} is a
+       boosted arrival (the pipeline Details and search links reach it boosted, as does a
+       history restore), and a `<link>` inside `#app-main` is discovered only after the first
+       frame paints. This closes the exposure the line above names for `template-editor.css`. -->
+  <link th:href="@{/css/template-editor.css}" rel="stylesheet">
+  <link th:href="@{/css/template-workspace.css}" rel="stylesheet">
   <!-- 079 §A — the rail's collapsed state, applied BEFORE the first paint.
 
        Until 188 this was the ONE inline script in the layout — the round's only
@@ -273,10 +281,11 @@
 
         <div class="app-nav-section app-rail-label">Build</div>
         <!-- #350 (workspace spec §5, D7/D8) — THE NAVIGATING-TREE PATTERN, one shape for every
-             artifact family that browses as a folder tree (Pipelines here, Dashboards below;
-             Templates is its declared next use). #399: Visualizations joins it below Dashboards
-             with the same four pieces (this block, a browse model, a partial controller, a
-             tree-level fragment) and the same search box. Three parts, kept distinct on purpose:
+             artifact family that browses as a folder tree (Pipelines here; Templates and
+             Dashboards below; workspace spec §5 names Templates the pattern's first reuse).
+             #399: Visualizations joins it below Dashboards with the same four pieces (this
+             block, a browse model, a partial controller, a tree-level fragment) and the same
+             search box. Three parts, kept distinct on purpose:
 
                - the item LINK (unchanged: the catalog page, the active section, the crumb);
                - the TOGGLE beside it (a real button, aria-expanded/aria-controls) — opening the
@@ -318,10 +327,36 @@
             </div>
           </div>
         </div>
-        <a th:href="@{/templates}" class="app-nav-link" data-nav-section="/templates"
-           data-nav-group="Build" data-nav-label="Templates"
-           th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/templates')} ? 'active' : null"
-           th:attr="aria-current=${currentPath != null and #strings.startsWith(currentPath, '/templates')} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#code"></use></svg><span class="app-rail-label">Templates</span><span class="app-nav-badge app-rail-label" th:if="${navCounts?.templates != null}" th:text="${navCounts.templates}">0</span></a>
+        <!-- #398 — the Templates branch is the pattern's declared reuse: the item link is the
+             catalog, the toggle opens the lazy sidebar tree (the same /partials/templates
+             fragments, scope=nav), and a leaf is a full-document link into the template
+             workspace /templates/{name}. -->
+        <div class="app-nav-branch" data-nav-branch="templates">
+          <a th:href="@{/templates}" class="app-nav-link" data-nav-section="/templates"
+             data-nav-group="Build" data-nav-label="Templates"
+             th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/templates')} ? 'active' : null"
+             th:attr="aria-current=${currentPath != null and #strings.startsWith(currentPath, '/templates')} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#code"></use></svg><span class="app-rail-label">Templates</span><span class="app-nav-badge app-rail-label" th:if="${navCounts?.templates != null}" th:text="${navCounts.templates}">0</span></a>
+          <button type="button" class="app-nav-branch-toggle app-rail-label" data-nav-tree-toggle
+                  aria-expanded="false" aria-controls="nav-tree-templates" aria-label="Template folders">
+            <svg class="ds-icon ds-icon-xs tpl-chevron" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#chevron-right"></use></svg>
+          </button>
+          <div class="app-nav-tree app-rail-label" id="nav-tree-templates" data-nav-tree="templates" hidden
+               th:attr="data-nav-workspace=${activeWorkspace},data-nav-root-url=@{/partials/templates(scope='nav')}">
+            <div class="app-nav-tree-search">
+              <input type="search" name="q" class="ds-input app-nav-tree-input" autocomplete="off"
+                     placeholder="Search templates…" aria-label="Search templates in the tree"
+                     data-nav-tree-search
+                     th:attr="hx-get=@{/partials/templates(scope='nav')}"
+                     hx-target="#template-nav-root" hx-swap="outerHTML"
+                     hx-trigger="input changed delay:300ms, search" hx-sync="this:replace">
+            </div>
+            <div class="app-nav-tree-scroll" data-nav-tree-scroll>
+              <div id="template-nav-root" class="tpl-level tpl-level-pending" data-nav-tree-root>
+                <span class="ds-spinner htmx-indicator" aria-hidden="true"></span>
+              </div>
+            </div>
+          </div>
+        </div>
         <a th:href="@{/datasources}" class="app-nav-link" data-nav-section="/datasources"
            data-nav-group="Build" data-nav-label="Datasources"
            th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/datasources')} ? 'active' : null"

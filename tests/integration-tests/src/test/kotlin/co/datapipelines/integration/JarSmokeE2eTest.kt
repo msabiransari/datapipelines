@@ -221,10 +221,10 @@ class JarSmokeE2eTest {
 
     @Test
     fun `the template editor renders from the jar`() {
-        val (body, status) = request("/templates/editor?name=$SEEDED_TEMPLATE", authorSession)
+        val (body, status) = request("/templates/$SEEDED_TEMPLATE", authorSession)
         status shouldBe 200
         body shouldContain "Smoke Template"
-        noneCarriesErrorMarkersAs(authorSession, "/templates/editor?name=$SEEDED_TEMPLATE")
+        noneCarriesErrorMarkersAs(authorSession, "/templates/$SEEDED_TEMPLATE")
     }
 
     /**
@@ -236,9 +236,10 @@ class JarSmokeE2eTest {
      */
     @Test
     fun `a viewer renders the template editor read-only and the lists`() {
-        val (templateEditor, templateEditorStatus) = request("/templates/editor?name=$SEEDED_TEMPLATE", viewerSession)
+        val (templateEditor, templateEditorStatus) = request("/templates/$SEEDED_TEMPLATE", viewerSession)
         templateEditorStatus shouldBe 200
-        // ...and what a viewer gets is the READER's page: the read-only pane, no textarea.
+        // ...and what a viewer gets is the READER's page: the read-only pane, no textarea (#398:
+        // the workspace route, not the retired /templates/editor, which is now a 302).
         templateEditor shouldContain "id=\"versionBody\""
         templateEditor shouldNotContain "id=\"templateBody\""
         request("/pipelines", viewerSession).second shouldBe 200

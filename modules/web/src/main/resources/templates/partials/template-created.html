@@ -1,13 +1,16 @@
 <!-- The create modal's success response (ui-screens.md §5.1, Shape A).
 
      The form targets #template-create-result, so htmx swaps the non-OOB remainder (this
-     success node) there — its arrival is what closes the modal. The refreshed list rides
-     along out-of-band; no HX-Redirect, so the screen never navigates and the toast survives. -->
+     success node) there — its arrival is what closes the modal. The refreshed CATALOG list
+     rides along out-of-band (the modal lives on the catalog page, #398); no HX-Redirect, so
+     the screen never navigates and the toast survives. -->
 <div xmlns:th="http://www.thymeleaf.org">
   <p class="u-success u-text-sm"
      th:text="'Template ' + ${createdName} + ' created.'">created</p>
-  <!-- outerHTML OOB: the browse root already carries id="template-list-wrapper"; the
-       controller set oob=true, which puts hx-swap-oob="true" on it for THIS render only. -->
-  <th:block th:replace="~{partials/templates :: fragment}"></th:block>
+  <!-- outerHTML OOB: the catalog's list root already carries id="template-list-wrapper" (the
+       fragment's own rootId, stamped by the CATALOG scope); the controller set oob=true, which
+       puts hx-swap-oob="true" on it for THIS render only. The create path always fills the
+       flat list (the catalog has no tree), so the search fragment IS the refreshed root. -->
+  <th:block th:replace="~{partials/template-search :: results}"></th:block>
   <div th:replace="~{partials/toast-oob :: oob('success', 'Template created', ${createdName} + ' is ready to edit.')}"></div>
 </div>

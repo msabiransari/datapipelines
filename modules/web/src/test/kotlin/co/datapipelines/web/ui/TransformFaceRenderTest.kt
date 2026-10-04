@@ -1,6 +1,8 @@
 package co.datapipelines.web.ui
 
 import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.pipeline.RetiredFactCitation
+import co.datapipelines.templates.Template
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
@@ -14,22 +16,27 @@ import org.thymeleaf.templateresolver.ClassLoaderTemplateResolver
 import org.thymeleaf.web.servlet.JakartaServletWebApplication
 
 /**
- * 7d (#7, transform-nodes design §9.3/§9.5) — the transform face as markup: the editor page
- * paints it in place of the Freemarker source column, and every user-supplied string — the
+ * 7d (#7, transform-nodes design §9.3/§9.5) — the transform face as markup: the template
+ * workspace (#398: the standalone editor page is gone) paints it in place of the Freemarker
+ * source column, and every user-supplied string — the
  * four panes, a case name, a diff side, a refusal — renders as TEXT. The escaping cases plant
  * markup in each and require it to come back inert.
  */
 class TransformFaceRenderTest {
     @Test
-    fun `the editor page paints the face for a transform - no rail, no Freemarker preview, the select swaps the face`() {
-        val html = render("templates/editor") { page() }
+    fun `the workspace paints the face for a transform - no Render tab, no Freemarker preview, the face posts its own suite and save`() {
+        val html = render("templates/workspace") { page() }
 
         html shouldContain "class=\"te-source tf-face\""
-        html shouldContain "te-body-no-rail"
         html shouldNotContain "Render Context"
         html shouldNotContain "id=\"previewBtn\""
         html shouldNotContain "id=\"templateBody\""
-        html shouldContain "hx-get=\"/partials/templates/transform-face?name=test/shape/order_lines.jsonata\""
+        html shouldNotContain "data-tw-tab=\"render\"" // a transform has no Render tab (workspace.html's isTransform guard)
+        // The face posts its own suite run and save; a version switch is a NAVIGATION in the
+        // workspace (the selector's links), so no select-driven `hx-get` swap of the face is left.
+        html shouldContain "hx-post=\"/partials/templates/transform-face/run-suite\""
+        html shouldContain "hx-post=\"/partials/templates/transform-face/save\""
+        html shouldNotContain "hx-get=\"/partials/templates/transform-face?name="
         html shouldContain "src=\"/js/template-transform-face.js\""
         // Four panes, the language named on the body.
         listOf("tf-body", "tf-contract", "tf-invariants", "tf-tests").forEach { id -> html shouldContain "id=\"$id\"" }
@@ -38,11 +45,12 @@ class TransformFaceRenderTest {
     }
 
     @Test
-    fun `the needs-review marker renders in the editor header only when its flag is set`() {
-        render("templates/editor") { page() } shouldNotContain "data-needs-review"
-        render("templates/editor") {
-            page()
-            setVariable("needsReview", true)
+    fun `the needs-review marker renders in the workspace header only when the viewed version cites a retired fact`() {
+        render("templates/workspace") { page() } shouldNotContain "data-needs-review"
+        render("templates/workspace") {
+            page(
+                retired = listOf(RetiredFactCitation("3f1c0000-0000-0000-0000-000000000001", "superseded", null)),
+            )
         } shouldContain "data-needs-review"
     }
 
@@ -167,21 +175,69 @@ class TransformFaceRenderTest {
         setVariable("panes", TransformPanes.of(stored))
     }
 
-    private fun WebContext.page() {
+    /**
+     * The template workspace's page model for a transform's draft v1 — the variables
+     * `templates/workspace.html` reads, as `TemplateWorkspaceController` fills them (the
+     * `ViewerEditorRenderTest` fixture's shape). [retired] puts the needs-review mark on the
+     * viewed version (`Template.needsReview` derives from it).
+     */
+    private fun WebContext.page(retired: List<RetiredFactCitation> = emptyList()) {
         face()
-        setVariable("_csrf", mapOf("token" to "t"))
+        val stored = (getVariable("template") as Template).copy(retiredFacts = retired)
+        setVariable("template", stored)
+        setVariable("_csrf", mapOf("token" to "t", "parameterName" to "_csrf"))
         setVariable("workspaceHeaderFragment", "")
         setVariable("workspaceOptions", emptyList<Any>())
         setVariable("activeWorkspace", "acme")
         setVariable("activeTheme", "saas")
         setVariable("authenticated", true)
         setVariable("currentPath", "/templates")
-        setVariable("versions", emptyList<Any>())
+        setVariable("navCounts", NavCounts.Counts(1, 1))
+        setVariable("navCurrentPath", stored.id)
+        setVariable("hasSelectedBody", true)
+        setVariable("viewedVersion", stored.version)
+        setVariable("viewedLabel", "v1 · draft")
+        setVariable("viewedIsDraft", true)
+        setVariable("viewedIsCurrent", false)
+        setVariable("viewedStatusLabel", "draft")
+        setVariable("currentVersion", null)
+        setVariable("viewedEditable", true)
         setVariable("hasDraft", true)
         setVariable("draftVersion", 1)
         setVariable("draftHash", "hash-v1-0000000000")
-        setVariable("needsReview", false)
+        setVariable("canDelete", false)
+        setVariable("canDiscardCurrent", false)
+        setVariable("canPurgeDraftInHeader", false)
+        setVariable("releasableVersion", 1)
+        setVariable("currentReleaseVersion", null)
+        setVariable("canAuthor", true)
+        setVariable("activeTab", "source")
+        setVariable("interpolations", emptyList<String>())
+        setVariable("versions", emptyList<Any>())
+        setVariable("templateWorkspace", resolved(stored))
+        setVariable("usedBy", emptyList<Any>())
+        setVariable("usedByCount", 0)
+        setVariable("usedBySets", emptyList<Any>())
+        setVariable("usedByVisualizations", emptyList<Any>())
+        setVariable("usedBySummary", "nothing")
     }
+
+    private fun resolved(stored: Template): TemplateWorkspaceModel.Resolved =
+        TemplateWorkspaceModel.Resolved(
+            name = stored.id,
+            selected = TemplateWorkspaceModel.Selected(stored, null),
+            draft = null,
+            currentVisible = null,
+            versions = emptyList(),
+            usedBy =
+                TemplateWorkspaceModel.UsedByFacts(
+                    pipelines = emptyList(),
+                    pipelineCount = 0,
+                    sets = emptyList(),
+                    visualizations = emptyList(),
+                    summary = "nothing",
+                ),
+        )
 
     private fun WebContext.result(
         refusals: List<FaceRefusal> = emptyList(),
