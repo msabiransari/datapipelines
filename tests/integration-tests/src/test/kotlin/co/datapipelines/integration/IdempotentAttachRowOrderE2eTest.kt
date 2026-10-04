@@ -86,6 +86,7 @@ import java.util.concurrent.TimeoutException
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
 )
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
+@Suppress("LargeClass") // one slot/start-window fixture; splitting the REST/MCP witness would boot the app twice
 class IdempotentAttachRowOrderE2eTest {
     @LocalServerPort
     private var port: Int = 0
@@ -245,7 +246,7 @@ class IdempotentAttachRowOrderE2eTest {
      */
     @Test
     @Order(2)
-    @Suppress("LongMethod") // one wire scenario, including the crash control and MCP parity
+    @Suppress("LongMethod", "CyclomaticComplexMethod") // one wire scenario; waits and crash/MCP controls are assertions
     fun `a never-started refusal releases its key for retries while a crashed original still answers 410`() {
         ensureAuthSeeded()
         registerDatasource()
