@@ -767,14 +767,45 @@ spec-drift tests, the route and read floors, the coverage scans, the page-count 
 the served-manual guards, the config-key drift tests (the list lives in the script; a new guard that
 reads the whole tree or the docs is added there in the same commit). Iterate on its output,
 then run the gate once. It is not the gate: its exit code decides nothing about a merge. Every
-run appends its verdict line — `PRE-GATE PASS|FAIL`, the base, the merge-base, HEAD, the UTC time
-and the five stage exits — to `.pregate-logs/0-verdict.log`, which is where the lander reads a
-delivered lane's verdict (the terminal is the only other place it is printed).
+run appends its verdict line — `PRE-GATE PASS|FAIL`, the base, the merge-base, HEAD, the UTC time,
+the five stage exits, `snap` and the run id — to `.pregate-logs/0-verdict.log`, which is where the
+lander reads a delivered lane's verdict (the terminal is the only other place it is printed).
 Measured need (five lanes, 2026-09-19 to 21): 0–3 extra full gates each, all on lint,
 cross-cutting guards or foreign fixtures. Both this script and `scripts/gate.sh` pass
 `-Pdp.browser.ciPatience=true` to every Gradle invocation (#438), so the browser suite inside a
 gate or a pre-gate waits CI's 90 s per action while a plain `./gradlew :tests:browser-tests:test`
 keeps 30 s.
+
+**Per-stage evidence survives the run (#441).** Stage 3 reruns the guard classes FILTERED in
+modules stage 2 already ran, and Gradle deletes a test task's result directory before it writes:
+by the end of a pre-gate the touched modules' stage-2 XML is gone, so a post-run `test-recount.sh`
+used to read only the guards and under-report the bulk of the tests. Every run now gets its own
+directory, `.pregate-logs/runs/<run-id>/` (run-id = UTC stamp + short HEAD + PID), holding a
+`MANIFEST.txt` (base, merge-base, HEAD, timestamp, each stage's executed/skipped status and its
+original exit) and one `<stage>/` mirror of that stage's XML (`2/modules/<m>/build/test-results/…`,
+`2b/tests/<m>/…`, `3/modules|tests/…`). Each test-producing stage is snapshotted immediately after
+it returns — before the next stage can overwrite it, and even when the stage failed, because the
+failing XML is the evidence. `2b` snapshots only the modules its own invocation actually ran, so a
+stale earlier result is never presented as this run's. Read one stage at a time:
+
+```bash
+./scripts/test-recount.sh .pregate-logs/runs/<run-id>/2   # that stage's inventory only
+./scripts/test-recount.sh .pregate-logs/runs/<run-id>/3
+```
+
+The stages are never summed: a guard class may legitimately run in stage 2 and in stage 3, so each
+root's counts stand alone and there is no "unique tests" total across stages. Each stage dir also
+carries `PROVENANCE.txt`, the stage log's test-task status lines: a task Gradle marked `UP-TO-DATE`
+or `FROM-CACHE` means the copied XML is a previous execution's, not fresh evidence, and the
+manifest's `provenance=` field says whether that record exists — a file's existence is never read
+as a fresh run. A copy, provenance or manifest write failure refuses a PASS (`snap=1` in the verdict
+line, beside the unchanged five stage exits) even when every Gradle stage exited 0; it never turns a
+Gradle failure into success. A stage that ran but produced no XML is recorded (`files=0`), malformed
+XML is preserved and named by the recount (`unreadable=`), and a skipped stage is recorded as
+skipped rather than counted as an empty pass. `./scripts/pregate.sh --self-test` drives the real
+orchestration over isolated fixtures with a recording, refusing Gradle stand-in and asserts
+per-stage counts and paths, a failing stage's retained XML, and that a second invocation cannot
+reuse the previous run's results.
 
 **A tooling crash is neither green nor red.** An OOM-killed daemon, `Could not write XML test
 results` (two builds sharing one `build/`), a corrupted result store — re-run before drawing any

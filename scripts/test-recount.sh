@@ -6,6 +6,19 @@
 #   ./scripts/test-recount.sh
 #   → files=298 tests=3155 failures=0 errors=0 skipped=1 unreadable=0
 #
+#   ./scripts/test-recount.sh <results-root>
+#   → the same counts over that root's own modules/* and tests/* trees. #441: the
+#     pre-gate snapshots each stage's XML under .pregate-logs/runs/<run-id>/<stage>/, so
+#     read ONE stage at a time:
+#
+#       ./scripts/test-recount.sh .pregate-logs/runs/<run-id>/2
+#       ./scripts/test-recount.sh .pregate-logs/runs/<run-id>/3
+#
+#     A stage root yields ONLY that stage's inventory. Guard classes can run in more than
+#     one stage, so the stages are never summed into a purported unique-test total.
+#     An explicit root that is not a directory is refused (exit 2) rather than reported
+#     as an empty success.
+#
 # ---------------------------------------------------------------------------
 # WHY THIS SCRIPT EXISTS
 # ---------------------------------------------------------------------------
@@ -40,7 +53,19 @@
 # the very total this script exists to keep honest.
 
 set -u
-cd "$(dirname "$0")/.." || exit 2
+# #441: an optional results root (the saved pre-gate stage directory). No argument keeps
+# today's repo-root behavior exactly; an argument that is missing or not a directory is
+# refused rather than reported as an empty success.
+if [ "$#" -ge 1 ]; then
+  root="$1"
+  if [ ! -d "$root" ]; then
+    echo "test-recount.sh: results root '$root' is not a directory — nothing recounted" >&2
+    exit 2
+  fi
+  cd "$root" || exit 2
+else
+  cd "$(dirname "$0")/.." || exit 2
+fi
 
 python3 - <<'PY'
 import glob, xml.etree.ElementTree as ET

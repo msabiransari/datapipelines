@@ -26,14 +26,25 @@
 #
 # Usage: ./scripts/pregate.sh [base-ref]     (default: origin/main; the diff is base...HEAD
 #        plus the working tree). Logs: .pregate-logs/ — the verdict line of every run is
-#        appended to .pregate-logs/0-verdict.log (PASS|FAIL, base, merge-base, HEAD, UTC time).
-#        ./scripts/pregate.sh --self-test    (the stage-2b selector over isolated fixtures
-#        and a recording, refusing Gradle stand-in — no gradle, no repo state touched).
+#        appended to .pregate-logs/0-verdict.log (PASS|FAIL, base, merge-base, HEAD, UTC time,
+#        the five stage exits, snap, and the run id). #441: each test-producing stage's JUnit
+#        XML is snapshotted under .pregate-logs/runs/<run-id>/<stage>/ before the next stage
+#        can overwrite it; read one stage with `./scripts/test-recount.sh <run-dir>/<stage>`.
+#        ./scripts/pregate.sh --self-test    (the stage-2b selector AND the #441 evidence
+#        capture, over isolated fixtures and a recording, refusing Gradle stand-in — no
+#        gradle, no repo state touched).
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"; cd "$ROOT"
 # shellcheck source=scripts/pregate-2b-lib.sh
 source "$ROOT/scripts/pregate-2b-lib.sh"
-if [ "${1:-}" = "--self-test" ]; then pg2b::self_test; exit $?; fi
+# shellcheck source=scripts/pregate-results-lib.sh
+source "$ROOT/scripts/pregate-results-lib.sh"
+if [ "${1:-}" = "--self-test" ]; then
+  pg2b::self_test; s_sel=$?
+  pgres::self_test; s_res=$?
+  [ "$s_sel" -eq 0 ] && [ "$s_res" -eq 0 ]
+  exit $?
+fi
 BASE="${1:-origin/main}"; LOGDIR="$ROOT/.pregate-logs"; mkdir -p "$LOGDIR"
 
 # run() appends `-Pdp.browser.ciPatience=true` (#438): the pre-gate's browser-class stage
@@ -51,12 +62,22 @@ mb="$(git merge-base "$BASE" HEAD 2>/dev/null || echo "$BASE")"
 changed_files="$( { git diff --name-only "$mb" HEAD; git diff --name-only; git ls-files --others --exclude-standard; } | sort -u)"
 touched="$(echo "$changed_files" | grep -oE '^modules/[a-z-]+/' | sort -u | sed -E 's|^modules/([a-z-]+)/|:modules:\1|')"
 touched_tests="$(echo "$changed_files" | grep -oE '^tests/[a-z-]+/' | sort -u | sed -E 's|^tests/([a-z-]+)/|\1|')"
+
+# #441: this invocation's own evidence directory. `snap` carries any copy/manifest
+# failure into the verdict; it never replaces a Gradle exit with success.
+RUN_ID="$(pgres::new_run_id "$LOGDIR")"
+RUN_DIR="$(pgres::run_dir "$LOGDIR" "$RUN_ID")"
+MANIFEST="$RUN_DIR/MANIFEST.txt"
+snap=0
+pgres::manifest_init "$MANIFEST" "$RUN_ID" "$BASE" "$mb" "$(git rev-parse --short HEAD 2>/dev/null || echo HEAD)" || snap=1
+
 echo "=============================================================="
 echo " Pre-gate   |   $(date '+%Y-%m-%d %H:%M:%S %z')   |   base $BASE ($mb)"
 echo " touched modules: ${touched:-(none)}"
 echo " touched tests/ modules: ${touched_tests:-(none)}"
 echo " browser patience: CI's 90 s per action (-Pdp.browser.ciPatience=true, #438)"
 echo " logs: $LOGDIR"
+echo " evidence: $RUN_DIR"
 echo "=============================================================="
 
 # --- 1. lint, whole tree --------------------------------------------------------
@@ -67,6 +88,7 @@ echo "=============================================================="
 lint=$(run "$LOGDIR/1-lint.log" ktlintCheck detekt composeEnvAudit composeArgvSecretsAudit verifyModuleDependencies verifyVerificationMetadataDocs --continue)
 echo "  1 lint + root audits (ktlintCheck detekt composeEnvAudit composeArgvSecretsAudit verifyModuleDependencies verifyVerificationMetadataDocs)  EXIT=$lint"
 [ "$lint" -ne 0 ] && grep -E 'ktlint|detekt|\.kt:[0-9]+|audit:|^\s+[0-9]+ |verifyModule|verifyVerification|What went wrong' "$LOGDIR/1-lint.log" | grep -vE '^> Task|UP-TO-DATE' | head -24 | sed 's/^/      /'
+pgres::manifest_stage "$MANIFEST" stage-1 executed "$lint" "lint+root-audits" || snap=1
 
 # --- 2. the touched modules' check: every test task and the coverage floor ------
 # `<module>:check` is that module's slice of the gate's `build`: the unfiltered `test`, every
@@ -112,6 +134,18 @@ PY
   fi
 done
 
+# #441: snapshot stage 2 NOW. Stage 3 reruns the same modules' `test` task FILTERED and
+# Gradle deletes test-results/test/ before it writes, so without this copy the stage-2 XML
+# is gone by the end of the run. The snapshot happens on a failed stage too — the failing
+# XML is the evidence. A copy/manifest failure sets `snap` and refuses the verdict.
+roots2=()
+for m in $touched; do r="${m#:}"; roots2+=("${r//:/\/}"); done
+if [ -n "$touched" ]; then
+  pgres::capture "$ROOT" "$RUN_DIR" 2 executed "$mod" "$LOGDIR/2-touched-modules.log" ${roots2[@]+"${roots2[@]}"} || snap=1
+else
+  pgres::capture "$ROOT" "$RUN_DIR" 2 skipped 0 "" || snap=1
+fi
+
 # --- 2b. tests/* modules: the changed test classes and their affected consumers ------
 # A changed `tests/<m>/build.gradle.kts` means the knobs changed → that module unfiltered.
 # The selection itself lives in scripts/pregate-2b-lib.sh (drivable by --self-test): a
@@ -124,6 +158,7 @@ done
 # running (#342 round review, 2026-09-30). The module's zero-test guard is skipped (a
 # filtered run always trips it — §9.4); the merge gate runs these modules whole.
 t2b=0
+t2b_ran=()
 if [ -n "$touched_tests" ]; then
   targs=()
   for m in $touched_tests; do
@@ -142,6 +177,7 @@ if [ -n "$touched_tests" ]; then
     done < <(pg2b::gradle_args "$m" $plan)
     if [ "${#margs[@]}" -gt 0 ]; then
       targs+=("${margs[@]}")
+      t2b_ran+=("tests/$m")
     else
       echo "  2b tests/$m: touched, but no test source changed → nothing to run here"
     fi
@@ -152,6 +188,15 @@ if [ -n "$touched_tests" ]; then
 fi
 echo "  2b tests/* changed classes                         EXIT=$t2b"
 [ "$t2b" -ne 0 ] && grep -E 'FAILED$|> Task .* FAILED' "$LOGDIR/2b-tests-modules.log" | head -20 | sed 's/^/      /'
+# #441: snapshot stage 2b before stage 3, which also reruns :tests:integration-tests:test
+# (guards) and would otherwise erase the changed classes' XML. Only modules whose task this
+# invocation actually ran are snapshotted, so a stale prior-run result is never presented as
+# this run's.
+if [ "${#t2b_ran[@]}" -gt 0 ]; then
+  pgres::capture "$ROOT" "$RUN_DIR" 2b executed "$t2b" "$LOGDIR/2b-tests-modules.log" ${t2b_ran[@]+"${t2b_ran[@]}"} || snap=1
+else
+  pgres::capture "$ROOT" "$RUN_DIR" 2b skipped 0 "" || snap=1
+fi
 
 # --- 3. cross-cutting guards -----------------------------------------------------
 # One line per module: the guard classes that read the WHOLE tree or the docs, so a
@@ -190,6 +235,11 @@ done
 grd=$(run "$LOGDIR/3-guards.log" "${args[@]}" --continue)
 echo "  3 cross-cutting guards (filtered, zero-test guard skipped) EXIT=$grd"
 [ "$grd" -ne 0 ] && grep -E 'FAILED$|> Task .* FAILED' "$LOGDIR/3-guards.log" | head -20 | sed 's/^/      /'
+# #441: snapshot stage 3's guarded XML as its own inventory. It is never summed with
+# stage 2: a guard class may legitimately also run in stage 2, so the two stages are read
+# separately (DEVELOPMENT.md §9.4).
+mapfile -t guard_roots < <(for m in "${!GUARDS[@]}"; do r="${m#:}"; printf '%s\n' "${r//:/\/}"; done | sort)
+pgres::capture "$ROOT" "$RUN_DIR" 3 executed "$grd" "$LOGDIR/3-guards.log" ${guard_roots[@]+"${guard_roots[@]}"} || snap=1
 
 # --- 4. every module's test sources compile ------------------------------------
 # The cross-module trap (MISTAKES.md): a changed signature, a test in ANOTHER module
@@ -197,20 +247,25 @@ echo "  3 cross-cutting guards (filtered, zero-test guard skipped) EXIT=$grd"
 cmp=$(run "$LOGDIR/4-compile-all-tests.log" compileTestKotlin --continue)
 echo "  4 compileTestKotlin, every module                  EXIT=$cmp"
 [ "$cmp" -ne 0 ] && grep -E '^e: |error:|FAILED' "$LOGDIR/4-compile-all-tests.log" | head -20 | sed 's/^/      /'
+pgres::manifest_stage "$MANIFEST" stage-4 executed "$cmp" "compileTestKotlin-all-modules" || snap=1
 
 # The verdict is also APPENDED to a file, one line per run: the terminal is the only other place it
 # lives, and the lander reads a delivered lane's verdict from here (2026-10-02 — until then it had to
 # re-derive it from the five step logs).
 verdict() { # verdict PASS|FAIL → one line in .pregate-logs/0-verdict.log
-  echo "PRE-GATE $1 base=$BASE merge-base=$(git rev-parse --short "$mb" 2>/dev/null || echo "$mb") head=$(git rev-parse --short HEAD) at=$(date -u '+%Y-%m-%dT%H:%M:%SZ') lint=$lint mod=$mod t2b=$t2b grd=$grd cmp=$cmp" >> "$LOGDIR/0-verdict.log"
+  echo "PRE-GATE $1 base=$BASE merge-base=$(git rev-parse --short "$mb" 2>/dev/null || echo "$mb") head=$(git rev-parse --short HEAD) at=$(date -u '+%Y-%m-%dT%H:%M:%SZ') lint=$lint mod=$mod t2b=$t2b grd=$grd cmp=$cmp snap=$snap run=$RUN_ID" >> "$LOGDIR/0-verdict.log"
 }
 echo "--------------------------------------------------------------"
-if [ "$lint" -eq 0 ] && [ "$mod" -eq 0 ] && [ "$t2b" -eq 0 ] && [ "$grd" -eq 0 ] && [ "$cmp" -eq 0 ]; then
+# `snap` joins the decision: a copy/manifest failure refuses a PASS and is reported
+# alongside the original five stage exits, never in place of them.
+if [ "$lint" -eq 0 ] && [ "$mod" -eq 0 ] && [ "$t2b" -eq 0 ] && [ "$grd" -eq 0 ] && [ "$cmp" -eq 0 ] && [ "$snap" -eq 0 ]; then
   echo "  PRE-GATE PASS — a lane stops here (protocol 2026-09-24); the orchestrator's gate on the merge SHA is the verdict"
   verdict PASS
+  pgres::manifest_verdict "$MANIFEST" PASS "$RUN_ID" || true
   exit 0
 else
   echo "  PRE-GATE FAIL — fix the lines above"
   verdict FAIL
+  pgres::manifest_verdict "$MANIFEST" FAIL "$RUN_ID" || true
   exit 1
 fi
