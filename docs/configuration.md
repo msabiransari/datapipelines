@@ -1,8 +1,8 @@
 # Configuration Reference
 
-**Status:** v1.49 (single source of truth for every config key)
+**Status:** v1.50 (single source of truth for every config key)
 **Owner:** datapipelines.co core
-**Last updated:** 2026-10-02
+**Last updated:** 2026-10-03
 
 ---
 
@@ -493,6 +493,7 @@ The scheduler's knobs ([Scheduler](scheduler.md)). Every instance serves the sch
 | `datapipelines.scheduler.shutdown-wait-seconds` | `5` | On shutdown, how long to wait for launches in progress to reach "started" before the executions are drained; also the library's shutdown wait. 1–15 — Spring's per-phase stop timeout is 30 s and the execution drain needs its own 20 s |
 | `datapipelines.scheduler.min-interval-seconds` | `300` | A cron whose consecutive occurrences come closer than this (in the 14 days after the save) is refused, `schedule.validation.interval_too_short`. ≥ 60 |
 | `datapipelines.scheduler.max-schedules-per-workspace` | `100` | Live schedules per workspace; one more is `schedule.limit.per_workspace`. ≥ 1 |
+| `datapipelines.scheduler.notifications.max-recipients` | `20` | Maximum normalized recipients per schedule; bounded 1–100 at binding. These are defaults chosen for #442a, not an owner ruling. Settings only; delivery remains off until part b |
 
 Scheduled runs keep the instance's execution timeout (`datapipelines.executor.execution-timeout-seconds`) and ask for the maximum result TTL (`datapipelines.result.ttl-max-seconds`); there is no scheduler-specific budget in v1. One Spring Boot key is set with them: `management.health.db-scheduler.enabled: false` — the library's health indicator reports DOWN on an API-mode instance (it never starts there), and a dispatcher stall must not restart a pod; watch the scheduler's metrics instead ([Observability §4](observability.md#4-metrics)).
 
@@ -862,6 +863,8 @@ datapipelines:
     shutdown-wait-seconds: ${DATAPIPELINES_SCHEDULER_SHUTDOWN_WAIT_SECONDS:5}
     min-interval-seconds: ${DATAPIPELINES_SCHEDULER_MIN_INTERVAL_SECONDS:300}
     max-schedules-per-workspace: ${DATAPIPELINES_SCHEDULER_MAX_SCHEDULES_PER_WORKSPACE:100}
+    notifications:
+      max-recipients: ${DATAPIPELINES_SCHEDULER_NOTIFICATIONS_MAX_RECIPIENTS:20}
   parameters:                      # §3.30 — the parameter engine (#194)
     max-parameters-per-set: ${DATAPIPELINES_PARAMETERS_MAX_PARAMETERS_PER_SET:64}
     max-options-per-selector: ${DATAPIPELINES_PARAMETERS_MAX_OPTIONS_PER_SELECTOR:200}
@@ -1034,6 +1037,7 @@ Validation runs in `@PostConstruct` of a `ConfigValidator` bean. Failures stop s
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-03 | v1.50 | 442a (#442) | Saved schedule notification settings: recipients and five event choices, validated and shown by role; omitted PUT settings preserved; mail remains off pending part b. |
 | 2026-10-02 | v1.49 | S3 (#376) the evaluation history's retention | §3.30 states that the parameter-evaluation history has NO key of its own: the execution-event retention (§3.11) deletes finished records on its hourly tick, and the stale sweep's cutoff is `evaluate-timeout-seconds` plus a fixed one-minute margin. No key, default or bound added or changed (the owner's §11.5 ruling). |
 | 2026-10-02 | v1.48 | 140 (#140) the Helm chart maps the DuckDB operator keys | §3.25's operator instruction names the Helm route: the reference chart's `duckdb.extensionDirectory` and `duckdb.memoryLimit` values render these two env vars when non-empty, an empty value renders no entry (inheriting the image's bundled extension directory), and an `extraEnv` double mapping is refused at render time. No key, default or bound changed. |
 | 2026-10-02 | v1.47 | 167 (#167) the probe's timeout ceiling | §3.2: `node-query-timeout-seconds` and `node-query-timeout-seconds-by-dialect.<dialect>` are documented as ALSO the `sql_probe` timeout ceiling (was a static 30 s in code). No key, default or bound added or changed — the existing knob is the one truth. |

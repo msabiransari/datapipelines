@@ -37,6 +37,11 @@ class SchedulerUnitTest {
         listOf(p.maxConcurrentRuns, p.latenessSeconds, p.catchUpMaxAgeSeconds, p.shutdownWaitSeconds) shouldBe listOf(4, 600L, 86_400L, 5L)
         listOf(p.minIntervalSeconds, p.maxSchedulesPerWorkspace) shouldBe listOf(300L, 100)
         p.startGrace shouldBe Duration.ofMinutes(3)
+        p.notifications.maxRecipients shouldBe 20
+        SchedulerProperties.Notifications(1).maxRecipients shouldBe 1
+        SchedulerProperties.Notifications(100).maxRecipients shouldBe 100
+        shouldThrow<IllegalArgumentException> { SchedulerProperties.Notifications(0) }
+        shouldThrow<IllegalArgumentException> { SchedulerProperties.Notifications(101) }
         shouldThrow<IllegalArgumentException> { SchedulerProperties(shutdownWaitSeconds = 30) }
         shouldThrow<IllegalArgumentException> { SchedulerProperties(minIntervalSeconds = 30) }
         shouldThrow<IllegalArgumentException> { SchedulerProperties(catchUpMaxAgeSeconds = 700_000) }

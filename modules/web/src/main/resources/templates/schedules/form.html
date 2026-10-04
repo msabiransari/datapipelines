@@ -8,8 +8,8 @@
      interactive run uses (R7). A refusal comes back as the catalog's message BESIDE the field
      it names; anything that names no field is a toast.
 
-     NOT in this slice (record §6): the notification e-mail list (slice 4 — the schema has no
-     recipients yet) and any key or role assignment (R2 — a schedule fires as the system
+     Notification settings are saved in slice 4 part a; mail delivery awaits part b.
+     Key and role assignment remain outside this form (R2 — a schedule fires as the system
      identity). The version is `current`, fixed: slice 1 refuses a numeric version
      (scheduler.md §2.1). -->
 <th:block xmlns:th="http://www.thymeleaf.org" th:fragment="skeletons">
@@ -125,6 +125,22 @@
             <p class="ds-field-help u-mt-xs" data-slot="params-status">Choose a pipeline to see the parameters its current version declares.</p>
             <div class="sch-params" data-slot="params"></div>
             <p class="ds-field-error" data-field-error="parameters" hidden></p>
+          </fieldset>
+
+          <fieldset class="sch-fieldset">
+            <legend class="ds-field-label">Notifications</legend>
+            <div class="ds-field">
+              <label class="ds-field-label" for="sch-f-recipients">Recipients</label>
+              <input class="ds-input" id="sch-f-recipients" type="text" aria-describedby="sch-f-recipients-help">
+              <p class="ds-field-help" id="sch-f-recipients-help">Comma-separated email addresses. Leave empty for no mail.</p>
+            </div>
+            <label class="sch-radio"><input type="checkbox" name="notification_event" value="start"> <span>Started</span></label>
+            <label class="sch-radio"><input type="checkbox" name="notification_event" value="success"> <span>Succeeded</span></label>
+            <label class="sch-radio"><input type="checkbox" name="notification_event" value="failure" checked> <span>Failed, cancelled or could not start</span></label>
+            <label class="sch-radio"><input type="checkbox" name="notification_event" value="unknown" checked> <span>Outcome unknown</span></label>
+            <label class="sch-radio"><input type="checkbox" name="notification_event" value="blocked" checked> <span>Schedule blocked</span></label>
+            <p class="ds-field-error" data-field-error="notifications" hidden></p>
+            <div class="app-alert app-alert-warning" role="note" th:if="${notificationDelivery == null or notificationDelivery.state == 'off'}">Scheduler mail is not enabled on this deployment — these settings are saved, but no mail is sent.</div>
           </fieldset>
 
           <div class="u-row u-gap-sm u-right sch-form-actions">

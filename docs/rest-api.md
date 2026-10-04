@@ -1,6 +1,6 @@
 # REST API + SSE Specification
 
-**Status:** v2.83 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
+**Status:** v2.84 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
 **Last updated:** 2026-10-04
@@ -2353,6 +2353,7 @@ A **schedule** runs a registered executor's job — in v1 the `pipeline` executo
 | `cron` | string | Five fields, Unix style (`minute hour day-of-month month day-of-week`) |
 | `timezone` | string | IANA region id (`America/New_York`) |
 | `missed_run_policy` | string | `skip` (default) \| `latest` |
+| `notifications` | object | `{recipient_count, events, delivery: {state: "off", reason: "disabled"}}`; `recipients` is present ONLY when the workspace context permits `schedule.update`. Every other reader gets count/events/delivery and no addresses. Events serialize in order `start`, `success`, `failure`, `unknown`, `blocked` (#442a) |
 | `enabled` | bool | `false` while paused |
 | `condition` | string | `enabled` \| `paused` \| `blocked` — blocked wins |
 | `blocked` | object \| null | `{reason, at, run_id}` while blocked (`run_unknown`, or an executor refusal such as `pointer_null`) |
@@ -2390,6 +2391,10 @@ A **schedule** runs a registered executor's job — in v1 the `pipeline` executo
 
 `POST /schedules` — `schedule.create`. Body: `name`, `payload`, `cron`, `timezone` (required); `executor` (default `pipeline`), `parameters` (default `{}`), `missed_run_policy` (default `skip`). Optional `Idempotency-Key`, held durably: a replay of the same request answers `200` with the original schedule; a replay with a different body is `409 idempotency.key_reused_for_different_request`. `201` with the schedule and its `ETag`. Refusals: the `schedule.validation.*` family, `409 schedule.name_taken`, `409 schedule.limit.per_workspace`, and a parameter refusal exactly as an interactive run's (§13.4).
 
+**`notifications`** (#442a) is optional: absent or JSON null creates no recipients and events `failure`, `unknown`, `blocked` (start/success off). A present object accepts optional `recipients` (list of strings) and `events` (list of the five event names); an omitted member uses its create default. Example: `{"recipients":["a@example.com"],"events":["failure","unknown","blocked"]}`. Addresses are trimmed, domains lower-cased and duplicates removed case-insensitively, preserving first spelling and order; events deduplicate. One WHATWG valid e-mail address grammar, at most 254 characters, refuses header injection. The configured recipient limit defaults to 20. The idempotency hash includes normalized effective settings; case-only duplicates and reordered event choices replay the same meaning. Pre-V49 create keys still replay when the effective notification settings are the old defaults (no recipients and the three default events); different settings cannot match that legacy hash. Mail remains off: settings are saved, nothing sends until part b.
+
+| `schedule.validation.notifications_invalid` | 400 | Notification settings refused (#442a). `details` contains only `{field, reason}`: `notifications`, `notifications.recipients`, an indexed recipient or event field; `not_an_object`, `not_a_list`, `not_a_string`, `syntax`, `too_long`, `too_many`, `unknown_event`. No address is echoed |
+
 **`payload.parameter_bindings`** (#9 slice 3) — an optional, ADDITIVE key of payload schema 1. One binding per declared `DATE` parameter:
 
 ```json
@@ -2416,6 +2421,8 @@ Keywords are an exact allowlist — `TODAY` and `YESTERDAY`, uppercase — and a
 ### 20.5 Edit a schedule
 
 `PUT /schedules/{id}` with `If-Match: "<revision>"` — `schedule.update`. Body as §20.2 (the whole schedule), `parameter_bindings` included — replacing the saved bindings wholesale, like every other body field. A stale revision is `409 schedule.revision_conflict` (`details.current_revision`); a missing `If-Match` is refused as on §5.5. Changing the cron or timezone recomputes `next_due_at` from now — occurrences of the old pattern are not "missed". Runs already recorded keep the revision they were recorded under.
+
+**Additive frozen-contract rule (#442a):** absent or JSON-null `notifications` KEEPS the stored settings, so clients written before this field cannot wipe them. A present object replaces each supplied member; an omitted member keeps its stored value. `recipients: []` turns mail off; `events: []` selects no events. Neither omission resets a member to its create default.
 
 ### 20.6 Delete a schedule
 
@@ -2738,6 +2745,7 @@ window. A dashboard execution has no stored result: `GET /api/v1/executions/{id}
 
 ## Appendix A: Change Log
 
+| 2026-10-04 | v2.84 | 442a (#442) — renumbered at merge after 403's v2.83 (the lane's row sat atop the older second table) | Saved schedule notification settings: recipients and five event choices, validated and shown by role; omitted PUT settings preserved; mail remains off pending part b. |
 | 2026-10-04 | v2.83 | #403 release never-started reservations — renumbered at merge after 382's v2.82 (the lane's row sat atop the older second table) | **§3.5**: pre-start refusals release the caller’s key before completing the error response; same-key retries re-execute. A follower already attached or an original that died without cleanup retains the id-free 410. Started executions retain their reservations. |
 | 2026-10-04 | v2.82 | #382 the dashboard binding body is read strictly — renumbered at merge after 384's v2.81 | **§23.2** — the `POST /api/v1/dashboards/bindings` row names the strict body reader (#333's, the fifth DTO-bodied route it had omitted): a number or boolean for a string field, an unknown key and a missing `name_prefix` are the standard `400 pipeline.execution.invalid_parameter_type` (`wrong_type` / `unknown_key` / `missing`), the value never echoed; before this a number bound as text (`name_prefix: 12` was the folder "12") and an unknown key was dropped. No route, scope, status code or success shape changed. |
 | 2026-10-04 | v2.81 | #384 the one SSE cap spans all three families | **§12.1** — the execution registry now counts refresh and observed-evaluation streams beside its own, so `sse.max-streams-per-user` is the one per-user cap the sentence already promised (#375 D7): a user at the cap through refresh or evaluation streams is refused a new execution stream (`rate_limit.exceeded`), and the doc stops claiming every counter lives in Redis — the request-rate counters are Redis-backed, but the three SSE registries count **per instance**, so the SSE cap is per-instance in a multi-instance deployment, and check-then-open (the cross-family reads included) is non-atomic, a bounded overshoot. No route, field, code or permission changed. Wire-proven by `CrossFamilySseCapE2eTest`. |

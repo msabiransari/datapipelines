@@ -521,6 +521,8 @@ datapipelines:
     shutdown-wait-seconds: ${DATAPIPELINES_SCHEDULER_SHUTDOWN_WAIT_SECONDS:5}
     min-interval-seconds: ${DATAPIPELINES_SCHEDULER_MIN_INTERVAL_SECONDS:300}
     max-schedules-per-workspace: ${DATAPIPELINES_SCHEDULER_MAX_SCHEDULES_PER_WORKSPACE:100}
+    notifications:
+      max-recipients: ${DATAPIPELINES_SCHEDULER_NOTIFICATIONS_MAX_RECIPIENTS:20}
   # The parameter engine (#194; configuration.md §3.30, the design record §11). Appended as the LAST child of
   # datapipelines: (the reparenting lesson — MISTAKES.md); ParametersConfigKeysSpecDriftTest pins its neighbours.
   parameters:
