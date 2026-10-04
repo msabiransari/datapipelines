@@ -503,7 +503,7 @@ that competes with everything else the box is doing — the create-workspace for
 (#283/#303/#327) at 30 s while every assertion held, each green on the incremental. Those waits
 use `BrowserSuite.FIRST_RENDER_TIMEOUT_MS` (90 s, CI and local alike); every action after them
 acts on a present DOM and keeps the ordinary patience (30 s locally, where a 30 s wait IS the
-defect).
+defect; the gates raise that to CI's 90 s per action with `-Pdp.browser.ciPatience=true`, #438).
 
 ```bash
 # The marketing site's screenshots, produced by a script rather than by hand (070 §C).
@@ -771,7 +771,10 @@ run appends its verdict line — `PRE-GATE PASS|FAIL`, the base, the merge-base,
 and the five stage exits — to `.pregate-logs/0-verdict.log`, which is where the lander reads a
 delivered lane's verdict (the terminal is the only other place it is printed).
 Measured need (five lanes, 2026-09-19 to 21): 0–3 extra full gates each, all on lint,
-cross-cutting guards or foreign fixtures.
+cross-cutting guards or foreign fixtures. Both this script and `scripts/gate.sh` pass
+`-Pdp.browser.ciPatience=true` to every Gradle invocation (#438), so the browser suite inside a
+gate or a pre-gate waits CI's 90 s per action while a plain `./gradlew :tests:browser-tests:test`
+keeps 30 s.
 
 **A tooling crash is neither green nor red.** An OOM-killed daemon, `Could not write XML test
 results` (two builds sharing one `build/`), a corrupted result store — re-run before drawing any

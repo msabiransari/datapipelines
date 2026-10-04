@@ -85,6 +85,7 @@ rm -rf "$LOGDIR"; mkdir -p "$LOGDIR"
 echo "=============================================================="
 echo " Gate A — $CYCLES cycle(s)   |   $(date '+%Y-%m-%d %H:%M:%S %z')"
 echo " logs: $LOGDIR"
+echo " browser patience: CI's 90 s per action (-Pdp.browser.ciPatience=true, #438)"
 echo "=============================================================="
 
 # ---- rule 3: other build actors -------------------------------------------
@@ -108,12 +109,15 @@ fi
 # `-P` reaches the project properties: `-D` system properties and
 # ORG_GRADLE_PROJECT_* env vars lose to the repo's gradle.properties (measured
 # 2026-09-19). Word-split on purpose; quote nothing that needs a space.
+# run() also appends `-Pdp.browser.ciPatience=true` (#438), so this gate's browser
+# suite gets CI's 90 s per-action patience; because GATE_GRADLE_ARGS is appended
+# AFTER it, a `-Pdp.browser.ciPatience=false` passed here overrides it for the run.
 read -r -a GATE_EXTRA_ARGS <<< "${GATE_GRADLE_ARGS:-}"
 [ "${#GATE_EXTRA_ARGS[@]}" -gt 0 ] && echo " gradle args: ${GATE_EXTRA_ARGS[*]}"
 
 run() { # run <logfile> <args...>  → echoes exit code, never pipes gradle
   local log="$1"; shift
-  ./gradlew "$@" "${GATE_EXTRA_ARGS[@]}" > "$log" 2>&1
+  ./gradlew "$@" -Pdp.browser.ciPatience=true "${GATE_EXTRA_ARGS[@]}" > "$log" 2>&1
   echo $?
 }
 

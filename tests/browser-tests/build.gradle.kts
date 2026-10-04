@@ -90,4 +90,12 @@ tasks.named<Test>("test") {
     if (project.providers.gradleProperty("junit.jupiter.testclass.order.default").orNull == null) {
         systemProperty("junit.jupiter.testclass.order.default", "org.junit.jupiter.api.ClassOrderer\$ClassName")
     }
+    // #438 (owner ruling 2026-10-03): the gates run the browser suite with CI's per-action
+    // patience. Only a project property reaches here — `-D` and ORG_GRADLE_PROJECT_* env vars
+    // lose to the repo's gradle.properties (measured 2026-09-19) — so scripts/gate.sh and
+    // scripts/pregate.sh pass `-Pdp.browser.ciPatience=true` and this forwards it to the test
+    // JVM BrowserSuite reads. Absent = 30 s, where a plain local run stays impatient.
+    project.providers.gradleProperty("dp.browser.ciPatience").orNull?.let {
+        systemProperty("dp.browser.ciPatience", it)
+    }
 }
