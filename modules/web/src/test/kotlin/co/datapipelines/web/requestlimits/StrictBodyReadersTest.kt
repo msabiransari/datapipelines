@@ -43,8 +43,8 @@ import java.util.UUID
 
 /**
  * #333 reader 4 - the five DTO-bodied handlers (#382 added the dashboard key binding) refuse a JSON number or
- * boolean where the DTO declares a STRING (and a string or float where it declares an integer), refuse an unknown key on the two request
- * DTOs that are not a cross-version wire, and never echo the value.
+ * boolean where the DTO declares a STRING (and a string or float where it declares an integer), refuse an unknown key on every request
+ * DTO that is not a cross-version wire, and never echo the value.
  *
  * Boot's mapper binds a scalar into a String field as text (`"name": 12` is the key named "12"), and the
  * bind happens in Spring's message converter, before any handler line - so the only place a route can own
@@ -128,7 +128,7 @@ class StrictBodyReadersTest {
     }
 
     @Test
-    fun `an unknown key on the two request DTOs is refused by name, the key clipped`() {
+    fun `an unknown key on every request DTO that is not a cross-version wire is refused by name, the key clipped`() {
         UNKNOWN_KEY_CASES.forEach { (route, body) ->
             withClue("$route with a $GARBAGE_LENGTH-char unknown key") {
                 val reply = refused(route, body)
