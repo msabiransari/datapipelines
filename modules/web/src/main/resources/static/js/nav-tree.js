@@ -13,7 +13,10 @@
  *
  * 2. THE ADMISSION GUARD. Every request whose target sits in a tree is stamped with the
  *    tree's live GENERATION; a swap is admitted only if (a) its generation is still current —
- *    a search typed or cleared, or a reset, makes every older folder/search response stale —
+ *    a search typed or cleared, or a reset, makes every older folder/search response stale.
+ *    The generation advances on a CHANGED query only, mirroring htmx's `input changed`: a
+ *    reflexive `input` event carrying the value the box already had advances nothing, because
+ *    it has no root-replacing request behind it and would strand a folder level in flight —
  *    and (b) its `DP-Nav-Stamp` (`<workspace>|<lens>`, PipelinePartialController) matches the
  *    tree: the workspace the document was rendered for, and the lens the tree's rows were
  *    rendered under. A stale response is dropped without a sound (it is the past, not a
@@ -662,6 +665,7 @@
       var box = searchBox(cleared);
       if (box && window.htmx) {
         box.value = "";
+        cleared.query = "";
         cleared.gen += 1;
         cleared.restoring = true;
         window.htmx.trigger(box, "search");
@@ -675,8 +679,17 @@
     if (!box.matches || !box.matches("[data-nav-tree-search]")) return;
     var t = treeFor(box);
     if (!t) return;
+    /* An `input` EVENT is not the same as a changed query. The box's request is htmx's
+       `input changed`, which fires only on a new value; a redundant event (an autofill, an
+       IME, a re-dispatched event, a form-style restore) carries the value the box already
+       had. Advancing the generation for one would make every level already in flight stale
+       with NO root-replacing request behind it, stranding an open folder's placeholder
+       forever (its `click once` spent). Mirror `changed`: only a new trimmed query counts. */
+    var query = box.value.trim();
+    if (query === t.query) return;
+    t.query = query;
     t.gen += 1; // every older folder/search answer is now the past
-    t.restoring = box.value.trim() === ""; // back to browsing: re-open what was open
+    t.restoring = query === ""; // back to browsing: re-open what was open
   }
 
   function onSearchKeydown(evt) {
@@ -700,6 +713,7 @@
     var workspace = panel.getAttribute("data-nav-workspace") || "";
     var family = panel.getAttribute("data-nav-tree");
     var state = parseState(readKey(stateKey(family, workspace)));
+    var search = panel.querySelector("[data-nav-tree-search]");
     var t = {
       family: family,
       workspace: workspace,
@@ -712,6 +726,9 @@
       loaded: false,
       gen: 0,
       lens: null,
+      /* The query `onInput` last treated as a search: seeded from the box so a value the
+         browser restored (and then re-announced with an `input` event) is not a change. */
+      query: search ? search.value.trim() : "",
       folders: state.folders,
       savedScroll: { top: state.top, left: state.left },
       restoring: true,
