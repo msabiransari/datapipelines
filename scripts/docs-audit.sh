@@ -289,7 +289,8 @@ events |= set(re.findall(r"auth\.[a-z_]+(?:\.[a-z_]+)*", enums_txt))
 # structured log events, and `dashboard` is a code namespace (L1a) and a permission family (`dashboard.execute`).
 # `parameter` joined at #418 (§3.4M), for the same reason: `parameter.evaluation_record_failed` and its siblings are
 # structured log events, and `parameter` is ALSO the error-code family of Pipeline Contract §13.20 (`parameter.evaluate.timeout`),
-# so a bare citation of an uncatalogued event fails check C. The ONE test of §3.4M against the code is the lane's A.4 diff, not this regex.
+# so a bare citation of an uncatalogued event fails check C. The §3.4 tables' test against the code is
+# ObservabilityEventCatalogParityTest (#439), which enforces the complete namespaces name-for-name; this regex only catalogs citations.
 obs_txt = texts.get("docs/observability.md", "")
 sec34 = re.search(r"^#### 3\.4A\b.*?(?=^### )", obs_txt, re.M | re.S)
 if sec34:
