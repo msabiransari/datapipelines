@@ -30,8 +30,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
-import java.lang.management.ManagementFactory
-import java.lang.management.MemoryType
 import java.math.BigDecimal
 import java.time.Duration
 import java.time.Instant
@@ -724,16 +722,17 @@ class TransformNodeRunsTest {
     // ---------------------------------------------------------------- the memory proof (§5.2)
 
     @Test
-    fun `row mode never materialises the input - 200k rows, the peak stays within two batches of the tables`() =
+    fun `row mode streams 200k rows with at most two batches of retained input payloads`() =
         runBlocking<Unit> {
             val batchSize = 10_000
-            val columns = listOf(ContractColumn("n", LogicalType.INTEGER))
+            val rowCount = 200_000
+            val columns = listOf(ContractColumn("n", LogicalType.INTEGER), ContractColumn("payload", LogicalType.STRING))
             val schema = columns.map { ColumnSchema(it.name, it.type, it.precision, it.scale, nullable = it.nullable) }
             val bigContract =
                 TransformContract(
                     mode = TransformMode.ROW,
                     inputs = mapOf("numbers" to TransformInput.Table(columns)),
-                    output = TransformOutput.Table(columns),
+                    output = TransformOutput.Table(columns.take(1)),
                 )
             val bigNode =
                 node(
@@ -741,67 +740,37 @@ class TransformNodeRunsTest {
                     inputs = mapOf("numbers" to jsonText("stg_big")),
                     output = NodeOutput.Tempdb("out_big"),
                 )
+            staging.stageRows("stg_big", schema, (1..rowCount).asSequence().map { listOf(it, "payload-$it") })
+            val probe = RetainedInputProbe(staging, batchSize)
+            val result =
+                run(
+                    bigNode,
+                    support(resolved(bigContract, """[ rows.{ "n": n } ]"""), readBatchSize = batchSize),
+                    ctx = context().copy(staging = probe),
+                )
 
-            // The table readings are RETAINED LIVE SIZE too (the CI red on a6eda076: the staging
-            // stats read the JVM's used heap, a collection between two readings made the input
-            // table -18.6 MB and the bound negative) — one probe for every number in the proof.
-            val mem0 = liveRetainedBytes()
-            staging.stageRows("witness", schema, (1..batchSize).map { listOf(it) }.asSequence())
-            val witnessBytes = liveRetainedBytes() - mem0
-            staging.stageRows("stg_big", schema, (1..200_000).asSequence().map { listOf(it) })
-            val memIn = liveRetainedBytes()
-
-            // The measurement is RETAINED LIVE SIZE, not whole-JVM used heap (issue #238):
-            // every sample collects, then sums the heap pools' collection usage — the size the
-            // last collection left live, garbage excluded by construction. The old sampler read
-            // `totalMemory() − freeMemory()`, the whole JVM's used heap, and whatever the
-            // collector deferred of the `System.gc()` hint read as the transform's overhead —
-            // the gate red at 6ff90545 and the CI red on 9ed119e2 were exactly that.
-            val baseline = memoryProofBaseline()
-            withClue("the retained-size probe read live heap (heap pools reporting a collection)") {
-                (baseline > 0) shouldBe true
-            }
-            val peak =
-                java.util.concurrent.atomic
-                    .AtomicLong(0)
-            val samples =
-                java.util.concurrent.atomic
-                    .AtomicInteger(0)
-            val sampler =
-                launch(kotlinx.coroutines.Dispatchers.IO) {
-                    while (true) {
-                        val live = liveRetainedBytes()
-                        peak.updateAndGet { maxOf(it, live) }
-                        samples.incrementAndGet()
-                        kotlinx.coroutines.delay(SAMPLE_PERIOD_MS)
-                    }
-                }
-            val result = run(bigNode, support(resolved(bigContract, """[ rows.{ "n": n } ]"""), readBatchSize = batchSize))
-            sampler.cancel()
-
-            result.rowsIn shouldBe 200_000L
-            result.rowsOut shouldBe 200_000L
-            // Retained live heap at the peak = the baseline (the fork's other live data) plus
-            // the two legitimate tables the run itself stands up (the output table, growing to
-            // the input's size, and the batch in flight). The bound is the discriminator: the
-            // run's retained overhead stays under TWO full copies of the input table — a
-            // materialised 200k-row input adds MORE than that in live structures (falsified
-            // below: the peak grows past the bound).
-            val inputTableBytes = memIn - (mem0 + witnessBytes)
-            val bound = memoryProofBound(baseline, witnessBytes, inputTableBytes)
-            println(
-                "memory proof: baseline=${baseline}B over $MEMORY_PROOF_SAMPLES samples, " +
-                    "peak retained during run=${peak.get()}B over ${samples.get()} samples, " +
-                    "input table=${inputTableBytes}B, bound=baseline + 2 × input=${bound}B",
-            )
-            withClue("the sampler saw the run at all (vacuity guard)") { (samples.get() >= 3) shouldBe true }
-            withClue(
-                "the streaming overhead (peak ${peak.get() - baseline}B over the baseline) " +
-                    "stays under two full copies of the input table (${2 * inputTableBytes}B) — a materialised input adds more",
-            ) {
-                (peak.get() < bound) shouldBe true
-            }
+            result.rowsIn shouldBe rowCount.toLong()
+            result.rowsOut shouldBe rowCount.toLong()
+            probe.verify(rowCount)
         }
+
+    @Test
+    fun `retention probe refuses missing observations`() {
+        val probe = RetainedInputProbe(staging, 10_000)
+        shouldThrow<IllegalStateException> { probe.verify(200_000) }.message shouldContain "must observe the full input"
+    }
+
+    @Test
+    fun `retention probe refuses zero stale unavailable and nonlive samples`() {
+        shouldThrow<IllegalStateException> { RetainedInputProbe.validateSample(0, 0, 10_000, 10_000) }
+            .message shouldContain "collection count must advance"
+        shouldThrow<IllegalStateException> { RetainedInputProbe.validateSample(5, 5, 10_000, 10_000) }
+            .message shouldContain "collection count must advance"
+        shouldThrow<IllegalStateException> { RetainedInputProbe.validateSample(-1, 5, 10_000, 10_000) }
+            .message shouldContain "collection count must advance"
+        shouldThrow<IllegalStateException> { RetainedInputProbe.validateSample(5, 6, 0, 10_000) }
+            .message shouldContain "current batch must be live"
+    }
 }
 
 // ---------------------------------------------------------------- fixtures, file-level
@@ -811,66 +780,6 @@ class TransformNodeRunsTest {
 // These four are state-free — no instance field of the spec is read here.
 
 private const val TEMPLATE = "acme/shape/order_lines.jsonata"
-
-// The memory proof's sampling shape (issue #238): the pre-run baseline takes this many
-// readings of the same probe the run sampler uses, and both sample on the same period.
-private const val MEMORY_PROOF_SAMPLES = 5
-private const val SAMPLE_PERIOD_MS = 50L
-
-/**
- * The heap size the most recent collection left live, summed over the JVM's heap pools —
- * the measurement the memory proof reads (issue #238). [MemoryPoolMXBean.getCollectionUsage]
- * is the snapshot each pool took at its last collection, so uncollected garbage is excluded
- * by construction; the whole-JVM form this replaces (`totalMemory() − freeMemory()` after a
- * `System.gc()` hint) counts whatever the collector deferred under load, which is what read
- * as the transform's overhead in the gate red at 6ff90545 and the CI red on 9ed119e2. The
- * pool-usage form is chosen over `MemoryMXBean.heapMemoryUsage` after a full collection
- * precisely because it does not depend on the hint being honoured (or on
- * `-XX:+ExplicitGCInvokesConcurrent` being absent).
- */
-private fun liveRetainedBytes(): Long {
-    @Suppress("ExplicitGarbageCollectionCall")
-    System.gc()
-    return ManagementFactory
-        .getMemoryPoolMXBeans()
-        .filter { it.type == MemoryType.HEAP }
-        .sumOf { it.collectionUsage?.used ?: 0L }
-}
-
-/**
- * The proof's bound — after the measurement's own validity: the 200k-row table must measure
- * larger than the 10k-row witness; a smaller or negative reading is a probe failure (the CI
- * red on a6eda076 read the input as -18.6 MB), never a verdict about the transform.
- */
-private fun memoryProofBound(
-    baseline: Long,
-    witnessBytes: Long,
-    inputTableBytes: Long,
-): Long {
-    withClue(
-        "the input table (${inputTableBytes}B) measured larger than the witness (${witnessBytes}B) — " +
-            "else the probe, not the transform, is wrong",
-    ) {
-        (inputTableBytes > witnessBytes) shouldBe true
-    }
-    return baseline + 2 * inputTableBytes
-}
-
-/**
- * The memory proof's pre-run baseline (issue #238): [MEMORY_PROOF_SAMPLES] readings of
- * [liveRetainedBytes] on the same period the run sampler uses, median — the fork JVM's
- * other live data (the H2 store's own structures, the engine's warm classes), subtracted
- * from the peak rather than measured as overhead.
- */
-private suspend fun memoryProofBaseline(): Long {
-    val readings =
-        MutableList(MEMORY_PROOF_SAMPLES) {
-            val live = liveRetainedBytes()
-            kotlinx.coroutines.delay(SAMPLE_PERIOD_MS)
-            live
-        }
-    return readings.sorted()[MEMORY_PROOF_SAMPLES / 2]
-}
 
 private fun resolved(
     contract: TransformContract,
