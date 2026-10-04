@@ -1539,6 +1539,9 @@ object PipelineErrorCodes {
 
         /** 400 — the same parameter supplied in `parameters` and `parameter_bindings` (#9 slice 3). */
         const val BINDING_CONFLICT = "schedule.validation.binding_conflict"
+
+        /** 400 — notification settings refusal; details contain only field/index and reason (#442a). */
+        const val NOTIFICATIONS_INVALID = "schedule.validation.notifications_invalid"
     }
 
     /**

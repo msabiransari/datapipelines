@@ -37,6 +37,141 @@ class ScheduleServiceIntegrationTest {
     }
 
     @Test
+    fun `notification defaults normalization and replacement persist in the database`() {
+        val defaults = h.create()
+        defaults.notificationRecipients shouldBe emptyList()
+        defaults.notificationEvents shouldBe NotificationEvent.DEFAULT
+        val request =
+            h.request(name = "reports/mail").copy(
+                notifications =
+                    notificationRequest(
+                        """{"recipients":[" A@Example.com ","a@example.com","b@EXAMPLE.org"],"events":["start","blocked","start"]}""",
+                    ),
+            )
+        var stored = h.create(request)
+        stored.notificationRecipients shouldBe listOf("A@example.com", "b@example.org")
+        stored.notificationEvents shouldBe setOf(NotificationEvent.START, NotificationEvent.BLOCKED)
+
+        fun edit(settings: NotificationSettingsRequest?) {
+            stored =
+                h.service.update(
+                    SchedulerTestDb.WORKSPACE,
+                    stored.id,
+                    SchedulerTestDb.CREATOR,
+                    stored.revision,
+                    request.copy(notifications = settings),
+                )
+        }
+        edit(null)
+        stored.notificationRecipients shouldBe listOf("A@example.com", "b@example.org")
+        stored.notificationEvents shouldBe setOf(NotificationEvent.START, NotificationEvent.BLOCKED)
+        edit(notificationRequest("""{"events":["success"]}"""))
+        stored.notificationRecipients shouldBe listOf("A@example.com", "b@example.org")
+        stored.notificationEvents shouldBe setOf(NotificationEvent.SUCCESS)
+        edit(notificationRequest("""{"recipients":["new@example.com"]}"""))
+        stored.notificationRecipients shouldBe listOf("new@example.com")
+        stored.notificationEvents shouldBe setOf(NotificationEvent.SUCCESS)
+        edit(notificationRequest("""{"recipients":[],"events":[]}"""))
+        h.service.get(SchedulerTestDb.WORKSPACE, stored.id, TargetViewer.EVERYONE).notificationRecipients shouldBe emptyList()
+        stored.notificationEvents shouldBe emptySet()
+    }
+
+    @Test
+    fun `notification refusals identify only a field index and reason including header injection`() {
+        val cases =
+            listOf(
+                Triple("7", "notifications", "not_an_object"),
+                Triple("""{"recipients":null}""", "notifications.recipients", "not_a_list"),
+                Triple("""{"recipients":[7]}""", "notifications.recipients[0]", "not_a_string"),
+                Triple(
+                    """{"recipients":["a@example.com\r\nBcc: b@example.org"]}""",
+                    "notifications.recipients[0]",
+                    "syntax",
+                ),
+                Triple("""{"recipients":["${"a".repeat(243)}@example.com"]}""", "notifications.recipients[0]", "too_long"),
+                Triple(
+                    """{"recipients":[${(0..20).joinToString(",") { "\"a$it@example.com\"" }}]}""",
+                    "notifications.recipients",
+                    "too_many",
+                ),
+                Triple("""{"events":false}""", "notifications.events", "not_a_list"),
+                Triple("""{"events":[false]}""", "notifications.events[0]", "not_a_string"),
+                Triple("""{"events":["stop"]}""", "notifications.events[0]", "unknown_event"),
+            )
+        cases.forEach { (body, field, reason) ->
+            withClue(reason) {
+                val refusal = shouldThrow<ScheduleException> { h.create(h.request().copy(notifications = notificationRequest(body))) }
+                refusal.code shouldBe ScheduleErrorCodes.NOTIFICATIONS_INVALID
+                refusal.details shouldBe mapOf("field" to field, "reason" to reason)
+                refusal.message?.contains("example.") shouldBe false
+            }
+        }
+    }
+
+    @Test
+    fun `notification meaning participates in create idempotency`() {
+        val request =
+            h.request().copy(
+                notifications = notificationRequest("""{"recipients":["A@Example.com"],"events":["blocked","failure"]}"""),
+            )
+        h.service.create(SchedulerTestDb.WORKSPACE, SchedulerTestDb.CREATOR, request, "notification-key")
+        val equivalent =
+            request.copy(
+                notifications =
+                    notificationRequest(
+                        """{"recipients":["a@example.com","A@example.com"],"events":["failure","blocked","failure"]}""",
+                    ),
+            )
+        h.service.create(SchedulerTestDb.WORKSPACE, SchedulerTestDb.CREATOR, equivalent, "notification-key").replayed shouldBe true
+        val different =
+            request.copy(
+                notifications = notificationRequest("""{"recipients":["b@example.com"],"events":["blocked","failure"]}"""),
+            )
+        shouldThrow<ScheduleException> {
+            h.service.create(SchedulerTestDb.WORKSPACE, SchedulerTestDb.CREATOR, different, "notification-key")
+        }.code shouldBe ScheduleErrorCodes.IDEMPOTENCY_KEY_REUSED
+    }
+
+    @Test
+    fun `pre-V49 create keys still replay only for the original default notification meaning`() {
+        val request = h.request()
+        val created = h.service.create(SchedulerTestDb.WORKSPACE, SchedulerTestDb.CREATOR, request, "old-notification-key")
+        // The frozen pre-V49 canonical object; payload and parameters here each have at most one key.
+        val legacy =
+            SchedulerAutoConfiguration.JSON.writeValueAsString(
+                linkedMapOf(
+                    "name" to request.name,
+                    "executor" to request.executor,
+                    "payload" to request.payload,
+                    "parameters" to request.parameters,
+                    "cron" to request.cron,
+                    "timezone" to request.timezone,
+                    "missed_run_policy" to request.missedRunPolicy,
+                ),
+            )
+        val hash =
+            java.security.MessageDigest
+                .getInstance("SHA-256")
+                .digest(legacy.toByteArray())
+                .joinToString("") { "%02x".format(it) }
+        SchedulerTestDb.jdbc.update(
+            "UPDATE schedules SET idempotency_hash = :hash WHERE id = :id",
+            mapOf(
+                "hash" to hash,
+                "id" to created.value.id,
+            ),
+        )
+        h.service.create(SchedulerTestDb.WORKSPACE, SchedulerTestDb.CREATOR, request, "old-notification-key").replayed shouldBe true
+        val changed = request.copy(notifications = notificationRequest("""{"recipients":["new@example.com"]}"""))
+        shouldThrow<ScheduleException> {
+            h.service.create(SchedulerTestDb.WORKSPACE, SchedulerTestDb.CREATOR, changed, "old-notification-key")
+        }.code shouldBe ScheduleErrorCodes.IDEMPOTENCY_KEY_REUSED
+    }
+
+    private fun notificationRequest(body: String): NotificationSettingsRequest? =
+        NotificationSettingsRequest.fromNode(SchedulerAutoConfiguration.JSON.readTree(body))
+
+    @Test
     fun `create validates name, cron, zone, executor, payload shape and target - each with its own code`() {
         fun refused(request: ScheduleRequest) = shouldThrow<ScheduleException> { h.create(request) }.code
 

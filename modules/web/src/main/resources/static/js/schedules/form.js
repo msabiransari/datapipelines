@@ -96,6 +96,11 @@
   }
 
   function fillFrom(s) {
+    var notifications = s.notifications || { recipients: [], events: ["failure", "unknown", "blocked"] };
+    el("sch-f-recipients").value = M().recipientsText(notifications.recipients);
+    Array.prototype.forEach.call(S.dialog().querySelectorAll('input[name="notification_event"]'), function (input) {
+      input.checked = notifications.events.indexOf(input.value) !== -1;
+    });
     el("sch-f-name").value = s.name;
     el("sch-f-pipeline").value = M().pipelineOf(s);
     chooseZone(el("sch-f-timezone"), s.timezone);
@@ -498,7 +503,7 @@
   }
 
   function clearAllErrors() {
-    ["name", "pipeline", "cron", "timezone", "missed_run_policy", "parameters"].forEach(clearError);
+    ["name", "pipeline", "cron", "timezone", "missed_run_policy", "parameters", "notifications"].forEach(clearError);
     var dlg = S.dialog();
     Array.prototype.forEach.call(dlg.querySelectorAll("[data-param-error]"), function (p) {
       p.hidden = true;
@@ -572,6 +577,10 @@
       cron: el("sch-f-cron").value.trim(),
       timezone: el("sch-f-timezone").value,
       missed_run_policy: policy ? policy.value : "skip",
+      notifications: {
+        recipients: M().recipientsFromText(el("sch-f-recipients").value),
+        events: Array.prototype.map.call(dlg.querySelectorAll('input[name="notification_event"]:checked'), function (input) { return input.value; }),
+      },
     };
   }
 

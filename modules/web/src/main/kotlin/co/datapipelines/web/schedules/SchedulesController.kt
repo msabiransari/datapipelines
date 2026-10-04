@@ -4,6 +4,9 @@ import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
+import co.datapipelines.scheduler.NotificationDelivery
+import co.datapipelines.scheduler.NotificationEvent
+import co.datapipelines.scheduler.NotificationSettingsRequest
 import co.datapipelines.scheduler.Occurrence
 import co.datapipelines.scheduler.RunDetail
 import co.datapipelines.scheduler.Schedule
@@ -78,7 +81,8 @@ class SchedulesController(
         val found = schedules.list(workspaceOf(principal), prefix?.trim(), size + 1, page, PrincipalTargetViewer(principal))
         val items = found.take(size)
         val names = namesOf(items.flatMap { listOf(it.createdBy, it.updatedBy) })
-        val mapped = items.map { scheduleJson(it, names) }
+        val mayReadRecipients = principal.holds(Permission.SCHEDULE_UPDATE)
+        val mapped = items.map { scheduleJson(it, names, mayReadRecipients) }
         return ApiResponse.of(PagedData(mapped, Pagination.unknownTotal(page, size, mapped.size, found.size > size)))
     }
 
@@ -261,7 +265,14 @@ class SchedulesController(
         audit.log(
             event = event,
             userId = principal.userId,
-            details = mapOf("schedule_id" to schedule.id.toString(), "name" to schedule.name, "revision" to schedule.revision),
+            details =
+                mapOf(
+                    "schedule_id" to schedule.id.toString(),
+                    "name" to schedule.name,
+                    "revision" to schedule.revision,
+                    "recipient_count" to schedule.notificationRecipients.size,
+                    "events" to NotificationEvent.entries.filter { it in schedule.notificationEvents }.map { it.wire },
+                ),
         )
     }
 
@@ -278,6 +289,7 @@ class SchedulesController(
             cron = text(node, "cron"),
             timezone = text(node, "timezone"),
             missedRunPolicy = node.path("missed_run_policy").takeIf { it.isTextual }?.asText() ?: "skip",
+            notifications = NotificationSettingsRequest.fromNode(node.get("notifications")),
         )
     }
 
@@ -299,7 +311,15 @@ class SchedulesController(
         ResponseEntity
             .status(status)
             .header(HttpHeaders.ETAG, "\"${schedule.revision}\"")
-            .body(ApiResponse.of(scheduleJson(schedule, namesOf(listOf(schedule.createdBy, schedule.updatedBy)))))
+            .body(
+                ApiResponse.of(
+                    scheduleJson(
+                        schedule,
+                        namesOf(listOf(schedule.createdBy, schedule.updatedBy)),
+                        currentPrincipal().holds(Permission.SCHEDULE_UPDATE),
+                    ),
+                ),
+            )
 
     /** One batched name read per response (#261); a row whose user is gone falls back to its short id. */
     private fun namesOf(ids: List<UUID>): Map<UUID, String> = actorNames.lookup(ids)
@@ -307,6 +327,7 @@ class SchedulesController(
     private fun scheduleJson(
         schedule: Schedule,
         names: Map<UUID, String>,
+        mayReadRecipients: Boolean,
     ): Map<String, Any?> =
         linkedMapOf(
             "id" to schedule.id.toString(),
@@ -320,6 +341,12 @@ class SchedulesController(
             "cron" to schedule.cron,
             "timezone" to schedule.timezone,
             "missed_run_policy" to schedule.missedRunPolicy.wire,
+            "notifications" to
+                linkedMapOf<String, Any?>(
+                    "recipient_count" to schedule.notificationRecipients.size,
+                    "events" to NotificationEvent.entries.filter { it in schedule.notificationEvents }.map { it.wire },
+                    "delivery" to NotificationDelivery.CURRENT,
+                ).apply { if (mayReadRecipients) put("recipients", schedule.notificationRecipients) },
             "enabled" to schedule.enabled,
             "condition" to schedule.condition,
             "blocked" to

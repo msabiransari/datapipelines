@@ -1,9 +1,9 @@
 # Pipeline Contract Specification
 
-**Status:** v1.51 (revised — see Change Log)
+**Status:** v1.52 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
-**Last updated:** 2026-10-02
+**Last updated:** 2026-10-03
 
 ---
 
@@ -1452,7 +1452,7 @@ The scheduler's refusals (#9; [Scheduler](scheduler.md), the scheduler design re
 | `schedule.validation.target_not_released` | 400 | the payload names a pipeline with no current version to follow (#280) — release it, or switch its current version, then save again; `details.pipeline` |
 | `schedule.validation.binding_invalid` | 400 | a `parameter_bindings` entry cannot be resolved (#9 slice 3) — an unknown parameter, a non-`DATE` type, an unknown keyword (`TODAY`/`YESTERDAY` only), an unknown source, a literal binding without a value, or a keyword with no reference at run time; `details.reason` (`unknown_parameter` / `type_mismatch` / `unknown_keyword` / `unknown_source` / `literal_invalid` / `no_reference`) and `details.parameter` name why |
 | `schedule.validation.binding_conflict` | 400 | the same parameter is supplied in `parameters` and in `parameter_bindings` — give it one source; the resolver rejects ambiguity instead of applying a precedence rule (`details.parameter`) |
-
+| `schedule.validation.notifications_invalid` | 400 | Notification settings refused (#442a). `details` contains only `{field, reason}`: `notifications`, `notifications.recipients`, an indexed recipient or event field; `not_an_object`, `not_a_list`, `not_a_string`, `syntax`, `too_long`, `too_many`, `unknown_event`. No address is echoed |
 
 ### 13.20 Parameter sets
 
@@ -1874,6 +1874,7 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-03 | v1.52 | 442a (#442) | Saved schedule notification settings: recipients and five event choices, validated and shown by role; omitted PUT settings preserved; mail remains off pending part b. |
 | 2026-10-02 | v1.51 | 328 (#328) the release records its caller node's result columns | New **§3.3.1** — the source of truth for the caller-output record: the flip copies the version's latest qualifying execution's `result_schema_json` into `pipeline_versions.caller_output_json` (D1, in the flip's own statement); the D2 `{name, type, nullable}` shape with the 256-column / 128-character record bounds and the JSON-null-reads-`true` rule; the D3 word (`recorded` \| `declared` \| `none` \| `not_observed`) the response and audit row carry — never the column list; the D4 precedence (the record never overrides a transform caller's declared contract) and the promotion carry (validated at the receiver, stored on the imported release). No new error code; the body, the hash and §12.12 are untouched. |
 | 2026-10-02 | v1.50 | 333 (#333) the strict contract readers | **§13.21 gains the scalar-shapes paragraph**: the pipeline, template, transform-block and DTO readers refuse a JSON number or boolean where a string is declared (and a string or float where an integer is declared) with the path and the expected shape, never the value. `pipeline.validation.schema_version_unsupported` is also the pipeline reader's wrong-type answer (`details.reason: "wrong_type"`); `template.contract_invalid` gains `details.rule: "wrong_type"`. No new code, no status change. |
 | 2026-10-01 | v1.49 | L5 (#367, #10) the `dashboard` key kind | New **§13.23 row `dashboard.binding.path_invalid`** (400): a dashboard binding's `name_prefix` is not a legal folder of the name grammar (1–9 segments, or the root `/`), or names no folder at or above a dashboard the CALLER's workspace has (the #191 non-disclosure rule). The refusal the binding routes and the Keys page's dashboard binding editor answer; the reserved `dashboard.key.kind_refused` stays unused (the surfaces answer the one catalogued `endpoint.key_kind_refused`, whose `details.reason` names the kind). §13.23 is 36 rows. |

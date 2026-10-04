@@ -4,6 +4,7 @@ import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
 import com.fasterxml.jackson.module.kotlin.readValue
 import org.springframework.data.redis.core.StringRedisTemplate
+import org.springframework.data.redis.core.script.RedisScript
 import java.security.MessageDigest
 import java.time.Duration
 import java.time.Instant
@@ -47,6 +48,13 @@ interface IdempotencyStore {
         executionId: UUID,
         ttlSeconds: Long,
     ): IdempotencyOutcome
+
+    /** Atomically releases this caller's key only while it still names [executionId]; true iff deleted. */
+    fun release(
+        userId: UUID,
+        idempotencyKey: String,
+        executionId: UUID,
+    ): Boolean
 }
 
 /**
@@ -95,7 +103,18 @@ class RedisIdempotencyStore(
             details = mapOf("idempotency_key_suffix" to idempotencyKey.takeLast(KEY_SUFFIX_HINT)),
         )
 
-    /** The stored value of §11.3: `{execution_id, request_hash, expires_at}`. */
+    override fun release(
+        userId: UUID,
+        idempotencyKey: String,
+        executionId: UUID,
+    ): Boolean =
+        redis.execute(
+            RELEASE_SCRIPT,
+            listOf("$KEY_PREFIX$userId:${IdempotencyKeys.hash(idempotencyKey)}"),
+            executionId.toString(),
+        ) == 1L
+
+    /** The stored value of §11.3: `{executionId, requestHash, expiresAt}`. */
     internal data class Record(
         val executionId: UUID,
         val requestHash: String,
@@ -104,6 +123,18 @@ class RedisIdempotencyStore(
 
     private companion object {
         const val KEY_PREFIX = "idem:"
+
+        val RELEASE_SCRIPT: RedisScript<Long> =
+            RedisScript.of(
+                """
+                local value = redis.call('GET', KEYS[1])
+                if not value then return 0 end
+                local record = cjson.decode(value)
+                if record.executionId ~= ARGV[1] then return 0 end
+                return redis.call('DEL', KEYS[1])
+                """.trimIndent(),
+                Long::class.java,
+            )
 
         /** Reflected client input is bounded before it reaches an error message or a log. */
         const val MAX_ECHOED_KEY = 32
