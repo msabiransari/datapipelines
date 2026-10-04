@@ -312,7 +312,13 @@ class VisualizationMechanicalCheckTest {
     fun `absent numeric text and numeric text from only an unbound column are refused on both paths`() {
         assertTextRefused(directKpi("INTEGER", "42", "987654"), "rows", 1)
         val direct = directKpi("INTEGER", "42", "987654")
-        val fixture = direct.tests?.cases?.single()?.fixtures?.getValue("revenue")?.single()
+        val fixture =
+            direct.tests
+                ?.cases
+                ?.single()
+                ?.fixtures
+                ?.getValue("revenue")
+                ?.single()
         requireNotNull(fixture).put("unbound", 987654)
         assertTextRefused(direct, "rows", 1)
 
@@ -347,7 +353,13 @@ class VisualizationMechanicalCheckTest {
     fun `a nullable null supplies no text while a missing required fixture column still fails`() {
         assertTextRefused(directKpi("INTEGER", "null", "null", nullable = true), "rows", 1)
         val missing = directKpi("INTEGER", "42", "42")
-        requireNotNull(missing.tests).cases.single().fixtures.getValue("revenue").single().remove("amount")
+        requireNotNull(missing.tests)
+            .cases
+            .single()
+            .fixtures
+            .getValue("revenue")
+            .single()
+            .remove("amount")
         val report = check.run(WORKSPACE, missing)
         report.ok shouldBe false
         report.cases.getValue("rows").ok shouldBe false
@@ -371,18 +383,19 @@ class VisualizationMechanicalCheckTest {
         kind: String = "value_visible",
         nullable: Boolean = false,
     ): VisualizationBody =
-        ValidatorFakes.visualizationDocument(
-            DocumentFixtures.tree(
-                """
-                {"name":"finance/visualizations/direct","display_name":"Direct",
-                 "renderer":{"kind":"kpi","version":"1"},
-                 "inputs":{"revenue":{"columns":[{"name":"amount","type":"$type","nullable":$nullable}]}},
-                 "config":{"label":"Total","value":"$.amount"},"bindings":{"value":"amount"},
-                 "tests":{"cases":[{"name":"rows","fixtures":{"revenue":[{"amount":$value}]},
-                                    "assertions":[{"kind":"rendered"},{"kind":"$kind","text":"$text"}]}]}}
-                """.trimIndent(),
-            ),
-        ).body
+        ValidatorFakes
+            .visualizationDocument(
+                DocumentFixtures.tree(
+                    """
+                    {"name":"finance/visualizations/direct","display_name":"Direct",
+                     "renderer":{"kind":"kpi","version":"1"},
+                     "inputs":{"revenue":{"columns":[{"name":"amount","type":"$type","nullable":$nullable}]}},
+                     "config":{"label":"Total","value":"$.amount"},"bindings":{"value":"amount"},
+                     "tests":{"cases":[{"name":"rows","fixtures":{"revenue":[{"amount":$value}]},
+                                        "assertions":[{"kind":"rendered"},{"kind":"$kind","text":"$text"}]}]}}
+                    """.trimIndent(),
+                ),
+            ).body
 
     private fun assertFixtureScalar(
         candidate: VisualizationBody,
@@ -390,7 +403,13 @@ class VisualizationMechanicalCheckTest {
         text: String,
     ) {
         // Inspect the same Jackson conversion the direct-fixture path uses, without changing its mapper.
-        val row = requireNotNull(candidate.tests).cases.single().fixtures.getValue("revenue").single()
+        val row =
+            requireNotNull(candidate.tests)
+                .cases
+                .single()
+                .fixtures
+                .getValue("revenue")
+                .single()
         val converted: Map<String, Any?> =
             ArtifactJson.mapper.convertValue(row, object : com.fasterxml.jackson.core.type.TypeReference<Map<String, Any?>>() {})
         val value = requireNotNull(converted["amount"])
