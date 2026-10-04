@@ -3,6 +3,7 @@ package co.datapipelines.datasources.pooling
 import co.datapipelines.datasources.LakeViewOutcomeRecorder
 import co.datapipelines.datasources.LakeViewPlan
 import co.datapipelines.datasources.deepestThrowableMessage
+import co.datapipelines.persistence.FailureShape
 import java.sql.Connection
 import java.sql.SQLException
 import java.util.concurrent.ConcurrentHashMap
@@ -150,11 +151,12 @@ class LakeInstanceInitializer(
             recorder.record(datasourceName, view.table.namespace, view.table.name, bounded)
         } catch (e: RuntimeException) {
             log.warn(
-                "event=lake.view_outcome_record_failed datasource={} table={} error=\"{}\" " +
+                "event=lake.view_outcome_record_failed datasource={} table={} error={} sql_state={} " +
                     "message=\"the view outcome could not be recorded; the instance still serves the surviving views\"",
                 datasourceName,
                 view.qualifiedName,
-                deepestThrowableMessage(e).take(MAX_ERROR_CHARS),
+                FailureShape.cause(e),
+                FailureShape.sqlState(e),
             )
         }
     }

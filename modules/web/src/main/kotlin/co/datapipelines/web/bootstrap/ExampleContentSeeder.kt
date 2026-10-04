@@ -2,6 +2,7 @@ package co.datapipelines.web.bootstrap
 
 import co.datapipelines.auth.WorkspaceContentSeeder
 import co.datapipelines.datasources.DatasourceRegistry
+import co.datapipelines.persistence.FailureShape
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.Dialect
 import co.datapipelines.web.parameters.ParameterSetTransferService
@@ -192,14 +193,14 @@ class ExampleContentSeeder(
         } catch (e: Exception) {
             log.error(
                 "event=workspace.examples_seed_failed workspace_id={} user_id={} fixture_kind={} fixture={} " +
-                    "error_code={} message=\"{}\"",
+                    "error_code={} error={} sql_state={}",
                 workspaceId,
                 userId,
                 kind,
                 fixture,
                 errorCode(e),
-                e.message,
-                e,
+                FailureShape.cause(e),
+                FailureShape.sqlState(e),
             )
             throw e
         }

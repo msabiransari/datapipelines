@@ -1,8 +1,10 @@
 package co.datapipelines.web.bootstrap
 
+import ch.qos.logback.classic.Level
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
 import co.datapipelines.datasources.DatasourceRegistry
+import co.datapipelines.persistence.FailureShape
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineNameGrammar
 import co.datapipelines.web.TestRepoFiles
@@ -18,14 +20,19 @@ import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.collections.shouldNotBeEmpty
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
 import org.slf4j.LoggerFactory
 import java.nio.file.Path
+import java.sql.SQLException
 import java.util.UUID
+import java.util.concurrent.CopyOnWriteArrayList
 import kotlin.io.path.writeText
 
 /**
@@ -393,6 +400,38 @@ class ExampleContentSeederTest {
         failure.shouldContain("error_code=${PipelineErrorCodes.Template.SYNTAX_ERROR}")
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = [true, false])
+    fun `seeder import failure logs only its shape and rethrows with its error code`(sqlFailure: Boolean) {
+        val marker = "synthetic_seed_row_329a"
+        val failure =
+            ApiException(
+                PipelineErrorCodes.Template.SYNTAX_ERROR,
+                "$marker wrapper",
+                cause = if (sqlFailure) SQLException("$marker nested", "23514") else IllegalStateException("$marker nested"),
+            )
+        every { templates.import(any(), any(), any()) } throws failure
+        val events =
+            capturingLogEvents {
+                shouldThrow<ApiException> { seeder(file(examples)).seed(workspaceId, userId) } shouldBe failure
+            }
+        verify(exactly = 1) { templates.import(any(), workspaceId, userId) }
+        verify(exactly = 0) { pipelines.import(any(), any(), any()) }
+        val event = events.single { it.formattedMessage.startsWith("event=workspace.examples_seed_failed ") }
+        event.level shouldBe Level.ERROR
+        event.formattedMessage shouldNotContain marker
+        event.throwableProxy shouldBe null
+        event.formattedMessage shouldContain "workspace_id=$workspaceId"
+        event.formattedMessage shouldContain "user_id=$userId"
+        event.formattedMessage shouldContain "fixture_kind=templates"
+        event.formattedMessage shouldContain "fixture=nyc_revenue.sql"
+        event.formattedMessage shouldContain "error_code=${PipelineErrorCodes.Template.SYNTAX_ERROR}"
+        event.formattedMessage shouldContain "error=${FailureShape.cause(failure)}"
+        event.formattedMessage shouldContain "sql_state=${FailureShape.sqlState(failure)}"
+        FailureShape.sqlState(failure) shouldBe if (sqlFailure) "23514" else "none"
+        events.none { it.formattedMessage.contains("event=workspace.examples_seeded") } shouldBe true
+    }
+
     // ---------------------------------------------------------------- F10: family list semantics
 
     @Test
@@ -550,15 +589,24 @@ class ExampleContentSeederTest {
         mapper.readTree(TestRepoFiles.read("scripts/sample-data-trade/content/examples.json")).get("requires_datasources") shouldBe null
     }
 
-    private fun capturingLogs(block: () -> Unit): List<String> {
+    private fun capturingLogs(block: () -> Unit): List<String> = capturingLogEvents(block).map { it.formattedMessage }
+
+    private fun capturingLogEvents(block: () -> Unit): List<ILoggingEvent> {
         val logger = LoggerFactory.getLogger(ExampleContentSeeder::class.java) as ch.qos.logback.classic.Logger
-        val appender = ListAppender<ILoggingEvent>().apply { start() }
+        val previousLevel = logger.level
+        val appender =
+            ListAppender<ILoggingEvent>().apply {
+                list = CopyOnWriteArrayList()
+                start()
+            }
+        logger.level = Level.INFO
         logger.addAppender(appender)
         return try {
             block()
-            appender.list.map { it.formattedMessage }
+            appender.list.toList()
         } finally {
             logger.detachAppender(appender)
+            logger.level = previousLevel
             appender.stop()
         }
     }

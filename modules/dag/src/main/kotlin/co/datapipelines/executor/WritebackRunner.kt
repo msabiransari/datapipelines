@@ -2,6 +2,7 @@ package co.datapipelines.executor
 
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.ResultRowReader
+import co.datapipelines.persistence.FailureShape
 import co.datapipelines.pipeline.NodeOutput
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.WriteMode
@@ -353,7 +354,7 @@ class JdbcWritebackRunner(
             connection.rollback()
             true
         } catch (e: SQLException) {
-            LOG.warn("Write-back rollback failed (SQLState {}): {}", e.sqlState, e.message)
+            LOG.warn("Write-back rollback failed error={} sql_state={}", FailureShape.cause(e), FailureShape.sqlState(e))
             false
         }
 
