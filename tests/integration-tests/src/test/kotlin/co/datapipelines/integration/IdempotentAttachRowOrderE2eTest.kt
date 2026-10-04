@@ -17,10 +17,12 @@ import org.junit.jupiter.api.Order
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestMethodOrder
 import org.junit.jupiter.api.assertTimeoutPreemptively
+import org.mockito.Mockito.mockingDetails
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.web.server.LocalServerPort
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean
 import java.io.BufferedReader
 import java.io.InputStream
 import java.io.InputStreamReader
@@ -39,7 +41,7 @@ import java.util.concurrent.TimeoutException
 
 /**
  * #324 — the idempotent retry waits for the original's row like the first frame does; a
- * never-started original answers an id-free 410.
+ * refused original releases its key; a crashed original still answers an id-free 410 (#403).
  *
  * The reservation (Redis, `SET NX`) precedes everything, but the original's LOG ENTRY is appended
  * only after the RUNNING row commits and the live send (#306's order). A retry landing inside that
@@ -65,17 +67,12 @@ import java.util.concurrent.TimeoutException
  *    the shared id is 200; the same key with a different body is still
  *    `409 idempotency.key_reused_for_different_request`.
  *
- * The negative half forces R2's answer for an original that never started: with
- * `datapipelines.executor.max-concurrent-executions-per-user=1` (this class's property) a second
- * POST is refused the only slot AFTER its reservation was claimed and BEFORE any event — no row,
- * no log. That POST answers `429 pipeline.execution.concurrency_limit`. The retry of its key
- * attaches to nothing: the follow polls for ~15 s and gives up — the follow's patience IS the
- * wait — and answers the id-free `410 result.expired` (`reason: original_not_started`, no
- * `execution_id`). Both are JSON envelopes under the SSE-only Accept. Until #404 both reached
- * the wire as `401 auth.api_key.missing`: the stream's error completion re-enters as an ASYNC
- * dispatch, and `ScopeInterceptor` judged it against the empty security context — this class's
- * red-first record of that is #404's evidence. A third method proves the same 429 for an
- * execute that sent no `Idempotency-Key` at all.
+ * #403's second method proves a slot refusal releases the reservation before the 429 reaches
+ * the client, another same-key refusal is immediate, and a retry after the slot frees starts a
+ * new execution. A synthetic crash reservation preserves #404's exact id-free 410. The MCP
+ * wire uses the existing JSON-RPC harness with its own key identity and repeats the refusal/retry.
+ * A spy observes only the reserved id that cleanup removes before the response; Redis absence,
+ * frames, statuses and execution reads remain independent wire/storage assertions.
  *
  * The lock-hold window stays well under the shipped lifecycle bound
  * (`datapipelines.executor.lifecycle-write-timeout-seconds`, 10 s) — past it the insert would be
@@ -89,11 +86,15 @@ import java.util.concurrent.TimeoutException
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
 )
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
+@Suppress("LargeClass") // one slot/start-window fixture; splitting the REST/MCP witness would boot the app twice
 class IdempotentAttachRowOrderE2eTest {
     @LocalServerPort
     private var port: Int = 0
 
     private val mapper = ObjectMapper()
+
+    @MockitoSpyBean(name = "idempotencyStore")
+    private lateinit var idempotencyStore: Any
 
     @Test
     @Order(1)
@@ -240,16 +241,13 @@ class IdempotentAttachRowOrderE2eTest {
     }
 
     /**
-     * The negative half, on the wire: the slot-refused POST answers the `429` envelope, the
-     * follow's patience is the retry's wait, and the retry answers the id-free `410
-     * result.expired` (`reason: original_not_started`) — never the id again. Both statuses were
-     * `401 auth.api_key.missing` until #404 (the async completion dispatch was judged against an
-     * empty security context); red on that base, green since.
+     * #403 — a refused original releases immediately on REST and MCP; a same-key retry starts
+     * once the slot frees. A crash without cleanup still follows to #404's exact id-free 410.
      */
     @Test
     @Order(2)
-    @Suppress("LongMethod") // the wire scenario IS the assertion, in order
-    fun `a retry of a never-started original waits the follow's patience and its answer never carries the id`() {
+    @Suppress("LongMethod", "CyclomaticComplexMethod") // one wire scenario; waits and crash/MCP controls are assertions
+    fun `a never-started refusal releases its key for retries while a crashed original still answers 410`() {
         ensureAuthSeeded()
         registerDatasource()
         seedSourceUsers()
@@ -257,95 +255,226 @@ class IdempotentAttachRowOrderE2eTest {
         val pipelineId = createPipeline(SLOT_PIPELINE_NAME, SLOT_TEMPLATE_ID, declareParameter = false)
 
         assertTimeoutPreemptively(Duration.ofMinutes(SSE_BUDGET_MINUTES)) {
-            // 1. The slow original takes the class's only per-user execution slot; reading its
-            //    first frame proves the slot is held (the slot wraps the run, before any emit).
-            //    One client per request — the fleet's rule (see the window test above).
-            val slowKey = "e2e-324-slow-${UUID.randomUUID()}"
-            val slowFuture =
-                Executors
-                    .newSingleThreadExecutor { r -> Thread(r, "e2e-324-slow-reader").apply { isDaemon = true } }
-                    .submit<HttpResponse<InputStream>> {
-                        HttpClient
-                            .newBuilder()
-                            .version(HttpClient.Version.HTTP_1_1)
-                            .build()
-                            .send(executeRequest(pipelineId, slowKey), HttpResponse.BodyHandlers.ofInputStream())
-                    }
-            val slowResponse = slowFuture.get(30, TimeUnit.SECONDS)
-            if (slowResponse.statusCode() != 200) {
-                // An error envelope is a finite body; read it ONLY here — the 200 path is an open
-                // SSE stream, and any eager read (a withClue string included) consumes it whole.
-                throw AssertionError(
-                    "the slow original's POST answered ${slowResponse.statusCode()}: " +
-                        slowResponse.body().readBytes().toString(Charsets.UTF_8),
-                )
-            }
-            val slowReader = BufferedReader(InputStreamReader(slowResponse.body()))
-            val slowFirstLine = slowReader.readLine()
-            withClue("the slow original's first frame was: $slowFirstLine") {
-                slowFirstLine shouldBe "event:execution_started"
+            fun redisKey(
+                user: String,
+                key: String,
+            ): String {
+                val hash =
+                    java.security.MessageDigest
+                        .getInstance("SHA-256")
+                        .digest(key.toByteArray(Charsets.UTF_8))
+                        .joinToString("") { "%02x".format(it) }
+                return "idem:$user:$hash"
             }
 
-            // 2. A second POST, different key: the reservation is claimed (Redis, before the
-            //    executor runs), then the executor refuses the only slot BEFORE any event — no
-            //    row, no log — and the refusal is the 429 envelope (#404).
-            val doomedKey = "e2e-324-doomed-${UUID.randomUUID()}"
-            val reservationsBefore = reservationKeys()
-            val doomed =
-                HttpClient
-                    .newBuilder()
-                    .version(HttpClient.Version.HTTP_1_1)
-                    .build()
-                    .send(executeRequest(pipelineId, doomedKey), HttpResponse.BodyHandlers.ofString())
-            withClue("the slot-refused POST must answer the 429 envelope (#404), not start a second execution: ${doomed.body()}") {
-                doomed.statusCode() shouldBe 429
-                doomed.headers().firstValue("Content-Type").orElse("") shouldContain "application/json"
-                val error = mapper.readTree(doomed.body()).path("error")
-                error.path("code").asText() shouldBe "pipeline.execution.concurrency_limit"
+            fun awaitAbsent(key: String) {
+                val deadline = System.currentTimeMillis() + RESERVATION_WAIT_MS
+                while (System.currentTimeMillis() < deadline) {
+                    if (redis.execInContainer("redis-cli", "EXISTS", key).stdout.trim() == "0") return
+                    Thread.sleep(100)
+                }
+                throw AssertionError("the refused reservation remains in Redis: $key")
             }
-            val doomedReservationKey = awaitReservation(reservationsBefore)
-            val doomedExecutionId = reservationRecord(doomedReservationKey).path("executionId").asText()
-            withClue("the doomed key's reservation must map to an execution id") {
-                doomedExecutionId shouldNotBe ""
-            }
-            // The never-started premise, on the record: the id does NOT resolve.
-            withClue("GET /executions/$doomedExecutionId must 404 — there is no row to GET") {
+
+            fun reservedId(key: String): String =
+                mockingDetails(idempotencyStore)
+                    .invocations
+                    .last { it.method.name == "reserve" && it.arguments[1] == key }
+                    .arguments[3]
+                    .toString()
+
+            fun metadata(id: String) =
                 given()
                     .port(port)
                     .asSession(ADMIN_SESSION)
                     .`when`()
-                    .get("/api/v1/executions/$doomedExecutionId")
-                    .statusCode() shouldBe 404
-            }
+                    .get("/api/v1/executions/$id")
+                    .statusCode()
 
-            // 3. The doomed key's retry: attach → no log → row absent → follow → the follow's
-            //    ~15 s patience IS the wait (on the streamer's scheduler), and the answer is the
-            //    id-free 410 envelope — it must NOT carry the id again.
-            val retryStart = System.currentTimeMillis()
-            val retry =
+            fun post(key: String) =
                 HttpClient
                     .newBuilder()
                     .version(HttpClient.Version.HTTP_1_1)
                     .build()
-                    .send(executeRequest(pipelineId, doomedKey), HttpResponse.BodyHandlers.ofString())
-            val waitedMs = System.currentTimeMillis() - retryStart
-            // Non-vacuity: the wait proves the answer came from the follow's give-up, not from
-            // an instant refusal on some other path.
-            withClue("the retry answered after only ${waitedMs}ms — shorter than the follow's give-up") {
-                (waitedMs >= FOLLOW_GIVE_UP_FLOOR_MS) shouldBe true
+                    .send(executeRequest(pipelineId, key), HttpResponse.BodyHandlers.ofString())
+
+            fun assertRefused(response: HttpResponse<String>) {
+                withClue("the slot-refused POST must answer #404's exact 429: ${response.body()}") {
+                    response.statusCode() shouldBe 429
+                    response.headers().firstValue("Content-Type").orElse("") shouldContain "application/json"
+                    mapper
+                        .readTree(response.body())
+                        .path("error")
+                        .path("code")
+                        .asText() shouldBe
+                        "pipeline.execution.concurrency_limit"
+                }
             }
-            val body = retry.body()
-            withClue(
-                "the never-started retry must answer the id-free 410 envelope (#404) — never the id or the old " +
-                    "reason (status=${retry.statusCode()}): $body",
-            ) {
-                retry.statusCode() shouldBe 410
-                retry.headers().firstValue("Content-Type").orElse("") shouldContain "application/json"
-                val error = mapper.readTree(body).path("error")
+
+            val slowKey = "e2e-403-slow-${UUID.randomUUID()}"
+            val slowResponse =
+                HttpClient
+                    .newBuilder()
+                    .version(HttpClient.Version.HTTP_1_1)
+                    .build()
+                    .send(executeRequest(pipelineId, slowKey), HttpResponse.BodyHandlers.ofInputStream())
+            slowResponse.statusCode() shouldBe 200
+            val slowReader = BufferedReader(InputStreamReader(slowResponse.body()))
+            slowReader.readLine() shouldBe "event:execution_started"
+            readDataLine(slowReader)
+            val slowRecord = reservationRecord(redisKey(ADMIN_USER_ID, slowKey))
+
+            // The reservation is gone by the time the first 429 is observed.
+            val doomedKey = "e2e-403-doomed-${UUID.randomUUID()}"
+            assertRefused(post(doomedKey))
+            val doomedId = reservedId(doomedKey)
+            awaitAbsent(redisKey(ADMIN_USER_ID, doomedKey))
+            metadata(doomedId) shouldBe 404
+
+            // While the slot is held, the SAME key tries executing again; it never follows.
+            val retryStart = System.currentTimeMillis()
+            assertRefused(post(doomedKey))
+            val refusedRetryMs = System.currentTimeMillis() - retryStart
+            withClue("same-key refusal took ${refusedRetryMs}ms, the follow would wait at least $FOLLOW_GIVE_UP_FLOOR_MS") {
+                (refusedRetryMs < FOLLOW_GIVE_UP_FLOOR_MS) shouldBe true
+            }
+            awaitAbsent(redisKey(ADMIN_USER_ID, doomedKey))
+
+            drainToTerminal(slowReader, "the slot-holder")
+            val restarted =
+                HttpClient
+                    .newBuilder()
+                    .version(HttpClient.Version.HTTP_1_1)
+                    .build()
+                    .send(executeRequest(pipelineId, doomedKey), HttpResponse.BodyHandlers.ofInputStream())
+            restarted.statusCode() shouldBe 200
+            val restartedReader = BufferedReader(InputStreamReader(restarted.body()))
+            restartedReader.readLine() shouldBe "event:execution_started"
+            val newId = readDataLine(restartedReader).path("execution_id").asText()
+            newId shouldNotBe doomedId
+            reservationRecord(redisKey(ADMIN_USER_ID, doomedKey)).path("executionId").asText() shouldBe newId
+            metadata(newId) shouldBe 200
+            drainToTerminal(restartedReader, "the same-key restarted execution")
+
+            // Crash witness: matching requestHash from the SAME request, but no process to release.
+            val crashKey = "e2e-403-crash-${UUID.randomUUID()}"
+            val crashRecord = slowRecord.deepCopy<com.fasterxml.jackson.databind.node.ObjectNode>()
+            crashRecord.put("executionId", UUID.randomUUID().toString())
+            redis
+                .execInContainer(
+                    "redis-cli",
+                    "SET",
+                    redisKey(ADMIN_USER_ID, crashKey),
+                    mapper.writeValueAsString(crashRecord),
+                    "EX",
+                    "300",
+                ).stdout
+                .trim() shouldBe "OK"
+            val crashStart = System.currentTimeMillis()
+            val crash = post(crashKey)
+            (System.currentTimeMillis() - crashStart >= FOLLOW_GIVE_UP_FLOOR_MS) shouldBe true
+            withClue("the crash witness must preserve #404's exact id-free 410: ${crash.body()}") {
+                crash.statusCode() shouldBe 410
+                crash.headers().firstValue("Content-Type").orElse("") shouldContain "application/json"
+                val error = mapper.readTree(crash.body()).path("error")
                 error.path("code").asText() shouldBe "result.expired"
                 error.path("details").path("reason").asText() shouldBe "original_not_started"
-                body shouldNotContain """"execution_id""""
-                body shouldNotContain "event_log_expired"
+                crash.body() shouldNotContain "\"execution_id\""
+                crash.body() shouldNotContain "event_log_expired"
+            }
+
+            // Existing /mcp JSON-RPC harness: its key acts as its own service identity.
+            val issued =
+                given()
+                    .port(port)
+                    .asSession(ADMIN_SESSION)
+                    .contentType(ContentType.JSON)
+                    .body("""{"name":"e2e-403-mcp","kind":"mcp","role":"author"}""")
+                    .`when`()
+                    .post("/api/v1/auth/api-keys")
+                    .then()
+                    .statusCode(201)
+                    .extract()
+                    .jsonPath()
+            val credential = issued.getString("data.key")
+            val keyId = issued.getString("data.id")
+            val mcpUser =
+                DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
+                    connection.prepareStatement("SELECT user_id FROM api_keys WHERE id = ?").use { statement ->
+                        statement.setString(1, keyId)
+                        statement.executeQuery().use { rows ->
+                            rows.next()
+                            rows.getString(1)
+                        }
+                    }
+                }
+
+            fun tool(
+                name: String,
+                arguments: Map<String, Any>,
+                key: String? = null,
+            ): JsonNode {
+                val builder =
+                    HttpRequest
+                        .newBuilder(URI.create("http://localhost:$port/mcp"))
+                        .header("DP-API-Key", credential)
+                        .header("Content-Type", "application/json")
+                        .header("Accept", "application/json, text/event-stream")
+                if (key != null) builder.header("Idempotency-Key", key)
+                val response =
+                    HttpClient.newHttpClient().send(
+                        builder
+                            .POST(
+                                HttpRequest.BodyPublishers.ofString(
+                                    mapper.writeValueAsString(
+                                        mapOf(
+                                            "jsonrpc" to "2.0",
+                                            "id" to 1,
+                                            "method" to "tools/call",
+                                            "params" to
+                                                mapOf("name" to name, "arguments" to arguments),
+                                        ),
+                                    ),
+                                ),
+                            ).build(),
+                        HttpResponse.BodyHandlers.ofString(),
+                    )
+                response.statusCode() shouldBe 200
+                val result = mapper.readTree(response.body()).path("result")
+                return mapper.readTree(result.path("content")[0].path("text").asText())
+            }
+            tool("templates_render", mapOf("id" to SLOT_TEMPLATE_ID, "context" to emptyMap<String, Any>())).has("error") shouldBe false
+            val args = mapOf("id" to pipelineId, "parameters" to emptyMap<String, Any>())
+            val mcpSlowKey = "e2e-403-mcp-slow-${UUID.randomUUID()}"
+            val readers = Executors.newSingleThreadExecutor { r -> Thread(r, "e2e-403-mcp-holder").apply { isDaemon = true } }
+            try {
+                val holder = readers.submit<JsonNode> { tool("pipelines_execute", args, mcpSlowKey) }
+                val deadline = System.currentTimeMillis() + RESERVATION_WAIT_MS
+                var startedId = ""
+                while (System.currentTimeMillis() < deadline) {
+                    val stored = redis.execInContainer("redis-cli", "GET", redisKey(mcpUser, mcpSlowKey)).stdout.trim()
+                    if (stored.isNotBlank()) {
+                        startedId = mapper.readTree(stored).path("executionId").asText()
+                        if (metadata(startedId) == 200) break
+                    }
+                    Thread.sleep(100)
+                }
+                startedId shouldNotBe ""
+                metadata(startedId) shouldBe 200
+                val mcpKey = "e2e-403-mcp-doomed-${UUID.randomUUID()}"
+                val refused = tool("pipelines_execute", args, mcpKey)
+                refused.path("error").path("code").asText() shouldBe "pipeline.execution.concurrency_limit"
+                val mcpDoomedId = reservedId(mcpKey)
+                awaitAbsent(redisKey(mcpUser, mcpKey))
+                holder.get(60, TimeUnit.SECONDS).path("status").asText() shouldBe "SUCCESS"
+                val mcpRetry = tool("pipelines_execute", args, mcpKey)
+                mcpRetry.path("status").asText() shouldBe "SUCCESS"
+                val mcpNewId = mcpRetry.path("execution_id").asText()
+                mcpNewId shouldNotBe mcpDoomedId
+                reservationRecord(redisKey(mcpUser, mcpKey)).path("executionId").asText() shouldBe mcpNewId
+                metadata(mcpNewId) shouldBe 200
+            } finally {
+                readers.shutdownNow()
             }
         }
     }
@@ -428,7 +557,7 @@ class IdempotentAttachRowOrderE2eTest {
         }
     }
 
-    /** The stored reservation record at [key]: `{execution_id, request_hash, expires_at}`. */
+    /** The stored reservation record at [key]: `{executionId, requestHash, expiresAt}`. */
     private fun reservationRecord(key: String): JsonNode {
         val stored = redis.execInContainer("redis-cli", "GET", key).stdout.trim()
         return mapper.readTree(stored)

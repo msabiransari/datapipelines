@@ -444,7 +444,18 @@
 
   // ------------------------------------------------------------------ §20 refusals → fields
 
+  /** Split the form text; validation and deduplication belong to the server. */
+  function recipientsFromText(text) {
+    return (text || "").split(",").map(function (value) { return value.trim(); }).filter(Boolean);
+  }
+
+  /** The saved recipient list as editable comma-separated text. */
+  function recipientsText(list) {
+    return (list || []).join(", ");
+  }
+
   var FIELD_BY_CODE = {
+    "schedule.validation.notifications_invalid": "notifications",
     "schedule.validation.name_invalid": "name",
     "schedule.name_taken": "name",
     "schedule.validation.cron_invalid": "cron",
@@ -639,6 +650,8 @@
     pipelineLine: pipelineLine,
     mergeMessages: mergeMessages,
     fieldForError: fieldForError,
+    recipientsFromText: recipientsFromText,
+    recipientsText: recipientsText,
     parameterErrors: parameterErrors,
     coerceParameter: coerceParameter,
     collectParameters: collectParameters,

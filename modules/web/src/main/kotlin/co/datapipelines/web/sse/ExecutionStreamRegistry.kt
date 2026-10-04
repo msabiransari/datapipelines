@@ -37,12 +37,23 @@ import java.util.concurrent.atomic.AtomicInteger
  * ## Per-user stream cap (§12.1)
  * `datapipelines.sse.max-streams-per-user` concurrent streams. Counted here because this is the
  * only object that knows what is open.
+ *
+ * One cap over all three SSE families (#375 D7, #384): execution, refresh and observed-evaluation
+ * streams count together, so [atStreamLimit] adds the other two registries' OWN per-user counts
+ * ([otherStreams]) to this one's. Those counts are instance-local and non-atomic with the later
+ * [register] — the bounded overshoot [atStreamLimit] documents.
  */
 class ExecutionStreamRegistry(
     private val properties: SseProperties,
     private val cancellationService: ExecutionCancellationService,
     private val mapper: ObjectMapper,
     private val scheduler: ScheduledExecutorService = defaultScheduler(),
+    /**
+     * The user's OTHER open SSE streams — refreshes plus observed evaluations — for the one
+     * shared cap (#384). Wired lazily (the two registries take this one eagerly) and read only at
+     * [atStreamLimit]; a no-op for the module-slice and unit cases that hold one registry alone.
+     */
+    private val otherStreams: (UUID) -> Int = { 0 },
     private val nowMillis: () -> Long = System::currentTimeMillis,
 ) {
     private val log = LoggerFactory.getLogger(ExecutionStreamRegistry::class.java)
@@ -65,15 +76,18 @@ class ExecutionStreamRegistry(
     val maxStreamsPerUser: Int get() = properties.maxStreamsPerUser
 
     /**
-     * True when [userId] is already at `datapipelines.sse.max-streams-per-user` (§12.1).
+     * True when [userId] is already at `datapipelines.sse.max-streams-per-user` (§12.1) across ALL
+     * three SSE families — this registry's execution streams plus the refresh and observed-evaluation
+     * streams [otherStreams] reports (#384).
      *
-     * The check and the later [register] are not atomic (gate C, F11): two concurrent execute
-     * calls can both pass the check, so the cap is a **bounded overshoot**, not a hard guarantee
-     * — at most a handful of extra streams per user under a concurrent burst, each still bounded
-     * by the execution timeout. Closing the race would need a lock around check+register for a
-     * limit that is a round number by design; not worth it in v1.
+     * The check and the later [register] are not atomic (gate C, F11), and neither are the cross-family
+     * reads: two concurrent opens — of the same family or different ones — can both pass the check, so
+     * the cap is a **bounded overshoot**, not a hard guarantee — at most a handful of extra streams per
+     * user under a concurrent burst, each still bounded by its run's timeout or the disconnect grace.
+     * Closing the race would need a lock around check+register for a limit that is a round number by
+     * design; not worth it in v1.
      */
-    fun atStreamLimit(userId: UUID): Boolean = activeStreamsFor(userId) >= properties.maxStreamsPerUser
+    fun atStreamLimit(userId: UUID): Boolean = activeStreamsFor(userId) + otherStreams(userId) >= properties.maxStreamsPerUser
 
     /**
      * Registers a stream.

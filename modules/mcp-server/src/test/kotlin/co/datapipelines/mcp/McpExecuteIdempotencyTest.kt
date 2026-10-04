@@ -238,6 +238,16 @@ class McpExecuteIdempotencyTest {
     private class InMemoryIdempotencyStore : IdempotencyStore {
         private val claims = mutableMapOf<String, Pair<String, UUID>>()
 
+        override fun release(
+            userId: UUID,
+            idempotencyKey: String,
+            executionId: UUID,
+        ): Boolean {
+            val key = "$userId:$idempotencyKey"
+            if (claims[key]?.second != executionId) return false
+            return claims.remove(key) != null
+        }
+
         var reservations = 0
             private set
 

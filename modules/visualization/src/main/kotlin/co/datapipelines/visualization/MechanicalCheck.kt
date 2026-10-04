@@ -282,11 +282,23 @@ class VisualizationMechanicalCheck(
         return outcome
     }
 
-    /** The string values the bindings project from [rows] — the static text check reads exactly these. */
+    /**
+     * Bound strings and numbers' existing scalar text from [rows], without formatting or normalization.
+     * Only the bindings' columns participate; nulls and unsupported values supply no assertion text.
+     */
     private fun boundValues(
         boundColumns: Collection<String>,
         rows: List<Map<String, Any?>>,
-    ): List<String> = rows.flatMap { row -> boundColumns.mapNotNull { row[it] as? String } }
+    ): List<String> =
+        rows.flatMap { row ->
+            boundColumns.mapNotNull { column ->
+                when (val value = row[column]) {
+                    is String -> value
+                    is Number -> value.toString()
+                    else -> null
+                }
+            }
+        }
 
     /** One stored fixture row, as the evaluator and the text check read it. */
     private fun toRowMap(row: ObjectNode): Map<String, Any?> =

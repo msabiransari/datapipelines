@@ -2,6 +2,7 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
+import co.datapipelines.scheduler.NotificationDelivery
 import jakarta.servlet.http.HttpServletRequest
 import org.springframework.stereotype.Controller
 import org.springframework.ui.Model
@@ -28,9 +29,8 @@ import java.time.ZoneId
  *    sets equal). Hiding is not authorization: §20's routes enforce the same rows.
  *  - **the timezone list** ([ScheduleTimezones]) — the IANA region ids the scheduler accepts.
  *
- * Out of this slice, deliberately (record §6): the notification e-mail list (slice 4 — no
- * recipients column exists yet) and any key or role assignment (R2 dropped it: a schedule fires
- * as the system identity).
+ * Notification settings are saved in slice 4 part a; delivery arrives in part b (#442).
+ * A schedule fires as the system identity (R2), with no key or role assignment.
  */
 @Controller
 class SchedulesUiController(
@@ -45,6 +45,7 @@ class SchedulesUiController(
         model.addAttribute("activeTheme", themeResolver.resolve(request))
         RoleModel.stamp(model)
         model.addAttribute("timezoneGroups", ScheduleTimezones.GROUPS)
+        model.addAttribute("notificationDelivery", NotificationDelivery.CURRENT)
         return "schedules/index"
     }
 }

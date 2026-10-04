@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import org.springframework.jdbc.core.RowMapper
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
+import org.springframework.jdbc.support.SqlArrayValue
 import java.sql.ResultSet
 import java.sql.Timestamp
 import java.time.Instant
@@ -27,10 +28,12 @@ class ScheduleRepository(
             """
             INSERT INTO schedules (id, workspace_id, name, executor_id, payload_schema_version, payload_json,
                                    parameters_json, target_ref, cron, timezone, missed_run_policy, enabled,
-                                   next_due_at, created_by, updated_by, idempotency_key, idempotency_hash)
+                                   next_due_at, created_by, updated_by, idempotency_key, idempotency_hash,
+                                   notification_recipients, notification_events)
             VALUES (:id, :workspaceId, :name, :executorId, :payloadSchemaVersion, CAST(:payload AS jsonb),
                     CAST(:parameters AS jsonb), :targetRef, :cron, :timezone, :policy, TRUE,
-                    :nextDueAt, :createdBy, :createdBy, :idempotencyKey, :idempotencyHash)
+                    :nextDueAt, :createdBy, :createdBy, :idempotencyKey, :idempotencyHash,
+                    :recipients, :events)
             RETURNING *
             """.trimIndent(),
             mapOf(
@@ -49,6 +52,9 @@ class ScheduleRepository(
                 "createdBy" to schedule.createdBy,
                 "idempotencyKey" to schedule.idempotencyKey,
                 "idempotencyHash" to schedule.idempotencyHash,
+                "recipients" to textArray(schedule.notificationRecipients),
+                "events" to
+                    textArray(NotificationEvent.entries.filter { it in schedule.notificationEvents }.map { it.wire }),
             ),
             rowMapper,
         )!!
@@ -199,6 +205,7 @@ class ScheduleRepository(
                     name = :name, executor_id = :executorId, payload_schema_version = :payloadSchemaVersion,
                     payload_json = CAST(:payload AS jsonb), parameters_json = CAST(:parameters AS jsonb), target_ref = :targetRef,
                     cron = :cron, timezone = :timezone, missed_run_policy = :policy,
+                    notification_recipients = :recipients, notification_events = :events,
                     next_due_at = COALESCE(CAST(:nextDueAt AS timestamptz), next_due_at),
                     revision = revision + 1, updated_by = :by, updated_at = :now
                 WHERE id = :id AND workspace_id = :ws AND revision = :expected AND deleted_at IS NULL
@@ -217,6 +224,9 @@ class ScheduleRepository(
                     "cron" to edit.cron,
                     "timezone" to edit.timezone,
                     "policy" to edit.missedRunPolicy.wire,
+                    "recipients" to textArray(edit.notificationRecipients),
+                    "events" to
+                        textArray(NotificationEvent.entries.filter { it in edit.notificationEvents }.map { it.wire }),
                     "nextDueAt" to edit.nextDueAt?.let(Timestamp::from),
                     "by" to by,
                     "now" to Timestamp.from(now),
@@ -379,7 +389,25 @@ class ScheduleRepository(
             createdAt = rs.getTimestamp("created_at").toInstant(),
             updatedAt = rs.getTimestamp("updated_at").toInstant(),
             deletedAt = rs.getTimestamp("deleted_at")?.toInstant(),
+            notificationRecipients = strings(rs, "notification_recipients"),
+            notificationEvents = strings(rs, "notification_events").map { requireNotNull(NotificationEvent.fromWire(it)) }.toSet(),
         )
+
+    /** Spring's SQL array binding requires varargs; lists are bounded to at most 100 recipients. */
+    @Suppress("SpreadOperator")
+    private fun textArray(values: List<String>): SqlArrayValue = SqlArrayValue("text", *values.toTypedArray())
+
+    private fun strings(
+        rs: ResultSet,
+        column: String,
+    ): List<String> {
+        val array = rs.getArray(column)
+        return try {
+            (array.array as Array<*>).map { it as String }
+        } finally {
+            array.free()
+        }
+    }
 
     private fun json(text: String): JsonNode = mapper.readTree(text)
 }
@@ -401,6 +429,8 @@ data class NewSchedule(
     val createdBy: UUID,
     val idempotencyKey: String?,
     val idempotencyHash: String?,
+    val notificationRecipients: List<String> = emptyList(),
+    val notificationEvents: Set<NotificationEvent> = NotificationEvent.DEFAULT,
 )
 
 /** What [ScheduleRepository.update] writes. [nextDueAt] null keeps the stored value (timing unchanged). */
@@ -415,4 +445,6 @@ data class ScheduleEdit(
     val timezone: String,
     val missedRunPolicy: MissedRunPolicy,
     val nextDueAt: Instant?,
+    val notificationRecipients: List<String> = emptyList(),
+    val notificationEvents: Set<NotificationEvent> = NotificationEvent.DEFAULT,
 )

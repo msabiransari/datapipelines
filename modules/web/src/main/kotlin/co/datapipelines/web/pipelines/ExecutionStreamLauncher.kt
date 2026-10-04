@@ -316,16 +316,18 @@ class ExecutionStreamLauncher(
                 )
             recordResultColumns(result)
         } catch (e: PipelineConcurrencyLimitException) {
-            // Before the first event: the response is uncommitted, so this becomes a real 429.
-            failBeforeStart(sse, emitter, e)
-            return
+            if (!emitter.emittedAny()) {
+                failBeforeStart(sse, emitter, e, request, executionId)
+                return
+            }
+            log.debug("Execution refused concurrency after its events were streamed.")
         } catch (e: ExecutionAbortedException) {
             log.debug("Execution aborted ({}); the stream already carried the event.", e.reason.wire)
         } catch (e: DatapipelinesException) {
             // pipeline_failed / a setup failure was streamed when anything was emitted; otherwise
             // the response is still uncommitted and the advice renders the envelope.
             if (!emitter.emittedAny()) {
-                failBeforeStart(sse, emitter, e)
+                failBeforeStart(sse, emitter, e, request, executionId)
                 return
             }
             log.debug("Execution ended with {} after its events were streamed.", e.code)
@@ -333,7 +335,7 @@ class ExecutionStreamLauncher(
             @Suppress("TooGenericExceptionCaught") e: Exception,
         ) {
             if (!emitter.emittedAny()) {
-                failBeforeStart(sse, emitter, e)
+                failBeforeStart(sse, emitter, e, request, executionId)
                 return
             }
             log.error("Execution failed outside the executor's mapped paths.", e)
@@ -346,7 +348,10 @@ class ExecutionStreamLauncher(
         sse: SseEmitter,
         emitter: WebEventEmitter,
         error: Exception,
+        request: ExecuteLaunch,
+        executionId: UUID?,
     ) {
+        launcher.releaseNeverStarted(request.principal.userId, request.idempotencyKey, executionId)
         emitter.executionIdOrNull()?.let(streams::close)
         sse.completeWithError(error)
     }
