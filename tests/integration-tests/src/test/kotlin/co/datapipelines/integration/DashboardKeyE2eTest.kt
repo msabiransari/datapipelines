@@ -168,6 +168,40 @@ class DashboardKeyE2eTest {
         publicForB.jsonPath().getString("error.code") shouldBe "dashboard.not_found"
     }
 
+    /**
+     * #382: the BY-NAME addressing form had no positive case on the wire — every binding above names its key by id.
+     * The admin's OWN `dashboard` key (`NAMED_KEY`: the route resolves a name only within the caller's own keys)
+     * is bound through `api_key_name`; the response, the stored row and the key's serving are
+     * read back. It runs LAST (the order number follows the class's others, which stay put) and binds only its own
+     * key, so no other case's key, folder or count moves.
+     */
+    @Test
+    @Order(11)
+    fun `A an admin binds the key by its NAME through the REST route and the key serves the boards beneath the folder`() {
+        val bound =
+            given()
+                .port(port)
+                .asSession(ADMIN)
+                .contentType(ContentType.JSON)
+                .body("""{"api_key_name": "${NAMED_KEY.name}", "name_prefix": "$BOUND_FOLDER"}""")
+                .post("/api/v1/dashboards/bindings")
+        withClue(bound.asString().take(EXCERPT)) { bound.statusCode shouldBe 201 }
+        bound.jsonPath().getString("data.api_key_id") shouldBe NAMED_KEY.id
+        bound.jsonPath().getString("data.api_key_name") shouldBe NAMED_KEY.name
+        bound.jsonPath().getString("data.name_prefix") shouldBe BOUND_FOLDER
+
+        rows("SELECT api_key_id, name_prefix FROM dashboard_key_bindings WHERE api_key_id = '${NAMED_KEY.id}'")
+            .single() shouldBe mapOf("api_key_id" to NAMED_KEY.id, "name_prefix" to BOUND_FOLDER)
+
+        val served =
+            given()
+                .port(port)
+                .header("DP-API-Key", NAMED_KEY.plaintext)
+                .get("/api/v1/dashboards/$PUBLIC_BOARD/runtime/config")
+        withClue(served.asString().take(EXCERPT)) { served.statusCode shouldBe 200 }
+        served.jsonPath().getString("data.dashboard.status") shouldBe "RELEASED"
+    }
+
     @Test
     @Order(5)
     fun `A a refresh with the key streams to completion and the DATABASE names the key`() {
@@ -814,6 +848,19 @@ class DashboardKeyE2eTest {
                     "'${row.ws}', '${row.kind}', '${row.role}')",
             )
         }
+        seedAdminOwnedKey()
+    }
+
+    /**
+     * [NAMED_KEY] is the ADMIN's OWN key — the by-name binding resolves within the caller's own keys, so a key
+     * owned by a seeded service user (the others above) can never be found by name through the admin's session.
+     */
+    private fun seedAdminOwnedKey() {
+        sql(
+            "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id, kind, role) " +
+                "VALUES ('${NAMED_KEY.id}', '$ADMIN_ID', '$ADMIN_ID', '${NAMED_KEY.name}', '${NAMED_KEY.hash}', " +
+                "'$WORKSPACE_ID', 'dashboard', 'dashboard_viewer')",
+        )
     }
 
     private fun sql(statement: String) {
@@ -878,6 +925,7 @@ class DashboardKeyE2eTest {
         private val MCP_KEY = E2eAuth.generateKey("dbkey-mcp", ownerId = "db300000-0000-0000-0000-000000000004")
         private val ENDPOINT_KEY = E2eAuth.generateKey("dbkey-endpoint", ownerId = "db300000-0000-0000-0000-000000000005")
         private val FOREIGN_KEY = E2eAuth.generateKey("dbkey-foreign", ownerId = "db300000-0000-0000-0000-000000000006")
+        private val NAMED_KEY = E2eAuth.generateKey("dbkey-by-name", ownerId = ADMIN_ID)
 
         private val E2E_SECRET = E2eSession.newSecret()
         private val ADMIN get() = E2eSession.jwt(E2E_SECRET, ADMIN_ID, "dbkey-admin@e2e.test", WORKSPACE)
