@@ -1,6 +1,5 @@
 package co.datapipelines.web.ui
 
-import co.datapipelines.application.lens.LensedView
 import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
@@ -10,32 +9,40 @@ import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.web.api.currentPrincipal
 import co.datapipelines.web.pipelines.LifecycleVerbs
 import co.datapipelines.web.templates.TemplateReleaseService
-import jakarta.servlet.http.HttpServletResponse
 import org.springframework.http.ResponseEntity
+import org.springframework.stereotype.Controller
 import org.springframework.ui.Model
 import org.springframework.web.bind.annotation.GetMapping
-import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestParam
-import java.util.UUID
+import org.springframework.web.util.UriComponentsBuilder
 
 /**
  * The template twin of [PipelineLifecycleDialogController] (ui-screens §4.3d/§4.6, 102):
  * every dialog is addressed by NAME in the query (§9.6 — a `%2F` in a path segment is refused
  * below routing, which is the whole reason the templates partial routes are query-parameter
- * surface), every POST calls [TemplateReleaseService] — the service 101 wired — and the
- * shapes are the pipeline controller's: Shape A for the explorer, `HX-Redirect` for the
- * editor and the entity purge, Shape C for every refusal.
+ * surface), every POST calls [TemplateReleaseService] — the service 101 wired — and a success
+ * answers `HX-Redirect` with a layout flash (§4.3d's editor leg, the shape the #395 ruling
+ * gave the pipelines twin).
+ *
+ * Since #398 the dialogs have ONE page: the template workspace. The explorer's Shape A leg
+ * (the detail-pane re-render and its `lifecycle-changed` badge rewrite) is gone with the
+ * page the pane lived in — every success redirects onto the workspace's Versions tab (or,
+ * when the verb removed the whole template, onto the catalog), where the flash toast lands
+ * and the new version set is on the page. The dialogs' GETs all carry the optional `from`
+ * (the wire value the workspace sends is `editor`, the surface this controller's redirects
+ * serve); the POSTs accept it and answer the same redirect for any value, because there is
+ * no second surface left to render a result into. The dialogs' pre-read guards are
+ * unchanged: a refused branch opens with no button, and the POST re-runs the guard.
  *
  * There is deliberately no Switch dialog: templates are pinned by exact version, so there is
  * no served pointer a human would roll back (§4.6 records the absence).
  */
-@org.springframework.stereotype.Controller
+@Controller
 class TemplateLifecycleDialogController(
     private val releases: TemplateReleaseService,
     private val templates: TemplateRepository,
     private val dialogs: TemplateLifecycleDialogModel,
-    private val browse: TemplateBrowseModel,
     private val audit: AuditEventSink,
 ) {
     // ------------------------------------------------------------------ release
@@ -49,7 +56,7 @@ class TemplateLifecycleDialogController(
     ): String {
         LifecycleVerbs.requireSession()
         model.addAttribute("dlg", dialogs.release(currentPrincipal().requireWorkspace().id, name))
-        model.addAttribute("from", from ?: FROM_EXPLORER)
+        model.addAttribute("from", from ?: FROM_WORKSPACE)
         // 177 §D.8: the dialog's verb renders inside a role guard like every other verb — the route
         // already refuses the wrong role; the markup now says so too, and the exemption list is empty.
         RoleModel.stamp(model)
@@ -59,11 +66,8 @@ class TemplateLifecycleDialogController(
     @PostMapping("/partials/templates/lifecycle/release")
     @RequiredScope(Permission.TEMPLATE_RELEASE)
     fun release(
-        model: Model,
-        response: HttpServletResponse,
         @RequestParam name: String,
-        @RequestParam(required = false) from: String?,
-    ): Any {
+    ): ResponseEntity<String> {
         val principal = LifecycleVerbs.requireSession()
         val workspaceId = principal.requireWorkspace().id
         // The hash the DIALOG read (§4.2); a stale hash is the service's version.conflict.
@@ -83,18 +87,7 @@ class TemplateLifecycleDialogController(
             workspaceId,
             LifecycleVerbs.templateReleaseDetails(principal, released.detail.templateId, released.detail.version),
         )
-        return if (from == FROM_EDITOR) {
-            redirect("/templates/editor?name=${urlEncode(name)}&ok=released")
-        } else {
-            applied(
-                model,
-                response,
-                workspaceId,
-                name,
-                "Released v${released.detail.version}",
-                "v${released.detail.version} is the version a pin without a number resolves to now.",
-            )
-        }
+        return redirect(versionsTab(name, "released"))
     }
 
     // ------------------------------------------------------------------ purge draft (the versioned verb)
@@ -109,9 +102,7 @@ class TemplateLifecycleDialogController(
     ): String {
         LifecycleVerbs.requireSession()
         model.addAttribute("dlg", dialogs.purge(currentPrincipal().requireWorkspace().id, name, version))
-        model.addAttribute("from", from ?: FROM_EXPLORER)
-        // 177 §D.8: the dialog's verb renders inside a role guard like every other verb — the route
-        // already refuses the wrong role; the markup now says so too, and the exemption list is empty.
+        model.addAttribute("from", from ?: FROM_WORKSPACE)
         RoleModel.stamp(model)
         return "partials/template-lifecycle-purge"
     }
@@ -119,13 +110,10 @@ class TemplateLifecycleDialogController(
     @PostMapping("/partials/templates/lifecycle/purge")
     @RequiredScope(Permission.TEMPLATE_VERSION_MANAGE)
     fun purge(
-        model: Model,
-        response: HttpServletResponse,
         @RequestParam name: String,
         @RequestParam version: Int,
         @RequestParam confirm: String?,
-        @RequestParam(required = false) from: String?,
-    ): Any {
+    ): ResponseEntity<String> {
         val principal = LifecycleVerbs.requireSession()
         val workspaceId = principal.requireWorkspace().id
         requireTypedConfirm(confirm, "v$version")
@@ -141,23 +129,12 @@ class TemplateLifecycleDialogController(
         return when {
             soleDraft -> {
                 // The sole draft's purge took the TEMPLATE with it (§5.4): the tree must lose
-                // the leaf, so the page navigates and the flash carries the toast.
+                // the leaf, so the page navigates to the CATALOG and the flash carries the toast.
                 redirect("/templates?ok=template_purged")
             }
 
-            from == FROM_EDITOR -> {
-                redirect("/templates/editor?name=${urlEncode(name)}&ok=draft_purged")
-            }
-
             else -> {
-                applied(
-                    model,
-                    response,
-                    workspaceId,
-                    name,
-                    "Purged v$version",
-                    "The draft is gone. This cannot be undone.",
-                )
+                redirect(versionsTab(name, "draft_purged"))
             }
         }
     }
@@ -170,12 +147,13 @@ class TemplateLifecycleDialogController(
         model: Model,
         @RequestParam name: String,
         @RequestParam version: Int,
+        @RequestParam(required = false) from: String?,
     ): String {
         LifecycleVerbs.requireSession()
         model.addAttribute("dlg", dialogs.discard(currentPrincipal().requireWorkspace().id, name, version))
-        model.addAttribute("from", FROM_EXPLORER)
-        // 177 §D.8: the dialog's verb renders inside a role guard like every other verb — the route
-        // already refuses the wrong role; the markup now says so too, and the exemption list is empty.
+        // #395's shape — the `from` the opener carries decides the markup, and every GET
+        // accepts it; gone is the hard-set explorer value the #395 ruling called a defect.
+        model.addAttribute("from", from ?: FROM_WORKSPACE)
         RoleModel.stamp(model)
         return "partials/template-lifecycle-discard"
     }
@@ -183,14 +161,12 @@ class TemplateLifecycleDialogController(
     @PostMapping("/partials/templates/lifecycle/discard")
     @RequiredScope(Permission.TEMPLATE_VERSION_MANAGE)
     fun discard(
-        model: Model,
-        response: HttpServletResponse,
         @RequestParam name: String,
         @RequestParam version: Int,
-    ): Any {
+    ): ResponseEntity<String> {
         val principal = LifecycleVerbs.requireSession()
         val workspaceId = principal.requireWorkspace().id
-        val detail = releases.discardVersion(workspaceId, name, version, principal.userId)
+        releases.discardVersion(workspaceId, name, version, principal.userId)
         LifecycleVerbs.audit(
             audit,
             LifecycleVerbs.TEMPLATE_AUDIT_VERSION_DISCARDED,
@@ -198,15 +174,7 @@ class TemplateLifecycleDialogController(
             workspaceId,
             mapOf("template_id" to name, "version" to version),
         )
-        // The pointer outcome from the row the service returned — never the dialog's guess.
-        val current = templates.findLatest(workspaceId, name)?.version
-        val outcome =
-            if (current != null) {
-                "v$current is the resolved version now."
-            } else {
-                "Nothing eligible remains — the template has no current version."
-            }
-        return applied(model, response, workspaceId, name, "Discarded v$version", outcome)
+        return redirect(versionsTab(name, "discarded"))
     }
 
     // ------------------------------------------------------------------ restore
@@ -217,12 +185,11 @@ class TemplateLifecycleDialogController(
         model: Model,
         @RequestParam name: String,
         @RequestParam version: Int,
+        @RequestParam(required = false) from: String?,
     ): String {
         LifecycleVerbs.requireSession()
         model.addAttribute("dlg", dialogs.restore(currentPrincipal().requireWorkspace().id, name, version))
-        model.addAttribute("from", FROM_EXPLORER)
-        // 177 §D.8: the dialog's verb renders inside a role guard like every other verb — the route
-        // already refuses the wrong role; the markup now says so too, and the exemption list is empty.
+        model.addAttribute("from", from ?: FROM_WORKSPACE)
         RoleModel.stamp(model)
         return "partials/template-lifecycle-restore"
     }
@@ -230,11 +197,9 @@ class TemplateLifecycleDialogController(
     @PostMapping("/partials/templates/lifecycle/restore")
     @RequiredScope(Permission.TEMPLATE_VERSION_MANAGE)
     fun restore(
-        model: Model,
-        response: HttpServletResponse,
         @RequestParam name: String,
         @RequestParam version: Int,
-    ): Any {
+    ): ResponseEntity<String> {
         val principal = LifecycleVerbs.requireSession()
         val workspaceId = principal.requireWorkspace().id
         releases.restoreVersion(workspaceId, name, version)
@@ -245,19 +210,7 @@ class TemplateLifecycleDialogController(
             workspaceId,
             mapOf("template_id" to name, "version" to version),
         )
-        val current = templates.findLatest(workspaceId, name)?.version
-        return applied(
-            model,
-            response,
-            workspaceId,
-            name,
-            "Restored v$version",
-            if (current == version) {
-                "v$version is the resolved version now."
-            } else {
-                "v$version is released again; the pointer stays at v$current."
-            },
-        )
+        return redirect(versionsTab(name, "restored"))
     }
 
     // ------------------------------------------------------------------ purge entity
@@ -267,12 +220,11 @@ class TemplateLifecycleDialogController(
     fun purgeEntityDialog(
         model: Model,
         @RequestParam name: String,
+        @RequestParam(required = false) from: String?,
     ): String {
         LifecycleVerbs.requireSession()
         model.addAttribute("dlg", dialogs.purgeEntity(currentPrincipal().requireWorkspace().id, name))
-        model.addAttribute("from", FROM_EXPLORER)
-        // 177 §D.8: the dialog's verb renders inside a role guard like every other verb — the route
-        // already refuses the wrong role; the markup now says so too, and the exemption list is empty.
+        model.addAttribute("from", from ?: FROM_WORKSPACE)
         RoleModel.stamp(model)
         return "partials/template-lifecycle-purge-entity"
     }
@@ -301,27 +253,24 @@ class TemplateLifecycleDialogController(
 
     // ------------------------------------------------------------------ shared shapes
 
-    private fun applied(
-        model: Model,
-        response: HttpServletResponse,
-        workspaceId: UUID,
+    /**
+     * The Versions tab's landing URL — the canonical workspace with the tab the verbs live
+     * on and the layout flash's code. The name's SEGMENTS build the path (the same rule the
+     * editor redirect uses); the tab and the code are the controller's own wire words, so the
+     * built URI carries no free input but the grammar-checked name.
+     */
+    @Suppress("SpreadOperator") // pathSegment has no List overload; the split is bounded by the grammar
+    private fun versionsTab(
         name: String,
-        toastTitle: String,
-        toastMessage: String,
-    ): String {
-        // An author's re-render (the verbs are author/admin rows); the view is theirs — Everything.
-        browse.fillDetail(model, workspaceId, LensedView.EVERYTHING, name)
-        model.addAttribute("lifecycleToastTitle", toastTitle)
-        model.addAttribute("lifecycleToastMessage", toastMessage)
-        val draft = templates.findDraftDetail(workspaceId, name)
-        val latest = templates.findLatest(workspaceId, name)?.version
-        val working = (draft?.version ?: latest)?.toString() ?: "null"
-        response.setHeader(
-            "HX-Trigger",
-            "{\"lifecycle-changed\":{\"leafId\":\"${jsonEscape(name)}\",\"workingVersion\":$working,\"hasDraft\":${draft != null}}}",
-        )
-        return APPLIED_VIEW
-    }
+        ok: String,
+    ): String =
+        UriComponentsBuilder
+            .fromPath("/templates")
+            .pathSegment(*name.split("/").toTypedArray())
+            .queryParam("tab", TemplateWorkspaceController.TemplateWorkspaceTab.VERSIONS.wire)
+            .queryParam("ok", ok)
+            .build()
+            .toUriString()
 
     private fun redirect(url: String): ResponseEntity<String> = ResponseEntity.ok().header("HX-Redirect", url).body("")
 
@@ -339,13 +288,12 @@ class TemplateLifecycleDialogController(
         }
     }
 
-    private fun urlEncode(raw: String): String = java.net.URLEncoder.encode(raw, Charsets.UTF_8)
-
-    private fun jsonEscape(raw: String): String = raw.replace("\\", "\\\\").replace("\"", "\\\"")
-
     private companion object {
-        const val FROM_EXPLORER = "explorer"
-        const val FROM_EDITOR = "editor"
-        const val APPLIED_VIEW = "partials/template-lifecycle-applied"
+        /**
+         * The `from` wire value the workspace's dialogs send — the successor of the old
+         * editor surface, whose value (`editor`) the routes keep accepting. An absent value
+         * resolves here too: the dialogs' one page is the workspace.
+         */
+        const val FROM_WORKSPACE = "editor"
     }
 }

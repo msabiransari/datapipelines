@@ -94,6 +94,10 @@ class TemplateCreatePartialTest {
     private fun stubWrite(): CapturingSlot<TemplateDraft> {
         val captured = slot<TemplateDraft>()
         every { repository.existsId(any(), any()) } returns false
+        // The success node's refreshed CATALOG list rides out-of-band (#398): the fill reads
+        // the flat list, so the strict mock needs the one answer the refresh asks for.
+        every { repository.list(any(), any(), any(), any(), any(), any(), any()) } returns emptyList()
+        every { repository.count(any(), any(), any(), any()) } returns 0
         every { validator.validateOrThrow(capture(captured), any()) } answers { captured.captured }
         every { repository.create(any(), any(), any(), co.datapipelines.pipeline.CreateLifecycle.DRAFT, WriteSurface.SESSION) } answers {
             val d = secondArg<TemplateDraft>()
@@ -195,23 +199,6 @@ class TemplateCreatePartialTest {
         verify(
             exactly = 0,
         ) { repository.create(any(), any(), any(), co.datapipelines.pipeline.CreateLifecycle.DRAFT, WriteSurface.SESSION) }
-    }
-
-    @Test
-    fun `a name with no live template fills the not-found state and asks no further questions`() {
-        authenticate()
-        // 106: the detail fill short-circuits on a null working read, exactly as the pipelines
-        // twin does — every other read would be a query about a row that is not there. The
-        // repository is a STRICT mock, so an extra query fails this test rather than passing
-        // it quietly.
-        every { repository.findWorking(any(), "acme/x") } returns null
-
-        val model = ExtendedModelMap()
-        controller.versions(model, "acme/x") shouldBe "partials/template-detail"
-
-        model["templateId"] shouldBe "acme/x"
-        model["template"] shouldBe null
-        model["versions"] shouldBe null
     }
 
     /**

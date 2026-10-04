@@ -17,10 +17,11 @@ import java.nio.file.Paths
  *
  *  - an AUTHOR creates a jsonata template through the create modal (the record's example
  *    prefilled), finds it under the `jsonata` type filter and NOT under `html` (the filter's
- *    falsification: an html template with the same stem is seeded beside it), opens the
- *    editor, edits the body so a case goes red, runs the suite — red, with the first
- *    difference's path and both sides — fixes the expectation, runs it green, saves the draft
- *    (the hash changes), and releases it through the dialog;
+ *    falsification: an html template with the same stem is seeded beside it), opens its
+ *    WORKSPACE (#398 — the row IS the destination; there is no "Open in editor" hop),
+ *    edits the body so a case goes red, runs the suite — red, with the first difference's
+ *    path and both sides — fixes the expectation, runs it green, saves the draft (the hash
+ *    changes), and releases it through the dialog;
  *  - a VIEWER opens the same kind of template: four read-only panes and no verb at all.
  *
  * Owner ruling 2026-09-25: Run suite evaluates the panes AS TYPED — a saved draft is always
@@ -144,13 +145,16 @@ class TransformFaceBrowserTest : BrowserSuite() {
         page.locator("#tf-body").inputValue() shouldContain "\"no customer\""
         themedShots("saved")
 
-        // Release through the existing dialog: the page reloads on the released version, read-only.
-        page.click("#tpl-release-draft")
-        val dialog = page.locator("#te-dialog [data-lifecycle-dialog]").first()
+        // Release through the existing dialog: the POST answers HX-Redirect onto the
+        // workspace's Versions tab with the flash (102, #398's landing).
+        page.locator(".tw-topbar [data-verb='template-release']").click()
+        val dialog = page.locator("#tx-dialog [data-lifecycle-dialog]").first()
         dialog.waitFor()
         dialog.locator("button[type=submit]").click()
-        // The editor's release answers HX-Redirect to the editor with `ok=released` (102).
-        page.waitForURL({ url -> url.contains("/templates/editor") && url.contains("ok=released") })
+        page.waitForURL({ url -> url.contains("tab=versions") && url.contains("ok=released") })
+        // The page reloaded on the Versions tab; the face is the Source tab's to show.
+        page.locator("#tw-tab-source").click()
+        page.waitForFunction("() => !document.getElementById('tw-pane-source').hidden")
         page.locator("#tf-body-ro").waitFor()
         page.locator("#template-source").innerText() shouldContain "RELEASED"
         page.locator("#template-source [data-verb='template-edit']").count() shouldBe 1
@@ -189,20 +193,25 @@ class TransformFaceBrowserTest : BrowserSuite() {
         page.waitForResponse({ it.url().contains("/partials/templates") && it.url().contains("type=$type") }) {
             page.selectOption("#template-filter-type", type)
         }
-        page.locator("button.tpl-result span.tpl-path", Page.LocatorOptions().setHasText(present)).first().waitFor()
-        val paths = page.locator("button.tpl-result span.tpl-path").allInnerTexts()
+        page.locator("a.tpl-result span.tpl-path", Page.LocatorOptions().setHasText(present)).first().waitFor()
+        val paths = page.locator("a.tpl-result span.tpl-path").allInnerTexts()
         paths.contains(present) shouldBe true
         paths.contains(absent) shouldBe false
     }
 
+    /** The workspace is the row's destination (#398) — a full navigation, no "Open in editor" hop. */
     private fun openInEditor(stem: String) {
         page.navigate("$baseUrl/templates?q=$stem")
         page
-            .locator("button.tpl-result", Page.LocatorOptions().setHasText("$stem.jsonata"))
+            .locator("a.tpl-result", Page.LocatorOptions().setHasText("$stem.jsonata"))
             .first()
             .click()
-        page.locator("a:has-text('Open in editor')").first().click()
-        page.waitForURL("**/templates/editor**")
+        page.waitForURL("**/templates/test/**")
+        page.waitForSelector(".tw-root")
+        // The Source tab is where the face lives; it is not the default when a redirect names
+        // another tab (the release leg lands on ?tab=versions).
+        page.locator("#tw-tab-source").click()
+        page.waitForFunction("() => !document.getElementById('tw-pane-source').hidden")
     }
 
     private fun runSuite() {

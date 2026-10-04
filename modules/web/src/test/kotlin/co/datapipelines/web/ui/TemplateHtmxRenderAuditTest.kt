@@ -173,10 +173,11 @@ class TemplateHtmxRenderAuditTest {
                 "pipelines/list" to { c: WebContext -> c.fillPipelineList() },
                 "templates/list" to { c: WebContext -> c.fillTemplateList() },
                 "datasources/list" to { c: WebContext -> c.fillDatasourceList() },
-                // 054: the template editor is the fourth screen with an hx-target — the
-                // version select swaps #template-source and Edit answers into
-                // #tpl-edit-refusal, both of which live in a th:replace'd FRAGMENT.
-                "templates/editor" to { c: WebContext -> c.fillTemplateEditor() },
+                // 054, kept through #398: the template WORKSPACE is the fourth screen with
+                // an hx-target — the transform face's Save swaps #template-source and Edit
+                // answers into #tpl-edit-refusal, both of which live in a th:replace'd
+                // FRAGMENT. The workspace page itself renders the CATALOG's targets too.
+                "templates/workspace" to { c: WebContext -> c.fillTemplateEditor() },
             ).flatMap { (view, fill) ->
                 // Comments are stripped first: the templates document their own contract in
                 // prose ("The ROOT carries id=..."), and an id scraped out of a COMMENT makes
@@ -258,14 +259,10 @@ class TemplateHtmxRenderAuditTest {
         setVariable("namePattern", co.datapipelines.templates.TemplateNameGrammar.pattern)
         setVariable("nameMaxLength", co.datapipelines.templates.TemplateNameGrammar.maxLength)
         setVariable("nameHint", co.datapipelines.templates.TemplateNameGrammar.DESCRIPTION)
-        setVariable("searching", false)
-        setVariable("prefix", "")
-        setVariable("levelId", TemplateBrowseModel.ROOT_LEVEL_ID)
-        setVariable(
-            "folders",
-            listOf(TemplateFolderView("acme", "acme", 4, TemplateBrowseModel.levelId("acme"))),
-        )
-        setVariable("foldersTruncated", false)
+        // #398: the catalog's own fill — the flat list, always (the dispatcher is gone).
+        setVariable("searching", true)
+        setVariable("scope", TemplateListScope.CATALOG.wire)
+        setVariable("rootId", TemplateBrowseModel.CATALOG_ROOT_ID)
         setVariable("drafts", emptyMap<String, co.datapipelines.templates.TemplateVersionDetail>())
         setVariable(
             "templates",
@@ -286,6 +283,8 @@ class TemplateHtmxRenderAuditTest {
         setVariable("offset", 0)
         setVariable("hasMore", true)
         setVariable("total", 30)
+        setVariable("skeleton", TransformSkeleton)
+        setVariable("canAuthor", false)
     }
 
     /**
@@ -309,17 +308,58 @@ class TemplateHtmxRenderAuditTest {
                 createdBy = UUID.randomUUID(),
             ),
         )
-        setVariable("templateName", "acme/revenue.sql")
-        setVariable("versions", emptyList<Any>())
+        fillWorkspacePage("acme/revenue.sql")
         setVariable("selectedVersion", 1)
         setVariable("workingVersion", 2)
         setVariable("readOnly", true)
         setVariable("selectedStatus", "RELEASED")
         setVariable("releasedAt", Instant.parse("2026-08-11T00:00:00Z"))
         setVariable("releasedBy", UUID.randomUUID().toString())
+        setVariable("skeleton", TransformSkeleton)
+    }
+
+    /** The workspace page's own stamp, shared by the audits that render it. */
+    private fun WebContext.fillWorkspacePage(templateName: String) {
+        setVariable("templateName", templateName)
+        setVariable("navCurrentPath", templateName)
+        setVariable("hasSelectedBody", true)
+        setVariable("viewedVersion", 1)
+        setVariable("viewedLabel", "v1 · released · current")
+        setVariable("viewedIsDraft", false)
+        setVariable("viewedIsCurrent", true)
+        setVariable("viewedStatusLabel", "released")
+        setVariable("currentVersion", 1)
+        setVariable("viewedEditable", false)
+        setVariable("canAuthor", true)
         setVariable("hasDraft", false)
         setVariable("draftVersion", null)
         setVariable("draftHash", null)
+        setVariable("canDelete", false)
+        setVariable("canDiscardCurrent", true)
+        setVariable("canPurgeDraftInHeader", false)
+        setVariable("releasableVersion", null)
+        setVariable("currentReleaseVersion", 1)
+        setVariable("activeTab", "source")
+        setVariable("interpolations", emptyList<String>())
+        setVariable("isTransform", false)
+        setVariable(
+            "templateWorkspace",
+            TemplateWorkspaceModel.Resolved(
+                name = templateName,
+                selected = TemplateWorkspaceModel.Selected(null, null),
+                draft = null,
+                currentVisible = 1,
+                versions = emptyList(),
+                usedBy =
+                    TemplateWorkspaceModel.UsedByFacts(emptyList(), 0, emptyList(), emptyList(), "nothing"),
+            ),
+        )
+        setVariable("usedBy", emptyList<Any>())
+        setVariable("usedByCount", 0)
+        setVariable("usedBySets", emptyList<Any>())
+        setVariable("usedByVisualizations", emptyList<Any>())
+        setVariable("usedBySummary", "nothing")
+        setVariable("versions", emptyList<Any>())
     }
 
     /** DatasourceUiController's model — ONE row, or the pager never renders and the guard is vacuous. */

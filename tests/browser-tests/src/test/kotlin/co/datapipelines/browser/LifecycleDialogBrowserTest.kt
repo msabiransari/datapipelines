@@ -5,6 +5,7 @@ import com.microsoft.playwright.Page
 import com.microsoft.playwright.options.LoadState
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
 import java.nio.file.Files
 import java.nio.file.Paths
@@ -145,9 +146,8 @@ class LifecycleDialogBrowserTest : BrowserSuite() {
     }
 
     private fun rowMenu(versionBadge: String): Locator {
-        // The PIPELINE versions row is the house table (tr[data-version-row], #349); the
-        // TEMPLATE versions row is still the compact grid row (.tplx-vrow). The menu
-        // inside either is the same ⋯ + popover shape.
+        // BOTH versions rows are the house table (tr[data-version-row], #349/#398). The
+        // menu inside either is the same ⋯ + popover shape.
         val row =
             page
                 .locator("tr[data-version-row], .tplx-vrow")
@@ -156,32 +156,6 @@ class LifecycleDialogBrowserTest : BrowserSuite() {
         row.locator("details.tplx-vmenu summary").click()
         return row.locator(".tplx-vmenu-list")
     }
-
-    /**
-     * The success toast lands OOB in the stack; this waits for a NEW one (the previous
-     * toast may still be inside its 6s auto-dismiss window) and hands its text back. A
-     * refusal shows up here too: the stack's full text rides the timeout message, so a
-     * Shape C refusal names its code instead of just timing out.
-     *
-     * The baseline is counted BEFORE the action that earns the toast, never after: a local
-     * POST answers in ~30 ms, inside the click's own settle window, so a count taken after
-     * the click already included the new toast and the wait for "one more" ran out its 30 s
-     * while the toast auto-dismissed (traced at the 2026-09-12 gate: response done 38 ms into
-     * a 109 ms click, baseline taken 10 ms after it).
-     */
-    private fun successToastAfter(action: () -> Unit): String {
-        val before = toastCount()
-        action()
-        page.waitForFunction(
-            "(n) => document.querySelectorAll('#toast .ds-toast').length > n",
-            before,
-        )
-        // The NEW toast is the one at index `before` — earlier toasts may still be inside
-        // their 6s window, and reading `.last()` would hand back a stale sibling's text.
-        return page.locator("#toast .ds-toast").nth(before).innerText()
-    }
-
-    private fun toastCount(): Int = page.locator("#toast .ds-toast").count()
 
     /**
      * The redirect legs' toast: it arrives from the flash BIN via toast.js's init adoption,
@@ -339,43 +313,68 @@ class LifecycleDialogBrowserTest : BrowserSuite() {
         createDraftTemplate("test/lifecycle_probe.sql")
 
         page.setViewportSize(1280, 900)
-        page.navigate("$baseUrl/templates")
         selectLeafOf("test/lifecycle_probe.sql")
 
-        val releaseDialog = openDialog(page.locator(".tplx-detail-actions button", Page.LocatorOptions().setHasText("Release v1")))
+        val releaseDialog = openDialog(page.locator(".tw-topbar button", Page.LocatorOptions().setHasText("Release v1")))
         releaseDialog.innerText() shouldContain "pin without a number"
-        successToastAfter { releaseDialog.locator("button[type=submit]").click() } shouldContain "Released v1"
+        // #398: the redirect flash uses the layout's released toast (title "Released"; the
+        // body carries the "current version and locked" sentence). A template release never
+        // shows a pipeline's held names: the generic sentence is the whole body (#407's
+        // ReleaseFlash is bound to a pipeline id the template route does not carry).
+        releaseDialog.locator("button[type=submit]").click()
+        page.waitForURL("**/templates/test/lifecycle_probe.sql?tab=versions&ok=released")
+        flashToast() shouldContain "Released"
+        flashToast() shouldNotContain "Also released"
 
         // A draft over the release, then Discard the resolved release: the twin's fallback.
+        // #398: every success lands back on ?tab=versions, so the tab is where the walk is.
         openDraftOverReleaseTemplate("test/lifecycle_probe.sql")
-        page.navigate("$baseUrl/templates")
         selectLeafOf("test/lifecycle_probe.sql")
-        val discardDialog = openDialog(page.locator(".tplx-detail-actions button", Page.LocatorOptions().setHasText("Discard v1")))
+        page.locator("#tw-tab-versions").click()
+        page.waitForSelector("#tw-pane-versions tr[data-version-row]")
+        val discardDialog = openDialog(page.locator(".tw-topbar button", Page.LocatorOptions().setHasText("Discard v1")))
         shot("templates-discard-1280-light")
-        successToastAfter { discardDialog.locator("button[type=submit]").click() } shouldContain "v2 is the resolved version now."
+        discardDialog.locator("button[type=submit]").click()
+        page.waitForURL("**/templates/test/lifecycle_probe.sql?tab=versions&ok=discarded")
+        flashToast() shouldContain "Version discarded"
+        // The flash is generic by design (the layout's `discarded` code serves every family; the
+        // old Shape A toast named "v2 is the resolved version now"). That fact is the Versions
+        // tab's now — the page the redirect lands on marks v2 as the version that resolves.
+        page.waitForSelector("#tw-pane-versions tr[data-version-row='2'] .tplx-current")
+        page.locator("#tw-pane-versions tr[data-version-row='1'] td:nth-child(2) .ds-badge").innerText() shouldBe "DISCARDED"
 
         rowMenu("v1").locator("button", Locator.LocatorOptions().setHasText("Restore v1")).click()
-        successToastAfter {
-            page.locator("#tx-dialog [data-lifecycle-dialog='template-restore'] button[type=submit]").click()
-        } shouldContain "Restored v1"
+        page.locator("#tx-dialog [data-lifecycle-dialog='template-restore'] button[type=submit]").click()
+        page.waitForURL("**/templates/test/lifecycle_probe.sql?tab=versions&ok=restored")
+        flashToast() shouldContain "Version restored"
+        page.waitForSelector("#tw-pane-versions tr[data-version-row='1']")
+        page.locator("#tw-pane-versions tr[data-version-row='1'] td:nth-child(2) .ds-badge").innerText() shouldBe "RELEASED"
 
         // The version purge through its typed confirm; the template stays (v1 remains).
         rowMenu("v2").locator("button", Locator.LocatorOptions().setHasText("Purge v2")).click()
         val purgeDialog = page.locator("#tx-dialog [data-lifecycle-dialog='template-purge']")
         purgeDialog.waitFor()
         purgeDialog.locator("[data-confirm-input]").fill("v2")
-        successToastAfter { purgeDialog.locator("button[data-typed-confirm]").click() } shouldContain "Purged v2"
+        purgeDialog.locator("button[data-typed-confirm]").click()
+        page.waitForURL("**/templates/test/lifecycle_probe.sql?tab=versions&ok=draft_purged")
+        flashToast() shouldContain "Draft purged"
+        page.waitForSelector("#tw-pane-versions tr[data-version-row='1']")
+        page.locator("#tw-pane-versions tr[data-version-row='2']").count() shouldBe 0
 
-        // The entity purge on a fresh {D} template: typed NAME, redirect, leaf gone.
+        // The entity purge on a fresh {D} template: typed NAME, redirect to the CATALOG
+        // (the tree must lose the leaf), the leaf gone from the sidebar tree.
         createDraftTemplate("test/lifecycle_chaff.sql")
-        page.navigate("$baseUrl/templates")
         selectLeafOf("test/lifecycle_chaff.sql")
-        val entityDialog = openDialog(page.locator(".tplx-detail-actions button", Page.LocatorOptions().setHasText("Purge template")))
+        val entityDialog = openDialog(page.locator(".tw-topbar button", Page.LocatorOptions().setHasText("Purge template")))
         entityDialog.locator("[data-confirm-input]").fill("test/lifecycle_chaff.sql")
         entityDialog.locator("button[data-typed-confirm]").click()
         page.waitForURL("**/templates?ok=template_purged")
         flashToast() shouldContain "Template purged"
-        page.locator("button.tpl-leaf", Page.LocatorOptions().setHasText("lifecycle_chaff")).count() shouldBe 0
+        page.click("[data-nav-tree-reveal='templates']")
+        page.waitForSelector("#nav-tree-templates details.tpl-folder")
+        page
+            .locator("#nav-tree-templates a.tpl-leaf", Page.LocatorOptions().setHasText("lifecycle_chaff"))
+            .count() shouldBe 0
     }
 
     // -------------------------------------------------- every dialog, light and dark, two widths
@@ -424,14 +423,14 @@ class LifecycleDialogBrowserTest : BrowserSuite() {
                 }
                 page.setViewportSize(w, 900)
 
-                // The template twin's release + purge-entity ({D} shape on a fresh template).
-                page.navigate("$baseUrl/templates")
+                // The template twin's release + purge-entity ({D} shape on a fresh template),
+                // opened from the WORKSPACE header (#398).
                 selectLeafOf("test/lifecycle_probe_twin.sql")
-                openDialog(page.locator(".tplx-detail-actions button", Page.LocatorOptions().setHasText("Purge template"))).let {
+                openDialog(page.locator(".tw-topbar button", Page.LocatorOptions().setHasText("Purge template"))).let {
                     shot("templates-purge-entity-$w-$mode")
                 }
                 page.keyboard().press("Escape")
-                openDialog(page.locator(".tplx-detail-actions button", Page.LocatorOptions().setHasText("Release v"))).let {
+                openDialog(page.locator(".tw-topbar button", Page.LocatorOptions().setHasText("Release v"))).let {
                     shot("templates-release-$w-$mode")
                 }
                 page.keyboard().press("Escape")
@@ -442,26 +441,15 @@ class LifecycleDialogBrowserTest : BrowserSuite() {
 
     // ------------------------------------------------------------------ shared helpers
 
-    /** The TEMPLATES explorer's selection (#350: the pipelines page has no explorer any more). */
+    /** The template WORKSPACE, reached the way a reader does — a catalog row (#398). */
     private fun selectLeafOf(name: String) {
-        openDrawerIfPresent()
-        page.waitForSelector("[data-explorer-pane] summary.tpl-summary")
-        if (page.locator("[data-explorer-pane] details.tpl-folder[open]").count() == 0) {
-            page.waitForResponse({ it.url().contains("prefix=test") }) {
-                page.locator("[data-explorer-pane] summary.tpl-summary").first().click()
-            }
-        }
-        page.waitForSelector("button.tpl-leaf")
-        val leaf = page.locator("button.tpl-leaf", Page.LocatorOptions().setHasText(name.substringAfterLast('/'))).first()
-        page.waitForResponse({ it.url().contains("/detail") || it.url().contains("/versions") }) { leaf.click() }
-        page.waitForSelector(".tplx-detail-header")
-    }
-
-    private fun openDrawerIfPresent() {
-        val browse = page.locator("[data-explorer-drawer-open]")
-        if (browse.count() > 0 && browse.first().isVisible) {
-            browse.first().click()
-            page.locator(".tplx-body.is-drawer-open").waitFor()
-        }
+        page.navigate("$baseUrl/templates?q=" + name.substringAfterLast('/'))
+        page.waitForSelector("#template-list-wrapper a.tpl-result")
+        page
+            .locator("a.tpl-result", Page.LocatorOptions().setHasText(name))
+            .first()
+            .click()
+        page.waitForURL("**/templates/$name")
+        page.waitForSelector(".tw-root")
     }
 }

@@ -1,5 +1,10 @@
-<!-- ONE level of the template tree (template-hierarchy-design §9.2), as the LEFT pane of
-     the 058 explorer renders it.
+<!-- ONE level of the template tree (template-hierarchy-design §9.2), as the GLOBAL SIDEBAR
+     renders it since #398.
+
+     Deliberately the same shape as partials/pipeline-tree-level.html and
+     partials/dashboard-tree-level.html, down to the class names: one stylesheet
+     (template-tree.css) dresses every tree, a reader who knows one tree knows the others, and
+     the browser-test selectors (details.tpl-folder, summary.tpl-summary, .tpl-leaf) transfer.
 
      The tree is backed by server-side prefix queries: this fragment renders the direct
      sub-folders and the direct template children of one prefix, and expanding a folder issues
@@ -11,33 +16,35 @@
      this file, and no empty-folder state — a folder is derived from the live rows beneath it,
      so one with nothing beneath it does not exist to be rendered.
 
-     A leaf does NOT expand inline any more (058): selecting it swaps its header + versions
-     table into #template-detail on the RIGHT, and nothing in this pane moves. The selection
-     swap is innerHTML into a stable pane outside this fragment — the tree's DOM is untouched
-     by construction.
+     #398: a leaf NAVIGATES. It is a link to the canonical template workspace
+     /templates/{name} (no version: the page's release-first rule resolves it, and a draft
+     stays an explicit choice), and a FULL document load — hx-boost="false", the navigating-
+     tree pattern's leaf (the dashboards tree's leaf precedent). The old explorer's
+     select-into-a-detail-pane is gone with the pane.
 
      Folder expansion is <details>/<summary>: the browser owns open/closed state and the
      keyboard and screen-reader semantics, and htmx loads the level on the summary's FIRST
-     click only (hx-trigger="click once"). No JS of our own is involved in expansion.
+     click only (hx-trigger="click once"). nav-tree.js owns what the sidebar adds around it —
+     the visible failure + retry, the stale-response guard, the width fit and the
+     per-workspace state — without a second expansion path.
 
-     The root level's id is the screen's long-standing #template-list-wrapper, so browsing
-     inherits the existing SPA swap contract instead of inventing a second one; nested levels
-     get a derived id from TemplateBrowseModel.levelId so a placeholder and the fragment that
-     replaces it cannot disagree. The `oob` flag is set ONLY by the create-success path
-     (partials/template-created); every other render leaves the attribute off.
+     The root level's id is #template-nav-root, the sidebar's stable swap root (its search and
+     "clear" address it too); nested levels get a derived id from TemplateBrowseModel.levelId,
+     so a placeholder and the fragment that replaces it cannot disagree. The `oob` flag is set
+     ONLY by the create-success path (partials/template-created); every other render leaves
+     the attribute off.
 
      ARIA: the ROOT level's list is role=tree; a NESTED level's container is role=group under
-     its folder's treeitem. aria-expanded/aria-selected/tabindex are owned by
-     static/js/template-explorer.js, which initialises them on load and after every htmx swap
-     (the server cannot know which leaf is selected — selection is client state). -->
+     its folder's treeitem. aria-expanded and the roving tabindex are owned by
+     static/js/template-explorer.js (its nav context); aria-selected / aria-current mark the
+     leaf of the page being viewed and are nav-tree.js's — the server cannot know which page
+     the sidebar sits beside. -->
 <div xmlns:th="http://www.thymeleaf.org" th:fragment="level"
      th:id="${levelId}" class="tpl-level"
      th:attr="hx-swap-oob=${oob}, role=${#strings.isEmpty(prefix)} ? null : 'group'">
 
   <!-- The empty state belongs to the ROOT level only: a nested level always has at least one
-       child, because its folder was derived from that child (§3.1). 077: a template name
-       carries a folder, so this says where to put one rather than implying a bare name is a
-       choice the form will accept. -->
+       child, because its folder was derived from that child (§3.1). -->
   <th:block th:if="${lensUnavailable != null and #lists.isEmpty(folders) and #lists.isEmpty(templates)}">
     <div th:replace="~{partials/lens-unavailable :: notice(${lensUnavailable})}"></div>
   </th:block>
@@ -45,7 +52,8 @@
     <div class="ds-empty">
       <p class="ds-empty-title">No templates yet</p>
       <p class="ds-empty-description">
-        Author one through your agent under a folder, e.g. <code>test/&hellip;</code>
+        Author one through your agent or the Create Template form under a folder, e.g.
+        <code>test/&hellip;</code>
       </p>
     </div>
   </th:block>
@@ -71,11 +79,10 @@
                  th:attr="hx-get=@{/partials/templates(prefix=${f.path}, dialect=${selectedDialect}, type=${selectedType})}"
                  hx-trigger="click once"
                  hx-target="next .tpl-level" hx-swap="outerHTML">
-          <!-- 085 §A: the disclosure marker is the sprite's chevron-right (the unicode
-               ▸ was a second icon source at the wrong weight), rotated by CSS on
-               details[open]; then the folder state glyph — folder-open swaps in via
-               CSS on the same selector, so expansion needs no JS. All three are
-               aria-hidden decoration: the summary's text and role carry the meaning. -->
+          <!-- 085 §A: the disclosure marker is the sprite's chevron-right, rotated by CSS on
+               details[open]; then the folder state glyph — folder-open swaps in via CSS on
+               the same selector, so expansion needs no JS. All three are aria-hidden
+               decoration: the summary's text and role carry the meaning. -->
           <svg class="ds-icon ds-icon-xs tpl-chevron" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#chevron-right"></use></svg>
           <svg class="ds-icon ds-icon-sm tpl-row-icon tpl-icon-folder" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#folder"></use></svg>
           <svg class="ds-icon ds-icon-sm tpl-row-icon tpl-icon-folder-open" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#folder-open"></use></svg>
@@ -89,18 +96,13 @@
       </details>
     </li>
 
-    <!-- LEAVES. A leaf SELECTS: its header + versions table swap into #template-detail on the
-         right (innerHTML — the tree's DOM is untouched by the selection swap, which is the
-         whole point of the two-pane layout). Enter opens the editor; data-editor-url is what
-         the keyboard path reads, and it is the same URL the detail pane's Open button uses. -->
+    <!-- LEAVES. #398: a leaf is a LINK to the template's workspace — a full navigation
+         (hx-boost="false", see the header). Enter on it is the browser's own link activation;
+         the arrow keys only move focus (template-explorer.js's nav context). -->
     <li class="tpl-node" role="none" th:each="t : ${templates}">
-      <button type="button" class="tpl-leaf" role="treeitem" aria-selected="false"
-              th:attr="hx-get=@{/partials/templates/versions(name=${t.id})},
-                       data-leaf-name=${t.id},
-                       data-editor-url=@{/templates/editor(name=${t.id})}"
-              hx-target="#template-detail" hx-swap="innerHTML"
-              hx-sync="#template-detail:replace"
-              hx-indicator="#template-detail-spinner">
+      <a class="tpl-leaf" role="treeitem" aria-selected="false" hx-boost="false"
+         th:href="@{'/templates/' + ${t.id}}"
+         th:attr="data-leaf-id=${t.id}">
         <!-- The label is the leaf's own segment; the full path always rides on `title`
              (§9.4's rule for every surface that shows a template name). The file-code
              glyph sits where a sibling FOLDER's glyph sits — the leaf keeps the chevron
@@ -108,8 +110,8 @@
              right of its parent's, level with its sibling folders' (owner, 2026-09-12: a
              leaf in the chevron slot read as a sibling of its own folder).
 
-             There is no "at the root" branch here any more (077): §4.1 requires a folder, so
-             a leaf always sits under a non-empty prefix and the substring is always the right
+             There is no "at the root" branch here (077): §4.1 requires a folder, so a leaf
+             always sits under a non-empty prefix and the substring is always the right
              label. TemplateBrowseModel does not even query the root's leaves. -->
         <svg class="ds-icon ds-icon-sm tpl-row-icon" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#file-code"></use></svg>
         <span class="tpl-label"
@@ -117,16 +119,16 @@
               th:title="${t.id}">monthly_revenue</span>
         <span class="ds-badge ds-badge-default" th:text="${t.type.wire}">sql</span>
         <span class="ds-badge ds-badge-default" th:if="${t.dialect != null}" th:text="${t.dialect.wire}">POSTGRES</span>
-        <!-- versioning §7: unreleased edits stay visible in the list (templates §6). The pane
+        <!-- versioning §7: unreleased edits stay visible in the list (templates §6). The tree
              keeps the badge compact; the version number and the release action live in the
-             detail pane, one click away. -->
+             workspace, one click away. -->
         <span th:if="${drafts != null && drafts[t.id] != null}" class="ds-badge ds-badge-warning tpl-leaf-draft"
               th:title="'Draft v' + ${drafts[t.id].version} + ' is pending release — release it to publish.'">draft</span>
         <!-- 7d (transform-nodes design §8.2): a version citing a retired fact is MARKED on read,
-             never blocked; lane 7e fills `needsReviewIds` from the cited facts. -->
+             never blocked; the set is filled from the projection's own query. -->
         <span th:if="${needsReviewIds != null and #sets.contains(needsReviewIds, t.id)}" class="ds-badge ds-badge-warning" data-needs-review
               title="A fact this template cites was retired or superseded — re-verify before you lean on it.">needs review</span>
-      </button>
+      </a>
     </li>
   </ul>
 
@@ -137,8 +139,7 @@
   </p>
 
   <!-- The level's own leaves page through the one shared pager, targeting this level's own
-       root. `prefix` travels so the pager stays inside this level; an empty `prefix` is the
-       root level, which is how the wrapper and the level agree on one presentation. -->
+       root. `prefix` travels so the pager stays inside this level. -->
   <!-- The shared pager, rendered only when it can DO something: a tree renders many levels
        at once and most hold a handful of rows, so an always-on "Showing 1 of 1" with two
        dead buttons is noise repeated down the whole screen. The flat search list keeps the

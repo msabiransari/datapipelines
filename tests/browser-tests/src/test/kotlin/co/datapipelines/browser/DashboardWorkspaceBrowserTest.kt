@@ -259,7 +259,7 @@ class DashboardWorkspaceBrowserTest : DashboardBrowserSuite() {
         // A boosted leave and Back: htmx restores the page; it is wired ONCE (one root marker,
         // one window listener) and its strip still switches and replays.
         page.click(".app-nav-link[data-nav-section='/templates']")
-        page.waitForSelector("[data-explorer-pane] .tpl-tree, [data-explorer-pane] .ds-empty")
+        page.waitForSelector("#template-list-wrapper")
         page.goBack()
         page.waitForSelector("#dp-pane-versions:not([hidden])")
         page.waitForFunction("() => document.querySelectorAll('.dp-ws-root[data-dp-ws-wired=\"1\"]').length === 1")
