@@ -100,7 +100,11 @@ internal class RetainedInputProbe(
         val status = Path.of("/proc/self/status")
         val affinity =
             if (Files.isRegularFile(status)) {
-                Files.readAllLines(status).single { it.startsWith("Cpus_allowed_list:") }.substringAfter(':').trim()
+                Files
+                    .readAllLines(status)
+                    .single { it.startsWith("Cpus_allowed_list:") }
+                    .substringAfter(':')
+                    .trim()
             } else {
                 "unavailable"
             }
