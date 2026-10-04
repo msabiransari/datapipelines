@@ -1,6 +1,6 @@
 # Observability Specification
 
-**Status:** v1.36 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
+**Status:** v1.37 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-10-03
@@ -101,6 +101,8 @@ The switch is `datapipelines.observability.logging.format` ([configuration.md §
 | `templates` | template registered (id + version), render failures |
 | `mcp-server` | tool calls (tool name + caller), transport errors |
 | `web` | request log (method, path, status, duration), CORS preflight, SSE connections opened/closed |
+
+Each sub-section below catalogues one namespace's `event=` names. For the namespaces whose tables are already complete — `parameter`, `lake`, `mail`, `persistence`, `scheduler` — a build-time guard (`ObservabilityEventCatalogParityTest`, #439) fails the build when an `event=<namespace>.<name>` literal under `modules/<module>/src/main/kotlin` and the event column of these tables disagree, in either direction; the catalogued namespaces still drifting from the code are tracked in #443.
 
 #### 3.4A The pool-retirement events (094)
 
@@ -590,7 +592,8 @@ This is a construction rule, not a filter — the redacting encoder covers logs,
 
 | Date | Version | Author | Change |
 |---|---|---|---|
-| 2026-10-03 | v1.36 | #403 failed pre-start release | **§3.4I** gains `execution.idempotency_release_failed`: one WARN per failed cleanup attempt, user/execution ids and error class only; the original refusal is preserved. |
+| 2026-10-03 | v1.37 | #403 failed pre-start release | **§3.4I** gains `execution.idempotency_release_failed`: one WARN per failed cleanup attempt, user/execution ids and error class only; the original refusal is preserved. |
+| 2026-10-03 | v1.36 | 439 (#439) an event-catalogue parity guard | **§3.4's intro** states that `ObservabilityEventCatalogParityTest` fails the build when an `event=<namespace>.<name>` literal in `modules/<module>/src/main/kotlin` and the event column of these tables disagree for the namespaces whose tables are already complete (`parameter`, `lake`, `mail`, `persistence`, `scheduler`); its non-vacuity floor pins each namespace's count, and the catalogued namespaces still drifting are tracked in #443. No event row changes. |
 | 2026-10-03 | v1.35 | 393 (#393) a throwing metrics hook is contained | **§3.4G** gains `persistence.hook_failed` (WARN; `writer`, `hook`, `cause` — the hook's method name and the exception's simple class name, never its message): every `BatchingHooks` call in `BatchingWriter` goes through one guarded call, so a hook that throws can no longer strand a claimed entry, make `commit` re-write a batch the store already holds, or end a writer thread. The item's outcome stands; the hook still runs before the caller's release (#363). At most once per 10 s per writer, on the interval `persistence.saturated` uses. |
 | 2026-10-03 | v1.34 | 429 (#429) the two `parameter.*` failure lines follow the class-and-SQLState rule — renumbered at merge after 425's v1.33 | **§3.4M**: `parameter.evaluation_failed` no longer attaches the throwable (its message and stack could carry SQL or a value) — it names `error` (binary class name) and `sql_state`, and the stack moves to ONE new DEBUG row, `parameter.evaluation_failed_cause` (`evaluation_id`); `parameter.evaluation_record_failed` spells an absent SQLState `none` (`FailureShape`'s spelling), where it logged the string `null`. |
 | 2026-10-03 | v1.33 | 425 (#425, #385) the selector abandon event namespaced and worded | §3.4M gains its 19th row: `parameter.selector_statement_abandoned` (the bare `event=selector_statement_abandoned` of `SelectorPool.abandon`, which the audit's namespaced extraction could not catalogue). The line gains `cause` (`deadline` when the cancellation is the evaluate's own `withTimeout`, `caller` otherwise — #375's disconnect-grace abort, a shutdown) and no longer says "the evaluate's deadline passed" for a cancellation that was not one; it stays ONE error line with no throwable and no SQL or bind. |

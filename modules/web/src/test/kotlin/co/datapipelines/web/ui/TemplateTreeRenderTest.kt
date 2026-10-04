@@ -22,22 +22,26 @@ import java.time.Instant
 import java.util.UUID
 
 /**
- * Render-level guard for the templates TREE (template-hierarchy-design §9, round 047).
+ * Render-level guard for the templates tree and its fragments (template-hierarchy-design §9,
+ * round 047, re-aimed by #398 onto the sidebar tree and the catalog/workspace fragments).
  *
  * Controller tests pin the model; this class pins what the browser actually receives — and,
- * more importantly, what it must NEVER receive. Four of §9.1's six constraints are *absences*,
- * and an absence has no natural test: nothing fails when a well-meaning future round adds a
- * "New folder" button, a `type` select on the edit form, or a rename field. These assertions
- * are the only thing standing between those constraints and that round.
+ * more importantly, what it must NEVER receive. Four of §9.1's six constraints are
+ * *absences*, and an absence has no natural test: nothing fails when a well-meaning future
+ * round adds a "New folder" button, a `type` select on an edit surface, or a rename field.
+ * These assertions are the only thing standing between those constraints and that round.
  *
  *  - **Folders are virtual** (§3.1) — no create / rename / move / delete control anywhere in
  *    the tree, and no empty-folder state.
  *  - **`type` is create-time and immutable** (§5.3) — a selector on the create form, a
- *    read-only VALUE on the editor, and never a disabled control (which devtools re-enables
+ *    read-only VALUE on the workspace, and never a disabled control (which devtools re-enables
  *    in one click).
  *  - **No rename, anywhere** (§4.5) — a template's name is its identity.
  *  - **Client validation is a convenience, not an authority** (§9.5) — the create form's
  *    `pattern` must be the SERVER's regex source, not a copy of it.
+ *  - **#398: a leaf NAVIGATES** — a full-document link into `/templates/{name}`, never a
+ *    selection into a pane (the pane is gone); the sidebar's rows carry `data-leaf-id` for
+ *    nav-tree.js's current-leaf marking.
  *
  * Engine infra mirrors [DatasourcesTemplateRenderTest] (same WebContext shape).
  */
@@ -48,13 +52,16 @@ class TemplateTreeRenderTest {
     fun `a tree level renders folders and leaves, each expanding with ONE prefix request`() {
         val html = render("partials/template-tree-level") { fillLevel() }
 
-        html shouldContain "id=\"template-list-wrapper\""
+        html shouldContain "id=\"template-nav-root\""
         // One level per request: the folder fetches its OWN prefix, nothing wider (§9.2).
         html shouldContain "hx-get=\"/partials/templates?prefix=acme&amp;"
         html shouldContain "hx-trigger=\"click once\""
         html shouldContain "hx-target=\"next .tpl-level\""
-        // A leaf expands to its versions, addressed by ?name= — never a path segment (§9.6).
-        html shouldContain "/partials/templates/versions?name=legacy_flat.sql"
+        // #398: a leaf is a LINK to the workspace, a full document — never a detail-pane fetch.
+        html shouldContain "href=\"/templates/legacy_flat.sql\""
+        html shouldContain "hx-boost=\"false\""
+        html shouldContain "data-leaf-id=\"legacy_flat.sql\""
+        html shouldNotContain "/partials/templates/versions"
         // The full path is on `title` at every leaf, and the count comes from the subtree.
         html shouldContain "title=\"acme\""
         html shouldContain "ds-badge ds-badge-default"
@@ -92,8 +99,8 @@ class TemplateTreeRenderTest {
     fun `085 - folder rows carry the sprite chevron and folder state icons, leaves the file glyph`() {
         val html = render("partials/template-tree-level") { fillLevel() }
 
-        // The unicode ▸ is retired: the disclosure marker is the sprite's chevron-right,
-        // followed by the folder state pair (CSS swaps folder → folder-open on [open]).
+        // The disclosure marker is the sprite's chevron-right, followed by the folder state
+        // pair (CSS swaps folder → folder-open on [open]).
         html shouldContain "class=\"ds-icon ds-icon-xs tpl-chevron\""
         html shouldContain "lucide-sprite.svg#chevron-right"
         html shouldContain "tpl-icon-folder\""
@@ -127,73 +134,86 @@ class TemplateTreeRenderTest {
 
         // Derived in ONE place, so the placeholder and the fragment that replaces it agree.
         nested shouldContain "id=\"${TemplateBrowseModel.levelId("acme/finance")}\""
-        TemplateBrowseModel.levelId(null) shouldBe "template-list-wrapper"
+        TemplateBrowseModel.levelId(null) shouldBe "template-nav-root"
+        TemplateBrowseModel.CATALOG_ROOT_ID shouldBe "template-list-wrapper"
         (TemplateBrowseModel.levelId("acme/finance") == TemplateBrowseModel.levelId("acme/hr")) shouldBe false
     }
 
     @Test
-    fun `search is a FLAT list of full paths, not a pruned tree`() {
-        val html = render("partials/template-search") { fillSearch() }
+    fun `the catalog instance is plain links under the page root, the nav instance the listbox`() {
+        val catalog = render("partials/template-search") { fillSearch(scope = TemplateListScope.CATALOG) }
+        val nav = render("partials/template-search") { fillSearch(scope = TemplateListScope.NAV) }
 
-        html shouldContain "id=\"template-list-wrapper\""
-        // 058: the flat list renders IN THE LEFT PANE — a listbox of full-path rows, not the
-        // full-width seven-column table the accordion screen carried. Still flat, still full
-        // paths: the §9.2 rule is about the SHAPE (no pruned tree), not the table element.
-        html shouldContain "role=\"listbox\""
-        html shouldContain "class=\"tpl-result\""
-        // Full paths, each also on `title` — the search result is where a path is longest.
-        html shouldContain "acme/finance/monthly_revenue"
-        html shouldContain "title=\"acme/finance/monthly_revenue\""
-        // A result SELECTS like a tree leaf: the detail pane fills, the pane itself stands.
-        html shouldContain "hx-target=\"#template-detail\""
-        // No tree machinery reaches the search presentation.
-        html shouldNotContain "hx-trigger=\"click once\""
-        html shouldNotContain "prefix="
-        html shouldNotContain "tpl-tree"
-        // The pager keeps every active filter, including 046's `type`.
-        html shouldContain "q=revenue"
-        html shouldContain "type=sql"
+        // #398's two instances: the scope names the markup AND the stable swap root.
+        catalog shouldContain "id=\"template-list-wrapper\""
+        catalog shouldContain "data-template-list=\"page\""
+        catalog shouldNotContain "role=\"listbox\""
+        nav shouldContain "id=\"template-nav-root\""
+        nav shouldContain "data-template-list=\"nav\""
+        nav shouldContain "role=\"listbox\""
+        // Both are links into the workspace, full documents, carrying the leaf id.
+        listOf(catalog, nav).forEach {
+            it shouldContain "href=\"/templates/$DEEP_PATH\""
+            it shouldContain "hx-boost=\"false\""
+            it shouldContain "data-leaf-id=\"$DEEP_PATH\""
+            it shouldNotContain "hx-target=\"#template-detail\""
+            it shouldNotContain "prefix="
+        }
+        // The pager keeps every active filter, including 046's `type` — on the page instance.
+        catalog shouldContain "q=revenue"
+        catalog shouldContain "type=sql"
+        // The nav's clear is nav-tree.js's (it empties the sidebar's own box too) and lives on
+        // the EMPTY branch — the no-match case; the catalog's clear is a bare re-fetch.
+        val emptyNav =
+            render("partials/template-search") {
+                fillSearch(TemplateListScope.NAV)
+                setVariable("templates", emptyList<Template>())
+            }
+        emptyNav shouldContain "data-nav-tree-clear"
+        val emptyCatalog =
+            render("partials/template-search") {
+                fillSearch(TemplateListScope.CATALOG)
+                setVariable("templates", emptyList<Template>())
+                setVariable("q", "revenue")
+            }
+        emptyCatalog shouldNotContain "data-nav-tree-clear"
+        emptyCatalog shouldContain "Clear search"
     }
 
     @Test
-    fun `the wrapper dispatches to the tree when q is empty and to search when it is not`() {
-        val browsing = render("partials/templates") { fillLevel() }
-        val searching = render("partials/templates") { fillSearch() }
-
-        browsing shouldContain "hx-trigger=\"click once\""
-        browsing shouldContain "tpl-tree"
-        browsing shouldNotContain "tpl-results"
-        searching shouldContain "tpl-results"
-        searching shouldNotContain "hx-trigger=\"click once\""
-        // One stable swap root in BOTH presentations (ui-screens.md §4.5).
-        browsing shouldContain "id=\"template-list-wrapper\""
-        searching shouldContain "id=\"template-list-wrapper\""
+    fun `the level and list fragments never carry the OOB attribute unprompted`() {
+        render("partials/template-tree-level") { fillLevel() } shouldNotContain "hx-swap-oob=\"true\""
+        render("partials/template-search") { fillSearch() } shouldNotContain "hx-swap-oob=\"true\""
     }
 
     @Test
-    fun `the primary level fragment never carries the OOB attribute`() {
-        render("partials/template-tree-level") { fillLevel() } shouldNotContain "hx-swap-oob"
-        render("partials/template-search") { fillSearch() } shouldNotContain "hx-swap-oob"
+    fun `the dispatcher fragment is gone - the controller returns the concrete view`() {
+        // partials/templates.html retired with the two-pane page (#398): a dispatcher here
+        // would be a silent second contract beside the model's concrete LEVEL/SEARCH views.
+        javaClass.getResource("/templates/partials/templates.html") shouldBe null
+        javaClass.getResource("/templates/partials/template-detail.html") shouldBe null
     }
 
     @Test
-    fun `a leaf's versions carry RELEASED and DRAFT badges, and only allowed verbs in the menu`() {
+    fun `the Versions tab is the house table, with per-row menus and the canonical Open`() {
         val html = render("partials/template-versions") { fillVersions() }
 
+        // §4.4's house-table rule: the same component every version surface renders.
+        html shouldContain "<table class=\"ds-table\""
+        html shouldContain "data-version-row=\"2\""
         html shouldContain "DRAFT"
         html shouldContain "RELEASED"
         html shouldContain "ds-badge ds-badge-warning"
         html shouldContain "ds-badge ds-badge-success"
-        html shouldContain "/templates/editor?name=$DEEP_PATH"
-        // 102: each row's verbs live in the ⋯ overflow menu, and a verb §3.5 refuses for the
-        // row's status is ABSENT, not disabled — the table and the screen cannot disagree.
-        // "No destructive action" stays narrowed to "no rename, no move, nothing that writes a
-        // version in place" (106): a version is immutable (§5.1), a name is identity (§4.5).
+        // Open is the CANONICAL workspace with the row's own version explicit (R5).
+        html shouldContain "/templates/$DEEP_PATH?version=1&amp;tab=source"
+        // 102: each row's verbs live in the ⋯ overflow menu, opened with from=editor — the
+        // workspace's surface — and a verb §3.5 refuses for the row's status is ABSENT.
         listOf("Rename", "Move", "hx-put").forEach { html shouldNotContain it }
         html shouldContain "details class=\"tplx-vmenu\""
-        html shouldContain "hx-get=\"/partials/templates/lifecycle/release?name=$DEEP_PATH\""
-        html shouldContain "hx-get=\"/partials/templates/lifecycle/purge?name=$DEEP_PATH&amp;version=2\""
-        html shouldContain "hx-get=\"/partials/templates/lifecycle/discard?name=$DEEP_PATH&amp;version=1\""
+        html shouldContain "hx-get=\"/partials/templates/lifecycle/release?name=$DEEP_PATH&amp;from=editor\""
+        html shouldContain "hx-get=\"/partials/templates/lifecycle/purge?name=$DEEP_PATH&amp;version=2&amp;from=editor\""
+        html shouldContain "hx-get=\"/partials/templates/lifecycle/discard?name=$DEEP_PATH&amp;version=1&amp;from=editor\""
         html shouldContain "hx-target=\"#tx-dialog\""
         // The template rows offer no Switch, and the fetch path is gone.
         html shouldNotContain "Switch to v"
@@ -203,17 +223,13 @@ class TemplateTreeRenderTest {
 
     @Test
     fun `each version row states its in-use count, and an unused version stays quiet`() {
-        // fillVersions: v2 (the draft) is pinned by one pipeline, v1 by two, and any version
-        // with no working-version pin renders the em dash — "nobody uses this" is the
-        // retirement-ready signal, not a zero to squint past.
+        // fillVersions: v2 (the draft) is pinned by one pipeline, v1 by two — both sides of
+        // the singular/plural fork, worded by the model ([VersionRowView.usageLabel]).
         val html = render("partials/template-versions") { fillVersions() }
 
         html shouldContain "1 pipeline"
         html shouldContain "2 pipelines"
-        // 106 dropped the table's "In use" column header — the row states its own unit now,
-        // because the acting column is too narrow for a five-column table.
         html shouldNotContain "In use"
-        html shouldNotContain "<table"
     }
 
     // ------------------------------------------------------------- create form
@@ -259,30 +275,33 @@ class TemplateTreeRenderTest {
     }
 
     @Test
-    fun `the type filter joins dialect and search on the list screen`() {
+    fun `the type filter joins dialect and search on the catalog page`() {
         val html = render("templates/list") { fillPage() }
 
         html shouldContain "id=\"template-filter-type\""
         html shouldContain "hx-include=\"#template-filter-q, #template-filter-dialect\""
         html shouldContain "hx-include=\"#template-filter-dialect, #template-filter-type\""
         html shouldContain "id=\"template-list-wrapper\""
+        // #398: the catalog's other door is the sidebar tree's reveal, not a page tree.
+        html shouldContain "data-nav-tree-reveal=\"templates\""
     }
 
-    // ------------------------------------------------------------- edit / draft
+    // ------------------------------------------------------------- the workspace's type rule
 
     @Test
-    fun `the editor shows type as a read-only VALUE and never as a control`() {
-        val html = render("templates/editor") { fillEditor() }
+    fun `the workspace shows type as a read-only VALUE and never as a control`() {
+        val html = render("templates/workspace") { fillWorkspace() }
 
         // §9.3 / §5.3: a read-only value, because a disabled <select> is re-enabled in
         // devtools in one click and the UI must not present a lock it does not own.
-        html shouldContain "Type:"
-        html shouldContain "<span class=\"ds-badge ds-badge-default\">sql</span>"
+        html shouldContain "<span class=\"ds-badge ds-badge-default\""
+        html shouldContain ">sql</span>"
         // No `type` control of any kind — not an enabled one, and not a disabled one either.
         html shouldNotContain "name=\"type\""
         html shouldNotContain "disabled=\"disabled\""
-        // ...and no rename affordance on the edit form either (§4.5).
+        // ...and no rename affordance on the workspace either (§4.5).
         html shouldNotContain "Rename"
+        html shouldNotContain "rename"
     }
 
     // ------------------------------------------ §9.4 the pipeline editor's path
@@ -301,6 +320,9 @@ class TemplateTreeRenderTest {
 
         html shouldContain "class=\"pe-link pe-path\""
         html shouldContain "title=\"$DEEP_PATH @ v3\""
+        // The link is the PIPELINE partial's own (not this lane's fence): it points at the
+        // editor route, which #398 made the 302 into the workspace — the destination is
+        // TemplateEditorControllerTest's, the §9.4 title rule is this one's.
         html shouldContain "/templates/editor?name=$DEEP_PATH"
     }
 
@@ -323,9 +345,6 @@ class TemplateTreeRenderTest {
         val html = render("pipelines/editor") { fillPipelineEditor() }
 
         // One value, rendered twice — the truncated text is never the only copy (§9.4).
-        // 080: the rule moved from the inspector's template link to the Details tab's
-        // key/value grid, where every row's dd carries the same string in both places.
-        // 195: rows are {k, v} objects — the CSP build's bindings are paths.
         html shouldContain "x-bind:title=\"row.v\""
         html shouldContain "x-text=\"row.v\""
         // …and the SQL partial's own template link keeps its pe-path form.
@@ -345,6 +364,7 @@ class TemplateTreeRenderTest {
 
     private fun WebContext.fillLevel() {
         setVariable("searching", false)
+        setVariable("scope", TemplateListScope.NAV.wire)
         setVariable("prefix", "")
         setVariable("levelId", TemplateBrowseModel.ROOT_LEVEL_ID)
         setVariable(
@@ -362,11 +382,12 @@ class TemplateTreeRenderTest {
         setVariable("total", 1)
         setVariable("selectedDialect", "")
         setVariable("selectedType", "")
-        setVariable("scopes", setOf("ADMIN"))
     }
 
-    private fun WebContext.fillSearch() {
+    private fun WebContext.fillSearch(scope: TemplateListScope = TemplateListScope.NAV) {
         setVariable("searching", true)
+        setVariable("scope", scope.wire)
+        setVariable("rootId", scope.rootId)
         setVariable("templates", listOf(template(DEEP_PATH)))
         setVariable("drafts", emptyMap<String, TemplateVersionDetail>())
         setVariable("q", "revenue")
@@ -375,20 +396,15 @@ class TemplateTreeRenderTest {
         setVariable("offset", 0)
         setVariable("hasMore", true)
         setVariable("total", 4)
-        setVariable("scopes", setOf("ADMIN"))
     }
 
     /**
-     * The 106 version rows: DRAFT v2 over RELEASED v1, with the per-version in-use counts
+     * The Versions tab's rows: DRAFT v2 over RELEASED v1, with the per-version in-use counts
      * already WORDED by the model ([VersionRowView.usageLabel]) — v2 by one pipeline, v1 by
      * two, so both sides of the singular/plural fork are exercised.
      */
     private fun WebContext.fillVersions() {
-        setVariable("templateId", DEEP_PATH)
-        setVariable("draftVersion", 2)
-        setVariable("draftHash", "h2")
-        setVariable("versionCount", 2)
-        setVariable("inUse", mapOf(2 to 1, 1 to 2))
+        setVariable("templateName", DEEP_PATH)
         setVariable(
             "versions",
             listOf(
@@ -401,6 +417,7 @@ class TemplateTreeRenderTest {
                     usage = 1,
                     usageUnit = "pipeline",
                     isCurrent = false,
+                    isViewed = true,
                 ),
                 VersionRowView.of(
                     version = 1,
@@ -418,23 +435,75 @@ class TemplateTreeRenderTest {
 
     private fun WebContext.fillPage() {
         fillChrome()
-        fillLevel()
+        // The catalog's own fill: the flat list, always (the dispatcher is gone).
+        fillSearch(TemplateListScope.CATALOG)
         setVariable("q", "")
         setVariable("dialects", listOf("POSTGRES", "MYSQL"))
         setVariable("types", TemplateType.WIRE_VALUES)
         setVariable("namePattern", TemplateNameGrammar.pattern)
         setVariable("nameMaxLength", TemplateNameGrammar.maxLength)
         setVariable("nameHint", TemplateNameGrammar.DESCRIPTION)
+        setVariable("transformTypes", TemplateType.entries.filter { it.isTransform }.joinToString(",") { it.wire })
+        setVariable("skeleton", TransformSkeleton)
+        setVariable("canAuthor", true)
     }
 
-    private fun WebContext.fillEditor() {
+    /** The workspace page's fill, release-first (an sql template at its v2 release). */
+    private fun WebContext.fillWorkspace() {
         fillChrome()
-        setVariable("template", template(DEEP_PATH))
-        setVariable("versions", emptyList<TemplateVersionSummary>())
+        setVariable("templateName", DEEP_PATH)
+        setVariable("navCurrentPath", DEEP_PATH)
+        setVariable("hasSelectedBody", true)
+        setVariable("viewedVersion", 2)
+        setVariable("viewedLabel", "v2 · released · current")
+        setVariable("viewedIsDraft", false)
+        setVariable("viewedIsCurrent", true)
+        setVariable("viewedStatusLabel", "released")
+        setVariable("currentVersion", 2)
+        setVariable("viewedEditable", false)
         setVariable("hasDraft", false)
         setVariable("draftVersion", null)
         setVariable("draftHash", null)
+        setVariable("canDelete", false)
+        setVariable("canDiscardCurrent", true)
+        setVariable("canPurgeDraftInHeader", false)
+        setVariable("releasableVersion", null)
+        setVariable("currentReleaseVersion", 2)
+        setVariable("canAuthor", true)
+        setVariable("activeTab", "source")
+        setVariable("templateWorkspace", workspaceResolved())
+        setVariable("usedBy", emptyList<Any>())
+        setVariable("usedByCount", 0)
+        setVariable("usedBySets", emptyList<Any>())
+        setVariable("usedByVisualizations", emptyList<Any>())
+        setVariable("usedBySummary", "nothing")
+        setVariable("template", template(DEEP_PATH))
+        setVariable("selectedVersion", 2)
+        setVariable("selectedStatus", "RELEASED")
+        setVariable("releasedAt", null)
+        setVariable("releasedBy", null)
+        setVariable("readOnly", true)
+        setVariable("interpolations", emptyList<String>())
+        setVariable("isTransform", false)
+        setVariable("versions", emptyList<VersionRowView>())
     }
+
+    private fun workspaceResolved(): TemplateWorkspaceModel.Resolved =
+        TemplateWorkspaceModel.Resolved(
+            name = DEEP_PATH,
+            selected = TemplateWorkspaceModel.Selected(template(DEEP_PATH), null),
+            draft = null,
+            currentVisible = 2,
+            versions = emptyList(),
+            usedBy =
+                TemplateWorkspaceModel.UsedByFacts(
+                    pipelines = emptyList(),
+                    pipelineCount = 0,
+                    sets = emptyList(),
+                    visualizations = emptyList(),
+                    summary = "nothing",
+                ),
+        )
 
     private fun WebContext.fillPipelineEditor() {
         fillChrome()

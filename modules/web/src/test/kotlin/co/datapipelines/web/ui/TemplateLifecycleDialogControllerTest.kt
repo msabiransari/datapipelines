@@ -1,12 +1,10 @@
 package co.datapipelines.web.ui
 
-import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineVersionStatus
-import co.datapipelines.templates.Template
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateVersionDetail
 import co.datapipelines.typesystem.DatapipelinesException
@@ -31,17 +29,19 @@ import java.time.Instant
 import java.util.UUID
 
 /**
- * The template twin of [PipelineLifecycleDialogControllerTest] (ui-screens §4.6, 102): the
- * Shape A / Shape C / HX-Redirect delivery over the NAME-addressed routes (§9.6), the
- * `template.version.confirm_mismatch` guard that fires before the service, and the
- * sole-draft purge's entity redirect.
+ * The template twin of [PipelineLifecycleDialogControllerTest] (ui-screens §4.6, 102), after
+ * #398: the dialogs have ONE page — the workspace — so every success answers `HX-Redirect`
+ * onto the canonical Versions tab (the `from`-aware rule the #395 ruling gave the pipelines
+ * twin), and onto the CATALOG when the verb removed the whole template (the tree must lose
+ * the leaf). The explorer's Shape A leg is gone with the pane it rendered into; the
+ * `template.version.confirm_mismatch` guard still fires before the service, and the in-use
+ * refusal is still Shape C with the real 409.
  */
 class TemplateLifecycleDialogControllerTest {
     private val releases = mockk<TemplateReleaseService>()
     private val templates = mockk<TemplateRepository>()
     private val dialogs = mockk<TemplateLifecycleDialogModel>()
     private val audit = PipelineLifecycleDialogControllerTest.RecordingAudit()
-    private val browse = mockk<TemplateBrowseModel>(relaxed = true)
 
     private lateinit var mvc: MockMvc
 
@@ -61,7 +61,7 @@ class TemplateLifecycleDialogControllerTest {
             )
         mvc =
             MockMvcBuilders
-                .standaloneSetup(TemplateLifecycleDialogController(releases, templates, dialogs, browse, audit))
+                .standaloneSetup(TemplateLifecycleDialogController(releases, templates, dialogs, audit))
                 .setControllerAdvice(UiExceptionHandler())
                 .build()
     }
@@ -72,43 +72,7 @@ class TemplateLifecycleDialogControllerTest {
     }
 
     @Test
-    fun `release - Shape A with the toast and the lifecycle-changed payload`() {
-        every { browse.fillDetail(any(), WORKSPACE, any(), PATH) } returns "partials/template-detail"
-        // The draft exists FOR the release and is GONE after it — the payload reads post-state.
-        every { templates.findDraftDetail(WORKSPACE, PATH) } returns draftDetail() andThen null
-        every { releases.release(WORKSPACE, PATH, "h2", USER) } returns
-            TemplateReleaseService.Released(
-                draftDetail().copy(status = PipelineVersionStatus.RELEASED),
-                template(version = 2),
-            )
-        every { templates.findLatest(WORKSPACE, PATH) } returns template(version = 2)
-
-        mvc
-            .perform(
-                post("/partials/templates/lifecycle/release")
-                    .contentType(MediaType.APPLICATION_FORM_URLENCODED)
-                    .param("name", PATH)
-                    .header("HX-Request", "true"),
-            ).andExpect(status().isOk)
-            .andExpect(
-                header().string(
-                    "HX-Trigger",
-                    "{\"lifecycle-changed\":{\"leafId\":\"$PATH\",\"workingVersion\":2,\"hasDraft\":false}}",
-                ),
-            ).andExpect(
-                org.springframework.test.web.servlet.result.MockMvcResultMatchers
-                    .view()
-                    .name("partials/template-lifecycle-applied"),
-            ).andExpect(
-                org.springframework.test.web.servlet.result.MockMvcResultMatchers
-                    .model()
-                    .attribute("lifecycleToastTitle", "Released v2"),
-            )
-        audit.events shouldBe listOf("template.version.released")
-    }
-
-    @Test
-    fun `release - the editor surface answers HX-Redirect`() {
+    fun `release - the redirect lands on the workspace's Versions tab with the flash`() {
         every { templates.findDraftDetail(WORKSPACE, PATH) } returns draftDetail()
         every { releases.release(WORKSPACE, PATH, "h2", USER) } returns
             TemplateReleaseService.Released(draftDetail().copy(status = PipelineVersionStatus.RELEASED), template(version = 2))
@@ -120,7 +84,28 @@ class TemplateLifecycleDialogControllerTest {
                     .param("name", PATH)
                     .param("from", "editor")
                     .header("HX-Request", "true"),
-            ).andExpect(header().string("HX-Redirect", "/templates/editor?name=nyc%2Fmobility%2Fprobe.sql&ok=released"))
+            ).andExpect(
+                header().string(
+                    "HX-Redirect",
+                    "/templates/nyc/mobility/probe.sql?tab=versions&ok=released",
+                ),
+            )
+        audit.events shouldBe listOf("template.version.released")
+    }
+
+    @Test
+    fun `release - a stale surface's from value answers the same redirect (there is one page)`() {
+        every { templates.findDraftDetail(WORKSPACE, PATH) } returns draftDetail()
+        every { releases.release(WORKSPACE, PATH, "h2", USER) } returns
+            TemplateReleaseService.Released(draftDetail().copy(status = PipelineVersionStatus.RELEASED), template(version = 2))
+
+        mvc
+            .perform(
+                post("/partials/templates/lifecycle/release")
+                    .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                    .param("name", PATH)
+                    .header("HX-Request", "true"),
+            ).andExpect(header().string("HX-Redirect", "/templates/nyc/mobility/probe.sql?tab=versions&ok=released"))
     }
 
     @Test
@@ -149,6 +134,26 @@ class TemplateLifecycleDialogControllerTest {
     }
 
     @Test
+    fun `purge - a draft beside history lands back on the Versions tab with the flash`() {
+        every { templates.listVersions(WORKSPACE, PATH) } returns
+            listOf(
+                co.datapipelines.templates.TemplateVersionSummary(PATH, 2, Instant.now(), USER),
+                co.datapipelines.templates.TemplateVersionSummary(PATH, 1, Instant.now(), USER),
+            )
+        every { releases.purgeVersion(WORKSPACE, PATH, 2) } returns Unit
+
+        mvc
+            .perform(
+                post("/partials/templates/lifecycle/purge")
+                    .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                    .param("name", PATH)
+                    .param("version", "2")
+                    .param("confirm", "v2")
+                    .header("HX-Request", "true"),
+            ).andExpect(header().string("HX-Redirect", "/templates/nyc/mobility/probe.sql?tab=versions&ok=draft_purged"))
+    }
+
+    @Test
     fun `purge - a confirm mismatch is a 400 and the service was never called`() {
         val response =
             mvc
@@ -165,6 +170,20 @@ class TemplateLifecycleDialogControllerTest {
 
         response shouldContain "template.version.confirm_mismatch"
         verify(exactly = 0) { releases.purgeVersion(any(), any(), any()) }
+    }
+
+    @Test
+    fun `discard - the redirect lands on the Versions tab with the flash`() {
+        every { releases.discardVersion(WORKSPACE, PATH, 1, USER) } returns draftDetail()
+
+        mvc
+            .perform(
+                post("/partials/templates/lifecycle/discard")
+                    .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                    .param("name", PATH)
+                    .param("version", "1")
+                    .header("HX-Request", "true"),
+            ).andExpect(header().string("HX-Redirect", "/templates/nyc/mobility/probe.sql?tab=versions&ok=discarded"))
     }
 
     @Test
@@ -193,6 +212,20 @@ class TemplateLifecycleDialogControllerTest {
     }
 
     @Test
+    fun `restore - the redirect lands on the Versions tab with the flash`() {
+        every { releases.restoreVersion(WORKSPACE, PATH, 1) } returns draftDetail()
+
+        mvc
+            .perform(
+                post("/partials/templates/lifecycle/restore")
+                    .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                    .param("name", PATH)
+                    .param("version", "1")
+                    .header("HX-Request", "true"),
+            ).andExpect(header().string("HX-Redirect", "/templates/nyc/mobility/probe.sql?tab=versions&ok=restored"))
+    }
+
+    @Test
     fun `purge entity - the confirm names the template, and the redirect carries the toast`() {
         every { releases.purgeEntity(WORKSPACE, PATH) } returns Unit
 
@@ -208,8 +241,8 @@ class TemplateLifecycleDialogControllerTest {
 
     // ------------------------------------------------------------------ fixtures
 
-    private fun template(version: Int): Template =
-        Template(
+    private fun template(version: Int): co.datapipelines.templates.Template =
+        co.datapipelines.templates.Template(
             id = PATH,
             version = version,
             dialect = co.datapipelines.typesystem.Dialect.POSTGRES,

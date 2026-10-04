@@ -17,7 +17,6 @@ import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.web.api.CorrelationId
 import co.datapipelines.web.api.currentPrincipal
 import com.fasterxml.jackson.core.JsonProcessingException
-import jakarta.servlet.http.HttpServletRequest
 import org.slf4j.LoggerFactory
 import org.springframework.http.ResponseEntity
 import org.springframework.stereotype.Controller
@@ -27,60 +26,66 @@ import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.ResponseBody
 import org.springframework.web.servlet.ModelAndView
-import java.net.URLEncoder
-import java.nio.charset.StandardCharsets
+import org.springframework.web.servlet.view.RedirectView
+import org.springframework.web.util.UriComponentsBuilder
 import java.util.UUID
 
 @Controller
 class TemplateEditorController(
     private val templates: TemplateRepository,
     private val templateEngines: WorkspaceTemplateEngines,
-    private val themeResolver: ThemeResolver,
     private val drafts: TemplateDraftService,
-    /** 178 — the promoter lens on the two READ_RESOURCES reads (the page, the source partial); the writes are an author's. */
+    /** 178 — the promoter lens on the source-column read (the writes are an author's). */
     private val reads: TemplateService,
     private val lens: PromoterLens,
 ) {
     /** The source column's one rule, shared with the transform face's routes (7d). */
     private val source = TemplateSourceModel(reads)
 
+    /**
+     * #398 — the compatibility redirect: `GET /templates/editor?name=&version=&tab=` is a 302
+     * onto the canonical workspace `/templates/{name}`, preserving an explicit valid version
+     * and a supported tab (the pipelines twin's rule, `PipelineEditorController`). Validated,
+     * not forwarded blind: the same parse the canonical page runs, and only a tab of the
+     * closed set survives. A malformed version is the same house 400 the canonical route
+     * answers; the name is the query's (§9.6 — it may contain `/`), re-encoded into the one
+     * place a path may carry it, the workspace's capture-everything variable.
+     *
+     * The route stays under `template.read` (its Surfaces cell names it as the redirect), and
+     * the page floor is unchanged: the workspace itself is a read surface.
+     */
     @GetMapping("/templates/editor")
-    // 143 (T315): the page floors at READ, the pipeline editor's 122 rule — the operation
-    // the screen exists to perform for its LOWEST role is reading the source. What it
-    // renders is read state (a draft body is read, never written, by a GET); every write
-    // it can make — Edit, Preview, the lifecycle dialogs — is its own verb-guarded route,
-    // and the markup hides those verbs by role (§4.3e). 096 §C's "authoring state" floor
-    // stays on the writes below, where it belongs.
     @RequiredScope(Permission.TEMPLATE_READ)
     fun editor(
         @RequestParam name: String,
-        @RequestParam(required = false) version: Int?,
-        model: Model,
-        request: HttpServletRequest,
-    ): String {
-        val principal = currentPrincipal()
-        val workspaceId = principal.requireWorkspace().id
-        // §9.6: the name is a query parameter — it may contain `/`, which can never travel
-        // in a URL path segment (the container refuses %2F below routing).
-        val view = lens.viewFor(principal).templates
-        val filled = source.fill(model, workspaceId, view, name, version, RoleModel.roles(principal).canAuthor)
-        val draft = filled.draft
-        model.addAttribute("versions", reads.listVersions(workspaceId, view, name))
-        model.addAttribute("hasDraft", draft != null)
-        model.addAttribute("draftVersion", draft?.version)
-        model.addAttribute("draftHash", draft?.bodyHash)
-        // 7e (transform-nodes design §8.2): the displayed version's `needs_review` marker —
-        // computed on read by the projection's own query (a cited fact is retired).
-        model.addAttribute("needsReview", filled.displayed?.needsReview == true)
-        model.addAttribute("activeTheme", themeResolver.resolve(request))
-        RoleModel.stamp(model, principal)
-        return "templates/editor"
+        @RequestParam(required = false) version: String?,
+        @RequestParam(required = false) tab: String?,
+    ): RedirectView {
+        val parsedVersion = PipelineWorkspaceModel.parseRequestedVersion(version)
+        val supportedTab = TemplateWorkspaceController.TemplateWorkspaceTab.entries.firstOrNull { it.wire == tab }
+        val builder = canonicalBuilder(name)
+        parsedVersion?.let { builder.queryParam("version", it) }
+        supportedTab?.let { builder.queryParam("tab", it.wire) }
+        return RedirectView(builder.build().encode().toUriString())
     }
 
     /**
-     * The source column alone — what the version `<select>` swaps (§5's idiom: the page
-     * renders the shell AND the initial fragment; every later selection hits this endpoint
-     * and swaps `#template-source` only).
+     * The canonical workspace URL builder: the name's SEGMENTS as path segments, so
+     * `demo/top_carrier.sql` builds `/templates/demo/top_carrier.sql` (a `pathSegment` per
+     * grammar segment — the grammar allows no `/` inside one, so the split is lossless — and
+     * each segment percent-encodes anything that is not a path character). The workspace's
+     * capture-everything variable is the one place a path may carry the name.
+     */
+    @Suppress("SpreadOperator") // pathSegment has no List overload; the split is bounded by the grammar
+    private fun canonicalBuilder(name: String): UriComponentsBuilder =
+        UriComponentsBuilder
+            .fromPath("/templates")
+            .pathSegment(*name.split('/').toTypedArray())
+
+    /**
+     * The source column alone — what the workspace's Source tab and the version selector
+     * swap (§5's idiom: a stable target, `#template-source`, one fragment for the first
+     * paint and every later selection).
      */
     @GetMapping("/partials/templates/editor/source")
     @RequiredScope(Permission.TEMPLATE_READ)
@@ -122,11 +127,13 @@ class TemplateEditorController(
     ): Any {
         val principal = currentPrincipal()
         val workspaceId = principal.requireWorkspace().id
+        var draftVersion: Int? = null
         // A draft already exists ⇒ it IS the edit target and this path writes NOTHING.
         if (templates.findDraftDetail(workspaceId, name) == null) {
             copyIntoDraft(workspaceId, name, version, principal.userId)?.let { return it }
         }
-        return openWorkingVersion(name)
+        draftVersion = templates.findDraftDetail(workspaceId, name)?.version
+        return openWorkingVersion(name, draftVersion)
     }
 
     /** Copies [version] into a new draft; returns the refusal to render, or null on success. */
@@ -175,14 +182,25 @@ class TemplateEditorController(
 
     /**
      * Success: htmx navigates the whole page, because opening the draft changes the header
-     * too (the pending-release badge, Release, Discard) — a fragment swap would leave the
-     * page telling two different stories about which version is being edited.
+     * too (the pending-release badge, Release, Purge draft) — a fragment swap would leave the
+     * page telling two different stories about which version is being edited. The landing is
+     * the CANONICAL workspace (#398) with the draft's own version made explicit: the
+     * workspace's default view is the current release, so a version-less redirect would land
+     * the author on the read-only release they were merely reading instead of the draft they
+     * just opened. The Source tab is where the draft's editable body lives.
      */
-    private fun openWorkingVersion(name: String): ResponseEntity<String> =
-        ResponseEntity
+    private fun openWorkingVersion(
+        name: String,
+        draftVersion: Int?,
+    ): ResponseEntity<String> {
+        val builder = canonicalBuilder(name)
+        draftVersion?.let { builder.queryParam("version", it) }
+        builder.queryParam("tab", TemplateWorkspaceController.TemplateWorkspaceTab.SOURCE.wire)
+        return ResponseEntity
             .ok()
-            .header("HX-Redirect", "/templates/editor?name=" + URLEncoder.encode(name, StandardCharsets.UTF_8))
+            .header("HX-Redirect", builder.build().toUriString())
             .body("")
+    }
 
     /**
      * A refusal is a 200 carrying the reason, not a 4xx: htmx does not swap 4xx bodies

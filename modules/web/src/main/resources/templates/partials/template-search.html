@@ -1,62 +1,81 @@
-<!-- Search results: a FLAT list of full paths (template-hierarchy-design §9.2, decided),
-     rendered in the explorer's LEFT pane (058).
+<!-- A FLAT list of full paths (template-hierarchy-design §9.2, decided), in TWO instances since
+     #398 — chosen by `scope`, which also names the stable swap root (`rootId`):
+
+     - `nav`  — the global sidebar's search results, under #template-nav-root. Clearing the box
+                returns the sidebar to its tree (nav-tree.js's own clear: the sidebar has a
+                tree to return to). The rows are role=option in a role=listbox — a result list,
+                not a tree — and template-explorer.js's nav context gives them the same
+                keyboard as the tree.
+     - `page` — the /templates CATALOG, under #template-list-wrapper: every template the caller
+                may read when `q` is empty, the matches otherwise (the pipelines catalog's
+                ruling, read onto templates). Plain links in a plain list; the page has no
+                tree and no detail pane any more.
 
      Not a tree pruned to matching leaves. Pruning requires walking the ancestors of every
      match, which is precisely the whole-list-in-the-browser work §9.1 forbids, and a flat list
-     of full paths is what someone searching `finance/agg` actually wants to see. Clearing `q`
-     returns to the tree — partials/templates dispatches on exactly that.
+     of full paths is what someone searching `finance/agg` actually wants to see.
 
-     A result row SELECTS, exactly like a tree leaf: its header + versions table swap into
-     #template-detail on the right, and Enter opens the editor. The rows are role=option in a
-     role=listbox — this is a result list, not a tree, so it does not wear tree machinery.
-
-     The ROOT carries id="template-list-wrapper", the same stable swap target the tree's root
-     level carries, so the filter controls and the pager address one id in both presentations
-     (ui-screens.md §4.5). The `oob` flag is set ONLY by the create-success path. -->
-<div xmlns:th="http://www.thymeleaf.org" th:fragment="results" id="template-list-wrapper"
-     th:attr="hx-swap-oob=${oob}">
+     Every row is a LINK to the canonical workspace /templates/{name} — a full document load
+     (hx-boost="false", the navigating-tree pattern's leaf), never a selection into a pane. -->
+<div xmlns:th="http://www.thymeleaf.org" th:fragment="results" th:id="${rootId}"
+     th:with="nav=${scope == 'nav'}" th:attr="data-template-list=${scope}, hx-swap-oob=${oob}">
   <th:block th:if="${lensUnavailable != null and #lists.isEmpty(templates)}">
     <div th:replace="~{partials/lens-unavailable :: notice(${lensUnavailable})}"></div>
   </th:block>
-  <th:block th:if="${lensUnavailable == null and #lists.isEmpty(templates)}">
+  <!-- The catalog with no query and no rows is the workspace's EMPTY state, not a failed
+       search: it says how templates arrive (authored through the agent or the create form),
+       like the tree's. -->
+  <th:block th:if="${lensUnavailable == null and #lists.isEmpty(templates) and !nav and #strings.isEmpty(q)}">
+    <div class="ds-empty">
+      <p class="ds-empty-title">No templates yet</p>
+      <p class="ds-empty-description">
+        Author one through your agent or the Create Template form under a folder, e.g.
+        <code>test/&hellip;</code> — a folder is required, and the folders appear in the
+        sidebar's Templates tree on their own.
+      </p>
+    </div>
+  </th:block>
+  <th:block th:if="${lensUnavailable == null and #lists.isEmpty(templates) and (nav or !#strings.isEmpty(q))}">
     <div class="ds-empty">
       <p class="ds-empty-title">No templates match your search</p>
       <div class="ds-empty-actions">
-        <button class="ds-button ds-button-secondary ds-button-sm"
-                th:attr="hx-get=@{/partials/templates}, hx-target='#template-list-wrapper', hx-swap='outerHTML'">Clear filters</button>
+        <!-- The sidebar's clear also empties ITS box, so it is nav-tree.js's (data-nav-tree-clear):
+             a bare hx-get would bring the tree back under a box still holding the old query. -->
+        <button th:if="${nav}" type="button" class="ds-button ds-button-secondary ds-button-sm"
+                data-nav-tree-clear>Clear search</button>
+        <button th:unless="${nav}" type="button" class="ds-button ds-button-secondary ds-button-sm"
+                th:attr="hx-get=@{/partials/templates}, hx-target='#' + ${rootId}, hx-swap='outerHTML'">Clear search</button>
       </div>
     </div>
   </th:block>
 
-  <!-- The full path IS the row — in a pane, not a full-width table (058); type and dialect
-       ride along as the same badges a tree leaf carries, and the detail pane is where the
-       wider columns live. -->
-  <ul class="tpl-results" role="listbox" aria-label="Search results"
-      th:unless="${#lists.isEmpty(templates)}">
-    <li role="none" th:each="t : ${templates}">
-      <button type="button" class="tpl-result" role="option" aria-selected="false"
-              th:attr="hx-get=@{/partials/templates/versions(name=${t.id})},
-                       data-editor-url=@{/templates/editor(name=${t.id})}"
-              hx-target="#template-detail" hx-swap="innerHTML"
-              hx-sync="#template-detail:replace"
-              hx-indicator="#template-detail-spinner">
+  <ul class="tpl-results"
+      th:unless="${#lists.isEmpty(templates)}"
+      th:attr="role=${nav} ? 'listbox' : null,
+               aria-label=${nav} ? 'Template search results' : 'Templates'">
+    <li th:attr="role=${nav} ? 'none' : null" th:each="t : ${templates}">
+      <a class="tpl-result" hx-boost="false"
+         th:href="@{'/templates/' + ${t.id}}"
+         th:attr="role=${nav} ? 'option' : null,
+                  aria-selected=${nav} ? 'false' : null,
+                  data-leaf-id=${t.id}">
         <!-- The FULL path, and it rides on `title` too — a deep path in a narrow pane
              truncates, and the truncated text must never be the only copy (§9.4). -->
         <span class="tpl-path" th:text="${t.id}" th:title="${t.id}">acme/finance/monthly_revenue</span>
         <span class="ds-badge ds-badge-default" th:text="${t.type.wire}">sql</span>
         <span class="ds-badge ds-badge-default" th:if="${t.dialect != null}" th:text="${t.dialect.wire}">POSTGRES</span>
         <span th:if="${drafts != null && drafts[t.id] != null}" class="ds-badge ds-badge-warning"
-              th:title="'Draft v' + ${drafts[t.id].version} + ' is pending release — release it from the editor to publish.'">draft</span>
-        <!-- 7d (§8.2): the needs-review marker, as the tree leaf carries it (7e fills the set). -->
+              th:title="'Draft v' + ${drafts[t.id].version} + ' is pending release — release it from the template workspace to publish.'">draft</span>
+        <!-- 7d (§8.2): the needs-review marker, as the tree leaf carries it. -->
         <span th:if="${needsReviewIds != null and #sets.contains(needsReviewIds, t.id)}" class="ds-badge ds-badge-warning" data-needs-review
               title="A fact this template cites was retired or superseded — re-verify before you lean on it.">needs review</span>
-      </button>
+      </a>
     </li>
   </ul>
 
   <th:block th:unless="${#lists.isEmpty(templates)}"
-            th:with="prevUrl=@{/partials/templates(q=${q}, dialect=${selectedDialect}, type=${selectedType}, offset=${offset - 25})},
-                     nextUrl=@{/partials/templates(q=${q}, dialect=${selectedDialect}, type=${selectedType}, offset=${offset + 25})}">
-    <div th:replace="~{partials/pager :: pager('#template-list-wrapper', ${prevUrl}, ${nextUrl}, ${offset}, ${hasMore}, ${templates.size()}, ${total})}"></div>
+            th:with="prevUrl=${nav} ? @{/partials/templates(q=${q}, scope='nav', offset=${offset - 25})} : @{/partials/templates(q=${q}, dialect=${selectedDialect}, type=${selectedType}, offset=${offset - 25})},
+                     nextUrl=${nav} ? @{/partials/templates(q=${q}, scope='nav', offset=${offset + 25})} : @{/partials/templates(q=${q}, dialect=${selectedDialect}, type=${selectedType}, offset=${offset + 25})}">
+    <div th:replace="~{partials/pager :: pager('#' + ${rootId}, ${prevUrl}, ${nextUrl}, ${offset}, ${hasMore}, ${templates.size()}, ${total})}"></div>
   </th:block>
 </div>

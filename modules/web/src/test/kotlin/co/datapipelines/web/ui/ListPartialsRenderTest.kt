@@ -63,10 +63,12 @@ class ListPartialsRenderTest {
     }
 
     @Test
-    fun `templates partial renders resolved pagination controls when rows exist`() {
+    fun `templates list fragment renders resolved pagination controls when rows exist`() {
+        // #398: the dispatcher retired; the catalog's list IS the search fragment (the
+        // CATALOG scope, rooted at the page's stable swap target).
         val html =
             engine.process(
-                "partials/templates",
+                "partials/template-search",
                 webContext().apply { fillTemplatesModel(listOf(templateRecord())) },
             )
 
@@ -142,10 +144,10 @@ class ListPartialsRenderTest {
     }
 
     @Test
-    fun `templates partial renders the design-system table and dialect badge`() {
+    fun `templates list fragment renders the design-system rows and dialect badge`() {
         val html =
             engine.process(
-                "partials/templates",
+                "partials/template-search",
                 webContext().apply { fillTemplatesModel(listOf(templateRecord())) },
             )
 
@@ -164,7 +166,7 @@ class ListPartialsRenderTest {
     fun `templates empty state uses the ds-empty primitive`() {
         val html =
             engine.process(
-                "partials/templates",
+                "partials/template-search",
                 webContext().apply { fillTemplatesModel(emptyList()) },
             )
 
@@ -262,6 +264,9 @@ class ListPartialsRenderTest {
      */
     private fun WebContext.fillTemplatesModel(rows: List<Template>) {
         setVariable("searching", true)
+        // #398: the fragment reads its instance's scope and root (the CATALOG by default).
+        setVariable("scope", TemplateListScope.CATALOG.wire)
+        setVariable("rootId", TemplateListScope.CATALOG.rootId)
         setVariable("templates", rows)
         setVariable("drafts", emptyMap<String, co.datapipelines.templates.TemplateVersionDetail>())
         setVariable("q", "orders")

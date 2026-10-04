@@ -5,16 +5,17 @@ import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
 
 /**
- * Golden path 4 of the release checklist: templates — the tree's empty state, creation
+ * Golden path 4 of the release checklist: templates — the catalog's empty state, creation
  * through the modal (the SAME validator + repository as the REST surface), the leaf
- * appearing in the refreshed tree, and the two-pane selection contract (the versions
- * pane swaps into #template-detail while the tree stays untouched).
+ * appearing in the refreshed catalog, and the leaf's NAVIGATION into its workspace.
  *
- * 077 changed the shape of this path, not its meaning. A name carries a FOLDER now (§4.1),
- * so the create posts `test/<leaf>` and the refreshed ROOT shows a **folder**, not a leaf —
- * the leaf lives one level down and the test expands the folder to reach it, which is the
- * journey a real user now takes. Both halves would have gone red silently otherwise: the
- * create would 400 on the flat name, and the root would never grow a `tpl-leaf`.
+ * 077 changed the shape of this path (a name carries a FOLDER; the create posts
+ * `test/<leaf>`), and #398 changed its surface: the refreshed list is the CATALOG's flat
+ * rows (the leaf appears there at once — the catalog lists every template), and the leaf a
+ * reader reaches through the SIDEBAR's tree is a full navigation into the template
+ * workspace. Both halves would have gone red silently otherwise: the create would 400 on
+ * the flat name, and the catalog row's href is the one place the workspace URL is pinned
+ * end to end.
  */
 class TemplatesGoldenPathBrowserTest : BrowserSuite() {
     private fun loginReadyUser(): LocalUser {
@@ -41,7 +42,7 @@ class TemplatesGoldenPathBrowserTest : BrowserSuite() {
     }
 
     @Test
-    fun `create through the modal puts the template in the tree and selects it`() {
+    fun `create through the modal puts the template in the catalog and opens it in the workspace`() {
         startTrace()
         loginReadyUser()
         // 077: a folder is mandatory. `test/` is the sanctioned scratch folder (§15.2), which
@@ -66,46 +67,49 @@ class TemplatesGoldenPathBrowserTest : BrowserSuite() {
             }
         create.status() shouldBe 200
 
-        // The OOB swap refreshes the ROOT level, and since 077 that level holds FOLDERS ONLY:
-        // what appears is the `test` folder, never the leaf. Asserting the absence too, because
-        // "the leaf is not visible yet" is the actual change and a missing assertion here is
-        // how the old expectation would creep back.
-        page.waitForSelector("details.tpl-folder")
-        page.locator("#template-list-wrapper button.tpl-leaf").count() shouldBe 0
+        // The OOB swap refreshes the CATALOG's list (#398): the new leaf is a row at once —
+        // the catalog lists every template — a link to its workspace with the full path on
+        // `title` (§9.4).
+        val row =
+            page.locator(
+                "#template-list-wrapper a.tpl-result",
+                com.microsoft.playwright.Page
+                    .LocatorOptions()
+                    .setHasText(name),
+            )
+        row.waitFor()
+        row.getAttribute("href") shouldBe "/templates/$name"
+
+        // The SIDEBAR's tree carries the folder-and-leaf shape: the branch's root level holds
+        // FOLDERS ONLY (077), the `test` folder expands with ONE prefix request (§9.1), and
+        // its leaf is a link with the same label rule.
+        page.click("[data-nav-tree-reveal='templates']")
+        page.waitForSelector("#nav-tree-templates details.tpl-folder")
         val folder =
             page.locator(
-                "summary.tpl-summary",
+                "#nav-tree-templates summary.tpl-summary",
                 com.microsoft.playwright.Page
                     .LocatorOptions()
                     .setHasText("test"),
             )
-        folder.waitFor()
-
-        // Expanding the folder issues ONE request for ONE level (§9.1) — and THAT level has
-        // the leaf, labelled by its last segment with the full path on `title` (§9.4).
-        // A PREDICATE, not a glob: Playwright treats `?` as a wildcard in a URL glob, so
-        // "**/partials/templates?prefix=test**" does not reliably match the query string the
-        // fragment renders (`?prefix=test&dialect=&type=`).
         page.waitForResponse(
             { response -> response.url().contains("/partials/templates") && response.url().contains("prefix=test") },
             { folder.click() },
         )
-        val leafButton =
+        val leafLink =
             page.locator(
-                "button.tpl-leaf",
+                "#nav-tree-templates a.tpl-leaf",
                 com.microsoft.playwright.Page
                     .LocatorOptions()
                     .setHasText(leaf),
             )
-        leafButton.waitFor()
-        leafButton.locator("span.tpl-label").getAttribute("title") shouldBe name
+        leafLink.waitFor()
+        leafLink.locator("span.tpl-label").getAttribute("title") shouldBe name
 
-        // Selection swaps the versions pane into #template-detail — the two-pane contract.
-        page.waitForResponse(
-            { response -> response.url().contains("/partials/templates/versions") },
-            { leafButton.click() },
-        )
-        page.waitForSelector("#template-detail")
-        page.locator("#template-detail").innerText() shouldContain leaf
+        // A leaf NAVIGATES — a full document into the template workspace.
+        leafLink.click()
+        page.waitForURL("**/templates/$name")
+        page.waitForSelector(".tw-root")
+        page.locator(".tw-crumb-name").innerText() shouldContain leaf
     }
 }

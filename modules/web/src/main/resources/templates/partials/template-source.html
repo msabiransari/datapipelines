@@ -1,28 +1,29 @@
-<!-- The template editor's SOURCE COLUMN — the editor (or, for a version the author
-     merely SELECTED, its read-only body) with the preview output below it.
+<!-- The template workspace's SOURCE column — the body of the VIEWED version (or, for an
+     author on the working draft, the editable draft) with the one way out of the read-only
+     view. #398: the preview block is NOT part of this column any more — the Render Context
+     and the preview are the workspace's Render tab, a tab of their own; what stays here is
+     what a version IS: its body, its status, its release provenance, and Edit.
 
-     R5 (054): selecting a version in the dropdown LOADS it read-only, with its badge and
+     R5 (054): selecting a version in the workspace LOADS it read-only, with its badge and
      its release metadata. The editable textarea carries the WORKING version and nothing
-     else (039 O14: the draft when one exists, else the current release), so no selection
-     can ever make a RELEASED row the write target — the invariant "we never modify
-     RELEASED" is visible here, not merely enforced by the server.
+     else (039 O14: the draft), so no selection can ever make a RELEASED row the write
+     target — the invariant "we never modify RELEASED" is visible here, not merely enforced
+     by the server.
 
      Edit is the one way out of the read-only view, and it does NOT decide anything: it
      posts to the editor's edit path, which applies the lifecycle rule 035/039 shipped —
      a draft already exists ⇒ that draft opens (nothing is written); otherwise the
      selected version is copied into a new draft through the same TemplateDraftService
-     the REST write uses.
+     the REST write uses — and the answer lands on the workspace with the draft explicit.
 
      143 (T315): `readOnly` is no longer the version rule alone — the controller combines it
      with the AUTHOR capability, so a reader (a viewer, or a promoter who releases but does
      not edit) sees the working version in this same read-only pane. The editable textarea
-     is reached only by an author on the working version, and the Preview block below is an
-     author's too (its POST is MUTATE, and rendering with a caller-supplied context is an
-     authoring act by decision — the ratified 143 design keeps the render permission as is).
+     is reached only by an author on the working version.
 
-     This fragment is th:replace'd by templates/editor.html for the first paint and
-     returned alone by GET /partials/templates/editor/source for every later selection
-     (§5's idiom) — one definition, so the two paints cannot disagree. -->
+     This fragment is th:replace'd by the workspace page for the first paint and returned
+     alone by GET /partials/templates/editor/source (§5's idiom) — one definition, so the
+     two paints cannot disagree. -->
 <div xmlns:th="http://www.thymeleaf.org" th:fragment="source" id="template-source" class="te-source">
 
   <!-- READ-ONLY: a version other than the working one — or any version, for a reader. -->
@@ -75,17 +76,4 @@
     </div>
     <textarea id="templateBody" class="ds-textarea" th:text="${template?.body ?: ''}">Template body</textarea>
   </th:block>
-
-  <!-- The preview is an author's surface (143): the button posts to a MUTATE route, and a
-       reader is not offered a control the server would refuse. -->
-  <div class="te-preview" th:if="${canAuthor == true}">
-    <div class="te-panel-head te-panel-head-flush">
-      <div class="u-row">
-        <h2>Preview Output</h2>
-        <button type="button" class="ds-button ds-button-primary" data-action="template-preview" id="previewBtn">Preview</button>
-        <span id="previewSpinner" class="u-hidden u-secondary u-text-sm">Rendering...</span>
-      </div>
-    </div>
-    <div id="previewPane" class="te-preview-pane"></div>
-  </div>
 </div>

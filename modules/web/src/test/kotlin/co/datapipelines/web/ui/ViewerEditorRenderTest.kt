@@ -3,6 +3,7 @@ package co.datapipelines.web.ui
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.templates.Template
+import co.datapipelines.templates.TemplateVersionDetail
 import co.datapipelines.typesystem.Dialect
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
@@ -20,26 +21,26 @@ import java.time.Instant
 import java.util.UUID
 
 /**
- * 143 (T315) — the TEMPLATE editor as a READER sees it, rendered by the real engine and read
- * as DOM, not as a substring next to a role word.
+ * Role visibility on the template workspace (#398 — this class was the editor page's viewer
+ * guard; the page it guards is the workspace now, and the rule is the same one sentence).
  *
- * The owner's ruling: a viewer's "Open in editor" opens the template exactly as the pipeline
- * editor opens for a viewer — genuinely read-only. `readOnly` is what the controller stamps
- * (author capability combined with the version rule); what this pins is that the MARKUP obeys
- * it: the working version is a `<pre>`, never a textarea; nothing on the page posts a write;
- * the author-only Preview and its context rail are absent; the version select and the Imports
- * panel — the reads — stay. The inventory of interactive elements is asserted as an EXACT SET,
- * so a control added without a guard shows up here by name rather than passing a grep.
+ * A viewer's workspace page is a READ surface: the body renders read-only, the editable
+ * textarea, the Render tab (the render-context panel and the preview — its POST is MUTATE)
+ * and every lifecycle verb are absent; the version selector, the Imports table and the tab
+ * strip are the reads that stay. The inventory of interactive elements is asserted as an
+ * EXACT SET, so a control added without a guard shows up here by name rather than passing a
+ * grep.
  *
- * The positive half is kept on purpose: an author's page still carries the textarea, Preview
- * and the context rail, and a promoter's still carries Release — "hide everything" cannot pass.
+ * The positive half is kept on purpose: an author on the working draft still gets the
+ * textarea, the Render tab and (Q1(b)) the edit affordance, and a promoter never does —
+ * "hide everything" cannot pass.
  */
 class ViewerEditorRenderTest {
     @Test
-    fun `a viewer's editor page is a read surface - no textarea, no preview, no context rail, no verb`() {
+    fun `a viewer's workspace is a read surface - no textarea, no render tab, no context rail, no verb`() {
         val html =
-            render("templates/editor") {
-                page(readOnly = true)
+            render("templates/workspace") {
+                page(viewedEditable = false)
                 viewer()
             }
 
@@ -54,22 +55,72 @@ class ViewerEditorRenderTest {
         html shouldNotContain "tpl-edit-version"
         html shouldNotContain "data-verb="
         html shouldContain "data-role-note=\"read-only\""
-        // The reads stay: the version select, the Imports table, the read-only badge line.
-        html shouldContain "id=\"versionSelect\""
+        // The reads stay: the version selector, the Imports table, the read-only badge line.
+        html shouldContain "tw-version-link"
         html shouldContain "lib/common.sql"
         html shouldContain ">read-only<"
     }
 
-    /** The exact interactive surface of a viewer's editor page — by element, not by grep. */
+    /**
+     * §3.0 (ui-screens, normative; 090): a page template carries no `<link rel="stylesheet">`.
+     * The workspace is a BOOSTED arrival, and a sheet inside `#app-main` is discovered after the
+     * first frame has painted — the unstyled-first-frame defect. #398's first round shipped the
+     * two workspace sheets inside `content`; they ride the layout head now. The probe is the
+     * rendered page: both sheets before `</head>`, no `<link` stylesheet inside `<main>`.
+     */
     @Test
-    fun `a viewer's editor page carries exactly the version select and the shell's own controls`() {
+    fun `the workspace's stylesheets load from the document head - none rides inside main`() {
+        val html = render("templates/workspace") { page(viewedEditable = true) }
+        val head = html.substringBefore("</head>")
+
+        listOf("/css/template-editor.css", "/css/template-workspace.css").forEach { sheet ->
+            head shouldContain "href=\"$sheet\""
+            mainOf(html) shouldNotContain sheet
+        }
+        mainOf(html) shouldNotContain "rel=\"stylesheet\""
+    }
+
+    @Test
+    fun `the topbar's Release label is ONE text node - a span inside the flex button spreads it apart`() {
+        // 398b live walk: `Release v<span>3</span>…` inside `.ds-button` (inline-flex with a gap)
+        // painted "Release v  3  …". The sibling verbs build their label with th:text.
+        val html = render("templates/workspace") { page(viewedEditable = true, hasDraft = true) }
+        html shouldContain ">Release v2…</button>"
+    }
+
+    @Test
+    fun `a page opened on the Runs tab loads its runs - the lazy click is only for a tab opened later`() {
+        // 398b review: `?tab=runs` showed the Runs pane with "Open the tab to load the recent runs."
+        // until the reader clicked the tab that was already active (`click once` was its only trigger).
+        val runsTab = Regex("<button[^>]*id=\"tw-tab-runs\"[^>]*>")
+        val opened =
+            render("templates/workspace") {
+                page(viewedEditable = true)
+                setVariable("activeTab", "runs")
+            }
+        val later = render("templates/workspace") { page(viewedEditable = true) }
+
+        runsTab.find(opened)?.value shouldContain "hx-trigger=\"load\""
+        runsTab.find(later)?.value shouldContain "hx-trigger=\"click once\""
+    }
+
+    /** The exact interactive surface of a viewer's workspace page — by element, not by grep. */
+    @Test
+    fun `a viewer's workspace carries exactly its tab strip and nothing else`() {
         val html =
-            render("templates/editor") {
-                page(readOnly = true)
+            render("templates/workspace") {
+                page(viewedEditable = false)
                 viewer()
             }
 
-        interactive(mainOf(html)) shouldContainExactly listOf("select#versionSelect")
+        interactive(mainOf(html)) shouldContainExactly
+            listOf(
+                "button#tw-tab-source",
+                "button#tw-tab-overview",
+                "button#tw-tab-runs",
+                "button#tw-tab-used",
+                "button#tw-tab-versions",
+            )
     }
 
     @Test
@@ -81,7 +132,6 @@ class ViewerEditorRenderTest {
             }
         working shouldContain "id=\"versionBody\""
         working shouldNotContain "<textarea"
-        working shouldNotContain "previewBtn"
         working shouldNotContain "tpl-edit-version"
 
         val older =
@@ -94,10 +144,10 @@ class ViewerEditorRenderTest {
     }
 
     @Test
-    fun `an author's editor keeps the textarea, Preview and the context rail`() {
+    fun `an author on the working draft keeps the textarea, the Render tab and the preview`() {
         val html =
-            render("templates/editor") {
-                page(readOnly = false)
+            render("templates/workspace") {
+                page(viewedEditable = true, draftView = true)
                 author()
             }
 
@@ -108,6 +158,8 @@ class ViewerEditorRenderTest {
         html shouldNotContain "data-role-note=\"read-only\""
         interactive(mainOf(html)).contains("textarea#templateBody") shouldBe true
         interactive(mainOf(html)).contains("button#previewBtn") shouldBe true
+        // The Render tab exists for the author of a non-transform template.
+        html shouldContain "id=\"tw-tab-render\""
     }
 
     @Test
@@ -118,8 +170,6 @@ class ViewerEditorRenderTest {
                 author()
             }
         author shouldContain "tpl-edit-version"
-        // Preview stays an author's on the read-only pane too — it renders the STORED version.
-        author shouldContain "previewBtn"
 
         val promoter =
             render("partials/template-source") {
@@ -127,15 +177,14 @@ class ViewerEditorRenderTest {
                 promoter()
             }
         promoter shouldNotContain "tpl-edit-version"
-        promoter shouldNotContain "previewBtn"
     }
 
     /** D5/D8 (2026-09-20): the promoter releases nothing — a read-only source, the read-only note, no verb. */
     @Test
-    fun `a promoter's editor is read-only with no Release, even when a draft is pending`() {
+    fun `a promoter's workspace is read-only with no Release, even when a draft is pending`() {
         val html =
-            render("templates/editor") {
-                page(readOnly = true, hasDraft = true)
+            render("templates/workspace") {
+                page(viewedEditable = false, hasDraft = true)
                 promoter()
             }
 
@@ -143,11 +192,14 @@ class ViewerEditorRenderTest {
         html shouldNotContain "<textarea"
         html shouldNotContain "data-verb=\"template-release\""
         html shouldNotContain "data-verb=\"template-purge\""
+        html shouldNotContain "data-verb=\"template-discard\""
+        html shouldNotContain "data-verb=\"template-purge-entity\""
         html shouldContain "data-role-note=\"read-only\""
         html shouldNotContain "previewBtn"
+        html shouldNotContain "id=\"tw-tab-render\""
     }
 
-    /** Every version row's Open names ITS version — a reader can trust which version opened. */
+    /** Every version row's Open names ITS version on the CANONICAL workspace — a reader can trust which version opened. */
     @Test
     fun `every version row's Open carries that row's exact version`() {
         val html =
@@ -156,11 +208,11 @@ class ViewerEditorRenderTest {
                 viewer()
             }
 
-        val opens = Regex("href=\"(/templates/editor\\?[^\"]*)\"[^>]*>Open<").findAll(html).map { it.groupValues[1] }.toList()
+        val opens = Regex("href=\"(/templates/[^\"]*)\"[^>]*>Open<").findAll(html).map { it.groupValues[1] }.toList()
         opens shouldContainExactly
             listOf(
-                "/templates/editor?name=acme/revenue.sql&amp;version=2",
-                "/templates/editor?name=acme/revenue.sql&amp;version=1",
+                "/templates/acme/revenue.sql?version=2&amp;tab=source",
+                "/templates/acme/revenue.sql?version=1&amp;tab=source",
             )
     }
 
@@ -226,13 +278,19 @@ class ViewerEditorRenderTest {
         setVariable("selectedStatus", "RELEASED")
         setVariable("releasedAt", null)
         setVariable("releasedBy", null)
+        setVariable("isTransform", false)
     }
 
     private fun WebContext.page(
-        readOnly: Boolean,
+        viewedEditable: Boolean,
         hasDraft: Boolean = false,
+        draftView: Boolean = false,
     ) {
-        source(readOnly, selected = 2)
+        source(readOnly = !viewedEditable, selected = if (draftView) 2 else 2)
+        if (draftView) {
+            setVariable("selectedStatus", "DRAFT")
+            setVariable("readOnly", false)
+        }
         setVariable("_csrf", mapOf("token" to "t", "parameterName" to "_csrf"))
         setVariable("workspaceHeaderFragment", "")
         setVariable("workspaceOptions", emptyList<Any>())
@@ -241,14 +299,86 @@ class ViewerEditorRenderTest {
         setVariable("authenticated", true)
         setVariable("currentPath", "/templates")
         setVariable("navCounts", NavCounts.Counts(1, 1))
-        setVariable("versions", emptyList<Any>())
+        setVariable("templateName", NAME)
+        setVariable("navCurrentPath", NAME)
+        setVariable("hasSelectedBody", true)
+        setVariable("viewedVersion", 2)
+        setVariable("viewedLabel", if (draftView) "v2 · draft" else "v2 · released · current")
+        setVariable("viewedIsDraft", draftView)
+        setVariable("viewedIsCurrent", !draftView)
+        setVariable("viewedStatusLabel", if (draftView) "draft" else "released")
+        setVariable("currentVersion", if (draftView) null else 2)
+        setVariable("viewedEditable", viewedEditable)
         setVariable("hasDraft", hasDraft)
         setVariable("draftVersion", if (hasDraft) 2 else null)
         setVariable("draftHash", if (hasDraft) "h" else null)
+        setVariable("canDelete", false)
+        setVariable("canDiscardCurrent", !draftView)
+        setVariable("canPurgeDraftInHeader", false)
+        setVariable("releasableVersion", if (hasDraft) 2 else null)
+        setVariable("currentReleaseVersion", 2)
+        setVariable("canAuthor", true)
+        setVariable("activeTab", "source")
+        setVariable("interpolations", emptyList<String>())
+        setVariable("isTransform", false)
+        fillUsedByFacts()
+        // The selector reads the admitted history; one row of each side of the fork.
+        setVariable("versions", selectorRows())
     }
 
+    private fun WebContext.fillUsedByFacts() {
+        setVariable("templateWorkspace", resolved())
+        setVariable("usedBy", emptyList<Any>())
+        setVariable("usedByCount", 0)
+        setVariable("usedBySets", emptyList<Any>())
+        setVariable("usedByVisualizations", emptyList<Any>())
+        setVariable("usedBySummary", "nothing")
+    }
+
+    private fun selectorRows(): List<VersionRowView> =
+        listOf(
+            VersionRowView.of(
+                version = 2,
+                status = PipelineVersionStatus.RELEASED,
+                createdAt = Instant.EPOCH,
+                actor = "Muhammad",
+                now = Instant.EPOCH,
+                usage = 0,
+                usageUnit = "pipeline",
+                isCurrent = true,
+                isViewed = true,
+            ),
+            VersionRowView.of(
+                version = 1,
+                status = PipelineVersionStatus.RELEASED,
+                createdAt = Instant.EPOCH,
+                actor = "Muhammad",
+                now = Instant.EPOCH,
+                usage = 1,
+                usageUnit = "pipeline",
+                isCurrent = false,
+            ),
+        )
+
+    private fun resolved(): TemplateWorkspaceModel.Resolved =
+        TemplateWorkspaceModel.Resolved(
+            name = NAME,
+            selected = TemplateWorkspaceModel.Selected(template(), null),
+            draft = null,
+            currentVisible = 2,
+            versions = emptyList(),
+            usedBy =
+                TemplateWorkspaceModel.UsedByFacts(
+                    pipelines = emptyList(),
+                    pipelineCount = 0,
+                    sets = emptyList(),
+                    visualizations = emptyList(),
+                    summary = "nothing",
+                ),
+        )
+
     private fun WebContext.versions() {
-        setVariable("templateId", NAME)
+        setVariable("templateName", NAME)
         setVariable(
             "versions",
             listOf(

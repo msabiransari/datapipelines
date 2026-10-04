@@ -1,32 +1,31 @@
 package co.datapipelines.browser
 
 import com.microsoft.playwright.Page
-import io.kotest.matchers.doubles.shouldBeGreaterThanOrEqual
-import io.kotest.matchers.doubles.shouldBeLessThanOrEqual
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
 
 /**
- * #112 — an EMPTY side rail reclaims its width for the read-only source, in a real browser.
+ * #112's presence rules, re-aimed by #398 onto the WORKSPACE — the rail and its splitter are
+ * gone (the Render Context is the author-only RENDER tab; the Imports table is a card on the
+ * Source tab), and what the old cases pinned is the TAB presence the same rules now produce:
  *
- * The rail carries two things: the Render Context panel (author-only — 143/T315, its POST is
- * MUTATE) and the Imports table (a read, present only when the selected template imports a
- * library). A reader — viewer or pure promoter — on a template with no imports therefore got a
- * 320px column of NOTHING and a source pane narrowed by it. The fix is server-side: a rail with
- * nothing to show is not rendered (nor is its splitter handle), and `.te-body` collapses to one
- * column. What must NOT change: an author's rail, the Imports table for readers, the remembered
- * `--te-side-w` when the rail IS present, and the narrow-viewport contract ([TemplateEditorSideResizeBrowserTest]
- * owns the clamp floor).
+ *  - a READER (viewer or pure promoter) on any template gets NO Render tab and NO context
+ *    rows — the panel was author-only (143/T315, its POST is MUTATE) and so is the tab;
+ *  - a reader on a template WITH imports keeps the Imports table — the read the rail used
+ *    to carry — on the Source tab;
+ *  - an author gets the Render tab with the context panel (and the release-only template
+ *    shows Edit, never an editable surface, R5).
  *
- * Geometry is asserted as RELATIONS (source spans the body; the rail takes its track), never
- * against a hard-coded page width. Falsification, recorded in the handback: every "no rail"
- * assertion here is red on the pre-fix markup (the rail rendered empty but present).
+ * The empty-rail geometry and the remembered `--te-side-w` retired with the rail (no rail,
+ * no splitter, no width to remember); the withdrawal guards live in
+ * [TemplateWorkspaceBrowserTest], which also owns the workspace's own layout.
  */
 class TemplateEditorRailBrowserTest : BrowserSuite() {
-    // ------------------------------------------------------------------ the collapsed rail
+    // ------------------------------------------------------------------ the reader gets no Render tab
 
     @Test
-    fun `a viewer on an imports-less template gets NO rail - the source spans the body, in light and dark`() {
+    fun `a viewer on any template gets NO Render tab and no context rows, in light and dark`() {
         startTrace()
         val maker = seedAndLogin("railmk", role = "author")
         val name = "test/rail_plain_" + suffix()
@@ -34,18 +33,25 @@ class TemplateEditorRailBrowserTest : BrowserSuite() {
         maker.close()
 
         val viewer = seedAndLogin("railvw", role = "viewer")
-        openEditor(viewer, name)
-
-        assertCollapsed(probe(viewer.page), "on first paint")
-        ensureThemeOn(viewer.page, "light")
-        assertCollapsed(probe(viewer.page), "light")
-        ensureThemeOn(viewer.page, "dark")
-        assertCollapsed(probe(viewer.page), "dark")
+        listOf("light", "dark").forEach { theme ->
+            ensureThemeOn(viewer.page, theme)
+            openWorkspace(viewer.page, name)
+            assertNoRenderTab(viewer.page, "viewer at ${mode(viewer.page)}")
+        }
         viewer.close()
     }
 
+    /**
+     * The promoter arm, NARROWED by #398 and disclosed: without a configured promotion
+     * target the lens admits NOTHING (178, fail closed — ViewerAccessBrowserTest's promoter
+     * arm), so the promoter's workspace answer is the family 404 and there is no page on
+     * which a Render tab could exist, let alone render. The old case passed vacuously (the
+     * old editor page rendered "Unknown Template" for any name); the honest assertion is
+     * the 404 itself — the Render tab's author-only rule is pinned on the viewer arms above
+     * and on the author's positive case.
+     */
     @Test
-    fun `a pure promoter on an imports-less template gets NO rail either - the panel is author-only`() {
+    fun `a pure promoter with no promotion target is lensed out of the workspace entirely - the family 404`() {
         startTrace()
         val maker = seedAndLogin("railmk", role = "author")
         val name = "test/rail_promo_" + suffix()
@@ -53,13 +59,16 @@ class TemplateEditorRailBrowserTest : BrowserSuite() {
         maker.close()
 
         val promoter = seedAndLogin("railpr", role = "promoter")
-        openEditor(promoter, name)
-        assertCollapsed(probe(promoter.page), "promoter")
+        promoter.page.navigate("$baseUrl/templates/$name")
+        promoter.page.locator(".app-error, #app-main").waitFor()
+        // No workspace chrome to mistake for a page: no tab strip, no Render tab.
+        promoter.page.locator("#tw-tab-render").count() shouldBe 0
+        promoter.page.locator(".tw-tabs").count() shouldBe 0
         promoter.close()
     }
 
     @Test
-    fun `the collapse holds narrow and wide - the phone band does not resurrect the rail`() {
+    fun `the tab absence holds narrow and wide - the phone band does not resurrect it`() {
         startTrace()
         val maker = seedAndLogin("railmk", role = "author")
         val name = "test/rail_np_" + suffix()
@@ -67,20 +76,20 @@ class TemplateEditorRailBrowserTest : BrowserSuite() {
         maker.close()
 
         val viewer = seedAndLogin("railvw", role = "viewer")
-        // 110 §C: at 390px the page shows the wide-screen note with the editor rendered
-        // underneath — and the rail question has the same answer there.
+        // 110 §C: at 390px the page shows the wide-screen note with the workspace rendered
+        // underneath — and the tab question has the same answer there.
         viewer.page.setViewportSize(390, 844)
-        openEditor(viewer, name)
-        assertCollapsed(probe(viewer.page), "narrow 390px")
+        openWorkspace(viewer.page, name)
+        assertNoRenderTab(viewer.page, "narrow 390px")
         viewer.page.setViewportSize(1440, 900)
-        assertCollapsed(probe(viewer.page), "wide 1440px")
+        assertNoRenderTab(viewer.page, "wide 1440px")
         viewer.close()
     }
 
-    // ------------------------------------------------------------------ the rail that stays
+    // ------------------------------------------------------------------ the reads that stay
 
     @Test
-    fun `a viewer on a template WITH imports keeps the rail - the Imports table is the read it carries`() {
+    fun `a viewer on a template WITH imports keeps the Imports table - the read the rail used to carry`() {
         startTrace()
         // The maker edits AND releases: since 2026-09-20 release is the AUTHOR's verb (D8), so
         // an author fixture holds both.
@@ -94,83 +103,57 @@ class TemplateEditorRailBrowserTest : BrowserSuite() {
         maker.close()
 
         val viewer = seedAndLogin("railvw", role = "viewer")
-        openEditor(viewer, name)
+        openWorkspace(viewer.page, name)
 
-        val m = probe(viewer.page)
-        withClue("the rail is gone even though the template imports a library: $m") {
-            m.b("railPresent") shouldBe true
-            m.b("handlePresent") shouldBe true
+        // The Imports table is on the SOURCE tab now, and the reader keeps it.
+        withClue("the Imports card did not render on the Source tab") {
+            viewer.page.locator(".tw-imports").waitFor()
         }
-        withClue("the rail does not carry its Imports table: $m") {
-            m.b("importsHead") shouldBe true
-        }
-        withClue("a READER got the author-only Render Context panel: $m") {
-            m.b("renderContext") shouldBe false
-        }
-        withClue("the rail is not at the stylesheet default (320px): $m") {
-            m.d("railW") shouldBeGreaterThanOrEqual DEFAULT_W - 1
-            m.d("railW") shouldBeLessThanOrEqual DEFAULT_W + 1
-        }
-        withClue("the source kept the remainder, not the width of a collapsed rail: $m") {
-            m.d("sourceW") shouldBeLessThanOrEqual m.d("bodyW") - DEFAULT_W
-        }
-
-        // Narrow: the clamp floor owns the rail, as the resize suite pins for the author case.
-        viewer.page.setViewportSize(390, 844)
-        val narrow = probe(viewer.page)
-        withClue("at 390px the rail is not at the 220px clamp floor: $narrow") {
-            narrow.d("railW") shouldBeGreaterThanOrEqual SIDE_MIN - 1
-            narrow.d("railW") shouldBeLessThanOrEqual SIDE_MIN + 1
-        }
+        viewer.page.locator(".tw-imports .ds-table").waitFor()
+        viewer.page.locator(".tw-imports").innerText() shouldContain "rail_lib_"
+        // ...and the author-only Render Context is still not theirs (no tab, no rows).
+        assertNoRenderTab(viewer.page, "imports viewer")
         viewer.close()
     }
 
     @Test
-    fun `an author's rail is untouched - Render Context stays and the remembered width still paints first`() {
+    fun `an author's Render Context stays - the Render tab carries it, and the release shows Edit instead`() {
         startTrace()
         val author = seedAndLogin("railau", role = "author")
         val name = "test/rail_auth_" + suffix()
         seedTemplate(author, name)
 
-        // A remembered 400px: the parser-blocking restore writes --te-side-w before the first
-        // paint, and the collapse change must not have touched that path.
-        author.page.addInitScript("window.localStorage.setItem('dp.pane.template-editor-side', '400');")
-        openEditor(author, name)
-
-        val m = probe(author.page)
-        withClue("the author's rail vanished with the reader's empty one: $m") {
-            m.b("railPresent") shouldBe true
-            m.b("renderContext") shouldBe true
-        }
-        withClue("the remembered 400px did not survive the change: $m") {
-            m.d("railW") shouldBeGreaterThanOrEqual 400.0 - 1
-            m.d("railW") shouldBeLessThanOrEqual 400.0 + 1
-        }
+        openWorkspace(author.page, name)
+        // A fresh DRAFT-only template: the draft is the view, and the author gets the Render
+        // tab with the context panel.
+        author.page.locator("#tw-tab-render").waitFor()
+        author.page.locator("#tw-tab-render").click()
+        author.page.locator("#context-rows").waitFor()
+        author.page.locator("#tab-kv-btn").waitFor()
+        author.page.locator("#tab-json-btn").waitFor()
         author.close()
     }
 
     // ------------------------------------------------------------------ the assertion
 
-    /** The empty-rail contract: no rail, no handle, and the source column IS the body. */
-    private fun assertCollapsed(
-        m: Map<String, Any?>,
+    /** The author-only rule, on the workspace: no Render tab, and no context rows anywhere. */
+    private fun assertNoRenderTab(
+        page: Page,
         clue: String,
     ) {
-        withClue("$clue: the empty rail is still rendered: $m") {
-            m.b("railPresent") shouldBe false
+        withClue("$clue: the Render tab is rendered for a reader") {
+            page.locator("#tw-tab-render").count() shouldBe 0
         }
-        withClue("$clue: the splitter handle outlived its rail: $m") {
-            m.b("handlePresent") shouldBe false
+        withClue("$clue: the Render pane is rendered for a reader") {
+            page.locator("#tw-pane-render").count() shouldBe 0
         }
-        withClue("$clue: the source does not start at the body's left edge: $m") {
-            (m.d("sourceX") - m.d("bodyX")) shouldBeLessThanOrEqual 1.0
-            (m.d("bodyX") - m.d("sourceX")) shouldBeLessThanOrEqual 1.0
-        }
-        withClue("$clue: the source does not span the body: $m") {
-            (m.d("bodyW") - m.d("sourceW")) shouldBeLessThanOrEqual 1.0
-            (m.d("sourceW") - m.d("bodyW")) shouldBeLessThanOrEqual 1.0
+        withClue("$clue: the context rows are rendered for a reader") {
+            page.locator("#context-rows").count() shouldBe 0
         }
     }
+
+    private fun mode(page: Page): String =
+        if ((page.locator("#theme-link").first().getAttribute("href") ?: "").contains("/light.css")) "light" else "dark"
 
     // ------------------------------------------------------------------ fixtures and drivers
 
@@ -198,14 +181,24 @@ class TemplateEditorRailBrowserTest : BrowserSuite() {
         return session
     }
 
-    private fun openEditor(
-        session: Session,
+    private fun openWorkspace(
+        page: Page,
         name: String,
     ) {
-        session.page.navigate("$baseUrl/templates/editor?name=" + java.net.URLEncoder.encode(name, "UTF-8"))
-        // The source pane renders whether or not the rail does — the stable landmark to wait on.
-        session.page.waitForSelector(".te-source")
-        session.page.waitForLoadState(com.microsoft.playwright.options.LoadState.NETWORKIDLE)
+        // The name's segments are path segments (the workspace's capture variable) — a
+        // percent-encoded slash is refused 400 below routing (§9.6).
+        page.navigate("$baseUrl/templates/$name")
+        try {
+            // The source pane renders whether or not the Render tab does — the stable landmark.
+            page.waitForSelector(".tw-root")
+        } catch (e: com.microsoft.playwright.PlaywrightException) {
+            // Name the page the browser actually has: the honest 404 of a lens-hidden or
+            // failed seed names itself, and a vacuous timeout does not. (e is the timeout;
+            // the page's own body is the useful diagnostic.)
+            val body = page.evaluate("() => document.body ? document.body.innerText.slice(0, 300) : '(no body)'")
+            error("openWorkspace($name) landed on ${page.url()} - $body - ${e.message?.lineSequence()?.firstOrNull()}")
+        }
+        page.waitForLoadState(com.microsoft.playwright.options.LoadState.NETWORKIDLE)
     }
 
     /**
@@ -264,37 +257,6 @@ class TemplateEditorRailBrowserTest : BrowserSuite() {
             mapOf("name" to name, "ifMatch" to ifMatch),
         ) as Int
 
-    /** The facts, read in ONE evaluate so they describe the same frame. */
-    private val probeJs =
-        """
-        () => {
-          const body = document.querySelector('.te-body');
-          if (!body) return null;
-          const rail = document.querySelector('.te-rail');
-          const handle = document.querySelector('[data-splitter="template-editor-side"]');
-          const source = document.querySelector('.te-source');
-          const b = body.getBoundingClientRect();
-          const s = source ? source.getBoundingClientRect() : null;
-          const r = rail ? rail.getBoundingClientRect() : null;
-          return {
-            railPresent: !!rail,
-            handlePresent: !!handle,
-            bodyX: b.x, bodyW: b.width,
-            sourceX: s ? s.x : -1, sourceW: s ? s.width : -1,
-            railW: r ? r.width : -1,
-            renderContext: !!document.querySelector('#context-rows'),
-            importsHead: !!Array.from(document.querySelectorAll('.te-rail h2')).find(h => h.textContent === 'Imports'),
-          };
-        }
-        """.trimIndent()
-
-    @Suppress("UNCHECKED_CAST")
-    private fun probe(page: Page): Map<String, Any?> = page.evaluate(probeJs) as Map<String, Any?>
-
-    private fun Map<String, Any?>.d(k: String) = (this[k] as Number).toDouble()
-
-    private fun Map<String, Any?>.b(k: String) = this[k] as Boolean
-
     /** [BrowserSuite.ensureTheme], for a session's own page (the toggle flips light ↔ dark). */
     private fun ensureThemeOn(
         page: Page,
@@ -318,10 +280,4 @@ class TemplateEditorRailBrowserTest : BrowserSuite() {
     }
 
     private fun suffix(): String = generatedPassword("s").take(8).lowercase()
-
-    private companion object {
-        /** `template-editor.css`'s default (the `--app-detail-width` token) and its clamp floor. */
-        const val DEFAULT_W = 320.0
-        const val SIDE_MIN = 220.0
-    }
 }

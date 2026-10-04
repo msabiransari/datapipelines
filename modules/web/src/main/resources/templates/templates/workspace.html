@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{layouts/default :: page(~{::content})}">
+<th:block th:fragment="content">
+
+  <!--/* #398 — the global sidebar's current-leaf hook: which template this page shows, by id
+          AND full path (they are the same thing — the id IS the name), so the rail's Templates
+          tree (nav-tree.js) can mark the leaf and reveal its folders one level at a time — on a
+          full-document entry, a boosted arrival and a history restore alike (it rides inside
+          #app-main). The record is the one this page already resolved through the caller's
+          lens; nothing here is new information. */-->
+  <span hidden data-nav-current="templates"
+        th:attr="data-nav-current-id=${templateName},data-nav-current-path=${navCurrentPath}"></span>
+
+  <!--/* #398 — no stylesheet link here: §3.0 (ui-screens, normative) puts every sheet in the
+          layout head — template-editor.css and template-workspace.css included — because this
+          page is a boosted arrival and a link inside #app-main paints a frame late. */-->
+
+  <!--/* D4: the shared, dependency-free SQL tokenizer (032) — consumed, not modified. It
+          highlights the read-only preview output on the Render tab; the editable textarea
+          stays plain (D5). preview.js wraps the pass the preview call uses. */-->
+  <script th:src="@{/js/pipeline-editor/sql-highlight.js}"></script>
+  <script th:src="@{/js/template-editor/preview.js}"></script>
+  <!-- 097 §D: the render-context rail and the preview call live in a FILE — outside the CSP's
+       inline ban, inside the CSRF audit's sweep, inside `node --test`. csrf.js is the one
+       reader of the double-submit cookie. -->
+  <script th:src="@{/js/csrf.js}"></script>
+  <script th:src="@{/js/template-editor/lifecycle.js}"></script>
+  <!-- #398: the workspace's tab state — a pure module (node-tested) plus its DOM glue; the
+       tab strip is in-page navigation only. -->
+  <script th:src="@{/js/template-editor/workspace.js}" defer></script>
+  <!-- 7d: the transform face's two behaviours — the "unsaved changes" marker (Release
+       publishes the last SAVED draft, never what is typed) and scrolling a fresh result into
+       view. Delegated, so a face swapped in by a save is covered without re-arming. -->
+  <script th:src="@{/js/template-transform-face.js}" defer></script>
+
+  <!--/* 110 §C — the phone band. Desktop-first BY DECISION: below 768px the band renders above
+          the workspace (which stays on the page, rendered and scrollable underneath) and says
+          so, with the template's name and the viewed-version chip — the same viewedLabel the
+          header reads. Hidden at every width by app.css except < 768px. */-->
+  <div class="ds-empty app-wide-screen-note">
+    <p class="ds-empty-title">Open on a wider screen to work on this template</p>
+    <p class="ds-empty-description">
+      <span th:text="${template?.displayName ?: templateName}">Template Name</span>
+      <span class="ds-badge" th:classappend="${viewedIsDraft} ? 'ds-badge-warning' : 'ds-badge-default'"
+            th:text="${viewedLabel}">v1 · released · current</span>
+      — the template workspace needs a width this screen does not have.
+    </p>
+    <p class="ds-empty-actions">
+      <a class="ds-button ds-button-secondary" th:href="@{/templates(q=${templateName})}">Open in Templates</a>
+    </p>
+  </div>
+
+  <!--/* #398 — the choose-a-version state (workspace spec §3.1, resolution rules 3–4): no body
+          resolved for this caller, so there is nothing to render a body OF. The admitted
+          history is the affordance — each link selects its exact version; the empty state says
+          so when nothing is admitted. No Edit, no Save, no render affordance until a body is
+          selected. */-->
+  <div class="ds-empty app-center u-modal-tall" th:if="${!hasSelectedBody}">
+    <p class="ds-empty-title" th:text="${#lists.isEmpty(versions)} ? 'No viewable version' : 'Choose a version'">Choose a version</p>
+    <p class="ds-empty-description">
+      <span class="u-mono" th:text="${templateName}">acme/finance/monthly_revenue</span>
+      <span th:if="${#lists.isEmpty(versions)}">has no version your role can view yet — ask an author to release one.</span>
+      <span th:unless="${#lists.isEmpty(versions)}">has versions — pick one to view its source, render and history.</span>
+    </p>
+    <p class="ds-empty-actions">
+      <a th:each="v : ${versions}" class="ds-button ds-button-secondary" hx-boost="false"
+         th:href="@{${'/templates/' + templateName}(version=${v.version})}"
+         th:text="'v' + ${v.version} + ' — ' + ${v.status.name().toLowerCase()} + (${v.isCurrent} ? ' · current' : '')">v1 — released · current</a>
+    </p>
+  </div>
+
+  <div class="tw-root" th:if="${hasSelectedBody}"
+       th:attr="data-template-id=${templateName}, data-viewed-version=${viewedVersion}, data-can-render=${canAuthor == true and isTransform != true}">
+    <!-- Header: back to the catalog, crumb (folder muted + leaf bold), the viewed-version
+         chip, the version selector, the read-only note, and the header verbs (102 §B.1's
+         one-destructive rule) — at most one of Purge template / Discard current / Purge
+         draft, beside Release when a draft exists. -->
+    <div class="tw-topbar">
+      <a th:href="@{/templates}" class="tw-back"><svg class="ds-icon ds-icon-xs" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#arrow-left"></use></svg> Templates</a>
+      <!-- The crumb's split is the controller's: SpEL cannot call the Kotlin stdlib's
+           substring helpers, so the page reads the two parts off the model (crumbPath). -->
+      <div class="tw-crumb">
+        <span class="tw-crumb-path" th:text="${crumbPath}" th:title="${templateName}">acme/finance/</span>
+        <span class="tw-crumb-name" th:text="${template?.displayName ?: crumbName}" th:title="${templateName}">monthly</span>
+        <!-- The chip names the VIEWED version and its own status — never the working version,
+             never "latest release" (versioning §3.4: the current pointer is sticky and
+             event-driven, and this page displays the row it resolved). -->
+        <span class="tw-vchip" th:classappend="${viewedIsDraft} ? 'tw-vchip-draft'"
+              th:text="${viewedLabel}">v1 · released · current</span>
+        <!-- 7e (§8.2): the displayed version's needs-review marker — computed on read by the
+             projection's own query (a cited fact is retired); marked, never blocked. -->
+        <span th:if="${template?.needsReview == true}" class="ds-badge ds-badge-warning" data-needs-review
+              title="A fact this version cites was retired or superseded — re-verify before you lean on it.">needs review</span>
+      </div>
+      <!-- #398 — the version selector: READ navigation over the admitted history (R5: a
+           selected version is never made the write target — a full navigation resolves the
+           version server-side, and a draft is an explicit choice, visibly a draft). The row's
+           href is the canonical deep link with the CURRENT tab carried along (the tab module
+           re-stamps it after an in-page switch); there is no active run to protect, so the
+           navigation is a full document — the same resolution the workspace's own default
+           rule runs. -->
+      <nav class="tw-versions" aria-label="View another version">
+        <a th:each="v : ${versions}" class="ds-button ds-button-ghost ds-button-sm tw-version-link" hx-boost="false"
+           th:href="@{${'/templates/' + templateName}(version=${v.version}, tab=${activeTab})}"
+           th:attr="aria-current=${v.isViewed} ? 'true' : null,
+                    data-version=${v.version},
+                    title=${'v' + v.version + ' — ' + v.status.name().toLowerCase() + (v.isCurrent ? ' · current' : '')}">
+          <span th:text="'v' + ${v.version}">v1</span>
+          <span th:if="${v.isCurrent}" class="u-muted">· current</span>
+        </a>
+      </nav>
+      <!-- 114 §A — a viewer's workspace is READ-ONLY: it loads (template.read), the mutating
+           verbs are absent, and the line below says so once, quietly. No toast: nothing failed. -->
+      <div th:if="${canAuthor != true}" class="app-note" data-role-note="read-only">
+        <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#info"></use></svg>
+        <span>Read-only — you are a viewer in <span th:text="${activeWorkspace}">workspace</span>.</span>
+      </div>
+      <div class="tw-topbar-actions">
+        <!-- versioning §6/§7, since 102 through the §4.3d dialogs (never a native confirm):
+             Release opens the release dialog; the one destructive (102 §B.1) is the entity
+             purge in the {D} shape, else Discard of the resolved release, else Purge draft.
+             The POST answers HX-Redirect and the page reloads onto the Versions tab with a
+             flash. The name travels in the query (§9.6). -->
+        <button th:if="${hasDraft == true and canAuthor == true}" data-verb="template-release" class="ds-button ds-button-primary ds-button-sm"
+                th:attr="hx-get=@{/partials/templates/lifecycle/release(name=${templateName}, from='editor')},
+                         hx-target='#tx-dialog', hx-swap='innerHTML'"
+                th:text="'Release v' + ${draftVersion} + '…'">Release v2…</button>
+        <button th:if="${canDelete == true and canAuthor == true}" data-verb="template-purge-entity" class="ds-button ds-button-secondary ds-button-sm"
+                th:attr="hx-get=@{/partials/templates/lifecycle/purge-entity(name=${templateName}, from='editor')},
+                         hx-target='#tx-dialog', hx-swap='innerHTML'">
+          Purge template…
+        </button>
+        <button th:if="${canDiscardCurrent == true and canAuthor == true}" data-verb="template-discard" class="ds-button ds-button-secondary ds-button-sm"
+                th:attr="hx-get=@{/partials/templates/lifecycle/discard(name=${templateName}, version=${currentReleaseVersion}, from='editor')},
+                         hx-target='#tx-dialog', hx-swap='innerHTML'"
+                th:text="'Discard v' + ${currentReleaseVersion} + '…'">Discard v1…</button>
+        <button th:if="${canPurgeDraftInHeader == true and canAuthor == true}" data-verb="template-purge" class="ds-button ds-button-secondary ds-button-sm"
+                th:attr="hx-get=@{/partials/templates/lifecycle/purge(name=${templateName}, version=${draftVersion}, from='editor')},
+                         hx-target='#tx-dialog', hx-swap='innerHTML'"
+                th:text="'Purge v' + ${draftVersion} + '…'">Purge v2…</button>
+      </div>
+    </div>
+
+    <!-- #398 — the workspace's six tabs (the tab floor, the pipelines twin's shape): Source is
+         the default; Overview, Render (authors, non-transform), Runs, Used by and Versions are
+         the template's reading surfaces. A tab change is NAVIGATION ONLY — it swaps no state
+         and refetches nothing but the Runs tab's one lazy load. The tab set is closed
+         server-side (TemplateWorkspaceTab); Render resolves to Source for a reader and for a
+         transform. The panels hide through the `hidden` ATTRIBUTE (never an inline style). -->
+    <nav class="tw-tabs" role="tablist" aria-label="Template workspace tabs">
+      <button type="button" class="tw-tab" role="tab" id="tw-tab-source" aria-controls="tw-pane-source"
+              data-tw-tab="source" th:attr="aria-selected=${activeTab == 'source'} ? 'true' : 'false'">Source</button>
+      <button type="button" class="tw-tab" role="tab" id="tw-tab-overview" aria-controls="tw-pane-overview"
+              data-tw-tab="overview" th:attr="aria-selected=${activeTab == 'overview'} ? 'true' : 'false'">Overview</button>
+      <button th:if="${canAuthor == true and isTransform != true}" type="button" class="tw-tab" role="tab"
+              id="tw-tab-render" aria-controls="tw-pane-render"
+              data-tw-tab="render" th:attr="aria-selected=${activeTab == 'render'} ? 'true' : 'false'">Render</button>
+      <button type="button" class="tw-tab" role="tab" id="tw-tab-runs" aria-controls="tw-pane-runs"
+              data-tw-tab="runs"
+              th:attr="aria-selected=${activeTab == 'runs'} ? 'true' : 'false',
+                       hx-get=@{/partials/templates/runs(name=${templateName})},
+                       hx-trigger=${activeTab == 'runs'} ? 'load' : 'click once'"
+              hx-target="#tw-runs-body" hx-swap="innerHTML">Runs</button>
+      <button type="button" class="tw-tab" role="tab" id="tw-tab-used" aria-controls="tw-pane-used"
+              data-tw-tab="used-by" th:attr="aria-selected=${activeTab == 'used-by'} ? 'true' : 'false'">Used by</button>
+      <button type="button" class="tw-tab" role="tab" id="tw-tab-versions" aria-controls="tw-pane-versions"
+              data-tw-tab="versions" th:attr="aria-selected=${activeTab == 'versions'} ? 'true' : 'false'">Versions</button>
+    </nav>
+
+    <div class="tw-panes">
+      <!-- SOURCE — the viewed version's body: the source column (or the transform face), plus
+           the imports table. The column fragments are the workspace's one definition (the same
+           /partials/templates/editor/source and /partials/templates/transform-face serve);
+           the fragments carry their own read-only/editable rule (R5). -->
+      <div class="tw-pane tw-pane-source" id="tw-pane-source" role="tabpanel" aria-labelledby="tw-tab-source"
+           th:attr="hidden=${activeTab != 'source'}">
+        <div class="tw-source-row" th:with="paneView=${isTransform == true} ? ~{partials/template-transform-face :: face} : ~{partials/template-source :: source}">
+          <div th:replace="${paneView}"></div>
+          <th:block th:if="${template?.imports != null and !template.imports.isEmpty()}">
+            <section class="ds-card tw-imports">
+              <div class="app-card-h">
+                <h3>Imports</h3>
+                <span class="app-card-note" th:text="${#lists.size(template.imports)} + (${#lists.size(template.imports)} == 1 ? ' library' : ' libraries')">2 libraries</span>
+              </div>
+              <div class="app-card-b">
+                <!-- 282 (#282): a PAGE-FLOW data-table frame (ui-screens §3.7). -->
+                <div class="dt-frame dt-fit">
+                  <div class="dt-viewport" tabindex="-1">
+                    <table class="ds-table">
+                      <thead>
+                        <tr>
+                          <th>Template ID</th>
+                          <th class="num">Version</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr th:each="imp : ${template.imports}">
+                          <td th:text="${imp.id}">import_id</td>
+                          <td class="num" th:text="${imp.version}">1</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </section>
+          </th:block>
+        </div>
+      </div>
+
+      <!-- OVERVIEW — the viewed version's facts: the chips, the description, the References
+           reading (a derived scan, never a declared contract) and the created provenance. The
+           per-version "N uses" phrases live on the version rows themselves (Versions tab), as
+           ever lens-true (#340). -->
+      <div class="tw-pane tw-pane-overview" id="tw-pane-overview" role="tabpanel" aria-labelledby="tw-tab-overview"
+           th:attr="hidden=${activeTab != 'overview'}">
+        <div class="tw-doc">
+          <section class="ds-card">
+            <div class="app-card-h">
+              <h3>Overview</h3>
+              <span class="app-card-note" th:text="${viewedLabel}">v1 · released · current</span>
+            </div>
+            <div class="app-card-b">
+              <div class="app-chips">
+                <span class="ds-badge ds-badge-default app-chip-mono" th:text="${'v' + viewedVersion}">v1</span>
+                <span th:if="${viewedIsDraft}" class="ds-badge ds-badge-warning">draft · pending release</span>
+                <span th:if="${hasDraft and !viewedIsDraft}" class="ds-badge ds-badge-warning"
+                      title="A draft exists; release it to publish.">draft v<span th:text="${draftVersion}"></span> pending</span>
+                <span class="ds-badge ds-badge-default" th:text="${template?.type?.wire ?: '—'}">sql</span>
+                <span class="ds-badge ds-badge-default" th:if="${template?.dialect != null}"
+                      th:text="${template.dialect.wire}">POSTGRES</span>
+                <span class="ds-badge ds-badge-default app-chip-mono" th:text="${template?.engine}">freemarker</span>
+              </div>
+
+              <p class="tw-measure u-pre-line" th:if="${!#strings.isEmpty(template?.description)}"
+                 th:text="${template.description}">What this template expects and produces.</p>
+
+              <dl class="tw-kv">
+                <!-- A template declares NO parameter schema anywhere in this system (only a
+                     pipeline does), so this is what the body REFERENCES, said as that.
+                     7d: a transform DECLARES its inputs (its contract), so it shows the
+                     declared mode and inputs; sql/html keep the derived References reading. -->
+                <th:block th:if="${template?.contract != null}">
+                  <dt>Mode</dt>
+                  <dd class="u-mono" th:text="${template.contract.mode.wire}">row</dd>
+                  <dt>Inputs</dt>
+                  <dd>
+                    <th:block th:each="in, i : ${template.contract.inputs.keySet()}"><span class="u-mono" th:text="${in}">orders</span><span
+                         th:if="${!i.last}" class="u-muted"> · </span></th:block>
+                  </dd>
+                </th:block>
+                <th:block th:if="${template?.contract == null}">
+                  <dt>References</dt>
+                  <dd>
+                    <th:block th:if="${#lists.isEmpty(interpolations)}">—</th:block>
+                    <th:block th:each="v, i : ${interpolations}"><span class="u-mono" th:text="${v}">start_date</span><span
+                         th:if="${!i.last}" class="u-muted"> · </span></th:block>
+                  </dd>
+                </th:block>
+                <dt>Created</dt>
+                <dd th:text="${#temporals.format(template.createdAt, 'yyyy-MM-dd HH:mm')}">2026-09-02 10:00</dd>
+                <dt>Current release</dt>
+                <dd>
+                  <span th:if="${currentVersion != null}" th:text="'v' + ${currentVersion}">v1</span>
+                  <span th:if="${currentVersion == null}">— no current release</span>
+                  <span th:if="${hasDraft}" class="u-muted"> · draft v<span th:text="${draftVersion}"></span> pending release</span>
+                </dd>
+              </dl>
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <!-- RENDER (authors, non-transform) — the Render Context panel (Key/Value + JSON tabs)
+           and the preview. The preview POST is MUTATE (`template.render`) and the context is
+           an author's surface (143): the tab is not drawn for a reader, and the server's tab
+           admission resolves render→source for one before any render state is read. The
+           preview renders the STORED version the page is viewing. -->
+      <div class="tw-pane tw-pane-render" id="tw-pane-render" role="tabpanel" aria-labelledby="tw-tab-render"
+           th:if="${canAuthor == true and isTransform != true}"
+           th:attr="hidden=${activeTab != 'render'}">
+        <div class="tw-doc">
+          <section class="ds-card">
+            <div class="app-card-h">
+              <h3>Render Context</h3>
+              <div class="u-flex u-gap-xs">
+                <button class="ds-button ds-button-ghost ds-button-sm u-semibold app-tab-active" data-action="context-tab" data-tab="kv" id="tab-kv-btn">Key/Value</button>
+                <button class="ds-button ds-button-ghost ds-button-sm app-tab-idle" data-action="context-tab" data-tab="json" id="tab-json-btn">JSON</button>
+              </div>
+            </div>
+            <div class="app-card-b">
+              <div id="context-kv" class="u-mb-sm">
+                <!-- The row markup addContextRow() clones — styled once. -->
+                <div id="context-rows" class="te-context-rows">
+                  <div class="context-row">
+                    <input type="text" placeholder="key">
+                    <input type="text" placeholder="value">
+                    <button type="button" class="ds-button ds-button-ghost ds-button-sm" data-action="context-row-remove"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#x"></use></svg></button>
+                  </div>
+                </div>
+                <button type="button" class="ds-button ds-button-ghost ds-button-sm" data-action="context-row-add"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#plus"></use></svg> Add Row</button>
+              </div>
+              <div id="context-json" class="u-hidden">
+                <textarea id="contextJsonTextarea" class="ds-textarea" placeholder='{"key1": "value1", "key2": 42}'>{ }</textarea>
+              </div>
+              <!-- The preview: the context above against the STORED version the page is
+                   viewing; the body travels for honesty (the server renders the stored
+                   version either way). Output below, highlighted by the shared tokenizer. -->
+              <div class="te-preview">
+                <div class="te-panel-head te-panel-head-flush">
+                  <div class="u-row">
+                    <h2>Preview Output</h2>
+                    <button type="button" class="ds-button ds-button-primary" data-action="template-preview" id="previewBtn">Preview</button>
+                    <span id="previewSpinner" class="u-hidden u-secondary u-text-sm">Rendering...</span>
+                  </div>
+                </div>
+                <div id="previewPane" class="te-preview-pane"></div>
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <!-- RUNS — the derived fragment (the recent executions of the pipelines that pin this
+           template), lazy-loaded on the tab's first open. The derivation sentence lives on
+           the fragment; the visibility rules are the execution-history screen's. -->
+      <div class="tw-pane tw-pane-runs" id="tw-pane-runs" role="tabpanel" aria-labelledby="tw-tab-runs"
+           th:attr="hidden=${activeTab != 'runs'}">
+        <div class="tw-doc">
+          <section class="ds-card">
+            <div class="app-card-h">
+              <h3>Runs</h3>
+              <span class="app-card-note">of the pipelines pinning this template</span>
+            </div>
+            <div class="app-card-b" id="tw-runs-body">
+              <p class="ds-empty-description">Open the tab to load the recent runs.</p>
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <!-- USED BY — every pin of any version, from any stored aggregate, both halves of the
+           lens (#320's three arms). One row per PIN; the header counts objects per kind. -->
+      <div class="tw-pane tw-pane-used" id="tw-pane-used" role="tabpanel" aria-labelledby="tw-tab-used"
+           th:attr="hidden=${activeTab != 'used-by'}">
+        <div class="tw-doc">
+          <section class="ds-card">
+            <div class="app-card-h">
+              <h3>Used by</h3>
+              <span class="app-card-note" th:text="${templateWorkspace.usedBy.summary}">2 pipelines</span>
+            </div>
+            <div class="tw-scroll">
+              <div th:replace="~{partials/template-used-by :: usedBy}"></div>
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <!-- VERSIONS — the admitted history with provenance and per-version verbs (the house
+           table; the dialogs open into #tx-dialog with from=editor, so a success reloads the
+           workspace onto this tab with a flash). A row's Open is the canonical with the row's
+           version explicit. No Switch — templates are pinned by exact version. -->
+      <div class="tw-pane tw-pane-versions" id="tw-pane-versions" role="tabpanel" aria-labelledby="tw-tab-versions"
+           th:attr="hidden=${activeTab != 'versions'}">
+        <div class="tw-doc">
+          <section class="ds-card">
+            <div class="app-card-h">
+              <h3>Versions</h3>
+              <span class="app-card-note" th:text="${#lists.size(versions)} + (${#lists.size(versions)} == 1 ? ' version' : ' versions')">3 versions</span>
+            </div>
+            <div class="app-card-b">
+              <div th:replace="~{partials/template-versions :: versions}"></div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 102: the lifecycle dialogs' single per-screen container (§4.3d). The header verbs and
+       the Versions tab's per-row menus open dialogs served into it; their POSTs answer
+       HX-Redirect onto this workspace (or the catalog) with a flash. -->
+  <div id="tx-dialog"></div>
+  <script th:src="@{/js/lifecycle-dialog.js}" defer></script>
+</th:block>
+</html>

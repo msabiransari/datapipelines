@@ -105,20 +105,17 @@ class TemplateEditorVersionRenderTest {
     }
 
     @Test
-    fun `the editor page paints the SAME fragment the version swap targets`() {
-        val html = render("templates/editor") { editorPage() }
+    fun `the workspace page paints the SAME column the fragments define - one id, one definition`() {
+        val html = render("templates/workspace") { workspacePage() }
 
-        // §5's idiom: one definition, so the first paint and every later swap agree.
-        html shouldContain "id=\"template-source\""
-        html shouldContain "hx-target=\"#template-source\""
-        html shouldContain "hx-swap=\"outerHTML\""
-        // The editor's own fragment swap, pinned by its URL — not by "the page's FIRST
-        // hx-get": since 161 the layout's search control precedes this one in DOM order,
-        // and a position-sensitive first-match would pin the shell's route, not the
-        // editor's (that is exactly how this test went red on an unrelated surface).
-        Regex("hx-get=\"[^\"]*/partials/templates/editor/source").containsMatchIn(html) shouldBe true
-        // The dead 041 handler is gone — the select no longer calls a function that
-        // blanked the query string and reloaded the same version.
+        // §5's idiom, kept through #398: the page th:replace's the SAME fragment the
+        // /partials/templates/editor/source and /transform-face endpoints return — one
+        // `#template-source` definition, so a paint and any swap cannot disagree. The ONE
+        // in-page swap that targets it is the transform face's Save (pinned by
+        // TransformFaceRenderTest against the fragment); an sql draft carries no save
+        // affordance at all (the body is written through the API), and a version switch is a
+        // full navigation — the server re-resolves everything, which is R5 by construction.
+        Regex("id=\"template-source\"").findAll(html).count() shouldBe 1
         html shouldNotContain "updateVersion"
     }
 
@@ -129,11 +126,11 @@ class TemplateEditorVersionRenderTest {
      * two blocking browser dialogs. Every `<script>` on this page is now a `src` reference.
      */
     @Test
-    fun `the editor page carries no inline script - every script tag is a src reference`() {
+    fun `the workspace page carries no inline script - every script tag is a src reference`() {
         // The page's OWN content fragment, without the layout: the layout keeps one
         // deliberate inline snippet (the rail-collapse flash preventer, which must run before
         // first paint and therefore cannot be a file). This rule is about the screen.
-        val html = COMMENT.replace(engine().process("templates/editor", setOf("content"), context().apply { editorPage() }), "")
+        val html = COMMENT.replace(engine().process("templates/workspace", setOf("content"), context().apply { workspacePage() }), "")
 
         val inline =
             SCRIPT_TAG
@@ -177,7 +174,8 @@ class TemplateEditorVersionRenderTest {
         setVariable("workingVersion", 2)
     }
 
-    private fun WebContext.editorPage() {
+    /** The workspace page's fill: an author on the working draft (the editable view). */
+    private fun WebContext.workspacePage() {
         editable("SELECT working FROM t")
         setVariable("_csrf", mapOf("token" to "t"))
         setVariable("workspaceHeaderFragment", "")
@@ -187,11 +185,53 @@ class TemplateEditorVersionRenderTest {
         setVariable("authenticated", true)
         setVariable("currentPath", "/templates")
         setVariable("scopes", setOf("ADMIN"))
+        setVariable("templateName", NAME)
+        setVariable("navCurrentPath", NAME)
+        setVariable("hasSelectedBody", true)
+        setVariable("viewedVersion", 2)
+        setVariable("viewedLabel", "v2 · draft")
+        setVariable("viewedIsDraft", true)
+        setVariable("viewedIsCurrent", false)
+        setVariable("viewedStatusLabel", "draft")
+        setVariable("currentVersion", null)
+        setVariable("viewedEditable", true)
+        setVariable("canAuthor", true)
+        setVariable("hasDraft", true)
+        setVariable("draftVersion", 2)
+        setVariable("draftHash", "h")
+        setVariable("canDelete", false)
+        setVariable("canDiscardCurrent", false)
+        setVariable("canPurgeDraftInHeader", false)
+        setVariable("releasableVersion", 2)
+        setVariable("currentReleaseVersion", null)
+        setVariable("activeTab", "source")
+        setVariable("interpolations", emptyList<String>())
+        setVariable("isTransform", false)
+        setVariable("templateWorkspace", workspaceResolved())
+        setVariable("usedBy", emptyList<Any>())
+        setVariable("usedByCount", 0)
+        setVariable("usedBySets", emptyList<Any>())
+        setVariable("usedByVisualizations", emptyList<Any>())
+        setVariable("usedBySummary", "nothing")
         setVariable("versions", emptyList<Any>())
-        setVariable("hasDraft", false)
-        setVariable("draftVersion", null)
-        setVariable("draftHash", null)
     }
+
+    private fun workspaceResolved(): TemplateWorkspaceModel.Resolved =
+        TemplateWorkspaceModel.Resolved(
+            name = NAME,
+            selected = TemplateWorkspaceModel.Selected(template("SELECT working FROM t").copy(version = 2), null),
+            draft = null,
+            currentVisible = null,
+            versions = emptyList(),
+            usedBy =
+                TemplateWorkspaceModel.UsedByFacts(
+                    pipelines = emptyList(),
+                    pipelineCount = 0,
+                    sets = emptyList(),
+                    visualizations = emptyList(),
+                    summary = "nothing",
+                ),
+        )
 
     private fun template(body: String) =
         Template(
