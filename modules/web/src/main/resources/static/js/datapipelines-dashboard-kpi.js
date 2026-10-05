@@ -76,12 +76,14 @@
         var bound = bindings || {};
         if (!rows || rows === 0) return Promise.resolve("no-data");
         if (!root) build();
-        var array = bound[stored.value];
+        var array = Object.prototype.hasOwnProperty.call(bound, "value") ? bound.value : bound[stored.value];
         var value = Array.isArray(array) ? array[0] : null;
         var numberElement = root.querySelector(".dp-dashboard-kpi-number");
         numberElement.textContent = format(value, stored.format);
         if (stored.comparison) {
-          var comparisonArray = bound[stored.comparison.value];
+          var comparisonArray = Object.prototype.hasOwnProperty.call(bound, "comparison.value")
+            ? bound["comparison.value"]
+            : bound[stored.comparison.value];
           var comparisonValue = Array.isArray(comparisonArray) ? comparisonArray[0] : null;
           var target = root.querySelector(".dp-dashboard-kpi-comparison-value");
           if (target) target.textContent = format(comparisonValue, stored.format);

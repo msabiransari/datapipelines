@@ -382,13 +382,13 @@ A PIPELINE node executes another pipeline — the version pinned by `pipeline` �
 
 Field rules:
 
-- `pipeline` — required: `{name, version}`. `name` per §3.2's path grammar (a child may live under any folder); `version` a positive integer pinning an existing, immutable pipeline version. Self-reference (`name` = the containing pipeline's own name) is invalid. There is no "latest".
+- `pipeline` — required: `{name, version}`. `name` per §3.2's path grammar (a child may live under any folder); `version` a positive integer pinning an existing live pipeline version (mutable DRAFT during authoring, immutable RELEASED for release/import). Self-reference (`name` = the containing pipeline's own name) is invalid. There is no "latest".
 - `source` and `template` — **forbidden** (mirrors "output forbidden on DML/DDL"): the node runs a pipeline, not SQL.
 - `parameters` — optional map filling the child's inputs: each key names a child **declared parameter** or one of the pinned child's **CALCULATOR `context_key`s** (078 A5-composition — supplying the key skips the child's node exactly as a direct execute-time supply does, §4.10; child calculator keys are optional, never required, so `pipeline_parameter_unmapped` still reads declared parameters only). Each value is either a typed literal obeying the target's §6.3 wire encoding, or the string form `"${ref}"` resolving against the PARENT's Context tiers: a parent declared parameter, a parent CALCULATOR `context_key` (typed by its kind's output), or an org/platform key (org always STRING, platform per §0.2's canonical types) — at the identical type. An ANY-output key on either side skips the type check: the value is typed only by the run. No expressions, no concatenation — a value is a literal or a reference, nothing in between (v1). **No auto-passthrough:** a parent and child calculator key spelled the same are NOT implicitly mapped — the mapping is always an explicit entry here, or the child's node computes its own value.
 - `output` — standard §4.7 block, permitted only when the pinned child has a caller node. Zero-caller child ⇒ `output` must be absent; the node is side-effect-only and downstream `depends_on` gives ordering.
 - `depends_on` — unchanged.
 
-A pipeline whose entity is DISCARDED (every version discarded) still resolves existing pinned references — the pinned version keeps resolving — but blocks NEW references at save time (`pipeline_reference_deleted`, §12.9). This mirrors template deletion exactly. A PIPELINE node may pin only a RELEASED child version (`pipeline_reference_not_released`, 101/D58).
+A pipeline whose entity is DISCARDED (every version discarded) still resolves existing pinned references — the pinned version keeps resolving — but blocks NEW references at save time (`pipeline_reference_deleted`, §12.9). This mirrors template deletion exactly. Draft authoring may pin a DRAFT or RELEASED child version (#459, owner requirement superseding 101/D58). Release and import require a RELEASED child (`pipeline_reference_not_released`); missing or DISCARDED child references remain refused.
 
 ---
 
@@ -775,7 +775,7 @@ A PIPELINE node executes the pipeline pinned by its `pipeline` reference as a **
 - **Result.** The child's caller-node ResultSet streams **directly** to the parent executor (`direct` delivery — nothing is materialized to the result store, and the result is not re-fetchable afterwards; re-running is the recovery path) and lands per the node's `output` block, exactly like a DQL node's ResultSet (§8.1). A zero-caller child produces no stream: the parent waits for child completion, and success/failure is the node's outcome.
 - **Failure.** A failed child fails the PIPELINE node fail-fast with `pipeline.node.child_execution_failed`; the detail carries the child's error code and execution id, so the debugging trail leads to a real execution record.
 - **Cancellation.** Cancelling an ancestor cancels the whole family: the cancellation flag is honored for every execution sharing the family's `root_execution_id` ([Metadata DB §4.6](metadata-db.md#46-pipeline_executions)). A descendant stopped because an ancestor was cancelled — or because an ancestor's `execution-timeout-seconds` expired — ends `ABORTED`, never `FAILED`: it did not fail, and its own deadline did not expire. Only the execution whose own deadline fired reports `pipeline.execution.timeout`.
-- **Guards.** Composition depth is bounded by `datapipelines.pipelines.max-composition-depth` (default 5), checked statically at save time (`composition_too_deep`, §12.9 — pins are immutable, so the reference tree is fully computable) and again at run time (`pipeline.node.composition_depth_exceeded` — a backstop; reaching it means save-time validation was bypassed). **Both count the same unit: pipelines.** A pipeline with no PIPELINE nodes is depth 1 and the bound is inclusive, so the default admits a chain of 5 pipelines (4 parent→child hops) and refuses the 6th — identically at save time and at run time. Cycles are impossible by construction: a pin references an existing, immutable version. Child executions do **not** take per-user concurrency slots — only root executions do; a waiting parent holding a slot while its children queue would deadlock.
+- **Guards.** Composition depth is bounded by `datapipelines.pipelines.max-composition-depth` (default 5), checked statically at save time (`composition_too_deep`, §12.9 — the current pinned bodies define the reference tree) and again at run time (`pipeline.node.composition_depth_exceeded` — a backstop; reaching it means save-time validation was bypassed). **Both count the same unit: pipelines.** A pipeline with no PIPELINE nodes is depth 1 and the bound is inclusive, so the default admits a chain of 5 pipelines (4 parent→child hops) and refuses the 6th — identically at save time and at run time. Mutable draft references can form cycles; the static walk and runtime depth bound terminate them. Release revalidates the current graph. Child executions do **not** take per-user concurrency slots — only root executions do; a waiting parent holding a slot while its children queue would deadlock.
 
 ---
 
@@ -1001,7 +1001,7 @@ is the same hole as an interpolated one, one directive earlier.
 
 ### 12.9 Composition validations
 
-The PIPELINE-node rules (§4.9). Everything here is computed against the pinned — immutable — child bodies, so the verdicts are stable: editing the child later produces a new version and never invalidates a saved reference.
+The PIPELINE-node rules (§4.9). Everything here is computed against the exact pinned child bodies. A draft child is mutable, so its verdict describes its current content and release revalidates the graph. Released child bodies are immutable.
 
 | Code | Check |
 |---|---|
@@ -1009,7 +1009,7 @@ The PIPELINE-node rules (§4.9). Everything here is computed against the pinned 
 | `pipeline.validation.pipeline_version_not_found` | Pinned `version` exists for that name |
 | `pipeline.validation.pipeline_self_reference` | Node does not reference its containing pipeline |
 | `pipeline.validation.pipeline_reference_deleted` | Referenced pipeline's entity is DISCARDED — every version discarded, derived since V19 (blocks NEW references only — discarding never breaks an existing pinned reference, mirroring template deletion) |
-| `pipeline.validation.pipeline_reference_not_released` | A PIPELINE node pins a child version that is not RELEASED — composition references reviewed content only (101, versioning §3.5 D58; a DRAFT child can be purged out from under its parent) |
+| `pipeline.validation.pipeline_reference_not_released` | A PIPELINE node pins a lifecycle-ineligible child: release/import require RELEASED; draft authoring admits DRAFT or RELEASED (#459 supersedes 101/D58 for authoring) |
 | `pipeline.validation.pipeline_node_has_source` | PIPELINE node has no `source` |
 | `pipeline.validation.pipeline_node_has_template` | PIPELINE node has no `template` |
 | `pipeline.validation.pipeline_parameter_unmapped` | Every required-without-default child parameter is supplied |

@@ -7,7 +7,6 @@ import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.ReadLens
-import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.templates.TemplateService
 import co.datapipelines.visualization.ArtifactVersion
 import co.datapipelines.visualization.DashboardBody
@@ -33,13 +32,13 @@ class ResolvedDashboard(
     /** Occurrence name → its pinned visualization version. */
     val visualizations: Map<String, ArtifactVersion<VisualizationBody>>,
     val set: ParameterSetVersion?,
-    /** Source name → its executable release. */
+    /** Source name → its executable version. */
     val sources: Map<String, ResolvedSource>,
     /** `sha256(dashboard_id | version | body_hash | every pinned dependency's kind, name, version and body_hash)`. */
     val configurationId: String,
 )
 
-/** One source's pinned pipeline release, ready to execute. */
+/** One source's pinned pipeline version, ready to execute. */
 class ResolvedSource(
     val record: PipelineRecord,
     val version: Int,
@@ -48,7 +47,7 @@ class ResolvedSource(
 
 /**
  * Resolves a dashboard for the runtime — and REFUSES, the way [co.datapipelines.visualization.DashboardValidator] does
- * at save, when a pin no longer holds: a dependency gone, un-released, or no longer read-only is
+ * at save, when a pin no longer holds: a dependency gone, lifecycle-ineligible, or no longer read-only is
  * `dashboard.runtime.dependency_missing` (409) naming the kind and the source — never a 500 and never a run against a
  * pipeline that could write (D38, checked TRANSITIVELY at every config read and every refresh through
  * [PipelineReleaseFacts], whose `readOnly` is `ReadOnlyPipelineRule` over the release and its child pipelines).
@@ -151,72 +150,30 @@ class DashboardRuntimeResolver(
                 visualizations.values.forEach { add("visualization|${it.record.name}|${it.detail.version}|${it.detail.bodyHash}") }
                 set?.let { add("parameter_set|${it.record.name}|${it.detail.version}|${it.detail.bodyHash}") }
                 sources.values.forEach { source ->
-                    val hash = pipelineRepository.findVersionDetail(workspaceId, source.record.id, source.version)?.bodyHash.orEmpty()
+                    val hash =
+                        pipelineRepository.findVersionDetail(workspaceId, source.record.id, source.version)?.bodyHash
+                            ?: throw missing("source", source.record.name, NOT_FOUND)
                     add("pipeline|${source.record.name}|${source.version}|$hash")
                 }
                 if (served.detail.status == PipelineVersionStatus.DRAFT) {
-                    addAll(draftDependencyHashes(workspaceId, visualizations, set, sources))
+                    addAll(
+                        DraftDashboardDependencies(
+                            pipelineRepository,
+                            pipelines,
+                            templates,
+                            ::missing,
+                        ).hashes(workspaceId, visualizations, set, sources),
+                    )
                 }
             }.sorted()
         val text = (listOf("${served.record.id}|${served.detail.version}|${served.detail.bodyHash}") + dependencies).joinToString("\n")
         return MessageDigest.getInstance("SHA-256").digest(text.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
     }
 
-    /**
-     * Draft pins are mutable. Include nested pipelines, node/selector/transform templates and their imports
-     * so a dependency edit invalidates an already mounted configuration even when its version number is unchanged.
-     * Iterative walks deduplicate exact pins and terminate on cycles; the source's read-only walk owns its depth limit.
-     */
-    private fun draftDependencyHashes(
-        workspaceId: UUID,
-        visualizations: Map<String, ArtifactVersion<VisualizationBody>>,
-        set: ParameterSetVersion?,
-        sources: Map<String, ResolvedSource>,
-    ): List<String> {
-        val hashes = mutableListOf<String>()
-        val templatePins = ArrayDeque<TemplateRef>()
-        visualizations.values.forEach { visualization ->
-            visualization.body.transform?.template?.let { templatePins.addLast(TemplateRef(it.name, it.version)) }
-        }
-        set?.body?.parameters?.forEach { parameter -> parameter.source?.template?.let(templatePins::addLast) }
-        val pipelinePins = ArrayDeque<ResolvedSource>()
-        sources.values.forEach(pipelinePins::addLast)
-        val seenPipelines = mutableSetOf<Pair<UUID, Int>>()
-        while (pipelinePins.isNotEmpty()) {
-            val source = pipelinePins.removeFirst()
-            if (!seenPipelines.add(source.record.id to source.version)) continue
-            val detail = pipelineRepository.findVersionDetail(workspaceId, source.record.id, source.version)
-                ?: throw missing("source", source.record.name, NOT_FOUND)
-            if (!admitted(detail.status, allowDraft = true)) throw missing("source", source.record.name, NOT_RELEASED)
-            hashes += "pipeline|${source.record.name}|${source.version}|${detail.bodyHash}"
-            source.executable.pipeline.nodes.forEach { node ->
-                if (node.template.id.isNotBlank()) templatePins.addLast(node.template)
-                node.pipeline?.let { ref ->
-                    val record = pipelineRepository.findByNameAnyStatus(workspaceId, ref.name)
-                        ?: throw missing("source", ref.name, NOT_FOUND)
-                    val executable = pipelines.findExecutable(workspaceId, ReadLens.Everything, record, ref.version)
-                        ?: throw missing("source", ref.name, NOT_FOUND)
-                    pipelinePins.addLast(ResolvedSource(record, ref.version, executable))
-                }
-            }
-        }
-        val seenTemplates = mutableSetOf<TemplateRef>()
-        while (templatePins.isNotEmpty()) {
-            val ref = templatePins.removeFirst()
-            if (!seenTemplates.add(ref)) continue
-            val template = templates.findVersion(workspaceId, ReadLens.Everything, ref.id, ref.version)
-                ?: throw missing("template", ref.id, NOT_FOUND)
-            if (!admitted(template.status, allowDraft = true)) throw missing("template", ref.id, NOT_RELEASED)
-            val detail = templates.findVersionDetail(workspaceId, ReadLens.Everything, ref.id, ref.version)
-                ?: throw missing("template", ref.id, NOT_FOUND)
-            hashes += "template|${ref.id}|${ref.version}|${detail.bodyHash}"
-            template.imports.forEach { templatePins.addLast(TemplateRef(it.id, it.version)) }
-        }
-        return hashes
-    }
-
-    private fun admitted(status: PipelineVersionStatus, allowDraft: Boolean): Boolean =
-        status == PipelineVersionStatus.RELEASED || (allowDraft && status == PipelineVersionStatus.DRAFT)
+    private fun admitted(
+        status: PipelineVersionStatus,
+        allowDraft: Boolean,
+    ): Boolean = status == PipelineVersionStatus.RELEASED || (allowDraft && status == PipelineVersionStatus.DRAFT)
 
     private fun missing(
         kind: String,

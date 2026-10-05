@@ -12,8 +12,8 @@ import java.util.UUID
  * The namespace (D15): occurrence, group, action and action-control names and the pinned set's parameter
  * names are ONE namespace (`duplicate_name`; an object name outside `[a-z][a-z0-9_]{0,63}` is `duplicate_name`
  * / `grammar`); sources are unique among themselves. Dependencies: a pin that does not exist (or only
- * DISCARDED) is `dependency_not_found`; a source must pin a RELEASED (`source_not_released`) read-only
- * (`source_not_read_only`) pipeline version; a set or visualization pin may be a DRAFT here — the release
+ * DISCARDED) is `dependency_not_found`; a source must pin a live read-only (`source_not_read_only`) pipeline version; draft source,
+ * set and visualization pins are admitted during authoring — the release
  * requires RELEASED (the D61 cascade covers the visualizations).
  *
  * Layout — the spec's "every visualization occurrence, group and action control appears exactly once" read
@@ -106,7 +106,7 @@ class DashboardValidator(
                     failures.add(
                         DashboardErrorCodes.SOURCE_NOT_READ_ONLY,
                         "$path.pipeline",
-                        "Source '${source.name.safeEcho()}' pins a release that writes business data or acts externally (D38).",
+                        "Source '${source.name.safeEcho()}' pins a pipeline that writes business data or acts externally (D38).",
                         mapOf("source" to source.name.safeEcho()),
                     )
                 }

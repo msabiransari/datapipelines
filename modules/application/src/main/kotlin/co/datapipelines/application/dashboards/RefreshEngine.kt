@@ -218,6 +218,7 @@ class RefreshEngine(
                     spec.parameters,
                     collector,
                     slot,
+                    allowDraftDependencies = job.allowDraftDependencies,
                 )
             val outcome =
                 try {

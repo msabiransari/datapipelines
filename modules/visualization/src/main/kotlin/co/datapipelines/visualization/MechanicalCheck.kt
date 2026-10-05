@@ -23,8 +23,7 @@ import java.util.UUID
  *    browser saw anything (a headless render check is a later lane).
  *
  * It never runs a live source pipeline, never queries a datasource and never executes agent code. A DRAFT
- * transform pin is valid HERE (this is the authoring path); the production runtime keeps its RELEASED-only
- * rule. The report is the `mechanical_json` stored on the run and re-run at release — failures carry the
+ * transform pin is valid HERE (this is the authoring path); published dashboard runtime requires RELEASED pins; draft preview admits live draft pins. The report is the `mechanical_json` stored on the run and re-run at release — failures carry the
  * catalogued code and the path, and `ok` is true only when every step found nothing.
  */
 class VisualizationMechanicalCheck(

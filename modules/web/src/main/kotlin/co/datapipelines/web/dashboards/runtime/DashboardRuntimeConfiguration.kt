@@ -145,7 +145,8 @@ class DashboardRuntimeConfiguration {
     fun dashboardSourceStarter(
         runner: RecordingExecutionRunner,
         readOnly: ReadOnlyPipelineRule,
-    ): SourceStarter = RecordingSourceStarter(runner, readOnly)
+        pipelines: PipelineRepository,
+    ): SourceStarter = RecordingSourceStarter(runner, readOnly, pipelines)
 
     @Bean
     fun dashboardTransformer(

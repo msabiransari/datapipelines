@@ -51,7 +51,7 @@ import java.util.concurrent.TimeUnit
  * | a viewer reads the same draft (D50: every reader an executor) | `a viewer` |
  * | the promoter's lens refuses the draft — the family 404, page and route | `a promoter` |
  * | a DISCARDED version is the family 404 (route); a board with no live version is absent entirely (page 404) | `a discarded version` |
- * | R1: a draft pinning a DRAFT visualization is `dependency_missing`/`not_released` naming the pin, with the hint | `a draft pinning` |
+ * | #459: a draft pinning a live DRAFT visualization resolves without release | `a draft pinning` |
  * | R2: an edit between two calls is `configuration_stale`, no new machinery | `a draft edited between two calls` |
  * | a `dashboard` key never names a version (the version routes are the session page's) | `a dashboard_viewer key` |
  * | `version` is a bounded positive integer | `a malformed version` |
@@ -285,25 +285,52 @@ class DashboardDraftPreviewE2eTest {
         page.statusCode shouldBe 404
     }
 
-    // ------------------------------------------------------------------------------------------ 6 the pin rule (R1)
+    // ------------------------------------------------------------------------------------------ 6 draft dependency admission (#459)
 
     @Test
     @Order(8)
-    fun `a draft pinning a DRAFT visualization is dependency_missing naming the pin, with the release hint`() {
+    fun `a draft pinning a DRAFT visualization resolves without a release`() {
         val config = get("/api/v1/dashboards/$DRAFT_PIN_BOARD/runtime/config?version=1", ADMIN)
         withClue(config.asString().take(EXCERPT)) {
-            config.statusCode shouldBe 409
-            config.jsonPath().getString("error.code") shouldBe "dashboard.runtime.dependency_missing"
-            config.jsonPath().getString("error.details.dependency") shouldBe "visualization"
-            config.jsonPath().getString("error.details.name") shouldBe "v1"
-            config.jsonPath().getString("error.details.reason") shouldBe "not_released"
+            config.statusCode shouldBe 200
+            config.jsonPath().getString("data.dashboard.status") shouldBe "DRAFT"
+            config.jsonPath().getString("data.configuration_id").length shouldBe 64
         }
 
         val page = get("/dashboards/$DRAFT_PIN_BOARD/preview?version=1", ADMIN)
         withClue(page.asString().take(EXCERPT)) {
             page.statusCode shouldBe 200
-            page.body().asString() shouldContain "dashboard.runtime.dependency_missing"
-            page.body().asString() shouldContain "release it first"
+            page.body().asString() shouldNotContain "dashboard.runtime.dependency_missing"
+            page.body().asString() shouldContain "data-dp-dashboard-version=\"1\""
+        }
+    }
+
+    @Test
+    @Order(8)
+    fun `a published dashboard still refuses a draft dependency and release never publishes it implicitly`() {
+        val hash = get("/api/v1/dashboards/$DRAFT_PIN_BOARD", ADMIN).jsonPath().getString("data.body_hash")
+        val release =
+            given()
+                .port(port)
+                .asSession(ADMIN)
+                .header("If-Match", hash)
+                .post("/api/v1/dashboards/$DRAFT_PIN_BOARD/release")
+        release.statusCode shouldBe 409
+        release.jsonPath().getString("error.code") shouldBe "dashboard.release.dependency_not_released"
+        sql(
+            "UPDATE dashboard_versions SET status = 'RELEASED', released_at = NOW(), released_by = '$ADMIN_ID' WHERE dashboard_id = '$DRAFT_PIN_BOARD'",
+        )
+        sql("UPDATE dashboards SET current_version = 1 WHERE id = '$DRAFT_PIN_BOARD'")
+        try {
+            val config = get("/api/v1/dashboards/$DRAFT_PIN_BOARD/runtime/config", ADMIN)
+            config.statusCode shouldBe 409
+            config.jsonPath().getString("error.code") shouldBe "dashboard.runtime.dependency_missing"
+            config.jsonPath().getString("error.details.reason") shouldBe "not_released"
+        } finally {
+            sql(
+                "UPDATE dashboard_versions SET status = 'DRAFT', released_at = NULL, released_by = NULL WHERE dashboard_id = '$DRAFT_PIN_BOARD'",
+            )
+            sql("UPDATE dashboards SET current_version = NULL WHERE id = '$DRAFT_PIN_BOARD'")
         }
     }
 
@@ -613,7 +640,7 @@ class DashboardDraftPreviewE2eTest {
                 "released_at, released_by, created_by) " +
                 "VALUES ('$releasedId', 1, '$releasedBody'::jsonb, 'RELEASED', 'seeded-$releasedId', NOW(), '$ADMIN_ID', '$ADMIN_ID')",
         )
-        // DRAFT: the pin R1 refuses — a draft pinning it is the dependency_missing refusal.
+        // DRAFT: admitted during explicit draft preview (#459).
         val draftId = uuid()
         sql(
             "INSERT INTO visualizations (id, workspace_id, name, display_name, description, current_version, created_by) " +
@@ -636,7 +663,7 @@ class DashboardDraftPreviewE2eTest {
                 "SELECT dashboard_id, 2, body_json, 'DRAFT', 'seeded-draft-2', '$ADMIN_ID' FROM dashboard_versions " +
                 "WHERE dashboard_id = '$RELEASED_BOARD' AND version = 1",
         )
-        // The R1 refusal: a DRAFT board pinning the DRAFT visualization.
+        // The draft dependency case: a DRAFT board pinning the DRAFT visualization.
         seedBoard(DRAFT_PIN_BOARD, "dpprev/boards/draft_pin_board", VIZ_DRAFT, status = "DRAFT", currentVersion = null)
         // The discarded case: a DRAFT version flipped to DISCARDED in its own test.
         seedBoard(DISCARDED_BOARD, "dpprev/boards/discarded_board", VIZ_X, status = "DRAFT", currentVersion = null)

@@ -1,7 +1,7 @@
 ---
 area: dashboards
 layer: guide
-purpose: Visualizations and dashboards — author a chart bound to named inputs, pin it on a dashboard over released pipelines, validate, and hand release to a person.
+purpose: Visualizations and dashboards — author a chart bound to named inputs, pin it on a dashboard over exact pipeline versions, validate, and hand release to a person.
 ---
 
 # Dashboards — visualizations, dashboards and the authoring loop
@@ -10,7 +10,7 @@ A **visualization** is a versioned chart, table or KPI bound to named inputs: it
 `table` or `kpi`), the renderer's native `config`, the input contracts (named column lists), an optional
 pinned transform template that reshapes the inputs, the `bindings` that inject columns into `config`, and
 saved test cases. It has no pipeline of its own — it is input-bound and reusable. A **dashboard** pins
-released pipelines as `sources`, places occurrences of pinned visualizations, maps each visualization
+exact pipeline versions as `sources`, places occurrences of pinned visualizations, maps each visualization
 input to a source, and arranges them with groups, actions and controls on a 12-column grid. Both are
 versioned exactly like parameter sets: draft → release → (discard / restore / purge / switch), the same
 hash precondition (`body_hash` → `expected_hash`) and the same promoter lens. Every tool after a list
@@ -23,8 +23,11 @@ Build in this order — each step's refusal names the path to fix.
 1. **List the roots.** `visualizations_list` and `dashboards_list` with `prefix: ""`. Reuse a root; a name
    under a root nobody has used is refused `*.validation.new_root_requires_confirmation` until you ask the
    person and pass `confirm_new_root: true`. `test/` never needs it.
-2. **Read the sources' schemas.** A dashboard source pins a RELEASED, read-only pipeline release; its
+2. **Read the sources' schemas.** A draft dashboard source pins a live DRAFT or RELEASED read-only pipeline version; its
    parameters must all be bound (to a set parameter, or to a literal). Read the pipeline before you pin it.
+   Published boards and release/import still require released dependencies throughout the graph.
+   Preview an explicitly selected draft version in the dashboard workspace; no dependency release is needed.
+   Draft edits, including nested pipelines and template imports, invalidate the mounted configuration.
    A SQL source's columns are what its release RECORDED from its last run — `dashboards_validate` judges
    your visualization inputs against that record at save, so run the draft before handing back for release.
 3. **Create the visualization** with `visualizations_create`: `renderer`, `inputs` (the columns you will
@@ -101,7 +104,7 @@ real renderer before you hand the work over:
   non-empty `data` array of supported trace types).
 - `dashboard.validation.input_unbound` — a pinned visualization input no source feeds.
 - `dashboard.validation.parameter_unbound` — a required pipeline parameter left unbound.
-- `dashboard.validation.source_not_released` / `source_not_read_only` — the pinned pipeline release.
+- `dashboard.validation.source_not_released` / `source_not_read_only` — release requires a released pipeline; every source must stay transitively read-only.
 - `dashboard.validation.layout_invalid` — an occurrence or control not placed exactly once.
 - `dashboard.validation.dependency_not_found` — a pin this workspace does not hold.
 - `visualization.test.session_not_found` — the session is not yours (another key started it), or

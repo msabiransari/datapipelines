@@ -10,6 +10,8 @@ import co.datapipelines.executor.ExecutionTrigger
 import co.datapipelines.pipeline.ParameterBinder
 import co.datapipelines.pipeline.Pipeline
 import co.datapipelines.pipeline.PipelineErrorCodes
+import co.datapipelines.pipeline.PipelineRepository
+import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.web.pipelines.RecordingExecutionRunner
 import co.datapipelines.web.sse.ExecutionRecordUnwritableException
@@ -42,6 +44,7 @@ import java.util.UUID
 class RecordingSourceStarter(
     private val runner: RecordingExecutionRunner,
     private val readOnly: ReadOnlyPipelineRule,
+    private val pipelines: PipelineRepository,
 ) : SourceStarter {
     private val log = LoggerFactory.getLogger(RecordingSourceStarter::class.java)
 
@@ -50,7 +53,14 @@ class RecordingSourceStarter(
         onRecorded: (UUID) -> Unit,
     ): SourceOutcome {
         val pipeline = launch.pipeline
-        val admission: (Pipeline) -> Unit = { body ->
+        val admission: (Pipeline, UUID, Int) -> Unit = { body, id, version ->
+            val status = pipelines.findVersionDetail(launch.workspaceId, id, version)?.status
+            if (status == null || !PipelineVersionStatus.eligibleForPointer(status, draftsEligible = launch.allowDraftDependencies)) {
+                throw DatapipelinesException(
+                    code = PipelineErrorCodes.Dashboard.RUNTIME_DEPENDENCY_MISSING,
+                    message = "A dashboard source pipeline version is no longer eligible for execution.",
+                )
+            }
             if (!readOnly.check(body, launch.workspaceId).isValid) {
                 throw DatapipelinesException(
                     code = PipelineErrorCodes.Dashboard.SOURCE_NOT_READ_ONLY,
@@ -59,7 +69,7 @@ class RecordingSourceStarter(
             }
         }
         try {
-            admission(pipeline)
+            admission(pipeline, launch.pipelineId, launch.pipelineVersion)
             ParameterBinder(
                 pipeline.parameters,
                 pipeline.calculatorOutputs(),

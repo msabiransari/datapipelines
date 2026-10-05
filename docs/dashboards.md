@@ -1,6 +1,6 @@
 # Dashboards
 
-**Status:** v0.33 — the Release dialogs post the draft hash they read (§7, #416) beside numeric bound-value assertion feasibility (§3.4, #377) beside the visualizations workspace's tab switches on the shared history helper, the parameter-set decision (§7, #426) beside the pipeline editor runs the shared tab core (§7, #420) beside the Versions tables' created/released relative with the UTC stamp on hover (§7, #422) beside Back/Forward across the dashboards workspace's tab switches (§7, #402) beside the visualizations workspace (§7, #399) beside the dashboards workspace (§5.2's `version`, §7's workspace, #400; #409 closes with it) beside the
+**Status:** v0.34 — draft dashboard dependencies (#459), then the Release dialogs post the draft hash they read (§7, #416) beside numeric bound-value assertion feasibility (§3.4, #377) beside the visualizations workspace's tab switches on the shared history helper, the parameter-set decision (§7, #426) beside the pipeline editor runs the shared tab core (§7, #420) beside the Versions tables' created/released relative with the UTC stamp on hover (§7, #422) beside Back/Forward across the dashboards workspace's tab switches (§7, #402) beside the visualizations workspace (§7, #399) beside the dashboards workspace (§5.2's `version`, §7's workspace, #400; #409 closes with it) beside the
 board's small-slot margins and its breakpoint collapse (§6.2, §6.3, #386/#387), 328's release-record judgement (§4.3)
 permissions (§4, lane L1b); the transfer routes and their limits' honest contract (§3.3, lanes L1c/L1c-b/L1c-c: the
 import's atomicity, the RELEASE rules on a landing, the aggregate count ceiling, the wire's per-family arms); the server
@@ -17,9 +17,8 @@ page, the screenshot upload and the two test tools — §3.4.1 (lane L4b, #353).
 the [design record](superpowers/specs/2026-09-25-dashboard-authoring-design-draft.md) (decisions D1–D63)
 **Last updated:** 2026-10-04
 
-A dashboard presents released pipeline results. It is built from two versioned artifacts: **visualizations** —
-a chart, table or KPI bound to named inputs, reusable across dashboards — and **dashboards**, which pin released
-pipelines as sources, map their results onto visualization inputs, and arrange visualizations, groups, actions and
+A dashboard presents pipeline results. Draft development admits draft dependencies; published boards require released dependencies. It is built from two versioned artifacts: **visualizations** —
+a chart, table or KPI bound to named inputs, reusable across dashboards — and **dashboards**, which pin exact pipeline versions as sources, map their results onto visualization inputs, and arrange visualizations, groups, actions and
 parameter controls on a 12-column layout. Both are authored through MCP and follow the draft/release lifecycle
 pipelines, templates and parameter sets already have.
 
@@ -154,7 +153,7 @@ the case runs; a `DECIMAL` is a JSON number on the wire (type-system §3), so wr
 |---|---|
 | names | The occurrences', groups', actions' and action controls' names and the pinned set's parameter names share ONE namespace (D15): an object name is `[a-z][a-z0-9_]{0,63}`, and no two share a name across kinds (`dashboard.validation.duplicate_name`). Sources are unique among themselves. Every object carries a `type` that matches its list ([Enumerations §34](enums.md)) |
 | `parameter_set` | Optional: at most one pinned set version (D40); a DRAFT is accepted here, the release requires it RELEASED |
-| `sources[]` | A pinned pipeline version that must be RELEASED (`dashboard.validation.source_not_released`) and pass the read-only rule, child pipelines included (`dashboard.validation.source_not_read_only`, D38). `parameters` binds each pipeline parameter EITHER to a set parameter (`{"parameter": …}`) OR to a literal (`{"value": …}` — a scalar or a list of scalars); every REQUIRED pipeline parameter is bound, here or by an outgoing override (`dashboard.validation.parameter_unbound`) |
+| `sources[]` | A pinned live pipeline version (DRAFT or RELEASED during authoring; RELEASED at release/import, `dashboard.validation.source_not_released`) that must pass the read-only rule, child pipelines included (`dashboard.validation.source_not_read_only`, D38). `parameters` binds each pipeline parameter EITHER to a set parameter (`{"parameter": …}`) OR to a literal (`{"value": …}` — a scalar or a list of scalars); every REQUIRED pipeline parameter is bound, here or by an outgoing override (`dashboard.validation.parameter_unbound`) |
 | `visualizations[]` | An occurrence of a pinned visualization version (a DRAFT is accepted here); `inputs` maps EVERY input of that visualization to a source (`dashboard.validation.input_unbound`), whose caller output columns must supply each input column by name and type (`dashboard.validation.input_contract_mismatch`, naming the column). `timeout_seconds` is 1–900 |
 | `groups[]` | Containers for composition and action scope, never a name or evaluation scope (D47). A member is an occurrence, a group, an action control or a set parameter; nothing belongs to two groups and no group contains itself |
 | `actions[]` | A refresh action: `scope` `all` (no targets) or `targets` with a non-empty list of occurrence names (D55, D57); `initial` marks the actions bootstrap invokes (R22). `dashboard.validation.empty_targets`, `dashboard.validation.target_not_visualization` |
@@ -300,7 +299,7 @@ the preview page, the upload and the two tools — is §3.4.1 (#353).
   fixture rows through the deep schema, ~60 ms): the renderer's schema (for Plotly the reduced vendored
   4.1.1 plot-schema — unknown attributes, wrong types and unsupported traces refused with the path), every
   binding's resolution and per-path type rules, every case's fixtures through the REAL bounded evaluator (a DRAFT
-  transform pin is valid here — authoring; the runtime keeps its RELEASED-only rule), every projected bound
+  transform pin is valid here and in an explicitly selected draft dashboard; published runtime requires RELEASED pins), every projected bound
   column present in every row, and static assertion feasibility (`trace_count` against `config.data.length`,
   `no_data` against zero produced rows, `text_visible`/`value_visible` strings present in the configuration or
   the bound values). Bound strings and INTEGER/DECIMAL values participate by their existing scalar text
@@ -457,11 +456,12 @@ parameter set and transform templates they could not run or evaluate themselves:
 caller's `pipeline.execute`, the set is evaluated without `parameter_set.evaluate`, the transform without
 `template.evaluate`. Two things keep that safe:
 
-- **Sources are read-only.** Every source pins a RELEASED pipeline that passes the read-only rule (D38),
+- **Sources are read-only.** Every source pins a live pipeline that passes the read-only rule (D38),
   transitively through its child pipelines. It is checked at save, at release, at every configuration read AND at
-  every refresh; a pin that stops holding is `dashboard.runtime.dependency_missing` (409), never a run.
-- **Every runtime pin is released.** Configuration reads and refreshes require RELEASED visualization and parameter-set
-  versions, and RELEASED transform templates for every visualization that pins one. A missing or changed pin is
+  every refresh and against every exact loaded child body immediately before execution; a pin that stops holding is `dashboard.runtime.dependency_missing` (409), never a run.
+- **Lifecycle follows the dashboard.** A released dashboard requires RELEASED dependencies. An explicitly selected
+  draft dashboard admits live DRAFT or RELEASED visualizations, parameter sets, source and nested pipelines, and
+  node, selector, transform and imported templates. Missing or DISCARDED references refuse in both modes. A missing or changed pin is
   `dashboard.runtime.dependency_missing` (409); a transform that changes status after configuration resolution fails
   that target in the already-open stream before evaluation.
 - **Isolation.** Every read is workspace-scoped; the dashboard is read through the caller's lens (a promoter refreshes
@@ -488,16 +488,17 @@ otherwise); absent means exactly today's read. The named version must resolve fo
 hidden under a narrowing lens is the family 404 naming the version they named — and a `dashboard` key never names one:
 the version routes are the session-authenticated workspace's ([§7](#7-the-first-party-pages-l3b)), and a version
 parameter would be a second credential for the same principal (refused `dashboard.key.kind_refused` before anything is
-looked up). The pin rule does not move (R1, the owner's ruling on #369): every pinned visualization, its transform
-template, the parameter set and each source pipeline release must be RELEASED — a draft pinning a DRAFT pin is the
-existing `dashboard.runtime.dependency_missing` (`reason: "not_released"`, naming the pin, the message carrying the
-release hint), the engineer's way out being the release, not a second renderer. A dashboard with no release is absent,
-exactly like a hidden one.
+looked up). An explicitly selected DRAFT dashboard admits live DRAFT or RELEASED dependencies throughout its graph
+(#459, owner requirement superseding #369 R1). Released dashboards retain the RELEASED-only policy. Missing,
+DISCARDED or unsafe dependencies refuse `dashboard.runtime.dependency_missing`. A dashboard with no release is absent
+from the default released runtime read; its explicitly selected draft remains available to an authorized session.
 
 ### 5.3 The configuration
 
 `configuration_id` is `sha256(dashboard id | version | body_hash | every pinned dependency's kind, name, version and
-body_hash)` — the pinned visualizations, the parameter set and each source pipeline. Every later call sends it; a mismatch
+body_hash)` — the pinned visualizations, the parameter set and each source pipeline. For a draft this also walks
+nested pipeline bodies, node/selector/transform templates and their transitive imports; a same-version draft edit
+changes the identity. Every later call sends it; a mismatch
 is `dashboard.runtime.configuration_stale` (409) and the client reloads. The answer carries the layout, each
 occurrence's renderer, configuration and `bindings` (a configuration path to a column, filled later from
 `visualization_data`), the groups, actions, controls, scopes and parameter-state overrides, the resolved refresh
@@ -842,9 +843,8 @@ tree had just linked; it does not any more. The five tabs:
   beside the board. Navigation onto it is never boosted; disposal stays the
   `htmx:beforeHistorySave` hook.
 - **Overview** — the viewed version's definition, read-only: the sources with their pinned
-  pipeline releases and statuses, the parameter set, the pinned visualizations with each
-  pin's status (RELEASED, or DRAFT with the release hint — R1, the same judge the validator
-  and the release guard run), the layout summary. No authoring control anywhere: the browser
+  pipeline versions and statuses, the parameter set, the pinned visualizations with each
+  pin's status. DRAFT pins are available during draft preview and must be released before publication, the layout summary. No authoring control anywhere: the browser
   never authors a dashboard (#396) — agents author over MCP, and a person releases from the
   Versions tab.
 - **Refreshes** — the events pane full width; the board pane keeps its own beside the board.
@@ -931,6 +931,7 @@ change (#426). The templates workspace adopts the helper after #398's rework lan
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-05 | v0.34 | #459 draft dashboard dependencies | Draft save and explicitly selected draft runtime admit live draft dependencies transitively. Released runtime, release and import remain strict. Configuration identity includes mutable nested pipeline and template/import content; each loaded source/child is admitted for lifecycle and read-only execution. Overview explains draft availability and release requirements. Supersedes #369 R1 for draft development. |
 | 2026-10-04 | v0.33 | #416 the Release dialogs post the hash they read | **§7:** the dashboards and visualizations workspaces' Release dialog forms carry a hidden hash of the draft the dialog read (`bodyHash`; `body_hash` for visualizations), the POST requires it (a missing one is a 400 at binding) and releases AT it. Before, the POST re-read the draft and released whatever hash it found, so a draft changed after the dialog opened went live unseen. A stale hash is `*.version.conflict` (409) and, for a cascading release, rolls the cascade back (§3.2). The same change covers the pipelines and templates dialogs ([UI Screens §4.3d](ui-screens.md)). No service, REST or matrix change. |
 | 2026-10-03 | v0.32 | #377 numeric bound-value assertion feasibility | **§3.4:** bound INTEGER/DECIMAL scalar text joins strings in the static substring scan; `42` and `10.5` can satisfy `text_visible`/`value_visible`. Browser formatting remains the agent's preview check; rendered state remains `not_available`. |
 | 2026-10-03 | v0.31 | #426 the visualizations workspace on the shared history helper — renumbered at merge after 420's v0.30 | **§7:** the visualizations workspace's tab switches push tab-only `visualizations` entries through `workspace/history.js` (via `workspace/panes.js`), Back/Forward re-select in page, a restored root re-wires once; the parameter-set workspace stays on full-document section links — the helper is not adopted there (decision recorded); the templates workspace follows after #398's rework. |

@@ -160,7 +160,7 @@ class SubPipelineExecutionRunner(
         // references do not exist) — carried down on the context since 025 A5, so no lookup.
         val workspaceId = ctx.workspaceId
         val (record, child) = loadChild(node, ref, workspaceId)
-        ctx.pipelineAdmission?.invoke(child)
+        ctx.pipelineAdmission?.invoke(child, record.id, ref.version)
 
         // Minted before execution starts: the parent's node stats and any failure detail must be
         // able to name the child execution even when it never completes.

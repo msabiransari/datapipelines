@@ -126,7 +126,7 @@ data class ExecuteRequest(
      */
     val reference: ExecutionReference? = null,
     /** Internal admission check inherited by children and applied to their exact loaded bodies. */
-    val pipelineAdmission: ((Pipeline) -> Unit)? = null,
+    val pipelineAdmission: ((Pipeline, UUID, Int) -> Unit)? = null,
 )
 
 /**

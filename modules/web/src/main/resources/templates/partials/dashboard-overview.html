@@ -1,8 +1,7 @@
 <!-- The workspace's OVERVIEW tab (#400) — the viewed version's definition, READ-ONLY: the
-     display name and description, the sources with their pinned pipeline releases, the
+     display name and description, the sources with their pinned pipeline versions, the
      parameter set, the pinned visualizations with each pin's status (RELEASED, or DRAFT with
-     the release hint — R1: pins are judged RELEASED-only on a draft exactly as on a
-     release), and the layout summary. There is deliberately no authoring control anywhere in
+     draft-preview hint; published boards require released dependencies), and the layout summary. There is deliberately no authoring control anywhere in
      this file: the browser never authors a dashboard (#396) — agents author over MCP.
 
      Every dynamic value is a `th:text` (a DOM text sink) — a pin name is user-supplied text
@@ -33,7 +32,7 @@
             <li th:each="p : ${sources}">
               <span class="u-mono" th:text="${p.label}">revenue</span>
               <span class="u-muted" th:text="${p.ref}">finance/pipelines/revenue@3</span>
-              <span class="ds-badge" th:classappend="${p.status == 'RELEASED'} ? 'ds-badge-success' : 'ds-badge-danger'"
+              <span class="ds-badge" th:classappend="${p.status == 'RELEASED'} ? 'ds-badge-success' : (${p.status == 'DRAFT'} ? 'ds-badge-default' : 'ds-badge-danger')"
                     th:text="${p.status ?: 'MISSING'}">RELEASED</span>
             </li>
           </ul>
@@ -43,7 +42,7 @@
           <span th:if="${parameterSet == null}">—</span>
           <th:block th:if="${parameterSet != null}">
             <span class="u-mono" th:text="${parameterSet.ref}">finance/sets/filters@2</span>
-            <span class="ds-badge" th:classappend="${parameterSet.status == 'RELEASED'} ? 'ds-badge-success' : 'ds-badge-danger'"
+            <span class="ds-badge" th:classappend="${parameterSet.status == 'RELEASED'} ? 'ds-badge-success' : (${parameterSet.status == 'DRAFT'} ? 'ds-badge-default' : 'ds-badge-danger')"
                   th:text="${parameterSet.status ?: 'MISSING'}">RELEASED</span>
           </th:block>
         </dd>
@@ -54,11 +53,10 @@
             <li th:each="p : ${visualizations}">
               <span class="u-mono" th:text="${p.label}">revenue_cells</span>
               <span class="u-muted" th:text="${p.ref}">finance/visualizations/cells@1</span>
-              <!-- R1: a DRAFT pin carries the release hint — the engineer's way out is the
-                   release, not a second renderer. -->
-              <span class="ds-badge" th:classappend="${p.status == 'RELEASED'} ? 'ds-badge-success' : 'ds-badge-danger'"
+              <!-- Draft dependencies run during draft preview; publication retains the release requirement. -->
+              <span class="ds-badge" th:classappend="${p.status == 'RELEASED'} ? 'ds-badge-success' : (${p.status == 'DRAFT'} ? 'ds-badge-default' : 'ds-badge-danger')"
                     th:text="${p.status ?: 'MISSING'}">RELEASED</span>
-              <span class="u-secondary" th:if="${p.draftHint}">— release it first (or release the dashboard with it)</span>
+              <span class="u-secondary" th:if="${p.draftHint}">— available in draft preview; release before publishing</span>
             </li>
           </ul>
         </dd>

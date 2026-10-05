@@ -87,7 +87,8 @@ class DashboardService(
         val record = repository.findRecord(workspaceId, id) ?: throw lifecycle.notFound(id)
         val draft = repository.findDraft(workspaceId, id) ?: throw lifecycle.notDraft(id)
         val body = checkNotNull(repository.findVersion(workspaceId, id, draft.version)).body
-        validator.validate(workspaceId, DashboardDocument(record.name, body), requireReleasedSources = true)
+        validator
+            .validate(workspaceId, DashboardDocument(record.name, body), requireReleasedSources = true)
             .orThrow(DashboardErrorCodes.BODY_INVALID)
         val toCascade = dependenciesToRelease(workspaceId, body, releasePinnedVisualizations)
         val released =

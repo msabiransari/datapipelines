@@ -22,6 +22,35 @@ class CompositionRulesTest {
     private val workspaceId = UUID.randomUUID()
 
     @Test
+    fun `draft child composition is admitted for authoring and refused for release`() {
+        val draft =
+            PipelineResolver { _, _, version ->
+                if (version == 1 ||
+                    version == CHILD_VERSION
+                ) {
+                    ResolvedPipeline(child(), false, versionStatus = PipelineVersionStatus.DRAFT)
+                } else {
+                    null
+                }
+            }
+        val validator = validatorWith(draft)
+        validator.validate(parent(), workspaceId, allowDraftPipelineReferences = true).failures shouldContainExactly emptyList()
+        validator.validate(parent(), workspaceId).codes shouldContainExactly listOf(Validation.PIPELINE_REFERENCE_NOT_RELEASED)
+        val discarded =
+            PipelineResolver { _, _, version ->
+                if (version == 1 ||
+                    version == CHILD_VERSION
+                ) {
+                    ResolvedPipeline(child(), false, versionStatus = PipelineVersionStatus.DISCARDED)
+                } else {
+                    null
+                }
+            }
+        validatorWith(discarded).validate(parent(), workspaceId, allowDraftPipelineReferences = true).codes shouldContainExactly
+            listOf(Validation.PIPELINE_REFERENCE_NOT_RELEASED)
+    }
+
+    @Test
     fun `a valid PIPELINE node passes`() {
         validatorWith(resolver(child())).validate(parent(), workspaceId).failures shouldContainExactly emptyList()
     }

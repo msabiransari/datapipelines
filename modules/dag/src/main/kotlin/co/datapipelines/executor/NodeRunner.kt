@@ -149,7 +149,7 @@ data class NodeExecutionContext(
      */
     val operations: NodeOperations = NodeOperations(),
     /** The root surface's admission check, retained through every composed child execution. */
-    val pipelineAdmission: ((Pipeline) -> Unit)? = null,
+    val pipelineAdmission: ((Pipeline, UUID, Int) -> Unit)? = null,
 )
 
 /**

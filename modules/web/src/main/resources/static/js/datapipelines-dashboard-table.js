@@ -53,6 +53,12 @@
       return out;
     }
 
+    function columnValues(bindings, columns, index) {
+      var path = "columns[" + index + "].values";
+      // Native configuration paths are the validated wire contract; older fixtures use aliases.
+      return Object.prototype.hasOwnProperty.call(bindings, path) ? bindings[path] : bindings[columns[index].values];
+    }
+
     return {
       renderData: function (occurrenceRef, rows, bindings) {
         var bound = bindings || {};
@@ -76,7 +82,7 @@
         var body = document.createElement("tbody");
         var width = 0;
         for (var c2 = 0; c2 < columns.length; c2++) {
-          var values = bound[columns[c2].values];
+          var values = columnValues(bound, columns, c2);
           if (Array.isArray(values)) width = Math.max(width, values.length);
         }
         for (var r = 0; r < Math.min(width, pageSize); r++) {
@@ -84,7 +90,7 @@
           for (var i = 0; i < columns.length; i++) {
             var td = document.createElement("td");
             var column = columns[i];
-            var array = bound[column.values];
+            var array = columnValues(bound, columns, i);
             var value = Array.isArray(array) ? array[r] : null;
             td.textContent = format(value, column.format);
             if (column.align) td.style.textAlign = column.align;

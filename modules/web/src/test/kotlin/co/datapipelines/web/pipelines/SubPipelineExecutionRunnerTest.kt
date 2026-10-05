@@ -285,6 +285,39 @@ class SubPipelineExecutionRunnerTest {
             result.childExecutionId shouldBe request.executionId
         }
 
+    @Test
+    fun `dashboard admission judges the exact loaded child and is inherited by its request`() {
+        runTest {
+            stubRegistry()
+            val stub = ExecutorStub()
+            val seen = mutableListOf<co.datapipelines.pipeline.Pipeline>()
+            val admission: (co.datapipelines.pipeline.Pipeline, UUID, Int) -> Unit = { body, id, version ->
+                id shouldBe childRecordId
+                version shouldBe 4
+                seen += body
+            }
+            runner(stub).run(pipelineNode(), context().copy(pipelineAdmission = admission))
+            val request = stub.captured.single()
+            seen.single() shouldBe request.pipeline
+            request.pipelineAdmission shouldBe admission
+        }
+    }
+
+    @Test
+    fun `a child refused by dashboard admission never reaches the executor`() {
+        runTest {
+            stubRegistry()
+            val stub = ExecutorStub()
+            val admission: (co.datapipelines.pipeline.Pipeline, UUID, Int) -> Unit = { _, _, _ ->
+                throw DatapipelinesException(PipelineErrorCodes.Dashboard.SOURCE_NOT_READ_ONLY, "unsafe child")
+            }
+            shouldThrow<DatapipelinesException> {
+                runner(stub).run(pipelineNode(), context().copy(pipelineAdmission = admission))
+            }.code shouldBe PipelineErrorCodes.Dashboard.SOURCE_NOT_READ_ONLY
+            stub.captured shouldBe emptyList()
+        }
+    }
+
     /**
      * F5 — the child minted `correlationId = UUID.randomUUID()`, so its `pipeline_executions` row,
      * its SSE payloads (via `SseEventProjection`) and its logs all carried an id unrelated to the
