@@ -1052,6 +1052,7 @@ class PipelineExecutor(
             // A13: the frozen reference travels with the context so a PIPELINE node's child
             // request can inherit it — the family resolves bindings on one logical time.
             reference = request.reference,
+            pipelineAdmission = request.pipelineAdmission,
             // 108 §D: the staging drain's per-batch count lands in the stats collector and, at
             // most once per `progress-write-interval-seconds`, in the row. The snapshot is built
             // inside the lambda so a throttled tick that decides not to write does not build it.

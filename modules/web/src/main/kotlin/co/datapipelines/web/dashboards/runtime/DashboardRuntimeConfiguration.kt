@@ -6,6 +6,7 @@ import co.datapipelines.application.dashboards.DashboardTransformer
 import co.datapipelines.application.dashboards.RefreshAdmission
 import co.datapipelines.application.dashboards.RefreshEngine
 import co.datapipelines.application.dashboards.SourceStarter
+import co.datapipelines.application.endpoints.ReadOnlyPipelineRule
 import co.datapipelines.application.lens.PromoterLens
 import co.datapipelines.application.templates.TemplateEvaluateService
 import co.datapipelines.auth.ApiKeyRepository
@@ -141,7 +142,10 @@ class DashboardRuntimeConfiguration {
         RefreshStreamRegistry(properties, executionStreams, abort, SseJson.mapper, evaluationStreams = evaluationStreams::activeStreamsFor)
 
     @Bean
-    fun dashboardSourceStarter(runner: RecordingExecutionRunner): SourceStarter = RecordingSourceStarter(runner)
+    fun dashboardSourceStarter(
+        runner: RecordingExecutionRunner,
+        readOnly: ReadOnlyPipelineRule,
+    ): SourceStarter = RecordingSourceStarter(runner, readOnly)
 
     @Bean
     fun dashboardTransformer(

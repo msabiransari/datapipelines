@@ -125,6 +125,8 @@ data class ExecuteRequest(
      * node's child request inherits it, so the family resolves bindings on one clock.
      */
     val reference: ExecutionReference? = null,
+    /** Internal admission check inherited by children and applied to their exact loaded bodies. */
+    val pipelineAdmission: ((Pipeline) -> Unit)? = null,
 )
 
 /**

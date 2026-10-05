@@ -166,7 +166,12 @@ open class PipelineService(
         bodyJson: String,
         workspaceId: UUID,
     ): ValidatedPipeline {
-        val pipeline = validator.validateOrThrow(deserializer.readOrThrow(bodyJson), workspaceId)
+        val pipeline =
+            validator.validateOrThrow(
+                deserializer.readOrThrow(bodyJson),
+                workspaceId,
+                allowDraftPipelineReferences = true,
+            )
         return ValidatedPipeline(pipeline, serializer.write(pipeline))
     }
 

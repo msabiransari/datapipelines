@@ -2,6 +2,7 @@ package co.datapipelines.web.dashboards.runtime
 
 import co.datapipelines.application.dashboards.SourceLaunch
 import co.datapipelines.application.dashboards.SourceOutcome
+import co.datapipelines.application.endpoints.ReadOnlyPipelineRule
 import co.datapipelines.executor.AbortReason
 import co.datapipelines.executor.DirectResultSink
 import co.datapipelines.executor.ExecuteRequest
@@ -14,6 +15,7 @@ import co.datapipelines.executor.ExecutionTrigger
 import co.datapipelines.pipeline.Parameter
 import co.datapipelines.pipeline.Pipeline
 import co.datapipelines.pipeline.PipelineErrorCodes
+import co.datapipelines.pipeline.PipelineResolver
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.LogicalType
 import co.datapipelines.web.pipelines.RecordingExecutionRunner
@@ -45,7 +47,11 @@ import java.util.UUID
 @OptIn(ExperimentalCoroutinesApi::class)
 class RecordingSourceStarterTest {
     private val runner = mockk<RecordingExecutionRunner>()
-    private val starter = RecordingSourceStarter(runner)
+    private val starter =
+        RecordingSourceStarter(
+            runner,
+            ReadOnlyPipelineRule(PipelineResolver { _, _, _ -> null }, maxCompositionDepth = 1),
+        )
     private val slots = ExecutionSlots(maxPerUser = 1, maxPerInstance = 10)
     private val refreshId = UUID.randomUUID()
     private val executionId = UUID.randomUUID()
@@ -54,6 +60,7 @@ class RecordingSourceStarterTest {
     private val sink = DirectResultSink { _, _ -> }
     private val pipeline =
         mockk<Pipeline> {
+            every { nodes } returns emptyList()
             every { parameters } returns emptyMap()
             every { calculatorOutputs(any()) } returns emptyMap()
             every { calculatorOutputGroups(any()) } returns emptyMap()

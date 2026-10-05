@@ -364,7 +364,15 @@ class RefreshEngine(
                 } else {
                     val fed = transform.inputs.mapValues { (_, visualizationInput) -> maps(tables.getValue(visualizationInput)) }
                     val started = job.startedAt
-                    when (val out = withContext(blocking) { transformer.transform(job.workspaceId, transform.template, fed, started) }) {
+                    val out =
+                        withContext(blocking) {
+                            if (job.allowDraftDependencies) {
+                                transformer.transformDraft(job.workspaceId, transform.template, fed, started)
+                            } else {
+                                transformer.transform(job.workspaceId, transform.template, fed, started)
+                            }
+                        }
+                    when (out) {
                         is TransformOutcome.Rows -> Produced.Rows(out.rows)
                         is TransformOutcome.Refused -> Produced.Refused(TargetOutcome.Error(TRANSFORM_STAGE, out.code))
                     }

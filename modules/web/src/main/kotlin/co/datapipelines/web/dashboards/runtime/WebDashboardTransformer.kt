@@ -40,10 +40,24 @@ class WebDashboardTransformer(
         template: ArtifactRef,
         tables: Map<String, List<Map<String, Any?>>>,
         now: Instant,
+    ): TransformOutcome = transform(workspaceId, template, tables, now, allowDraft = false)
+
+    override fun transformDraft(
+        workspaceId: UUID,
+        template: ArtifactRef,
+        tables: Map<String, List<Map<String, Any?>>>,
+        now: Instant,
+    ): TransformOutcome = transform(workspaceId, template, tables, now, allowDraft = true)
+
+    private fun transform(
+        workspaceId: UUID,
+        template: ArtifactRef,
+        tables: Map<String, List<Map<String, Any?>>>,
+        now: Instant,
+        allowDraft: Boolean,
     ): TransformOutcome {
-        if (templates.findVersionStatus(workspaceId, ReadLens.Everything, template.name, template.version) !=
-            PipelineVersionStatus.RELEASED
-        ) {
+        val status = templates.findVersionStatus(workspaceId, ReadLens.Everything, template.name, template.version)
+        if (status != PipelineVersionStatus.RELEASED && !(allowDraft && status == PipelineVersionStatus.DRAFT)) {
             return TransformOutcome.Refused(DashboardErrorCodes.RUNTIME_DEPENDENCY_MISSING)
         }
         val mode = contracts.transformContract(workspaceId, TemplateRef(template.name, template.version))?.mode

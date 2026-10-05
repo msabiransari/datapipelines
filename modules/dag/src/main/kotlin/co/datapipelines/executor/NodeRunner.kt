@@ -12,6 +12,7 @@ import co.datapipelines.pipeline.CalculatorInputResolver
 import co.datapipelines.pipeline.NodeOutput
 import co.datapipelines.pipeline.NodeSource
 import co.datapipelines.pipeline.NodeType
+import co.datapipelines.pipeline.Pipeline
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.staging.Staging
 import co.datapipelines.staging.StagingMemoryLimitException
@@ -147,6 +148,8 @@ data class NodeExecutionContext(
      * fixture is unchanged.
      */
     val operations: NodeOperations = NodeOperations(),
+    /** The root surface's admission check, retained through every composed child execution. */
+    val pipelineAdmission: ((Pipeline) -> Unit)? = null,
 )
 
 /**

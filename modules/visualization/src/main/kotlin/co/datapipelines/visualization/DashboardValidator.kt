@@ -38,6 +38,7 @@ class DashboardValidator(
     fun validate(
         workspaceId: UUID,
         document: DashboardDocument,
+        requireReleasedSources: Boolean = false,
     ): ArtifactValidation<DashboardDocument> {
         val failures = ArtifactFailures(DashboardErrorCodes.BODY_INVALID)
         val body = document.body
@@ -47,7 +48,7 @@ class DashboardValidator(
         val names = DashboardNames.of(body, set)
         val graph = GroupGraph(body)
         namespace(body, names, failures)
-        val sources = sources(workspaceId, body, set, failures)
+        val sources = sources(workspaceId, body, set, failures, requireReleasedSources)
         invocations(body, failures)
         occurrences(workspaceId, body, names, sources, failures)
         groups(body, names, failures)
@@ -80,6 +81,7 @@ class DashboardValidator(
         body: DashboardBody,
         set: ParameterSetFact?,
         failures: ArtifactFailures,
+        requireReleasedSources: Boolean,
     ): Map<String, PipelineReleaseFact> {
         val facts = mutableMapOf<String, PipelineReleaseFact>()
         val setParameters = set?.parameters?.map { it.name }?.toSet()
@@ -91,7 +93,7 @@ class DashboardValidator(
                     dependencyNotFound("$path.pipeline", "pipeline", source.pipeline, failures)
                 }
 
-                fact.status != PipelineVersionStatus.RELEASED -> {
+                requireReleasedSources && fact.status != PipelineVersionStatus.RELEASED -> {
                     failures.add(
                         DashboardErrorCodes.SOURCE_NOT_RELEASED,
                         "$path.pipeline",

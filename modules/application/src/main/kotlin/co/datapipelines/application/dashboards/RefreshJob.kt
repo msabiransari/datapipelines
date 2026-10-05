@@ -55,6 +55,8 @@ class RefreshJob(
     val deadlineSeconds: Int,
     val reservation: SlotReservation?,
     val startedAt: Instant,
+    /** Only a session's explicitly selected draft dashboard may execute draft dependencies. */
+    val allowDraftDependencies: Boolean = false,
 )
 
 /** How one target ended. */
@@ -116,6 +118,14 @@ fun interface DashboardTransformer {
         tables: Map<String, List<Map<String, Any?>>>,
         now: Instant,
     ): TransformOutcome
+
+    /** Draft preview keeps the same transform contract; implementations may admit live draft templates. */
+    fun transformDraft(
+        workspaceId: UUID,
+        template: ArtifactRef,
+        tables: Map<String, List<Map<String, Any?>>>,
+        now: Instant,
+    ): TransformOutcome = transform(workspaceId, template, tables, now)
 }
 
 /** The refresh's persistence: the execution link and the terminal write. Blocking, called by the engine on its dispatcher. */

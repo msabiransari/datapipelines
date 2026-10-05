@@ -3,10 +3,12 @@ package co.datapipelines.web.dashboards.runtime
 import co.datapipelines.application.dashboards.SourceLaunch
 import co.datapipelines.application.dashboards.SourceOutcome
 import co.datapipelines.application.dashboards.SourceStarter
+import co.datapipelines.application.endpoints.ReadOnlyPipelineRule
 import co.datapipelines.executor.ExecuteRequest
 import co.datapipelines.executor.ExecutionAbortedException
 import co.datapipelines.executor.ExecutionTrigger
 import co.datapipelines.pipeline.ParameterBinder
+import co.datapipelines.pipeline.Pipeline
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.web.pipelines.RecordingExecutionRunner
@@ -39,6 +41,7 @@ import java.util.UUID
  */
 class RecordingSourceStarter(
     private val runner: RecordingExecutionRunner,
+    private val readOnly: ReadOnlyPipelineRule,
 ) : SourceStarter {
     private val log = LoggerFactory.getLogger(RecordingSourceStarter::class.java)
 
@@ -47,7 +50,16 @@ class RecordingSourceStarter(
         onRecorded: (UUID) -> Unit,
     ): SourceOutcome {
         val pipeline = launch.pipeline
+        val admission: (Pipeline) -> Unit = { body ->
+            if (!readOnly.check(body, launch.workspaceId).isValid) {
+                throw DatapipelinesException(
+                    code = PipelineErrorCodes.Dashboard.SOURCE_NOT_READ_ONLY,
+                    message = "Dashboard source pipelines must remain read-only, including every child pipeline.",
+                )
+            }
+        }
         try {
+            admission(pipeline)
             ParameterBinder(
                 pipeline.parameters,
                 pipeline.calculatorOutputs(),
@@ -70,6 +82,7 @@ class RecordingSourceStarter(
                 directSink = launch.sink,
                 slotLease = launch.slot,
                 executedByKeyKind = launch.executedByKeyKind,
+                pipelineAdmission = admission,
             )
         return try {
             SourceOutcome.Succeeded(
