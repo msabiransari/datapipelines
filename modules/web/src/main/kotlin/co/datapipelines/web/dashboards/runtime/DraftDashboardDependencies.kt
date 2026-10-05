@@ -38,8 +38,18 @@ internal class DraftDashboardDependencies(
                 ?.let { templatePins.addLast(TemplateRef(it.name, it.version)) }
         }
         set?.body?.parameters?.forEach { parameter -> parameter.source?.template?.let(templatePins::addLast) }
-        val pipelinePins = ArrayDeque<ResolvedSource>()
-        sources.values.forEach(pipelinePins::addLast)
+        pipelineHashes(workspaceId, sources, templatePins, hashes)
+        templateHashes(workspaceId, templatePins, hashes)
+        return hashes
+    }
+
+    private fun pipelineHashes(
+        workspaceId: UUID,
+        sources: Map<String, ResolvedSource>,
+        templatePins: ArrayDeque<TemplateRef>,
+        hashes: MutableList<String>,
+    ) {
+        val pipelinePins = ArrayDeque(sources.values)
         val seenPipelines = mutableSetOf<Pair<UUID, Int>>()
         while (pipelinePins.isNotEmpty()) {
             val source = pipelinePins.removeFirst()
@@ -59,16 +69,32 @@ internal class DraftDashboardDependencies(
             source.executable.pipeline.nodes.forEach { node ->
                 if (node.template.id.isNotBlank()) templatePins.addLast(node.template)
                 node.pipeline?.let { ref ->
-                    val record =
-                        pipelineRepository.findByNameAnyStatus(workspaceId, ref.name)
-                            ?: throw missing("source", ref.name, NOT_FOUND)
-                    val executable =
-                        pipelines.findExecutable(workspaceId, ReadLens.Everything, record, ref.version)
-                            ?: throw missing("source", ref.name, NOT_FOUND)
-                    pipelinePins.addLast(ResolvedSource(record, ref.version, executable))
+                    val child = loadSource(workspaceId, ref.name, ref.version)
+                    pipelinePins.addLast(child)
                 }
             }
         }
+    }
+
+    private fun loadSource(
+        workspaceId: UUID,
+        name: String,
+        version: Int,
+    ): ResolvedSource {
+        val record =
+            pipelineRepository.findByNameAnyStatus(workspaceId, name)
+                ?: throw missing("source", name, NOT_FOUND)
+        val executable =
+            pipelines.findExecutable(workspaceId, ReadLens.Everything, record, version)
+                ?: throw missing("source", name, NOT_FOUND)
+        return ResolvedSource(record, version, executable)
+    }
+
+    private fun templateHashes(
+        workspaceId: UUID,
+        templatePins: ArrayDeque<TemplateRef>,
+        hashes: MutableList<String>,
+    ) {
         val seenTemplates = mutableSetOf<TemplateRef>()
         while (templatePins.isNotEmpty()) {
             val ref = templatePins.removeFirst()
@@ -80,7 +106,6 @@ internal class DraftDashboardDependencies(
             hashes += "template|${ref.id}|${ref.version}|${template.bodyHash}"
             template.imports.forEach { templatePins.addLast(TemplateRef(it.id, it.version)) }
         }
-        return hashes
     }
 
     private fun admitted(

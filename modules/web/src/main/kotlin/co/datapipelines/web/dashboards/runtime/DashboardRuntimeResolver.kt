@@ -50,7 +50,7 @@ class ResolvedSource(
  * at save, when a pin no longer holds: a dependency gone, lifecycle-ineligible, or no longer read-only is
  * `dashboard.runtime.dependency_missing` (409) naming the kind and the source — never a 500 and never a run against a
  * pipeline that could write (D38, checked TRANSITIVELY at every config read and every refresh through
- * [PipelineReleaseFacts], whose `readOnly` is `ReadOnlyPipelineRule` over the release and its child pipelines).
+ * [PipelineReleaseFacts], whose `readOnly` is `ReadOnlyPipelineRule` over the pinned body and its child pipelines).
  *
  * ## Isolation
  * Everything is workspace-scoped (the caller's workspace id is the first argument of every read) and the dashboard is
@@ -59,8 +59,8 @@ class ResolvedSource(
  * names dashboards, not their dependencies.
  *
  * ## The configuration id
- * Every dependency's body hash is in it, so ANY change to a pinned release (a re-release under the same number is
- * impossible; a purge and re-import is not) changes the id, and a client holding the old one gets
+ * Every direct dependency's body hash is in it; a draft also includes nested pipelines, templates and imports.
+ * An edit at the same draft version changes the id, and a client holding the old one gets
  * `dashboard.runtime.configuration_stale`.
  */
 @Suppress("LongParameterList") // the dashboard's dependencies ARE its ports
@@ -182,8 +182,7 @@ class DashboardRuntimeResolver(
     ) = ApiException(
         DashboardErrorCodes.RUNTIME_DEPENDENCY_MISSING,
         if (reason == NOT_RELEASED) {
-            // #369: the draft preview shows this refusal in place, so the not-released case tells the
-            // engineer the way out — the other reasons are a pin gone or unsafe, not one to release.
+            // Released boards keep the release hint; draft previews admit live drafts and refuse discarded pins.
             "A $kind this dashboard pins is not released — release it first, then try this board again."
         } else {
             "A $kind this dashboard pins no longer holds."

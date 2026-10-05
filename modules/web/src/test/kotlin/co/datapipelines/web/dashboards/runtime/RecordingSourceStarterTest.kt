@@ -125,6 +125,7 @@ class RecordingSourceStarterTest {
                                 type = co.datapipelines.pipeline.NodeType.DML,
                                 source = "warehouse",
                                 template = co.datapipelines.pipeline.TemplateRef("write.sql", 1),
+                                output = null,
                                 dependsOn = emptyList(),
                             ),
                         )

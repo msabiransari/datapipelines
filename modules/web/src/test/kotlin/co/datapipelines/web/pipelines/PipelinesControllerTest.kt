@@ -135,7 +135,7 @@ class PipelinesControllerTest {
         val body =
             """{"schema_version":1,"name":"monthly_revenue","display_name":"Monthly Revenue",""" +
                 """"description":"d","parameters":{},"settings":{"tempdb":{"engine":"H2"}},"nodes":[]}"""
-        every { validator.validateOrThrow(any(), any()) } answers { firstArg() }
+        every { validator.validateOrThrow(any(), any(), allowDraftPipelineReferences = true) } answers { firstArg() }
         // D55: the lifecycle argument is part of the expectation — a create that asked for a
         // RELEASED v1 would not match this stub, so the mock is the guard for the ruling.
         every {
@@ -272,7 +272,7 @@ class PipelinesControllerTest {
         val body =
             """{"schema_version":1,"name":"monthly_revenue","display_name":"Monthly Revenue",""" +
                 """"description":"d","parameters":{},"settings":{"tempdb":{"engine":"H2"}},"nodes":[]}"""
-        every { validator.validateOrThrow(any(), any()) } answers { firstArg() }
+        every { validator.validateOrThrow(any(), any(), allowDraftPipelineReferences = true) } answers { firstArg() }
         val draftDetail =
             PipelineVersionDetail(
                 pipelineId = pipelineId,
@@ -302,7 +302,7 @@ class PipelinesControllerTest {
         val body =
             """{"schema_version":1,"name":"monthly_revenue","display_name":"Monthly Revenue",""" +
                 """"description":"d","parameters":{},"settings":{"tempdb":{"engine":"H2"}},"nodes":[]}"""
-        every { validator.validateOrThrow(any(), any()) } answers { firstArg() }
+        every { validator.validateOrThrow(any(), any(), allowDraftPipelineReferences = true) } answers { firstArg() }
         val storedBody = """{"schema_version":1,"name":"monthly_revenue"}"""
         // versioning §5.1: identical body ⇒ the service returns the RELEASED detail and
         // the STORED body; the response must say so plainly — not a 4xx, not a draft.

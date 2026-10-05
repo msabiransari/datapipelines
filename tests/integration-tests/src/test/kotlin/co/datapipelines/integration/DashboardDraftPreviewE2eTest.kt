@@ -315,10 +315,13 @@ class DashboardDraftPreviewE2eTest {
                 .asSession(ADMIN)
                 .header("If-Match", hash)
                 .post("/api/v1/dashboards/$DRAFT_PIN_BOARD/release")
-        release.statusCode shouldBe 409
-        release.jsonPath().getString("error.code") shouldBe "dashboard.release.dependency_not_released"
+        withClue(release.asString().take(EXCERPT)) {
+            release.statusCode shouldBe 409
+            release.jsonPath().getString("error.code") shouldBe "dashboard.release.dependency_not_released"
+        }
         sql(
-            "UPDATE dashboard_versions SET status = 'RELEASED', released_at = NOW(), released_by = '$ADMIN_ID' WHERE dashboard_id = '$DRAFT_PIN_BOARD'",
+            "UPDATE dashboard_versions SET status = 'RELEASED', released_at = NOW(), released_by = '$ADMIN_ID' " +
+                "WHERE dashboard_id = '$DRAFT_PIN_BOARD'",
         )
         sql("UPDATE dashboards SET current_version = 1 WHERE id = '$DRAFT_PIN_BOARD'")
         try {
@@ -328,7 +331,8 @@ class DashboardDraftPreviewE2eTest {
             config.jsonPath().getString("error.details.reason") shouldBe "not_released"
         } finally {
             sql(
-                "UPDATE dashboard_versions SET status = 'DRAFT', released_at = NULL, released_by = NULL WHERE dashboard_id = '$DRAFT_PIN_BOARD'",
+                "UPDATE dashboard_versions SET status = 'DRAFT', released_at = NULL, released_by = NULL " +
+                    "WHERE dashboard_id = '$DRAFT_PIN_BOARD'",
             )
             sql("UPDATE dashboards SET current_version = NULL WHERE id = '$DRAFT_PIN_BOARD'")
         }
@@ -681,7 +685,8 @@ class DashboardDraftPreviewE2eTest {
                 '/',
             )}","sources":[{"name":"s1","pipeline":{"name":"$PIPELINE","version":1},"parameters":{}}],""" +
                 """"visualizations":[{"name":"v1","type":"visualization","visualization":{"name":"$visualization","version":1},""" +
-                """"inputs":{"main":{"source":"s1"}}}],"layout":{}}"""
+                """"inputs":{"main":{"source":"s1"}}}],"layout":{"columns":12,"grid":[""" +
+                """{"name":"v1","x":0,"y":0,"w":12,"h":4}]}}"""
         sql(
             "INSERT INTO dashboards (id, workspace_id, name, display_name, description, current_version, created_by) " +
                 "VALUES ('$id', '$WORKSPACE_ID', '$name', '$name', '', ${currentVersion ?: "NULL"}, '$ADMIN_ID')",

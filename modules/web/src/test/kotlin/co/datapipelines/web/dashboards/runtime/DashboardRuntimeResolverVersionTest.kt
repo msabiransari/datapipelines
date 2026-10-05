@@ -29,7 +29,8 @@ import java.util.UUID
 /**
  * The resolver's `version` parameter (#369 R2): absent is [DashboardService.findServed] unchanged — the current
  * RELEASED version; a value is [DashboardService.findServedVersion] — a DRAFT or RELEASED version by number — and
- * an absent, discarded or lens-hidden one is the family's 404 naming the version the caller named. Draft pins are admitted only for a named draft dashboard; released dashboards retain the release-only policy.
+ * an absent, discarded or lens-hidden one is the family's 404 naming the version the caller named. Draft pins
+ * are admitted only for a named draft dashboard; released dashboards retain the release-only policy.
  */
 class DashboardRuntimeResolverVersionTest {
     private val workspaceId = UUID.randomUUID()

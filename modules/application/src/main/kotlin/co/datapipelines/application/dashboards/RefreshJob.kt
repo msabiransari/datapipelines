@@ -23,7 +23,7 @@ class TargetSpec(
     val timeoutSeconds: Int?,
 )
 
-/** One distinct execution to run: its resolved pipeline release and the parameters it launches with. */
+/** One distinct execution to run: its resolved pipeline version and the parameters it launches with. */
 class InvocationSpec(
     val id: String,
     val pipelineId: UUID,

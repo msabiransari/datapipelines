@@ -53,21 +53,7 @@ class RecordingSourceStarter(
         onRecorded: (UUID) -> Unit,
     ): SourceOutcome {
         val pipeline = launch.pipeline
-        val admission: (Pipeline, UUID, Int) -> Unit = { body, id, version ->
-            val status = pipelines.findVersionDetail(launch.workspaceId, id, version)?.status
-            if (status == null || !PipelineVersionStatus.eligibleForPointer(status, draftsEligible = launch.allowDraftDependencies)) {
-                throw DatapipelinesException(
-                    code = PipelineErrorCodes.Dashboard.RUNTIME_DEPENDENCY_MISSING,
-                    message = "A dashboard source pipeline version is no longer eligible for execution.",
-                )
-            }
-            if (!readOnly.check(body, launch.workspaceId).isValid) {
-                throw DatapipelinesException(
-                    code = PipelineErrorCodes.Dashboard.SOURCE_NOT_READ_ONLY,
-                    message = "Dashboard source pipelines must remain read-only, including every child pipeline.",
-                )
-            }
-        }
+        val admission = admission(launch)
         try {
             admission(pipeline, launch.pipelineId, launch.pipelineVersion)
             ParameterBinder(
@@ -113,4 +99,21 @@ class RecordingSourceStarter(
             SourceOutcome.Failed(null, e.code)
         }
     }
+
+    private fun admission(launch: SourceLaunch): (Pipeline, UUID, Int) -> Unit =
+        { body, id, version ->
+            val status = pipelines.findVersionDetail(launch.workspaceId, id, version)?.status
+            if (status == null || !PipelineVersionStatus.eligibleForPointer(status, draftsEligible = launch.allowDraftDependencies)) {
+                throw DatapipelinesException(
+                    code = PipelineErrorCodes.Dashboard.RUNTIME_DEPENDENCY_MISSING,
+                    message = "A dashboard source pipeline version is no longer eligible for execution.",
+                )
+            }
+            if (!readOnly.check(body, launch.workspaceId).isValid) {
+                throw DatapipelinesException(
+                    code = PipelineErrorCodes.Dashboard.SOURCE_NOT_READ_ONLY,
+                    message = "Dashboard source pipelines must remain read-only, including every child pipeline.",
+                )
+            }
+        }
 }

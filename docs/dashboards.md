@@ -844,7 +844,8 @@ tree had just linked; it does not any more. The five tabs:
   `htmx:beforeHistorySave` hook.
 - **Overview** — the viewed version's definition, read-only: the sources with their pinned
   pipeline versions and statuses, the parameter set, the pinned visualizations with each
-  pin's status. DRAFT pins are available during draft preview and must be released before publication, the layout summary. No authoring control anywhere: the browser
+  pin's status, and the layout summary. DRAFT pins are available during draft preview and
+  must be released before publication. No authoring control anywhere: the browser
   never authors a dashboard (#396) — agents author over MCP, and a person releases from the
   Versions tab.
 - **Refreshes** — the events pane full width; the board pane keeps its own beside the board.

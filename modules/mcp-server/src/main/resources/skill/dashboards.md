@@ -28,7 +28,7 @@ Build in this order — each step's refusal names the path to fix.
    Published boards and release/import still require released dependencies throughout the graph.
    Preview an explicitly selected draft version in the dashboard workspace; no dependency release is needed.
    Draft edits, including nested pipelines and template imports, invalidate the mounted configuration.
-   A SQL source's columns are what its release RECORDED from its last run — `dashboards_validate` judges
+   A SQL source's columns are what its pinned version RECORDED from its last run — `dashboards_validate` judges
    your visualization inputs against that record at save, so run the draft before handing back for release.
 3. **Create the visualization** with `visualizations_create`: `renderer`, `inputs` (the columns you will
    feed it), `config` with every path you bind already present (`"x": []`), `bindings` from a path to a

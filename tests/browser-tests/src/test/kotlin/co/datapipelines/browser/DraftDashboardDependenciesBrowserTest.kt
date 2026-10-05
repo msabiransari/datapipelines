@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test
 /** #459: a browser builds and runs an entirely draft graph through the real authoring API. */
 class DraftDashboardDependenciesBrowserTest : DashboardBrowserSuite() {
     @Test
+    @Suppress("LongMethod") // creation, initial render, parameter change, edit and discard are one ordered API/browser experiment
     fun `all draft dependencies render through nested composition selectors imports and transforms`() {
         startTrace()
         val root = ready("draftdeps")
@@ -44,7 +45,8 @@ class DraftDashboardDependenciesBrowserTest : DashboardBrowserSuite() {
             "/api/v1/templates",
             sqlTemplate(
                 selector,
-                "SELECT CAST(:kind AS TEXT) || '-1' AS value, CAST(:kind AS TEXT) || '-1' AS display_value, true AS is_default ORDER BY value",
+                "SELECT CAST(:kind AS TEXT) || '-1' AS value, " +
+                    "CAST(:kind AS TEXT) || '-1' AS display_value, true AS is_default ORDER BY value",
             ),
             201,
         )
@@ -178,7 +180,8 @@ class DraftDashboardDependenciesBrowserTest : DashboardBrowserSuite() {
         )
         // A discarded nested import is refused in the page before a source can run.
         sql(
-            "UPDATE template_versions SET status = 'DISCARDED', discarded_at = NOW() WHERE template_id = (SELECT id FROM templates WHERE name = '$inner')",
+            "UPDATE template_versions SET status = 'DISCARDED', discarded_at = NOW() " +
+                "WHERE template_id = (SELECT id FROM templates WHERE name = '$inner')",
         )
         page.reload()
         page.waitForSelector("#dp-board-refusal:not([hidden])")

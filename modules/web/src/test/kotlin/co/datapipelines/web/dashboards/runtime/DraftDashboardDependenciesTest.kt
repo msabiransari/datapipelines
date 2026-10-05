@@ -12,6 +12,7 @@ import co.datapipelines.templates.TemplateImport
 import co.datapipelines.templates.TemplateService
 import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNotBe
 import io.mockk.every
 import io.mockk.mockk
 import org.junit.jupiter.api.Test
@@ -93,6 +94,19 @@ class DraftDashboardDependenciesTest {
     }
 
     @Test
+    fun `identity includes the loaded body even when detail has the same hash`() {
+        val before = hashes()
+        every { child.executable.bodyJson } returns "child-loaded-after-edit"
+        hashes() shouldNotBe before
+    }
+
+    @Test
+    fun `a nested pipeline removed between body and detail reads is refused`() {
+        every { repository.findVersionDetail(workspace, child.record.id, 2) } returns null
+        assertThrows<IllegalStateException> { hashes() }.message shouldBe "source|child|not_found"
+    }
+
+    @Test
     fun `discarded nested pipelines fail closed instead of contributing an empty hash`() {
         every { repository.findVersionDetail(workspace, child.record.id, 2) } returns
             mockk {
@@ -112,6 +126,9 @@ class DraftDashboardDependenciesTest {
 
     @Test
     fun `cycles terminate and each exact pin contributes once`() {
+        every { child.executable.pipeline.nodes } returns listOf(node(TemplateRef("sql", 2), PipelineNodeRef("root", 2)))
+        every { repository.findByNameAnyStatus(workspace, "root") } returns root.record
+        every { pipelines.findExecutable(workspace, ReadLens.Everything, root.record, 2) } returns root.executable
         every { library.imports } returns listOf(TemplateImport("sql", 2, "cycle"))
         hashes().size shouldBe 6
         every { sql.imports } returns emptyList()
