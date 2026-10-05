@@ -2,6 +2,7 @@ package co.datapipelines.browser
 
 import com.microsoft.playwright.Page
 import com.microsoft.playwright.options.RequestOptions
+import com.microsoft.playwright.options.WaitForSelectorState
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldNotBeEmpty
@@ -333,6 +334,157 @@ class VisualizationWorkspaceBrowserTest : VisualizationBrowserSuite() {
     }
 
     private fun historyLength(): Int = (page.evaluate("() => history.length") as Number).toInt()
+
+    @Test
+    @Order(7)
+    @Suppress("LongMethod") // two real cached-history walks share one document and the passive observation ledger
+    fun `#444 - cached Back remounts Preview, switches real fixtures, and refits only live instances`() {
+        startTrace()
+        page.setViewportSize(DESKTOP_W, DESKTOP_H)
+        val root = ready("vrestore")
+        val (id, _) = createVisualization("$root/charts/units")
+        observePreviewHistory()
+        val errors = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val requested = java.util.concurrent.CopyOnWriteArrayList<String>()
+        page.onConsoleMessage {
+            val text = it.text()
+            // BrowserSuite sets aside this exact empty CSSOM style hash too; all real refusals still fail.
+            val emptyStyle = text.startsWith("Applying inline style") && text.contains("'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='")
+            if (it.type() == "error" && !emptyStyle) errors += text
+        }
+        page.onPageError { errors += it }
+        page.onRequest { requested += it.method() + " " + it.url() }
+        page.navigate("$baseUrl/visualizations/$id")
+        awaitPreviewResult("0")
+        previewObservation("mounts.length") shouldBe 1
+        previewObservation("selectors.length") shouldBe 1
+        val documentMarker = page.evaluate("() => window.__v444.documentMarker")
+        val swapListeners = previewObservation("swaps")
+        swapListeners shouldBe 1
+        val previewRequests = requested.count { it.contains("/partials/visualizations/$id/preview") }
+        previewRequests shouldBe 1
+
+        for (cycle in 1..2) {
+            page.evaluate("() => { window.__v444.before = document.querySelector('#viz-preview-data'); }")
+            page.click(".app-nav-link[data-nav-section='/templates']")
+            page.waitForSelector("#template-list-wrapper")
+            page.evaluate("() => window.__v444.documentMarker") shouldBe documentMarker
+            withClue("the real boosted leave saved the wired Preview in htmx's cache") {
+                page.evaluate(
+                    "id => JSON.parse(sessionStorage.getItem('htmx-history-cache') || '[]').some(" +
+                        "e => e.url.startsWith('/visualizations/' + id) && e.content.includes('data-viz-wired=\"1\"'))",
+                    id,
+                ) shouldBe true
+            }
+            page.goBack()
+            page.waitForFunction("n => window.__v444.restores.length === n", cycle)
+            page.waitForSelector(
+                "#viz-pane-preview:not([hidden]) #viz-preview-data[data-viz-wired='1']",
+                Page.WaitForSelectorOptions().setState(WaitForSelectorState.ATTACHED),
+            )
+            page.waitForFunction("() => document.querySelector('.viz-workspace .dp-ws-root').__dpWsWired === true")
+            withClue("Back used a real htmx cache hit, restoring a new marker-carrying node in the same document") {
+                page.evaluate(
+                    "() => { const o = window.__v444, b = document.querySelector('#viz-preview-data');" +
+                        " return o.hits.length === o.restores.length && o.misses === 0 && b !== o.before && !o.before.isConnected; }",
+                ) shouldBe true
+                page.evaluate("() => window.__v444.documentMarker") shouldBe documentMarker
+            }
+            // This assertion rejects a static ready marker copied from the cache: only real mounts are counted.
+            withClue("post-Back selected case must mount afresh (cycle $cycle)") {
+                previewObservation("mounts.length") shouldBe cycle * 2
+            }
+            previewObservation("selectors.length") shouldBe cycle + 1
+            previewObservation("swaps") shouldBe swapListeners
+            page.evaluate(
+                "() => { const o = window.__v444, b = document.querySelector('#viz-preview-data'), s = window.VisualizationWorkspacePreview;" +
+                    " const m = o.mounts.filter(m => m.block === b); return m.length === 1 && m[0].instance !== null && s.instances[m[0].index] === m[0].instance; }",
+            ) shouldBe true
+            awaitPreviewResult("0")
+            page.selectOption("[data-viz-case-select]", "1")
+            awaitPreviewResult("1")
+            previewObservation("mounts.length") shouldBe cycle * 2 + 1
+            page.selectOption("[data-viz-case-select]", "0")
+            awaitPreviewResult("0")
+            page.evaluate("() => { window.__v444.resizesBefore = window.__v444.mounts.reduce((n, m) => n + m.resizes, 0); }")
+            page.click("#viz-tab-overview")
+            awaitPane(page, "overview")
+            page.click("#viz-tab-preview")
+            awaitPreviewResult("0")
+            page.evaluate(
+                "() => { const o = window.__v444, b = document.querySelector('#viz-preview-data');" +
+                    " return o.mounts.reduce((n, m) => n + m.resizes, 0) === o.resizesBefore + 1 &&" +
+                    " o.mounts.filter(m => !m.section.isConnected).every(m => m.resizes === m.frozenResizes) &&" +
+                    " o.mounts.filter(m => m.block === b && m.index === 0)[0].resizes > 0; }",
+            ) shouldBe true
+            previewObservation("mounts.length") shouldBe cycle * 2 + 1
+            shot("444-preview-restored-$cycle")
+            println(
+                "444 cache cycle=$cycle hits=${previewObservation(
+                    "hits.length",
+                )} mounts=${previewObservation("mounts.length")} selectors=${previewObservation("selectors.length")} swaps=$swapListeners",
+            )
+        }
+        requested.filter { it.contains("/api/v1/") }.shouldBeEmpty()
+        requested.count { it.contains("/partials/visualizations/$id/preview") } shouldBe previewRequests
+        requested.count { it.contains("/visualizations/$id") && !it.contains("/partials/") } shouldBe 1
+        errors.shouldBeEmpty()
+        drainCspViolations().shouldBeEmpty()
+    }
+
+    /** Observes real registrations, mounts and resizes; every wrapper delegates to the original implementation. */
+    private fun observePreviewHistory() {
+        page.addInitScript(
+            """(() => {
+              const o = window.__v444 = { documentMarker: Math.random(), mounts: [], selectors: [], swaps: 0, hits: [], restores: [], misses: 0 };
+              const add = EventTarget.prototype.addEventListener;
+              EventTarget.prototype.addEventListener = function(type, fn, options) {
+                if (type === 'change' && this.matches && this.matches('[data-viz-case-select]')) o.selectors.push(this);
+                if (type === 'htmx:afterSwap' && String(fn).includes('reg.handler(event)')) o.swaps++;
+                return add.call(this, type, fn, options);
+              };
+              let mount;
+              Object.defineProperty(window, 'DatapipelinesPreviewMount', { configurable: true,
+                get: () => mount,
+                set: real => { mount = function(...args) {
+                  const instance = real.apply(this, args);
+                  const section = args[3], block = section.closest('[data-dp-pane]').querySelector('#viz-preview-data');
+                  const m = { instance, section, block, index: Number(section.dataset.vizCaseIndex), resizes: 0, frozenResizes: 0, ready: false };
+                  o.mounts.push(m);
+                  if (instance) {
+                    instance.ready.then(() => { m.ready = true; });
+                    const resize = instance.resize;
+                    instance.resize = function(...a) { m.resizes++; return resize.apply(this, a); };
+                  }
+                  return instance;
+                }; }
+              });
+              document.addEventListener('htmx:historyCacheHit', e => { o.hits.push(e.detail.path); });
+              document.addEventListener('htmx:historyCacheMiss', () => { o.misses++; });
+              document.addEventListener('htmx:historyRestore', e => { o.restores.push(e.detail.path); });
+              document.addEventListener('htmx:beforeHistorySave', () => { o.mounts.forEach(m => { m.frozenResizes = m.resizes; }); });
+            })();""",
+        )
+    }
+
+    private fun previewObservation(path: String): Int =
+        (page.evaluate("p => p.split('.').reduce((o, k) => o[k], window.__v444)", path) as Number).toInt()
+
+    /** Fresh runtime readiness plus visible fixture output; snapshot attributes alone cannot satisfy this check. */
+    private fun awaitPreviewResult(index: String) {
+        page.waitForFunction(
+            """i => {
+              const s = document.querySelector('#viz-pane-preview section[data-viz-case-index="' + i + '"]');
+              const o = window.__v444, b = document.querySelector('#viz-preview-data');
+              if (!s || s.hidden || s.closest('[data-dp-pane]').hidden || !o.mounts.some(m => m.block === b && m.index === Number(i) && m.ready)) return false;
+              if (i === '1') return s.querySelector('.dp-dashboard-status')?.getAttribute('data-dp-state') === 'no-data';
+              const g = s.querySelector('.js-plotly-plot');
+              return g && g._fullData && g._fullData.length === 2 && JSON.stringify(Array.from(g._fullData[0].y)) === '[3,5,2]' &&
+                JSON.stringify(Array.from(g._fullData[1].y)) === '[4,4,4]';
+            }""",
+            index,
+        )
+    }
 
     private fun historyStat(path: String): Int =
         (
