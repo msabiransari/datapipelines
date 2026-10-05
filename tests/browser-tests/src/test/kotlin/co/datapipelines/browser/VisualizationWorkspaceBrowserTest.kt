@@ -349,7 +349,9 @@ class VisualizationWorkspaceBrowserTest : VisualizationBrowserSuite() {
         page.onConsoleMessage {
             val text = it.text()
             // BrowserSuite sets aside this exact empty CSSOM style hash too; all real refusals still fail.
-            val emptyStyle = text.startsWith("Applying inline style") && text.contains("'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='")
+            val emptyStyle =
+                text.startsWith("Applying inline style") &&
+                    text.contains("'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='")
             if (it.type() == "error" && !emptyStyle) errors += text
         }
         page.onPageError { errors += it }
@@ -397,8 +399,10 @@ class VisualizationWorkspaceBrowserTest : VisualizationBrowserSuite() {
             previewObservation("selectors.length") shouldBe cycle + 1
             previewObservation("swaps") shouldBe swapListeners
             page.evaluate(
-                "() => { const o = window.__v444, b = document.querySelector('#viz-preview-data'), s = window.VisualizationWorkspacePreview;" +
-                    " const m = o.mounts.filter(m => m.block === b); return m.length === 1 && m[0].instance !== null && s.instances[m[0].index] === m[0].instance; }",
+                "() => { const o = window.__v444, b = document.querySelector('#viz-preview-data');" +
+                    " const s = window.VisualizationWorkspacePreview;" +
+                    " const m = o.mounts.filter(m => m.block === b); return m.length === 1 && m[0].instance !== null &&" +
+                    " s.instances[m[0].index] === m[0].instance; }",
             ) shouldBe true
             awaitPreviewResult("0")
             page.selectOption("[data-viz-case-select]", "1")
