@@ -67,26 +67,27 @@ class DashboardLifecycleDialogController(
     @PostMapping("/partials/dashboards/{id}/lifecycle/release")
     @RequiredScope(Permission.DASHBOARD_RELEASE)
     fun release(
-        @Suppress("UNUSED_PARAMETER") // the form posts it; the redirect target is the Versions tab regardless
         @PathVariable id: UUID,
+        @RequestParam bodyHash: String,
         @RequestParam(required = false, defaultValue = "false") releasePinnedVisualizations: Boolean,
     ): ResponseEntity<String> {
         val principal = LifecycleVerbs.requireSession()
         val workspaceId = principal.requireWorkspace().id
-        // The hash the DIALOG read (§4.2: you release what you tested); a draft that changed
-        // in between is a stale hash and the service answers dashboard.version.conflict.
-        val draft =
-            dashboards.findWorking(workspaceId, ReadLens.Everything, id)?.takeIf { it.detail.status == PipelineVersionStatus.DRAFT }
-                ?: throw DatapipelinesException(
-                    code = DashboardErrorCodes.VERSION_NOT_DRAFT,
-                    message = "This dashboard has no draft to release.",
-                    details = mapOf("dashboard_id" to id.toString()),
-                )
+        // #416 — [bodyHash] is the hash the DIALOG read (§4.2: you release what you tested). The
+        // draft is read here only to refuse the no-draft case; its CURRENT hash is never the one
+        // released, so a draft that changed after the dialog opened is a stale hash and the
+        // service answers dashboard.version.conflict.
+        dashboards.findWorking(workspaceId, ReadLens.Everything, id)?.takeIf { it.detail.status == PipelineVersionStatus.DRAFT }
+            ?: throw DatapipelinesException(
+                code = DashboardErrorCodes.VERSION_NOT_DRAFT,
+                message = "This dashboard has no draft to release.",
+                details = mapOf("dashboard_id" to id.toString()),
+            )
         // D61: the ONE consent — without it a DRAFT visualization pin refuses
         // dashboard.release.dependency_not_released as it always has; the server, never the
         // checkbox, is the guard. The set and the source pins have no cascade: RELEASED or refused.
         val released =
-            dashboards.release(workspaceId, id, draft.detail.bodyHash, principal.userId, releasePinnedVisualizations)
+            dashboards.release(workspaceId, id, bodyHash, principal.userId, releasePinnedVisualizations)
         // #332 — the release audit, the REST route's twin: each cascaded visualization's own event
         // first, then the dashboard's own event naming them.
         val cascade = LifecycleVerbs.FamilyCascade("dashboard_id", id, released.version.detail.version)

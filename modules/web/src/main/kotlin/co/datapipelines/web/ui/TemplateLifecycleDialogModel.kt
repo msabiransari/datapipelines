@@ -41,6 +41,14 @@ class TemplateLifecycleDialogModel(
         val updatedBy: String,
         val updatedAgo: String,
         val updatedAt: Instant?,
+        /**
+         * #416 — the body hash of the SAME draft the dialog's version and last-writer facts come
+         * from; the form posts it back and the release is made AT it (a changed draft answers
+         * `template.version.conflict`). Empty on the no-draft branch, whose [refusal] renders no
+         * form. The default keeps the render tests' hand-built dialogs compiling; both production
+         * constructions pass it explicitly.
+         */
+        val bodyHash: String = "",
         /** `template.version.not_draft`: the dialog opens and says why there is no button. */
         val refusal: Refusal?,
     )
@@ -57,6 +65,7 @@ class TemplateLifecycleDialogModel(
                 updatedBy = "",
                 updatedAgo = "",
                 updatedAt = null,
+                bodyHash = "",
                 refusal = Refusal("template.version.not_draft", "This template has no draft — nothing to release."),
             )
         }
@@ -66,6 +75,7 @@ class TemplateLifecycleDialogModel(
             updatedBy = draft.updatedBy?.let { actorName(it) } ?: actorName(draft.createdBy),
             updatedAgo = RelativeTime.since(draft.updatedAt ?: draft.createdAt, Instant.now()),
             updatedAt = draft.updatedAt ?: draft.createdAt,
+            bodyHash = draft.bodyHash,
             refusal = null,
         )
     }

@@ -70,27 +70,29 @@ class PipelineLifecycleDialogController(
     fun release(
         session: HttpSession,
         @PathVariable id: UUID,
+        @RequestParam bodyHash: String,
         @RequestParam(required = false) overrideChecksReason: String?,
         @RequestParam(required = false, defaultValue = "false") releasePinnedTemplates: Boolean,
     ): ResponseEntity<String> {
         val principal = LifecycleVerbs.requireSession()
         val workspaceId = principal.requireWorkspace().id
-        // The hash the DIALOG read (§4.2: you release what you tested); a draft that changed
-        // in between is a stale hash and the service answers pipeline.version.conflict.
-        val draft =
-            pipelines.findDraft(workspaceId, ReadLens.Everything, id)
-                ?: throw DatapipelinesException(
-                    code = PipelineErrorCodes.Versioning.NOT_DRAFT,
-                    message = "This pipeline has no draft to release.",
-                    details = mapOf("pipeline_id" to id.toString()),
-                )
+        // #416 — [bodyHash] is the hash the DIALOG read (§4.2: you release what you tested). The
+        // draft is read here only to refuse the no-draft case; its CURRENT hash is never the one
+        // released, so a draft that changed after the dialog opened is a stale hash and the
+        // service answers pipeline.version.conflict.
+        pipelines.findDraft(workspaceId, ReadLens.Everything, id)
+            ?: throw DatapipelinesException(
+                code = PipelineErrorCodes.Versioning.NOT_DRAFT,
+                message = "This pipeline has no draft to release.",
+                details = mapOf("pipeline_id" to id.toString()),
+            )
         // 140: a failing check run refuses with pipeline.check.failed unless the dialog's
         // override disclosure supplied the reason — it arrives audited on the release event.
         // 142: the consent checkbox ("Also release these N draft templates") posts
         // releasePinnedTemplates; without it a DRAFT pin refuses template_not_released as
         // it always has, and the server — never the checkbox — is the guard.
         val released =
-            pipelines.release(workspaceId, id, draft.bodyHash, principal.userId, overrideChecksReason, releasePinnedTemplates)
+            pipelines.release(workspaceId, id, bodyHash, principal.userId, overrideChecksReason, releasePinnedTemplates)
         // T187 — the release is the D4 human step; it is audited on every surface that offers
         // it — one event per cascaded template first, then the pipeline's (142).
         LifecycleVerbs.auditRelease(audit, principal, workspaceId, id, released)

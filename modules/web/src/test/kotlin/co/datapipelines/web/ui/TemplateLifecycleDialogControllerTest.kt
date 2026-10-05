@@ -82,6 +82,7 @@ class TemplateLifecycleDialogControllerTest {
                 post("/partials/templates/lifecycle/release")
                     .contentType(MediaType.APPLICATION_FORM_URLENCODED)
                     .param("name", PATH)
+                    .param("bodyHash", "h2")
                     .param("from", "editor")
                     .header("HX-Request", "true"),
             ).andExpect(
@@ -104,8 +105,91 @@ class TemplateLifecycleDialogControllerTest {
                 post("/partials/templates/lifecycle/release")
                     .contentType(MediaType.APPLICATION_FORM_URLENCODED)
                     .param("name", PATH)
+                    .param("bodyHash", "h2")
                     .header("HX-Request", "true"),
             ).andExpect(header().string("HX-Redirect", "/templates/nyc/mobility/probe.sql?tab=versions&ok=released"))
+    }
+
+    @Test
+    fun `release - 416 - the posted hash is released even when the draft has moved on since the dialog opened`() {
+        // The draft is at h3 NOW (draftDetail is h2 — build a moved one); the dialog read h2.
+        every { templates.findDraftDetail(WORKSPACE, PATH) } returns draftDetail().copy(bodyHash = "h3-fresh")
+        every { releases.release(WORKSPACE, PATH, "h2", USER) } returns
+            TemplateReleaseService.Released(draftDetail().copy(status = PipelineVersionStatus.RELEASED), template(version = 2))
+
+        mvc
+            .perform(
+                post("/partials/templates/lifecycle/release")
+                    .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                    .param("name", PATH)
+                    .param("bodyHash", "h2")
+                    .header("HX-Request", "true"),
+            ).andExpect(header().string("HX-Redirect", "/templates/nyc/mobility/probe.sql?tab=versions&ok=released"))
+
+        verify(exactly = 1) { releases.release(WORKSPACE, PATH, "h2", USER) }
+        verify(exactly = 0) { releases.release(any(), any(), "h3-fresh", any()) }
+    }
+
+    @Test
+    fun `release - 416 - a stale dialog hash is forwarded as posted, never replaced by the fresh draft's, and answers the 409 conflict`() {
+        every { templates.findDraftDetail(WORKSPACE, PATH) } returns draftDetail().copy(bodyHash = "h3-fresh")
+        every { releases.release(WORKSPACE, PATH, "h2-stale", USER) } throws
+            DatapipelinesException(
+                code = PipelineErrorCodes.Template.VERSION_CONFLICT,
+                message = "The draft changed since you loaded it.",
+            )
+
+        val response =
+            mvc
+                .perform(
+                    post("/partials/templates/lifecycle/release")
+                        .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                        .param("name", PATH)
+                        .param("bodyHash", "h2-stale")
+                        .header("HX-Request", "true"),
+                ).andExpect(status().isConflict)
+                .andExpect(header().string("HX-Retarget", "#toast"))
+                .andReturn()
+                .response.contentAsString
+
+        response shouldContain "template.version.conflict"
+        verify(exactly = 1) { releases.release(WORKSPACE, PATH, "h2-stale", USER) }
+        verify(exactly = 0) { releases.release(any(), any(), "h3-fresh", any()) }
+        audit.events shouldBe emptyList()
+    }
+
+    @Test
+    fun `release - 416 - a missing hash is a 400 at binding and neither the draft read nor the service runs`() {
+        mvc
+            .perform(
+                post("/partials/templates/lifecycle/release")
+                    .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                    .param("name", PATH)
+                    .header("HX-Request", "true"),
+            ).andExpect(status().isBadRequest)
+
+        verify(exactly = 0) { templates.findDraftDetail(any(), any()) }
+        verify(exactly = 0) { releases.release(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `release - 416 - a hostile hash value reaches the service verbatim and is the conflict, never a 500`() {
+        val hostile = "'\"; DROP TABLE template_version; --<script>" + "x".repeat(5000)
+        every { templates.findDraftDetail(WORKSPACE, PATH) } returns draftDetail()
+        every { releases.release(WORKSPACE, PATH, hostile, USER) } throws
+            DatapipelinesException(
+                code = PipelineErrorCodes.Template.VERSION_CONFLICT,
+                message = "The draft changed since you loaded it.",
+            )
+
+        mvc
+            .perform(
+                post("/partials/templates/lifecycle/release")
+                    .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                    .param("name", PATH)
+                    .param("bodyHash", hostile)
+                    .header("HX-Request", "true"),
+            ).andExpect(status().isConflict)
     }
 
     @Test

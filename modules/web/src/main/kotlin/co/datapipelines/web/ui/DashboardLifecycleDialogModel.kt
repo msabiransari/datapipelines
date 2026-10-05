@@ -85,6 +85,14 @@ class DashboardLifecycleDialogModel(
         val updatedAgo: String,
         val updatedAt: Instant?,
         val pins: List<PinView>,
+        /**
+         * #416 — the body hash of the SAME draft the dialog's version and last-writer facts come
+         * from; the form posts it back and the release is made AT it (a changed draft answers
+         * `dashboard.version.conflict`). Empty on the no-draft branch, whose [refusal] renders no
+         * form. The default keeps hand-built dialogs compiling; both production constructions
+         * pass it explicitly.
+         */
+        val bodyHash: String = "",
         /** The no-draft branch: the dialog opens and says why there is no button. */
         val refusal: Refusal?,
     ) {
@@ -121,6 +129,7 @@ class DashboardLifecycleDialogModel(
                 updatedAgo = "",
                 updatedAt = null,
                 pins = emptyList(),
+                bodyHash = "",
                 refusal = refusal(DashboardErrorCodes.VERSION_NOT_DRAFT, "This dashboard has no draft — nothing to release."),
             )
         }
@@ -155,6 +164,7 @@ class DashboardLifecycleDialogModel(
             updatedAgo = RelativeTime.since(working.detail.updatedAt ?: working.detail.createdAt, Instant.now()),
             updatedAt = working.detail.updatedAt ?: working.detail.createdAt,
             pins = pins,
+            bodyHash = working.detail.bodyHash,
             refusal = null,
         )
     }

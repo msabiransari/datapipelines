@@ -21,14 +21,19 @@ import co.datapipelines.web.ui.VisualizationUiFixtures.detail
 import co.datapipelines.web.ui.VisualizationUiFixtures.version
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
+import org.springframework.http.MediaType
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
 import org.springframework.security.core.context.SecurityContextHolder
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
+import org.springframework.test.web.servlet.setup.MockMvcBuilders
 import org.springframework.ui.ExtendedModelMap
 import java.util.UUID
 
@@ -73,14 +78,15 @@ class VisualizationLifecycleDialogControllerTest {
     // ------------------------------------------------------------------ release
 
     @Test
-    fun `release passes the draft's hash and the consent, audits the cascaded template first, and returns to the tab`() {
+    fun `release passes the DIALOG's hash and the consent, audits the cascaded template first, and returns to the tab`() {
         authenticate()
-        draftWorking()
+        // #416: the draft is at v3 / hash-3 NOW; the form posted hash-2, the one the dialog read.
+        draftWorking(version = 3)
         val released = version(vizId, workspaceId, 2, PipelineVersionStatus.RELEASED, currentVersion = 2)
         every { visualizations.release(workspaceId, vizId, "hash-2", any(), true) } returns
             VisualizationReleased(released, listOf(TemplateRef("acme/templates/t", 3)))
 
-        val answer = controller.release(vizId, releasePinnedTemplates = true, from = "preview")
+        val answer = controller.release(vizId, bodyHash = "hash-2", releasePinnedTemplates = true, from = "preview")
 
         location(answer) shouldBe "/visualizations/$vizId?tab=preview&ok=released_with_templates"
         audit.events.map { it.first } shouldBe listOf("template.version.released", "visualization.version.released")
@@ -94,7 +100,7 @@ class VisualizationLifecycleDialogControllerTest {
         every { visualizations.release(workspaceId, vizId, "hash-2", any(), false) } returns
             VisualizationReleased(version(vizId, workspaceId, 2, PipelineVersionStatus.RELEASED), emptyList())
 
-        location(controller.release(vizId, releasePinnedTemplates = false, from = null)) shouldBe
+        location(controller.release(vizId, bodyHash = "hash-2", releasePinnedTemplates = false, from = null)) shouldBe
             "/visualizations/$vizId?tab=versions&ok=released"
         audit.events.map { it.first } shouldBe listOf("visualization.version.released")
     }
@@ -104,15 +110,91 @@ class VisualizationLifecycleDialogControllerTest {
         authenticate()
         every { visualizations.findWorking(workspaceId, ReadLens.Everything, vizId) } returns
             version(vizId, workspaceId, 1, PipelineVersionStatus.RELEASED, currentVersion = 1)
-        assertThrows<DatapipelinesException> { controller.release(vizId, false, null) }.code shouldBe
+        assertThrows<DatapipelinesException> { controller.release(vizId, "hash-2", false, null) }.code shouldBe
             VisualizationErrorCodes.VERSION_NOT_DRAFT
 
         draftWorking()
         every { visualizations.release(workspaceId, vizId, "hash-2", any(), false) } throws
             DatapipelinesException(VisualizationErrorCodes.RELEASE_TESTS_MISSING, "no cases")
-        assertThrows<DatapipelinesException> { controller.release(vizId, false, null) }
+        assertThrows<DatapipelinesException> { controller.release(vizId, "hash-2", false, null) }
         audit.events.shouldBeEmpty()
     }
+
+    @Test
+    fun `416 - a stale dialog hash is forwarded as posted, never replaced by the fresh draft's, and is the version conflict`() {
+        authenticate()
+        draftWorking(version = 3)
+        every { visualizations.release(workspaceId, vizId, "hash-stale", any(), false) } throws
+            DatapipelinesException(PipelineErrorCodes.Visualization.VERSION_CONFLICT, "The draft changed since you loaded it.")
+
+        val thrown = assertThrows<DatapipelinesException> { controller.release(vizId, "hash-stale", false, null) }
+
+        thrown.code shouldBe "visualization.version.conflict"
+        verify(exactly = 1) { visualizations.release(workspaceId, vizId, "hash-stale", any(), any()) }
+        verify(exactly = 0) { visualizations.release(any(), any(), "hash-3", any(), any()) }
+        audit.events.shouldBeEmpty()
+    }
+
+    @Test
+    fun `416 - over HTTP the form's body_hash binds, and a stale one answers the 409 toast`() {
+        authenticate()
+        draftWorking(version = 3)
+        every { visualizations.release(workspaceId, vizId, "hash-stale", any(), false) } throws
+            DatapipelinesException(PipelineErrorCodes.Visualization.VERSION_CONFLICT, "The draft changed since you loaded it.")
+
+        val response =
+            mvc()
+                .perform(
+                    post("/partials/visualizations/$vizId/lifecycle/release")
+                        .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                        .param("body_hash", "hash-stale")
+                        .header("HX-Request", "true"),
+                ).andExpect(status().isConflict)
+                .andReturn()
+                .response.contentAsString
+
+        response shouldContain "visualization.version.conflict"
+        verify(exactly = 1) { visualizations.release(workspaceId, vizId, "hash-stale", any(), any()) }
+        verify(exactly = 0) { visualizations.release(any(), any(), "hash-3", any(), any()) }
+    }
+
+    @Test
+    fun `416 - over HTTP a missing hash is a 400 at binding and neither the draft read nor the service runs`() {
+        authenticate()
+
+        mvc()
+            .perform(
+                post("/partials/visualizations/$vizId/lifecycle/release")
+                    .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                    .header("HX-Request", "true"),
+            ).andExpect(status().isBadRequest)
+
+        verify(exactly = 0) { visualizations.findWorking(any(), any(), any()) }
+        verify(exactly = 0) { visualizations.release(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `416 - over HTTP a hostile hash value reaches the service verbatim and is the conflict, never a 500`() {
+        authenticate()
+        draftWorking(version = 3)
+        val hostile = "'\"; DROP TABLE visualization_version; --<script>" + "x".repeat(5000)
+        every { visualizations.release(workspaceId, vizId, hostile, any(), false) } throws
+            DatapipelinesException(PipelineErrorCodes.Visualization.VERSION_CONFLICT, "The draft changed since you loaded it.")
+
+        mvc()
+            .perform(
+                post("/partials/visualizations/$vizId/lifecycle/release")
+                    .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                    .param("body_hash", hostile)
+                    .header("HX-Request", "true"),
+            ).andExpect(status().isConflict)
+    }
+
+    private fun mvc() =
+        MockMvcBuilders
+            .standaloneSetup(controller)
+            .setControllerAdvice(UiExceptionHandler())
+            .build()
 
     // ------------------------------------------------------------------ the redirect whitelist
 
@@ -219,7 +301,7 @@ class VisualizationLifecycleDialogControllerTest {
 
         val calls: List<() -> Any> =
             listOf(
-                { controller.release(vizId, false, null) },
+                { controller.release(vizId, "hash-2", false, null) },
                 { controller.purgeDraft(vizId, 2, "v2", null) },
                 { controller.purgeVersion(vizId, 2, "v2", null) },
                 { controller.discard(vizId, 1, null) },
