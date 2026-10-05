@@ -21,15 +21,24 @@ import co.datapipelines.templates.WorkspaceTemplateEngines
 import co.datapipelines.typesystem.Dialect
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
 import io.mockk.verify
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
+import org.slf4j.LoggerFactory
+import org.springframework.mock.web.MockHttpServletRequest
+import org.springframework.mock.web.MockHttpServletResponse
+import org.springframework.mock.web.MockServletContext
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.ui.ExtendedModelMap
+import org.thymeleaf.context.WebContext
+import org.thymeleaf.spring6.SpringTemplateEngine
+import org.thymeleaf.templateresolver.ClassLoaderTemplateResolver
+import org.thymeleaf.web.servlet.JakartaServletWebApplication
 import java.time.Instant
 import java.util.UUID
 
@@ -225,6 +234,167 @@ class TemplateEditorControllerTest {
         val preview = controller.renderPreview("test/my_template.sql", 1, "SELECT 1", "{oops")
 
         (preview.model["renderError"] as String) shouldContain "Invalid context JSON"
+    }
+
+    // ------------------------------------------------------------------ #448: safe parser refusals
+
+    /**
+     * #448 — the SYNTAX arm: the real mapper's `JsonProcessingException` carries the token it
+     * could not read. The sentinel is asserted absent BEFORE the fixed prose, so restoring this
+     * one catch makes the test fail on the reflected token, not on the wording.
+     */
+    @Test
+    fun `a syntactically malformed context is refused without the parser's token`() {
+        authenticate()
+        stubRenderableTemplate()
+        val sentinel = "sentinelCtxSyntax448"
+
+        val preview =
+            controller.renderPreview("test/my_template.sql", 1, "SELECT 1", """{"x": $sentinel}""")
+
+        val error = preview.model["renderError"] as String
+        error shouldNotContain sentinel
+        error shouldNotContain "at [Source"
+        error shouldNotContain "Unrecognized token"
+        error shouldContain "Invalid context JSON"
+        error shouldContain "expected valid JSON syntax"
+        preview.viewName shouldBe "partials/template-render"
+        preview.model["renderOutput"] shouldBe ""
+        verify(exactly = 0) { engine.render(any(), any()) }
+    }
+
+    /**
+     * #448 — the WRONG-ROOT arm: a syntactically valid JSON scalar reaches the real
+     * `convertValue` wrapper and its `IllegalArgumentException`, whose coercion text quotes the
+     * value. Restoring this catch alone makes the assertion below fail on the reflected token.
+     */
+    @Test
+    fun `a syntactically valid non-object context is refused without the parser's token`() {
+        authenticate()
+        stubRenderableTemplate()
+        val sentinel = "sentinelCtxObject448"
+
+        val preview =
+            controller.renderPreview("test/my_template.sql", 1, "SELECT 1", "\"$sentinel\"")
+
+        val error = preview.model["renderError"] as String
+        error shouldNotContain sentinel
+        error shouldNotContain "Cannot construct instance"
+        error shouldContain "Invalid context JSON"
+        error shouldContain "expected a JSON object"
+        preview.viewName shouldBe "partials/template-render"
+        preview.model["renderOutput"] shouldBe ""
+        verify(exactly = 0) { engine.render(any(), any()) }
+    }
+
+    /** #448 — both refusals render through the real fragment; no reflected payload reaches the HTML. */
+    @Test
+    fun `the context refusals render through the fragment with no reflected payload`() {
+        authenticate()
+        stubRenderableTemplate()
+        val sentinel = "sentinelRender448"
+
+        val syntax =
+            controller.renderPreview("test/my_template.sql", 1, "SELECT 1", """{"x": $sentinel}""")
+        val objectRoot =
+            controller.renderPreview("test/my_template.sql", 1, "SELECT 1", "\"$sentinel\"")
+
+        val syntaxHtml = renderTemplateFragment(syntax.model["renderError"] as String)
+        val objectHtml = renderTemplateFragment(objectRoot.model["renderError"] as String)
+        syntaxHtml shouldNotContain sentinel
+        objectHtml shouldNotContain sentinel
+        syntaxHtml shouldContain "Invalid context JSON"
+        objectHtml shouldContain "Invalid context JSON"
+    }
+
+    /** #448 — an escaped-markup probe: the caller's text is never echoed, escaped or raw. */
+    @Test
+    fun `a markup-bearing non-object context is never reflected into the fragment`() {
+        authenticate()
+        stubRenderableTemplate()
+        val sentinel = "<script>alert('sentinelMarkup448')</script>"
+
+        val preview =
+            controller.renderPreview("test/my_template.sql", 1, "SELECT 1", "\"$sentinel\"")
+
+        val html = renderTemplateFragment(preview.model["renderError"] as String)
+        html shouldNotContain "script"
+        html shouldNotContain "sentinelMarkup448"
+    }
+
+    /** #448 — the refusal log carries the fixed prose, never the caller's token. */
+    @Test
+    fun `the template context refusal log never carries the caller's token`() {
+        authenticate()
+        stubRenderableTemplate()
+        val sentinel = "sentinelLog448"
+        val logger = LoggerFactory.getLogger(TemplateEditorController::class.java) as ch.qos.logback.classic.Logger
+        val appender =
+            ch.qos.logback.core.read
+                .ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>()
+        appender.start()
+        logger.addAppender(appender)
+        try {
+            controller.renderPreview("test/my_template.sql", 1, "SELECT 1", """{"x": $sentinel}""")
+            controller.renderPreview("test/my_template.sql", 1, "SELECT 1", "\"$sentinel\"")
+
+            // Non-vacuous: the refusals DID log, with the fixed prose, and never the token.
+            appender.list.count { it.formattedMessage?.contains("Invalid context JSON") == true } shouldBe 2
+            appender.list.none { it.formattedMessage?.contains(sentinel) == true } shouldBe true
+        } finally {
+            logger.detachAppender(appender)
+        }
+    }
+
+    /** #448 — an empty object is VALID: it renders (the control the fix must not break). */
+    @Test
+    fun `an empty object context still renders`() {
+        authenticate()
+        stubRenderableTemplate()
+        every { engine.render(any(), emptyMap<String, Any?>()) } returns "SELECT 1"
+
+        val preview = controller.renderPreview("test/my_template.sql", 1, "SELECT 1", "{}")
+
+        preview.model["renderError"] shouldBe null
+        preview.model["renderOutput"] shouldBe "SELECT 1"
+    }
+
+    /** A stored version the preview can resolve, so the parse — not the existence check — answers. */
+    private fun stubRenderableTemplate() {
+        every { templates.lookupVersion(any(), "test/my_template.sql", 1) } returns
+            TemplateVersion(
+                id = "test/my_template.sql",
+                version = 1,
+                dialect = Dialect.POSTGRES,
+                isLibrary = false,
+                imports = emptyList(),
+                body = "SELECT 1",
+                createdAt = Instant.EPOCH,
+                createdBy = userId,
+            )
+    }
+
+    /** The real Thymeleaf fragment over the refusal model — [DatasourceFactsPartialControllerTest]'s shape. */
+    private fun renderTemplateFragment(renderError: String): String {
+        val templateEngine =
+            SpringTemplateEngine().apply {
+                setTemplateResolver(
+                    ClassLoaderTemplateResolver().apply {
+                        prefix = "templates/"
+                        suffix = ".html"
+                        characterEncoding = "UTF-8"
+                    },
+                )
+            }
+        val context =
+            WebContext(
+                JakartaServletWebApplication
+                    .buildApplication(MockServletContext())
+                    .buildExchange(MockHttpServletRequest(), MockHttpServletResponse()),
+            )
+        context.setVariable("renderOutput", "")
+        context.setVariable("renderError", renderError)
+        return templateEngine.process("partials/template-render", context)
     }
 
     private val olderVersion =

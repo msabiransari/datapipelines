@@ -176,8 +176,10 @@ class PipelineNodeSqlPartialController(
         val tree =
             try {
                 mapper.readTree(parameters)
-            } catch (e: JsonProcessingException) {
-                return Overrides.Malformed(e.originalMessage ?: "unparseable JSON")
+            } catch (_: JsonProcessingException) {
+                // #448 — `originalMessage` quotes the token the parser could not read; the
+                // refusal reason is fixed syntax prose instead (#381's convention).
+                return Overrides.Malformed("expected valid JSON syntax")
             }
         if (!tree.isObject) return Overrides.Malformed("expected a JSON object of parameter values")
         return Overrides.Parsed(tree.properties().associate { it.key to it.value })
