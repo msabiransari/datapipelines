@@ -29,6 +29,9 @@
              catalog, when the verb removed the template) — there is no detail pane left to
              re-render in place. `from` rides along for the surface's own audit. -->
         <input type="hidden" name="from" th:value="${from}">
+        <!-- #416: the hash of the draft THIS dialog read; the POST releases AT it, so a draft
+             changed after the dialog opened answers template.version.conflict. -->
+        <input type="hidden" name="bodyHash" th:value="${dlg.bodyHash}" data-release-body-hash>
         <button th:if="${canAuthor == true}" type="submit" data-verb="template-release-confirm" class="ds-button ds-button-primary u-full" hx-disabled-elt="this"
                 th:text="'Release v' + ${dlg.version}">Release v2</button>
       </form>

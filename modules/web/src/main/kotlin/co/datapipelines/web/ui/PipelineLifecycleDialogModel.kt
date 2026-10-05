@@ -129,6 +129,14 @@ class PipelineLifecycleDialogModel(
         val updatedAt: Instant?,
         val pins: List<PinView>,
         /**
+         * #416 — the body hash of the SAME draft the dialog's version and last-writer facts come
+         * from. The form posts it back and the release is made AT it, so a draft that changed after
+         * the dialog opened is refused `pipeline.version.conflict`, never released silently. Empty on
+         * the no-draft branch, whose [refusal] renders no form. The default keeps the render tests'
+         * hand-built dialogs compiling; both production constructions pass it explicitly.
+         */
+        val bodyHash: String = "",
+        /**
          * 140: the draft body declares `checks[]` — the dialog runs them as it opens and the
          * run's own fragment decides the submit footer (all pass → Release; failing → the
          * override disclosure). False renders the pre-140 shape: no run, the submit enabled.
@@ -169,6 +177,7 @@ class PipelineLifecycleDialogModel(
                 updatedAgo = "",
                 updatedAt = null,
                 pins = emptyList(),
+                bodyHash = "",
                 hasChecks = false,
                 refusal = refusal("pipeline.version.not_draft", "This pipeline has no draft — nothing to release."),
             )
@@ -203,6 +212,7 @@ class PipelineLifecycleDialogModel(
             updatedAgo = RelativeTime.since(draft.updatedAt ?: draft.createdAt, Instant.now()),
             updatedAt = draft.updatedAt ?: draft.createdAt,
             pins = pins,
+            bodyHash = draft.bodyHash,
             hasChecks = parsed?.checks?.isNotEmpty() == true,
             refusal = null,
         )

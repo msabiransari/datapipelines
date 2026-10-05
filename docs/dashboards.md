@@ -1,6 +1,6 @@
 # Dashboards
 
-**Status:** v0.32 — numeric bound-value assertion feasibility (§3.4, #377) beside the visualizations workspace's tab switches on the shared history helper, the parameter-set decision (§7, #426) beside the pipeline editor runs the shared tab core (§7, #420) beside the Versions tables' created/released relative with the UTC stamp on hover (§7, #422) beside Back/Forward across the dashboards workspace's tab switches (§7, #402) beside the visualizations workspace (§7, #399) beside the dashboards workspace (§5.2's `version`, §7's workspace, #400; #409 closes with it) beside the
+**Status:** v0.33 — the Release dialogs post the draft hash they read (§7, #416) beside numeric bound-value assertion feasibility (§3.4, #377) beside the visualizations workspace's tab switches on the shared history helper, the parameter-set decision (§7, #426) beside the pipeline editor runs the shared tab core (§7, #420) beside the Versions tables' created/released relative with the UTC stamp on hover (§7, #422) beside Back/Forward across the dashboards workspace's tab switches (§7, #402) beside the visualizations workspace (§7, #399) beside the dashboards workspace (§5.2's `version`, §7's workspace, #400; #409 closes with it) beside the
 board's small-slot margins and its breakpoint collapse (§6.2, §6.3, #386/#387), 328's release-record judgement (§4.3)
 permissions (§4, lane L1b); the transfer routes and their limits' honest contract (§3.3, lanes L1c/L1c-b/L1c-c: the
 import's atomicity, the RELEASE rules on a landing, the aggregate count ceiling, the wire's per-family arms); the server
@@ -15,7 +15,7 @@ page, the screenshot upload and the two test tools — §3.4.1 (lane L4b, #353).
 [MCP Server](mcp-server.md) (§6.2.50–§6.2.62 — the tools), [Auth](auth.md) (§7.6 — the permissions)
 **Design:** the [dashboard implementation spec](superpowers/specs/2026-09-28-dashboard-implementation-spec.md) and
 the [design record](superpowers/specs/2026-09-25-dashboard-authoring-design-draft.md) (decisions D1–D63)
-**Last updated:** 2026-10-03
+**Last updated:** 2026-10-04
 
 A dashboard presents released pipeline results. It is built from two versioned artifacts: **visualizations** —
 a chart, table or KPI bound to named inputs, reusable across dashboards — and **dashboards**, which pin released
@@ -853,7 +853,10 @@ tree had just linked; it does not any more. The five tabs:
   lifecycle verbs' dialogs in the pipeline dialogs' shape: Release (the ONE D61 consent —
   "Also release these N draft visualizations" — cascading a DRAFT visualization pin through
   its own gate in the dashboard's transaction; the set and the sources have no cascade and
-  refuse as before; #397's generic dependency-aware dialog is HELD and is NOT this), Purge
+  refuse as before; the form posts `bodyHash`, the hash of the draft the dialog read, and the
+  release is made AT it — a draft changed after the dialog opened is refused
+  `dashboard.version.conflict`, never released silently, #416; #397's generic dependency-aware
+  dialog is HELD and is NOT this), Purge
   draft, Discard (naming where the pointer falls back, D60), Restore, Purge version, Switch
   (make current), Purge dashboard (typed confirm, sole-draft only). Every dialog's POST
   calls the SAME service the REST route wires, is session-only, is audited exactly as the
@@ -902,7 +905,11 @@ version a 400 that never echoes it. Its five tabs ([ui-screens §4.24](ui-screen
 - **Versions** — the history (created and released relative in the cell, absolute UTC on hover,
   #422) and the lifecycle verbs' dialogs: Release (the refusals before the
   button, in the service's order — §3.1's test case and transform pin, then §3.4's evidence gate —
-  and the ONE `release_pinned_templates` consent for a DRAFT transform pin, D61), Purge draft,
+  and the ONE `release_pinned_templates` consent for a DRAFT transform pin, D61; the form posts
+  `body_hash`, the hash of the draft the dialog read, and the release is made AT it — a draft
+  changed after the dialog opened is refused `visualization.version.conflict`, except that §3.4's
+  evidence gate judges the CURRENT body and answers first when the new draft has no green run,
+  #416), Purge draft,
   Discard (naming the D60 fallback), Restore, Purge version, Switch, Purge visualization (typed
   confirm, sole-draft only), and the Export link (§3.3). Every POST calls the SAME service the REST
   route wires, is session-only, is audited as the REST route audits it (a cascaded template's own
@@ -924,6 +931,7 @@ change (#426). The templates workspace adopts the helper after #398's rework lan
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-04 | v0.33 | #416 the Release dialogs post the hash they read | **§7:** the dashboards and visualizations workspaces' Release dialog forms carry a hidden hash of the draft the dialog read (`bodyHash`; `body_hash` for visualizations), the POST requires it (a missing one is a 400 at binding) and releases AT it. Before, the POST re-read the draft and released whatever hash it found, so a draft changed after the dialog opened went live unseen. A stale hash is `*.version.conflict` (409) and, for a cascading release, rolls the cascade back (§3.2). The same change covers the pipelines and templates dialogs ([UI Screens §4.3d](ui-screens.md)). No service, REST or matrix change. |
 | 2026-10-03 | v0.32 | #377 numeric bound-value assertion feasibility | **§3.4:** bound INTEGER/DECIMAL scalar text joins strings in the static substring scan; `42` and `10.5` can satisfy `text_visible`/`value_visible`. Browser formatting remains the agent's preview check; rendered state remains `not_available`. |
 | 2026-10-03 | v0.31 | #426 the visualizations workspace on the shared history helper — renumbered at merge after 420's v0.30 | **§7:** the visualizations workspace's tab switches push tab-only `visualizations` entries through `workspace/history.js` (via `workspace/panes.js`), Back/Forward re-select in page, a restored root re-wires once; the parameter-set workspace stays on full-document section links — the helper is not adopted there (decision recorded); the templates workspace follows after #398's rework. |
 | 2026-10-03 | v0.30 | #420 the pipeline editor re-adopts the shared tab core | **§7:** the tab-core sentence no longer says the editor keeps its own copy — `pipeline-editor/tabs.js` delegates admission and transition to `workspace/tabs.js` (its 18 getters keep reading `this`, so Alpine's proxy tracks them), so the dashboards, visualizations and pipeline workspaces run one machine. No dashboards behaviour changes. |

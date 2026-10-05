@@ -303,6 +303,75 @@ class LifecycleDialogBrowserTest : BrowserSuite() {
         page.locator("#nav-tree-pipelines span[title='test/lifecycle_chaff']").count() shouldBe 0
     }
 
+    /** The draft's current body hash, read back over REST — the token a release dialog carries. */
+    private fun bodyHashOf(id: String): String {
+        val (status, body) = send("GET", "/api/v1/pipelines/$id")
+        status shouldBe 200
+        return Regex(""""body_hash"\s*:\s*"([0-9a-f]+)"""").find(body!!)!!.groupValues[1]
+    }
+
+    /**
+     * #416 — a release posts the draft hash the DIALOG read. The dialog opens on the draft as it is, the draft
+     * changes underneath it (a valid REST write with the right If-Match, as a colleague or an agent would make),
+     * and the dialog is then submitted: the old hash reaches the service, which refuses it `pipeline.version.conflict`
+     * (409, the toast carries the code) and releases NOTHING. Before this lane the POST re-read the draft and
+     * released whatever it found, so the changed draft went live unseen. The control: a dialog opened AFTER the change
+     * releases it, so the refusal is the stale hash and nothing broader.
+     */
+    @Test
+    fun `a release dialog submitted after its draft changed is refused 409 and releases nothing - a fresh dialog then releases`() {
+        startTrace()
+        ready()
+        page.navigate("$baseUrl/dashboard")
+        val probeId = createDraftPipeline("test/stale_release_probe")
+
+        page.setViewportSize(1280, 900)
+        openWorkspace(probeId)
+        page.locator(".pe-topbar [data-verb='pipeline-release']").click()
+        val staleDialog = workspaceDialog("pipeline-release")
+        // The form carries the hash of the draft the dialog read — and it IS the draft's hash right now.
+        val dialogHash = staleDialog.locator("input[name='bodyHash']").inputValue()
+        dialogHash shouldBe bodyHashOf(probeId)
+
+        // The draft changes under the open dialog.
+        openDraftOverRelease(probeId, note = "changed after the release dialog opened")
+        val currentHash = bodyHashOf(probeId)
+        (currentHash == dialogHash) shouldBe false
+
+        // Submit the OLD dialog: 409 pipeline.version.conflict, rendered as the toast, nothing released.
+        val refused =
+            page.waitForResponse({ it.url().contains("/lifecycle/release") }) {
+                staleDialog.locator("button[type=submit]").click()
+            }
+        refused.status() shouldBe 409
+        page.locator("#toast .ds-toast").first().waitFor()
+        page.locator("#toast .ds-toast").first().innerText() shouldContain "pipeline.version.conflict"
+        currentVersionOf(probeId) shouldBe null
+        bodyHashOf(probeId) shouldBe currentHash
+
+        // A tampered hash (long, quoted, markup) is the same refusal through the real service and database — a 409,
+        // never a 500 and never a release.
+        staleDialog
+            .locator("input[name='bodyHash']")
+            .evaluate("(el, v) => { el.value = v; }", "'\"; DROP TABLE pipeline_version; --<script>" + "x".repeat(4000))
+        val tampered =
+            page.waitForResponse({ it.url().contains("/lifecycle/release") }) {
+                staleDialog.locator("button[type=submit]").click()
+            }
+        tampered.status() shouldBe 409
+        currentVersionOf(probeId) shouldBe null
+
+        // The control: a dialog opened now reads the changed draft's hash, and releases it.
+        openWorkspace(probeId)
+        page.locator(".pe-topbar [data-verb='pipeline-release']").click()
+        val freshDialog = workspaceDialog("pipeline-release")
+        freshDialog.locator("input[name='bodyHash']").inputValue() shouldBe currentHash
+        freshDialog.locator("button[type=submit]").click()
+        page.waitForURL("**/pipelines/$probeId?ok=released")
+        flashToast() shouldContain "Released"
+        currentVersionOf(probeId) shouldBe 1
+    }
+
     // --------------------------------------------------------------- the templates path
 
     @Test

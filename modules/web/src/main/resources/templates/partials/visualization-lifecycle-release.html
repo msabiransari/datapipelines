@@ -38,6 +38,9 @@
           th:attr="hx-post=@{'/partials/visualizations/{id}/lifecycle/release'(id=${dlg.id})},
                    hx-swap='none'">
       <input type="hidden" name="from" th:value="${from}">
+      <!-- #416: the hash of the draft THIS dialog read (snake_case, like release_pinned_templates); the POST
+           releases AT it, so a draft changed after the dialog opened answers visualization.version.conflict. -->
+      <input type="hidden" name="body_hash" th:value="${dlg.bodyHash}" data-release-body-hash>
       <th:block th:if="${dlg.pin != null}">
         <p class="u-text-sm u-mb-xs">The transform template this release locks:</p>
         <ul class="u-text-sm u-mb-xs" data-release-pins th:unless="${dlg.needsConsent}">

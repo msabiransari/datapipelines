@@ -55,6 +55,9 @@
       <form th:if="${#lists.isEmpty(dlg.blockingPins)}"
             th:attr="hx-post=@{'/partials/dashboards/{id}/lifecycle/release'(id=${dlg.id})},
                      hx-swap='none'">
+        <!-- #416: the hash of the draft THIS dialog read; the POST releases AT it, so a draft
+             changed after the dialog opened answers dashboard.version.conflict. -->
+        <input type="hidden" name="bodyHash" th:value="${dlg.bodyHash}" data-release-body-hash>
 
         <th:block th:if="${!#lists.isEmpty(dlg.pins)}">
           <p class="u-text-sm u-mb-xs">Dependencies this release locks:</p>

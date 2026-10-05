@@ -70,16 +70,20 @@ class VisualizationLifecycleDialogController(
     @RequiredScope(Permission.VISUALIZATION_RELEASE)
     fun release(
         @PathVariable id: UUID,
+        @RequestParam(name = "body_hash") bodyHash: String,
         @RequestParam(name = "release_pinned_templates", required = false, defaultValue = "false") releasePinnedTemplates: Boolean,
         @RequestParam(required = false) from: String?,
     ): ResponseEntity<String> {
         val principal = LifecycleVerbs.requireSession()
         val workspaceId = principal.requireWorkspace().id
-        // The hash of the draft as it is NOW (you release what you tested: the evidence gate re-checks the run's hash).
-        val draft = draftOf(workspaceId, id, version = null)
+        // #416 — [bodyHash] is the hash the DIALOG read (you release what you tested). The draft is read here only
+        // to refuse the no-draft case; its CURRENT hash is never the one released, so a draft that changed after
+        // the dialog opened is a stale hash and the service answers visualization.version.conflict (the evidence
+        // gate, which judges the current body, still answers first when the new draft has no green run).
+        draftOf(workspaceId, id, version = null)
         // D61 — the ONE consent: without it a DRAFT transform pin refuses release.dependency_not_released as it
         // always has; the server, never the checkbox, is the guard.
-        val released = visualizations.release(workspaceId, id, draft.detail.bodyHash, principal.userId, releasePinnedTemplates)
+        val released = visualizations.release(workspaceId, id, bodyHash, principal.userId, releasePinnedTemplates)
         val cascade = LifecycleVerbs.FamilyCascade("visualization_id", id, released.version.detail.version)
         released.templatesReleased.forEach { template ->
             LifecycleVerbs.audit(
