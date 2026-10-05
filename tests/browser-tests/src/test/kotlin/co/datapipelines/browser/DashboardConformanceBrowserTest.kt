@@ -255,14 +255,7 @@ class DashboardConformanceBrowserTest : DashboardBrowserSuite() {
 
         val refreshId =
             page.evaluate("() => window.__dp.instance.refresh({ scope: 'targets', targets: ['slowchart'] })") as String
-        page.waitForFunction(
-            """async () => {
-              const res = await fetch('/api/v1/dashboards/$board/refreshes/$refreshId', { credentials: 'same-origin' });
-              if (!res.ok) return false;
-              const doc = await res.json();
-              return doc.data && doc.data.status === 'COMPLETED';
-            }""",
-        )
+        awaitRefreshStatus(board, refreshId, "COMPLETED")
         // The slow chart delivered: the completion notification is the client's own processing
         // signal — its data frame set success (the settle timer may have moved it on to ready);
         // both are the delivered truth, and neither is abort.
@@ -284,14 +277,7 @@ class DashboardConformanceBrowserTest : DashboardBrowserSuite() {
         acked["abort_requested"] shouldBe false
         // Nothing changed: no abort chip, the row is still COMPLETED, the other occurrences untouched.
         chipStateIsNot("slowchart", "abort")
-        page.waitForFunction(
-            """async () => {
-              const res = await fetch('/api/v1/dashboards/$board/refreshes/$refreshId', { credentials: 'same-origin' });
-              if (!res.ok) return false;
-              const doc = await res.json();
-              return doc.data && doc.data.status === 'COMPLETED';
-            }""",
-        )
+        awaitRefreshStatus(board, refreshId, "COMPLETED")
         val revenueState =
             page.evaluate(
                 "() => document.querySelector('[data-dp-viz=\\'revenue\\'] .dp-dashboard-status').getAttribute('data-dp-state')",

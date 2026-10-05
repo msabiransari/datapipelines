@@ -738,35 +738,40 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
         refreshIds: List<String>,
         status: String,
     ) {
-        page.waitForFunction(
-            """async (ids) => {
-              for (const id of ids) {
-                const res = await fetch('/api/v1/dashboards/$board/refreshes/' + id, { credentials: 'same-origin' });
-                if (!res.ok) return false;
-                const doc = await res.json();
-                if (!doc.data || doc.data.status !== '$status') return false;
-              }
-              return true;
-            }""",
-            refreshIds,
-        )
+        require(refreshIds.isNotEmpty()) { "a status wait needs at least one refresh id" }
+        page.waitForCondition {
+            // Read every requested id before deciding; a ready prefix is not a ready list.
+            val observations = refreshIds.map { id -> readRefreshObservation(board, id) }
+            observations.zip(refreshIds).all { (observation, id) ->
+                observation["http"] == 200 && observation["id"] == id && observation["status"] == status
+            }
+        }
     }
 
-    /** One refresh's row waits until it reads [status]. */
+    /** One refresh's row waits until a completed GET reads [status] for the requested id. */
     protected fun awaitRefreshStatus(
         board: String,
         refreshId: String,
         status: String,
     ) {
-        page.waitForFunction(
-            """async () => {
-              const res = await fetch('/api/v1/dashboards/$board/refreshes/$refreshId', { credentials: 'same-origin' });
-              if (!res.ok) return false;
-              const doc = await res.json();
-              return doc.data && doc.data.status === '$status';
-            }""",
-        )
+        page.waitForCondition {
+            val observation = readRefreshObservation(board, refreshId)
+            observation["http"] == 200 && observation["id"] == refreshId && observation["status"] == status
+        }
     }
+
+    private fun readRefreshObservation(
+        board: String,
+        refreshId: String,
+    ): Map<*, *> =
+        page.evaluate(
+            """async ([board, id]) => {
+              const res = await fetch('/api/v1/dashboards/' + board + '/refreshes/' + id, { credentials: 'same-origin' });
+              const doc = await res.json();
+              return { http: res.status, id: doc.data && doc.data.refresh_id, status: doc.data && doc.data.status };
+            }""",
+            listOf(board, refreshId),
+        ) as Map<*, *>
 
     /** The window's positive signal: the start's marker exists in Redis while its row does not. */
     protected fun awaitStartMarker(
