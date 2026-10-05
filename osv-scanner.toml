@@ -73,3 +73,17 @@ ignoreUntil = 2027-02-15
 id = "GHSA-r937-wjx7-w2jp" # kotlin-gradle-plugin 2.4.10 — build tooling only, build cache disabled (triaged 2026-08-15)
 reason = "kotlin-gradle-plugin is build-only tooling; the vulnerable build-cache deserialization path is unused (Gradle build cache not enabled); only fix is a pre-release"
 ignoreUntil = 2027-02-15
+
+#  * spring-webmvc 6.2.19 (CRITICAL 9.8, CVE-2026-47884, XsltView SSRF/RCE)
+#    — on every web module's runtime classpath. Exploitable only when the app
+#    renders through XsltView behind a `/**` mapping with an unspecified view
+#    name; the sources carry no XsltView, XsltViewResolver or XSLT at all
+#    (git grep, 2026-10-05) and Spring Boot never auto-configures one. No OSS
+#    6.2.x fix exists (6.2.19 and Boot 3.5.16 are the newest on their lines);
+#    the only fix is Spring Framework 7.0.9, a Boot 4 migration. Short expiry
+#    on purpose: re-triage or fix before it lapses (#461).
+
+[[IgnoredVulns]]
+id = "GHSA-pc63-qcmh-9cmg" # spring-webmvc 6.2.19 — XsltView never configured, no 6.2.x fix; owner ruling (triaged 2026-10-05, #461)
+reason = "XsltView is never configured (no XsltView/XsltViewResolver/XSLT in the sources); no fixed 6.2.x exists, the only fix is Spring 7.0.9 (Boot 4) — tracked in #461"
+ignoreUntil = 2026-11-05
