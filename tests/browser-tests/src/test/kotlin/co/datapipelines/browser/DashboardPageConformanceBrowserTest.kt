@@ -126,26 +126,12 @@ class DashboardPageConformanceBrowserTest : DashboardBrowserSuite() {
         page.waitForSelector("[data-dp-viz='hungcells'] .dp-dashboard-status[data-dp-state='in-progress']")
         // The RUNNING row before the abort, as the host half's case has always done: the abort's
         // acknowledgement is only meaningful for a refresh the read route just reported RUNNING.
-        page.waitForFunction(
-            """async () => {
-              const res = await fetch('/api/v1/dashboards/$board/refreshes/$refreshId', { credentials: 'same-origin' });
-              if (!res.ok) return false;
-              const doc = await res.json();
-              return doc.data && doc.data.status === 'RUNNING';
-            }""",
-        )
+        awaitRefreshStatus(board, refreshId, "RUNNING")
         // A false ack names the row's status and the client path that answered, not a bare boolean (#366 red 2).
         abortAndNameAck("window.__dpPage.instance", board, refreshId)
         page.waitForSelector("[data-dp-viz='hungcells'] .dp-dashboard-status[data-dp-state='abort']")
         // The DURABLE outcome, read off the real route.
-        page.waitForFunction(
-            """async () => {
-              const res = await fetch('/api/v1/dashboards/$board/refreshes/$refreshId', { credentials: 'same-origin' });
-              if (!res.ok) return false;
-              const doc = await res.json();
-              return doc.data && doc.data.status === 'ABORTED';
-            }""",
-        )
+        awaitRefreshStatus(board, refreshId, "ABORTED")
     }
 
     @Test
@@ -180,14 +166,7 @@ class DashboardPageConformanceBrowserTest : DashboardBrowserSuite() {
         client["ended"] shouldBe true
         acked["abort_requested"] shouldBe false
         chipStateIsNot("slowchart", "abort")
-        page.waitForFunction(
-            """async () => {
-              const res = await fetch('/api/v1/dashboards/$board/refreshes/$refreshId', { credentials: 'same-origin' });
-              if (!res.ok) return false;
-              const doc = await res.json();
-              return doc.data && doc.data.status === 'COMPLETED';
-            }""",
-        )
+        awaitRefreshStatus(board, refreshId, "COMPLETED")
     }
 
     @Test
