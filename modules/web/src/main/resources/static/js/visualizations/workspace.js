@@ -71,7 +71,9 @@
   /** The Preview partial arrived: read its block once and mount the selected case. */
   function wirePreview(pane) {
     var block = pane.querySelector("#viz-preview-data");
-    if (!block || block.getAttribute("data-viz-wired") === "1") return;
+    // Cached history carries attributes, but no live node wiring (the panes.js guard pattern).
+    if (!block || block.__dpVizWired === true) return;
+    block.__dpVizWired = true;
     block.setAttribute("data-viz-wired", "1");
     preview.data = JSON.parse(block.textContent);
     preview.instances = {};
@@ -106,6 +108,27 @@
     if (live && target === live) wirePreview(live);
   }
 
+  /** Save fixture shells, never a mounted runtime marker or Plotly's generated style attributes. */
+  function onPreviewHistorySave(historyRoot) {
+    var live = livePreviewPane();
+    if (!live || !historyRoot || !historyRoot.contains(live)) return;
+    Object.keys(preview.instances).forEach(function (index) {
+      var instance = preview.instances[index];
+      if (instance && typeof instance.dispose === "function") instance.dispose();
+    });
+    preview.instances = {};
+    var sections = live.querySelectorAll("[data-viz-case-index]");
+    for (var i = 0; i < sections.length; i++) {
+      sections[i].removeAttribute("data-dp-ready");
+      sections[i].removeAttribute("data-dp-error");
+      var board = live.querySelector('[data-viz-case-board="' + sections[i].getAttribute("data-viz-case-index") + '"]');
+      if (board) board.replaceChildren();
+    }
+    // The board page removes this same global scratch SVG; Plotly recreates it on the next draw.
+    var tester = document.getElementById("js-plotly-tester");
+    if (tester && tester.parentElement) tester.parentElement.removeChild(tester);
+  }
+
   /**
    * ONE htmx:afterSwap listener per document, however many times this glue is evaluated (#437): a
    * restored (cloned) root re-runs the script (#426), and a listener per wiring would stay bound to
@@ -117,6 +140,14 @@
     var reg = window[SWAP_REGISTRY];
     if (!reg) reg = window[SWAP_REGISTRY] = { handler: null, listeners: 0 };
     reg.handler = handler;
+    reg.historySave = onPreviewHistorySave;
+    if (!reg.historyCleanup) {
+      reg.historyCleanup = true;
+      window.__dpHistoryStyleCleanups = window.__dpHistoryStyleCleanups || [];
+      window.__dpHistoryStyleCleanups.push(function (historyRoot) {
+        reg.historySave(historyRoot);
+      });
+    }
     if (reg.listeners === 0) {
       reg.listeners = 1;
       document.body.addEventListener("htmx:afterSwap", function (event) {

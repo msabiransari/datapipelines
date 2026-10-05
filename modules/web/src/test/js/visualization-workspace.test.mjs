@@ -117,10 +117,16 @@ function makeEnv() {
         index: data.cases.indexOf(testCase),
         owner: section.owner,
         resizes: 0,
+        disposals: 0,
         resize() {
           instance.resizes += 1;
         },
+        dispose() {
+          instance.disposals += 1;
+          board.removeAttribute("data-datapipelines-dashboard");
+        },
       };
+      board.setAttribute("data-datapipelines-dashboard", "live-instance");
       env.mounts.push(instance);
       return instance;
     },
@@ -129,6 +135,7 @@ function makeEnv() {
     readyState: "complete",
     body: env.body,
     addEventListener: () => {},
+    getElementById: () => null,
     // Strict: the family selector is part of the contract this harness pins.
     querySelector(sel) {
       const ws = env.current;
@@ -156,9 +163,43 @@ function previewPartial(pane, cases, selected = "0") {
     select.listeners.forEach((fn) => fn());
   };
   const sections = cases.map((_, i) => Object.assign(element({ "data-viz-case-index": String(i) }), { owner: pane }));
-  const boards = cases.map(() => element());
+  const boards = cases.map(() => Object.assign(element(), { clears: 0, replaceChildren() { this.clears += 1; } }));
   return { data, block, select, sections, boards };
 }
+
+test("history saves only the live Preview's clean fixture shells, through one current cleanup", () => {
+  const env = makeEnv();
+  try {
+    const old = restoreWorkspace(env, { arrived: CASES });
+    old.root.isConnected = false;
+    const ws = restoreWorkspace(env, { arrived: CASES });
+    const partial = ws.pane.partial;
+    partial.select.change("1");
+    partial.sections.forEach((s) => s.setAttribute("data-dp-ready", "true"));
+    partial.sections[2].setAttribute("data-dp-error", "old-error");
+    evaluateScripts(env);
+    const cleanups = env.window.__dpHistoryStyleCleanups;
+    assert.equal(cleanups.length, 1, "one cleanup across restored roots and repeat evaluations");
+    const historyRoot = { contains: (p) => p === ws.pane };
+    cleanups[0]({ contains: () => false });
+    assert.deepEqual(env.mounts.map((m) => m.disposals), [0, 0, 0], "no cleanup outside the history region");
+    cleanups[0](historyRoot);
+    assert.deepEqual(env.mounts.map((m) => m.disposals), [0, 1, 1], "only the current instances are disposed");
+    assert.deepEqual(Object.keys(env.window.VisualizationWorkspacePreview.instances), []);
+    assert.deepEqual(partial.boards.map((b) => b.getAttribute("data-datapipelines-dashboard")), [null, null, null]);
+    assert.deepEqual(partial.boards.map((b) => b.clears), [1, 1, 1], "no generated styled chart DOM survives");
+    assert.ok(partial.sections.every((s) => s.getAttribute("data-dp-ready") === null && s.getAttribute("data-dp-error") === null));
+    assert.equal(partial.block.getAttribute("data-viz-wired"), "1", "the cached block still carries its marker");
+    assert.equal(partial.select.value, "1", "case selection survives the cleanup");
+    cleanups[0](historyRoot);
+    assert.deepEqual(env.mounts.map((m) => m.disposals), [0, 1, 1], "repeated saves never dispose an instance twice");
+    env.current = makeWorkspace("dashboards");
+    cleanups[0](historyRoot);
+    assert.deepEqual(env.mounts.map((m) => m.disposals), [0, 1, 1], "another family is untouched");
+  } finally {
+    restoreGlobals();
+  }
+});
 
 /** One root with five tab buttons and panes; the Preview pane serves whatever partial [arrive] installed. */
 function makeWorkspace(family) {
@@ -424,3 +465,53 @@ test("a selector value outside the rendered cases mounts the first case on wirin
     restoreGlobals();
   }
 });
+
+for (const selected of ["0", "1"]) {
+  test(`a cached block carrying the wired marker mounts selected case ${selected} and keeps one live wiring`, () => {
+    const env = makeEnv();
+    try {
+      restoreWorkspace(env, { arrived: CASES });
+      const earlier = env.window.VisualizationWorkspacePreview;
+      const ws = makeWorkspace("visualizations");
+      const partial = ws.pane.arrive(CASES, selected);
+      // htmx restores innerHTML: attributes survive; node expandos and listeners do not.
+      partial.block.setAttribute("data-viz-wired", "1");
+      env.current = ws;
+      evaluateScripts(env);
+      assert.equal(env.mounts.length, 2, "the cached block must mount its selected case afresh");
+      const state = env.window.VisualizationWorkspacePreview;
+      const initial = Number(selected);
+      const other = initial === 0 ? 1 : 0;
+      assert.notEqual(state, earlier, "the restored evaluation publishes current state");
+      assert.equal(state.instances[initial], env.mounts[1]);
+      assert.equal(env.mounts[1].owner, ws.pane);
+      assert.equal(env.mounts[1].index, initial);
+      assert.equal(partial.select.listeners.length, 1, "one selector registration");
+      assert.equal(partial.block.getAttribute("data-viz-wired"), "1", "visible marker retained");
+
+      env.swap(ws.pane);
+      env.swap(ws.pane);
+      evaluateScripts(env);
+      assert.equal(env.mounts.length, 2, "repeated swaps and evaluation never mount the live block again");
+      assert.equal(partial.select.listeners.length, 1, "repeated wiring never adds a selector listener");
+      assert.equal(env.registrations, 1, "one document swap listener across evaluations");
+      assert.equal(env.window.VisualizationWorkspacePreview, state);
+
+      partial.select.change(String(other));
+      assert.equal(env.mounts.length, 3, "the second case mounts only on selection");
+      assert.equal(state.instances[other], env.mounts[2]);
+      assert.equal(partial.sections[other].getAttribute("hidden"), null);
+      assert.equal(partial.sections[initial].getAttribute("hidden"), "hidden");
+      partial.select.change(selected);
+      partial.select.change(String(other));
+      assert.equal(env.mounts[2].resizes, 1, "revisiting a mounted case re-fits it");
+      ws.root.button("overview").click();
+      ws.root.button("preview").click();
+      assert.equal(env.mounts[2].resizes, 2, "revealing Preview re-fits the current instance");
+      assert.equal(env.mounts.length, 3);
+      assert.equal(env.window.VisualizationWorkspacePreview, state);
+    } finally {
+      restoreGlobals();
+    }
+  });
+}
