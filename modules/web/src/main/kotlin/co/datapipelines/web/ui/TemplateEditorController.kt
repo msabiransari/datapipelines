@@ -230,10 +230,14 @@ class TemplateEditorController(
                 @Suppress("UNCHECKED_CAST")
                 MAPPER.convertValue(MAPPER.readTree(contextJson), Map::class.java)
                     as? Map<String, Any?> ?: emptyMap()
-            } catch (e: JsonProcessingException) {
-                return renderError("Invalid context JSON: ${e.message}")
-            } catch (e: IllegalArgumentException) {
-                return renderError("Invalid context JSON: ${e.message}")
+            } catch (_: JsonProcessingException) {
+                // #448 — the parser's own message quotes the token it could not read; the
+                // refusal is fixed syntax guidance instead (#381's convention).
+                return renderError("Invalid context JSON: expected valid JSON syntax.")
+            } catch (_: IllegalArgumentException) {
+                // #448 — the real mapper's `convertValue` wrapper: a valid JSON value that is
+                // not an object. Its coercion text quotes the value; fixed prose instead.
+                return renderError("Invalid context JSON: expected a JSON object.")
             }
         return try {
             val rendered = templateEngines.engineFor(workspaceId).render(TemplateRef(name, version), context)

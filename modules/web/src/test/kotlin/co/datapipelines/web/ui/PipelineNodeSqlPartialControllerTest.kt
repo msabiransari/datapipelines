@@ -22,15 +22,23 @@ import io.mockk.verify
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.springframework.mock.web.MockHttpServletRequest
+import org.springframework.mock.web.MockHttpServletResponse
+import org.springframework.mock.web.MockServletContext
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers.model
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.view
 import org.springframework.test.web.servlet.setup.MockMvcBuilders
 import org.springframework.ui.ExtendedModelMap
+import org.thymeleaf.context.WebContext
+import org.thymeleaf.spring6.SpringTemplateEngine
+import org.thymeleaf.templateresolver.ClassLoaderTemplateResolver
+import org.thymeleaf.web.servlet.JakartaServletWebApplication
 import java.time.Instant
 import java.util.UUID
 
@@ -173,6 +181,108 @@ class PipelineNodeSqlPartialControllerTest {
 
         model.getAttribute("state") shouldBe "parameter-rejected"
         verify(exactly = 0) { engine.render(any(), any(), any()) }
+    }
+
+    // ------------------------------------------------------------------ #448: safe parser refusals
+
+    /**
+     * #448 — the override SYNTAX arm: Jackson's `originalMessage` quotes the token it could not
+     * read. The sentinel is asserted absent BEFORE the fixed prose, so restoring the one catch
+     * makes this test fail on the reflected token, not on the wording.
+     */
+    @Test
+    fun `a syntactically malformed parameters document never reflects the parser's token`() {
+        val sentinel = "sentinelOverride448"
+        val model = ExtendedModelMap()
+
+        controller.nodeSql(pipelineId, "top_days", """{"limit": $sentinel}""", null, model)
+
+        val failure = (model.getAttribute("failures") as List<*>).single() as Map<*, *>
+        val message = failure["message"] as String
+        message shouldNotContain sentinel
+        message shouldNotContain "at [Source"
+        message shouldNotContain "Unrecognized token"
+        message shouldContain "The parameters document is not valid §6.3 wire JSON:"
+        message shouldContain "expected valid JSON syntax"
+        failure["parameter"] shouldBe "parameters"
+        model.getAttribute("state") shouldBe "parameter-rejected"
+        verify(exactly = 0) { engine.render(any(), any(), any()) }
+    }
+
+    /**
+     * #448 — the same refusal through the real MVC dispatch and the real Thymeleaf fragment:
+     * a 200 fragment, the existing view/model keys and prefix, never the token.
+     */
+    @Test
+    fun `the malformed-parameters refusal renders the fragment without the token`() {
+        val sentinel = "sentinelOverrideHttp448"
+
+        val result =
+            mvcFor(controller)
+                .perform(
+                    get("/partials/pipelines/$pipelineId/nodes/top_days/sql")
+                        .param("parameters", """{"limit": $sentinel}""")
+                        .header("HX-Request", "true"),
+                ).andExpect(status().isOk)
+                .andExpect(view().name("partials/pipeline-node-sql"))
+                .andExpect(model().attribute("state", "parameter-rejected"))
+                .andReturn()
+
+        val html = renderNodeSqlFragment(result.modelAndView!!.modelMap)
+        html shouldContain "Parameter rejected"
+        html shouldContain "The parameters document is not valid §6.3 wire JSON:"
+        html shouldContain "expected valid JSON syntax"
+        html shouldNotContain sentinel
+    }
+
+    /** #448 — the non-object refusal is untouched: a valid JSON array is still the object prose. */
+    @Test
+    fun `a non-object parameters document keeps the expected-object refusal`() {
+        val model = ExtendedModelMap()
+
+        controller.nodeSql(pipelineId, "top_days", "[1,2,3]", null, model)
+
+        val failure = (model.getAttribute("failures") as List<*>).single() as Map<*, *>
+        (failure["message"] as String) shouldContain "expected a JSON object of parameter values"
+        failure["parameter"] shouldBe "parameters"
+        model.getAttribute("state") shouldBe "parameter-rejected"
+        verify(exactly = 0) { engine.render(any(), any(), any()) }
+    }
+
+    /** #448 — a control-character probe: the fixed refusal carries no unprintable payload. */
+    @Test
+    fun `a control-character-bearing parameters document is refused with printable prose only`() {
+        val model = ExtendedModelMap()
+
+        controller.nodeSql(pipelineId, "top_days", "{\"limit\": \u0001}", null, model)
+
+        val failure = (model.getAttribute("failures") as List<*>).single() as Map<*, *>
+        val message = failure["message"] as String
+        message.any { it.isISOControl() } shouldBe false
+        message shouldContain "expected valid JSON syntax"
+        model.getAttribute("state") shouldBe "parameter-rejected"
+    }
+
+    /** The real node-SQL fragment over the refusal model — [DatasourceFactsPartialControllerTest]'s shape. */
+    private fun renderNodeSqlFragment(model: Map<String, Any?>): String {
+        val templateEngine =
+            SpringTemplateEngine().apply {
+                setTemplateResolver(
+                    ClassLoaderTemplateResolver().apply {
+                        prefix = "templates/"
+                        suffix = ".html"
+                        characterEncoding = "UTF-8"
+                    },
+                )
+            }
+        val context =
+            WebContext(
+                JakartaServletWebApplication
+                    .buildApplication(MockServletContext())
+                    .buildExchange(MockHttpServletRequest(), MockHttpServletResponse()),
+            )
+        model.forEach { (key, value) -> context.setVariable(key, value) }
+        return templateEngine.process("partials/pipeline-node-sql", context)
     }
 
     @Test
