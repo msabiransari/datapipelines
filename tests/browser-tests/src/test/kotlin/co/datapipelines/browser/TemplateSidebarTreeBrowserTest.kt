@@ -202,6 +202,37 @@ class TemplateSidebarTreeBrowserTest : BrowserSuite() {
     }
 
     @Test
+    fun `a template loaded only by search marks current without browsing its ancestors`() {
+        loginReadyUser("tpl460searchcurrent")
+        seedTemplate("search/deep/current_probe.sql")
+        page.navigate("$baseUrl/dashboard")
+        val requests = mutableListOf<String>()
+        page.onRequest { if (it.url().contains("/api/v1/templates/tree")) requests += it.url() }
+        openTree()
+        page.waitForFunction("() => window.DatapipelinesSidebarTrees.get('templates').state.levels.get(null)?.complete")
+        page.fill("$panel input[type=search]", "current_probe.sql")
+        page.waitForSelector(leaf("search/deep/current_probe.sql"))
+        page.waitForFunction("() => window.DatapipelinesSidebarTrees.get('templates').state.search.complete")
+        page.evaluate(
+            "() => {window.__searchRail=document.getElementById('app-rail');" +
+                "window.__searchLeaf=document.querySelector('#nav-tree-templates a[href=\"/templates/search/deep/current_probe.sql\"]')}",
+        )
+        page.click(leaf("search/deep/current_probe.sql"))
+        page.waitForURL("**/templates/search/deep/current_probe.sql")
+        page.waitForSelector(".tw-root")
+        page.waitForFunction("() => !document.querySelector('.htmx-settling') && !document.querySelector('.htmx-request')")
+        page.locator(leaf("search/deep/current_probe.sql")).getAttribute("aria-current") shouldBe "page"
+        page.evaluate(
+            "() => window.__searchRail===document.getElementById('app-rail') && " +
+                "window.__searchLeaf===document.querySelector('#nav-tree-templates a[href=\"/templates/search/deep/current_probe.sql\"]')",
+        ) shouldBe true
+        page.inputValue("$panel input[type=search]") shouldBe "current_probe.sql"
+        requests.size shouldBe 2
+        requests.count { it.contains("/tree/search") } shouldBe 1
+        consoleErrors shouldBe emptyList()
+    }
+
+    @Test
     fun `the catalog has no tree and its Browse folders opens the sidebar - the keyboard reaches the rows`() {
         loginReadyUser("tpl398cat")
         seedTemplate("test/cat_probe.sql")

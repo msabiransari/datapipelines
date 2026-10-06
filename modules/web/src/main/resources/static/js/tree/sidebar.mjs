@@ -14,7 +14,8 @@ function markCurrent() {
   instances.forEach((instance, source) => {
     let key = source === family && id ? `artifact:${id}` : null;
     if (!key || source === "templates") {
-      const matching = Array.from(instance.state.levels.values()).flatMap(level => Array.from(level.nodes.values()))
+      const matching = [...Array.from(instance.state.levels.values()).flatMap(level => Array.from(level.nodes.values())),
+        ...instance.state.search.nodes.values()]
         .find(node => node.href === location.pathname);
       key = matching?.key || null;
     }
