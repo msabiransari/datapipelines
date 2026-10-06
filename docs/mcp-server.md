@@ -1,9 +1,9 @@
 # MCP Server Specification
 
-**Status:** v1.70 (frozen contract — additive-only changes after this point)
+**Status:** v1.71 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [REST API spec](rest-api.md), [Auth spec](auth.md), [Templates spec](templates.md)
-**Last updated:** 2026-10-03
+**Last updated:** 2026-10-05
 
 ---
 
@@ -2171,7 +2171,7 @@ Browse ONE level of the dashboard tree, the `visualizations_list` shape. A promo
 ```json
 {
   "name": "dashboards_list",
-  "description": "List the dashboards of the key's pinned workspace by BROWSING one level of the name tree. A dashboard pins released pipelines as sources, maps their results onto pinned visualizations' inputs and lays them out; every row carries the id the other dashboards_* tools take. Names are FOLDER PATHS (acme/dashboards/revenue_overview): prefix:\"\" lists the roots. A promoter's key sees only released dashboards whose every source pipeline its lens admits.",
+  "description": "List the dashboards of the key's pinned workspace by BROWSING one level of the name tree. A dashboard pins exact pipeline versions as sources, maps their results onto pinned visualizations' inputs and lays them out; every row carries the id the other dashboards_* tools take. Names are FOLDER PATHS (acme/dashboards/revenue_overview): prefix:\"\" lists the roots. A promoter's key sees only released dashboards whose every source pipeline its lens admits.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -2193,12 +2193,12 @@ Browse ONE level of the dashboard tree, the `visualizations_list` shape. A promo
 
 #### 6.2.56 `dashboards_get`
 
-Read one dashboard by id: the WORKING version's full document and lifecycle state, plus `dependencies` — each pinned visualization occurrence's version status and each source pipeline release's status and `read_only` verdict as they are NOW, each read through the caller's lens (a hidden or absent pin answers `status: null` alike; one read per pin, bounded by the reader's 50 visualizations) — and `last_refresh`, the CALLER's own latest refresh of the dashboard (#10 L2) — `{refresh_id, dashboard_version, status, started_at, finished_at}` — or `null` when they have none. It names nobody else's refresh, whatever their role, and carries no selection; an MCP key acts as its OWN identity (keys v2 A13) and a refresh belongs to a person's session until the `dashboard` key kind (L5), so through a key it is `null` today; no tool refreshes a dashboard (the runtime is a person's surface until the `dashboard` key kind, L5).
+Read one dashboard by id: the WORKING version's full document and lifecycle state, plus `dependencies` — each pinned visualization occurrence's version status and each source pipeline version's status and `read_only` verdict as they are NOW, each read through the caller's lens (a hidden or absent pin answers `status: null` alike; one read per pin, bounded by the reader's 50 visualizations) — and `last_refresh`, the CALLER's own latest refresh of the dashboard (#10 L2) — `{refresh_id, dashboard_version, status, started_at, finished_at}` — or `null` when they have none. It names nobody else's refresh, whatever their role, and carries no selection; an MCP key acts as its OWN identity (keys v2 A13) and a refresh belongs to a person's session until the `dashboard` key kind (L5), so through a key it is `null` today; no tool refreshes a dashboard (the runtime is a person's surface until the `dashboard` key kind, L5).
 
 ```json
 {
   "name": "dashboards_get",
-  "description": "Read one dashboard by ID: the WORKING version's full document and lifecycle state (version, status, body_hash for an update's expected_hash, current_version), plus dependencies — each pinned visualization's version status and each source pipeline release's status and read_only verdict as they are NOW (a status of null: absent, or not visible to this key) — and last_refresh, the caller's own latest refresh of it (null when they have none). No tool refreshes a dashboard. A dashboard of another workspace, or one the promoter lens hides, answers not-found.",
+  "description": "Read one dashboard by ID: the WORKING version's full document and lifecycle state (version, status, body_hash for an update's expected_hash, current_version), plus dependencies — each pinned visualization's version status and each source pipeline version's status and read_only verdict as they are NOW (a status of null: absent, or not visible to this key) — and last_refresh, the caller's own latest refresh of it (null when they have none). No tool refreshes a dashboard. A dashboard of another workspace, or one the promoter lens hides, answers not-found.",
   "inputSchema": {
     "type": "object",
     "required": [
@@ -2220,12 +2220,12 @@ Read one dashboard by id: the WORKING version's full document and lifecycle stat
 
 #### 6.2.57 `dashboards_create`
 
-Create a dashboard: version 1 lands as a DRAFT, validated in FULL against the pins as they are now (every source release RELEASED and read-only with its required parameters bound; every visualization input mapped; one namespace for occurrences, groups, actions, controls and the set's parameters; every occurrence and control placed on the grid). A pinned visualization or set may still be a DRAFT at save. The arguments ARE the document's keys; the 094 new-root confirmation applies.
+Create a dashboard: version 1 lands as a DRAFT, validated in FULL against the pins as they are now (every source version DRAFT or RELEASED and read-only with its required parameters bound; every visualization input mapped; one namespace for occurrences, groups, actions, controls and the set's parameters; every occurrence and control placed on the grid). Pinned dependencies may be live drafts during authoring and explicit draft preview; publication requires released dependencies. The arguments ARE the document's keys; the 094 new-root confirmation applies.
 
 ```json
 {
   "name": "dashboards_create",
-  "description": "Create a dashboard: version 1 lands as a DRAFT (a human releases it; no tool releases anything). The document is validated in FULL against the pins as they are now — every source pipeline release RELEASED and read-only with its required parameters bound, every visualization input mapped to a source, one namespace for occurrences, groups, actions, controls and the set's parameters, every occurrence and control placed on the 12-column grid — and a refusal names every failing path. A pinned visualization or parameter set may still be a DRAFT at save. A NEW top-level folder is refused until you confirm it: reuse an existing root, or ask the person first and then pass confirm_new_root: true.",
+  "description": "Create a dashboard: version 1 lands as a DRAFT (a human releases it; no tool releases anything). The document is validated in FULL against the pins as they are now — every source pipeline version DRAFT or RELEASED and read-only with its required parameters bound, every visualization input mapped to a source, one namespace for occurrences, groups, actions, controls and the set's parameters, every occurrence and control placed on the 12-column grid — and a refusal names every failing path. A pinned dependency may be a live DRAFT at save and in explicit draft preview; publication requires releases. A NEW top-level folder is refused until you confirm it: reuse an existing root, or ask the person first and then pass confirm_new_root: true.",
   "inputSchema": {
     "type": "object",
     "required": [
@@ -2256,7 +2256,7 @@ Create a dashboard: version 1 lands as a DRAFT, validated in FULL against the pi
         "items": {
           "type": "object"
         },
-        "description": "[{name, pipeline: {name, version}, parameters: {<pipeline parameter>: {parameter: <set parameter>} or {value: <literal>}}}] — each pinned release RELEASED and read-only; every required pipeline parameter bound."
+        "description": "[{name, pipeline: {name, version}, parameters: {<pipeline parameter>: {parameter: <set parameter>} or {value: <literal>}}}] — each pinned version DRAFT or RELEASED and read-only during authoring; publication requires RELEASED; every required pipeline parameter bound."
       },
       "visualizations": {
         "type": "array",
@@ -2366,7 +2366,7 @@ The hash-preconditioned draft write — `visualizations_update`'s twin.
         "items": {
           "type": "object"
         },
-        "description": "[{name, pipeline: {name, version}, parameters: {<pipeline parameter>: {parameter: <set parameter>} or {value: <literal>}}}] — each pinned release RELEASED and read-only; every required pipeline parameter bound."
+        "description": "[{name, pipeline: {name, version}, parameters: {<pipeline parameter>: {parameter: <set parameter>} or {value: <literal>}}}] — each pinned version DRAFT or RELEASED and read-only during authoring; publication requires RELEASED; every required pipeline parameter bound."
       },
       "visualizations": {
         "type": "array",
@@ -3117,6 +3117,7 @@ the audit green over the exported set.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-05 | v1.71 | #459 draft dashboard dependencies | Dashboard list/get/create descriptions and source schemas name exact live DRAFT or RELEASED versions during authoring and explicit draft preview. Publication and imports retain released dependencies. No tool, argument, permission or role change. |
 | 2026-10-03 | v1.70 | 405 (#405) a datasource's own timeout tightens the probe | **§6.2.34 `sql_probe`: a datasource's own `query_timeout_seconds` tightens the dialect ceiling, never loosens it** — the bound is `min(ceiling, query_timeout_seconds)`, so a probe on a datasource set below the ceiling runs no longer than that datasource's nodes; v1.69's "not consulted" is replaced. The payload's `timeout_seconds` reports the tightened value. No tool, argument, `inputSchema`, count or permission changed ([Datasources §7D](datasources.md#7d-the-sql-probe) v2.52). |
 | 2026-10-02 | v1.69 | 167 (#167) the probe's timeout ceiling follows the node's | **§6.2.34 `sql_probe`: `timeout_seconds` is clamped to the instance's node query timeout for the datasource's dialect** (`node-query-timeout-seconds-by-dialect.<dialect>` when set, else `node-query-timeout-seconds` — Configuration §3.2), no longer to a static 30 s: an acceptance run's verification probe over the lake table timed out at 30 s while the same scan completed as a node. The `inputSchema` drops `"maximum": 30` for `timeout_seconds` (the ceiling is configuration, so a static schema cannot state it; `minimum` 1 and `default` 10 unchanged, drift-pinned as before). The success payload gains **`timeout_seconds`** (the timeout the statement ran under) and a timeout's `details` carry it too. A request above the ceiling is still clamped, never refused. No tool, argument name, count or permission changed ([Datasources §7D](datasources.md#7d-the-sql-probe)). |
 | 2026-10-02 | v1.68 | 235 (#235) the drift test pins every tool's description | **Additive, no surface change.** 19 blocks gain their top-level `description` — every `parameter_sets_*` (6), `visualizations_*` (5), `dashboards_*` (6) and `visualizations_test_*` (2) block, the verbatim shipped string; the drift test now pins descriptions (it compared `inputSchema` only). Seven stale descriptions are refreshed to the shipped string (the code was right, the blocks predate #194/#274/#320 and the visibility and TRANSFORM-node refusals): `endpoints_delete`, `endpoints_list`, `executions_get`, `executions_get_result`, `pipelines_execute_node`, `templates_purge_draft`, `templates_used_by`. **§6.2.5 `pipelines_update`** (input documented in prose) gains a description-only block so its string is pinned too. No tool added or removed: **61 stays 61**, permissions and every `inputSchema` unchanged. |
