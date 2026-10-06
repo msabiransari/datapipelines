@@ -89,8 +89,8 @@ Open exactly the guide the task needs, then its references.
   contract, the `in_list` macro, the evaluate loop.
 - **`lake`** — the data is Parquet or Iceberg on S3, not in a database.
 - **`endpoints`** — a released read-only pipeline must answer a plain HTTP GET.
-- **`dashboards`** — charts and dashboards over released pipelines: author a visualization, pin it on a
-  dashboard, validate, and hand the release to a person.
+- **`dashboards`** — charts and dashboards over pipelines (draft or released while authoring, released to
+  publish): author a visualization, pin it on a dashboard, validate, and hand the release to a person.
 
 Each area's tools reference is named `<area>-tools` (`pipelines-tools`, `datasources-tools`, …)
 — generated from the shipped tools' own descriptions, so it cannot drift. When a tool answered

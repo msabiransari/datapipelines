@@ -699,9 +699,9 @@ open class PipelineService(
             pipelines.findVersionDetail(workspaceId, pipelineId, version)
                 ?: throw versionNotFound(pipelineId, version)
         if (detail.status != PipelineVersionStatus.DRAFT) throw lastRelease(pipelineId, version, detail.status)
-        // Graph rule 1: a draft PIPELINE version cannot be pinned by a saved parent (D58
-        // refuses the pin at save), so there is no pin guard here — the invariant is
-        // enforced upstream, and this comment is what makes that a decision rather than a gap.
+        // Graph rule 1: NO pin guard here yet, and since #459 that is a gap, not a decision.
+        // D58 used to refuse a draft pin at save; a draft parent or a draft dashboard may now
+        // pin this DRAFT, and purging it leaves their pins dangling (versioning §3 rule 3, #462).
         return when (
             val outcome =
                 pipelines.purgeDraft(
@@ -767,8 +767,8 @@ open class PipelineService(
         }
 
         // Graph rule 3: no inbound edges of any kind. A never-released pipeline cannot be
-        // published (the pointer is NULL) and cannot be pinned by a saved parent (D58), but
-        // the check is stated, not assumed — a template-style pin edge would refuse here.
+        // published (the pointer is NULL), but since #459 a draft parent or a draft dashboard
+        // may pin it (D58), so this check is load-bearing: a live pin refuses here.
         refuseIfPinned(workspaceId, record, versions[0].version, entityPurge = true)
 
         val exclusive = exclusiveDraftTemplates(workspaceId, record)
