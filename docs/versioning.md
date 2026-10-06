@@ -1,9 +1,9 @@
 # Versioning: Draft, Release, Promotion
 
-**Status:** v1.26 — #328: the release flip records the caller output (§5.3). #349: the UI workspace row states the in-page version switch (§7.2); #344: the push closure is read at the pinned versions without the promoter lens (§10.4); #332: the three families audit every lifecycle verb (§7's blanket sentence); #348: §7.2's table disambiguates the REST `GET /api/v1/pipelines/{id}` from the UI read workspace `GET /pipelines/{id}`; #10 L1c-c: the count ceiling stated as aggregate; the receive's refused-dashboard rollback witnessed (§10.4); #320: the reverse arrows into other families (§3.5.3); #10: visualizations and dashboards join the lifecycle table (§3.5)
+**Status:** v1.27 — #459: draft authoring may pin DRAFT or RELEASED children (D58, §3); the pipeline draft purges' missing pin guard is #462. #328: the release flip records the caller output (§5.3). #349: the UI workspace row states the in-page version switch (§7.2); #344: the push closure is read at the pinned versions without the promoter lens (§10.4); #332: the three families audit every lifecycle verb (§7's blanket sentence); #348: §7.2's table disambiguates the REST `GET /api/v1/pipelines/{id}` from the UI read workspace `GET /pipelines/{id}`; #10 L1c-c: the count ceiling stated as aggregate; the receive's refused-dashboard rollback witnessed (§10.4); #320: the reverse arrows into other families (§3.5.3); #10: visualizations and dashboards join the lifecycle table (§3.5)
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Contract](pipeline-contract.md) (§13 error catalog, §17 persistence), [Templates](templates.md), [Metadata DB](metadata-db.md) (§4.4/§4.5/§4.8/§4.9 — DDL authority), [REST API](rest-api.md), [Pipeline Editor UI](pipeline-editor.md)
-**Last updated:** 2026-10-02
+**Last updated:** 2026-10-06
 
 ---
 
@@ -248,18 +248,26 @@ Three graph rules cover every refusal:
    details key is [§3.5.3](#353-the-reverse-arrows-into-other-families-320).
 2. A pointer edge follows the pointer and refuses on NULL (§3.4).
 3. An entity can be purged only when it has **no inbound edges of any kind** and its only
-   version is a DRAFT. For pipelines this reduces to the draft-only check — a
-   never-released pipeline cannot be pinned (D58) and cannot be published — and to the
-   template side it is the `template.in_use` pin check, which is reachable. **A draft purge
+   version is a DRAFT. For pipelines the entity purge asks it (`pipeline.version.pinned`, any
+   version, parent pipelines and dashboards): a never-released pipeline cannot be published, but
+   since #459 a draft parent or a draft dashboard may pin it (D58). On the template side it is
+   the `template.in_use` pin check. **A draft purge
    that takes the entity with it** (the draft is the only version) **is an entity purge** and
    asks rule 3's any-version question; a draft purge of an entity that keeps other versions asks
    rule 1's exact-pin question of the draft's own version (#320 — the template and parameter-set
-   draft purges ran no pin check at all before).
+   draft purges ran no pin check at all before). **The pipeline draft purges do not ask it yet**
+   (`PipelineReleaseService.purge`, `PipelineService.purgeVersion`): they were designed when D58
+   refused a draft pin at save. Until [#462](https://github.com/msabiransari/datapipelines/issues/462)
+   lands, purging a pinned pipeline draft succeeds and leaves the pinning drafts dangling. Their
+   run, validate and release then refuse with not-found, and a name freed by an entity-taking
+   purge can be re-created and re-resolved by the old pin.
 
-**Composition (D58).** A PIPELINE node may pin only a RELEASED child version —
-`pipeline.validation.pipeline_reference_not_released` at save. Template pins keep their
-rule: a DRAFT pipeline may pin a DRAFT or RELEASED template version while iterating, and
-release requires every pinned template version RELEASED (§5.3). Pinning a DISCARDED
+**Composition (D58, #459).** A draft pipeline may pin a live DRAFT or RELEASED child
+version at save; a DISCARDED or missing child is refused. Release and import require every
+pinned child RELEASED (`pipeline.validation.pipeline_reference_not_released`), so released
+composition still references only reviewed content. Template pins keep their rule: a DRAFT
+pipeline may pin a DRAFT or RELEASED template version while iterating, and release requires
+every pinned template version RELEASED (§5.3). Pinning a DISCARDED
 template version is refused at save (`pipeline.validation.template_version_not_found`) —
 which is what makes "no live version pins a DISCARDED version" an invariant rather than a
 hope.
@@ -412,8 +420,9 @@ statement shape and differ only in their scope predicate.
 dependency (a dashboard source must be RELEASED; a release refuses a DRAFT pin, or cascades it to RELEASED under
 consent), and a RELEASED version never returns to DRAFT and is never purged (`last_release`). So an entity whose only
 version is a DRAFT — the only entity an entity purge accepts — can never have been pinned by a DISCARDED dependent version.
-The same argument is why the pipeline VERSION purge (which carries no pin guard by design, D58) needs none for
-dashboards: it takes only DRAFT versions, and a dashboard source pins only a RELEASED one. The scans still ask the
+The pipeline VERSION purge carries no pin guard. Before #459 none was needed, because D58 refused a draft pin at save
+and a dashboard source pinned only a RELEASED version. Since #459 a draft parent or a draft dashboard may pin the DRAFT
+it takes, so the guard is owed: [#462](https://github.com/msabiransari/datapipelines/issues/462). The scans still ask the
 any-version question for the pipeline, set and template arms (the cost is one scan, and the
 argument above rests on lifecycle transitions a future flow could change); the visualization's own guard (`visualization.version.pinned`) counts LIVE
 dashboard versions only, and is moot for the same reason.
@@ -1473,6 +1482,7 @@ re-opening it.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-06 | v1.27 | 459 (#459) draft dependencies — merge follow-up | **D58 relaxed** (the row was changed by the lane): a draft pipeline may pin a live DRAFT or RELEASED child at save; release and import still require RELEASED children (`pipeline_reference_not_released`). **§3's composition paragraph** now says so (it still said RELEASED-only at save). **§3 graph rule 3 and the "moot" paragraph** no longer rest on "a never-released pipeline cannot be pinned": the pipeline entity purge asks the any-version question (it always ran `refuseIfPinned`). The pipeline draft purges (`purge`, `purgeVersion`) carry no pin guard and now owe one, because a draft parent or a draft dashboard may pin the draft they take. That gap and its traced impact are stated in rule 3 and tracked as #462. |
 | 2026-10-02 | v1.26 | 328 (#328) the flip records the caller output | **§5.3's sketch mirrors the statement**: the flip now also sets `caller_output_json` — the D1 subselect over `pipeline_executions` (SUCCESS, root, non-null schema, `started_at >` the last draft write's clock), in the SAME statement, so the record is atomic with the flip and cannot drift from it. A never-run draft releases with NULL (`not_observed` in the response/audit); the release is never refused for a missing run; the record is outside `body_hash`. Shape and precedence: pipeline-contract §3.3.1. |
 | 2026-10-01 | v1.25 | #349 the workspace composition — UI wording only | **§7.2's table**, the UI row: the viewed version moves IN PAGE (the selector and the Versions tab apply the admitted body through the REST version read — never a document reload, so an active run keeps its stream and identity), and the client's viewed-version state is the lens-filtered admitted history — a hidden current or draft never enters it. Service/REST/MCP defaults untouched; no route, permission or role changed. |
 | 2026-10-02 | v1.24 | 344 (#344) bundled templates are the artifact's pins | **§10.4** states the rule the sender already followed (the owner's ruling of 2026-10-02): the closure is read at the exact pinned versions without the promoter lens — the lens and §10.3's guards govern the roots; a pinned template the view hides still rides, and the same-version-and-hash skip is the only omission. No behaviour changed. |

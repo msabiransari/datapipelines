@@ -1,9 +1,9 @@
 # Pipeline Contract Specification
 
-**Status:** v1.53 (revised — see Change Log)
+**Status:** v1.54 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
-**Last updated:** 2026-10-04
+**Last updated:** 2026-10-06
 
 ---
 
@@ -1874,6 +1874,7 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-06 | v1.54 | 459 (#459) + merge follow-up | **§4.9 / §12.9 / the error table**, written by the lane: a PIPELINE node may pin a live DRAFT child while the parent is a draft, and release and import still require RELEASED children (`pipeline_reference_not_released`). Composition verdicts describe a draft child's current body, and release revalidates them. The follow-up adds this row and the bump. The error row's old reason ("a DRAFT child can be purged out from under its parent") still holds for drafts: the pipeline draft purges have no pin guard yet (versioning §3 rule 3, #462). |
 | 2026-10-04 | v1.53 | #382 merge follow-up | **§13.21** — the strict-reader sentence names five routes that bind a typed request DTO, `POST /dashboards/bindings` added (#382 moved it onto the reader; #382 review F1). No code, status or error shape changed. |
 | 2026-10-03 | v1.52 | 442a (#442) | Saved schedule notification settings: recipients and five event choices, validated and shown by role; omitted PUT settings preserved; mail remains off pending part b. |
 | 2026-10-02 | v1.51 | 328 (#328) the release records its caller node's result columns | New **§3.3.1** — the source of truth for the caller-output record: the flip copies the version's latest qualifying execution's `result_schema_json` into `pipeline_versions.caller_output_json` (D1, in the flip's own statement); the D2 `{name, type, nullable}` shape with the 256-column / 128-character record bounds and the JSON-null-reads-`true` rule; the D3 word (`recorded` \| `declared` \| `none` \| `not_observed`) the response and audit row carry — never the column list; the D4 precedence (the record never overrides a transform caller's declared contract) and the promotion carry (validated at the receiver, stored on the imported release). No new error code; the body, the hash and §12.12 are untouched. |
