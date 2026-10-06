@@ -1,6 +1,7 @@
 package co.datapipelines.web.dashboards.runtime
 
 import co.datapipelines.parameters.ParameterSetVersion
+import co.datapipelines.pipeline.PipelineNodeRef
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.pipeline.PipelineVersionStatus
@@ -51,6 +52,9 @@ internal class DraftDashboardDependencies(
     ) {
         val pipelinePins = ArrayDeque(sources.values)
         val seenPipelines = mutableSetOf<Pair<UUID, Int>>()
+        // The exact pins already queued, by the (name, version) a node names: a child that many nodes
+        // reference, or a cycle back to an ancestor, is loaded once, never once per edge.
+        val queued = sources.values.mapTo(mutableSetOf()) { it.record.name to it.version }
         while (pipelinePins.isNotEmpty()) {
             val source = pipelinePins.removeFirst()
             if (!seenPipelines.add(source.record.id to source.version)) continue
@@ -68,12 +72,19 @@ internal class DraftDashboardDependencies(
             hashes += "pipeline_loaded|${source.record.name}|${source.version}|$loadedHash"
             source.executable.pipeline.nodes.forEach { node ->
                 if (node.template.id.isNotBlank()) templatePins.addLast(node.template)
-                node.pipeline?.let { ref ->
-                    val child = loadSource(workspaceId, ref.name, ref.version)
-                    pipelinePins.addLast(child)
-                }
+                node.pipeline?.let { ref -> enqueueChild(workspaceId, ref, queued, pipelinePins) }
             }
         }
+    }
+
+    /** Loads and queues [ref] unless its exact pin is already [queued] — one load per pin, not per edge. */
+    private fun enqueueChild(
+        workspaceId: UUID,
+        ref: PipelineNodeRef,
+        queued: MutableSet<Pair<String, Int>>,
+        pipelinePins: ArrayDeque<ResolvedSource>,
+    ) {
+        if (queued.add(ref.name to ref.version)) pipelinePins.addLast(loadSource(workspaceId, ref.name, ref.version))
     }
 
     private fun loadSource(

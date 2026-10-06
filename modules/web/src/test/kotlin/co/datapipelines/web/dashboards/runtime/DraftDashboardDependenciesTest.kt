@@ -15,6 +15,7 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import java.util.UUID
@@ -133,5 +134,16 @@ class DraftDashboardDependenciesTest {
         hashes().size shouldBe 6
         every { sql.imports } returns emptyList()
         hashes().size shouldBe 5
+    }
+
+    @Test
+    fun `an exact pin is loaded once however many nodes name it, and a cycle back to a source loads nothing`() {
+        every { root.executable.pipeline.nodes } returns List(3) { node(TemplateRef(), PipelineNodeRef("child", 2)) }
+        every { child.executable.pipeline.nodes } returns listOf(node(TemplateRef("sql", 2), PipelineNodeRef("root", 2)))
+        every { repository.findByNameAnyStatus(workspace, "root") } returns root.record
+        every { pipelines.findExecutable(workspace, ReadLens.Everything, root.record, 2) } returns root.executable
+        hashes().size shouldBe 6
+        verify(exactly = 1) { pipelines.findExecutable(workspace, ReadLens.Everything, child.record, 2) }
+        verify(exactly = 0) { repository.findByNameAnyStatus(workspace, "root") }
     }
 }
