@@ -33,8 +33,19 @@ class TreeControllerTest {
     private val sets = mockk<ParameterSetService>()
     private val workspace = UUID.randomUUID()
     private val actor = UUID.randomUUID()
-    private val admitted = ReadLens.Only(setOf("scope/visible"))
-    private var view = LensedView(admitted, admitted, parameterSets = admitted, visualizations = admitted, dashboards = admitted)
+
+    // One distinct lens per family, so a handler that read another family's lens cannot pass.
+    private val lenses =
+        listOf("pipeline", "template", "dashboard", "visualization", "set")
+            .associateWith { ReadLens.Only(setOf("scope/$it")) }
+    private var view =
+        LensedView(
+            pipelines = lenses.getValue("pipeline"),
+            templates = lenses.getValue("template"),
+            parameterSets = lenses.getValue("set"),
+            visualizations = lenses.getValue("visualization"),
+            dashboards = lenses.getValue("dashboard"),
+        )
     private val controller = TreeController(pipelines, templates, dashboards, visualizations, sets, PromoterLens { view })
 
     @AfterEach
@@ -65,27 +76,28 @@ class TreeControllerTest {
             answer.headers.cacheControl shouldBe "no-store"
             checkNotNull(answer.body).data.workspaceId shouldBe workspace
         }
-        val browse = NavigationRequest(workspace, admitted, "scope", "scope", null, limit = NavigationRequest.PAGE_SIZE + 1)
-        val search = browse.copy(query = "match")
+
+        fun browse(family: String) =
+            NavigationRequest(workspace, lenses.getValue(family), "scope", "scope", null, limit = NavigationRequest.PAGE_SIZE + 1)
         verify(exactly = 1) {
-            pipelines.navigation(browse)
-            pipelines.navigation(search)
+            pipelines.navigation(browse("pipeline"))
+            pipelines.navigation(browse("pipeline").copy(query = "match"))
         }
         verify(exactly = 1) {
-            templates.navigation(browse)
-            templates.navigation(search)
+            templates.navigation(browse("template"))
+            templates.navigation(browse("template").copy(query = "match"))
         }
         verify(exactly = 1) {
-            dashboards.navigation(browse)
-            dashboards.navigation(search)
+            dashboards.navigation(browse("dashboard"))
+            dashboards.navigation(browse("dashboard").copy(query = "match"))
         }
         verify(exactly = 1) {
-            visualizations.navigation(browse)
-            visualizations.navigation(search)
+            visualizations.navigation(browse("visualization"))
+            visualizations.navigation(browse("visualization").copy(query = "match"))
         }
         verify(exactly = 1) {
-            sets.navigation(browse)
-            sets.navigation(search)
+            sets.navigation(browse("set"))
+            sets.navigation(browse("set").copy(query = "match"))
         }
     }
 
