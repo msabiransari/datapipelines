@@ -27,9 +27,12 @@
 # Usage: ./scripts/pregate.sh [base-ref]     (default: origin/main; the diff is base...HEAD
 #        plus the working tree). Logs: .pregate-logs/ — the verdict line of every run is
 #        appended to .pregate-logs/0-verdict.log (PASS|FAIL, base, merge-base, HEAD, UTC time,
-#        the five stage exits, snap, and the run id). #441: each test-producing stage's JUnit
-#        XML is snapshotted under .pregate-logs/runs/<run-id>/<stage>/ before the next stage
-#        can overwrite it; read one stage with `./scripts/test-recount.sh <run-dir>/<stage>`.
+#        the five stage exits, snap, prune, and the run id). #441: each test-producing stage's
+#        JUnit XML is snapshotted under .pregate-logs/runs/<run-id>/<stage>/ before the next
+#        stage can overwrite it; read one stage with `./scripts/test-recount.sh <run-dir>/<stage>`.
+#        #447: older run snapshots are retained to the newest PREGATE_KEEP_RUNS (default 10;
+#        the current run and any run with a live PID are never deleted); a refused/invalid
+#        prune shows as prune=1 and refuses a PASS.
 #        ./scripts/pregate.sh --self-test    (the stage-2b selector AND the #441 evidence
 #        capture, over isolated fixtures and a recording, refusing Gradle stand-in — no
 #        gradle, no repo state touched).
@@ -75,6 +78,12 @@ RUN_DIR="$(pgres::run_dir "$LOGDIR" "$RUN_ID")"
 MANIFEST="$RUN_DIR/MANIFEST.txt"
 snap=0
 pgres::manifest_init "$MANIFEST" "$RUN_ID" "$BASE" "$mb" "$(git rev-parse --short HEAD 2>/dev/null || echo HEAD)" || snap=1
+# #447: prune OLDER run snapshots once per invocation, now that this run's own directory
+# exists so it counts among the kept N and is protected by name. An invalid
+# PREGATE_KEEP_RUNS or a refused deletion is carried into the verdict (prune=1) exactly as a
+# snapshot failure is: it refuses a PASS and is never silently absorbed.
+prune=0
+pgres::prune_runs "$LOGDIR" "$RUN_ID" || prune=1
 
 echo "=============================================================="
 echo " Pre-gate   |   $(date '+%Y-%m-%d %H:%M:%S %z')   |   base $BASE ($mb)"
@@ -274,15 +283,14 @@ pgres::manifest_stage "$MANIFEST" stage-4 executed "$cmp" "compileTestKotlin-all
 # lives, and the lander reads a delivered lane's verdict from here (2026-10-02 — until then it had to
 # re-derive it from the five step logs).
 verdict() { # verdict PASS|FAIL → one line in .pregate-logs/0-verdict.log
-  echo "PRE-GATE $1 base=$BASE merge-base=$(git rev-parse --short "$mb" 2>/dev/null || echo "$mb") head=$(git rev-parse --short HEAD) at=$(date -u '+%Y-%m-%dT%H:%M:%SZ') lint=$lint mod=$mod t2b=$t2b grd=$grd cmp=$cmp snap=$snap run=$RUN_ID deferred=${t2b_deferred[*]:-none}" >> "$LOGDIR/0-verdict.log"
+  echo "PRE-GATE $1 base=$BASE merge-base=$(git rev-parse --short "$mb" 2>/dev/null || echo "$mb") head=$(git rev-parse --short HEAD) at=$(date -u '+%Y-%m-%dT%H:%M:%SZ') lint=$lint mod=$mod t2b=$t2b grd=$grd cmp=$cmp snap=$snap prune=$prune run=$RUN_ID deferred=${t2b_deferred[*]:-none}" >> "$LOGDIR/0-verdict.log"
 }
 echo "--------------------------------------------------------------"
 if [ "${#t2b_deferred[@]}" -gt 0 ]; then
   echo "  DEFERRED: ${t2b_deferred[*]} — full-suite coverage requires Gate A; not exercised here"
 fi
-# `snap` joins the decision: a copy/manifest failure refuses a PASS and is reported
-# alongside the original five stage exits, never in place of them.
-if [ "$lint" -eq 0 ] && [ "$mod" -eq 0 ] && [ "$t2b" -eq 0 ] && [ "$grd" -eq 0 ] && [ "$cmp" -eq 0 ] && [ "$snap" -eq 0 ]; then
+# Bookkeeping failure refuses PASS alongside the original stage exits.
+if [ "$lint" -eq 0 ] && [ "$mod" -eq 0 ] && [ "$t2b" -eq 0 ] && [ "$grd" -eq 0 ] && [ "$cmp" -eq 0 ] && [ "$snap" -eq 0 ] && [ "$prune" -eq 0 ]; then
   echo "  PRE-GATE PASS — a lane stops here (protocol 2026-09-24); the orchestrator's gate on the merge SHA is the verdict"
   verdict PASS
   pgres::manifest_verdict "$MANIFEST" PASS "$RUN_ID" || true

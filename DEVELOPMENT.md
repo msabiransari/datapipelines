@@ -805,16 +805,33 @@ stale earlier result is never presented as this run's. Read one stage at a time:
 The stages are never summed: a guard class may legitimately run in stage 2 and in stage 3, so each
 root's counts stand alone and there is no "unique tests" total across stages. Each stage dir also
 carries `PROVENANCE.txt`, the stage log's test-task status lines: a task Gradle marked `UP-TO-DATE`
-or `FROM-CACHE` means the copied XML is a previous execution's, not fresh evidence, and the
-manifest's `provenance=` field says whether that record exists — a file's existence is never read
-as a fresh run. A copy, provenance or manifest write failure refuses a PASS (`snap=1` in the verdict
-line, beside the unchanged five stage exits) even when every Gradle stage exited 0; it never turns a
-Gradle failure into success. A stage that ran but produced no XML is recorded (`files=0`), malformed
-XML is preserved and named by the recount (`unreadable=`), and a skipped stage is recorded as
-skipped rather than counted as an empty pass. `./scripts/pregate.sh --self-test` drives the real
-orchestration over isolated fixtures with a recording, refusing Gradle stand-in and asserts
-per-stage counts and paths, a failing stage's retained XML, and that a second invocation cannot
-reuse the previous run's results.
+or `FROM-CACHE` means the copied XML is a previous execution's — neither that status nor a copied
+XML file alone proves a fresh run. The same file names the gap rather than leaving it silent: for
+every copied task directory with no exact `> Task :…` line in the stage log it emits
+`# NO-STATUS-LINE <repo-relative-task-directory>` (a missing log annotates every copied directory,
+and similarly-prefixed task names such as `test` and `testExtra` stay distinct), while the status
+lines themselves are preserved. A copy, provenance or manifest write failure refuses a PASS
+(`snap=1` in the verdict line, beside the unchanged five stage exits) even when every Gradle stage
+exited 0; it never turns a Gradle failure into success. A stage that ran but produced no XML is
+recorded (`files=0`), malformed XML is preserved and named by the recount (`unreadable=`), and a
+skipped stage is recorded as skipped rather than counted as an empty pass. `./scripts/pregate.sh
+--self-test` drives the real orchestration over isolated fixtures with a recording, refusing Gradle
+stand-in and asserts per-stage counts and paths, a failing stage's retained XML, the NO-STATUS-LINE
+annotations, and that a second invocation cannot reuse the previous run's results.
+
+**Run snapshots are retained, not accumulated (#447).** Each run leaves a directory under
+`.pregate-logs/runs/`; once per invocation, after this run's own directory exists, `scripts/pregate.sh`
+keeps the newest `PREGATE_KEEP_RUNS` (default 10, a positive decimal integer) and deletes only the
+older, over-bound candidates. Ordering is deterministic `LC_ALL=C` byte order of the run id — its
+UTC-stamp prefix makes that chronological and collision suffixes keep ids unique — and the newest N
+include the current run. Only immediate, non-symlink children of `.pregate-logs/runs` whose name
+matches the run-id grammar `scripts/pregate.sh` emits, and whose canonical path stays under that runs
+root, are ever deleted; unrelated directories and files, a symlinked runs root, and a symlinked
+candidate are left alone. The current run and any run whose embedded PID is still alive are never
+deleted, so a checkout with concurrent invocations may briefly hold more than N — the explicit cost
+of not deleting active evidence. An invalid `PREGATE_KEEP_RUNS` fails before any deletion, and a
+refused prune is carried into the verdict as `prune=1`, refusing a PASS exactly as `snap=1` does;
+failure-run snapshots are retained under the same policy.
 
 **A tooling crash is neither green nor red.** An OOM-killed daemon, `Could not write XML test
 results` (two builds sharing one `build/`), a corrupted result store — re-run before drawing any
