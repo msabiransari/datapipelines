@@ -87,21 +87,12 @@ class ModalBackBrowserTest : BrowserSuite() {
         // The ⋯ usually sits below the fold: scroll it into view OURSELVES, then wait for the
         // scroll to have SETTLED — the summary's rect inside the viewport and unchanged across
         // two animation frames (301 #301; was a fixed 300 ms sleep) — so Playwright's own
-        // pre-click auto-scroll cannot race the menu's scroll-out-of-sight close.
+        // pre-click auto-scroll cannot race the menu's scroll-out-of-sight close. The wait
+        // decides from COMPLETED observations and retries a false one (#454; it was a
+        // waitForFunction whose Promise-valued predicate ended the wait on its first, possibly
+        // unstable, observation) — ModalScrollStabilityBrowserTest drives this same helper.
         page.locator("#pe-pane-versions details.tplx-vmenu > summary").first().evaluate("el => el.scrollIntoView({ block: 'center' })")
-        page.waitForFunction(
-            """(sel) => {
-              const el = document.querySelector(sel);
-              if (!el) return false;
-              const rect = el.getBoundingClientRect();
-              if (rect.top < 0 || rect.bottom > innerHeight) return false;
-              return new Promise(done => requestAnimationFrame(() => requestAnimationFrame(() => {
-                const after = el.getBoundingClientRect();
-                done(after.top === rect.top && after.bottom === rect.bottom);
-              })));
-            }""",
-            "#pe-pane-versions details.tplx-vmenu > summary",
-        )
+        awaitSettledInViewport(page, "#pe-pane-versions details.tplx-vmenu > summary")
         page.locator("#pe-pane-versions details.tplx-vmenu > summary").first().click()
         page.waitForFunction(
             """() => {
