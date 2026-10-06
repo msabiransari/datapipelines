@@ -14,7 +14,7 @@ export function restTreeSource(family, fetchPage = fetch) {
     });
     if (!response.ok || !response.headers.get("content-type")?.includes("application/json")) {
       const error = new Error("Could not load tree");
-      if (response.status === 401 || (response.status === 400 && cursor !== null)) {
+      if (response.status === 401 || response.status === 403 || (response.status === 400 && cursor !== null)) {
         error.message = "Navigation context changed. Retry to reload."; error.resetTree = true;
       }
       throw error;

@@ -19,6 +19,10 @@ for(const family of ['pipelines','templates','dashboards','visualizations','para
     await assert.rejects(foreign.loadChildren(null,null,options),error=>error.resetTree===true);
     const expired=restTreeSource(family,async()=>({ok:false,status:400}));
     await assert.rejects(expired.loadChildren('folder:scope/a','old-process-cursor',options),error=>error.resetTree===true);
+    for(const status of [401,403]) {
+      const refused=restTreeSource(family,async()=>({ok:false,status}));
+      await assert.rejects(refused.loadChildren(null,null,options),error=>error.resetTree===true);
+    }
   });
 }
 test('unsafe destinations and dependency paths refuse schemes, traversal and foreign routes',()=>{
