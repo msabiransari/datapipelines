@@ -19,8 +19,8 @@ import java.util.UUID
  * bounded evaluator, [TemplateEvaluateService] — the evaluation pool, the §5.1 input check and the type
  * gate, so the fixtures a case submits are judged exactly as the runtime judges production rows. It is a
  * NEW composition, not [co.datapipelines.web.dashboards.runtime.WebDashboardTransformer]: the authoring
- * path admits a DRAFT transform pin (the release cascade releases it later), while the runtime keeps its
- * RELEASED-only rule untouched.
+ * path admits a DRAFT transform pin (the release cascade releases it later), and an explicitly selected draft
+ * dashboard also admits it; published runtime requires RELEASED pins.
  *
  * Input shaping follows the contract: a `ROW`-mode transform receives the (single) table as `rows`; every
  * other mode receives each table under `inputs[name]` (the shape authoring test cases use). The output

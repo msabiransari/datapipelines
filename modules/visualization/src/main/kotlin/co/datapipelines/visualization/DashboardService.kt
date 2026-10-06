@@ -77,7 +77,7 @@ class DashboardService(
     fun validate(
         workspaceId: UUID,
         document: DashboardDocument,
-    ): ArtifactValidation<DashboardDocument> = validator.validate(workspaceId, document)
+    ): ArtifactValidation<DashboardDocument> = validator.validate(workspaceId, document, requireReleasedSources = false)
 
     /** Release the DRAFT at [expectedHash] (see the class KDoc for the order of the checks). */
     fun release(
@@ -91,7 +91,9 @@ class DashboardService(
         val record = repository.findRecord(workspaceId, id) ?: throw lifecycle.notFound(id)
         val draft = repository.findDraft(workspaceId, id) ?: throw lifecycle.notDraft(id)
         val body = checkNotNull(repository.findVersion(workspaceId, id, draft.version)).body
-        validated(workspaceId, DashboardDocument(record.name, body))
+        validator
+            .validate(workspaceId, DashboardDocument(record.name, body), requireReleasedSources = true)
+            .orThrow(DashboardErrorCodes.BODY_INVALID)
         val toCascade = dependenciesToRelease(workspaceId, body, releasePinnedVisualizations)
         val released =
             checkNotNull(
@@ -153,7 +155,8 @@ class DashboardService(
         body: DashboardBody,
     ) {
         val record = repository.findRecord(workspaceId, id) ?: return
-        val invalid = validator.validate(workspaceId, DashboardDocument(record.name, body)) as? ArtifactValidation.Invalid ?: return
+        val validation = validator.validate(workspaceId, DashboardDocument(record.name, body), requireReleasedSources = false)
+        val invalid = validation as? ArtifactValidation.Invalid ?: return
         val dangling = invalid.result.failures.filter { it.code == DashboardErrorCodes.DEPENDENCY_NOT_FOUND }
         if (dangling.isNotEmpty()) throw ArtifactValidationException(ValidationResult(dangling), DashboardErrorCodes.BODY_INVALID)
     }
@@ -181,7 +184,7 @@ class DashboardService(
         workspaceId: UUID,
         document: DashboardDocument,
     ): DashboardDocument =
-        when (val validation = validator.validate(workspaceId, document)) {
+        when (val validation = validator.validate(workspaceId, document, requireReleasedSources = true)) {
             is ArtifactValidation.Valid -> validation.document
 
             is ArtifactValidation.Invalid -> throw ArtifactValidationException(
@@ -242,8 +245,9 @@ class DashboardService(
      * One NAMED version the RUNTIME serves (#369, the draft preview's R2): the version [version] of dashboard [id]
      * through [lens] — DRAFT or RELEASED. Absent = [findServed]'s answer, exactly today's behaviour; a value names a
      * version. The lens holds the record's line: under the whole view a DRAFT or RELEASED version is served (the
-     * engineer perfects the board before releasing it, R1 — the pins are judged RELEASED-only by the resolver either
-     * way), while a narrowing lens never learns of a draft — RELEASED only, the same answer [findVersion] gives, so a
+     * engineer perfects the board before releasing it, R1; since #459 a served DRAFT version previews over its DRAFT or
+     * RELEASED dependencies, while a RELEASED version's pins stay RELEASED-only in the resolver), while a narrowing
+     * lens never learns of a draft — RELEASED only, the same answer [findVersion] gives, so a
      * hidden or draft version is the family's 404, never a served row. DISCARDED is served to no one under any lens.
      */
     fun findServedVersion(
@@ -367,7 +371,10 @@ class DashboardService(
     private fun validated(
         workspaceId: UUID,
         document: DashboardDocument,
-    ): DashboardDocument = validator.validate(workspaceId, document).orThrow(DashboardErrorCodes.BODY_INVALID)
+    ): DashboardDocument =
+        validator
+            .validate(workspaceId, document, requireReleasedSources = false)
+            .orThrow(DashboardErrorCodes.BODY_INVALID)
 
     /**
      * D61's release preconditions beyond the §3.2 rules, and the cascade's worklist: the set RELEASED; every pinned

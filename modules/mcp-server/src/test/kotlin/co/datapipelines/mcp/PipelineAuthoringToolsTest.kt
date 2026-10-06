@@ -71,7 +71,7 @@ class PipelineAuthoringToolsTest {
 
     @Test
     fun `create validates before storing and returns v1 as a DRAFT with no released pointer`() {
-        every { validator.validateOrThrow(any(), any()) } answers { firstArg() }
+        every { validator.validateOrThrow(any(), any(), allowDraftPipelineReferences = true) } answers { firstArg() }
         val stored = slot<String>()
         val row = slot<NewPipeline>()
         // D55: the lifecycle argument is part of the expectation, so a create that asked the
@@ -105,7 +105,7 @@ class PipelineAuthoringToolsTest {
 
     @Test
     fun `a validation failure is raised with its catalogued code and never reaches the repository`() {
-        every { validator.validateOrThrow(any(), any()) } throws
+        every { validator.validateOrThrow(any(), any(), allowDraftPipelineReferences = true) } throws
             PipelineValidationException(
                 ValidationResult(
                     listOf(
@@ -132,7 +132,7 @@ class PipelineAuthoringToolsTest {
 
     @Test
     fun `update writes the DRAFT and answers with its status, hash and pointer`() {
-        every { validator.validateOrThrow(any(), any()) } answers { firstArg() }
+        every { validator.validateOrThrow(any(), any(), allowDraftPipelineReferences = true) } answers { firstArg() }
         every {
             drafts.write(any(), McpFixtures.PIPELINE_ID, any<Pipeline>(), any(), "hash-v1", McpFixtures.USER, WriteSurface.MCP)
         } returns
@@ -164,7 +164,7 @@ class PipelineAuthoringToolsTest {
 
     @Test
     fun `a no-op update answers with the RELEASED state and carries no draft pointer`() {
-        every { validator.validateOrThrow(any(), any()) } answers { firstArg() }
+        every { validator.validateOrThrow(any(), any(), allowDraftPipelineReferences = true) } answers { firstArg() }
         every {
             drafts.write(any(), McpFixtures.PIPELINE_ID, any<Pipeline>(), any(), "hash-v1", McpFixtures.USER, WriteSurface.MCP)
         } returns
@@ -220,7 +220,7 @@ class PipelineAuthoringToolsTest {
     @Test
     fun `update of an unknown pipeline is a catalogued not-found`() {
         val id = UUID.randomUUID()
-        every { validator.validateOrThrow(any(), any()) } answers { firstArg() }
+        every { validator.validateOrThrow(any(), any(), allowDraftPipelineReferences = true) } answers { firstArg() }
         every { drafts.write(any(), id, any<Pipeline>(), any(), any(), McpFixtures.USER, WriteSurface.MCP) } throws
             co.datapipelines.typesystem.DatapipelinesException(
                 PipelineErrorCodes.Execution.NOT_FOUND,

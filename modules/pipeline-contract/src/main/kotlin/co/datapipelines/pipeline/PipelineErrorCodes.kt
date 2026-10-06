@@ -282,10 +282,9 @@ object PipelineErrorCodes {
         const val PIPELINE_VERSION_NOT_FOUND = "pipeline.validation.pipeline_version_not_found"
 
         /**
-         * §12.9 (101, D58) — a PIPELINE node pinned a child pipeline version that is not
-         * RELEASED. Composition references reviewed content only: a DRAFT child can be
-         * purged out from under its parent, which an exact-version pin must never allow.
-         * A DISCARDED child version is refused by the same rule.
+         * §12.9 — a PIPELINE node pinned a lifecycle-ineligible child: release/import
+         * require RELEASED; authoring admits DRAFT or RELEASED (#459).
+         * A DISCARDED child version is refused in either mode.
          */
         const val PIPELINE_REFERENCE_NOT_RELEASED = "pipeline.validation.pipeline_reference_not_released"
 

@@ -36,7 +36,7 @@ fun repositoryPipelineResolver(
         ResolvedPipeline(
             pipeline = deserializer.readOrThrow(body),
             entityDiscarded = !repository.hasLiveVersion(workspaceId, record.id),
-            // D58: the pinned version's own status — a pin must name a RELEASED child.
+            // The pinned version's own status — authoring admits drafts, release/import require RELEASED.
             versionStatus = detail.status,
             // #328 — the pinned version's caller-output record (D4); null when none.
             callerOutputJson = detail.callerOutputJson,

@@ -284,6 +284,7 @@ class DashboardRuntime internal constructor(
             deadlineSeconds = RuntimeViews.refreshSeconds(body, config),
             reservation = admitted.reservation,
             startedAt = Instant.now(),
+            allowDraftDependencies = resolved.served.detail.status == co.datapipelines.pipeline.PipelineVersionStatus.DRAFT,
         )
     }
 

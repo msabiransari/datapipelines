@@ -83,10 +83,13 @@ class PipelineValidator(
      * the pipeline is being saved into: its template, PIPELINE-node and datasource references
      * resolve there (design 2026-08-16-workspaces §3 — cross-workspace references do not exist
      * in v1; datasources since 134, see [DatasourceRegistry.describe]).
+     * [allowDraftPipelineReferences] admits mutable child drafts during authoring only;
+     * release and promotion retain the strict default.
      */
     fun validate(
         pipeline: Pipeline,
         workspaceId: java.util.UUID,
+        allowDraftPipelineReferences: Boolean = false,
     ): ValidationResult {
         val collector = FailureCollector()
         StructuralRules.check(pipeline, datasources, workspaceId, collector)
@@ -96,7 +99,15 @@ class PipelineValidator(
         ParameterRules.check(pipeline, collector)
         ChecksRules.check(pipeline, datasources, workspaceId, collector)
         SettingsRules.check(pipeline, nodeTimeoutMaxSeconds, nodeTimeoutSeconds, nodeQueryTimeoutMaxSeconds, collector)
-        CompositionRules.check(pipeline, pipelines, maxCompositionDepth, workspaceId, orgContext, collector)
+        CompositionRules.check(
+            pipeline,
+            pipelines,
+            maxCompositionDepth,
+            workspaceId,
+            orgContext,
+            collector,
+            allowDraftPipelineReferences = allowDraftPipelineReferences,
+        )
         CalculatorRules.check(pipeline, orgContext, templates, workspaceId, collector, calculatorKinds)
         // §12.13 AFTER §12.10 (7c, #7): the transform rules read the writer map the calculator
         // rules establish — a value-mode TRANSFORM's `context_key` is a writer of the same kind.
@@ -108,8 +119,9 @@ class PipelineValidator(
     fun validateOrThrow(
         pipeline: Pipeline,
         workspaceId: java.util.UUID,
+        allowDraftPipelineReferences: Boolean = false,
     ): Pipeline {
-        validate(pipeline, workspaceId).orThrow()
+        validate(pipeline, workspaceId, allowDraftPipelineReferences = allowDraftPipelineReferences).orThrow()
         return pipeline
     }
 

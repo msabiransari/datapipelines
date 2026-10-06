@@ -175,7 +175,7 @@ class VisualizationMechanicalCheckTest {
     }
 
     @Test
-    fun `a DRAFT transform pin is valid here - the authoring path, not the runtime's RELEASED-only rule`() {
+    fun `a DRAFT transform pin is valid in authoring - published runtime remains RELEASED-only`() {
         val draftFacts =
             TemplateContractFacts { _, ref ->
                 ValidatorFakes.CONTRACT.let {

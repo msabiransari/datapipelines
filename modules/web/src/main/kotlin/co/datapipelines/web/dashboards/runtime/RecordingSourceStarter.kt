@@ -3,11 +3,15 @@ package co.datapipelines.web.dashboards.runtime
 import co.datapipelines.application.dashboards.SourceLaunch
 import co.datapipelines.application.dashboards.SourceOutcome
 import co.datapipelines.application.dashboards.SourceStarter
+import co.datapipelines.application.endpoints.ReadOnlyPipelineRule
 import co.datapipelines.executor.ExecuteRequest
 import co.datapipelines.executor.ExecutionAbortedException
 import co.datapipelines.executor.ExecutionTrigger
 import co.datapipelines.pipeline.ParameterBinder
+import co.datapipelines.pipeline.Pipeline
 import co.datapipelines.pipeline.PipelineErrorCodes
+import co.datapipelines.pipeline.PipelineRepository
+import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.web.pipelines.RecordingExecutionRunner
 import co.datapipelines.web.sse.ExecutionRecordUnwritableException
@@ -39,6 +43,8 @@ import java.util.UUID
  */
 class RecordingSourceStarter(
     private val runner: RecordingExecutionRunner,
+    private val readOnly: ReadOnlyPipelineRule,
+    private val pipelines: PipelineRepository,
 ) : SourceStarter {
     private val log = LoggerFactory.getLogger(RecordingSourceStarter::class.java)
 
@@ -47,7 +53,9 @@ class RecordingSourceStarter(
         onRecorded: (UUID) -> Unit,
     ): SourceOutcome {
         val pipeline = launch.pipeline
+        val admission = admission(launch)
         try {
+            admission(pipeline, launch.pipelineId, launch.pipelineVersion)
             ParameterBinder(
                 pipeline.parameters,
                 pipeline.calculatorOutputs(),
@@ -70,6 +78,7 @@ class RecordingSourceStarter(
                 directSink = launch.sink,
                 slotLease = launch.slot,
                 executedByKeyKind = launch.executedByKeyKind,
+                pipelineAdmission = admission,
             )
         return try {
             SourceOutcome.Succeeded(
@@ -90,4 +99,21 @@ class RecordingSourceStarter(
             SourceOutcome.Failed(null, e.code)
         }
     }
+
+    private fun admission(launch: SourceLaunch): (Pipeline, UUID, Int) -> Unit =
+        { body, id, version ->
+            val status = pipelines.findVersionDetail(launch.workspaceId, id, version)?.status
+            if (status == null || !PipelineVersionStatus.eligibleForPointer(status, draftsEligible = launch.allowDraftDependencies)) {
+                throw DatapipelinesException(
+                    code = PipelineErrorCodes.Dashboard.RUNTIME_DEPENDENCY_MISSING,
+                    message = "A dashboard source pipeline version is no longer eligible for execution.",
+                )
+            }
+            if (!readOnly.check(body, launch.workspaceId).isValid) {
+                throw DatapipelinesException(
+                    code = PipelineErrorCodes.Dashboard.SOURCE_NOT_READ_ONLY,
+                    message = "Dashboard source pipelines must remain read-only, including every child pipeline.",
+                )
+            }
+        }
 }

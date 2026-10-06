@@ -5,6 +5,7 @@ import co.datapipelines.events.ExecutionStarted
 import co.datapipelines.events.PipelineCompleted
 import co.datapipelines.events.SseEventType
 import co.datapipelines.pipeline.NodeType
+import co.datapipelines.pipeline.Pipeline
 import co.datapipelines.pipeline.PipelineErrorCodes
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.booleans.shouldBeTrue
@@ -107,6 +108,34 @@ class SubPipelineCompositionTest {
                         .nodeStats
                         .single { it.nodeId == "child_ref" }
                 stats.childExecutionId shouldBe childExecutionId.get()
+            }
+        }
+
+    /**
+     * #459: the root surface's admission check reaches a PIPELINE node's context — the one hop
+     * (request → [NodeExecutionContext]) between the dashboard runtime's admission and the child
+     * request web's runner builds from the context. Dropping it lets a composed child of a draft
+     * preview run unadmitted while every web-side test, which starts from a hand-built context,
+     * stays green. A request without one leaves the context's null.
+     */
+    @Test
+    fun `a PIPELINE node's context carries the request's pipeline admission, and none when the request has none`() =
+        runBlocking<Unit> {
+            val seen = mutableListOf<NodeExecutionContext>()
+            val admission: (Pipeline, UUID, Int) -> Unit = { _, _, _ -> }
+
+            harnessWithRunner { _, node, ctx ->
+                seen += ctx
+                NodeResult.of(node.id, 0, Instant.now())
+            }.use { h ->
+                h.executor
+                    .execute(Fixtures.request(parentPipeline()).copy(pipelineAdmission = admission))
+                    .status shouldBe ExecutionStatus.SUCCESS
+                h.executor.execute(Fixtures.request(parentPipeline())).status shouldBe ExecutionStatus.SUCCESS
+
+                seen.size shouldBe 2
+                (seen[0].pipelineAdmission === admission).shouldBeTrue()
+                seen[1].pipelineAdmission shouldBe null
             }
         }
 

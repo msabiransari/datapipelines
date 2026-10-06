@@ -1,9 +1,9 @@
 # REST API + SSE Specification
 
-**Status:** v2.84 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
+**Status:** v2.85 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
-**Last updated:** 2026-10-04
+**Last updated:** 2026-10-05
 
 ---
 
@@ -2689,6 +2689,11 @@ The DEEPER-BINDING-REPLACES rule (R-EP2, [Auth §7.7](auth.md#77-key-kinds-and-p
 
 ### 23.3 The runtime and the refresh routes
 
+An explicitly selected draft dashboard admits live DRAFT or RELEASED dependencies throughout its graph (#459).
+Default and explicitly released runtime views, dashboard release and import remain RELEASED-only. The existing
+`dashboard.execute` permission, promoter lens and session-only version selection continue to govern these routes.
+Draft configuration identity includes nested pipeline and template/import content; same-version edits invalidate it.
+
 Six routes under `/api/v1/dashboards/{id}`, all `dashboard.execute` ([Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative);
 the promoter reads through the lens of §23.1 — a dashboard it hides is `404 dashboard.not_found`). The semantics are
 [Dashboards §5](dashboards.md#5-the-runtime); this section is the wire. Since L5 (#367) a `dashboard` key reaches them too — the runtime and refreshes prefixes are its whole surface, its bindings the lens, one key one budget ([Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings), [Dashboards §6.5](dashboards.md#65-credentials-session-and-proxy)) — and no MCP tool executes a dashboard. Since #369 the FOUR runtime routes take an optional `version` query parameter naming a DRAFT or RELEASED version of the dashboard (the draft preview's, `GET /dashboards/{id}/preview?version=`): absent = the current RELEASED version, exactly the behaviour below; a value is a bounded positive integer (`400 pipeline.execution.invalid_parameter_type` otherwise), must resolve for the caller — absent, DISCARDED, or hidden under a narrowing lens is `404 dashboard.not_found` naming `details.version` — and a `dashboard` key never names one (`403 dashboard.key.kind_refused`, `details.reason: version_is_session_only`, before anything is looked up). A request body is read whole before anything is looked up: not JSON, or a
@@ -2781,6 +2786,7 @@ browser persistence. Clients must reject foreign/stale responses even after abor
 
 ## Appendix A: Change Log
 
+| 2026-10-05 | v2.85 | #459 draft dashboard dependencies | §23.3: explicitly selected draft runtime admits live draft dependencies transitively, with nested content in configuration identity. Released views, release/import, permissions and key restrictions remain strict. No new route or wire field. |
 | 2026-10-04 | v2.84 | 442a (#442) — renumbered at merge after 403's v2.83 (the lane's row sat atop the older second table) | Saved schedule notification settings: recipients and five event choices, validated and shown by role; omitted PUT settings preserved; mail remains off pending part b. Merge follow-up (review F2): §20.2's refusal is a sentence, not a lone table row. |
 | 2026-10-04 | v2.83 | #403 release never-started reservations — renumbered at merge after 382's v2.82 (the lane's row sat atop the older second table) | **§3.5**: pre-start refusals release the caller’s key before completing the error response; same-key retries re-execute. A follower already attached or an original that died without cleanup retains the id-free 410. Started executions retain their reservations. Merge follow-up (review F1): §6.1.3's 429 row says the reservation is released, no longer claimed. |
 | 2026-10-04 | v2.82 | #382 the dashboard binding body is read strictly — renumbered at merge after 384's v2.81 | **§23.2** — the `POST /api/v1/dashboards/bindings` row names the strict body reader (#333's, the fifth DTO-bodied route it had omitted): a number or boolean for a string field, an unknown key and a missing `name_prefix` are the standard `400 pipeline.execution.invalid_parameter_type` (`wrong_type` / `unknown_key` / `missing`), the value never echoed; before this a number bound as text (`name_prefix: 12` was the folder "12") and an unknown key was dropped. No route, scope, status code or success shape changed. **§4.2** (merge follow-up, #382 review F1): the strict-reader sentence names five routes, `POST /dashboards/bindings` §23.2 added. |

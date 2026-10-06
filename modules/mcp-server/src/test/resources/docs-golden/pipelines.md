@@ -3,8 +3,9 @@
 
 A **pipeline** is a JSON document: `schema_version`, `name` (a folder path — the core's naming
 rule), `display_name`, `description`, `parameters` (typed input map) and `nodes` (the DAG).
-`id`, `version`, `owner` and timestamps are server-assigned. Nodes pin immutable template
-versions; updating a template never changes a pipeline until you update the node reference.
+`id`, `version`, `owner` and timestamps are server-assigned. Nodes pin exact template and child pipeline versions. Draft dependencies are mutable during authoring;
+released versions are immutable. A draft dependency edit affects the next run without changing its number.
+Release and import require released dependencies.
 Create lands v1 as a DRAFT — executable at once (the core's draft-and-release rule). One node
 may ship rows to the caller (at most one caller node; zero is legal); the others stage into
 tempdb, the execution's own in-memory H2.

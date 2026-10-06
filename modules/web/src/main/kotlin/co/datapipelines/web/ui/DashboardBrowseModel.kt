@@ -204,9 +204,9 @@ class DashboardBrowseModel(
     /**
      * Fills [model] for the workspace's **Overview tab** (#400) — the viewed version's
      * definition, read-only: the display name and description, the sources with their pinned
-     * pipeline releases and statuses, the parameter set with its status, the pinned
-     * visualizations with their versions and each pin's status (RELEASED, or DRAFT with the
-     * release hint — R1: pins are judged RELEASED-only, the hint is the engineer's way out),
+     * pipeline versions and statuses, the parameter set with its status, the pinned
+     * visualizations with their versions and each pin's status (DRAFT pins work in draft
+     * preview and require release before publication),
      * and the layout summary. There is deliberately no authoring control: the browser never
      * authors a dashboard (#396). The body is the caller's lensed read
      * ([DashboardService.findServedVersion] — the same admission the page resolved), so a
@@ -258,8 +258,8 @@ class DashboardBrowseModel(
      * newest first, each row marked with the served (current RELEASED) pointer, the DRAFT
      * state and the DISCARDED state, so the lifecycle verbs' dialogs (the row's ⋯ actions)
      * open onto the truth. The read is [DashboardService.listVersions]' — the same lensed
-     * history the REST versions route answers — and the RELEASED-only pin rule (R1) rides the
-     * draft badge's hint, never a second judgement.
+     * history the REST versions route answers. Draft preview admits live draft dependencies;
+     * publication requires released pins.
      */
     fun fillVersions(
         model: Model,
@@ -340,7 +340,7 @@ class DashboardBrowseModel(
         val ref: String,
         val status: String?,
     ) {
-        /** The R1 sentence a DRAFT pin carries — release it first, the cascade aside. */
+        /** A DRAFT pin is available in draft preview and requires release before publication. */
         val draftHint: Boolean get() = status == "DRAFT"
     }
 

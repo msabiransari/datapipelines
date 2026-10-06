@@ -13,8 +13,7 @@ import org.junit.jupiter.api.TestMethodOrder
  * tab at the named version, where the browser lands. What the page carries is #369's truth
  * about what is on screen — the viewed-version chip naming v2 · draft, the version riding the
  * `data-dp-dashboard-version` attribute the glue reads, a real chart rendered from the draft's
- * own pins (R1: released pins only), the refusal block IN PLACE for a draft whose pin is not
- * released (with the release hint), and the light/dark handback screens. The suite's
+ * own pins, including live draft dependencies, and the light/dark handback screens. The suite's
  * after-each proves ZERO CSP violations for every page this test opens — asserted there,
  * never weaker here.
  */
@@ -50,11 +49,11 @@ class DashboardDraftPreviewBrowserTest : DashboardBrowserSuite() {
 
     @Test
     @Order(2)
-    fun `a draft pinning a DRAFT visualization shows the refusal block in place, with the release hint`() {
+    fun `a draft pinning a DRAFT visualization mounts the runtime without a release`() {
         startTrace()
         val root = ready("dppin")
         // The board's RELEASED source and released-chart fixtures come from the standard seed;
-        // the DRAFT pin is planted beside them (R1: the pin rule is RELEASED-only, draft or not).
+        // the DRAFT pin is planted beside them (live draft dependencies are admitted for a draft board).
         seedBoard(root)
         seedDraftBoardPinningDraftVisualization(root)
 
@@ -63,12 +62,9 @@ class DashboardDraftPreviewBrowserTest : DashboardBrowserSuite() {
                 "SELECT id::text AS i FROM dashboards WHERE name = '$root/boards/draftpin'",
             )}/preview?version=1",
         )
-        page.waitForSelector("#dp-board-refusal:not([hidden])")
-        val refusal = page.locator("#dp-board-refusal").innerText()
-        refusal shouldContain "dashboard.runtime.dependency_missing"
-        refusal shouldContain "release it first"
-        // A refusal loads no bundle and mounts no runtime: the region is the whole answer.
-        (page.evaluate("() => window.__dpPage === undefined || window.__dpPage.instance === null") as Boolean) shouldBe true
+        page.waitForFunction("() => window.__dpPage && window.__dpPage.ready === true")
+        (page.evaluate("() => document.getElementById('dp-board-refusal').hidden") as Boolean) shouldBe true
+        (page.evaluate("() => window.__dpPage.instance === null") as Boolean) shouldBe false
     }
 
     @Test
@@ -141,7 +137,7 @@ class DashboardDraftPreviewBrowserTest : DashboardBrowserSuite() {
         )
     }
 
-    /** A DRAFT visualization and a DRAFT board pinning it — R1's refusal, planted for the browser. */
+    /** A DRAFT visualization and a DRAFT board pinning it — draft admission, planted for the browser. */
     private fun seedDraftBoardPinningDraftVisualization(root: String) {
         // The ACTIVE workspace's name — ready()'s returned root is an artifact-NAME prefix, never
         // the workspace's name (the same read the pages' suite and the host suite make).
