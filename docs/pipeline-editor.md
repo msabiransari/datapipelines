@@ -1,9 +1,9 @@
 # Pipeline Editor UI Specification
 
-**Status:** v1.25 (revised — see Change Log)
+**Status:** v1.26 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Contract](pipeline-contract.md), [REST API + SSE](rest-api.md), [Type System](type-system.md), [Enums](enums.md), [Auth](auth.md), [Configuration](configuration.md), [@acme/design-tokens Design System](https://github.com/msabir/design-system-starter)
-**Last updated:** 2026-10-03
+**Last updated:** 2026-10-05
 
 ---
 
@@ -2026,6 +2026,7 @@ Themes shipped by the design system — `saas` (modern indigo, devtool-oriented)
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-05 | v1.26 | #460 reusable REST navigation | §4.1: persistent artifact entry, closed-root initialization, rail continuity and observer ownership through cached restoration. |
 | 2026-10-03 | v1.25 | #402 Back/Forward across the in-page switches | **§4.1**: in-page version/tab switches push entries and Back/Forward replays them (no longer `replaceState`). **§10.8**: the canonical URL moves with a pushed entry of the workspace's own (`workspace/history.js`, `{dpWorkspace: {family, version, tab}}`); a replay goes through the same lensed read with `{history: false}` and never pushes; an entry under another screen is handed to htmx; the workspace block and the root's tab attribute stay truthful for a cached restore. |
 | 2026-10-02 | v1.24 | #350 the sidebar tree | **§4.1**: how a reader arrives — the global sidebar's Pipelines tree leaf or a `/pipelines` catalog row, both full-document links to the canonical `/pipelines/{id}` (no version: the current-first rule); the page's `data-nav-current` hook (id + path) lets the rail mark and reveal its leaf; the explorer's detail pane and "Open" are gone (ui-screens §4.3); Back/Forward across in-page switches is #402. The workspace header's lifecycle verbs and the Versions tab's Switch/Discard/Restore redirect with a flash since #395 (ui-screens §4.3d). |
 | 2026-10-01 | v1.23 | #349 — the workspace composition. **§5** principle 5: six tabs (Flow the graph + dock, Overview, Parameters, Runs, Usage, Versions); the settings sidebar withdrawn, the graph owns the width (§4.3's row updated; the 1024px drawer and the sidebar resize contract die with the pane). **§4.1**: the selector is IN-PAGE read navigation — a version switch never reloads the document (an active run keeps its stream; §10.8). **§10**: the dock is Node Details beside Results/Errors/Events; the execution tabs render only with the execution read, belong to ONE captured run named by the identity strip (§10.9), and the Details pane's run-derived rows attach only when run version = viewed version. **§10.8** (new): the state keys, the generation/token discipline over every in-page read (the token rides the request; stale never paints; the `hx-sync="this:replace"` requester supersedes an in-flight read — the default drops it and `abort` aborts without issuing, both verified in the vendored 2.0.10), per-version run-input drafts (never persisted), refused switches move nothing. No route, permission or role changed. |
