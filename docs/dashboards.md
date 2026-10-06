@@ -1,6 +1,6 @@
 # Dashboards
 
-**Status:** v0.36 — the read-only rule is stated as declarative (§5.1, #463), then draft dashboard dependencies (#459), then the Release dialogs post the draft hash they read (§7, #416) beside numeric bound-value assertion feasibility (§3.4, #377) beside the visualizations workspace's tab switches on the shared history helper, the parameter-set decision (§7, #426) beside the pipeline editor runs the shared tab core (§7, #420) beside the Versions tables' created/released relative with the UTC stamp on hover (§7, #422) beside Back/Forward across the dashboards workspace's tab switches (§7, #402) beside the visualizations workspace (§7, #399) beside the dashboards workspace (§5.2's `version`, §7's workspace, #400; #409 closes with it) beside the
+**Status:** v0.37 — renderer-aware binding types and nullable transform output (§3.4, #458/#457), then the read-only rule is stated as declarative (§5.1, #463), then draft dashboard dependencies (#459), then the Release dialogs post the draft hash they read (§7, #416) beside numeric bound-value assertion feasibility (§3.4, #377) beside the visualizations workspace's tab switches on the shared history helper, the parameter-set decision (§7, #426) beside the pipeline editor runs the shared tab core (§7, #420) beside the Versions tables' created/released relative with the UTC stamp on hover (§7, #422) beside Back/Forward across the dashboards workspace's tab switches (§7, #402) beside the visualizations workspace (§7, #399) beside the dashboards workspace (§5.2's `version`, §7's workspace, #400; #409 closes with it) beside the
 board's small-slot margins and its breakpoint collapse (§6.2, §6.3, #386/#387), 328's release-record judgement (§4.3)
 permissions (§4, lane L1b); the transfer routes and their limits' honest contract (§3.3, lanes L1c/L1c-b/L1c-c: the
 import's atomicity, the RELEASE rules on a landing, the aggregate count ceiling, the wire's per-family arms); the server
@@ -298,15 +298,25 @@ the preview page, the upload and the two tools — is §3.4.1 (#353).
 - **The mechanical check** (§11.3, D56 (b)) is server-run, no browser, sub-second (measured: one case, 1,000
   fixture rows through the deep schema, ~60 ms): the renderer's schema (for Plotly the reduced vendored
   4.1.1 plot-schema — unknown attributes, wrong types and unsupported traces refused with the path), every
-  binding's resolution and per-path type rules, every case's fixtures through the REAL bounded evaluator (a DRAFT
+  binding's resolution and renderer-specific type rules, every case's fixtures through the REAL bounded evaluator (a DRAFT
   transform pin is valid here and in an explicitly selected draft dashboard; published runtime requires RELEASED pins), every projected bound
-  column present in every row, and static assertion feasibility (`trace_count` against `config.data.length`,
+  column present in every row, with explicit null accepted only when its output contract column is nullable,
+  and static assertion feasibility (`trace_count` against `config.data.length`,
   `no_data` against zero produced rows, `text_visible`/`value_visible` strings present in the configuration or
   the bound values). Bound strings and INTEGER/DECIMAL values participate by their existing scalar text
   (for example, `42` and `10.5`), using substring matching without numeric normalization. Locale, currency,
   percent and rounded display text still need the agent's visual check in the preview. The rendered-state
   check records `not_available` today — a headless render check is a later
   lane, and nothing here claims a browser saw anything. The report is stored on the run and RE-RUN at release.
+  Plotly numeric leaves (`y`, `z`, `values`, `size`, `lat`, `lon`, `open`, `high`, `low`, `close`,
+  `weight`, including indexed leaves) accept INTEGER/DECIMAL; BIGINTEGER/BIGDECIMAL string wire values
+  remain refused there. Other Plotly leaves accept any scalar type. Table `columns[n].values` accepts
+  every canonical scalar type, including STRING, BOOLEAN, dates and BIG wire strings. KPI `value` and
+  `comparison.value` retain their scalar compatibility, including BIG wire strings; formatting feasibility
+  still requires visual evidence. For nullable Plotly y/z columns, present nulls remain gaps rather than
+  zeros. An absent bound key is `binding_unbound` even when nullable; a present nonnullable null is
+  `test_case_invalid`. Null supplies no assertion text (including the literal `"null"`). Evaluator refusals
+  retain their own code and case path, and the report keeps its existing failure bound.
 - **At a successful submission the server mints a SECOND, separate capability** for the screenshot upload —
   random, hash-only, bound to the exact run and purpose, expiring no later than the session's original deadline,
   its raw form shown exactly once. Submit revokes the preview and does NOT touch this one; atomic image storage
@@ -934,6 +944,7 @@ change (#426). The templates workspace adopts the helper after #398's rework lan
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-06 | v0.37 | #458/#457 binding contracts | **§3.4:** renderer-specific scalar acceptance, Plotly numeric wire restrictions and unchanged KPI compatibility; transform output nullability distinguishes present null from missing keys. Null stays a gap and supplies no assertion text; visual evidence and release revalidation remain required. |
 | 2026-10-06 | v0.36 | #460 reusable REST navigation | §6.4/§7: one lazy compatible bundle in the signed-in shell, explicit per-container mounts and prepared navigation; standalone bundle choice and refresh cancellation preserved. |
 | 2026-10-06 | v0.35 | 459 merge follow-up | "Sources are read-only" now says what the rule checks: declared node types, output targets and sources, enforced at the listed points. It is not a read-only database connection, and with draft previews running unreviewed source bodies that difference matters. Database-enforced read-only is #463. "Last updated" brought current (the lane's v0.34 row left it at 2026-10-04). |
 | 2026-10-05 | v0.34 | #459 draft dashboard dependencies | Draft save and explicitly selected draft runtime admit live draft dependencies transitively. Released runtime, release and import remain strict. Configuration identity includes mutable nested pipeline and template/import content; each loaded source/child is admitted for lifecycle and read-only execution. Overview explains draft availability and release requirements. Supersedes #369 R1 for draft development. |
