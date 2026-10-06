@@ -265,7 +265,7 @@ class DashboardValidatorTest {
         val result =
             assertTimeoutPreemptively(
                 Duration.ofSeconds(CHAIN_SECONDS),
-                ThrowingSupplier { validator.validate(ValidatorFakes.WORKSPACE, document) },
+                ThrowingSupplier { validator.validate(ValidatorFakes.WORKSPACE, document, requireReleasedSources = false) },
             )
         val failures = result.shouldBeInstanceOf<ArtifactValidation.Invalid>().result.failures
         failures.first().code shouldBe DashboardErrorCodes.SCOPE_OMITS_CONSUMER
@@ -284,7 +284,7 @@ class DashboardValidatorTest {
             .Fakes()
             .also(setup)
             .dashboardValidator()
-            .validate(ValidatorFakes.WORKSPACE, ValidatorFakes.dashboardDocument(tree))
+            .validate(ValidatorFakes.WORKSPACE, ValidatorFakes.dashboardDocument(tree), requireReleasedSources = false)
             .shouldBeInstanceOf<ArtifactValidation.Valid<DashboardDocument>>()
     }
 

@@ -34,11 +34,18 @@ class DashboardValidator(
     /** The most DISTINCT executions one refresh may run (`datapipelines.dashboards.admission.max-executions-per-refresh`, 16). */
     private val maxExecutionsPerRefresh: Int = DEFAULT_MAX_EXECUTIONS_PER_REFRESH,
 ) {
-    /** Every rule over [document]; the document itself when it passes. */
+    /**
+     * Every rule over [document]; the document itself when it passes.
+     *
+     * [requireReleasedSources] has no default on purpose (459 merge follow-up): authoring
+     * (create, update, validate) passes `false` and admits a DRAFT source; release and import
+     * pass `true` and refuse one with `source_not_released`. Every caller states which it is,
+     * so a new release-like path cannot silently inherit the lax answer.
+     */
     fun validate(
         workspaceId: UUID,
         document: DashboardDocument,
-        requireReleasedSources: Boolean = false,
+        requireReleasedSources: Boolean,
     ): ArtifactValidation<DashboardDocument> {
         val failures = ArtifactFailures(DashboardErrorCodes.BODY_INVALID)
         val body = document.body

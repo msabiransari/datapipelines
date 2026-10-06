@@ -163,6 +163,31 @@ class DashboardServiceIntegrationTest {
     }
 
     @Test
+    fun `a DRAFT source pipeline is admitted while authoring and refused by release and import - source_not_released (#459)`() {
+        h.createVisualization()
+        h.fakes.pipelines[ValidatorFakes.PIPELINE_REF] =
+            h.fakes.pipelines
+                .getValue(ValidatorFakes.PIPELINE_REF)
+                .copy(status = PipelineVersionStatus.DRAFT)
+        val dashboard = h.dashboards.create(WORKSPACE, h.dashboardDocument(1), AUTHOR, WriteSurface.MCP)
+        h.dashboards.validate(WORKSPACE, h.dashboardDocument(1)).shouldBeInstanceOf<ArtifactValidation.Valid<DashboardDocument>>()
+
+        val released =
+            refusal {
+                h.dashboards.release(WORKSPACE, dashboard.record.id, dashboard.detail.bodyHash, AUTHOR, releasePinnedVisualizations = true)
+            }
+        released.code shouldBe DashboardErrorCodes.SOURCE_NOT_RELEASED
+        checkNotNull(h.dashboardRepository.findDraft(WORKSPACE, dashboard.record.id)).status shouldBe PipelineVersionStatus.DRAFT
+        vizStatus() shouldBe PipelineVersionStatus.DRAFT
+
+        val export =
+            ArtifactExport(java.util.UUID.randomUUID(), "acme/dashboards/imported", null, null, null, h.dashboardDocument(1).body)
+        shouldThrow<ArtifactValidationException> { h.dashboards.import(WORKSPACE, export, AUTHOR) }.code shouldBe
+            DashboardErrorCodes.SOURCE_NOT_RELEASED
+        h.dashboardRepository.findRecord(WORKSPACE, export.id) shouldBe null
+    }
+
+    @Test
     fun `with consent the DRAFT visualization is released in the dashboard's transaction, the dashboard's flip last`() {
         h.createVisualization()
         val dashboard = h.dashboards.create(WORKSPACE, h.dashboardDocument(1), AUTHOR, WriteSurface.MCP)
