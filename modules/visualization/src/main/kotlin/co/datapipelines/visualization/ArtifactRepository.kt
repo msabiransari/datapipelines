@@ -39,6 +39,17 @@ open class ArtifactRepository<B : Any>(
     val kind: ArtifactKind,
     private val codec: BodyCodec<B>,
 ) {
+    /** Complete navigation projection, shared by both artifact families. */
+    fun navigation(request: co.datapipelines.pipeline.NavigationRequest): List<co.datapipelines.pipeline.NavigationRow> =
+        co.datapipelines.pipeline.NavigationSource.page(
+            jdbc,
+            when (kind) {
+                ArtifactKind.VISUALIZATION -> co.datapipelines.pipeline.NavigationFamily.VISUALIZATIONS
+                ArtifactKind.DASHBOARD -> co.datapipelines.pipeline.NavigationFamily.DASHBOARDS
+            },
+            request,
+        )
+
     private val sql = ArtifactSql(kind)
     private val codes = kind.codes
 

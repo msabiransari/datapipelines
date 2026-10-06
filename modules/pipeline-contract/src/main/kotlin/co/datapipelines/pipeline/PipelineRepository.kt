@@ -133,6 +133,11 @@ data class DatasourceRef(
 class PipelineRepository(
     private val jdbc: NamedParameterJdbcTemplate,
 ) {
+    /** Complete, body-free tree pages; authorization precedes folder derivation. */
+    fun navigation(request: co.datapipelines.pipeline.NavigationRequest): List<co.datapipelines.pipeline.NavigationRow> =
+        co.datapipelines.pipeline.NavigationSource
+            .page(jdbc, co.datapipelines.pipeline.NavigationFamily.PIPELINES, request)
+
     /**
      * The 067 tree read (see [listFolder]) — constructed here, so nothing else has to wire it,
      * and HANDED this class's own row projection and mapper rather than owning a second copy

@@ -48,6 +48,10 @@ class VisualizationService(
     transactions: TransactionOperations = ArtifactLifecycle.DIRECT,
     newId: () -> UUID = UUID::randomUUID,
 ) {
+    /** Repository-owned, lens-filtered navigation metadata only. */
+    fun navigation(request: co.datapipelines.pipeline.NavigationRequest): List<co.datapipelines.pipeline.NavigationRow> =
+        repository.navigation(request)
+
     private val lifecycle = ArtifactLifecycle(repository, authoring, transactions, newId)
 
     // ---- writes ---------------------------------------------------------------------------------------

@@ -2743,6 +2743,42 @@ window. A dashboard execution has no stored result: `GET /api/v1/executions/{id}
 | `dashboard.refresh.not_found` | 404 | No such refresh for the caller on this dashboard, or it already finished (abort), or it is still starting for someone else — the four answer the identical body |
 | `rate_limit.exceeded` | 429 | The per-user concurrent-stream cap (§12.1) — execution, refresh and observed-evaluation (§21.5) streams count together |
 
+## 24. First-party navigation trees
+
+`GET /api/v1/<family>/tree` and `GET /api/v1/<family>/tree/search` are literal session-only
+reads for `pipelines`, `templates`, `dashboards`, `visualizations` and `parameter-sets`.
+Each declares its existing read permission and derives the workspace from the principal.
+Keys gain no surface. Every response uses the §4.1 envelope and `Cache-Control: no-store`.
+An unavailable promotion view returns a retryable 503, rather than a completed empty level.
+
+Browse takes optional `root`, `parent` and `cursor`; omitted parent means root. Empty root is
+the family root. A nonempty root names a folder boundary; parent cannot escape it. A page
+contains at most 200 immediate folders AND artifacts, folders first, in binary path order.
+The client automatically exhausts continuation for this one level; no grandchildren are read.
+Search takes `root`, required `q` and `cursor`, and pages all case-insensitive literal substring
+matches of canonical or display NAME, never descriptions. Each page includes all ancestors
+needed to connect its matches to root. Search does not crawl browse endpoints.
+
+A 1 MiB serialized response budget may shorten a page before 200 logical results; continuation
+then resumes at the last delivered result. It never drops matches or required ancestors.
+
+The typed payload has `family`, `mode` (`browse` or `search`), `root`, `parent`, normalized
+`query`, server-derived `workspace_id`, `view_token`, `nodes` and nullable `next_cursor`.
+Nodes have `key`, `parent_key`, `kind` (`folder` or `artifact`), `name`, canonical `path`,
+`has_children` and `match`. Artifacts also have `resource_id`, canonical relative `href`,
+listed `version` and nullable `draft_version`. A narrowing view emits released metadata only.
+Folder and artifact keys are distinct even at the same path. Search ancestors may repeat
+across pages; deduplicate by key. No stored body, SQL, description, fixture or secret travels.
+
+Continuation uses signed keyset ordering, bound to family/mode/root/parent/query, workspace,
+caller and actual admitted-name membership. A changed view, foreign or malformed cursor is a
+safe 400 and must be retried from the beginning. Process restart expires outstanding cursors.
+Completeness applies to an unchanged dataset; Refresh revalidates external changes. There is
+no immutable snapshot promise. Personalized rows and expansions stay in memory, never in
+browser persistence. Clients must reject foreign/stale responses even after aborting fetch.
+
+---
+
 ## Appendix A: Change Log
 
 | 2026-10-04 | v2.84 | 442a (#442) — renumbered at merge after 403's v2.83 (the lane's row sat atop the older second table) | Saved schedule notification settings: recipients and five event choices, validated and shown by role; omitted PUT settings preserved; mail remains off pending part b. Merge follow-up (review F2): §20.2's refusal is a sentence, not a lone table row. |

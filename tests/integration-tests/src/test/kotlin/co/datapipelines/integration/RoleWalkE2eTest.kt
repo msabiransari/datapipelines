@@ -99,6 +99,11 @@ class RoleWalkE2eTest {
     fun `every REST route answers each role exactly as auth-md §7-6 says`() {
         ensureSeeded()
         val routes = walkableRoutes()
+        // #460: ten literal metadata surfaces must participate in the doc-driven five-role walk.
+        listOf("pipelines", "templates", "dashboards", "visualizations", "parameter-sets").forEach { family ->
+            routes.any { it.pattern == "/api/v1/$family/tree" } shouldBe true
+            routes.any { it.pattern == "/api/v1/$family/tree/search" } shouldBe true
+        }
         val tallies = ROLES.associateWith { role -> walkRest(role, routes) }
         val counts = tallies.mapValues { (_, tally) -> tally.allowed to tally.refused }
 

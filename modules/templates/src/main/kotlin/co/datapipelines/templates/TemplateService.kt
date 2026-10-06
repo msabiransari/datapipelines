@@ -44,6 +44,10 @@ import java.util.UUID
 open class TemplateService(
     private val templates: TemplateRepository,
 ) {
+    /** Repository-owned, lens-filtered navigation metadata only. */
+    open fun navigation(request: co.datapipelines.pipeline.NavigationRequest): List<co.datapipelines.pipeline.NavigationRow> =
+        templates.navigation(request)
+
     /** The current-version projection of a live, admitted template, or null. */
     open fun findLatest(
         workspaceId: UUID,
