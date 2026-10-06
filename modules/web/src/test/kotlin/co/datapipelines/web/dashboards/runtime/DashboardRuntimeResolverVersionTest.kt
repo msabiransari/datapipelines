@@ -16,6 +16,7 @@ import co.datapipelines.visualization.VisualizationService
 import co.datapipelines.web.api.ApiException
 import co.datapipelines.web.visualizations.ArtifactFamily
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
 import io.mockk.every
 import io.mockk.mockk
@@ -28,9 +29,8 @@ import java.util.UUID
 /**
  * The resolver's `version` parameter (#369 R2): absent is [DashboardService.findServed] unchanged — the current
  * RELEASED version; a value is [DashboardService.findServedVersion] — a DRAFT or RELEASED version by number — and
- * an absent, discarded or lens-hidden one is the family's 404 naming the version the caller named. R1 is inherited,
- * not re-decided here: the pin rule below stays RELEASED-only, so the draft-resolution case runs over a body whose
- * pins are released and the draft-pin case proves the refusal the preview's board shows in place.
+ * an absent, discarded or lens-hidden one is the family's 404 naming the version the caller named. Draft pins
+ * are admitted only for a named draft dashboard; released dashboards retain the release-only policy.
  */
 class DashboardRuntimeResolverVersionTest {
     private val workspaceId = UUID.randomUUID()
@@ -127,8 +127,8 @@ class DashboardRuntimeResolverVersionTest {
     }
 
     @Test
-    fun `a draft pinning a DRAFT visualization is dependency_missing naming the pin, with the release hint`() {
-        val draft = served(2, PipelineVersionStatus.DRAFT, bodyWith(vizPin = true))
+    fun `a released dashboard pinning a DRAFT visualization is dependency_missing with the release hint`() {
+        val draft = served(2, PipelineVersionStatus.RELEASED, bodyWith(vizPin = true))
         every { dashboards.findServedVersion(workspaceId, ReadLens.Everything, dashboardId, 2) } returns draft
         val pinned = mockk<ArtifactVersion<VisualizationBody>>()
         every { pinned.detail } returns
@@ -149,5 +149,27 @@ class DashboardRuntimeResolverVersionTest {
         thrown.details["name"] shouldBe "v1"
         thrown.details["reason"] shouldBe "not_released"
         thrown.message shouldContain "release it first"
+    }
+
+    @Test
+    fun `a named draft admits a live draft visualization and changes identity when it is edited`() {
+        val draft = served(2, PipelineVersionStatus.DRAFT, bodyWith(vizPin = true))
+        every { dashboards.findServedVersion(workspaceId, ReadLens.Everything, dashboardId, 2) } returns draft
+        val pinned = mockk<ArtifactVersion<VisualizationBody>>()
+        val detail = ArtifactVersionDetail(UUID.randomUUID(), 1, PipelineVersionStatus.DRAFT, "first", Instant.EPOCH, UUID.randomUUID())
+        every { pinned.detail } returns detail
+        every { pinned.record.name } returns "finance/charts/x"
+        every { pinned.body.transform } returns null
+        every { visualizations.findVersionByName(workspaceId, ReadLens.Everything, "finance/charts/x", 1) } returns pinned
+        val first = resolver.resolve(workspaceId, ReadLens.Everything, dashboardId, 2)
+        first.visualizations["v1"] shouldBe pinned
+        every { pinned.detail } returns detail.copy(bodyHash = "edited")
+        resolver.resolve(workspaceId, ReadLens.Everything, dashboardId, 2).configurationId shouldNotBe first.configurationId
+        every { pinned.detail } returns detail.copy(status = PipelineVersionStatus.DISCARDED)
+        assertThrows<ApiException> { resolver.resolve(workspaceId, ReadLens.Everything, dashboardId, 2) }.code shouldBe
+            DashboardErrorCodes.RUNTIME_DEPENDENCY_MISSING
+        every { visualizations.findVersionByName(workspaceId, ReadLens.Everything, "finance/charts/x", 1) } returns null
+        assertThrows<ApiException> { resolver.resolve(workspaceId, ReadLens.Everything, dashboardId, 2) }.details["reason"] shouldBe
+            "not_found"
     }
 }

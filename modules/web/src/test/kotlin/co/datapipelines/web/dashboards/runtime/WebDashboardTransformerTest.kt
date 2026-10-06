@@ -113,4 +113,20 @@ class WebDashboardTransformerTest {
         }
         io.mockk.verify(exactly = 0) { evaluate.evaluate(any(), any(), any(), any(), any()) }
     }
+
+    @Test
+    fun `draft evaluation admits a draft transform and refuses discarded or missing templates`() {
+        every { templateService.findVersionStatus(workspace, ReadLens.Everything, "dbr/templates/t", 2) } returns
+            PipelineVersionStatus.DRAFT
+        every { renderer.transformContract(workspace, TemplateRef("dbr/templates/t", 2)) } returns
+            contract(TransformContractView.Mode.TABLE)
+        every { evaluate.evaluate(workspace, "dbr/templates/t", 2, any(), now) } returns evaluated(listOf(mapOf("x" to 9)))
+        transformer.transformDraft(workspace, template, tables, now) shouldBe TransformOutcome.Rows(listOf(mapOf("x" to 9)))
+        listOf(PipelineVersionStatus.DISCARDED, null).forEach { status ->
+            every { templateService.findVersionStatus(workspace, ReadLens.Everything, "dbr/templates/t", 2) } returns status
+            transformer.transformDraft(workspace, template, tables, now) shouldBe
+                TransformOutcome.Refused(co.datapipelines.visualization.DashboardErrorCodes.RUNTIME_DEPENDENCY_MISSING)
+        }
+        io.mockk.verify(exactly = 1) { evaluate.evaluate(any(), any(), any(), any(), any()) }
+    }
 }

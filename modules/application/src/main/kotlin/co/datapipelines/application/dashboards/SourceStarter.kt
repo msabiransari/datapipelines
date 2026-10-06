@@ -48,6 +48,8 @@ data class SourceLaunch(
     val sink: DirectResultSink,
     /** One of the refresh's reserved instance slots; the execution releases it at its end. */
     val slot: SlotLease,
+    /** Lifecycle policy inherited from the explicitly selected dashboard version. */
+    val allowDraftDependencies: Boolean = false,
 )
 
 /** How one source's execution ended. [executionId] is null only when the run was refused before any execution existed. */

@@ -31,7 +31,7 @@ class DashboardsListTool(
             name = "dashboards_list",
             description =
                 "List the dashboards of the key's pinned workspace by BROWSING one level of the name tree. A " +
-                    "dashboard pins released pipelines as sources, maps their results onto pinned visualizations' " +
+                    "dashboard pins exact pipeline versions as sources, maps their results onto pinned visualizations' " +
                     "inputs and lays them out; every row carries the id the other dashboards_* tools take. Names are " +
                     "FOLDER PATHS (acme/dashboards/revenue_overview): prefix:\"\" lists the roots. A promoter's key sees " +
                     "only released dashboards whose every source pipeline its lens admits.",
@@ -59,7 +59,7 @@ class DashboardsListTool(
 
 /**
  * `dashboards_get` (§6.2.56) — the WORKING version by id with its RESOLVED dependency state: each pinned
- * visualization's version status and each source pipeline's release status and read-only verdict — every one read
+ * visualization's version status and each source pipeline's version status and read-only verdict — every one read
  * through the caller's lens, one read per pin (bounded by the reader's 50 visualizations and the sources it declares),
  * a hidden or absent pin answering `status: null` alike. `last_refresh` is the CALLER's own latest refresh of the
  * dashboard (#10 L2) — `{refresh_id, dashboard_version, status, started_at, finished_at}` — or null when they have none;
@@ -79,7 +79,7 @@ class DashboardsGetTool(
             description =
                 "Read one dashboard by ID: the WORKING version's full document and lifecycle state (version, status, " +
                     "body_hash for an update's expected_hash, current_version), plus dependencies — each pinned " +
-                    "visualization's version status and each source pipeline release's status and read_only verdict " +
+                    "visualization's version status and each source pipeline version's status and read_only verdict " +
                     "as they are NOW (a status of null: absent, or not visible to this key) — and last_refresh, the " +
                     "caller's own latest refresh of it (null when they have none). No tool refreshes a dashboard. A " +
                     "dashboard of another workspace, or one the promoter lens hides, answers not-found.",
@@ -161,11 +161,12 @@ class DashboardsCreateTool(
             name = "dashboards_create",
             description =
                 "Create a dashboard: version 1 lands as a DRAFT (a human releases it; no tool releases anything). The " +
-                    "document is validated in FULL against the pins as they are now — every source pipeline release " +
-                    "RELEASED and read-only with its required parameters bound, every visualization input mapped to a " +
+                    "document is validated in FULL against the pins as they are now — every source pipeline version " +
+                    "DRAFT or RELEASED and read-only with its required parameters bound, every visualization input mapped to a " +
                     "source, one namespace for occurrences, groups, actions, controls and the set's parameters, every " +
                     "occurrence and control placed on the 12-column grid — and a refusal names every failing path. A " +
-                    "pinned visualization or parameter set may still be a DRAFT at save. A NEW top-level folder is " +
+                    "pinned dependency may be a live DRAFT at save and in explicit draft preview; publication requires " +
+                    "releases. A NEW top-level folder is " +
                     "refused until you confirm it: reuse an existing root, or ask the person first and then pass " +
                     "confirm_new_root: true.",
             schema = DASHBOARD_DOCUMENT_SCHEMA_CREATE,
@@ -298,7 +299,7 @@ private const val DASHBOARD_DOCUMENT_PROPERTIES =
     "display_name": {"type": "string", "description": "Human label, 1-120 characters."},
     "description": {"type": "string", "description": "Optional; 2000 characters max."},
     "parameter_set": {"type": "object", "description": "Optional: {name, version} — the parameter set whose controls the dashboard shows."},
-    "sources": {"type": "array", "items": {"type": "object"}, "description": "[{name, pipeline: {name, version}, parameters: {<pipeline parameter>: {parameter: <set parameter>} or {value: <literal>}}}] — each pinned release RELEASED and read-only; every required pipeline parameter bound."},
+    "sources": {"type": "array", "items": {"type": "object"}, "description": "[{name, pipeline: {name, version}, parameters: {<pipeline parameter>: {parameter: <set parameter>} or {value: <literal>}}}] — each pinned version DRAFT or RELEASED and read-only during authoring; publication requires RELEASED; every required pipeline parameter bound."},
     "visualizations": {"type": "array", "items": {"type": "object"}, "description": "[{name, type: \"visualization\", visualization: {name, version}, inputs: {<visualization input>: {source: <source name>}}, timeout_seconds}] — at most 50; every named input of the pinned visualization mapped."},
     "groups": {"type": "array", "items": {"type": "object"}, "description": "Optional: [{name, type: \"group\", members: [<object or parameter names>]}]."},
     "actions": {"type": "array", "items": {"type": "object"}, "description": "Optional: [{name, type: \"refresh\", scope: all or targets, targets: [<visualization occurrence names>] (iff scope is targets), initial}]."},

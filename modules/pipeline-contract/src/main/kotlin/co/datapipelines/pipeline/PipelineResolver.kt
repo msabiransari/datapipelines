@@ -33,10 +33,9 @@ fun interface PipelineResolver {
 /**
  * The outcome of a successful [PipelineResolver.resolve].
  *
- * [versionStatus] is the PINNED VERSION's lifecycle status (101/D58): composition references
- * reviewed content only, so a pin on anything but a RELEASED child version is refused at
- * save time — a DRAFT child can be purged out from under its parent, which an exact-version
- * pin must never allow.
+ * [versionStatus] is the PINNED VERSION's lifecycle status. Draft authoring admits live
+ * DRAFT or RELEASED children; release/import require RELEASED children. Mutable draft
+ * references are revalidated at release (#459 supersedes 101/D58 for authoring).
  */
 data class ResolvedPipeline(
     /** The pinned version's parsed body. */
@@ -46,7 +45,7 @@ data class ResolvedPipeline(
      * existing references, blocked for new ones (D7).
      */
     val entityDiscarded: Boolean,
-    /** The pinned version's own status — D58's save-time check reads it. */
+    /** The pinned version's own status — the lifecycle policy reads it. */
     val versionStatus: PipelineVersionStatus = PipelineVersionStatus.RELEASED,
     /**
      * #328 — the pinned version's caller-output record (pipeline-contract §3.3.1): the D2

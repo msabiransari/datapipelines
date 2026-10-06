@@ -2,6 +2,7 @@ package co.datapipelines.web.dashboards.runtime
 
 import co.datapipelines.application.dashboards.SourceLaunch
 import co.datapipelines.application.dashboards.SourceOutcome
+import co.datapipelines.application.endpoints.ReadOnlyPipelineRule
 import co.datapipelines.executor.AbortReason
 import co.datapipelines.executor.DirectResultSink
 import co.datapipelines.executor.ExecuteRequest
@@ -14,6 +15,7 @@ import co.datapipelines.executor.ExecutionTrigger
 import co.datapipelines.pipeline.Parameter
 import co.datapipelines.pipeline.Pipeline
 import co.datapipelines.pipeline.PipelineErrorCodes
+import co.datapipelines.pipeline.PipelineResolver
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.LogicalType
 import co.datapipelines.web.pipelines.RecordingExecutionRunner
@@ -45,7 +47,19 @@ import java.util.UUID
 @OptIn(ExperimentalCoroutinesApi::class)
 class RecordingSourceStarterTest {
     private val runner = mockk<RecordingExecutionRunner>()
-    private val starter = RecordingSourceStarter(runner)
+    private val pipelines =
+        mockk<co.datapipelines.pipeline.PipelineRepository> {
+            every { findVersionDetail(any(), any(), any()) } returns
+                mockk {
+                    every { status } returns co.datapipelines.pipeline.PipelineVersionStatus.RELEASED
+                }
+        }
+    private val starter =
+        RecordingSourceStarter(
+            runner,
+            ReadOnlyPipelineRule(PipelineResolver { _, _, _ -> null }, maxCompositionDepth = 1),
+            pipelines,
+        )
     private val slots = ExecutionSlots(maxPerUser = 1, maxPerInstance = 10)
     private val refreshId = UUID.randomUUID()
     private val executionId = UUID.randomUUID()
@@ -54,6 +68,7 @@ class RecordingSourceStarterTest {
     private val sink = DirectResultSink { _, _ -> }
     private val pipeline =
         mockk<Pipeline> {
+            every { nodes } returns emptyList()
             every { parameters } returns emptyMap()
             every { calculatorOutputs(any()) } returns emptyMap()
             every { calculatorOutputGroups(any()) } returns emptyMap()
@@ -76,6 +91,63 @@ class RecordingSourceStarterTest {
         )
 
     private fun result() = ExecutionResult(executionId, ExecutionStatus.SUCCESS, emptyList(), null, Instant.now(), Instant.now(), 1)
+
+    @Test
+    fun `a live draft source starts only when the dashboard explicitly admits draft dependencies`() {
+        runTest {
+            every { pipelines.findVersionDetail(any(), any(), any()) } returns
+                mockk {
+                    every { status } returns co.datapipelines.pipeline.PipelineVersionStatus.DRAFT
+                }
+            coEvery { runner.run(any(), workspace, ExecutionTrigger.DASHBOARD, any(), any()) } returns result()
+            starter.run(launch()) {} shouldBe SourceOutcome.Failed(null, PipelineErrorCodes.Dashboard.RUNTIME_DEPENDENCY_MISSING)
+            starter.run(launch().copy(allowDraftDependencies = true)) {} shouldBe SourceOutcome.Succeeded(executionId)
+            io.mockk.coVerify(exactly = 1) { runner.run(any(), any(), any(), any(), any()) }
+        }
+    }
+
+    @Test
+    fun `the admission callback refuses an exact loaded child that now writes to a datasource`() {
+        runTest {
+            var admission: ((Pipeline, UUID, Int) -> Unit)? = null
+            coEvery { runner.run(any(), workspace, ExecutionTrigger.DASHBOARD, any(), any()) } coAnswers {
+                admission = firstArg<ExecuteRequest>().pipelineAdmission
+                result()
+            }
+            starter.run(launch()) {} shouldBe SourceOutcome.Succeeded(executionId)
+            val unsafe =
+                mockk<Pipeline> {
+                    every { nodes } returns
+                        listOf(
+                            co.datapipelines.pipeline.Node(
+                                id = "write",
+                                description = "Business write",
+                                type = co.datapipelines.pipeline.NodeType.DML,
+                                source = "warehouse",
+                                template = co.datapipelines.pipeline.TemplateRef("write.sql", 1),
+                                output = null,
+                                dependsOn = emptyList(),
+                            ),
+                        )
+                }
+            org.junit.jupiter.api
+                .assertThrows<DatapipelinesException> {
+                    requireNotNull(admission)(unsafe, UUID.randomUUID(), 1)
+                }.code shouldBe PipelineErrorCodes.Dashboard.SOURCE_NOT_READ_ONLY
+        }
+    }
+
+    @Test
+    fun `a source discarded after configuration resolution never starts`() {
+        runTest {
+            every { pipelines.findVersionDetail(any(), any(), any()) } returns
+                mockk {
+                    every { status } returns co.datapipelines.pipeline.PipelineVersionStatus.DISCARDED
+                }
+            starter.run(launch()) {} shouldBe SourceOutcome.Failed(null, PipelineErrorCodes.Dashboard.RUNTIME_DEPENDENCY_MISSING)
+            io.mockk.coVerify(exactly = 0) { runner.run(any(), any(), any(), any(), any()) }
+        }
+    }
 
     @Test
     fun `the request carries the dashboard trigger, the collector, the lease, the correlation and the fail-closed run`() =

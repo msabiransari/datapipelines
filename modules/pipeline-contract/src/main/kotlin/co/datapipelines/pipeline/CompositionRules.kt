@@ -15,10 +15,9 @@ import com.fasterxml.jackson.databind.JsonNode
  *
  * These are the §12 rules that need the **pipeline registry**: whether the pinned child exists,
  * whether its declared parameters match what the node supplies, whether it has a caller node,
- * and how deep the reference tree rooted here descends. Everything is computed against the
- * pinned (immutable) child bodies the [PipelineResolver] returns, so the verdicts are stable:
- * a pipeline that passed at save time cannot become invalid because the child later changed —
- * an edit to the child is a new version, and the pin still points at the old one (D5).
+ * and how deep the reference tree rooted here descends. Released children are immutable;
+ * authoring can also reference mutable drafts. A verdict involving a draft describes its
+ * current body only, so release revalidates and requires released children.
  *
  * ## Missing references mirror missing templates
  *
@@ -38,12 +37,12 @@ import com.fasterxml.jackson.databind.JsonNode
  * ## Iterative depth walk, and the bound is the backstop
  *
  * [referenceDepth] computes the static reference-tree depth with an explicit stack, never
- * recursion in graph depth (§12.2 crash-safety). Cycles are impossible by construction — a pin
- * can only point at an already-stored immutable version — but the walk does not rely on that:
- * it never descends past `maxDepth`, so a resolver that handed back a cyclic graph terminates
- * here too, reported as `composition_too_deep` (design §4.4).
+ * recursion in graph depth (§12.2 crash-safety). Mutable draft references can form cycles;
+ * the walk never descends past `maxDepth`, so a cyclic graph terminates here too, reported
+ * as `composition_too_deep` (design §4.4).
  */
 internal object CompositionRules {
+    @Suppress("LongParameterList") // shared validation context plus the explicit authoring lifecycle policy
     fun check(
         pipeline: Pipeline,
         pipelines: PipelineResolver,
@@ -51,13 +50,17 @@ internal object CompositionRules {
         workspaceId: java.util.UUID,
         org: OrgContext,
         into: FailureCollector,
+        allowDraftPipelineReferences: Boolean = false,
     ) {
         pipeline.nodes.forEachIndexed { index, node ->
-            if (node.type == NodeType.PIPELINE) checkNode(pipeline, index, node, pipelines, workspaceId, org, into)
+            if (node.type == NodeType.PIPELINE) {
+                checkNode(pipeline, index, node, pipelines, workspaceId, org, into, allowDraftPipelineReferences)
+            }
         }
         checkDepth(pipeline, pipelines, maxDepth, workspaceId, into)
     }
 
+    @Suppress("LongParameterList") // one node and the shared validation context, including lifecycle policy
     private fun checkNode(
         pipeline: Pipeline,
         index: Int,
@@ -66,6 +69,7 @@ internal object CompositionRules {
         workspaceId: java.util.UUID,
         org: OrgContext,
         into: FailureCollector,
+        allowDraftPipelineReferences: Boolean,
     ) {
         checkNodeShape(index, node, into)
         val ref = node.pipeline
@@ -103,15 +107,15 @@ internal object CompositionRules {
             )
         }
         val resolved = resolve(ref, pipelines, workspaceId, index, into) ?: return
-        checkReferenceLifecycle(index, node, ref, resolved, into)
+        checkReferenceLifecycle(index, node, ref, resolved, into, allowDraftPipelineReferences)
         checkParameters(pipeline, index, node, resolved.pipeline, org, into)
         checkOutput(index, node, resolved.pipeline, into)
     }
 
     /**
      * §12.9's reference lifecycle (D7 + 101's D58): a discarded entity blocks NEW references,
-     * and a pin must name a RELEASED child version — a DRAFT child can be purged out from
-     * under its parent, which an exact-version pin must never allow.
+     * and a release must pin a RELEASED child version. Authoring may pin a mutable DRAFT;
+     * its parent must be revalidated before release because that draft can change or vanish.
      */
     private fun checkReferenceLifecycle(
         index: Int,
@@ -119,6 +123,7 @@ internal object CompositionRules {
         ref: PipelineNodeRef,
         resolved: ResolvedPipeline,
         into: FailureCollector,
+        allowDraftPipelineReferences: Boolean,
     ) {
         if (resolved.entityDiscarded) {
             into.add(
@@ -129,13 +134,13 @@ internal object CompositionRules {
                 mapOf("node" to node.id.truncateForError(), "pipeline" to ref.name.truncateForError()),
             )
         }
-        if (resolved.versionStatus != PipelineVersionStatus.RELEASED) {
+        if (!PipelineVersionStatus.eligibleForPointer(resolved.versionStatus, draftsEligible = allowDraftPipelineReferences)) {
             into.add(
                 Validation.PIPELINE_REFERENCE_NOT_RELEASED,
                 "nodes[$index].pipeline.version",
                 "PIPELINE node '${node.id.truncateForError()}' pins '${ref.name.truncateForError()}' version " +
                     "${ref.version}, which is ${resolved.versionStatus.name}; a child pipeline pin must name a " +
-                    "RELEASED version.",
+                    (if (allowDraftPipelineReferences) "DRAFT or RELEASED version." else "RELEASED version."),
                 mapOf(
                     "node" to node.id.truncateForError(),
                     "pipeline" to ref.name.truncateForError(),

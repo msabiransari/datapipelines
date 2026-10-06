@@ -87,7 +87,9 @@ class DashboardService(
         val record = repository.findRecord(workspaceId, id) ?: throw lifecycle.notFound(id)
         val draft = repository.findDraft(workspaceId, id) ?: throw lifecycle.notDraft(id)
         val body = checkNotNull(repository.findVersion(workspaceId, id, draft.version)).body
-        validated(workspaceId, DashboardDocument(record.name, body))
+        validator
+            .validate(workspaceId, DashboardDocument(record.name, body), requireReleasedSources = true)
+            .orThrow(DashboardErrorCodes.BODY_INVALID)
         val toCascade = dependenciesToRelease(workspaceId, body, releasePinnedVisualizations)
         val released =
             checkNotNull(
@@ -177,7 +179,7 @@ class DashboardService(
         workspaceId: UUID,
         document: DashboardDocument,
     ): DashboardDocument =
-        when (val validation = validator.validate(workspaceId, document)) {
+        when (val validation = validator.validate(workspaceId, document, requireReleasedSources = true)) {
             is ArtifactValidation.Valid -> validation.document
 
             is ArtifactValidation.Invalid -> throw ArtifactValidationException(

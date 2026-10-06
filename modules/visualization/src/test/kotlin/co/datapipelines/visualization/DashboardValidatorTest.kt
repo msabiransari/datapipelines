@@ -25,6 +25,8 @@ class DashboardValidatorTest {
     fun `the spec's worked document is valid unchanged - DRAFT set and visualization pins are accepted at save`() {
         valid(DocumentFixtures.dashboard())
         valid(DocumentFixtures.dashboard()) { fakes ->
+            fakes.pipelines[ValidatorFakes.PIPELINE_REF] =
+                fakes.pipelines.getValue(ValidatorFakes.PIPELINE_REF).copy(status = PipelineVersionStatus.DRAFT)
             fakes.sets[ValidatorFakes.SET_REF] = fakes.sets.getValue(ValidatorFakes.SET_REF).copy(status = PipelineVersionStatus.DRAFT)
             fakes.visualizations[ValidatorFakes.VISUALIZATION_REF] =
                 fakes.visualizations.getValue(ValidatorFakes.VISUALIZATION_REF).copy(status = PipelineVersionStatus.DRAFT)
@@ -294,7 +296,7 @@ class DashboardValidatorTest {
             .Fakes()
             .also(setup)
             .dashboardValidator()
-            .validate(ValidatorFakes.WORKSPACE, ValidatorFakes.dashboardDocument(tree))
+            .validate(ValidatorFakes.WORKSPACE, ValidatorFakes.dashboardDocument(tree), requireReleasedSources = true)
             .let { it as? ArtifactValidation.Invalid }
             ?.result
             ?.failures

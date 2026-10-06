@@ -22,7 +22,7 @@ import java.util.UUID
  * The authoring path's fixture evaluation over the REAL evaluator's contract (mocked at the service
  * edge): ROW-mode and multi-input shaping follow the pinned contract's mode, the pinned version travels
  * exactly (a DRAFT pin is admitted — authoring), the evaluator's refusals propagate with their own
- * codes, and a non-table output is refused the transformer's shape code. The RELEASED-only rule is the
+ * codes, and a non-table output is refused the transformer's shape code. The published runtime's RELEASED-only rule is the
  * runtime's, not this adapter's.
  */
 class WebVisualizationFixtureEvaluatorTest {

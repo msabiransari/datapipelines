@@ -354,6 +354,45 @@ test("the kpi renderer renders a zero, formats, carries the unit and the compari
   }
 });
 
+test("#459: table cells use native binding paths with null configuration placeholders", async () => {
+  installDom();
+  try {
+    const runtime = require(resolveStatic("datapipelines-dashboard.js"));
+    require(resolveStatic("datapipelines-dashboard-table.js")).register(runtime);
+    const host = fakeElement("div");
+    const handle = runtime._internal.renderers().table.create({
+      host,
+      occurrence: { name: "t", config: { columns: [{ label: "Country", values: null }] } },
+    });
+    assert.equal(await handle.renderData({ name: "t" }, 2, { "columns[0].values": ["EU", "<img onerror=alert(1)>"] }), "rendered");
+    const rows = host.children[0].children[1].children;
+    assert.equal(rows.length, 2);
+    assert.equal(rows[0].children[0].textContent, "EU");
+    assert.equal(rows[1].children[0].textContent, "<img onerror=alert(1)>");
+    assert.equal(rows[1].children[0].children.length, 0);
+  } finally {
+    uninstallDom();
+  }
+});
+
+test("#459: KPI values and comparison use native binding paths", async () => {
+  installDom();
+  try {
+    const runtime = require(resolveStatic("datapipelines-dashboard.js"));
+    require(resolveStatic("datapipelines-dashboard-kpi.js")).register(runtime);
+    const host = fakeElement("div");
+    const handle = runtime._internal.renderers().kpi.create({
+      host,
+      occurrence: { name: "k", config: { label: "Total", value: null, format: "integer", comparison: { label: "Previous", value: null } } },
+    });
+    assert.equal(await handle.renderData({ name: "k" }, 1, { value: [0], "comparison.value": [10] }), "rendered");
+    assert.equal(host.querySelector(".dp-dashboard-kpi-number").textContent, "0");
+    assert.equal(host.querySelector(".dp-dashboard-kpi-comparison-value").textContent, "10");
+  } finally {
+    uninstallDom();
+  }
+});
+
 test("the composite adapter builds the grid, mounts renderers by kind and renders status text-only", async () => {
   installDom();
   try {
