@@ -345,7 +345,8 @@ class PipelineWorkspacePromoterAdmittedBrowserTest : BrowserSuite() {
         val titles =
             (
                 promoter.page.evaluate(
-                    "() => [...document.querySelectorAll('#nav-tree-pipelines .dp-tree-activate[title]')].map(e => e.getAttribute('title'))",
+                    "() => [...document.querySelectorAll('#nav-tree-pipelines " +
+                        ".dp-tree-activate[title]')].map(e => e.getAttribute('title'))",
                 ) as List<*>
             ).map { it.toString() }
         titles.contains("p348/promoted") shouldBe true

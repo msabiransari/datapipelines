@@ -181,6 +181,8 @@ class TreeIndentAndVersionMenuBrowserTest : BrowserSuite() {
                 page.locator("#pipeline-list-wrapper a.tpl-result").first().click()
                 page.waitForURL(PipelineWorkspaceUrl.PATTERN)
                 page.waitForSelector(".pe-root")
+                // Boosted markup arrives before the observer finishes its mount.
+                page.waitForFunction("() => !!window.__peInstance")
                 page.locator("#pe-tab-versions").click()
                 page.waitForSelector("$panel tr[data-version-row]")
             } else {

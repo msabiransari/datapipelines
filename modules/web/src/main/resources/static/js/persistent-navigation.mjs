@@ -37,6 +37,10 @@ document.body.addEventListener("htmx:confirm", async event => {
 document.body.addEventListener("htmx:beforeRequest", event => {
   const detail = event.detail;
   const ticket = tickets.get(detail?.elt);
+  // Boosted navigation still targets body here; shell.js retargets it at beforeSwap.
+  if (ticket === undefined && detail?.boosted) {
+    pending?.abort(); generation += 1;
+  }
   if (ticket !== undefined && detail.xhr) requests.set(detail.xhr, ticket);
 });
 document.body.addEventListener("htmx:beforeSwap", event => {

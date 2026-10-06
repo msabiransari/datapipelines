@@ -38,7 +38,7 @@ export function mountSearchTree(host, options) {
   return {
     state, input, scroll, clear: clearTree,
     select(key) { renderer.select(key); },
-    async update(next) { clearTimeout(timer); input.value = ""; await state.update(next); },
+    async update(next) { clearTimeout(timer); input.value = ""; renderer.select(null); await state.update(next); },
     refresh(parent) { return state.refresh(parent); },
     dispose() { clearTimeout(timer); state.dispose(); renderer.dispose(); controls.remove(); scroll.remove(); },
   };

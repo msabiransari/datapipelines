@@ -167,7 +167,9 @@ class TemplateSidebarTreeBrowserTest : BrowserSuite() {
         page.waitForSelector(leaf("test/nav_probe.sql"))
 
         page.evaluate(
-            "() => {window.__templateRail=document.getElementById('app-rail');window.__templateRow=document.querySelector('#nav-tree-templates [role=treeitem]')}",
+            "() => " +
+                "{window.__templateRail=document.getElementById('app-rail');window.__templateRow=document.q" +
+                "uerySelector('#nav-tree-templates [role=treeitem]')}",
         )
         page.locator(leaf("test/nav_probe.sql")).getAttribute("href") shouldBe "/templates/test/nav_probe.sql"
 
@@ -175,7 +177,8 @@ class TemplateSidebarTreeBrowserTest : BrowserSuite() {
         page.waitForURL("**/templates/test/nav_probe.sql")
         page.waitForSelector(".tw-root")
         page.evaluate(
-            "() => window.__templateRail===document.getElementById('app-rail') && window.__templateRow===document.querySelector('#nav-tree-templates [role=treeitem]')",
+            "() => window.__templateRail===document.getElementById('app-rail') && " +
+                "window.__templateRow===document.querySelector('#nav-tree-templates [role=treeitem]')",
         ) shouldBe
             true
         // A current marker updates the loaded leaf without fetching its ancestors.

@@ -44,6 +44,7 @@ class TreeProjectionTest {
         shouldThrow<ResponseStatusException> { answer(actorId = UUID.randomUUID(), cursor = cursor, load = neverLoad) }
         shouldThrow<ResponseStatusException> { answer(family = NavigationFamily.TEMPLATES, cursor = cursor, load = neverLoad) }
         shouldThrow<ResponseStatusException> { answer(lens = ReadLens.Only(setOf("different")), cursor = cursor, load = neverLoad) }
+        shouldThrow<ResponseStatusException> { answer(lens = ReadLens.Only(setOf("everything")), cursor = cursor, load = neverLoad) }
     }
 
     @Test
@@ -60,6 +61,7 @@ class TreeProjectionTest {
         shouldThrow<ResponseStatusException> { answer(cursor = good + "x") { error("Must refuse") } }
         shouldThrow<ResponseStatusException> { answer(parent = "sibling") { error("Must refuse") } }
         shouldThrow<ResponseStatusException> { answer(root = "scope/../escape") { error("Must refuse") } }
+        shouldThrow<ResponseStatusException> { answer(query = "bad\u0000query") { error("Must refuse") } }
     }
 
     @Test

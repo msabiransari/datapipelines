@@ -51,6 +51,8 @@ class TemplatesGoldenPathBrowserTest : BrowserSuite() {
         val name = "test/$leaf"
 
         page.navigate("$baseUrl/templates")
+        page.click("[data-nav-branch='templates'] [data-nav-tree-toggle]")
+        page.waitForFunction("() => window.DatapipelinesSidebarTrees.get('templates')?.state.levels.get(null)?.complete")
         page.click("text=Create Template")
         page.locator("#create-template-modal").isVisible shouldBe true
 
@@ -104,7 +106,7 @@ class TemplatesGoldenPathBrowserTest : BrowserSuite() {
                     .setHasText(leaf),
             )
         leafLink.waitFor()
-        leafLink.locator("span[title]").getAttribute("title") shouldBe name
+        leafLink.locator("span[title='$name']").getAttribute("title") shouldBe name
 
         // A leaf NAVIGATES — a full document into the template workspace.
         leafLink.click()

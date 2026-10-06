@@ -17,6 +17,8 @@ for(const family of ['pipelines','templates','dashboards','visualizations','para
     assert.equal(seen.url,`/api/v1/${family}/tree?root=scope&parent=scope`);
     const foreign=restTreeSource(family,async()=>response({family,mode:'browse',root:'scope',parent:'scope',query:null,workspace_id:'other',view_token:'members',nodes:[],next_cursor:null}));
     await assert.rejects(foreign.loadChildren(null,null,options),error=>error.resetTree===true);
+    const expired=restTreeSource(family,async()=>({ok:false,status:400}));
+    await assert.rejects(expired.loadChildren('folder:scope/a','old-process-cursor',options),error=>error.resetTree===true);
   });
 }
 test('unsafe destinations and dependency paths refuse schemes, traversal and foreign routes',()=>{

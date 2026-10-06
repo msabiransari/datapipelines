@@ -45,7 +45,23 @@ document.querySelectorAll("[data-nav-branch]").forEach(branch => {
   });
   try { if (localStorage.getItem(storageKey(family)) === "1") visibility(true); } catch (_) { /* closed by default */ }
 });
-document.body.addEventListener("htmx:afterSettle", markCurrent);
+document.body.addEventListener("htmx:afterSettle", () => {
+  document.querySelectorAll("[data-artifact-change-family]").forEach(marker => {
+    const instance = instances.get(marker.dataset.artifactChangeFamily);
+    const path = marker.dataset.artifactChangePath;
+    marker.removeAttribute("data-artifact-change-family"); marker.removeAttribute("data-artifact-change-path");
+    if (!instance || !path) return;
+    let parent = null; let prefix = "";
+    for (const segment of path.split("/").slice(0, -1)) {
+      prefix += (prefix ? "/" : "") + segment;
+      const key = `folder:${prefix}`;
+      if (!instance.state.levels.get(parent)?.nodes.has(key)) break;
+      parent = key;
+    }
+    instance.refresh(parent);
+  });
+  markCurrent();
+});
 document.body.addEventListener("htmx:historyRestore", markCurrent);
 document.body.addEventListener("dp:artifacts-changed", event => {
   const instance = instances.get(event.detail?.family);

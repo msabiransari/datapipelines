@@ -66,7 +66,7 @@ class PipelineExplorerRenderTest {
         // The sidebar tree's other door, and the sidebar tree itself in the same document.
         main shouldContain "data-nav-tree-reveal=\"pipelines\""
         html shouldContain "data-nav-tree=\"pipelines\""
-        html shouldContain "id=\"pipeline-nav-root\""
+        html shouldContain "id=\"nav-tree-pipelines\""
     }
 
     @Test
@@ -425,7 +425,7 @@ class PipelineExplorerRenderTest {
     }
 
     @Test
-    fun `#350 - a SIDEBAR search result is a listbox option linking to the workspace, under the sidebar's root`() {
+    fun `#350 - the legacy sidebar search fragment retains its listbox and root contract`() {
         val html = render("partials/pipeline-search") { fillSearch() }
 
         html shouldContain "id=\"pipeline-nav-root\""

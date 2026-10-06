@@ -12,7 +12,9 @@ class PipelineSidebarTreeStateBrowserTest : RestTreeBrowserFixture() {
         readyTree()
         val id = seedPipeline("acme/a/b/target")
         page.evaluate(
-            "() => localStorage.setItem('dp-nav:pipelines:'+document.documentElement.dataset.dpWorkspace, JSON.stringify({open:true,paths:['acme','acme/a','acme/a/b']}))",
+            "() => " +
+                "localStorage.setItem('dp-nav:pipelines:'+document.documentElement.dataset.dpWorkspace, " +
+                "JSON.stringify({open:true,paths:['acme','acme/a','acme/a/b']}))",
         )
         page.navigate("$baseUrl/pipelines/$id")
         val requests = mutableListOf<String>()
@@ -151,7 +153,9 @@ class PipelineSidebarTreeStateBrowserTest : RestTreeBrowserFixture() {
         expand("acme")
         expand("acme/history")
         page.evaluate(
-            "() => {window.__treeInstance=window.DatapipelinesSidebarTrees.get('pipelines');window.__row=document.querySelector('[data-tree-key=\"folder:acme\"]')}",
+            "() => " +
+                "{window.__treeInstance=window.DatapipelinesSidebarTrees.get('pipelines');window.__row=docu" +
+                "ment.querySelector('[data-tree-key=\"folder:acme\"]')}",
         )
         page.click(leaf("acme/history/leaf"))
         page.waitForURL("**/pipelines/$id")

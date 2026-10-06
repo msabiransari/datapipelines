@@ -66,27 +66,34 @@
     syncTemplateDialect();
     syncTemplateBlocks();
     var result = document.getElementById('template-create-result');
-    if (!result) return;
+    if (!result || result.__dpCreateInitialized) return;
+    result.__dpCreateInitialized = true;
 
     /* Refusals arrive as 4xx and htmx does not swap those. The modal must not close over an
        error and a 6s toast is the wrong place for form-level feedback (the 022 review F9
        rule), so this screen owns its error path: the refusal lands in the result node,
        tagged so the observer below does NOT close the modal over it. */
-    document.body.addEventListener('htmx:responseError', function(event) {
-      if (!event.detail.elt.closest || !event.detail.elt.closest('#create-template-modal')) return;
-      result.setAttribute('data-error', 'true');
-      result.innerHTML = event.detail.xhr.responseText;
-    });
-    document.body.addEventListener('htmx:beforeRequest', function(event) {
-      if (!event.detail.elt.closest || !event.detail.elt.closest('#create-template-modal')) return;
-      result.removeAttribute('data-error');
-      result.innerHTML = '';
-    });
+    if (!window.__dpTemplateCreateRequestsArmed) {
+      window.__dpTemplateCreateRequestsArmed = true;
+      document.body.addEventListener('htmx:responseError', function(event) {
+        if (!event.detail.elt.closest || !event.detail.elt.closest('#create-template-modal')) return;
+        var liveResult = document.getElementById('template-create-result');
+        if (!liveResult) return;
+        liveResult.setAttribute('data-error', 'true');
+        liveResult.innerHTML = event.detail.xhr.responseText;
+      });
+      document.body.addEventListener('htmx:beforeRequest', function(event) {
+        if (!event.detail.elt.closest || !event.detail.elt.closest('#create-template-modal')) return;
+        var liveResult = document.getElementById('template-create-result');
+        if (!liveResult) return;
+        liveResult.removeAttribute('data-error'); liveResult.innerHTML = '';
+      });
+    }
 
     /* Close the modal only on SUCCESS content — never over an error. */
     var observer = new MutationObserver(function() {
       var modal = document.getElementById('create-template-modal');
-      if (!modal.classList.contains('u-backdrop-hidden') &&
+      if (modal && !modal.classList.contains('u-backdrop-hidden') &&
           result.children.length > 0 &&
           result.getAttribute('data-error') !== 'true') {
         hideCreateTemplateModal();

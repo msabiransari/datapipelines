@@ -19,6 +19,7 @@ class ReusableRestTreeBrowserTest : BrowserSuite() {
     }
 
     @Test
+    @Suppress("LongMethod") // sequential browser workflow: identity, history, resize and reload share one fixture
     fun `real REST browsing preserves rows across artifact catalog and cached history and the rail can consume the app`() {
         ready()
         val id = seedPipeline("scope/deep/first")
@@ -91,6 +92,7 @@ class ReusableRestTreeBrowserTest : BrowserSuite() {
     }
 
     @Test
+    @Suppress("LongMethod", "CyclomaticComplexMethod") // one transport fixture drives all adapters and bounded pages
     fun `all five adapters exhaust large levels and search paths then clear to closed roots`() {
         ready()
         val workspace = page.locator("html").getAttribute("data-dp-workspace-id")
@@ -220,7 +222,7 @@ class ReusableRestTreeBrowserTest : BrowserSuite() {
           for(let i=0;i<3;i++){const target=document.createElement('output');target.id='target-'+i;document.getElementById('app-main').append(target)}
           for(let i=0;i<3;i++) {
             const host=document.createElement('div');host.id='picker-'+i;document.getElementById('app-main').append(host);
-            window.__pickers.push(mountSearchTree(host,{source:i===2 ? {async loadChildren(){return {nodes:[{...folder,key:'folder:b',path:'b',name:'b'}],nextCursor:null}},async search(){return {nodes:[],nextCursor:null}}} : source,label:'Picker '+i,debounceMs:0,
+            window.__pickers.push(mountSearchTree(host,{source:i===2 ? {async loadChildren(){return {nodes:[{key:'artifact:two',parentKey:null,kind:'artifact',path:'b/two',name:'two',hasChildren:false}],nextCursor:null}},async search(){return {nodes:[],nextCursor:null}}} : source,label:'Picker '+i,debounceMs:0,
               onActivate(node){window.__picked=node.key;document.getElementById('target-'+i).textContent=node.key}}));
           }
         }""",
@@ -240,8 +242,20 @@ class ReusableRestTreeBrowserTest : BrowserSuite() {
         page.waitForSelector("#picker-1 [data-tree-key='artifact:one']")
         page.click("#picker-1 button[aria-label='Clear search']")
         page.locator("#picker-1 [aria-expanded=true]").count() shouldBe 0
+        page.click("#picker-2 [data-tree-key='artifact:two'] button")
+        page.locator("#target-2").textContent() shouldBe "artifact:two"
+        page.locator("#target-0").textContent() shouldBe "artifact:one"
+        page.evaluate(
+            """async () => window.__pickers[1].update({root:'scope',context:{workspace:'new'},source:{
+              async loadChildren(){return {nodes:[{key:'folder:scope/c',parentKey:null,kind:'folder',path:'scope/c',name:'c',hasChildren:true}],nextCursor:null}},
+              async search(){return {nodes:[],nextCursor:null}}
+            }})""",
+        )
+        page.locator("#picker-1 [data-tree-key='folder:a']").count() shouldBe 0
+        page.locator("#picker-1 [data-tree-key='folder:scope/c']").count() shouldBe 1
+        page.locator("#picker-1 [aria-expanded=true]").count() shouldBe 0
         page.evaluate("() => window.__pickers[0].dispose()")
-        page.locator("#picker-2 [data-tree-key='folder:b']").count() shouldBe 1
+        page.locator("#picker-2 [data-tree-key='artifact:two']").count() shouldBe 1
     }
 
     private fun node(

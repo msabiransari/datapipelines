@@ -68,11 +68,14 @@ class TreeProjection {
         validatePath(parent)
         if (parent != root && !parent.startsWith(if (root.isEmpty()) "" else "$root/")) invalid()
         val normalized = query?.trim()?.replace(Regex("\\s+"), " ")
-        if (normalized != null && (normalized.isEmpty() || normalized.length > MAX_PATH)) invalid()
+        if (normalized != null) {
+            if (normalized.isEmpty() || normalized.length > MAX_PATH) invalid()
+            if (normalized.any { it.isISOControl() }) invalid()
+        }
         val membership =
             when (lens) {
                 ReadLens.Everything -> "everything"
-                is ReadLens.Only -> lens.names.sorted().joinToString("\n")
+                is ReadLens.Only -> "only\n" + mapper.writeValueAsString(lens.names.sorted())
             }
         val view = digest("$workspace\n$actor\n$membership")
         val identity = digest("${family.route}\n$root\n$parent\n${normalized.orEmpty()}\n$view")

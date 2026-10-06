@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test
 /** Real charts and runtime ownership across prepared navigation, failed preparation and cached history. */
 class PersistentChartNavigationBrowserTest : VisualizationBrowserSuite() {
     @Test
+    @Suppress("LongMethod") // a single chart/history/zero-width journey keeps identity witnesses live
     fun `2d and 3d workspaces versions and cached history share one bundle and retain the rail`() {
         val root = ready("persistcharts")
         page.setViewportSize(1440, 1000)
@@ -15,7 +16,9 @@ class PersistentChartNavigationBrowserTest : VisualizationBrowserSuite() {
         val (surface, _) = createVisualization("$root/charts/surface", trace3d = true)
         openVisualizations(root)
         page.evaluate(
-            "() => {window.__rail=document.getElementById('app-rail');window.__rootRow=document.querySelector('#nav-tree-visualizations [role=treeitem]');window.__start=performance.now()}",
+            "() => " +
+                "{window.__rail=document.getElementById('app-rail');window.__rootRow=document.querySelector" +
+                "('#nav-tree-visualizations [role=treeitem]');window.__start=performance.now()}",
         )
         val treeRequests = mutableListOf<String>()
         page.onRequest { if (it.url().contains("/api/v1/visualizations/tree")) treeRequests += it.url() }
@@ -25,10 +28,20 @@ class PersistentChartNavigationBrowserTest : VisualizationBrowserSuite() {
         println(
             "460-chart-first " +
                 page.evaluate(
-                    "() => ({latency_ms:performance.now()-window.__start,resources:performance.getEntriesByType('resource').filter(x=>x.name.includes('plotly-3d.min.js')).map(x=>({encoded:x.encodedBodySize,transferred:x.transferSize,duration:x.duration}))})",
+                    "() => " +
+                        "({latency_ms:performance.now()-window.__start,resources:performance.getEntriesByType('reso" +
+                        "urce').filter(x=>x.name.includes('plotly-3d.min.js')).map(x=>({encoded:x.encodedBodySize,t" +
+                        "ransferred:x.transferSize,duration:x.duration}))})",
                 ),
         )
         sameShell()
+        page.locator("#rail-resize").focus()
+        page.keyboard().press("End")
+        page.waitForFunction("() => document.getElementById('app-main').getBoundingClientRect().width < 1")
+        page.keyboard().press("Home")
+        page.waitForFunction(
+            "() => document.querySelector('[data-viz-case-index=\"0\"] .js-plotly-plot')?.getBoundingClientRect().width > 100",
+        )
         page.click(".dp-versions a[href='/visualizations/$flat?version=1&tab=preview']")
         page.waitForURL("**/visualizations/$flat?version=1&tab=preview")
         preview()
@@ -129,10 +142,12 @@ class PersistentChartNavigationBrowserTest : VisualizationBrowserSuite() {
     fun `failed destination fetch retains a functional outgoing chart and unchanged rail`() {
         val root = ready("fetchfail")
         val (id, _) = createVisualization("$root/charts/flat")
-        page.navigate("$baseUrl/visualizations/$id")
+        val (other, _) = createVisualization("$root/charts/other")
+        openVisualizations(root)
+        page.click("#nav-tree-visualizations a[href='/visualizations/$id']")
         preview()
         page.evaluate("() => window.__rail=document.getElementById('app-rail')")
-        page.route("**/templates") {
+        page.route("**/visualizations/$other") {
             it.fulfill(
                 Route
                     .FulfillOptions()
@@ -141,9 +156,11 @@ class PersistentChartNavigationBrowserTest : VisualizationBrowserSuite() {
                     .setBody("unavailable"),
             )
         }
-        page.click(".app-nav-link[data-nav-section='/templates']")
+        page.click("#nav-tree-visualizations a[href='/visualizations/$other']")
         page.waitForSelector("#dp-navigation-notice")
         page.url().substringAfterLast('/') shouldBe id
+        page.locator("#nav-tree-visualizations a[href='/visualizations/$id']").getAttribute("aria-current") shouldBe "page"
+        page.locator("#nav-tree-visualizations a[href='/visualizations/$other']").getAttribute("aria-current") shouldBe null
         page.evaluate("() => window.__rail===document.getElementById('app-rail')") shouldBe true
         page.selectOption("[data-viz-case-select]", "1")
         page.waitForSelector("[data-viz-case-index='1']:not([hidden])[data-dp-ready=true]")
@@ -169,7 +186,10 @@ class PersistentChartNavigationBrowserTest : VisualizationBrowserSuite() {
             )
         }
         page.evaluate(
-            "id => {const a=document.createElement('a');a.href='/visualizations/'+id;a.textContent='Open chart';a.id='chart-failure-link';document.getElementById('app-main').append(a);htmx.process(a)}",
+            "id => {const " +
+                "a=document.createElement('a');a.href='/visualizations/'+id;a.textContent='Open " +
+                "chart';a.id='chart-failure-link';document.getElementById('app-main').append(a);htmx.proces" +
+                "s(a)}",
             id,
         )
         page.click("#chart-failure-link")
@@ -187,9 +207,21 @@ class PersistentChartNavigationBrowserTest : VisualizationBrowserSuite() {
         page.navigate("$baseUrl/dashboards/$board")
         page.waitForFunction("() => window.__dpPage?.ready===true")
         page.evaluate(
-            "() => {window.__oldBoard=window.__dpPage.instance;window.__rail=document.getElementById('app-rail');window.__disposals=0;const old=window.__oldBoard.dispose.bind(window.__oldBoard);window.__oldBoard.dispose=function(){window.__disposals++;return old()}}",
+            "() => " +
+                "{window.__oldBoard=window.__dpPage.instance;window.__rail=document.getElementById('app-rai" +
+                "l');window.__disposals=0;const " +
+                "old=window.__oldBoard.dispose.bind(window.__oldBoard);window.__oldBoard.dispose=function()" +
+                "{window.__disposals++;return old()}}",
         )
-        page.click(".app-nav-link[data-nav-section='/templates']")
+        page.waitForFunction(
+            "() => Object.keys(window.__oldBoard._refreshes).length > 0 && " +
+                "Object.values(window.__oldBoard._refreshes).every(refresh => refresh.ended)",
+        )
+        page.evaluate("() => {window.__dpPage.instance.refresh({scope:'targets',targets:['slowchart']})}")
+        page.waitForFunction("() => Object.values(window.__oldBoard._refreshes).some(refresh => !refresh.ended)")
+        page.waitForRequest({ it.url().contains("/refreshes/") && it.url().endsWith("/abort") }) {
+            page.click(".app-nav-link[data-nav-section='/templates']")
+        }
         page.waitForSelector("#template-list-wrapper")
         page.evaluate("() => window.__disposals") shouldBe 1
         page.goBack()
@@ -242,6 +274,31 @@ class PersistentChartNavigationBrowserTest : VisualizationBrowserSuite() {
                 "folder:$path",
             )
         }
+    }
+
+    @Test
+    fun `a newer Home navigation also rejects a held artifact response`() {
+        val root = ready("homewins")
+        val (id, _) = createVisualization("$root/charts/flat")
+        page.navigate("$baseUrl/visualizations/$id")
+        preview()
+        var held: Route? = null
+        page.route("**/templates") { route ->
+            if (route.request().headers()["hx-request"] == "true") held = route else route.resume()
+        }
+        page.click(".app-nav-link[data-nav-section='/templates']")
+        page.waitForFunction(
+            "() => document.querySelector('.app-nav-link[data-nav-section=\"/templates\"]')?.classList.contains('htmx-request')",
+        )
+        page.click(".app-nav-link[data-nav-section='/dashboard']")
+        page.waitForURL("**/dashboard")
+        page.evaluate("() => window.__homeHeading=document.querySelector('#app-main h1')")
+        page.waitForResponse({ it.url().endsWith("/templates") }) { checkNotNull(held).resume() }
+        page.waitForFunction(
+            "() => !document.querySelector('.app-nav-link[data-nav-section=\"/templates\"]')?.classList.contains('htmx-request')",
+        )
+        page.url().endsWith("/dashboard") shouldBe true
+        page.evaluate("() => window.__homeHeading===document.querySelector('#app-main h1')") shouldBe true
     }
 
     private fun preview() {

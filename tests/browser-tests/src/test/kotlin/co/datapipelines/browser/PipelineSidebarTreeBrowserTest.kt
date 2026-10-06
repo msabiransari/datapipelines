@@ -24,6 +24,10 @@ class PipelineSidebarTreeBrowserTest : RestTreeBrowserFixture() {
         page.mouse().move(box.x + box.width / 2, box.y + box.height / 2)
         page.mouse().down()
         page.mouse().move(900.0, 400.0)
+        page.evaluate(
+            "() => document.getElementById('rail-resize').dispatchEvent(new PointerEvent('pointercancel', {pointerId:1,bubbles:true}))",
+        )
+        page.mouse().move(1100.0, 400.0)
         page.mouse().up()
         width() shouldBe 900
         page.click("${folder("acme")} > .dp-tree-line button")

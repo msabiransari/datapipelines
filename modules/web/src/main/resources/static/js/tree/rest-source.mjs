@@ -12,7 +12,13 @@ export function restTreeSource(family, fetchPage = fetch) {
     const response = await fetchPage(`/api/v1/${family}/tree${query === null ? "" : "/search"}?${parameters}`, {
       signal, credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" },
     });
-    if (!response.ok || !response.headers.get("content-type")?.includes("application/json")) throw new Error("Could not load tree");
+    if (!response.ok || !response.headers.get("content-type")?.includes("application/json")) {
+      const error = new Error("Could not load tree");
+      if (response.status === 401 || (response.status === 400 && cursor !== null)) {
+        error.message = "Navigation context changed. Retry to reload."; error.resetTree = true;
+      }
+      throw error;
+    }
     const envelope = await response.json(); const data = envelope?.data;
     if (envelope.schema_version !== 1 || !data || data.family !== family || data.root !== root ||
         data.parent !== (query === null ? path : root) || data.query !== query || data.workspace_id !== options.context?.workspace ||

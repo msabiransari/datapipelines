@@ -14,7 +14,7 @@ export function createTreeRenderer(host, state, options) {
   root.setAttribute("aria-label", options.label || "Items"); host.append(root); groups.set(null, root);
   let focusedKey = null; let selectedKey = options.selectedKey || null;
   function activate(node, event) {
-    selectedKey = node.key;
+    if (!options.getHref?.(node)) selectedKey = node.key;
     options.onSelectionChange?.(node);
     if (options.onActivate) { event.preventDefault(); options.onActivate(node, event); }
     render();
