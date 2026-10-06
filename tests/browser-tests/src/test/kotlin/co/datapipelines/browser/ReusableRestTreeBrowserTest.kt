@@ -171,6 +171,7 @@ class ReusableRestTreeBrowserTest : BrowserSuite() {
                     mapOf("schema_version" to 1, "data" to data),
                 ) as String
             if (parent.isEmpty() && !search) println("460-fixture-json $encoded")
+            println("460-page-bytes family=$family mode=${data["mode"]} nodes=${nodes.size} bytes=${encoded.toByteArray().size}")
             route.fulfill(Route.FulfillOptions().setContentType("application/json").setBody(encoded))
         })
         listOf("pipelines", "templates", "dashboards", "visualizations", "parameter-sets").forEach { family ->
