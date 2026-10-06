@@ -168,16 +168,12 @@ identity. The old `/editor` URL redirects here — preserving a valid explicit `
 supported `tab` — so every historical link keeps working; its floor is `read` (see below).
 
 **How a reader arrives (#350).** From the global sidebar's **Pipelines tree** (ui-screens §3.4 —
-a leaf is a full-document link to `/pipelines/{id}`, no version, so the current-first rule above
+a leaf is a persistent main-content link to `/pipelines/{id}`, no version, so the current-first rule above
 resolves it) or from a row of the `/pipelines` **catalog** (ui-screens §4.3, the same link).
-Both are full document loads, the graph entry this page keeps (#348's spec §2: boosted entry
-is not turned on until initialization and teardown are proven under it); boosted arrivals and
-history restores still work through the runtime (§3.2). The page carries one hook for the
-sidebar, `<span hidden data-nav-current="pipelines" data-nav-current-id data-nav-current-path>`:
-the rail marks this pipeline's leaf `aria-current` and reveals its folders one level per request.
-The explorer's separate detail pane and its "Open" are gone — this page is the one place a
-pipeline is read, run and managed. In-page version/tab switches push entries of the workspace's own and
-Back/Forward replays them in page (§10.8, #402).
+Both preserve the sidebar through the shell's prepared main-content navigation (#460). The
+pipeline runtime retains sole initialization ownership; outgoing observation detaches without
+cancelling execution, and cached history mounts one observer on return. Fresh sidebar initialization
+loads only its root and never auto-reveals this leaf; an already mounted tree retains its loaded rows.
 
 Authentication: session cookie carrying the internal JWT (browser flow). See [Auth §6](auth.md#6-session-tokens-internal-jwt). Required scope per the authoritative matrix in [Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative): `read` to view (`pipeline.read` — every admitted role, the promoter through the lens), `execute` to run, `execute` to cancel.
 

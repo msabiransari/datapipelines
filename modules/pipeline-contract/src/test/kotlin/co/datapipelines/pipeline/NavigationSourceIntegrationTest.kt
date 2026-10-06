@@ -69,6 +69,23 @@ class NavigationSourceIntegrationTest {
         rows.any { it.path == "scope/description" || it.path.startsWith("elsewhere/") } shouldBe false
         rows.all { it.id != null } shouldBe true
         NavigationSource.page(jdbc, family, NavigationRequest(UUID.randomUUID(), ReadLens.Everything, "", "", "match")).size shouldBe 0
+        listOf(false, true).forEach { searching ->
+            val plan =
+                jdbc.queryForList(
+                    "EXPLAIN (ANALYZE, BUFFERS) " + NavigationSource.sql(family, narrowed = false, search = searching),
+                    mapOf(
+                        "workspace" to workspace,
+                        "prefix" to "scope/%",
+                        "cut" to 7,
+                        "pattern" to "%match%",
+                        "after" to "",
+                        "limit" to NavigationRequest.PAGE_SIZE + 1,
+                    ),
+                    String::class.java,
+                )
+            plan.any { it.contains("Execution Time:") } shouldBe true
+            println("460-query-plan family=${family.route} search=$searching\n" + plan.joinToString("\n"))
+        }
         insert(family, "scope/literal_percent", display = "100% real")
         exhaust(family, ReadLens.Everything, "%").map { it.path } shouldContainExactly listOf("scope/literal_percent")
     }

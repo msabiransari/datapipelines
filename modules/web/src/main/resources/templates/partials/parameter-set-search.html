@@ -1,21 +1,4 @@
-<!-- A FLAT list of parameter sets (#415), in TWO instances — chosen by `scope`, which also names
-     the stable swap root (partials/dashboard-search.html's shape, one family over):
-
-     - `nav`  — the global sidebar's search results, under #params-tree-nav. Clearing the box
-                returns the sidebar to its tree (partials/parameter-sets dispatches on exactly
-                that). The rows are role=option in a role=listbox — a result list, not a tree —
-                and template-explorer.js's nav context gives them the same keyboard as the tree.
-     - `page` — the /parameter-sets CATALOG, under #parameter-set-list-wrapper: every set the
-                caller may read when `q` is empty, the matches otherwise. Plain links in a plain
-                list; the page has no tree and no detail pane.
-
-     A match names ALL THREE columns the service searches — the name, the display name and the
-     description — and shows the FULL path either way (§9.4: the truncated text must never be
-     the only copy). A set the lens hides is not in this list: the service never returned it —
-     never rendered disabled, never hidden by CSS.
-
-     Every row is a LINK to the canonical workspace /parameter-sets/{id} — a full document load
-     (hx-boost="false", the tree leaf's rule), never a selection into a pane. -->
+<!-- Artifact and version links use prepared main-content navigation, preserving the sidebar. -->
 <div xmlns:th="http://www.thymeleaf.org" th:fragment="results" th:id="${rootId}"
      th:with="nav=${scope == 'nav'}" th:attr="data-parameter-set-list=${scope}">
   <th:block th:if="${lensUnavailable != null and #lists.isEmpty(parameterSets)}">
@@ -52,7 +35,7 @@
       th:attr="role=${nav} ? 'listbox' : null,
                aria-label=${nav} ? 'Parameter set search results' : 'Parameter sets'">
     <li th:attr="role=${nav} ? 'none' : null" th:each="p : ${parameterSets}">
-      <a class="tpl-result" hx-boost="false"
+      <a class="tpl-result" hx-boost="true"
          th:href="@{/parameter-sets/{id}(id=${p.id})}"
          th:attr="role=${nav} ? 'option' : null,
                   aria-selected=${nav} ? 'false' : null,

@@ -32,7 +32,7 @@
           <tr th:each="v : ${versions}" th:attr="data-version-row=${v.version}">
             <td class="u-mono">
               <!-- A DISCARDED version is not viewable (it serves nothing): its number is text, not a link. -->
-              <a th:unless="${v.isDiscarded}" hx-boost="false"
+              <a th:unless="${v.isDiscarded}" hx-boost="true"
                  th:href="@{/visualizations/{id}(id=${visualizationId}, version=${v.version}, tab='preview')}"
                  th:text="'v' + ${v.version}">v3</a>
               <span th:if="${v.isDiscarded}" th:text="'v' + ${v.version}">v1</span>

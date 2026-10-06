@@ -60,8 +60,8 @@
     },
   };
 
-  function wire() {
-    var root = document.querySelector(".dp-ws-root");
+  function wire(main) {
+    var root = main && main.querySelector ? main.querySelector(".dp-ws-root") : document.querySelector(".dp-ws-root");
     // The guard is an EXPANDO, never the attribute (#402): htmx's history snapshot is the
     // region's innerHTML, so a restored root carries `data-dp-ws-wired="1"` from the page it
     // was cloned from — an attribute guard left every restored strip unwired (dead tabs).
@@ -168,6 +168,8 @@
   if (typeof module !== "undefined" && module.exports) module.exports = logic;
   if (typeof window !== "undefined") {
     window.DashboardWorkspaceLogic = logic;
+    window.DashboardWorkspaceMount = wire;
+    if (window.DatapipelinesPageMountManaged || document.querySelector("template[data-chart-assets]")) return;
     if (document.readyState === "loading") {
       document.addEventListener("DOMContentLoaded", wire);
     } else {

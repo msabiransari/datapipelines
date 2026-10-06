@@ -1,29 +1,12 @@
 package co.datapipelines.browser
 
 import com.microsoft.playwright.Page
-import com.microsoft.playwright.options.WaitForSelectorState
-import io.kotest.matchers.doubles.shouldBeGreaterThan
-import io.kotest.matchers.doubles.shouldBeLessThan
 import io.kotest.matchers.shouldBe
-import io.kotest.matchers.string.shouldContain
-import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
 import java.nio.file.Files
 import java.nio.file.Paths
 
-/**
- * #398 (workspace spec §5 read onto templates, A11/A13) — the TEMPLATE tree in the GLOBAL
- * SIDEBAR, measured in a real browser on the real application: geometry (the rail fits the
- * visible rows between the same tokens every tree shares), the catalog that replaced the
- * page explorer, a leaf's FULL-DOCUMENT navigation into the template workspace, the keyboard,
- * the phone drawer and both themes.
- *
- * Every geometry claim reads COMPUTED boxes after the rail settles — never a class or a CSS
- * property alone. The state half (restore, reveal, the admission guard, failure/retry,
- * history and handler counts) is the ONE engine's (`nav-tree.js`), already pinned by
- * [PipelineSidebarTreeStateBrowserTest]; what is templates-specific here is the branch's
- * markup, the root URL and the leaf's destination.
- */
+/** Template branch geometry, canonical links, keyboard, phone drawer and themes on the real REST tree. */
 class TemplateSidebarTreeBrowserTest : BrowserSuite() {
     private fun loginReadyUser(slug: String): String {
         val user =
@@ -106,39 +89,24 @@ class TemplateSidebarTreeBrowserTest : BrowserSuite() {
         if (!alreadyOpen) {
             page.click("[data-nav-branch='templates'] [data-nav-tree-toggle]")
         }
-        page.waitForSelector("#nav-tree-templates:not([hidden]) .tpl-tree, #nav-tree-templates:not([hidden]) .ds-empty")
+        page.waitForSelector("#nav-tree-templates:not([hidden]) [role=tree]")
         settle()
     }
 
-    private fun folder(path: String) = "$panel details.tpl-folder:has(> summary > span.tpl-label[title='$path'])"
+    private fun folder(path: String) = "$panel [data-tree-key='folder:$path']"
 
-    /** Expands the sidebar folder whose FULL path is [path] and waits for its level to be
-     * VISIBLE. The tree's own restore clicks the same summaries asynchronously, so a blind
-     * click races it (the restore opens what my click just closed) — the click is retried
-     * until the level is VISIBLE, which is the only state the assertions below mean. */
     private fun expand(path: String) {
-        val sel = "${folder(path)} > .tpl-level:not(.tpl-level-pending)"
-        for (attempt in 1..3) {
-            val open =
-                page.evaluate(
-                    """(s) => {
-                      const d = document.querySelector(s);
-                      return !!d && d.open;
-                    }""",
-                    folder(path),
-                ) as Boolean
-            if (!open) page.click("${folder(path)} > summary")
-            try {
-                page.waitForSelector(sel, Page.WaitForSelectorOptions().setState(WaitForSelectorState.VISIBLE))
-                settle()
-                return
-            } catch (e: com.microsoft.playwright.PlaywrightException) {
-                if (attempt == 3) throw e
-            }
+        if (page.locator(folder(path)).getAttribute("aria-expanded") != "true") {
+            page.click("${folder(path)} > .dp-tree-line button")
         }
+        page.waitForFunction(
+            "selector => document.querySelector(selector)?.getAttribute('aria-busy') === 'false'",
+            "${folder(path)} > .dp-tree-group",
+        )
+        settle()
     }
 
-    private fun leaf(path: String) = "$panel a.tpl-leaf:has(span.tpl-label[title='$path'])"
+    private fun leaf(path: String) = "$panel a[href='/templates/$path']"
 
     private fun shot(name: String) {
         val dir = Paths.get("build", "reports", "398-screenshots")
@@ -166,52 +134,31 @@ class TemplateSidebarTreeBrowserTest : BrowserSuite() {
     // ------------------------------------------------------------------ A11 geometry
 
     @Test
-    fun `A11 - the templates tree opens in the rail, fits between the shared bounds, and closing restores the baseline`() {
+    fun `the templates tree leaves user width unchanged while deep levels load and close`() {
         page.setViewportSize(1440, 900)
         loginReadyUser("tpl398geo")
         seedTemplate(deepLeaf)
         seedTemplate("acme/short/s1.sql")
         page.navigate("$baseUrl/dashboard")
-        page.waitForSelector("[data-nav-branch='templates']")
-        drainCspViolations()
-
-        // The ordinary rail is the closed-tree baseline (--app-rail-expanded).
-        val baseline = railWidth()
-        baseline shouldBe 232.0
-        page.locator(panel).isVisible shouldBe false
-
-        // Open: the root level arrives (folders only — §4.1) and the rail fits it, never below
-        // the tree-open minimum.
         openTree()
-        page.locator("$panel .tpl-leaf").count() shouldBe 0
-        railWidth() shouldBe 320.0 // `acme` alone is narrower than the minimum
-
-        // Deep + long content: the rail grows to the MAXIMUM and stops there (the tokens are
-        // the sidebar's shared ones — one tree engine, one geometry).
+        page.locator("$panel a").count() shouldBe 0
+        railWidth() shouldBe 232.0
+        page.locator("#rail-resize").focus()
+        repeat(12) { page.keyboard().press("Shift+ArrowRight") }
+        railWidth() shouldBe 832.0
         deepFolders.forEach { expand(it) }
         page.waitForSelector(leaf(deepLeaf))
-        settle()
-        railWidth() shouldBe 400.0
-
-        // The full label: its text is the whole segment (no ellipsis) — the region scrolls.
-        page.locator("${leaf(deepLeaf)} .tpl-label").innerText() shouldBe deepLeaf.substringAfterLast('/')
-
-        // Folding the SHORT mid-level hides the whole deep subtree (its own labels were the
-        // width); the visible rows are back under the minimum and the rail follows.
-        page.click("${folder(deepFolders[1])} > summary")
-        settle()
-        railWidth() shouldBe 320.0
-
-        // Closing the tree restores the baseline.
+        page.locator("${leaf(deepLeaf)} span").first().innerText() shouldBe deepLeaf.substringAfterLast('/')
+        railWidth() shouldBe 832.0
+        page.click("${folder(deepFolders[1])} > .dp-tree-line button")
+        railWidth() shouldBe 832.0
         page.click("[data-nav-branch='templates'] [data-nav-tree-toggle]")
-        settle()
-        railWidth() shouldBe 232.0
-
+        railWidth() shouldBe 832.0
         consoleErrors shouldBe emptyList()
     }
 
     @Test
-    fun `a leaf is a full-document link into its workspace, and the page re-marks the current leaf`() {
+    fun `a leaf preserves its loaded row into the workspace and marks current without restoration fetch`() {
         loginReadyUser("tpl398leaf")
         seedTemplate("test/nav_probe.sql")
         page.navigate("$baseUrl/dashboard")
@@ -219,16 +166,19 @@ class TemplateSidebarTreeBrowserTest : BrowserSuite() {
         expand("test")
         page.waitForSelector(leaf("test/nav_probe.sql"))
 
-        // The leaf carries the workspace URL as its href, and hx-boost=false is the engine's
-        // full-navigation contract (the markup pins it; the walk proves the destination).
+        page.evaluate(
+            "() => {window.__templateRail=document.getElementById('app-rail');window.__templateRow=document.querySelector('#nav-tree-templates [role=treeitem]')}",
+        )
         page.locator(leaf("test/nav_probe.sql")).getAttribute("href") shouldBe "/templates/test/nav_probe.sql"
 
         page.locator(leaf("test/nav_probe.sql")).click()
         page.waitForURL("**/templates/test/nav_probe.sql")
         page.waitForSelector(".tw-root")
-        // The workspace names itself to the rail (the [data-nav-current] hook). The tree's
-        // restore marks the leaf aria-current once its level lands — the hook page is where
-        // that is true; a page WITHOUT the hook (the dashboard) marks nothing by design.
+        page.evaluate(
+            "() => window.__templateRail===document.getElementById('app-rail') && window.__templateRow===document.querySelector('#nav-tree-templates [role=treeitem]')",
+        ) shouldBe
+            true
+        // A current marker updates the loaded leaf without fetching its ancestors.
         openTree()
         expand("test")
         page.waitForFunction(
@@ -267,19 +217,19 @@ class TemplateSidebarTreeBrowserTest : BrowserSuite() {
         row.locator(".tpl-path").getAttribute("title") shouldBe "test/cat_probe.sql"
 
         // Browse folders is the sidebar tree's other door: the branch opens, focus lands in
-        // its search (nav-tree.js's reveal).
+        // its search (the host adapter's reveal).
         page.click("[data-nav-tree-reveal='templates']")
-        page.waitForSelector("#template-nav-root .tpl-tree")
-        page.waitForSelector("#template-nav-root .tpl-folder")
-        page.evaluate("() => document.activeElement?.matches('#nav-tree-templates [data-nav-tree-search]')") shouldBe true
+        page.waitForSelector("#nav-tree-templates [role=tree]")
+        page.waitForSelector("#nav-tree-templates [aria-expanded]")
+        page.evaluate("() => document.activeElement?.matches('#nav-tree-templates input[type=search]')") shouldBe true
 
         // The keyboard: ArrowDown moves focus among the rows (the nav context moves FOCUS only).
         // The root level holds FOLDERS only (077) — the first row the keydown reaches is the
         // folder summary; the invariant is that focus moved into the tree's rows at all.
-        page.press("#nav-tree-templates [data-nav-tree-search]", "ArrowDown")
+        page.press("#nav-tree-templates input[type=search]", "ArrowDown")
         val focused =
             page.evaluate(
-                "() => document.activeElement?.matches('#nav-tree-templates .tpl-summary, #nav-tree-templates .tpl-leaf')",
+                "() => document.activeElement?.matches('#nav-tree-templates [role=treeitem]')",
             ) as Boolean
         focused shouldBe true
 
@@ -295,7 +245,7 @@ class TemplateSidebarTreeBrowserTest : BrowserSuite() {
         page.click("#rail-open")
         page.waitForSelector("nav.app-nav")
         page.click("[data-nav-branch='templates'] [data-nav-tree-toggle]")
-        page.waitForSelector("#template-nav-root .tpl-tree")
+        page.waitForSelector("#nav-tree-templates [role=tree]")
         settle()
 
         // The drawer keeps its full width with the tree open (#350: the phone breakpoint wins

@@ -1,20 +1,4 @@
-<!-- ONE level of the parameter-set tree (#374), rendered in the sidebar's lazy Parameter Sets branch.
-     Deliberately the same shape as partials/dashboard-tree-level.html, down to the class names: one
-     stylesheet (template-tree.css) dresses every tree, and a reader who knows one tree knows the others.
-
-     The tree is backed by server-side prefix queries: this fragment renders the direct sub-folders and the
-     direct set children of one prefix, and expanding a folder issues ONE more request for ONE more level.
-     Folders are virtual — a name prefix, no table, no id, no CRUD; there is deliberately no New folder /
-     rename / move / delete control anywhere in this file. Parameter sets are authored through the REST API
-     and the MCP server, so the empty state says so instead of offering a button that does not exist.
-
-     A leaf NAVIGATES to the canonical workspace /parameter-sets/{id} as a full document load
-     (hx-boost="false", the pipelines tree's rule): a set the caller's lens hides is never rendered here —
-     not disabled, not hidden by CSS — because the service never returned it.
-
-     Root ids are derived per prefix (ParameterSetsBrowseModel.levelId) so a folder's placeholder and the
-     fragment that replaces it cannot disagree. ARIA: the ROOT level's list is role=tree; a NESTED level's
-     container is role=group under its folder's treeitem. -->
+<!-- Artifact and version links use prepared main-content navigation, preserving the sidebar. -->
 <div xmlns:th="http://www.thymeleaf.org" th:fragment="level"
      th:id="${levelId}" class="tpl-level"
      th:attr="role=${#strings.isEmpty(prefix)} ? null : 'group'">
@@ -61,7 +45,7 @@
          versioning §7 keeps unreleased edits visible in the list. -->
     <li class="tpl-node" role="none" th:each="p : ${parameterSets}">
       <a th:href="@{/parameter-sets/{id}(id=${p.id})}" class="tpl-leaf" role="treeitem" aria-selected="false"
-         hx-boost="false"
+         hx-boost="true"
          th:attr="data-leaf-id=${p.id}">
         <svg class="ds-icon ds-icon-sm tpl-row-icon" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#sliders-horizontal"></use></svg>
         <span class="tpl-label" th:text="${p.segment}" th:title="${p.name}">geo_filters</span>

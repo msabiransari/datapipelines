@@ -48,11 +48,11 @@
          version rides along so the header above keeps naming it). Full-document links, not client tabs: the History
          arm renders no live form, so opening it never issues an evaluate (it would be a history row of its own). -->
     <nav class="ps-tabs" aria-label="Workspace sections">
-      <a class="ps-tab" hx-boost="false" data-ps-tab="workspace"
+      <a class="ps-tab" hx-boost="true" data-ps-tab="workspace"
          th:classappend="${activeTab == 'workspace'} ? 'is-on'"
          th:href="${viewedVersion != null} ? @{/parameter-sets/{id}(id=${parameterSetId}, version=${viewedVersion})} : @{/parameter-sets/{id}(id=${parameterSetId})}"
          th:attr="aria-current=${activeTab == 'workspace'} ? 'page' : null">Workspace</a>
-      <a class="ps-tab" hx-boost="false" data-ps-tab="history"
+      <a class="ps-tab" hx-boost="true" data-ps-tab="history"
          th:classappend="${activeTab == 'history'} ? 'is-on'"
          th:href="${viewedVersion != null} ? @{/parameter-sets/{id}(id=${parameterSetId}, version=${viewedVersion}, tab='history')} : @{/parameter-sets/{id}(id=${parameterSetId}, tab='history')}"
          th:attr="aria-current=${activeTab == 'history'} ? 'page' : null">History</a>
@@ -61,7 +61,7 @@
     <!-- The version selector: every version the caller's lens admits, each link naming its EXACT version
          (?version=N — never a clamp). Under a narrowing lens only released versions are listed. -->
     <nav class="ps-versions" aria-label="Versions" th:unless="${#lists.isEmpty(versions)}">
-      <a th:each="v : ${versions}" class="ds-button ds-button-sm" hx-boost="false"
+      <a th:each="v : ${versions}" class="ds-button ds-button-sm" hx-boost="true"
          th:classappend="${v.isViewed} ? 'ds-button-primary' : 'ds-button-secondary'"
          th:href="@{/parameter-sets/{id}(id=${parameterSetId}, version=${v.version})}"
          th:attr="aria-current=${v.isViewed} ? 'page' : null"

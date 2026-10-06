@@ -198,14 +198,18 @@ class LifecycleDialogBrowserTest : BrowserSuite() {
 
     private fun openSidebarTree() {
         page.click("[data-nav-branch='pipelines'] [data-nav-tree-toggle]")
-        page.waitForSelector("#pipeline-nav-root .tpl-tree")
+        page.waitForSelector("#nav-tree-pipelines [role=tree]")
     }
 
     /** The sidebar leaf of the page being viewed, its working-version badge (the tree is open). */
     private fun sidebarBadgeOf(name: String): String? {
-        val leaf = page.locator("#nav-tree-pipelines a.tpl-leaf[aria-current='page']:has(span.tpl-label[title='$name'])")
+        page.waitForSelector("#nav-tree-pipelines [data-tree-key='folder:test']")
+        if (page.locator("#nav-tree-pipelines [data-tree-key='folder:test']").getAttribute("aria-expanded") != "true") {
+            page.click("#nav-tree-pipelines [data-tree-key='folder:test'] > .dp-tree-line button")
+        }
+        val leaf = page.locator("#nav-tree-pipelines a.dp-tree-activate[aria-current='page']:has(span[title][title='$name'])")
         leaf.waitFor()
-        val version = leaf.locator(".tpl-leaf-version")
+        val version = leaf.locator(".dp-tree-version")
         return if (version.count() > 0) version.innerText() else null
     }
 
@@ -243,7 +247,7 @@ class LifecycleDialogBrowserTest : BrowserSuite() {
         page.waitForURL("**/pipelines/$probeId?ok=released")
         flashToast() shouldContain "Released"
         sidebarBadgeOf("test/lifecycle_probe") shouldBe "v1"
-        page.locator("#nav-tree-pipelines a.tpl-leaf[aria-current='page'] .tpl-leaf-draft").count() shouldBe 0
+        page.locator("#nav-tree-pipelines a.dp-tree-activate[aria-current='page'] .dp-tree-draft").count() shouldBe 0
 
         // 2 — A draft over the release (§5.1 copy-on-write), then Discard the CURRENT release from
         //      the Versions tab: the §3.5.2 fallback catches the draft (the service's outcome).
@@ -299,7 +303,7 @@ class LifecycleDialogBrowserTest : BrowserSuite() {
         page.waitForURL("**/pipelines?ok=entity_purged")
         flashToast() shouldContain "Pipeline purged"
         page.locator("#pipeline-list-wrapper .tpl-path", Page.LocatorOptions().setHasText("lifecycle_chaff")).count() shouldBe 0
-        page.waitForSelector("#pipeline-nav-root .tpl-tree")
+        page.waitForSelector("#nav-tree-pipelines [role=tree]")
         page.locator("#nav-tree-pipelines span[title='test/lifecycle_chaff']").count() shouldBe 0
     }
 
@@ -440,9 +444,9 @@ class LifecycleDialogBrowserTest : BrowserSuite() {
         page.waitForURL("**/templates?ok=template_purged")
         flashToast() shouldContain "Template purged"
         page.click("[data-nav-tree-reveal='templates']")
-        page.waitForSelector("#nav-tree-templates details.tpl-folder")
+        page.waitForSelector("#nav-tree-templates [aria-expanded]")
         page
-            .locator("#nav-tree-templates a.tpl-leaf", Page.LocatorOptions().setHasText("lifecycle_chaff"))
+            .locator("#nav-tree-templates a.dp-tree-activate", Page.LocatorOptions().setHasText("lifecycle_chaff"))
             .count() shouldBe 0
     }
 

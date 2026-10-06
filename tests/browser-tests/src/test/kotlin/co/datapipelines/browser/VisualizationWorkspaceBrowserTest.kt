@@ -41,8 +41,9 @@ class VisualizationWorkspaceBrowserTest : VisualizationBrowserSuite() {
 
         page.navigate("$baseUrl/visualizations/$id")
         // ONE Plotly bundle, the server's choice for the viewed version's traces.
+        page.waitForSelector("script[data-dp-plotly-bundle]", Page.WaitForSelectorOptions().setState(WaitForSelectorState.ATTACHED))
         page.locator("script[data-dp-plotly-bundle]").count() shouldBe 1
-        page.locator("script[data-dp-plotly-bundle]").getAttribute("data-dp-plotly-bundle") shouldBe "2d"
+        page.locator("script[data-dp-plotly-bundle]").getAttribute("data-dp-plotly-bundle") shouldBe "3d"
         page.locator("#viz-tab-preview").innerText() shouldContain "test fixtures"
         page.waitForSelector("#viz-pane-preview section[data-viz-case-index='0'][data-dp-ready='true']")
         val traces =
@@ -227,6 +228,7 @@ class VisualizationWorkspaceBrowserTest : VisualizationBrowserSuite() {
 
         page.setViewportSize(DESKTOP_W, DESKTOP_H)
         page.navigate("$baseUrl/visualizations/$surface")
+        page.waitForSelector("script[data-dp-plotly-bundle]", Page.WaitForSelectorOptions().setState(WaitForSelectorState.ATTACHED))
         page.locator("script[data-dp-plotly-bundle]").count() shouldBe 1
         page.locator("script[data-dp-plotly-bundle]").getAttribute("data-dp-plotly-bundle") shouldBe "3d"
         page.waitForSelector("#viz-pane-preview section[data-viz-case-index='0'][data-dp-ready='true']")

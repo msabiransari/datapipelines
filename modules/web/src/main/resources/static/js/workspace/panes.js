@@ -67,7 +67,7 @@
    * @param {function(string, Element)} [spec.onReveal]  called after a pane becomes visible
    */
   function wireWorkspace(spec) {
-    var root = document.querySelector(".dp-ws-root");
+    var root = spec.root || document.querySelector(".dp-ws-root");
     // The guard is an EXPANDO, never the attribute (#402): htmx's history snapshot is the
     // region's innerHTML, so a restored root carries `data-dp-ws-wired="1"` from the page it
     // was cloned from — an attribute guard left every restored strip unwired (dead tabs).

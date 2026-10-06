@@ -50,6 +50,10 @@ class UiWorkspaceAdvice(
     fun workspaceOptions(): List<WorkspaceMembership>? =
         principal()?.let { principal -> workspaceService.listOwn(principal).filter { it.workspaceActive } }
 
+    /** Server-derived identity used to admit personalized navigation projections. */
+    @ModelAttribute("activeWorkspaceId")
+    fun activeWorkspaceId(): String? = principal()?.workspace?.id?.toString()
+
     @ModelAttribute("activeWorkspace")
     fun activeWorkspace(): String? = principal()?.workspace?.name
 

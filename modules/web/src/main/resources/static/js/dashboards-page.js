@@ -19,26 +19,20 @@
  *   - window.__dpPage is the page's test seam (window.__dp is the conformance host's): ready,
  *     error, code, notifications, instance — the same shape, so a reader knows one.
  *
- * Disposal: links ONTO the board are never boosted (hx-boost="false", the one-bundle rule),
- * but LEAVING it can be (the layout's nav boosts), and htmx saves a snapshot of this document
- * when it goes, then restores that snapshot FIRST on every Back/Forward — a swap that is not
- * a page load. The browser suite measured both of a snapshot's failure modes: carrying the
- * mounted marker, the re-run init refuses DashboardAlreadyMounted; and (post-dispose) the
- * bare shell swaps in with NO script re-run, an empty region where the board was. Either way
- * the settled state is decided by the FETCH htmx performs after the snapshot swap: the server
- * renders the shell again, the glue re-runs, and the runtime mounts exactly once. The glue's
- * only duty is to make the SNAPSHOT harmless — dispose on htmx:beforeHistorySave, so the
- * cached markup is the page's own shell, unmarked, and the snapshot's glue pass (when one
- * runs) finds nothing mounted and refuses nothing. The pages' browser suite proves the
- * settled count across a back/forward pass.
+ * Disposal runs at history snapshot creation after navigation admission. The snapshot holds
+ * inert shell markup; the persistent host replays this page mount against singleton libraries.
+ * ONE history listener disposes the live instance and retains the runtime's refresh cancellation.
  */
 (function () {
   "use strict";
 
-  window.__dpPage = { ready: false, error: null, code: null, notifications: [], instance: null };
+  function mount(main) {
+  var container = main && main.querySelector ? main.querySelector("#dp-board") : document.getElementById("dp-board");
+  if (!container || container.__dpPageMounted) return;
+  container.__dpPageMounted = true;
+  var pageState = { ready: false, error: null, code: null, notifications: [], instance: null };
+  window.__dpPage = pageState;
 
-  var container = document.getElementById("dp-board");
-  if (!container) return;
   var id = container.getAttribute("data-dp-dashboard-id");
   if (!id) return;
   // #369 — the draft preview names its version in the same data attribute channel the id rides
@@ -63,6 +57,8 @@
   // Plotly recreates the tester on its next render; a runtime that ever cleans up after
   // itself retires this line. One listener per document; a failing dispose must not break
   // the save.
+  if (!window.__dpBoardHistoryCleanup) {
+  window.__dpBoardHistoryCleanup = true;
   document.body.addEventListener("htmx:beforeHistorySave", function () {
     if (window.__dpPage.instance) {
       try {
@@ -76,6 +72,8 @@
     if (tester && tester.parentElement) tester.parentElement.removeChild(tester);
   });
 
+  }
+
   function refusalRegion() {
     return document.getElementById("dp-board-refusal");
   }
@@ -85,6 +83,7 @@
   // (the runtime's `ready` rejection names the failing step and the family's code). Both put
   // a code and a sentence where the person is looking, never a blank pane.
   function showRefusal(code, message) {
+    if (main && (!main.isConnected || main.querySelector("#dp-board") !== container)) return;
     var region = refusalRegion();
     if (!region) return;
     var text = document.getElementById("dp-board-refusal-message");
@@ -102,23 +101,27 @@
       adapter: runtime.adapters(container),
       options: {
         onNotification: function (n) {
-          window.__dpPage.notifications.push(n);
+          pageState.notifications.push(n);
         },
       },
     });
-    window.__dpPage.instance = instance;
+    pageState.instance = instance;
     instance.ready
       .then(function () {
-        window.__dpPage.ready = true;
+        pageState.ready = true;
       })
       .catch(function (error) {
-        window.__dpPage.error = error;
-        window.__dpPage.code = error && error.code ? error.code : String(error);
-        showRefusal(window.__dpPage.code, error && error.message ? error.message : String(error));
+        pageState.error = error;
+        pageState.code = error && error.code ? error.code : String(error);
+        showRefusal(pageState.code, error && error.message ? error.message : String(error));
       });
   } catch (e) {
-    window.__dpPage.code = e && e.code ? e.code : e.name;
-    window.__dpPage.error = String(e);
-    showRefusal(window.__dpPage.code, e && e.message ? e.message : String(e));
+    pageState.code = e && e.code ? e.code : e.name;
+    pageState.error = String(e);
+    showRefusal(pageState.code, e && e.message ? e.message : String(e));
   }
+  }
+  window.DashboardPageMount = mount;
+  var main = document.getElementById("app-main");
+  if (!window.DatapipelinesPageMountManaged && (!main || !main.querySelector("template[data-chart-assets]"))) mount(main);
 })();

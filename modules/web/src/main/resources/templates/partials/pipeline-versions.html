@@ -51,7 +51,7 @@
         <tbody>
           <tr th:each="v : ${versions}" th:attr="data-version-row=${v.version}">
             <td class="u-mono">
-              <a data-pe-version-link hx-boost="false" class="u-mono"
+              <a data-pe-version-link hx-boost="true" class="u-mono"
                  th:href="@{/pipelines/{id}(id=${pipeline.id}, version=${v.version})}"
                  th:text="${'v' + v.version}">v1</a>
               <span th:if="${v.isCurrent}" class="tplx-current">current</span>

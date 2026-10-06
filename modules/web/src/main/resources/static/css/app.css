@@ -603,7 +603,7 @@ button.app-busy::after {
      overrides it to --app-rail-collapsed when the collapse class is on); the expanded
      value is its own token so the phone drawer can always be full-size without
      re-declaring the geometry literal. */
-  --app-rail-expanded: 232px;
+  --app-rail-expanded: min(var(--app-rail-preferred, 232px), 100vw);
   --app-rail-width: var(--app-rail-expanded);
   --app-rail-collapsed: 60px;
   /* #350 (workspace spec §5) — the rail while a sidebar TREE is open: it fits the visible rows
@@ -611,12 +611,8 @@ button.app-busy::after {
      bounds, and the tree's own region scrolls sideways past the maximum. Layout tokens, not
      configuration; the closed-tree rail keeps --app-rail-expanded. */
   --app-rail-tree-min: 320px;
-  --app-rail-tree-max: 400px;
-  --app-rail-tree-width: clamp(
-    var(--app-rail-tree-min),
-    var(--app-rail-tree-fit, var(--app-rail-tree-min)),
-    var(--app-rail-tree-max)
-  );
+  --app-rail-tree-max: 100vw;
+  --app-rail-tree-width: var(--app-rail-expanded);
   /* The tree region's vertical bound, so the sections below it stay reachable. */
   --app-nav-tree-max-block: min(50dvh, 32rem);
 }
@@ -641,6 +637,7 @@ button.app-busy::after {
    lets the grid row shrink below its content so the overflow is main's, not the
    shell's; without it the row grows with the content and nothing scrolls. */
 .app-shell > .app-main {
+  padding-inline: min(var(--gap-lg), max(0px, calc((100vw - var(--app-rail-width)) / 2)));
   min-height: 0;
   overflow-y: auto;
   overflow-x: auto;
@@ -979,7 +976,7 @@ button.app-busy::after {
 }
 
 .app-nav-branch-toggle:focus-visible {
-  outline: 2px solid var(--focus-ring);
+  outline: 2px solid var(--border-focus);
   outline-offset: calc(-1 * var(--space-px));
 }
 
@@ -3680,3 +3677,23 @@ pre.tf-pane-input {
   color: var(--accent-warning);
   text-transform: none;
 }
+
+/* Source-independent tree controls; sidebar height is a host constraint. */
+.dp-tree-search { display: flex; align-items: center; gap: var(--gap-xs); padding: var(--gap-xs); }
+.dp-tree-search .ds-input { min-width: 0; flex: 1; }
+.dp-tree-scroll { overflow: auto; }
+.app-nav-tree .dp-tree-scroll { max-block-size: var(--app-nav-tree-max-block); }
+.dp-tree-group { padding-inline-start: var(--gap-md); }
+.dp-tree-line { display: flex; align-items: center; }
+.dp-tree-activate { display: flex; align-items: center; gap: var(--gap-xs); color: inherit; background: transparent; border: 0; cursor: pointer; padding: var(--gap-xs); white-space: nowrap; text-decoration: none; font: inherit; }
+.dp-tree-item:focus { outline: var(--focus-ring-width, 2px) solid var(--border-focus); outline-offset: -2px; }
+.dp-tree-item[aria-expanded="true"] > .dp-tree-line .ds-icon { transform: rotate(90deg); }
+.dp-tree-item[aria-selected="true"] > .dp-tree-line { background: var(--surface-selected); color: var(--text-link); }
+.dp-tree-status { padding: var(--gap-xs); color: var(--text-muted); }
+.app-rail-boundary { position: fixed; inset-block: 0; inset-inline-start: var(--app-rail-width); transform: translateX(-100%); display: flex; flex-direction: column; z-index: var(--z-popover); pointer-events: none; }
+.app-rail-resize { flex: 1; align-self: flex-end; width: var(--gap-xs); pointer-events: auto; cursor: col-resize; touch-action: none; border-inline-end: 1px solid var(--border-default); }
+.app-rail-boundary > button { pointer-events: auto; }
+:root.rail-collapsed .app-rail-boundary > button { display: none; }
+@media (min-width: 768px) and (max-width: 1099.98px) { :root:not(.rail-expanded) .app-rail-boundary > button { display: none; } }
+.app-rail-resize:focus-visible { outline: 2px solid var(--border-focus); }
+@media (max-width: 767.98px) { .app-rail-boundary { display: none; } }

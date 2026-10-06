@@ -156,9 +156,13 @@
     }
   }
 
-  function wire() {
+  function wire(main) {
     if (!window.WorkspacePanes) return;
+    var root = main && main.querySelector ? main.querySelector(".dp-ws-root") : document.querySelector(".dp-ws-root");
+    if (!root || root.__dpWsWired) return;
+    preview = { data: null, instances: {}, notifications: [] };
     var wired = window.WorkspacePanes.wireWorkspace({
+      root: root,
       family: "visualizations",
       tabs: TABS,
       defaultTab: DEFAULT_TAB,
@@ -184,6 +188,8 @@
   if (typeof module !== "undefined" && module.exports) module.exports = logic;
   if (typeof window !== "undefined" && typeof document !== "undefined") {
     window.VisualizationWorkspaceLogic = logic;
+    window.VisualizationWorkspaceMount = wire;
+    if (window.DatapipelinesPageMountManaged || document.querySelector("template[data-chart-assets]")) return;
     if (document.readyState === "loading") {
       document.addEventListener("DOMContentLoaded", wire);
     } else {

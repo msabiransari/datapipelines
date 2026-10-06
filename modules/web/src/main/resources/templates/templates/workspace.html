@@ -64,7 +64,7 @@
       <span th:unless="${#lists.isEmpty(versions)}">has versions — pick one to view its source, render and history.</span>
     </p>
     <p class="ds-empty-actions">
-      <a th:each="v : ${versions}" class="ds-button ds-button-secondary" hx-boost="false"
+      <a th:each="v : ${versions}" class="ds-button ds-button-secondary" hx-boost="true"
          th:href="@{${'/templates/' + templateName}(version=${v.version})}"
          th:text="'v' + ${v.version} + ' — ' + ${v.status.name().toLowerCase()} + (${v.isCurrent} ? ' · current' : '')">v1 — released · current</a>
     </p>
@@ -101,7 +101,7 @@
            navigation is a full document — the same resolution the workspace's own default
            rule runs. -->
       <nav class="tw-versions" aria-label="View another version">
-        <a th:each="v : ${versions}" class="ds-button ds-button-ghost ds-button-sm tw-version-link" hx-boost="false"
+        <a th:each="v : ${versions}" class="ds-button ds-button-ghost ds-button-sm tw-version-link" hx-boost="true"
            th:href="@{${'/templates/' + templateName}(version=${v.version}, tab=${activeTab})}"
            th:attr="aria-current=${v.isViewed} ? 'true' : null,
                     data-version=${v.version},

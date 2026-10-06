@@ -54,7 +54,7 @@ class DashboardPagesBrowserTest : DashboardBrowserSuite() {
 
     @Test
     @Order(2)
-    fun `the sidebar's Dashboards branch expands lazily, searches flat, and clearing returns the tree`() {
+    fun `the sidebar's Dashboards branch expands lazily, expands search paths, and clearing returns the tree`() {
         startTrace()
         val root = ready("dpbranch")
         seedBoard(root)
@@ -63,42 +63,32 @@ class DashboardPagesBrowserTest : DashboardBrowserSuite() {
 
         // Closed until its own toggle is clicked (#350: the rail's one navigating-tree pattern —
         // a toggle beside the link, a panel below).
-        page.locator("#dash-tree-nav .tpl-tree").count() shouldBe 0
+        page.locator("#nav-tree-dashboards [role=tree]").count() shouldBe 0
         page.click("[data-nav-branch='dashboards'] [data-nav-tree-toggle]")
-        page.waitForSelector("#dash-tree-nav .tpl-tree")
-        page.waitForSelector("#dash-tree-nav .tpl-summary")
+        page.waitForSelector("#nav-tree-dashboards [role=tree]")
+        page.waitForSelector("#nav-tree-dashboards [aria-expanded]")
         page.locator("[data-nav-branch='dashboards'] [data-nav-tree-toggle]").getAttribute("aria-expanded") shouldBe "true"
 
         // #400 — the branch's search: a non-empty query swaps the FLAT results into the same
         // nav root (role=listbox), the shared engine serving it with no JS change.
-        page.fill("[data-nav-branch='dashboards'] [data-nav-tree-search]", root)
-        page.waitForSelector("#dash-tree-nav a.tpl-result")
-        page.locator("#dash-tree-nav a.tpl-result").count() shouldBe 1
+        page.fill("[data-nav-branch='dashboards'] input[type=search]", root)
+        page.waitForSelector("#nav-tree-dashboards a.dp-tree-activate")
+        page.locator("#nav-tree-dashboards a.dp-tree-activate").count() shouldBe 1
         // Clearing the box returns the tree, by construction: the dispatcher answers the
         // empty query with the root level again.
-        page.fill("[data-nav-branch='dashboards'] [data-nav-tree-search]", "")
-        page.waitForSelector("#dash-tree-nav .tpl-summary")
+        page.fill("[data-nav-branch='dashboards'] input[type=search]", "")
+        page.waitForSelector("#nav-tree-dashboards [aria-expanded]")
         // The shared engine's NAV context: the arrows move focus through the tree and navigate
         // nowhere (L3b left this tree unwired for exactly that reason; the context solves it).
         val start = page.url()
-        page.waitForFunction(
-            "() => { const s = document.querySelector('#dash-tree-nav .tpl-summary'); " +
-                "const d = s && s['htmx-internal-data']; return !!(d && d.initHash); }",
-        )
-        page.focus("#dash-tree-nav .tpl-summary")
+        page.focus("#nav-tree-dashboards .dp-tree-rows > [role=treeitem]")
         page.keyboard().press("ArrowRight")
-        page.waitForSelector("#dash-tree-nav details.tpl-folder[open] > .tpl-level:not(.tpl-level-pending)")
+        page.waitForSelector("#nav-tree-dashboards [aria-expanded=true] > .dp-tree-group[aria-busy=false]")
         page.keyboard().press("ArrowDown")
-        page.evaluate("() => !!document.activeElement.closest('#dash-tree-nav')") shouldBe true
+        page.evaluate("() => !!document.activeElement.closest('#nav-tree-dashboards')") shouldBe true
         page.url() shouldBe start
-        // The NAV scope rides the lazy request: this level's folder placeholder carries the
-        // nav-scope derived id, never the page's.
-        val levelIds =
-            page.evaluate(
-                "() => Array.from(document.querySelectorAll('#dash-tree-nav .tpl-level')).map(function (el) { return el.id; })",
-            ) as List<*>
-        (levelIds.isNotEmpty()) shouldBe true
-        levelIds.all { it is String && it.startsWith("dash-level-nav-") } shouldBe true
+        page.locator("#nav-tree-dashboards [aria-expanded=true]").count() shouldBe 1
+        page.locator("#nav-tree-dashboards .dp-tree-group[aria-busy=true]").count() shouldBe 0
     }
 
     @Test

@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="en" xmlns:th="http://www.thymeleaf.org"
-      th:attr="data-theme=${activeTheme},data-dp-workspace=${activeWorkspace}"
+      th:attr="data-theme=${activeTheme},data-dp-workspace=${activeWorkspace},data-dp-workspace-id=${activeWorkspaceId}"
       th:fragment="page(content)">
 <head>
   <meta charset="utf-8">
@@ -280,27 +280,7 @@
            th:attr="aria-current=${currentPath != null and currentPath == '/dashboard'} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#layout-grid"></use></svg><span class="app-rail-label">Home</span></a>
 
         <div class="app-nav-section app-rail-label">Build</div>
-        <!-- #350 (workspace spec §5, D7/D8) — THE NAVIGATING-TREE PATTERN, one shape for every
-             artifact family that browses as a folder tree (Pipelines here; Templates and
-             Dashboards below; workspace spec §5 names Templates the pattern's first reuse).
-             #399: Visualizations joins it below Dashboards with the same four pieces (this
-             block, a browse model, a partial controller, a tree-level fragment) and the same
-             search box. Three parts, kept distinct on purpose:
-
-               - the item LINK (unchanged: the catalog page, the active section, the crumb);
-               - the TOGGLE beside it (a real button, aria-expanded/aria-controls) — opening the
-                 tree is not navigating, so it is never the link;
-               - the PANEL: a server-backed, lazy tree (one prefix level per request, the same
-                 fragments as ever, `scope=nav`) with its own search, in a bounded scroll region.
-
-             nav-tree.js owns the panel's lifecycle: the first open fetches the ROOT level into
-             the placeholder; a failure stays visible with a Retry; every tree swap is admitted
-             only for the live request generation AND the tree's own workspace/lens stamp; the
-             rail widens to fit the visible rows between the --app-rail-tree-min/max tokens and
-             scrolls sideways past the maximum; open folders + scroll persist per workspace and
-             family (paths only, never rows). template-explorer.js (its nav context) owns the
-             keyboard. The panel carries app-rail-label, so the icon-collapsed rail hides it and
-             a collapse always wins over a late width (app.css). -->
+        <!-- Reusable REST tree: the catalog link and disclosure have separate actions. -->
         <div class="app-nav-branch" data-nav-branch="pipelines">
           <a th:href="@{/pipelines}" class="app-nav-link" data-nav-section="/pipelines"
              data-nav-group="Build" data-nav-label="Pipelines"
@@ -311,21 +291,7 @@
             <svg class="ds-icon ds-icon-xs tpl-chevron" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#chevron-right"></use></svg>
           </button>
           <div class="app-nav-tree app-rail-label" id="nav-tree-pipelines" data-nav-tree="pipelines" hidden
-               th:attr="data-nav-workspace=${activeWorkspace},data-nav-root-url=@{/partials/pipelines(scope='nav')}">
-            <div class="app-nav-tree-search">
-              <input type="search" name="q" class="ds-input app-nav-tree-input" autocomplete="off"
-                     placeholder="Search pipelines…" aria-label="Search pipelines in the tree"
-                     data-nav-tree-search
-                     th:attr="hx-get=@{/partials/pipelines(scope='nav')}"
-                     hx-target="#pipeline-nav-root" hx-swap="outerHTML"
-                     hx-trigger="input changed delay:300ms, search" hx-sync="this:replace">
-            </div>
-            <div class="app-nav-tree-scroll" data-nav-tree-scroll>
-              <div id="pipeline-nav-root" class="tpl-level tpl-level-pending" data-nav-tree-root>
-                <span class="ds-spinner htmx-indicator" aria-hidden="true"></span>
-              </div>
-            </div>
-          </div>
+               th:attr="data-nav-workspace=${activeWorkspace}"></div>
         </div>
         <!-- #398 — the Templates branch is the pattern's declared reuse: the item link is the
              catalog, the toggle opens the lazy sidebar tree (the same /partials/templates
@@ -341,21 +307,7 @@
             <svg class="ds-icon ds-icon-xs tpl-chevron" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#chevron-right"></use></svg>
           </button>
           <div class="app-nav-tree app-rail-label" id="nav-tree-templates" data-nav-tree="templates" hidden
-               th:attr="data-nav-workspace=${activeWorkspace},data-nav-root-url=@{/partials/templates(scope='nav')}">
-            <div class="app-nav-tree-search">
-              <input type="search" name="q" class="ds-input app-nav-tree-input" autocomplete="off"
-                     placeholder="Search templates…" aria-label="Search templates in the tree"
-                     data-nav-tree-search
-                     th:attr="hx-get=@{/partials/templates(scope='nav')}"
-                     hx-target="#template-nav-root" hx-swap="outerHTML"
-                     hx-trigger="input changed delay:300ms, search" hx-sync="this:replace">
-            </div>
-            <div class="app-nav-tree-scroll" data-nav-tree-scroll>
-              <div id="template-nav-root" class="tpl-level tpl-level-pending" data-nav-tree-root>
-                <span class="ds-spinner htmx-indicator" aria-hidden="true"></span>
-              </div>
-            </div>
-          </div>
+               th:attr="data-nav-workspace=${activeWorkspace}"></div>
         </div>
         <a th:href="@{/datasources}" class="app-nav-link" data-nav-section="/datasources"
            data-nav-group="Build" data-nav-label="Datasources"
@@ -382,32 +334,10 @@
             <svg class="ds-icon ds-icon-xs tpl-chevron" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#chevron-right"></use></svg>
           </button>
           <div class="app-nav-tree app-rail-label" id="nav-tree-dashboards" data-nav-tree="dashboards" hidden
-               th:attr="data-nav-workspace=${activeWorkspace},data-nav-root-url=@{/partials/dashboards/tree(scope='nav')}">
-            <div class="app-nav-tree-search">
-              <input type="search" name="q" class="ds-input app-nav-tree-input" autocomplete="off"
-                     placeholder="Search dashboards…" aria-label="Search dashboards in the tree"
-                     data-nav-tree-search
-                     th:attr="hx-get=@{/partials/dashboards/tree(scope='nav')}"
-                     hx-target="#dash-tree-nav" hx-swap="outerHTML"
-                     hx-trigger="input changed delay:300ms, search" hx-sync="this:replace">
-            </div>
-            <div class="app-nav-tree-scroll" data-nav-tree-scroll>
-              <div class="tpl-level tpl-level-pending" id="dash-tree-nav" data-nav-tree-root>
-                <span class="ds-spinner htmx-indicator" aria-hidden="true"></span>
-              </div>
-            </div>
-          </div>
+               th:attr="data-nav-workspace=${activeWorkspace}"></div>
         </div>
 
-        <!-- #399 (#396): the Visualizations item — an every-role read (`visualization.read`, the
-             promoter through the lens), so it rides no advice boolean. The same navigating-tree
-             shape as the branches above, INCLUDING the Pipelines branch's search box: the item
-             LINK is the flat catalog page, the TOGGLE opens the lazy panel, a non-empty `q`
-             renders the lensed name search (name, display name, description) into the panel's
-             root and clearing returns to the tree. A LEAF is a plain link to the canonical
-             workspace /visualizations/{id} (hx-boost="false" — a full document load: the
-             workspace declares one Plotly bundle, dashboards.md §6.4's rule). The fragment is
-             /partials/visualizations/tree (scope=nav). -->
+        <!-- Reusable REST tree: the catalog link and disclosure have separate actions. -->
         <div class="app-nav-branch" data-nav-branch="visualizations">
           <a th:href="@{/visualizations}" class="app-nav-link" data-nav-section="/visualizations"
              data-nav-group="Build" data-nav-label="Visualizations"
@@ -418,33 +348,10 @@
             <svg class="ds-icon ds-icon-xs tpl-chevron" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#chevron-right"></use></svg>
           </button>
           <div class="app-nav-tree app-rail-label" id="nav-tree-visualizations" data-nav-tree="visualizations" hidden
-               th:attr="data-nav-workspace=${activeWorkspace},data-nav-root-url=@{/partials/visualizations/tree(scope='nav')}">
-            <div class="app-nav-tree-search">
-              <input type="search" name="q" class="ds-input app-nav-tree-input" autocomplete="off"
-                     placeholder="Search visualizations…" aria-label="Search visualizations in the tree"
-                     data-nav-tree-search
-                     th:attr="hx-get=@{/partials/visualizations/tree(scope='nav')}"
-                     hx-target="#viz-tree-nav" hx-swap="outerHTML"
-                     hx-trigger="input changed delay:300ms, search" hx-sync="this:replace">
-            </div>
-            <div class="app-nav-tree-scroll" data-nav-tree-scroll>
-              <div class="tpl-level tpl-level-pending" id="viz-tree-nav" data-nav-tree-root>
-                <span class="ds-spinner htmx-indicator" aria-hidden="true"></span>
-              </div>
-            </div>
-          </div>
+               th:attr="data-nav-workspace=${activeWorkspace}"></div>
         </div>
 
-        <!-- #374 (the Parameter Sets workspace, #357 S1): the Parameter Sets item — an every-role read
-             (`parameter_set.read`, the promoter through the lens), so like Dashboards it rides no
-             advice boolean. The branch is the same navigating-tree shape as the two above: the item
-             LINK is the flat catalog page, the TOGGLE opens the lazy panel, and a LEAF is a plain
-             link to the canonical workspace /parameter-sets/{id} (hx-boost="false" — a full
-             document load, never a swap into the page). Its fragment is
-             /partials/parameter-sets/tree (scope=nav). #415: the branch gains the search input in
-             the Pipelines branch's exact markup — the shared engine serves it with no JS change
-             (a non-empty `q` renders the flat results into this panel's root; clearing returns
-             to the tree). -->
+        <!-- Reusable REST tree: the catalog link and disclosure have separate actions. -->
         <div class="app-nav-branch" data-nav-branch="parameter-sets">
           <a th:href="@{/parameter-sets}" class="app-nav-link" data-nav-section="/parameter-sets"
              data-nav-group="Build" data-nav-label="Parameter Sets"
@@ -455,21 +362,7 @@
             <svg class="ds-icon ds-icon-xs tpl-chevron" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#chevron-right"></use></svg>
           </button>
           <div class="app-nav-tree app-rail-label" id="nav-tree-parameter-sets" data-nav-tree="parameter-sets" hidden
-               th:attr="data-nav-workspace=${activeWorkspace},data-nav-root-url=@{/partials/parameter-sets/tree(scope='nav')}">
-            <div class="app-nav-tree-search">
-              <input type="search" name="q" class="ds-input app-nav-tree-input" autocomplete="off"
-                     placeholder="Search parameter sets…" aria-label="Search parameter sets in the tree"
-                     data-nav-tree-search
-                     th:attr="hx-get=@{/partials/parameter-sets/tree(scope='nav')}"
-                     hx-target="#params-tree-nav" hx-swap="outerHTML"
-                     hx-trigger="input changed delay:300ms, search" hx-sync="this:replace">
-            </div>
-            <div class="app-nav-tree-scroll" data-nav-tree-scroll>
-              <div class="tpl-level tpl-level-pending" id="params-tree-nav" data-nav-tree-root>
-                <span class="ds-spinner htmx-indicator" aria-hidden="true"></span>
-              </div>
-            </div>
-          </div>
+               th:attr="data-nav-workspace=${activeWorkspace}"></div>
         </div>
 
         <div class="app-nav-section app-rail-label">Operate</div>
@@ -536,6 +429,17 @@
         </button>
       </div>
     </aside>
+    <div id="rail-boundary" class="app-rail-boundary" th:if="${authenticated}">
+      <div id="rail-resize" class="app-rail-resize" role="separator" tabindex="0"
+           aria-orientation="vertical" aria-label="Navigation width" aria-controls="app-rail" aria-valuemin="232" aria-valuenow="232"></div>
+      <button id="rail-width-reset" type="button" class="ds-button ds-button-ghost ds-button-sm" aria-label="Reset navigation width">
+        <svg class="ds-icon ds-icon-xs" aria-hidden="true"><use href="/vendor/icons/lucide-sprite.svg#rotate-ccw"></use></svg>
+      </button>
+      <button id="rail-boundary-collapse" type="button" class="ds-button ds-button-ghost ds-button-sm" aria-label="Collapse or restore navigation">
+        <svg class="ds-icon ds-icon-xs" aria-hidden="true"><use href="/vendor/icons/lucide-sprite.svg#chevron-left"></use></svg>
+      </button>
+    </div>
+
 
     <!-- 110 §A: the drawer's scrim — a sibling of the rail, rendered inert (invisible,
          non-interactive) at every width and only lit by `html.rail-open` below 768px.
@@ -811,6 +715,8 @@
        footer scripts OUTSIDE #app-main, so the region-scoped history cache (#358) never replays
        them. -->
   <script th:src="@{/js/template-explorer.js}"></script>
-  <script th:src="@{/js/nav-tree.js}"></script>
+  <script type="module" th:src="@{/js/tree/sidebar.mjs}"></script>
+  <script type="module" th:src="@{/js/rail-resize.mjs}"></script>
+  <script type="module" th:src="@{/js/persistent-navigation.mjs}"></script>
 </body>
 </html>

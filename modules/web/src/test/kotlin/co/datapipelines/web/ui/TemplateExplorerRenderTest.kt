@@ -88,7 +88,7 @@ class TemplateExplorerRenderTest {
     fun `a leaf is a navigating link carrying the leaf id and the path on title`() {
         val html = render("partials/template-tree-level") { fillNestedLevel() }
 
-        html shouldContain "<a class=\"tpl-leaf\" role=\"treeitem\" aria-selected=\"false\" hx-boost=\"false\""
+        html shouldContain "<a class=\"tpl-leaf\" role=\"treeitem\" aria-selected=\"false\" hx-boost=\"true\""
         html shouldContain "href=\"/templates/acme/finance/monthly_revenue.sql\""
         html shouldContain "data-leaf-id=\"acme/finance/monthly_revenue.sql\""
         html shouldContain "title=\"acme/finance/monthly_revenue.sql\""

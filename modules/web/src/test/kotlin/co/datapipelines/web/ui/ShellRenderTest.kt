@@ -146,7 +146,6 @@ class ShellRenderTest {
         html shouldContain
             "<input id=\"app-search-input\" type=\"search\" name=\"q\" class=\"app-search-field\" role=\"combobox\""
         html shouldContain "aria-controls=\"app-search-palette\""
-        html shouldContain "hx-get=\"/partials/search\""
         html shouldContain "hx-target=\"#app-search-results\""
         html shouldContain "id=\"app-search-palette\""
         html shouldContain "role=\"listbox\" aria-label=\"Search results\""
@@ -432,14 +431,9 @@ class ShellRenderTest {
         // (one level per request), and the NAV instance's root placeholder, never the page's.
         html shouldContain "aria-controls=\"nav-tree-dashboards\" aria-label=\"Dashboard folders\""
         html shouldContain "data-nav-tree=\"dashboards\""
-        html shouldContain "data-nav-root-url=\"/partials/dashboards/tree?scope=nav\""
-        html shouldContain "id=\"dash-tree-nav\""
         // #400 — the branch gains the search input in the Pipelines branch's exact markup:
         // the shared engine (nav-tree.js) serves it with no JS change, and the results swap
         // into THIS panel's root (clearing returns to the tree by construction).
-        html shouldContain "data-nav-tree-search"
-        html shouldContain "hx-target=\"#dash-tree-nav\""
-        html shouldContain "placeholder=\"Search dashboards…\""
         html shouldNotContain "data-nav-label=\"Dashboard\""
         // The second tree engine is gone: no <details> disclosure of its own.
         html shouldNotContain "app-nav-branch-tree"
@@ -459,15 +453,14 @@ class ShellRenderTest {
         // The PANEL: closed on paint, the nav-scope root URL, the document's workspace for the
         // admission guard, the sidebar search addressing the sidebar's root, the bounded region.
         branch shouldContain "id=\"nav-tree-pipelines\" data-nav-tree=\"pipelines\" hidden"
-        branch shouldContain "data-nav-root-url=\"/partials/pipelines?scope=nav\""
         branch shouldContain "data-nav-workspace=\"acme\""
-        branch shouldContain "hx-get=\"/partials/pipelines?scope=nav\""
-        branch shouldContain "hx-target=\"#pipeline-nav-root\""
-        branch shouldContain "data-nav-tree-scroll"
-        branch shouldContain "id=\"pipeline-nav-root\""
         // The shared engine and the branch controller load once, from the layout's footer.
         html shouldContain "<script src=\"/js/template-explorer.js\"></script>"
-        html shouldContain "<script src=\"/js/nav-tree.js\"></script>"
+        html shouldContain "<script type=\"module\" src=\"/js/tree/sidebar.mjs\"></script>"
+        html shouldContain "<script type=\"module\" src=\"/js/rail-resize.mjs\"></script>"
+        html shouldContain "id=\"rail-resize\""
+        html shouldNotContain "src=\"/js/nav-tree.js\""
+        html shouldNotContain "data-nav-root-url"
         // rail.js reads the active workspace's pre-paint width key off <html>.
         html shouldContain "data-dp-workspace=\"acme\""
     }
@@ -492,12 +485,7 @@ class ShellRenderTest {
         // The PANEL: closed on paint, the nav-scope root URL, the document's workspace for the
         // admission guard, the sidebar search addressing the sidebar's root, the bounded region.
         branch shouldContain "id=\"nav-tree-templates\" data-nav-tree=\"templates\" hidden"
-        branch shouldContain "data-nav-root-url=\"/partials/templates?scope=nav\""
         branch shouldContain "data-nav-workspace=\"acme\""
-        branch shouldContain "hx-get=\"/partials/templates?scope=nav\""
-        branch shouldContain "hx-target=\"#template-nav-root\""
-        branch shouldContain "data-nav-tree-scroll"
-        branch shouldContain "id=\"template-nav-root\""
     }
 
     @Test
@@ -515,16 +503,10 @@ class ShellRenderTest {
         branch shouldContain "<button type=\"button\" class=\"app-nav-branch-toggle app-rail-label\" data-nav-tree-toggle"
         branch shouldContain "aria-expanded=\"false\" aria-controls=\"nav-tree-parameter-sets\" aria-label=\"Parameter set folders\""
         branch shouldContain "id=\"nav-tree-parameter-sets\" data-nav-tree=\"parameter-sets\" hidden"
-        branch shouldContain "data-nav-root-url=\"/partials/parameter-sets/tree?scope=nav\""
         branch shouldContain "data-nav-workspace=\"acme\""
-        branch shouldContain "id=\"params-tree-nav\""
         // #415 — the branch gains the search input in the Pipelines branch's exact markup:
         // the shared engine (nav-tree.js) serves it with no JS change, and the results swap
         // into THIS panel's root (clearing returns to the tree by construction).
-        branch shouldContain "data-nav-tree-search"
-        branch shouldContain "hx-get=\"/partials/parameter-sets/tree?scope=nav\""
-        branch shouldContain "hx-target=\"#params-tree-nav\""
-        branch shouldContain "placeholder=\"Search parameter sets…\""
         // The branch sits in Build, before Operate, and is one more item - not a second tree engine.
         html.indexOf("data-nav-branch=\"parameter-sets\"") shouldBeLessThan html.indexOf(">Operate<")
     }
@@ -544,14 +526,8 @@ class ShellRenderTest {
         branch shouldContain "<button type=\"button\" class=\"app-nav-branch-toggle app-rail-label\" data-nav-tree-toggle"
         branch shouldContain "aria-expanded=\"false\" aria-controls=\"nav-tree-visualizations\" aria-label=\"Visualization folders\""
         branch shouldContain "id=\"nav-tree-visualizations\" data-nav-tree=\"visualizations\" hidden"
-        branch shouldContain "data-nav-root-url=\"/partials/visualizations/tree?scope=nav\""
         branch shouldContain "data-nav-workspace=\"acme\""
         // The Pipelines branch's search box, addressing THIS panel's root.
-        branch shouldContain "data-nav-tree-search"
-        branch shouldContain "hx-get=\"/partials/visualizations/tree?scope=nav\""
-        branch shouldContain "hx-target=\"#viz-tree-nav\""
-        branch shouldContain "placeholder=\"Search visualizations…\""
-        branch shouldContain "id=\"viz-tree-nav\""
         // Order in Build: Dashboards → Visualizations → Parameter Sets → Operate.
         html.indexOf("data-nav-branch=\"dashboards\"") shouldBeLessThan html.indexOf("data-nav-branch=\"visualizations\"")
         html.indexOf("data-nav-branch=\"visualizations\"") shouldBeLessThan html.indexOf("data-nav-branch=\"parameter-sets\"")

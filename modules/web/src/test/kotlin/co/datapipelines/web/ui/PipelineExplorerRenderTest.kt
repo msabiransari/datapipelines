@@ -180,7 +180,7 @@ class PipelineExplorerRenderTest {
         // spec §3.1), as a full document load (the graph entry spec §2 keeps).
         val leaf = Regex("""<a class="tpl-leaf"[^>]*>""").find(html)?.value ?: error("no leaf link in $html")
         leaf shouldContain "href=\"/pipelines/$LEAF_ID\""
-        leaf shouldContain "hx-boost=\"false\""
+        leaf shouldContain "hx-boost=\"true\""
         leaf shouldContain "role=\"treeitem\""
         leaf shouldContain "data-leaf-id=\"$LEAF_ID\""
         leaf shouldNotContain "version="
@@ -433,7 +433,7 @@ class PipelineExplorerRenderTest {
         html shouldContain "aria-label=\"Pipeline search results\""
         html shouldContain "role=\"option\""
         html shouldContain "href=\"/pipelines/$LEAF_ID\""
-        html shouldContain "hx-boost=\"false\""
+        html shouldContain "hx-boost=\"true\""
         html shouldNotContain "pipeline-detail"
         html shouldNotContain "data-editor-url"
         // The pager stays in the sidebar: its requests carry the nav scope and target its root.

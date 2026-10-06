@@ -2,34 +2,17 @@
 <html xmlns:th="http://www.thymeleaf.org"
       th:replace="~{layouts/default :: page(~{::content})}">
 <th:block th:fragment="content">
-  <!-- #400 — the dashboard WORKSPACE (the parent ruling #396's tabbed, version-explicit page):
-        one URL names one dashboard, one viewed version and one tab. The Board pane is today's
-        board page EXACTLY — the ONE Plotly bundle the SERVER chose (renderer.bundle, §10.4)
-        declared on its script tag, the glue (dashboards-page.js, unchanged) reading the two
-        data attributes, the refusal region, the events pane beside the board — and the
-        Overview, Refreshes, Versions and Keys panes are the workspace's other reading
-        surfaces (Versions carrying the lifecycle verbs' dialogs; the browser never authors a
-        dashboard, #396).
-
-        The ONE-bundle rule (dashboards.md §6.4) still governs: links ONTO any version of this
-        page are NEVER boosted (tree leaf, catalog rows, the selector, the choose-a-version
-        links — every one carries hx-boost="false"), so the scripts below execute on full
-        document loads alone. Tab switches are IN-PAGE (dashboards/workspace.js — no scripts
-        re-run, no navigation); version switches are FULL navigations (a draft's bundle can
-        differ from the release's — #369 review F1); lifecycle dialogs answer HX-Redirect
-        (a full navigation back onto the Versions tab).
-
-        The runtime's scripts ride ONLY a page whose version resolved: a refusal page or the
-        choose-a-version state loads no bundle at all (the refusal state is already
-        server-rendered, and a megabyte of Plotly has nothing to render into). -->
-  <th:block th:if="${bundle != null}">
-    <script th:src="@{/vendor/plotly/plotly-{bundle}.min.js(bundle=${bundle})}"
-            th:attr="data-dp-plotly-bundle=${bundle}"></script>
+  <!-- Signed-in chart pages share the shell's lazy 3D superset bundle. This inert catalog
+       declares reusable libraries and per-page mount glue; prepared navigation and cached
+       history preserve the rail and mount each live root once. Standalone embeds remain isolated. -->
+  <template data-chart-assets>
+    <th:block th:if="${bundle != null}">
+    <script th:src="@{/vendor/plotly/plotly-3d.min.js}"></script>
     <script th:src="@{/js/datapipelines-dashboard.js}"></script>
     <script th:src="@{/js/datapipelines-dashboard-plotly.js}"></script>
     <script th:src="@{/js/datapipelines-dashboard-table.js}"></script>
     <script th:src="@{/js/datapipelines-dashboard-kpi.js}"></script>
-    <script th:src="@{/js/dashboards-page.js}" defer></script>
+    <script data-page-mount th:src="@{/js/dashboards-page.js}" defer></script>
   </th:block>
   <!-- #400 — the workspace's tab state (the shared core, and the dashboards glue over it; the
         pipeline editor runs the same core since #420). A bare tag here is safe by the one-bundle rule:
@@ -38,9 +21,11 @@
   <script th:src="@{/js/workspace/tabs.js}"></script>
   <!-- #402: the workspaces' own history entries — a tab switch pushes, Back/Forward re-selects. -->
   <script th:src="@{/js/workspace/history.js}"></script>
-  <script th:src="@{/js/dashboards/workspace.js}" defer></script>
+  <script data-page-mount th:src="@{/js/dashboards/workspace.js}" defer></script>
   <!-- 102: the lifecycle dialogs' client half — the ONE per-screen container is #dp-dialog. -->
   <script th:src="@{/js/lifecycle-dialog.js}" defer></script>
+
+  </template>
 
   <!-- #350 — the global sidebar's current-leaf hook: which dashboard this page shows, by id
         AND full path, so the rail's Dashboards tree (nav-tree.js) can mark the leaf and
@@ -49,10 +34,7 @@
         th:attr="data-nav-current-id=${dashboardId},data-nav-current-path=${navCurrentPath}"></span>
 
   <div class="dp-workspace">
-    <!-- Top bar: back to the catalog, the crumb name, the VIEWED-version chip (the #369
-         preview banner's successor — the truth about what is on screen), the version
-         selector over the admitted history. Every version switch is a FULL navigation
-         (hx-boost="false"): the two bundles must never travel between documents. -->
+    <!-- Artifact and version links use prepared main-content navigation, preserving the sidebar. -->
     <div class="dp-ws-topbar">
       <a th:href="@{/dashboards}" class="dp-back"><svg class="ds-icon ds-icon-xs" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#arrow-left"></use></svg> Dashboards</a>
       <div class="dp-crumb">
@@ -70,7 +52,7 @@
            no-JS); the click is a full navigation by the one-bundle rule, never intercepted. -->
       <nav class="dp-versions" aria-label="View another version"
            th:if="${!#lists.isEmpty(versions)}">
-        <a th:each="row : ${versions}" class="ds-button ds-button-ghost ds-button-sm" hx-boost="false"
+        <a th:each="row : ${versions}" class="ds-button ds-button-ghost ds-button-sm" hx-boost="true"
            th:href="@{/dashboards/{id}(id=${dashboardId}, version=${row.version}, tab=${activeTab})}"
            th:attr="aria-current=${row.isSelected} ? 'true' : null"
            th:title="${'v' + row.version + ' — ' + row.status.toLowerCase() + (row.isServed ? ' · current' : '')}"
@@ -90,7 +72,7 @@
         <span>has no release yet — opening it says so instead of rendering a board.</span>
       </p>
       <p class="ds-empty-actions">
-        <a th:each="row : ${versions}" class="ds-button ds-button-secondary" hx-boost="false"
+        <a th:each="row : ${versions}" class="ds-button ds-button-secondary" hx-boost="true"
            th:href="@{/dashboards/{id}(id=${dashboardId}, version=${row.version}, tab='board')}"
            th:text="'v' + ${row.version} + ' — ' + ${row.status.toLowerCase()} + (${row.isServed} ? ' · current' : '')">v2 — draft</a>
       </p>

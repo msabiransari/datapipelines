@@ -139,6 +139,7 @@ function makeEnv() {
     // Strict: the family selector is part of the contract this harness pins.
     querySelector(sel) {
       const ws = env.current;
+      if (sel === "template[data-chart-assets]") return null;
       if (sel === ".dp-ws-root") return ws ? ws.root : null;
       if (sel === ".viz-workspace .dp-ws-root") return ws && ws.family === "visualizations" ? ws.root : null;
       throw new Error("unexpected document selector: " + sel);

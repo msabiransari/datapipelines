@@ -78,7 +78,7 @@ object NavigationSource {
         }
     }
 
-    private fun sql(
+    internal fun sql(
         family: NavigationFamily,
         narrowed: Boolean,
         search: Boolean,

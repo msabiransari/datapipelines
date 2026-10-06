@@ -1,7 +1,4 @@
-<!-- The workspace's USED BY tab (#399) — the dashboards whose versions pin this visualization's NAME
-     (DashboardService.pinnedBy through the caller's dashboards lens), each `name@version` a link to
-     that dashboard's workspace — a full navigation (hx-boost="false", the one-bundle rule). The
-     pinned visualization versions are listed per row. -->
+<!-- Artifact and version links use prepared main-content navigation, preserving the sidebar. -->
 <div xmlns:th="http://www.thymeleaf.org" th:fragment="used-by" class="viz-used-by">
   <div class="ds-card">
     <div class="app-card-h">
@@ -12,7 +9,7 @@
       <p class="u-secondary u-text-sm" th:if="${#lists.isEmpty(usedBy)}" data-viz-used-by-empty>no dashboard pins this visualization</p>
       <ul class="dp-pin-list" th:unless="${#lists.isEmpty(usedBy)}">
         <li th:each="row : ${usedBy}" th:attr="data-used-by=${row.dashboardName + '@' + row.dashboardVersion}">
-          <a th:if="${row.dashboardId != null}" hx-boost="false" class="u-mono"
+          <a th:if="${row.dashboardId != null}" hx-boost="true" class="u-mono"
              th:href="@{/dashboards/{id}(id=${row.dashboardId}, version=${row.dashboardVersion})}"
              th:text="${row.dashboardName + '@' + row.dashboardVersion}">finance/dashboards/revenue@3</a>
           <span th:if="${row.dashboardId == null}" class="u-mono"

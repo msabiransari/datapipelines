@@ -1,22 +1,4 @@
-<!-- A FLAT list of full paths (template-hierarchy-design §9.2, decided), in TWO instances since
-     #398 — chosen by `scope`, which also names the stable swap root (`rootId`):
-
-     - `nav`  — the global sidebar's search results, under #template-nav-root. Clearing the box
-                returns the sidebar to its tree (nav-tree.js's own clear: the sidebar has a
-                tree to return to). The rows are role=option in a role=listbox — a result list,
-                not a tree — and template-explorer.js's nav context gives them the same
-                keyboard as the tree.
-     - `page` — the /templates CATALOG, under #template-list-wrapper: every template the caller
-                may read when `q` is empty, the matches otherwise (the pipelines catalog's
-                ruling, read onto templates). Plain links in a plain list; the page has no
-                tree and no detail pane any more.
-
-     Not a tree pruned to matching leaves. Pruning requires walking the ancestors of every
-     match, which is precisely the whole-list-in-the-browser work §9.1 forbids, and a flat list
-     of full paths is what someone searching `finance/agg` actually wants to see.
-
-     Every row is a LINK to the canonical workspace /templates/{name} — a full document load
-     (hx-boost="false", the navigating-tree pattern's leaf), never a selection into a pane. -->
+<!-- Artifact and version links use prepared main-content navigation, preserving the sidebar. -->
 <div xmlns:th="http://www.thymeleaf.org" th:fragment="results" th:id="${rootId}"
      th:with="nav=${scope == 'nav'}" th:attr="data-template-list=${scope}, hx-swap-oob=${oob}">
   <th:block th:if="${lensUnavailable != null and #lists.isEmpty(templates)}">
@@ -54,7 +36,7 @@
       th:attr="role=${nav} ? 'listbox' : null,
                aria-label=${nav} ? 'Template search results' : 'Templates'">
     <li th:attr="role=${nav} ? 'none' : null" th:each="t : ${templates}">
-      <a class="tpl-result" hx-boost="false"
+      <a class="tpl-result" hx-boost="true"
          th:href="@{'/templates/' + ${t.id}}"
          th:attr="role=${nav} ? 'option' : null,
                   aria-selected=${nav} ? 'false' : null,

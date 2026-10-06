@@ -88,7 +88,11 @@ class ShellBusyBrowserTest : BrowserSuite() {
             page.onRequestFailed { req ->
                 if (req.url().contains("/partials/")) failedPartials.incrementAndGet()
             }
-            page.route("**/partials/**") { route ->
+            page.route(
+                java.util.function.Predicate { url ->
+                    url.contains("/partials/") || url.contains("/api/v1/templates/tree")
+                },
+            ) { route ->
                 try {
                     val response = route.fetch()
                     held.add(Held(route, response, System.currentTimeMillis() + holdMillis))
@@ -188,13 +192,13 @@ class ShellBusyBrowserTest : BrowserSuite() {
 
     // ------------------------------------------------------------------ tree driving
 
-    private val navRoot = "#template-nav-root"
+    private val navRoot = "#nav-tree-templates"
 
     private val catalog = "#template-list-wrapper"
 
-    private fun folderSummary(path: String) = "$navRoot summary.tpl-summary:has(span.tpl-label[title='$path'])"
+    private fun folderSummary(path: String) = "$navRoot [data-tree-key='folder:$path'] > .dp-tree-line button"
 
-    private fun leafLink(path: String) = "$navRoot a.tpl-leaf:has(span.tpl-label[title='$path'])"
+    private fun leafLink(path: String) = "$navRoot a.dp-tree-activate[title='$path']"
 
     /** The catalog page, its sidebar Templates branch open and its root level loaded. */
     private fun openCatalogAndSidebarTree() {
@@ -209,7 +213,7 @@ class ShellBusyBrowserTest : BrowserSuite() {
 
     /** Expands one folder and waits until its level request has actually fired (held or not). */
     private fun expandFolder(path: String) {
-        page.waitForRequest({ req -> req.url().contains("/partials/") && req.url().contains("prefix=") }) {
+        page.waitForRequest({ req -> req.url().contains("/api/v1/templates/tree") && req.url().contains("parent=") }) {
             page.click(folderSummary(path))
         }
     }
@@ -235,11 +239,8 @@ class ShellBusyBrowserTest : BrowserSuite() {
             // marker — the hook the §D CSS spins the chevron on. The computed animation pins
             // the spin without relying on motion.
             expandFolder("nyc")
-            page.waitForSelector("#app-progress.active")
-            page.waitForSelector("$navRoot summary.tpl-summary.app-busy")
-            page.evaluate(
-                "() => getComputedStyle(document.querySelector('summary.tpl-summary.app-busy > .tpl-chevron')).animationName",
-            ) shouldBe "ds-spin"
+            // REST tree work has local progress; htmx's global busy policy still owns catalog requests.
+            page.waitForSelector("$navRoot [data-tree-key='folder:nyc'] > .dp-tree-group[aria-busy=true]")
             throttle.awaitCaptured(1)
             throttle.releaseAll()
             page.waitForSelector(folderSummary("nyc/lib"))

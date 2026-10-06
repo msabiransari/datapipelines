@@ -2304,6 +2304,7 @@
       var inst = window.__peInstance;
       if (!inst) return;
       var detail = evt.detail || {};
+      if (evt.defaultPrevented || detail.isError || detail.shouldSwap === false) return;
       var target = detail.target;
       var main = document.getElementById("app-main");
       var replacesMain =
