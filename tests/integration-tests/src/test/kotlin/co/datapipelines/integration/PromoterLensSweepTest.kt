@@ -229,6 +229,30 @@ class PromoterLensSweepTest {
             statNumber(call("/partials/dashboard-stats", auth).body) shouldBe VISIBLE_PIPELINES.size
             railBadges(call("/pipelines", auth).body) shouldBe listOf(VISIBLE_PIPELINES.size, VISIBLE_TEMPLATES.size)
         }
+        treesAreTheNewerSet("pipelines", P, VISIBLE_PIPELINES, auth)
+        treesAreTheNewerSet("templates", T, VISIBLE_TEMPLATES, auth)
+    }
+
+    /**
+     * #460 — the sidebar's REST tree through the real lens: the root names only the visible folder, the
+     * folder level and the name search list exactly the visible artifacts, and no artifact carries the
+     * pending draft a narrowing view must not reveal.
+     */
+    private fun treesAreTheNewerSet(
+        family: String,
+        folder: String,
+        visible: List<String>,
+        auth: (RequestSpecification) -> RequestSpecification,
+    ) {
+        withClue("REST $family tree: root, folder level and name search") {
+            val root = getJson("/api/v1/$family/tree", auth).path("data").path("nodes")
+            names(root, "path") shouldContainExactly listOf(folder)
+            val level = getJson("/api/v1/$family/tree?parent=$folder", auth).path("data").path("nodes")
+            level.filter { it.path("kind").asText() == "artifact" }.map { it.path("path").asText() } shouldContainExactlyInAnyOrder visible
+            level.mapNotNull { it.get("draft_version")?.takeUnless(JsonNode::isNull) } shouldBe emptyList()
+            val search = getJson("/api/v1/$family/tree/search?q=$folder/", auth).path("data").path("nodes")
+            search.filter { it.path("match").asBoolean() }.map { it.path("path").asText() } shouldContainExactlyInAnyOrder visible
+        }
     }
 
     private fun mcpIsTheNewerSet(key: String) {
