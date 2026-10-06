@@ -1,6 +1,6 @@
 # REST API + SSE Specification
 
-**Status:** v2.86 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
+**Status:** v2.87 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
 **Last updated:** 2026-10-06
@@ -2786,6 +2786,7 @@ browser persistence. Clients must reject foreign/stale responses even after abor
 
 ## Appendix A: Change Log
 
+| 2026-10-06 | v2.87 | 460 merge follow-up — the section #460 added without a row | **§24 added (additive)**: `GET /api/v1/{pipelines,templates,dashboards,visualizations,parameter-sets}/tree` and `/tree/search`, session-only first-party navigation reads under each family's existing read permission — keyset pages of at most 200 immediate folders and artifacts (folders first, binary path order) under a 1 MiB response budget, literal case-insensitive name search with every ancestor a match needs, signed continuations bound to the request, the actor, the workspace and the lens, `Cache-Control: no-store`, and a 503 rather than an empty level when the promotion view is unavailable. No existing route, shape or code changed. |
 | 2026-10-06 | v2.86 | 459 merge follow-up | §23's runtime error table, the `dashboard.runtime.dependency_missing` row (additive, no code or status change): it names the lifecycle per mode (released dashboard RELEASED-only; an explicitly selected draft admits DRAFT or RELEASED), the `.reason` values, the draft walk's reach (nested pipelines, templates, imports), and the stream-side admission before execution, which fails a source with this code or `dashboard.validation.source_not_read_only`. |
 | 2026-10-05 | v2.85 | #459 draft dashboard dependencies | §23.3: explicitly selected draft runtime admits live draft dependencies transitively, with nested content in configuration identity. Released views, release/import, permissions and key restrictions remain strict. No new route or wire field. |
 | 2026-10-04 | v2.84 | 442a (#442) — renumbered at merge after 403's v2.83 (the lane's row sat atop the older second table) | Saved schedule notification settings: recipients and five event choices, validated and shown by role; omitted PUT settings preserved; mail remains off pending part b. Merge follow-up (review F2): §20.2's refusal is a sentence, not a lone table row. |

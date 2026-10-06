@@ -1,9 +1,9 @@
 # Auth & Security Specification
 
-**Status:** v3.42 (revised — see Change Log)
+**Status:** v3.43 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System](type-system.md)
-**Last updated:** 2026-10-03
+**Last updated:** 2026-10-06
 
 ---
 
@@ -1825,6 +1825,7 @@ All auth tables accessed via `JdbcTemplate` + `RowMapper`. No JPA. See [Metadata
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-06 | v3.43 | 460 merge follow-up — the row #460 changed without one | **§7.6: no new row, no new permission** — the five `*.read` Surfaces cells (`pipeline.read`, `template.read`, `dashboard.read`, `visualization.read`, `parameter_set.read`) each gain `GET /api/v1/<family>/tree` and `GET /api/v1/<family>/tree/search`: session-only navigation metadata (a key is refused by kind; the handler also refuses any non-session principal with `auth.session.required`), the workspace from the principal, the promoter lens applied before folders and ancestors are derived; `RoleWalkE2eTest` walks all ten. |
 | 2026-10-03 | v3.42 | 442a (#442) — renumbered at merge after 398b's v3.41 | Saved schedule notification settings: recipients and five event choices, validated and shown by role; omitted PUT settings preserved; mail remains off pending part b. |
 | 2026-10-03 | v3.41 | #398 the templates workspace — renumbered at merge after 404's v3.40 | **§7.6: no new row, no cell change** — `template.read`'s Surfaces cell gains `GET /templates/{*name}` (the canonical workspace page, `PathPatternParser`'s capture-everything variable — a dotted, multi-segment name; the grammar check answers the family's 404 before any read) and renames `GET /templates/editor`'s entry to the compatibility redirect it now is (302 onto the workspace, version and supported tab preserved); the cell loses `GET /partials/templates/versions` — the explorer's detail pane retired with the page it lived in (#398), the route with it. `GET /partials/templates` gains the `scope` query parameter (nav or catalog — the markup picker, never the rows). No handler's `@RequiredScope` changed; the dialogs' GETs and POSTs keep their rows and gain nothing. |
 | 2026-10-03 | v3.40 | #404 the async re-dispatch is not judged again | **No route, permission, role or §7.6 row changes.** `ScopeInterceptor.preHandle` returns at once on a `DispatcherType.ASYNC` dispatch (§8.2 step 11, §8.3's dispatcher-type note): the REQUEST dispatch already judged the request, the handler is not invoked again, and the re-dispatch's `SecurityContext` is empty (the credential filters skip async dispatches). Judging it anyway wrote `401 auth.api_key.missing` on every streaming completion — unseen once a frame had committed the response, but the WHOLE answer of a stream completed with an error before its first frame, so the execute route's `429 pipeline.execution.concurrency_limit` and the never-started `410 result.expired` (rest-api §6.1) never reached the wire. Wire-proven by `IdempotentAttachRowOrderE2eTest` (both statuses, and the unkeyed 429), unit-pinned by `SseErrorCompletionTest` (the interceptor named as the writer by its control) and `ScopeInterceptorTest`; the D-R8 audit stays one row per request. The ERROR dispatch is unchanged: its handler is the public `/error`. |
