@@ -243,6 +243,8 @@ pgres::_fixture() {
            "$F/buildSrc/src/main/kotlin"
   cp "$PGRES_LIB_DIR/pregate.sh" "$PGRES_LIB_DIR/pregate-results-lib.sh" \
      "$PGRES_LIB_DIR/pregate-2b-lib.sh" "$PGRES_LIB_DIR/test-recount.sh" "$F/scripts/"
+  mkdir -p "$F/scripts/lib"
+  cp "$PGRES_LIB_DIR/lib/verification-lock.sh" "$F/scripts/lib/"
   printf 'build/\n.pregate-logs/\npregate-argv.log\npregate.out\n' > "$F/.gitignore"
   echo '// auth source' > "$F/modules/auth/src/main/kotlin/co/x/Auth.kt"
   echo '// scripting source' > "$F/modules/scripting/src/main/kotlin/co/x/Script.kt"
@@ -283,7 +285,7 @@ EOF
 # is the change under test). Returns pregate's exit code.
 pgres::_run_fixture() {
   local F="$1"
-  ( cd "$F" && bash scripts/pregate.sh HEAD > pregate.out 2>&1 )
+  ( cd "$F" && XDG_CACHE_HOME="$F/.fixture-cache" bash scripts/pregate.sh HEAD > pregate.out 2>&1 )
 }
 
 pgres::self_test() {
