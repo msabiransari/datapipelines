@@ -21,6 +21,8 @@ import io.mockk.every
 import io.mockk.mockk
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
 import org.springframework.mock.web.MockHttpServletRequest
 import org.springframework.mock.web.MockHttpServletResponse
 import org.springframework.mock.web.MockServletContext
@@ -67,9 +69,11 @@ class TemplateWorkspaceControllerTest {
         every { pipelines.findAnyVersionTemplatePins(any(), any()) } returns emptyList()
     }
 
-    private val model = TemplateWorkspaceModel(TemplateService(repository), usage, ActorNames(mockk(relaxed = true)))
+    private val actorFixture = TemplateReleaseActorFixture()
+    private val actors = actorFixture.actors
+    private val model = TemplateWorkspaceModel(TemplateService(repository), usage, actors)
     private val controller =
-        TemplateWorkspaceController(model, themeResolver, co.datapipelines.web.EVERYTHING_LENS)
+        TemplateWorkspaceController(model, themeResolver, co.datapipelines.web.EVERYTHING_LENS, actors)
 
     private val userId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()
@@ -370,6 +374,46 @@ class TemplateWorkspaceControllerTest {
         )
 
     // ------------------------------------------------------------------ the page's model
+
+    @ParameterizedTest
+    @ValueSource(strings = ["human", "missing", "null", "service", "hostile"])
+    fun `workspace first paint resolves and renders its release actor`(case: String) {
+        authenticate()
+        stubReleased()
+        val expected = actorFixture.prepare(case, userId)
+        every { repository.findVersionDetail(workspaceId, name, 2) } returns
+            releasedDetail(name, 2).copy(releasedBy = userId.takeUnless { case == "null" })
+        every { themeResolver.resolve(any()) } returns "saas"
+        val page = ExtendedModelMap()
+
+        controller.workspace("/$name", "2", "source", page, MockHttpServletRequest())
+
+        assertTemplateProvenance(renderTemplateProvenance(page), expected, userId)
+        page["releasedBy"] shouldBe expected
+        page["selectedVersion"] shouldBe 2
+        page["readOnly"] shouldBe true
+        // Exactly the existing Versions batch, with no second lookup for provenance.
+        actorFixture.lookups shouldBe listOf(setOf(userId))
+    }
+
+    @Test
+    fun `workspace resolves the releaser separately when they did not create the version`() {
+        authenticate()
+        stubReleased()
+        val releaser = UUID.fromString("12345678-0000-0000-0000-000000000434")
+        actorFixture.users[userId] = "Version Creator" to "human"
+        actorFixture.users[releaser] = "Release Promoter" to "human"
+        every { repository.findVersionDetail(workspaceId, name, 2) } returns
+            releasedDetail(name, 2).copy(releasedBy = releaser)
+        every { themeResolver.resolve(any()) } returns "saas"
+        val page = ExtendedModelMap()
+
+        controller.workspace("/$name", "2", "source", page, MockHttpServletRequest())
+
+        page["releasedBy"] shouldBe "Release Promoter"
+        actorFixture.lookups shouldBe listOf(setOf(userId), setOf(releaser))
+        assertTemplateProvenance(renderTemplateProvenance(page), "Release Promoter", releaser)
+    }
 
     @Test
     fun `the page stamps the sidebar hook, the tab and the R5 read-only rule`() {

@@ -91,7 +91,7 @@ class TemplateEditorVersionRenderTest {
                 .ofPattern("yyyy-MM-dd HH:mm")
                 .withZone(ZoneId.systemDefault())
                 .format(RELEASED_AT)
-        html shouldContain ACTOR.toString()
+        html shouldContain ACTOR_NAME
     }
 
     @Test
@@ -156,7 +156,7 @@ class TemplateEditorVersionRenderTest {
         setVariable("selectedVersion", 1)
         setVariable("selectedStatus", "RELEASED")
         setVariable("releasedAt", RELEASED_AT)
-        setVariable("releasedBy", ACTOR.toString())
+        setVariable("releasedBy", ACTOR_NAME)
     }
 
     private fun WebContext.editable(body: String) {
@@ -273,10 +273,108 @@ class TemplateEditorVersionRenderTest {
         /** An opening script tag, with its attributes — not its body. */
         val SCRIPT_TAG = Regex("<script[^>]*>")
 
+        const val ACTOR_NAME = "Release Engineer"
         const val NAME = "acme/revenue.sql"
         const val RELEASED_BODY = "SELECT released_only FROM t"
         val RELEASED_AT: Instant = Instant.parse("2026-08-02T09:30:00Z")
         val COMMENT = Regex("<!--.*?-->", RegexOption.DOT_MATCHES_ALL)
         val ACTOR: UUID = UUID.fromString("00000000-0000-0000-0000-000000000001")
+    }
+}
+
+/** Real actor lookup and mapping over synthetic user rows, shared by the provenance tests. */
+internal class TemplateReleaseActorFixture {
+    private val jdbc = io.mockk.mockk<org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate>()
+    val users = mutableMapOf<UUID, Pair<String, String>>()
+    val lookups = mutableListOf<Set<UUID>>()
+    val actors = ActorNames(jdbc)
+
+    fun prepare(
+        case: String,
+        actor: UUID,
+    ): String? =
+        when (case) {
+            "human" -> "Release Engineer".also { users[actor] = it to "human" }
+            "service" -> "Release Bot (API key)".also { users[actor] = "Release Bot" to "service" }
+            "hostile" -> HOSTILE.also { users[actor] = it to "human" }
+            "missing" -> actor.toString().substring(0, 8) + "…"
+            "null" -> null
+            else -> error("Unknown actor case: $case")
+        }
+
+    companion object {
+        const val HOSTILE = "<img src=x onerror=alert(1)> & \"quoted\""
+    }
+
+    init {
+        io.mockk.every {
+            jdbc.query(
+                any<String>(),
+                any<Map<String, Any?>>(),
+                any<org.springframework.jdbc.core.RowMapper<Pair<UUID, String>>>(),
+            )
+        } answers {
+            val ids = (secondArg<Map<String, Any?>>()["ids"] as Collection<*>).filterIsInstance<UUID>().toSet()
+            lookups.add(ids)
+            val mapper = thirdArg<org.springframework.jdbc.core.RowMapper<Pair<UUID, String>>>()
+            ids.mapNotNull { id ->
+                users[id]?.let { (name, kind) ->
+                    val row = io.mockk.mockk<java.sql.ResultSet>()
+                    io.mockk.every { row.getObject("id", UUID::class.java) } returns id
+                    io.mockk.every { row.getString("display_name") } returns name
+                    io.mockk.every { row.getString("kind") } returns kind
+                    mapper.mapRow(row, 0)
+                }
+            }
+        }
+    }
+}
+
+/** Render the controller's actual source/face model through the shipped fragment. */
+internal fun renderTemplateProvenance(
+    model: org.springframework.ui.ExtendedModelMap,
+    view: String = "partials/template-source",
+): String {
+    val context =
+        WebContext(
+            JakartaServletWebApplication
+                .buildApplication(MockServletContext())
+                .buildExchange(MockHttpServletRequest(), MockHttpServletResponse()),
+        ).withRoles()
+    context.setVariables(model)
+    val engine =
+        SpringTemplateEngine().apply {
+            setTemplateResolver(
+                ClassLoaderTemplateResolver().apply {
+                    prefix = "templates/"
+                    suffix = ".html"
+                    characterEncoding = "UTF-8"
+                },
+            )
+        }
+    return Regex("<!--.*?-->", RegexOption.DOT_MATCHES_ALL).replace(engine.process(view, context), "")
+}
+
+/** Independent text/escaping oracle over real controller values, including absent attribution. */
+internal fun assertTemplateProvenance(
+    html: String,
+    expected: String?,
+    actor: UUID,
+) {
+    html shouldContain ">Released<"
+    html shouldNotContain actor.toString()
+    when (expected) {
+        null -> {
+            html shouldNotContain ">by<"
+        }
+
+        TemplateReleaseActorFixture.HOSTILE -> {
+            html shouldContain "&lt;img src=x onerror=alert(1)&gt; &amp; &quot;quoted&quot;"
+            html shouldNotContain "<img"
+        }
+
+        else -> {
+            html shouldContain expected
+        }
     }
 }
