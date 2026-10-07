@@ -47,15 +47,15 @@
     </div>
 
     <!-- Release provenance (versioning §3.1): who published this version, and when.
-         The actor is the stored user id — this app resolves no display name for it
-         anywhere, so it renders as the id rather than as a name it would have to invent. -->
+         The model resolves the actor through ActorNames, as Versions does, with the
+         abbreviated missing-user fallback and API-key attribution. -->
     <p th:if="${releasedAt != null}"
        class="u-m0 u-secondary u-text-sm">
       <span>Released</span>
       <span th:text="${#temporals.format(releasedAt, 'yyyy-MM-dd HH:mm')}">2026-09-01 10:00</span>
       <th:block th:if="${releasedBy != null}">
         <span>by</span>
-        <span class="u-mono" th:text="${releasedBy}">user-id</span>
+        <span class="u-mono" th:text="${releasedBy}">Release actor</span>
       </th:block>
     </p>
 

@@ -49,12 +49,13 @@ import java.util.UUID
 class TemplateTransformFaceController(
     private val reads: TemplateService,
     private val lens: PromoterLens,
+    actors: ActorNames,
     private val validator: TemplateValidator,
     private val drafts: TemplateDraftService,
     runner: TransformTestRunner,
     transform: TransformProperties,
 ) {
-    private val source = TemplateSourceModel(reads)
+    private val source = TemplateSourceModel(reads, actors)
     private val suite = TransformSuiteRun(validator, runner, Duration.ofSeconds(transform.suiteTimeoutSeconds))
 
     @GetMapping("/partials/templates/transform-face")

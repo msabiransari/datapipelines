@@ -28,6 +28,8 @@ import io.mockk.slot
 import io.mockk.verify
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
 import org.springframework.mock.web.MockHttpServletResponse
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
 import org.springframework.security.core.context.SecurityContextHolder
@@ -46,10 +48,13 @@ import java.util.UUID
 class TemplateTransformFaceControllerTest {
     private val templates = mockk<TemplateRepository>()
     private val drafts = mockk<TemplateDraftService>()
+    private val actorFixture = TemplateReleaseActorFixture()
+    private val actors = actorFixture.actors
     private val controller =
         TemplateTransformFaceController(
             TemplateService(templates),
             co.datapipelines.web.EVERYTHING_LENS,
+            actors,
             TransformFixtures.validator(),
             drafts,
             TransformFixtures.runner(),
@@ -103,6 +108,28 @@ class TemplateTransformFaceControllerTest {
     private fun panes(template: Template = TransformFixtures.storedSkeleton()) = TransformPanes.of(template)
 
     // ------------------------------------------------------------------ the face (GET)
+
+    @ParameterizedTest
+    @ValueSource(strings = ["human", "missing", "null", "service", "hostile"])
+    fun `transform owner resolves and renders its release actor`(case: String) {
+        authenticate()
+        val expected = actorFixture.prepare(case, userId)
+        val released = TransformFixtures.storedSkeleton(version = 1, status = PipelineVersionStatus.RELEASED)
+        stubStored(TransformFixtures.storedSkeleton(version = 2), released)
+        every { templates.findVersionDetail(any(), TransformFixtures.NAME, 1) } returns
+            detailOf(released).copy(releasedBy = userId.takeUnless { case == "null" })
+        val page = ExtendedModelMap()
+
+        val view = controller.face(TransformFixtures.NAME, 1, page)
+
+        view shouldBe TransformFace.VIEW
+        assertTemplateProvenance(renderTemplateProvenance(page, view), expected, userId)
+        page["releasedBy"] shouldBe expected
+        page["selectedVersion"] shouldBe 1
+        page["readOnly"] shouldBe true
+        page["faceEditable"] shouldBe false
+        actorFixture.lookups shouldBe if (case == "null") emptyList() else listOf(setOf(userId))
+    }
 
     @Test
     fun `an author's face on the working draft is editable, with the draft's hash as the save precondition`() {

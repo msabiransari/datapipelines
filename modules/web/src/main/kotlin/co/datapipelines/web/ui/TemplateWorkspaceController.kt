@@ -36,6 +36,7 @@ class TemplateWorkspaceController(
     private val themeResolver: ThemeResolver,
     /** 178 — the promoter lens: the page resolves and renders the caller's view. */
     private val lens: PromoterLens,
+    private val actors: ActorNames,
 ) {
     @GetMapping("/templates/{*name}")
     @RequiredScope(Permission.TEMPLATE_READ)
@@ -167,7 +168,16 @@ class TemplateWorkspaceController(
         model.addAttribute("selectedVersion", displayed.version)
         model.addAttribute("selectedStatus", (detail?.status ?: displayed.status).name)
         model.addAttribute("releasedAt", detail?.releasedAt)
-        model.addAttribute("releasedBy", detail?.releasedBy?.toString())
+        // Versions already resolved the creator. Reuse that identity only when the release
+        // stamp names the same actor; a different releaser needs its own lookup.
+        val releaseActor = detail?.releasedBy
+        val versionActor =
+            if (releaseActor != null && releaseActor == detail.createdBy) {
+                resolved.versions.firstOrNull { it.version == displayed.version }?.actor
+            } else {
+                null
+            }
+        model.addAttribute("releasedBy", versionActor ?: actors.displayName(releaseActor))
         model.addAttribute("readOnly", readOnly)
         // Overview's References reading (a derived scan, never a declared contract).
         model.addAttribute("interpolations", TemplateWorkspaceModel.interpolations(displayed.body))

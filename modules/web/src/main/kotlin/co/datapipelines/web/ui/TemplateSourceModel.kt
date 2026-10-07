@@ -29,6 +29,7 @@ import java.util.UUID
  */
 internal class TemplateSourceModel(
     private val reads: TemplateService,
+    private val actors: ActorNames,
 ) {
     /** What a fill read: the draft (the header's affordances need it) and the version displayed. */
     data class Filled(
@@ -65,7 +66,7 @@ internal class TemplateSourceModel(
         model.addAttribute("readOnly", readOnly)
         model.addAttribute("selectedStatus", (detail?.status ?: displayed?.status)?.name)
         model.addAttribute("releasedAt", detail?.releasedAt)
-        model.addAttribute("releasedBy", detail?.releasedBy?.toString())
+        model.addAttribute("releasedBy", actors.displayName(detail?.releasedBy))
         val filled = Filled(draft, displayed)
         model.addAttribute("isTransform", filled.isTransform)
         if (displayed != null && filled.isTransform) TransformFace.fill(model, displayed, readOnly)
