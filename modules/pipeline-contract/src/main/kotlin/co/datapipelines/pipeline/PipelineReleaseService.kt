@@ -442,8 +442,7 @@ open class PipelineReleaseService(
         // §5.5: purging authored content is authoring — a receiver's sole writer is promotion.
         authoring.requirePipelineAuthoring()
 
-        val draft = pipelines.findDraftDetail(workspaceId, pipelineId) ?: throw notDraft(pipelineId)
-        if (draft.bodyHash != expectedHash) throw conflictAfterGuardFailure(workspaceId, pipelineId)
+        val draft = requirePurgeDraft(workspaceId, pipelineId, expectedHash)
         val record = pipelines.findByIdAnyStatus(workspaceId, pipelineId) ?: throw notDraft(pipelineId)
         pinGuard.refuseIfDraftPinned(workspaceId, record, draft.version)
 
@@ -460,6 +459,17 @@ open class PipelineReleaseService(
             is PurgeOutcome.EntityPurged -> Purged.Entity(outcome.executionsDeleted)
             null -> throw conflictAfterGuardFailure(workspaceId, pipelineId)
         }
+    }
+
+    private fun requirePurgeDraft(
+        workspaceId: UUID,
+        pipelineId: UUID,
+        expectedHash: String,
+    ): PipelineVersionDetail {
+        // Status and hash refusals precede the pin preflight.
+        val draft = pipelines.findDraftDetail(workspaceId, pipelineId) ?: throw notDraft(pipelineId)
+        if (draft.bodyHash != expectedHash) throw conflictAfterGuardFailure(workspaceId, pipelineId)
+        return draft
     }
 
     /**

@@ -253,7 +253,8 @@ class PipelineDraftPurgePinsBrowserTest : DashboardBrowserSuite() {
         val foreignBoard = boardBody.replace("$root/board", boardName)
         sql(
             "INSERT INTO dashboards (id, workspace_id, name, display_name, description, created_by) " +
-                "SELECT gen_random_uuid(), '$foreignWorkspace', '$boardName', 'Foreign', '', created_by FROM dashboards WHERE id = '$board'",
+                "SELECT gen_random_uuid(), '$foreignWorkspace', '$boardName', 'Foreign', '', created_by " +
+                "FROM dashboards WHERE id = '$board'",
         )
         sql(
             "INSERT INTO dashboard_versions (dashboard_id, version, body_json, body_hash, status, created_by) " +
