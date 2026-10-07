@@ -1,5 +1,6 @@
 package co.datapipelines.persistence
 
+import ch.qos.logback.classic.Level
 import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.classic.spi.IThrowableProxy
@@ -73,6 +74,25 @@ class BatchingWriterFailureTest {
         val line = line("event=persistence.direct_write_failed")
         line shouldContain "cause=StoreRefusal"
         line shouldContain "sql_state=$SQL_STATE"
+    }
+
+    @Test
+    fun `a malformed driver state never reaches the direct write failure log`() {
+        val sink = MalformedStateSink()
+        val w = writer(sink)
+        w.close() // the caller owns the direct write and its synchronous log event
+        val outcome = w.record("synthetic-row").shouldBeInstanceOf<Outcome.Failed>()
+        outcome.cause shouldBe sink.failure
+        outcome.kind shouldBe "write_failed"
+        val events = logged().filter { it.formattedMessage.startsWith("event=persistence.direct_write_failed") }
+        events.size shouldBe 1
+        val event = events.single()
+        event.level shouldBe Level.WARN
+        event.formattedMessage shouldBe
+            "event=persistence.direct_write_failed writer=test kind=write_failed item=synthetic-row cause=StoreRefusal sql_state=invalid"
+        event.formattedMessage.contains(MALFORMED_STATE_SENTINEL) shouldBe false
+        event.formattedMessage.any { it.isISOControl() } shouldBe false
+        event.throwableProxy shouldBe null
     }
 
     @Test
@@ -225,6 +245,21 @@ class BatchingWriterFailureTest {
             )
     }
 
+    /** Dedicated synthetic driver refusal for the SQLSTATE logging boundary. */
+    private class MalformedStateSink : BatchSink<String> {
+        val failure = StoreRefusal("synthetic refusal", SQLException("synthetic driver", "40001\r\n$MALFORMED_STATE_SENTINEL"))
+
+        override fun write(items: List<String>): Unit = throw failure
+
+        override fun writeOne(item: String): Unit = throw failure
+
+        override fun partitionKey(item: String): Any = "one"
+
+        override fun sizeOf(item: String): Int = item.length
+
+        override fun describe(item: String): String = item
+    }
+
     /** A store that throws a store failure for `refused` and something else for `bug` — and claims only the latter. */
     private class ClaimingSink : BatchSink<String> {
         override fun write(items: List<String>) = items.forEach(::writeOne)
@@ -252,6 +287,7 @@ class BatchingWriterFailureTest {
 
     private companion object {
         const val ROW_CONTENT = "row-content-7f3a-must-not-be-logged"
+        const val MALFORMED_STATE_SENTINEL = "sqlstate-sentinel-446-must-not-be-logged"
         const val SQL_STATE = "23502"
     }
 }

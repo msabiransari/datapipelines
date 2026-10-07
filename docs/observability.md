@@ -1,9 +1,9 @@
 # Observability Specification
 
-**Status:** v1.38 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
+**Status:** v1.39 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
-**Last updated:** 2026-10-04
+**Last updated:** 2026-10-06
 
 ---
 
@@ -212,7 +212,7 @@ The batching writers in front of the audit log, the execution-event record and t
 | INFO | `persistence.drained` / `shutdown.persistence_drained` | A writer flushed everything it held | `writer` (`lost`, `in_flight` on the second) |
 | WARN | `persistence.drain_incomplete` | A writer's drain reached `shutdown-drain-ms` with items left: `lost` were never written (only `submit` items can be — nothing awaits them), `in_flight` were inside a commit and may or may not have landed | `writer`, `lost`, `in_flight`, `drain_ms` |
 
-A failure is named by `cause` (the exception's simple class name) and `sql_state` (the first SQLState in its cause chain, `none` without one) — never by the exception's message or its cause chain, which a store fills with the refused row (Postgres's DETAIL and CONTEXT; PgJDBC's batch exception quotes the bound values). `23xxx` is a row the store refuses, `08xxx` a connection lost (#266b). The emitter and the audit sink keep their own lines too — `Durable event … not written (kind)`, `SSE event log append failed … (replay will be incomplete)`, `audit_log write failed … kind=…` (on the direct path `… cause=… sql_state=…`) — the ones operators have always searched for. A steady `persistence.saturated` or a rising `datapipelines.persistence.fallbacks{reason=timeout}` (§4.1) means the store cannot keep up; `batch_retried` with `kind=poison` means rows the store refuses, which no retry will fix.
+A failure is named by `cause` (the exception's simple class name) and `sql_state` (the first non-null SQLSTATE among at most 16 causes, unchanged only if it matches ASCII `^[0-9A-Za-z]{1,5}$`; `invalid` for any other shape, without trying later states, and `none` when no state is found) — never by the exception's message or its cause chain, which a store fills with the refused row (Postgres's DETAIL and CONTEXT; PgJDBC's batch exception quotes the bound values). `23xxx` is a row the store refuses, `08xxx` a connection lost (#266b). The emitter and the audit sink keep their own lines too — `Durable event … not written (kind)`, `SSE event log append failed … (replay will be incomplete)`, `audit_log write failed … kind=…` (on the direct path `… cause=… sql_state=…`) — the ones operators have always searched for. A steady `persistence.saturated` or a rising `datapipelines.persistence.fallbacks{reason=timeout}` (§4.1) means the store cannot keep up; `batch_retried` with `kind=poison` means rows the store refuses, which no retry will fix.
 
 The same class/SQLState rule applies to both lake outcome-recorder failure paths (§3.4C), the write-back rollback warning and the example-content import failure line (#329, first slice): their `error` field uses `FailureShape.cause`, with `sql_state=none` when absent, and no exception message or throwable attachment. This slice leaves the remaining #329 inventory for separate review.
 
@@ -594,6 +594,7 @@ This is a construction rule, not a filter — the redacting encoder covers logs,
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-06 | v1.39 | #446 bounded driver SQLSTATE (2026-10-06T03:09:15Z) | §3.4G defines the one-to-five ASCII letter/digit shape, fixed `invalid` replacement and preserved `none` fallback. Valid states pass unchanged; rejected driver values are never logged. |
 | 2026-10-04 | v1.38 | 329a (#329), store-failure log shapes | §3.4C lake outcome-recorder field list gains `sql_state` and defines `error` as the exception class; §3.4G records the narrow reuse of its rule at four existing failure lines. Event names and failure behavior stay unchanged; the remaining inventory stays open on #329. |
 | 2026-10-03 | v1.37 | #403 failed pre-start release | **§3.4I** gains `execution.idempotency_release_failed`: one WARN per failed cleanup attempt, user/execution ids and error class only; the original refusal is preserved. |
 | 2026-10-03 | v1.36 | 439 (#439) an event-catalogue parity guard | **§3.4's intro** states that `ObservabilityEventCatalogParityTest` fails the build when an `event=<namespace>.<name>` literal in `modules/<module>/src/main/kotlin` and the event column of these tables disagree for the namespaces whose tables are already complete (`parameter`, `lake`, `mail`, `persistence`, `scheduler`); its non-vacuity floor pins each namespace's count, and the catalogued namespaces still drifting are tracked in #443. No event row changes. |
