@@ -79,6 +79,9 @@ STRICT="${2:-}"
 
 cd "$(dirname "$0")/.." || exit 2
 ROOT="$PWD"
+# Shared with pregate, including other worktrees; refuse before clearing evidence.
+source "$ROOT/scripts/lib/verification-lock.sh"
+verification::lock gate "$ROOT" || exit $?
 LOGDIR="$ROOT/.gate-logs"
 rm -rf "$LOGDIR"; mkdir -p "$LOGDIR"
 
@@ -117,7 +120,7 @@ read -r -a GATE_EXTRA_ARGS <<< "${GATE_GRADLE_ARGS:-}"
 
 run() { # run <logfile> <args...>  → echoes exit code, never pipes gradle
   local log="$1"; shift
-  ./gradlew "$@" -Pdp.browser.ciPatience=true "${GATE_EXTRA_ARGS[@]}" > "$log" 2>&1
+  ./gradlew "$@" -Pdp.browser.ciPatience=true "${GATE_EXTRA_ARGS[@]}" 9>&- > "$log" 2>&1
   echo $?
 }
 

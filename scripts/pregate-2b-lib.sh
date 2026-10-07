@@ -6,7 +6,11 @@
 # against ISOLATED fixture trees and a recording, refusing Gradle stand-in (342-b,
 # #342 round) — not only against the working tree's real diff.
 #
-# The contract (what "affected" means, fixed by the orchestrator reviews of 2026-09-30):
+# Resource policy (#472): the inventory below can conclude "whole", but pregate
+# NEVER executes that plan. plan_module defers it to Gate A, along with selections
+# exceeding five classes. gradle_args independently refuses unbounded plans.
+#
+# The inventory contract (what "affected" means, reviews of 2026-09-30):
 #   * a changed CONCRETE test class runs focused, by class (--tests FQCN);
 #   * the runnable identity is the file's DECLARED class, not its file name (342-c):
 #     Kotlin files are not one-class-per-file by rule, and a file whose declared class
@@ -14,8 +18,8 @@
 #     selects the class its declarations NAME. A file whose identity cannot be derived
 #     with certainty — no parseable concrete declaration, SEVERAL (two runnable classes
 #     in one file, or a test and a helper together), or a declaration-shaped line the
-#     parse cannot resolve — is NEVER focused on a guess: the whole module runs, which
-#     is complete no matter what the file declares;
+#     parse cannot resolve — is NEVER focused on a guess: whole-module coverage is required
+#     at Gate A, no matter what the file declares;
 #   * a changed file that is NOT a runnable test class — an abstract base, a sealed
 #     hierarchy, an interface, a helper object, a @TestConfiguration, a helper class —
 #     must schedule its REAL runnable consumers: the test classes that reference the
@@ -26,8 +30,8 @@
 #     declaration differs from its file name is traversed by the name it declares);
 #   * when consumers cannot be established — no references, no parseable declaration to
 #     traverse through, or the file was DELETED or RENAMED (no longer on disk) — the
-#     fallback is the WHOLE module, never a silent skip;
-#   * a changed build file, or a changed test RESOURCE, also means the whole module;
+#     inventory requires the WHOLE module, explicitly deferred to Gate A;
+#   * a changed build file, or a changed test RESOURCE, also requires whole-module coverage at Gate A;
 #   * while changed test sources exist the plan is NEVER EMPTY: focused-with-classes or
 #     whole. The delivered abstract/sealed skip produced a green no-op instead — a
 #     BrowserSuite-only change printed "skipping … nothing to run here" and no browser
@@ -42,7 +46,7 @@
 #   pg2b::file_classes <file> <src-root>          — FQCN(s) of a runnable file's declared class; exit 1 = not derivable
 #   pg2b::consumers_of <src-root> <exclude-file> <TypeName...> — runnable consumer paths, one per line
 #   pg2b::plan_module <module> <build-file> <src-root> <changed-files...>
-#       → stdout: "whole" | ("focused" + FQCN lines) | "none";  reasons on stderr
+#       → stdout: "deferred" | ("focused" + <=5 FQCN lines) | "none"; reasons on stderr
 #   pg2b::gradle_args <module> <plan-words...>    → gradle argv, one arg per line
 #   pg2b::self_test                               — fixtures + recording stub; 0 = PASS
 
@@ -100,7 +104,7 @@ pg2b::file_classes() {
   local line
   while IFS= read -r line; do
     # A helper can have consumers in other files while this file owns tests too.
-    # Focusing either side alone is incomplete; the whole module is the safe plan.
+    # Focusing either side alone is incomplete; defer coverage to Gate A.
     [ "${line%% *}" = concrete ] || return 1
     concrete+=("${line#* }")
   done < <(pg2b::declared_types "$f")
@@ -178,13 +182,13 @@ pg2b::consumers_of() {
 # orphan helper, deleted/renamed file, unparseable or multiple declarations), "focused"
 # + one FQCN per line, or "none" (no test source of the module changed). Reasons for
 # every decision go to stderr.
-pg2b::plan_module() {
+pg2b::affected_module() {
   local module="$1" build_file="$2" src="$3"
   shift 3
   local f
   for f in "$@"; do
     if [ "$f" = "$build_file" ]; then
-      echo "  2b tests/$module: build file changed → whole module" >&2
+      echo "  2b tests/$module: build file changed → whole-module coverage required (deferred to Gate A)" >&2
       echo "whole"
       return 0
     fi
@@ -195,14 +199,14 @@ pg2b::plan_module() {
     case "$f" in
       "$src"/*.kt) ;;
       *"/src/test/"*)
-        echo "  2b tests/$module: $(basename "$f") — test resource changed → whole module" >&2
+        echo "  2b tests/$module: $(basename "$f") — test resource changed → whole-module coverage required (deferred to Gate A)" >&2
         echo "whole"
         return 0
         ;;
       *) continue ;; # another module's file — not stage 2b's concern
     esac
     if [ ! -f "$f" ]; then
-      echo "  2b tests/$module: $(basename "$f") — deleted/renamed, consumers not derivable → whole module" >&2
+      echo "  2b tests/$module: $(basename "$f") — deleted/renamed, consumers not derivable → whole-module coverage required (deferred to Gate A)" >&2
       fallback=whole
       continue
     fi
@@ -210,7 +214,7 @@ pg2b::plan_module() {
       local fc
       fc="$(pg2b::file_classes "$f" "$src")" || {
 
-          echo "  2b tests/$module: $(basename "$f") — runnable, but its declared class identity is not derivable (0 or several concrete declarations, or an unparseable declaration line) → whole module" >&2
+          echo "  2b tests/$module: $(basename "$f") — runnable, but its declared class identity is not derivable (0 or several concrete declarations, or an unparseable declaration line) → whole-module coverage required (deferred to Gate A)" >&2
           fallback=whole
         }
         [ -n "$fc" ] && classes+=("$fc")
@@ -223,13 +227,13 @@ pg2b::plan_module() {
         seed+=("${declared#* }")
       done < <(pg2b::declared_types "$f")
       if [ "${#seed[@]}" -eq 0 ] || pg2b::has_unparsed_declaration "$f"; then
-        echo "  2b tests/$module: $(basename "$f") — not runnable, its declared type names are not derivable → whole module" >&2
+        echo "  2b tests/$module: $(basename "$f") — not runnable, its declared type names are not derivable → whole-module coverage required (deferred to Gate A)" >&2
         fallback=whole
         continue
       fi
       consumers="$(pg2b::consumers_of "$src" "$f" "${seed[@]}")" || PG2B_UNCERTAIN=1
       if [ "$PG2B_UNCERTAIN" -ne 0 ]; then
-        echo "  2b tests/$module: $(basename "$f") — an intermediate helper's declarations are not derivable; consumers not establishable → whole module" >&2
+        echo "  2b tests/$module: $(basename "$f") — an intermediate helper's declarations are not derivable; consumers not establishable → whole-module coverage required (deferred to Gate A)" >&2
         fallback=whole
       elif [ -n "$consumers" ]; then
         echo "  2b tests/$module: $(basename "$f") — not runnable itself; scheduling its runnable consumers" >&2
@@ -237,14 +241,14 @@ pg2b::plan_module() {
         while IFS= read -r c; do
           [ -z "$c" ] && continue
           cc="$(pg2b::file_classes "$c" "$src")" || {
-            echo "  2b tests/$module: $(basename "$c") — a consumer's declared class identity is not derivable → whole module" >&2
+            echo "  2b tests/$module: $(basename "$c") — a consumer's declared class identity is not derivable → whole-module coverage required (deferred to Gate A)" >&2
             fallback=whole
             continue
           }
           classes+=("$cc")
         done <<< "$consumers"
       else
-        echo "  2b tests/$module: $(basename "$f") — not runnable, no consumers found → whole module" >&2
+        echo "  2b tests/$module: $(basename "$f") — not runnable, no consumers found → whole-module coverage required (deferred to Gate A)" >&2
         fallback=whole
       fi
     fi
@@ -261,6 +265,28 @@ pg2b::plan_module() {
   fi
 }
 
+# A broad inventory belongs to Gate A, not to a cheap lane check. Do not truncate
+# a selection and pretend its first five classes cover the shared helper.
+pg2b::plan_module() {
+  local plan
+  plan="$(pg2b::affected_module "$@")" || return 1
+  local -a words=()
+  mapfile -t words <<< "$plan"
+  case "${words[0]}" in
+    whole) echo deferred ;;
+    focused)
+      if [ "${#words[@]}" -gt 6 ]; then
+        echo "  2b tests/$1: $((${#words[@]} - 1)) affected classes exceed the five-class budget → deferred to Gate A" >&2
+        echo deferred
+      else
+        printf '%s\n' "${words[@]}"
+      fi
+      ;;
+    none) echo none ;;
+    *) echo "  2b tests/$1: invalid affected-test plan" >&2; return 1 ;;
+  esac
+}
+
 # The stage's gradle argv for one module's plan, one argument per line — the exact
 # shape stage 2b passes to gradlew (the recording stand-in asserts it verbatim).
 pg2b::gradle_args() {
@@ -268,17 +294,25 @@ pg2b::gradle_args() {
   shift
   local plan="${1:-}"
   case "$plan" in
-    whole)
-      printf ':tests:%s:test\n' "$module"
-      ;;
     focused)
-      printf ':tests:%s:test\n' "$module"
       shift
+      if [ "$#" -lt 1 ] || [ "$#" -gt 5 ]; then
+        echo "  2b refused: focused plan must contain one to five exact classes" >&2
+        return 2
+      fi
       local c
+      for c in "$@"; do
+        [[ "$c" =~ ^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$ ]] || {
+          echo "  2b refused: invalid exact class: $c" >&2
+          return 2
+        }
+      done
+      printf ':tests:%s:test\n' "$module"
       for c in "$@"; do printf -- '--tests\n%s\n' "$c"; done
       printf -- '-x\n:tests:%s:verifyTestsExecuted\n' "$module"
       ;;
-    # "none": no output — nothing to run for this module.
+    none|deferred) ;; # no task; deferred coverage is recorded by the caller
+    *) echo "  2b refused: unbounded or invalid plan: $plan" >&2; return 2 ;;
   esac
 }
 
@@ -376,7 +410,7 @@ EOF
   # The brief's root case: FooTest.kt declaring runnable FooTest AND BarTest — the
   # delivered selector scheduled only FooTest and returned green with a real case
   # dropped. Two runnable declarations in one file are not derivable with certainty
-  # at class level: the whole module runs, which drops nothing.
+  # at class level: defer full coverage to Gate A.
   cat > "$src/FooTest.kt" <<'EOF'
 package co.x
 
@@ -426,7 +460,7 @@ class PkgMismatchTest {
     fun p() {}
 }
 EOF
-  # Mixed helper/test declarations in one file: identity not derivable → whole module.
+  # Mixed helper/test declarations in one file: identity not derivable → deferred to Gate A.
   cat > "$src/MixedDeclarations.kt" <<'EOF'
 package co.x
 
@@ -465,14 +499,14 @@ EOF
   ck "helper-with-consumers" "focused co.x.HelperUserTest" "$src/OriginHelper.kt"
   # An interface: its implementors run, focused.
   ck "interface-with-implementors" "focused co.x.ImplTest" "$src/CanFoo.kt"
-  # Consumers that cannot be established: the WHOLE module — never a silent skip.
-  ck "helper-without-consumers" "whole" "$src/OrphanHelper.kt"
-  # A deleted/renamed file: consumers not derivable → whole module.
-  ck "deleted-or-renamed" "whole" "$src/GhostTest.kt"
-  # The knobs changed → whole module (unchanged rule).
-  ck "build-file-changed" "whole" "$build"
-  # A changed test RESOURCE can affect any test that loads it → whole module.
-  ck "resource-changed" "whole" "$res/fixture.json"
+  # Consumers that cannot be established: defer to Gate A — never a silent skip.
+  ck "helper-without-consumers" "deferred" "$src/OrphanHelper.kt"
+  # A deleted/renamed file: consumers not derivable → deferred to Gate A.
+  ck "deleted-or-renamed" "deferred" "$src/GhostTest.kt"
+  # The knobs changed → deferred to Gate A.
+  ck "build-file-changed" "deferred" "$build"
+  # A changed test RESOURCE can affect any test that loads it → deferred to Gate A.
+  ck "resource-changed" "deferred" "$res/fixture.json"
   # An ordinary concrete test change stays focused — no module blow-up.
   ck "concrete-test-changed" "focused co.x.GammaBrowserTest" "$src/GammaBrowserTest.kt"
   # A file of the module that changed but carries no tests and no references
@@ -484,20 +518,20 @@ class Wiring {
     fun bean() = Object()
 }
 EOF
-  ck "wiring-without-consumers" "whole" "$src/Wiring.kt"
+  ck "wiring-without-consumers" "deferred" "$src/Wiring.kt"
 
   # --- the 342-c declared-identity assertions ---------------------------------
   # Two runnable classes in one file (FooTest.kt declaring FooTest AND BarTest): the
-  # delivered selector returned green having scheduled only FooTest. Now: whole module.
-  ck "two-runnable-classes-in-one-file" "whole" "$src/FooTest.kt"
+  # delivered selector returned green having scheduled only FooTest. Now: deferred to Gate A.
+  ck "two-runnable-classes-in-one-file" "deferred" "$src/FooTest.kt"
   # A file whose declared class differs from its file name: the DECLARED class runs.
   ck "misnamed-file-selects-declared-class" "focused co.x.ActualTest" "$src/Misnamed.kt"
   # An intermediate helper declared under a different name: its real consumer runs.
   ck "misnamed-intermediate-schedules-real-consumer" "focused co.x.ChildOfActualTest" "$src/MisnamedBase.kt"
   # Package/directory mismatch: the declared package names the class.
   ck "package-directory-mismatch-uses-declared-package" "focused co.y.PkgMismatchTest" "$src/mismatch/PkgMismatchTest.kt"
-  # A runnable test and a helper declared together: not derivable → whole module.
-  ck "mixed-helper-and-test-declarations" "whole" "$src/MixedDeclarations.kt"
+  # A runnable test and a helper declared together: not derivable → deferred to Gate A.
+  ck "mixed-helper-and-test-declarations" "deferred" "$src/MixedDeclarations.kt"
 
   # A runnable class beside a non-runnable helper owns tests AND has consumers.
   # Selecting only the helper's consumers silently drops the changed file's own test.
@@ -517,7 +551,7 @@ class OtherTest {
     fun other() {}
 }
 EOF
-  ck "runnable-and-object-with-consumer" "whole" "$src/OwnAndHelper.kt"
+  ck "runnable-and-object-with-consumer" "deferred" "$src/OwnAndHelper.kt"
 
   # The traversal runs inside command substitution. An uncertainty flag set only
   # in that subshell must not disappear while its partial consumer list survives.
@@ -544,7 +578,7 @@ class IndirectTest : Intermediate() {
     fun indirect() {}
 }
 EOF
-  ck "uncertain-intermediate-with-known-consumer" "whole" "$src/RootBase.kt"
+  ck "uncertain-intermediate-with-known-consumer" "deferred" "$src/RootBase.kt"
 
   # --- the recording, refusing Gradle stand-in --------------------------------
   # Records the argv it is handed and REFUSES anything that is not a :tests:*:test
