@@ -28,6 +28,8 @@ import io.mockk.slot
 import io.mockk.verify
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
 import org.slf4j.LoggerFactory
 import org.springframework.mock.web.MockHttpServletRequest
 import org.springframework.mock.web.MockHttpServletResponse
@@ -62,6 +64,8 @@ class TemplateEditorControllerTest {
             every { engineFor(any()) } returns engine
         }
     private val drafts = mockk<TemplateDraftService>()
+    private val actorFixture = TemplateReleaseActorFixture()
+    private val actors = actorFixture.actors
     private val controller =
         TemplateEditorController(
             templates,
@@ -69,6 +73,7 @@ class TemplateEditorControllerTest {
             drafts,
             co.datapipelines.templates.TemplateService(templates),
             co.datapipelines.web.EVERYTHING_LENS,
+            actors,
         )
 
     private val userId = UUID.randomUUID()
@@ -478,8 +483,29 @@ class TemplateEditorControllerTest {
         model["selectedVersion"] shouldBe 1
         model["selectedStatus"] shouldBe "RELEASED"
         model["releasedAt"] shouldBe Instant.parse("2026-08-02T09:30:00Z")
-        model["releasedBy"] shouldBe userId.toString()
+        model["releasedBy"] shouldBe ActorNames.fallback(userId)
         (model["template"] as Template).body shouldBe "SELECT old FROM t"
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["human", "missing", "null", "service", "hostile"])
+    fun `source refresh resolves and renders its release actor`(case: String) {
+        authenticate()
+        val expected = actorFixture.prepare(case, userId)
+        every { templates.findLatest(any(), "test/my_template.sql") } returns sampleTemplate
+        every { templates.findVersion(any(), "test/my_template.sql", 1) } returns olderVersion
+        every { templates.findVersionDetail(any(), "test/my_template.sql", 1) } returns
+            releasedDetail(1).copy(releasedBy = userId.takeUnless { case == "null" })
+        every { templates.findDraftDetail(any(), any()) } returns null
+        val page = ExtendedModelMap()
+
+        val view = controller.source("test/my_template.sql", 1, page)
+
+        assertTemplateProvenance(renderTemplateProvenance(page, view), expected, userId)
+        page["releasedBy"] shouldBe expected
+        page["selectedVersion"] shouldBe 1
+        page["readOnly"] shouldBe true
+        actorFixture.lookups shouldBe if (case == "null") emptyList() else listOf(setOf(userId))
     }
 
     @Test

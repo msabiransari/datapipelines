@@ -10,11 +10,10 @@ import java.util.UUID
  *
  * 106: the explorer detail states *who* made each version, and every stamp in
  * `pipeline_versions` / `template_versions` / `pipeline_executions` is a bare `users.id`.
- * Rendering the UUID was the pre-106 behaviour and it is what the template-editor's source
- * pane still does ("this app resolves no display name for it anywhere"); a folder-path screen
- * that reads like prose cannot also print a 36-character id in a row of four facts.
+ * Rendering the UUID was the pre-106 behaviour; version rows and source provenance use
+ * the same resolved display identity and missing-user fallback.
  *
- * ONE batched query per render (never one per row), exactly [PipelineNames]' shape and for the
+ * Batched lookups (never one per version row), exactly [PipelineNames]' shape and for the
  * same reason: `dag` and `pipeline-contract` own the stamped rows and neither may depend on
  * `auth`'s user table, so the join happens web-side.
  *
@@ -38,6 +37,9 @@ class ActorNames(
             ) { rs, _ -> rs.getObject("id", UUID::class.java) to displayed(rs.getString("display_name"), rs.getString("kind")) }
             .toMap()
     }
+
+    /** A nullable release stamp: no actor means no lookup and no attribution fragment. */
+    fun displayName(actor: UUID?): String? = actor?.let { lookup(listOf(it))[it] ?: fallback(it) }
 
     companion object {
         /** A key's identity is named for its key (record §3.3); a person and the System account by their own name. */
