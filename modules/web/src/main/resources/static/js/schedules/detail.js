@@ -223,8 +223,9 @@
       .findPipelines(name)
       .then(function (r) {
         var hit = ((r.data || {}).items || []).filter(function (p) { return p.name === name; })[0];
-        // A link built here is not boosted (htmx processed the page before it existed), so the
-        // editor is the full document load it must be (the rule the workspace's own links state).
+        // A link built here is not boosted (htmx processed the page before it existed), so it
+        // is an ordinary full document load; the editor initialises either way (#460's runtime
+        // owns activation on a full load and on a prepared in-shell arrival alike).
         if (hit) {
           use("/pipelines/" + encodeURIComponent(hit.id) + "/editor");
         } else {

@@ -2326,9 +2326,10 @@
   /*
    * #349 — the version selector's and the Versions tab's Open links: EVERY
    * `a[data-pe-version-link]` on the page applies its version IN PAGE instead of
-   * navigating. The href stays the canonical deep link (middle-click, no-JS, the
-   * explorer's full-document entry rule is untouched); a plain click here never
-   * reloads the document, because a reload would detach the page from an active run
+   * navigating. The href stays the canonical deep link (middle-click, no-JS, and the
+   * workspace's prepared in-shell entry from another screen is untouched); a plain click
+   * here never reloads the document, because a reload would detach the page from an active
+   * run
    * (spec §4.3: "Do not reload the document and lose an active run just to update the
    * dropdown"). Registered ONCE per document, reading the live component through the
    * teardown handle — the same pattern wireEventsScroll uses.

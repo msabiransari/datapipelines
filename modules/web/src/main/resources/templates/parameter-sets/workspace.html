@@ -3,10 +3,11 @@
       th:replace="~{layouts/default :: page(~{::content})}">
 <th:block th:fragment="content">
 
-  <!--/* #374 — the global sidebar's current-leaf hook (nav-tree.js): which parameter set this page shows, by id AND
+  <!--/* #374/#460 — the global sidebar's current-leaf hook: which parameter set this page shows, by id AND
           full path, so the rail's Parameter Sets tree can mark the leaf and reveal its folders. It rides inside
-          #app-main, so a full-document entry, a boosted arrival and a history restore all carry it. The record is
-          the one this page already resolved through the caller's lens — nothing here is new information. */-->
+          #app-main, so any arrival — a full load, prepared in-shell navigation or a history restore — carries it.
+          The record is the one this page already resolved through the caller's lens — nothing here is new
+          information. */-->
   <span hidden data-nav-current="parameter-sets"
         th:attr="data-nav-current-id=${parameterSetId},data-nav-current-path=${navCurrentPath}"></span>
 

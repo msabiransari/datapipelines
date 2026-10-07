@@ -27,9 +27,9 @@
 
      OPEN: a version-row Open enters the read workspace at ITS OWN version. In the
      workspace the same anchor switches the viewed version IN PAGE (the client
-     intercepts a[data-pe-version-link]); from the explorer it is a full-document entry
-     link (the page's entry rule), so a non-current row opens the body it names, never
-     the default. -->
+     intercepts a[data-pe-version-link]); from another screen it is a prepared
+     in-shell navigation link (#460), so a non-current row opens the body it
+     names, never the default. -->
 <div xmlns:th="http://www.thymeleaf.org" th:fragment="versions" class="tplx-vlist"
      th:with="dialogTarget=${dialogTarget != null ? dialogTarget : '#pe-dialog'},
               dialogFrom=${dialogFrom}">

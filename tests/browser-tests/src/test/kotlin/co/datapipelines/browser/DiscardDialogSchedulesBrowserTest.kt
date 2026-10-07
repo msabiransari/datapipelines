@@ -243,6 +243,11 @@ class DiscardDialogSchedulesBrowserTest : BrowserSuite() {
         on.locator("#pipeline-list-wrapper a.tpl-result").first().click()
         on.waitForURL(PipelineWorkspaceUrl.PATTERN)
         on.waitForSelector(".pe-root")
+        // #460 correction: the row's click is a prepared boosted swap, so the editor's Alpine
+        // runtime activates asynchronously. Its `data-pe-runtime-epoch` is stamped only after
+        // `Alpine.initTree` binds the tab's `@click`; clicking before it landed dropped the
+        // click and the version row never appeared (#469). Readiness, not a sleep.
+        on.waitForSelector(".pe-root[data-pe-runtime-epoch]")
         on.locator("#pe-tab-versions").click()
         on.waitForSelector("#pe-pane-versions tr[data-version-row]")
     }

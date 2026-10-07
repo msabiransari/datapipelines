@@ -293,10 +293,10 @@
           <div class="app-nav-tree app-rail-label" id="nav-tree-pipelines" data-nav-tree="pipelines" hidden
                th:attr="data-nav-workspace=${activeWorkspace}"></div>
         </div>
-        <!-- #398 — the Templates branch is the pattern's declared reuse: the item link is the
-             catalog, the toggle opens the lazy sidebar tree (the same /partials/templates
-             fragments, scope=nav), and a leaf is a full-document link into the template
-             workspace /templates/{name}. -->
+        <!-- #398/#460 — the Templates branch is the pattern's declared reuse: the item link is
+             the catalog, the toggle opens the reusable lazy sidebar tree (/api/v1/templates/tree),
+             and a leaf is prepared main-content navigation into the template workspace
+             /templates/{name}, preserving the rail. -->
         <div class="app-nav-branch" data-nav-branch="templates">
           <a th:href="@{/templates}" class="app-nav-link" data-nav-section="/templates"
              data-nav-group="Build" data-nav-label="Templates"

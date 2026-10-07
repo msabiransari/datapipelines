@@ -1,6 +1,7 @@
 package co.datapipelines.browser
 
 import com.microsoft.playwright.Page
+import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
@@ -131,13 +132,18 @@ class RoleVisibilityBrowserTest : BrowserSuite() {
 
         val viewer = signIn("rbv-exec-viewer", role = "viewer")
         val badResponses = mutableListOf<String>()
-        var editorDocumentStatus = 0
+        var editorAdmissionStatus = 0
         viewer.page.onResponse { response ->
             if (response.status() >= 400) {
                 badResponses += "${response.status()} ${response.request().method()} ${response.url()}"
             }
-            if (response.request().isNavigationRequest() && PipelineWorkspaceUrl.matches(response.url())) {
-                editorDocumentStatus = response.status()
+            // #460 correction: the workspace is now admitted by a PREPARED BOOSTED swap (an
+            // XHR into the persistent shell), not a document navigation, so the admission is
+            // the destination response's status regardless of request kind. The viewer's
+            // editor-loads-and-executes contract is unchanged — #149's full-document transport
+            // was the old mechanism, not the requirement.
+            if (PipelineWorkspaceUrl.matches(response.url())) {
+                editorAdmissionStatus = response.status()
             }
         }
 
@@ -150,6 +156,15 @@ class RoleVisibilityBrowserTest : BrowserSuite() {
         open.waitFor()
         badResponses shouldBe emptyList()
 
+        // #460 section A: markers that survive only if the row opens the workspace IN the shell,
+        // and a count that must stay zero — the entry reuses the already-mounted rail rather than
+        // re-fetching a tree level.
+        var treeRequests = 0
+        viewer.page.onRequest { if (it.url().contains("/tree")) treeRequests++ }
+        viewer.page.evaluate(
+            "() => { window.__dpDoc = document; window.__dpRail = document.getElementById('app-rail'); }",
+        )
+
         open.click()
         viewer.page.waitForURL(PipelineWorkspaceUrl.PATTERN)
         // LOAD, not the cards: at base the route answers 403 and no card ever comes, so the
@@ -160,7 +175,14 @@ class RoleVisibilityBrowserTest : BrowserSuite() {
         // listener first, so the failure names the refused request instead of timing out
         // on a note that never rendered.
         badResponses shouldBe emptyList()
-        editorDocumentStatus shouldBe 200
+        editorAdmissionStatus shouldBe 200
+        withClue("the editor opened in the shell — same document and rail, no tree refetch") {
+            viewer.page.evaluate(
+                "() => window.__dpDoc === document && " +
+                    "window.__dpRail === document.getElementById('app-rail')",
+            ) shouldBe true
+            treeRequests shouldBe 0
+        }
 
         // The graph's node cards are the signal that the editor finished loading (the same
         // wait every editor walk uses).
