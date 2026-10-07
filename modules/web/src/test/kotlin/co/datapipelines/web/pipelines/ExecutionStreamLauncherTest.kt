@@ -32,6 +32,7 @@ import com.fasterxml.jackson.databind.json.JsonMapper
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
+import io.kotest.matchers.types.shouldBeSameInstanceAs
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.coEvery
 import io.mockk.every
@@ -80,6 +81,7 @@ class ExecutionStreamLauncherTest {
     @OptIn(ExperimentalCoroutinesApi::class)
     private fun launcher(
         scope: CoroutineScope = CoroutineScope(UnconfinedTestDispatcher()),
+        store: IdempotencyStore = idempotencyStore,
         executorFactory: (co.datapipelines.web.sse.WebEventEmitter) -> PipelineExecutor,
     ): ExecutionStreamLauncher =
         ExecutionStreamLauncher(
@@ -109,7 +111,7 @@ class ExecutionStreamLauncherTest {
             executionRepository = executionRepository,
             launcher =
                 co.datapipelines.application.ExecutionLauncher(
-                    idempotencyStore = idempotencyStore,
+                    idempotencyStore = store,
                     idempotencyTtlSeconds = IdempotencyProperties().ttlSeconds,
                     metrics = WebIdempotencyMetrics(WebMetrics(SimpleMeterRegistry())),
                 ),
@@ -151,6 +153,253 @@ class ExecutionStreamLauncherTest {
             parameters = emptyMap(),
             nodes = emptyList(),
         )
+
+    private data class Release(
+        val user: UUID,
+        val key: String,
+        val execution: UUID,
+    )
+
+    private class RecordingReservations : IdempotencyStore {
+        val held = mutableMapOf<Pair<UUID, String>, UUID>()
+        val releases = mutableListOf<Release>()
+        val trace = mutableListOf<String>()
+        var cleanupError: Throwable? = null
+
+        override fun reserve(
+            userId: UUID,
+            idempotencyKey: String,
+            requestHash: String,
+            executionId: UUID,
+            ttlSeconds: Long,
+        ): IdempotencyOutcome {
+            val key = userId to idempotencyKey
+            val existing = held[key]
+            if (existing != null) return IdempotencyOutcome.Existing(existing)
+            held[key] = executionId
+            trace += "reserved"
+            return IdempotencyOutcome.Reserved(executionId)
+        }
+
+        override fun release(
+            userId: UUID,
+            idempotencyKey: String,
+            executionId: UUID,
+        ): Boolean {
+            releases += Release(userId, idempotencyKey, executionId)
+            trace += "released"
+            cleanupError?.let { throw it }
+            return held.remove(userId to idempotencyKey, executionId)
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["exception", "error"])
+    fun `construction failure releases its exact reservation before propagating and retry starts`(kind: String) {
+        val store = RecordingReservations()
+        val failure = if (kind == "error") AssertionError("construction") else IllegalStateException("construction")
+        var reserved: UUID? = null
+        val launch =
+            launcher(store = store) {
+                reserved = store.held[userId to "construction"]
+                throw failure
+            }
+        val caught = shouldThrow<Throwable> { launch.launch(launchRequest(key = "construction")) }
+        store.trace += "propagated"
+        val trace = store.trace.toList()
+        assertRetryStarts(store, "construction")
+
+        caught shouldBeSameInstanceAs failure
+        store.releases shouldBe listOf(Release(userId, "construction", requireNotNull(reserved)))
+        trace shouldBe listOf("reserved", "released", "propagated")
+    }
+
+    @Test
+    fun `failure before emitter construction still releases the claimed reservation`() {
+        val store = RecordingReservations()
+        val request = launchRequest(key = "context")
+        val error =
+            shouldThrow<co.datapipelines.auth.WorkspaceMembershipRequiredException> {
+                launcher(
+                    store = store,
+                ) { error("factory must not run") }.launch(request.copy(principal = request.principal.copy(workspace = null)))
+            }
+        error.message shouldBe "Principal has no active workspace (zero memberships)"
+        store.releases.single().user shouldBe userId
+        store.releases.single().key shouldBe "context"
+        store.trace shouldBe listOf("reserved", "released")
+        assertRetryStarts(store, "context")
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @ParameterizedTest
+    @ValueSource(booleans = [false, true])
+    fun `executor Error releases only before first emit and reaches original error boundary`(emitFirst: Boolean) {
+        runTest {
+            val store = RecordingReservations()
+            val failure = AssertionError("executor")
+            val failures = mutableListOf<Throwable>()
+            val job = kotlinx.coroutines.SupervisorJob()
+            val scope =
+                CoroutineScope(
+                    StandardTestDispatcher(testScheduler) + job +
+                        kotlinx.coroutines.CoroutineExceptionHandler { _, error ->
+                            store.trace += "propagated"
+                            failures += error
+                        },
+                )
+            val executor = mockk<PipelineExecutor>()
+            lateinit var emitter: co.datapipelines.web.sse.WebEventEmitter
+            var reserved: UUID? = null
+            coEvery { executor.execute(any()) } coAnswers {
+                if (emitFirst) {
+                    emitter.emit(ExecutionStarted(requireNotNull(reserved), pipelineId, 1, emptyMap(), startedAt = Instant.now()))
+                }
+                throw failure
+            }
+            try {
+                val sse =
+                    launcher(scope = scope, store = store) {
+                        emitter = it
+                        reserved = store.held[userId to "executor"]
+                        executor
+                    }.launch(launchRequest(key = "executor"))
+                runCurrent()
+
+                failures.single() shouldBeSameInstanceAs failure
+                ReflectionTestUtils.getField(sse, "failure") shouldBe null
+                registry.activeStreams shouldBe 0
+                if (emitFirst) {
+                    store.releases shouldBe emptyList()
+                    store.held[userId to "executor"] shouldBe reserved
+                    store.trace shouldBe listOf("reserved", "propagated")
+                } else {
+                    store.releases shouldBe listOf(Release(userId, "executor", requireNotNull(reserved)))
+                    store.trace shouldBe listOf("reserved", "released", "propagated")
+                    assertRetryStarts(store, "executor")
+                }
+            } finally {
+                job.cancel()
+            }
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @ParameterizedTest
+    @ValueSource(booleans = [false, true])
+    fun `scope cancellation without running body releases once and retry starts`(cancelBeforeLaunch: Boolean) {
+        runTest {
+            val store = RecordingReservations()
+            val job = kotlinx.coroutines.SupervisorJob()
+            val scope = CoroutineScope(StandardTestDispatcher(testScheduler) + job)
+            val executor = mockk<PipelineExecutor>()
+            var reserved: UUID? = null
+            if (cancelBeforeLaunch) job.cancel()
+            launcher(scope = scope, store = store) {
+                reserved = store.held[userId to "cancelled"]
+                executor
+            }.launch(launchRequest(key = "cancelled"))
+            if (!cancelBeforeLaunch) job.cancel()
+            runCurrent()
+            job.join()
+
+            io.mockk.coVerify(exactly = 0) { executor.execute(any()) }
+            store.releases shouldBe listOf(Release(userId, "cancelled", requireNotNull(reserved)))
+            assertRetryStarts(store, "cancelled")
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["exception", "error"])
+    fun `construction cleanup failure preserves identical original and retained reservation`(kind: String) {
+        val store = RecordingReservations().apply { cleanupError = AssertionError("cleanup sentinel") }
+        val failure = if (kind == "error") AssertionError("original sentinel") else IllegalStateException("original sentinel")
+        var reserved: UUID? = null
+        val caught =
+            shouldThrow<Throwable> {
+                launcher(store = store) {
+                    reserved = store.held[userId to "cleanup"]
+                    throw failure
+                }.launch(launchRequest(key = "cleanup"))
+            }
+        store.trace += "propagated"
+
+        caught shouldBeSameInstanceAs failure
+        store.releases shouldBe listOf(Release(userId, "cleanup", requireNotNull(reserved)))
+        store.held[userId to "cleanup"] shouldBe reserved
+        store.trace shouldBe listOf("reserved", "released", "propagated")
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `executor Error survives cleanup Error and reaches handler after release attempt`() {
+        runTest {
+            val store = RecordingReservations().apply { cleanupError = AssertionError("cleanup sentinel") }
+            val failure = AssertionError("original sentinel")
+            val failures = mutableListOf<Throwable>()
+            val job = kotlinx.coroutines.SupervisorJob()
+            val scope =
+                CoroutineScope(
+                    StandardTestDispatcher(testScheduler) + job +
+                        kotlinx.coroutines.CoroutineExceptionHandler { _, error ->
+                            store.trace += "propagated"
+                            failures += error
+                        },
+                )
+            val executor = mockk<PipelineExecutor>()
+            coEvery { executor.execute(any()) } throws failure
+            try {
+                launcher(scope = scope, store = store) { executor }.launch(launchRequest(key = "cleanup"))
+                val reserved = requireNotNull(store.held[userId to "cleanup"])
+                runCurrent()
+
+                failures.single() shouldBeSameInstanceAs failure
+                store.releases shouldBe listOf(Release(userId, "cleanup", reserved))
+                store.trace shouldBe listOf("reserved", "released", "propagated")
+                store.held[userId to "cleanup"] shouldBe reserved
+            } finally {
+                job.cancel()
+            }
+        }
+    }
+
+    @Test
+    fun `unkeyed construction Error propagates without reservation or release`() {
+        val store = RecordingReservations()
+        val failure = AssertionError("construction")
+        shouldThrow<AssertionError> { launcher(store = store) { throw failure }.launch(launchRequest()) } shouldBeSameInstanceAs failure
+        store.held shouldBe emptyMap()
+        store.releases shouldBe emptyList()
+        store.trace shouldBe emptyList()
+    }
+
+    @Test
+    fun `construction cleanup preserves another user and a replacement execution`() {
+        val store = RecordingReservations()
+        val otherUser = UUID.randomUUID()
+        val otherExecution = UUID.randomUUID()
+        val replacement = UUID.randomUUID()
+        store.held[otherUser to "ownership"] = otherExecution
+        var reserved: UUID? = null
+        shouldThrow<AssertionError> {
+            launcher(store = store) {
+                reserved = store.held[userId to "ownership"]
+                store.held[userId to "ownership"] = replacement
+                throw AssertionError("construction")
+            }.launch(launchRequest(key = "ownership"))
+        }
+        store.releases shouldBe listOf(Release(userId, "ownership", requireNotNull(reserved)))
+        store.held shouldBe mapOf((otherUser to "ownership") to otherExecution, (userId to "ownership") to replacement)
+    }
+
+    private fun assertRetryStarts(
+        store: RecordingReservations,
+        key: String,
+    ) {
+        val retry = co.datapipelines.application.ExecutionLauncher(store, IdempotencyProperties().ttlSeconds)
+        val decision = retry.decide(launchRequest(key = key).toLaunch())
+        (decision is co.datapipelines.application.LaunchDecision.Start) shouldBe true
+    }
 
     private fun refusal(kind: String): Exception =
         when (kind) {
@@ -307,6 +556,7 @@ class ExecutionStreamLauncherTest {
         val result = launcher { error("must not start a fresh execution") }.launch(launchRequest(key = "key-1"))
 
         result shouldBe followEmitter
+        verify(exactly = 0) { idempotencyStore.release(any(), any(), any()) }
     }
 
     /** #324 — the row decides when the log has no entry yet: terminal keeps the 410, else follow. */

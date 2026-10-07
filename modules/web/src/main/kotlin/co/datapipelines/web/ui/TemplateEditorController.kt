@@ -38,9 +38,10 @@ class TemplateEditorController(
     /** 178 — the promoter lens on the source-column read (the writes are an author's). */
     private val reads: TemplateService,
     private val lens: PromoterLens,
+    actors: ActorNames,
 ) {
     /** The source column's one rule, shared with the transform face's routes (7d). */
-    private val source = TemplateSourceModel(reads)
+    private val source = TemplateSourceModel(reads, actors)
 
     /**
      * #398 — the compatibility redirect: `GET /templates/editor?name=&version=&tab=` is a 302

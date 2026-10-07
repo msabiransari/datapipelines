@@ -12,7 +12,7 @@
 # DEVELOPMENT.md §9.4): (1) lint + the four root audits over the whole tree; (2) `check` of every
 # `modules/*` module the diff touched — its unfiltered tests, every other test task it carries
 # (scripting's breachSuite) and its coverage floor, reported as a number; (2b) for the two `tests/*` modules, ONLY the
-# test classes the diff changed or added (their build file changed → the whole module),
+# affected test classes, at most five per module (broader/uncertain plans → Gate A),
 # with the zero-test guard skipped — the E2E and browser suites are the expensive part of
 # a full build, and the orchestrator's gate on the merge SHA runs them whole; (3) the
 # cross-cutting guard classes, filtered, with the zero-test guard skipped for those
@@ -40,11 +40,14 @@ source "$ROOT/scripts/pregate-2b-lib.sh"
 # shellcheck source=scripts/pregate-results-lib.sh
 source "$ROOT/scripts/pregate-results-lib.sh"
 if [ "${1:-}" = "--self-test" ]; then
-  pg2b::self_test; s_sel=$?
-  pgres::self_test; s_res=$?
-  [ "$s_sel" -eq 0 ] && [ "$s_res" -eq 0 ]
+  (pg2b::self_test); s_sel=$?
+  (pgres::self_test); s_res=$?
+  bash "$ROOT/scripts/pregate-safety-test.sh"; s_safe=$?
+  [ "$s_sel" -eq 0 ] && [ "$s_res" -eq 0 ] && [ "$s_safe" -eq 0 ]
   exit $?
 fi
+source "$ROOT/scripts/lib/verification-lock.sh"
+verification::lock pregate "$ROOT" || exit $?
 BASE="${1:-origin/main}"; LOGDIR="$ROOT/.pregate-logs"; mkdir -p "$LOGDIR"
 
 # run() appends `-Pdp.browser.ciPatience=true` (#438): the pre-gate's browser-class stage
@@ -53,7 +56,9 @@ BASE="${1:-origin/main}"; LOGDIR="$ROOT/.pregate-logs"; mkdir -p "$LOGDIR"
 # this stage's argv are built by pg2b::gradle_args and are unaffected (--self-test pins them).
 run() { # run <logfile> <args...> → echoes exit code; never pipes gradle
   local log="$1"; shift
-  ./gradlew "$@" -Pdp.browser.ciPatience=true > "$log" 2>&1
+  ./gradlew "$@" -Pdp.browser.ciPatience=true \
+    --no-parallel --max-workers=1 -Pdp.test.forks=1 -Pdp.test.forks.e2e=1 \
+    9>&- > "$log" 2>&1
   echo $?
 }
 
@@ -76,6 +81,7 @@ echo " Pre-gate   |   $(date '+%Y-%m-%d %H:%M:%S %z')   |   base $BASE ($mb)"
 echo " touched modules: ${touched:-(none)}"
 echo " touched tests/ modules: ${touched_tests:-(none)}"
 echo " browser patience: CI's 90 s per action (-Pdp.browser.ciPatience=true, #438)"
+echo " resource limit: serial tasks, one worker, one test fork; shared gate/pregate lock"
 echo " logs: $LOGDIR"
 echo " evidence: $RUN_DIR"
 echo "=============================================================="
@@ -147,18 +153,17 @@ else
 fi
 
 # --- 2b. tests/* modules: the changed test classes and their affected consumers ------
-# A changed `tests/<m>/build.gradle.kts` means the knobs changed → that module unfiltered.
+# Build/resource changes and uncertain identities defer coverage to Gate A.
 # The selection itself lives in scripts/pregate-2b-lib.sh (drivable by --self-test): a
 # changed CONCRETE test class runs focused by class; a changed file that is not runnable —
 # an abstract base, an interface, an object, a helper — schedules its REAL runnable
 # consumers, found transitively through intermediate bases; when consumers cannot be
-# established (orphan helper, deleted/renamed file, changed test resource) the fallback is
-# the WHOLE module. The plan is never empty while test sources changed: the abstract/sealed
-# SKIP this stage once had let a BrowserSuite-only change pass without any browser class
-# running (#342 round review, 2026-09-30). The module's zero-test guard is skipped (a
-# filtered run always trips it — §9.4); the merge gate runs these modules whole.
+# established, or more than five classes are affected, coverage is explicitly DEFERRED.
+# Never expand a lane check into a full suite (#472). The module's zero-test guard is
+# skipped for focused runs; the merge gate runs these modules whole.
 t2b=0
 t2b_ran=()
+t2b_deferred=()
 if [ -n "$touched_tests" ]; then
   targs=()
   for m in $touched_tests; do
@@ -170,11 +175,25 @@ if [ -n "$touched_tests" ]; then
       echo "  2b tests/$m: no changed files → nothing to run here"
       continue
     fi
-    plan="$(pg2b::plan_module "$m" "$ROOT/tests/$m/build.gradle.kts" "$ROOT/tests/$m/src/test/kotlin" ${mfiles[@]+"${mfiles[@]}"})"
+    if ! plan="$(pg2b::plan_module "$m" "$ROOT/tests/$m/build.gradle.kts" "$ROOT/tests/$m/src/test/kotlin" ${mfiles[@]+"${mfiles[@]}"})"; then
+      echo "  2b tests/$m: selection failed" >&2
+      t2b=2
+      continue
+    fi
+    if [ "$plan" = deferred ]; then
+      t2b_deferred+=("tests/$m")
+      echo "  2b tests/$m: DEFERRED to Gate A (broad or uncertain affected tests)"
+      pgres::manifest_stage "$MANIFEST" "2b-$m" deferred 0 "Gate-A-required" || snap=1
+      continue
+    fi
     margs=()
+    if ! margv="$(pg2b::gradle_args "$m" $plan)"; then
+      t2b=2
+      continue
+    fi
     while IFS= read -r ga; do
       [ -n "$ga" ] && margs+=("$ga")
-    done < <(pg2b::gradle_args "$m" $plan)
+    done <<< "$margv"
     if [ "${#margs[@]}" -gt 0 ]; then
       targs+=("${margs[@]}")
       t2b_ran+=("tests/$m")
@@ -182,8 +201,10 @@ if [ -n "$touched_tests" ]; then
       echo "  2b tests/$m: touched, but no test source changed → nothing to run here"
     fi
   done
-  if [ ${#targs[@]} -gt 0 ]; then
+  if [ "$t2b" -eq 0 ] && [ ${#targs[@]} -gt 0 ]; then
     t2b=$(run "$LOGDIR/2b-tests-modules.log" "${targs[@]}" --continue)
+  else
+    t2b_ran=()
   fi
 fi
 echo "  2b tests/* changed classes                         EXIT=$t2b"
@@ -253,9 +274,12 @@ pgres::manifest_stage "$MANIFEST" stage-4 executed "$cmp" "compileTestKotlin-all
 # lives, and the lander reads a delivered lane's verdict from here (2026-10-02 — until then it had to
 # re-derive it from the five step logs).
 verdict() { # verdict PASS|FAIL → one line in .pregate-logs/0-verdict.log
-  echo "PRE-GATE $1 base=$BASE merge-base=$(git rev-parse --short "$mb" 2>/dev/null || echo "$mb") head=$(git rev-parse --short HEAD) at=$(date -u '+%Y-%m-%dT%H:%M:%SZ') lint=$lint mod=$mod t2b=$t2b grd=$grd cmp=$cmp snap=$snap run=$RUN_ID" >> "$LOGDIR/0-verdict.log"
+  echo "PRE-GATE $1 base=$BASE merge-base=$(git rev-parse --short "$mb" 2>/dev/null || echo "$mb") head=$(git rev-parse --short HEAD) at=$(date -u '+%Y-%m-%dT%H:%M:%SZ') lint=$lint mod=$mod t2b=$t2b grd=$grd cmp=$cmp snap=$snap run=$RUN_ID deferred=${t2b_deferred[*]:-none}" >> "$LOGDIR/0-verdict.log"
 }
 echo "--------------------------------------------------------------"
+if [ "${#t2b_deferred[@]}" -gt 0 ]; then
+  echo "  DEFERRED: ${t2b_deferred[*]} — full-suite coverage requires Gate A; not exercised here"
+fi
 # `snap` joins the decision: a copy/manifest failure refuses a PASS and is reported
 # alongside the original five stage exits, never in place of them.
 if [ "$lint" -eq 0 ] && [ "$mod" -eq 0 ] && [ "$t2b" -eq 0 ] && [ "$grd" -eq 0 ] && [ "$cmp" -eq 0 ] && [ "$snap" -eq 0 ]; then

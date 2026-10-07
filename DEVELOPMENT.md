@@ -752,22 +752,21 @@ failed two gates on floors no pregate had run, #297); (2b) for the two `tests/*`
 changed test classes, focused — where the changed file is not itself a runnable test class (an
 abstract base, an interface, an object, a helper), its real runnable consumers run, found through
 intermediate bases; when consumers cannot be established — an orphan helper, a deleted or renamed
-file, a changed test resource or build file — the WHOLE module runs. The selection reads the
-file's DECLARED class, never its file name: a runnable file schedules the one concrete class it
-declares, and a file whose identity is not derivable — zero or several concrete declarations in
-one file, or an unparseable declaration line — runs the whole module rather than focusing on a
-guess, so no declaration can silently disappear behind a partial parse (342-c). The selection is never a
-no-op while test sources changed: an earlier version skipped abstract/sealed files, and a lane
-editing the browser suite's shared base passed stage 2b without any browser test executing
-(#342's round review, 2026-09-30). `./scripts/pregate.sh --self-test` drives that selector over
-isolated fixtures and a recording, refusing Gradle stand-in and asserts the real consumer
-selection — run it after changing the selector; (3) the
+file, a changed test resource or build file — coverage is **DEFERRED to Gate A**.
+The selection uses declared class names, never file names. An ambiguous declaration is also
+deferred. At most **five exact classes per test module** run; larger selections (including a
+shared base affecting most browser classes) are deferred in their entirety, never truncated.
+Pregate cannot emit an unfiltered `tests/*:test` task. Deferred modules appear in the console,
+the run manifest and the verdict's `deferred=` field; a pregate PASS does not claim those tests
+ran. Full browser/integration coverage belongs to the lander's Gate A and CI.
+`./scripts/pregate.sh --self-test` checks the selector, resource limits, evidence and overlap
+refusal using isolated fixtures and a refusing Gradle stand-in; (3) the
 cross-cutting guard classes, filtered, with the zero-test guard skipped for those modules — the
 spec-drift tests, the route and read floors, the coverage scans, the page-count and keyword pins,
 the served-manual guards, the config-key drift tests (the list lives in the script; a new guard that
 reads the whole tree or the docs is added there in the same commit). Iterate on its output,
-then run the gate once. It is not the gate: its exit code decides nothing about a merge. Every
-run appends its verdict line — `PRE-GATE PASS|FAIL`, the base, the merge-base, HEAD, the UTC time,
+then deliver the lane for the lander's gate. It is not the gate: its exit code decides nothing
+about a merge. Every run appends its verdict line — `PRE-GATE PASS|FAIL`, the base, the merge-base, HEAD, the UTC time,
 the five stage exits, `snap` and the run id — to `.pregate-logs/0-verdict.log`, which is where the
 lander reads a delivered lane's verdict (the terminal is the only other place it is printed).
 Measured need (five lanes, 2026-09-19 to 21): 0–3 extra full gates each, all on lint,
@@ -775,6 +774,16 @@ cross-cutting guards or foreign fixtures. Both this script and `scripts/gate.sh`
 `-Pdp.browser.ciPatience=true` to every Gradle invocation (#438), so the browser suite inside a
 gate or a pre-gate waits CI's 90 s per action while a plain `./gradlew :tests:browser-tests:test`
 keeps 30 s.
+
+**Local resource protection (#472).** Pregate runs serial Gradle tasks with
+`--no-parallel --max-workers=1 -Pdp.test.forks=1 -Pdp.test.forks.e2e=1`.
+Gate and pregate acquire the same nonblocking `flock` under
+`${XDG_CACHE_HOME:-~/.cache}/datapipelines/verification.lock` before touching logs or starting
+Gradle. A second wrapper exits 75 and prints the holder's PID, checkout and start time.
+Use the same cache root across sessions; never remove a held lock file. The kernel releases
+the lock when its holder exits. Standalone Gradle commands and old script versions do not
+participate: update lane copies before their next verification run and coordinate direct tests.
+This limits new wrapper runs; it does not change already-running builds or host OOM policy.
 
 **Per-stage evidence survives the run (#441).** Stage 3 reruns the guard classes FILTERED in
 modules stage 2 already ran, and Gradle deletes a test task's result directory before it writes:

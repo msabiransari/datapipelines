@@ -50,6 +50,7 @@ import org.springframework.data.redis.core.StringRedisTemplate
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter
 import java.time.Duration
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
 
 /** Everything the launcher needs to start one execution — already validated, already authorized. */
 data class ExecuteLaunch(
@@ -226,42 +227,65 @@ class ExecutionStreamLauncher(
         )
     }
 
+    @Suppress("LongMethod")
     private fun startFresh(
         request: ExecuteLaunch,
         executionId: UUID?,
     ): SseEmitter {
-        val sse = SseEmitter(NEVER_TIMEOUT)
-        val workspaceId = request.principal.requireWorkspace().id
-        val context =
-            ExecutionContext(
-                pipelineId = request.pipelineId,
-                pipelineVersion = request.pipelineVersion,
-                userId = request.principal.userId,
-                executedByKeyKind = request.principal.executedByKeyKind(),
-                correlationId = request.correlationId,
-                triggeredVia = ExecutionTrigger.REST,
-                parametersJson = request.parametersJson,
-                workspaceId = workspaceId,
-            )
-        val emitter =
-            WebEventEmitter(
-                context = context,
-                stream = null,
-                streams = streams,
-                eventLog = eventLog,
-                eventRepository = eventRepository,
-                executionRepository = executionRepository,
-                persistenceDispatcher = persistenceDispatcher,
-                lifecycleWriteTimeout = Duration.ofSeconds(executorConfig.lifecycleWriteTimeoutSeconds.toLong()),
-                metrics = executorMetrics,
-                eventRecorder = eventRecorder,
-            ) { onExecutionStarted(it, request, sse) }
-        val executor = executorFactory?.invoke(emitter) ?: newExecutor(emitter, workspaceId)
-
-        scope.launch {
-            runExecution(executor, request, emitter, sse, executionId, workspaceId)
+        var emitter: WebEventEmitter? = null
+        val releaseAttempted = AtomicBoolean(false)
+        val releaseNeverStarted = {
+            if (emitter?.emittedAny() != true && releaseAttempted.compareAndSet(false, true)) {
+                launcher.releaseNeverStarted(request.principal.userId, request.idempotencyKey, executionId)
+            }
         }
-        return sse
+        try {
+            val sse = SseEmitter(NEVER_TIMEOUT)
+            val workspaceId = request.principal.requireWorkspace().id
+            val context =
+                ExecutionContext(
+                    pipelineId = request.pipelineId,
+                    pipelineVersion = request.pipelineVersion,
+                    userId = request.principal.userId,
+                    executedByKeyKind = request.principal.executedByKeyKind(),
+                    correlationId = request.correlationId,
+                    triggeredVia = ExecutionTrigger.REST,
+                    parametersJson = request.parametersJson,
+                    workspaceId = workspaceId,
+                )
+            val eventEmitter =
+                WebEventEmitter(
+                    context = context,
+                    stream = null,
+                    streams = streams,
+                    eventLog = eventLog,
+                    eventRepository = eventRepository,
+                    executionRepository = executionRepository,
+                    persistenceDispatcher = persistenceDispatcher,
+                    lifecycleWriteTimeout = Duration.ofSeconds(executorConfig.lifecycleWriteTimeoutSeconds.toLong()),
+                    metrics = executorMetrics,
+                    eventRecorder = eventRecorder,
+                ) { onExecutionStarted(it, request, sse) }
+            emitter = eventEmitter
+            val executor = executorFactory?.invoke(eventEmitter) ?: newExecutor(eventEmitter, workspaceId)
+
+            // Completion also owns cleanup when cancellation prevents the body from ever running.
+            // The body's finally releases before a fatal error reaches the coroutine error boundary.
+            scope
+                .launch {
+                    try {
+                        runExecution(executor, request, eventEmitter, sse, executionId, workspaceId, releaseNeverStarted)
+                    } finally {
+                        releaseNeverStarted()
+                    }
+                }.invokeOnCompletion { releaseNeverStarted() }
+            return sse
+        } catch (
+            @Suppress("TooGenericExceptionCaught") error: Throwable,
+        ) {
+            releaseNeverStarted()
+            throw error
+        }
     }
 
     /** The stream registration + idempotency alias, at the first moment the real id exists. */
@@ -284,6 +308,7 @@ class ExecutionStreamLauncher(
         )
     }
 
+    @Suppress("LongParameterList")
     private suspend fun runExecution(
         executor: PipelineExecutor,
         request: ExecuteLaunch,
@@ -291,6 +316,7 @@ class ExecutionStreamLauncher(
         sse: SseEmitter,
         executionId: UUID?,
         workspaceId: UUID,
+        releaseNeverStarted: () -> Unit,
     ) {
         try {
             val result =
@@ -317,7 +343,7 @@ class ExecutionStreamLauncher(
             recordResultColumns(result)
         } catch (e: PipelineConcurrencyLimitException) {
             if (!emitter.emittedAny()) {
-                failBeforeStart(sse, emitter, e, request, executionId)
+                failBeforeStart(sse, emitter, e, releaseNeverStarted)
                 return
             }
             log.debug("Execution refused concurrency after its events were streamed.")
@@ -327,7 +353,7 @@ class ExecutionStreamLauncher(
             // pipeline_failed / a setup failure was streamed when anything was emitted; otherwise
             // the response is still uncommitted and the advice renders the envelope.
             if (!emitter.emittedAny()) {
-                failBeforeStart(sse, emitter, e, request, executionId)
+                failBeforeStart(sse, emitter, e, releaseNeverStarted)
                 return
             }
             log.debug("Execution ended with {} after its events were streamed.", e.code)
@@ -335,7 +361,7 @@ class ExecutionStreamLauncher(
             @Suppress("TooGenericExceptionCaught") e: Exception,
         ) {
             if (!emitter.emittedAny()) {
-                failBeforeStart(sse, emitter, e, request, executionId)
+                failBeforeStart(sse, emitter, e, releaseNeverStarted)
                 return
             }
             log.error("Execution failed outside the executor's mapped paths.", e)
@@ -348,10 +374,9 @@ class ExecutionStreamLauncher(
         sse: SseEmitter,
         emitter: WebEventEmitter,
         error: Exception,
-        request: ExecuteLaunch,
-        executionId: UUID?,
+        releaseNeverStarted: () -> Unit,
     ) {
-        launcher.releaseNeverStarted(request.principal.userId, request.idempotencyKey, executionId)
+        releaseNeverStarted()
         emitter.executionIdOrNull()?.let(streams::close)
         sse.completeWithError(error)
     }
