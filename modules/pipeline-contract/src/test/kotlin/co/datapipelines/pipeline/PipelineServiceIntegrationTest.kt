@@ -15,6 +15,8 @@ import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.CsvSource
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import java.util.UUID
 
@@ -54,6 +56,7 @@ class PipelineServiceIntegrationTest {
      */
     private val dashboardPins = mutableListOf<DashboardPin>()
     private val dashboardQuestions = mutableListOf<String>()
+    private var dashboardTargetVersion: Int? = null
 
     @BeforeAll
     fun connect() {
@@ -72,6 +75,7 @@ class PipelineServiceIntegrationTest {
         templateStatus = PipelineVersionStatus.RELEASED
         dashboardPins.clear()
         dashboardQuestions.clear()
+        dashboardTargetVersion = null
         service = serviceWith(AuthoringGuard(true))
     }
 
@@ -95,6 +99,7 @@ class PipelineServiceIntegrationTest {
                     TemplateVersionStatuses { _, id, _ -> if (id.isBlank()) null else templateStatus },
                     validator,
                     authoring,
+                    dashboards = recordingDashboards(),
                 ),
             authoring = authoring,
             draftTemplates = draftTemplates,
@@ -111,7 +116,10 @@ class PipelineServiceIntegrationTest {
                 version: Int,
             ): List<DashboardPin> {
                 dashboardQuestions += "live $pipelineName@$version"
-                return dashboardPins.toList()
+                return dashboardPins.filter {
+                    it.status != PipelineVersionStatus.DISCARDED &&
+                        (dashboardTargetVersion == null || dashboardTargetVersion == version)
+                }
             }
 
             override fun anyVersionPins(
@@ -136,6 +144,154 @@ class PipelineServiceIntegrationTest {
                 templateId: String,
             ) = Unit
         }
+
+    @ParameterizedTest
+    @CsvSource(
+        "true,true,true",
+        "true,true,false",
+        "true,false,true",
+        "true,false,false",
+        "false,true,true",
+        "false,true,false",
+        "false,false,true",
+        "false,false,false",
+    )
+    fun `462 both draft purge entry points refuse named pins before deleting executions`(
+        hashGuarded: Boolean,
+        sole: Boolean,
+        parent: Boolean,
+    ) {
+        val draft = purgeFixture(sole)
+        val id = draft.record.id
+        val version = checkNotNull(draft.version).version
+        if (parent) {
+            insertPurgeParent(draft.record.name, version)
+        } else {
+            dashboardPins += DashboardPin("test/boards/draft_pinner", 1, PipelineVersionStatus.DRAFT)
+        }
+        val before = repository.findVersionDetail(WORKSPACE_ID, id, version)
+        val pointer = repository.findByIdAnyStatus(WORKSPACE_ID, id)?.currentVersion
+        val error =
+            shouldThrow<DatapipelinesException> {
+                purgeVia(hashGuarded, draft)
+            }
+        error.code shouldBe PipelineErrorCodes.Versioning.PINNED
+        val evidence = if (parent) error.details["pinned_by"] else error.details["referencing_dashboards"]
+        evidence.toString() shouldContain if (parent) "test/purge_parent" else "test/boards/draft_pinner"
+        repository.findVersionDetail(WORKSPACE_ID, id, version) shouldBe before
+        repository.findByIdAnyStatus(WORKSPACE_ID, id)?.currentVersion shouldBe pointer
+        executionCount(id) shouldBe 1
+        dashboardQuestions shouldContainExactly listOf(if (sole) "any ${draft.record.name}" else "live ${draft.record.name}@$version")
+    }
+
+    @ParameterizedTest
+    @CsvSource("true,true", "true,false", "false,true", "false,false")
+    fun `462 unpinned purges succeed and exact pins on another version do not block`(
+        hashGuarded: Boolean,
+        sole: Boolean,
+    ) {
+        val draft = purgeFixture(sole)
+        if (!sole) insertPurgeParent(draft.record.name, 1)
+        purgeVia(hashGuarded, draft)
+        repository.findDraftDetail(WORKSPACE_ID, draft.record.id) shouldBe null
+        executionCount(draft.record.id) shouldBe 0
+        (repository.findByIdAnyStatus(WORKSPACE_ID, draft.record.id) == null) shouldBe sole
+    }
+
+    @ParameterizedTest
+    @CsvSource("true", "false")
+    fun `462 other workspace parent pins neither block nor disclose`(hashGuarded: Boolean) {
+        val draft = purgeFixture(sole = true)
+        val other = UUID.randomUUID()
+        jdbc.update("INSERT INTO workspaces (id, name, display_name) VALUES (:id, 'other462', 'Other')", mapOf("id" to other))
+        insertPurgeParent(draft.record.name, 1, other)
+        purgeVia(hashGuarded, draft)
+        repository.findByIdAnyStatus(WORKSPACE_ID, draft.record.id) shouldBe null
+    }
+
+    @ParameterizedTest
+    @CsvSource("true,true", "true,false", "false,true", "false,false")
+    fun `462 historical dashboard pins block entity purge but not a nonsole draft`(
+        hashGuarded: Boolean,
+        sole: Boolean,
+    ) {
+        val draft = purgeFixture(sole)
+        dashboardPins += DashboardPin("test/boards/historical", 1, PipelineVersionStatus.DISCARDED)
+        if (sole) {
+            val error = shouldThrow<DatapipelinesException> { purgeVia(hashGuarded, draft) }
+            error.code shouldBe PipelineErrorCodes.Versioning.PINNED
+            error.details["referencing_dashboards"].toString() shouldContain "test/boards/historical"
+            executionCount(draft.record.id) shouldBe 1
+        } else {
+            purgeVia(hashGuarded, draft)
+            repository.findDraftDetail(WORKSPACE_ID, draft.record.id) shouldBe null
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource("true", "false")
+    fun `462 dashboard pin on another version does not block nonsole draft`(hashGuarded: Boolean) {
+        val draft = purgeFixture(sole = false)
+        dashboardPins += DashboardPin("test/boards/other_version", 1, PipelineVersionStatus.DRAFT)
+        dashboardTargetVersion = 1
+        purgeVia(hashGuarded, draft)
+        repository.findDraftDetail(WORKSPACE_ID, draft.record.id) shouldBe null
+    }
+
+    private fun purgeVia(
+        hashGuarded: Boolean,
+        draft: PipelineService.SavedPipeline,
+    ): PipelineReleaseService.Purged =
+        if (hashGuarded) {
+            service.purge(WORKSPACE_ID, draft.record.id, checkNotNull(draft.version).bodyHash)
+        } else {
+            service.purgeVersion(WORKSPACE_ID, draft.record.id, checkNotNull(draft.version).version)
+        }
+
+    private fun purgeFixture(sole: Boolean): PipelineService.SavedPipeline {
+        var saved = service.create(WORKSPACE_ID, body(Fixtures.pipeline()), owner, WriteSurface.SESSION)
+        if (!sole) {
+            val released = service.release(WORKSPACE_ID, saved.record.id, checkNotNull(saved.version).bodyHash, owner)
+            saved =
+                service.update(
+                    WORKSPACE_ID,
+                    saved.record.id,
+                    body(renamed("Draft two")),
+                    released.version.bodyHash,
+                    owner,
+                    WriteSurface.SESSION,
+                )
+        }
+        val execution = UUID.randomUUID()
+        jdbc.update(
+            "INSERT INTO pipeline_executions (execution_id, pipeline_id, pipeline_version, status, parameters_json, " +
+                "executed_by, triggered_via, root_execution_id) " +
+                "VALUES (:execution, :id, :version, 'SUCCESS', '{}', :owner, 'REST', :execution)",
+            mapOf("execution" to execution, "id" to saved.record.id, "version" to checkNotNull(saved.version).version, "owner" to owner),
+        )
+        return saved
+    }
+
+    private fun executionCount(id: UUID): Int =
+        checkNotNull(
+            jdbc.queryForObject("SELECT COUNT(*) FROM pipeline_executions WHERE pipeline_id = :id", mapOf("id" to id), Int::class.java),
+        )
+
+    private fun insertPurgeParent(
+        name: String,
+        version: Int,
+        workspace: UUID = WORKSPACE_ID,
+    ) {
+        val parent =
+            Fixtures.pipeline(
+                name = "test/purge_parent",
+                nodes =
+                    listOf(
+                        Fixtures.node(id = "child", type = NodeType.PIPELINE).copy(pipeline = PipelineNodeRef(name, version)),
+                    ),
+            )
+        repository.create(workspace, NewPipeline.from(parent, owner), body(parent), owner, CreateLifecycle.DRAFT, WriteSurface.SESSION)
+    }
 
     // ---------------------------------------------------------------- D1: save validation, once
 
@@ -842,9 +998,8 @@ class PipelineServiceIntegrationTest {
     }
 
     @Test
-    fun `an entity purge asks the any-version question of the dashboards - the stated form of a moot case`() {
-        // A draft-only pipeline cannot be pinned by a dashboard (a source must be RELEASED), so this can only be
-        // hit through a stale row; the wiring is asserted, not assumed.
+    fun `an entity purge asks the any-version question of the dashboards`() {
+        // Stored dashboard pins include discarded versions of an otherwise-live dashboard.
         val created = service.create(WORKSPACE_ID, body(Fixtures.pipeline()), owner, WriteSurface.SESSION)
         dashboardPins += DashboardPin("acme/boards/revenue", 4, PipelineVersionStatus.DISCARDED)
 

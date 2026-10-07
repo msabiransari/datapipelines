@@ -12,27 +12,46 @@
     <h2 class="ds-title u-m0 u-mb-md" id="plc-purge-title"
         th:text="'Purge v' + ${dlg.version} + '?'">Purge v4?</h2>
 
-    <p class="u-secondary u-text-sm">
-      The draft row and its
-      <strong th:text="${dlg.runCount}">3</strong> run<span th:if="${dlg.runCount != 1}">s</span>
-      are deleted permanently — this cannot be undone, and a sole draft takes the pipeline with it.
-    </p>
+    <th:block th:if="${!#lists.isEmpty(dlg.pinnerPipelines) or !#lists.isEmpty(dlg.pinnerDashboards)}">
+      <p class="u-secondary u-text-sm" data-purge-pinned>
+        <strong th:text="'v' + ${dlg.version}">v4</strong> cannot be purged: it is pinned by pipeline
+        or dashboard version(s) — remove or repoint them first.
+      </p>
+      <ul class="u-text-sm u-mb-md" data-purge-pinners>
+        <li th:each="p : ${dlg.pinnerPipelines}" data-purge-pinner-pipeline>
+          <span class="u-mono" th:text="${p.pipelineName}">parent/pipeline</span>
+          <span class="u-muted u-text-xs" th:text="'v' + ${p.pipelineVersion} + ' · node ' + ${p.nodeId}">v3 · node extract</span>
+        </li>
+        <li th:each="d : ${dlg.pinnerDashboards}" data-purge-pinner-dashboard>
+          <span class="u-mono" th:text="${d.name}">acme/boards/revenue</span>
+          <span class="u-muted u-text-xs" th:text="'v' + ${d.version} + ' · dashboard · ' + ${d.status}">v4 · dashboard · DRAFT</span>
+        </li>
+      </ul>
+    </th:block>
 
-    <form th:attr="hx-post=@{'/partials/pipelines/{id}/lifecycle/purge'(id=${dlg.id}, version=${dlg.version})},
-                     hx-swap='none'">
-      <!-- #401: every surface answers HX-Redirect — the workspace reloads with the layout's
-           flash; the explorer's in-place re-render is gone (no page renders its pane). -->
-      <input type="hidden" name="from" th:value="${from}">
-      <label class="ds-form-label u-mt-md" th:for="'plc-purge-confirm'">
-        Type <span class="u-mono" th:text="${dlg.expected}">v4</span> to confirm
-      </label>
-      <input class="ds-input u-mono" id="plc-purge-confirm" data-confirm-input name="confirm" autocomplete="off"
-             spellcheck="false" th:attr="data-confirm-expect=${dlg.expected}">
-      <button th:if="${canAuthor == true}" type="submit" data-verb="pipeline-purge-confirm" class="ds-button ds-button-danger u-full u-mt-md" data-typed-confirm
-              disabled hx-disabled-elt="this"
-              th:text="'Purge v' + ${dlg.version} + (${dlg.runCount > 0} ? ' and ' + ${dlg.runCount} + ' run' + (${dlg.runCount != 1} ? 's' : '') : '')">
-        Purge v4 and 3 runs
-      </button>
-    </form>
+    <th:block th:if="${#lists.isEmpty(dlg.pinnerPipelines) and #lists.isEmpty(dlg.pinnerDashboards)}">
+      <p class="u-secondary u-text-sm">
+        The draft row and its
+        <strong th:text="${dlg.runCount}">3</strong> run<span th:if="${dlg.runCount != 1}">s</span>
+        are deleted permanently — this cannot be undone, and a sole draft takes the pipeline with it.
+      </p>
+
+      <form th:attr="hx-post=@{'/partials/pipelines/{id}/lifecycle/purge'(id=${dlg.id}, version=${dlg.version})},
+                       hx-swap='none'">
+        <!-- #401: every surface answers HX-Redirect — the workspace reloads with the layout's
+             flash; the explorer's in-place re-render is gone (no page renders its pane). -->
+        <input type="hidden" name="from" th:value="${from}">
+        <label class="ds-form-label u-mt-md" th:for="'plc-purge-confirm'">
+          Type <span class="u-mono" th:text="${dlg.expected}">v4</span> to confirm
+        </label>
+        <input class="ds-input u-mono" id="plc-purge-confirm" data-confirm-input name="confirm" autocomplete="off"
+               spellcheck="false" th:attr="data-confirm-expect=${dlg.expected}">
+        <button th:if="${canAuthor == true}" type="submit" data-verb="pipeline-purge-confirm" class="ds-button ds-button-danger u-full u-mt-md" data-typed-confirm
+                disabled hx-disabled-elt="this"
+                th:text="'Purge v' + ${dlg.version} + (${dlg.runCount > 0} ? ' and ' + ${dlg.runCount} + ' run' + (${dlg.runCount != 1} ? 's' : '') : '')">
+          Purge v4 and 3 runs
+        </button>
+      </form>
+    </th:block>
   </div>
 </div>

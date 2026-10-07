@@ -226,6 +226,53 @@ class PipelineLifecycleDialogModelTest {
     }
 
     @Test
+    fun `462 purge evidence uses any stored dashboard pins only for the sole draft`() {
+        every { repository.findByIdAnyStatus(WS, ID) } returns recordOf(current = 1)
+        every { repository.findVersionDetail(WS, ID, 1) } returns detail(status = DRAFT)
+        every { runStats.runsByVersion(ID) } returns mapOf(1 to 2)
+        every { repository.findLiveParentsPinningVersion(WS, any(), 1) } returns
+            listOf(
+                co.datapipelines.pipeline.TemplatePin(UUID.randomUUID(), "test/parent", 2, DRAFT, "child", 1),
+            )
+        val scope = mockk<co.datapipelines.pipeline.PipelineVersionConsumers>()
+        every { scope.anyVersionPins(WS, any()) } returns
+            listOf(
+                co.datapipelines.pipeline.DashboardPin("test/historical", 1, co.datapipelines.pipeline.PipelineVersionStatus.DISCARDED),
+            )
+        every { scope.liveVersionPins(WS, any(), 1) } returns
+            listOf(
+                co.datapipelines.pipeline.DashboardPin("test/live", 2, DRAFT),
+            )
+        val scopedModel =
+            PipelineLifecycleDialogModel(
+                repository,
+                templates,
+                exclusive,
+                runStats,
+                anonymousActors(),
+                AuthoringGuard(true),
+                usage,
+                schedules = schedules,
+                dashboards = scope,
+            )
+        every { repository.listVersions(WS, ID) } returns
+            listOf(co.datapipelines.pipeline.PipelineVersionRecord(ID, 1, DRAFT, "h1", T0, USER))
+        val sole = scopedModel.purge(WS, ID, 1)
+        sole.pinnerPipelines.single().pipelineName shouldBe "test/parent"
+        sole.pinnerDashboards.single().name shouldBe "test/historical"
+        every { repository.listVersions(WS, ID) } returns
+            listOf(
+                co.datapipelines.pipeline.PipelineVersionRecord(ID, 1, DRAFT, "h1", T0, USER),
+                co.datapipelines.pipeline.PipelineVersionRecord(ID, 2, RELEASED, "h2", T0, USER),
+            )
+        scopedModel
+            .purge(WS, ID, 1)
+            .pinnerDashboards
+            .single()
+            .name shouldBe "test/live"
+    }
+
+    @Test
     fun `purge - a released target is last_release and a missing one is not-found`() {
         recordOf(current = 1)
         every { repository.findByIdAnyStatus(any(), any()) } returns recordOf(current = 1)

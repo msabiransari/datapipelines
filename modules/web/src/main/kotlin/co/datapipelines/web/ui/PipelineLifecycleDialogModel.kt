@@ -254,6 +254,8 @@ class PipelineLifecycleDialogModel(
         val version: Int,
         val runCount: Int,
         val expected: String,
+        val pinnerPipelines: List<PinnerView> = emptyList(),
+        val pinnerDashboards: List<co.datapipelines.pipeline.DashboardPin> = emptyList(),
     )
 
     @Suppress("ThrowsCount") // each throw is a distinct catalogued refusal the dialog renders
@@ -279,6 +281,16 @@ class PipelineLifecycleDialogModel(
             version = version,
             runCount = runStats.runsByVersion(id)[version] ?: 0,
             expected = "v$version",
+            pinnerPipelines =
+                repository.findLiveParentsPinningVersion(workspaceId, record.name, version).map {
+                    PinnerView(it.pipelineName, it.pipelineVersion, it.nodeId)
+                },
+            pinnerDashboards =
+                if (repository.listVersions(workspaceId, id).size == 1) {
+                    dashboards.anyVersionPins(workspaceId, record.name)
+                } else {
+                    dashboards.liveVersionPins(workspaceId, record.name, version)
+                },
         )
     }
 

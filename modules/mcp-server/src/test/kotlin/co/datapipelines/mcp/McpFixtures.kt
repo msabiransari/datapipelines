@@ -129,7 +129,8 @@ object McpFixtures {
         authoring: AuthoringGuard = AuthoringGuard(true),
         templateVersions: TemplateVersionStatuses = TemplateVersionStatuses { _, _, _ -> null },
         drafts: PipelineDraftService = PipelineDraftService(pipelines, authoring),
-        releases: PipelineReleaseService = PipelineReleaseService(pipelines, templateVersions, validator, authoring),
+        releases: PipelineReleaseService =
+            PipelineReleaseService(pipelines, templateVersions, validator, authoring, dashboards = mockk(relaxed = true)),
     ): PipelineService =
         PipelineService(
             pipelines = pipelines,

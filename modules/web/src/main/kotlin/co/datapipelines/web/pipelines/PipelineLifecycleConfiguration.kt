@@ -95,6 +95,7 @@ class PipelineLifecycleConfiguration {
         checkGate: ReleaseCheckGate,
         templateReleaser: TemplateReleaser,
         reviewMarks: TemplateReviewMarks,
+        dashboards: PipelineVersionConsumers,
     ): PipelineReleaseService =
         PipelineReleaseService(
             pipelines,
@@ -105,6 +106,7 @@ class PipelineLifecycleConfiguration {
             templateReleaser = templateReleaser,
             transactions = TransactionTemplate(metadataTransactionManager),
             reviewMarks = reviewMarks,
+            dashboards = dashboards,
         )
 
     /**

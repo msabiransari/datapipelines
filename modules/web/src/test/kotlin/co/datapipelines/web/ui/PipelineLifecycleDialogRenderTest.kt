@@ -213,6 +213,35 @@ class PipelineLifecycleDialogRenderTest {
     }
 
     @Test
+    fun `462 purge lists escaped parent and dashboard names and withholds destructive form`() {
+        val html =
+            render("partials/pipeline-lifecycle-purge") {
+                setVariable(
+                    "dlg",
+                    purgeDialog(runCount = 3).copy(
+                        pinnerPipelines = listOf(PipelineLifecycleDialogModel.PinnerView("test/<parent>", 2, "<child>")),
+                        pinnerDashboards =
+                            listOf(
+                                co.datapipelines.pipeline.DashboardPin(
+                                    "test/<board>",
+                                    3,
+                                    co.datapipelines.pipeline.PipelineVersionStatus.DRAFT,
+                                ),
+                            ),
+                    ),
+                )
+                setVariable("from", "editor")
+            }
+        html shouldContain "cannot be purged"
+        html shouldContain "test/&lt;parent&gt;"
+        html shouldContain "test/&lt;board&gt;"
+        html shouldContain "v2 · node &lt;child&gt;"
+        html shouldContain "v3 · dashboard · DRAFT"
+        html shouldNotContain "<form"
+        html shouldNotContain "data-typed-confirm"
+    }
+
+    @Test
     fun `purge - zero runs drops the plural, not the warning`() {
         val html =
             render("partials/pipeline-lifecycle-purge") {

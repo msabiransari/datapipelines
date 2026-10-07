@@ -1,6 +1,6 @@
 # REST API + SSE Specification
 
-**Status:** v2.86 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
+**Status:** v2.87 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
 **Last updated:** 2026-10-06
@@ -386,7 +386,13 @@ thing that never shipped are not history — and when it was the sole version th
 goes too. The number returns to the pool (nothing surviving outranks it). **Session-only**
 (an API key is refused `403 auth.session.required`); audited as `pipeline.version.purged`.
 
-Response: `204 No Content`. Errors as §5.10 (`not_draft` / `version.conflict`).
+Response: `204 No Content`. Errors as §5.10 (`not_draft` / `version.conflict`; a stale hash
+refuses before the pin check), plus `409 pipeline.version.pinned`: live parent pipeline versions
+pinning the exact draft, and live dashboard versions pinning it. A sole-draft purge takes the
+entity and checks stored dashboard pins to any version (DISCARDED included for a dashboard with
+a live version); parent scope remains live/exact. `details.pinned_by` names `{pipeline, version, node}`;
+`details.referencing_dashboards` names `{dashboard, version, status}` when non-empty. Refusal
+precedes all deletion and preserves executions, hash and pointer.
 
 ### 5.12 Discard pipeline version
 
@@ -430,7 +436,12 @@ irreversibly; the sole-draft case takes the entity with it. A RELEASED target is
 pipeline.version.last_release` — a release is never purged; discard is per version and
 reversible. **Session-only**; audited as `pipeline.version.purged`.
 
-Response: `204 No Content`.
+Response: `204 No Content`. Also refuses `409 pipeline.version.pinned` with the named parent
+pipelines and dashboards and the same scope as §5.11: live/exact for a nonsole draft; for a
+sole draft live/exact parents plus stored any-version dashboard pins. All rows and executions
+remain untouched on refusal. An unknown target is `404 pipeline.execution.not_found`; a
+DISCARDED target also refuses `pipeline.version.last_release`; authoring-disabled and
+session/key/role restrictions are unchanged.
 
 ### 5.15 Switch pipeline current version
 
@@ -2750,6 +2761,7 @@ window. A dashboard execution has no stored result: `GET /api/v1/executions/{id}
 
 ## Appendix A: Change Log
 
+| 2026-10-06 | v2.87 | #462 draft purge pins | §5.11 and §5.14: 409 `pipeline.version.pinned` on both draft purges, named blockers, sole/nonsole scope, hash precedence and unchanged stored state on refusal. |
 | 2026-10-06 | v2.86 | 459 merge follow-up | §23's runtime error table, the `dashboard.runtime.dependency_missing` row (additive, no code or status change): it names the lifecycle per mode (released dashboard RELEASED-only; an explicitly selected draft admits DRAFT or RELEASED), the `.reason` values, the draft walk's reach (nested pipelines, templates, imports), and the stream-side admission before execution, which fails a source with this code or `dashboard.validation.source_not_read_only`. |
 | 2026-10-05 | v2.85 | #459 draft dashboard dependencies | §23.3: explicitly selected draft runtime admits live draft dependencies transitively, with nested content in configuration identity. Released views, release/import, permissions and key restrictions remain strict. No new route or wire field. |
 | 2026-10-04 | v2.84 | 442a (#442) — renumbered at merge after 403's v2.83 (the lane's row sat atop the older second table) | Saved schedule notification settings: recipients and five event choices, validated and shown by role; omitted PUT settings preserved; mail remains off pending part b. Merge follow-up (review F2): §20.2's refusal is a sentence, not a lone table row. |

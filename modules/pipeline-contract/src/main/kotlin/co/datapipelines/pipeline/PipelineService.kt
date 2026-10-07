@@ -108,6 +108,8 @@ open class PipelineService(
     private val deserializer: PipelineDeserializer = PipelineDeserializer(),
     private val serializer: PipelineSerializer = PipelineSerializer(),
 ) {
+    private val pinGuard = PipelinePurgePinGuard(pipelines, dashboards)
+
     /** A body that passed §12 validation, paired with the canonical JSON that gets stored. */
     data class ValidatedPipeline(
         val pipeline: Pipeline,
@@ -682,7 +684,8 @@ open class PipelineService(
      *
      * Preconditions: entity + target exist (404); target is DRAFT (a RELEASED target is
      * `pipeline.version.last_release` — a release is never purged; a DISCARDED target is
-     * history, same code). An authoring write (§5.5).
+     * history, same code). Pins refuse before deletion: live/exact parent and dashboard pins
+     * for a nonsole draft; a sole draft uses the existing entity guard. An authoring write (§5.5).
      */
     @Transactional("metadataTransactionManager")
     open fun purgeVersion(
@@ -693,14 +696,12 @@ open class PipelineService(
         authoring.requirePipelineAuthoring()
         // AnyStatus: purging a DISCARDED entity's version is last_release (history is never
         // purged), not a 404 hiding it.
-        pipelines.findByIdAnyStatus(workspaceId, pipelineId) ?: throw pipelineNotFound(pipelineId)
+        val record = pipelines.findByIdAnyStatus(workspaceId, pipelineId) ?: throw pipelineNotFound(pipelineId)
         val detail =
             pipelines.findVersionDetail(workspaceId, pipelineId, version)
                 ?: throw versionNotFound(pipelineId, version)
         if (detail.status != PipelineVersionStatus.DRAFT) throw lastRelease(pipelineId, version, detail.status)
-        // Graph rule 1: NO pin guard here yet, and since #459 that is a gap, not a decision.
-        // D58 used to refuse a draft pin at save; a draft parent or a draft dashboard may now
-        // pin this DRAFT, and purging it leaves their pins dangling (versioning §3 rule 3, #462).
+        pinGuard.refuseIfDraftPinned(workspaceId, record, version)
         return when (
             val outcome =
                 pipelines.purgeDraft(
@@ -827,62 +828,19 @@ open class PipelineService(
         record: PipelineRecord,
     ): List<String> = draftTemplates.exclusiveIds(workspaceId, record.id)
 
-    /**
-     * Graph rule 1's service-side arm: names the pinning entities in `details` — the parent PIPELINES under
-     * `pinned_by`, and since #320 the DASHBOARDS whose sources pin this release under `referencing_dashboards`
-     * beside it (the C32 shape the parameter sets took). A discard asks the exact-pin question; the entity purge
-     * asks the any-version one (rule 3, R12) — moot for a pipeline that was never released, and stated rather than
-     * assumed: a dashboard source must be RELEASED, so a draft-only pipeline has nothing to be pinned by.
-     */
     private fun refuseIfPinned(
         workspaceId: UUID,
         record: PipelineRecord,
         version: Int,
         entityPurge: Boolean = false,
-    ) {
-        val pinners = pipelines.findLiveParentsPinningVersion(workspaceId, record.name, version)
-        val dashboardPins =
-            if (entityPurge) {
-                dashboards.anyVersionPins(workspaceId, record.name)
-            } else {
-                dashboards.liveVersionPins(workspaceId, record.name, version)
-            }
-        if (pinners.isNotEmpty() || dashboardPins.isNotEmpty()) {
-            throw pinned(record, version, pinners, dashboardPins)
-        }
-    }
+    ) = pinGuard.refuseIfPinned(workspaceId, record, version, entityPurge)
 
     private fun pinned(
         record: PipelineRecord,
         version: Int,
         pinners: List<TemplatePin>,
         dashboardPins: List<DashboardPin> = emptyList(),
-    ): DatapipelinesException =
-        DatapipelinesException(
-            code = PipelineErrorCodes.Versioning.PINNED,
-            message =
-                "Version $version of '${record.name.truncateForError()}' is pinned by " +
-                    listOfNotNull(
-                        pinners.takeIf { it.isNotEmpty() }?.let { "${it.size} live pipeline version(s)" },
-                        dashboardPins.takeIf { it.isNotEmpty() }?.let { "${it.size} dashboard version(s)" },
-                    ).joinToString(" and ") +
-                    "; discard or repoint them first.",
-            details =
-                buildMap {
-                    put("pipeline_id", record.id.toString())
-                    put("version", version)
-                    put(
-                        "pinned_by",
-                        pinners.map { mapOf("pipeline" to it.pipelineName, "version" to it.pipelineVersion, "node" to it.nodeId) },
-                    )
-                    if (dashboardPins.isNotEmpty()) {
-                        put(
-                            "referencing_dashboards",
-                            dashboardPins.map { mapOf("dashboard" to it.name, "version" to it.version, "status" to it.status.name) },
-                        )
-                    }
-                },
-        )
+    ): DatapipelinesException = pinGuard.pinned(record, version, pinners, dashboardPins)
 
     /**
      * The discard statement returned zero rows after the service-side guard passed: a pin

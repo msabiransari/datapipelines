@@ -1,6 +1,6 @@
 # Pipeline Contract Specification
 
-**Status:** v1.54 (revised — see Change Log)
+**Status:** v1.55 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
 **Last updated:** 2026-10-06
@@ -1326,7 +1326,7 @@ entry, Versioning is the semantics).
 | `pipeline.version.not_draft` | 409 | Pipeline release or discard requested but no DRAFT version exists (Versioning §5.3/§5.4) |
 | `pipeline.version.not_released` | 409 | Discard targeted a version that is not RELEASED — a DRAFT is purged, never discarded; a DISCARDED version is already retired (101, [Versioning §3.1](versioning.md#31-statuses-and-verbs)) |
 | `pipeline.version.not_discarded` | 409 | Restore targeted a version that is not DISCARDED — there is nothing to restore (101, [Versioning §3.1](versioning.md#31-statuses-and-verbs)) |
-| `pipeline.version.pinned` | 409 | Discard or purge refused: a LIVE version of another pipeline — or, since #320, of a dashboard whose source pins it — exact-pins this version. `details` names the pinning entities: `pinned_by` the pipelines (`{pipeline, version, node}`), `referencing_dashboards` the dashboards (`{dashboard, version, status}`), each present only when non-empty besides `pinned_by`, which is always present (101, [Versioning §3.5](versioning.md#35-the-lifecycle-table) graph rule 1, [§3.5.3](versioning.md#353-the-reverse-arrows-into-other-families-320)) |
+| `pipeline.version.pinned` | 409 | Discard or purge refused: a LIVE version of another pipeline — or, since #320, of a dashboard whose source pins it — exact-pins this version. A sole-draft purge uses live/exact parent pins plus stored any-version dashboard pins (DISCARDED included for a dashboard with a live version), before any destructive write (#462). `details` names the pinning entities: `pinned_by` the pipelines (`{pipeline, version, node}`), `referencing_dashboards` the dashboards (`{dashboard, version, status}`), each present only when non-empty besides `pinned_by`, which is always present (101, [Versioning §3.5](versioning.md#35-the-lifecycle-table) graph rule 1, [§3.5.3](versioning.md#353-the-reverse-arrows-into-other-families-320)) |
 | `pipeline.version.last_release` | 409 | The purge path refused: a RELEASED version is never purged, and an entity holding any non-draft version is never purged — discard is per version, the entity stays; restore or release something first (101, [Versioning §3.5](versioning.md#35-the-lifecycle-table) D57) |
 | `pipeline.version.not_eligible` | 409 | Manual switch targeted a version that is not a live, posture-eligible version — DISCARDED, missing, or a DRAFT under a hardened posture (101, [Versioning §3.4](versioning.md#34-current_version-is-sticky-and-event-driven-d60) D60) |
 | `pipeline.version.confirm_mismatch` | 400 | The typed-confirm guard on the irreversible purge dialogs (102): the `confirm` form field did not name the version the dialog asked the user to type (`v4`). Checked BEFORE the lifecycle service runs — a mismatch never reaches the verb ([UI §5.1](ui-screens.md#51-standard-states) typed-confirm, the second use after the CLI's `--clean`) |
@@ -1874,6 +1874,7 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-06 | v1.55 | #462 draft purge pins | §13 pinned-error row states sole-draft dashboard history scope and refusal before destructive writes. |
 | 2026-10-06 | v1.54 | 459 (#459) + merge follow-up | **§4.9 / §12.9 / the error table**, written by the lane: a PIPELINE node may pin a live DRAFT child while the parent is a draft, and release and import still require RELEASED children (`pipeline_reference_not_released`). Composition verdicts describe a draft child's current body, and release revalidates them. The follow-up adds this row and the bump. The error row's old reason ("a DRAFT child can be purged out from under its parent") still holds for drafts: the pipeline draft purges have no pin guard yet (versioning §3 rule 3, #462). |
 | 2026-10-04 | v1.53 | #382 merge follow-up | **§13.21** — the strict-reader sentence names five routes that bind a typed request DTO, `POST /dashboards/bindings` added (#382 moved it onto the reader; #382 review F1). No code, status or error shape changed. |
 | 2026-10-03 | v1.52 | 442a (#442) | Saved schedule notification settings: recipients and five event choices, validated and shown by role; omitted PUT settings preserved; mail remains off pending part b. |
