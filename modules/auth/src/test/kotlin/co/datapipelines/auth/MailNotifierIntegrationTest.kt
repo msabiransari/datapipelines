@@ -1,7 +1,5 @@
 package co.datapipelines.auth
 
-import ch.qos.logback.classic.spi.ILoggingEvent
-import ch.qos.logback.core.read.ListAppender
 import co.datapipelines.auth.SharedPostgres.dataSource
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactly
@@ -275,14 +273,7 @@ class MailNotifierIntegrationTest {
         block: () -> Unit,
     ): List<String> {
         val logger = LoggerFactory.getLogger(of) as ch.qos.logback.classic.Logger
-        val appender = ListAppender<ILoggingEvent>().apply { start() }
-        logger.addAppender(appender)
-        return try {
-            block()
-            appender.list.map { it.formattedMessage }
-        } finally {
-            logger.detachAppender(appender)
-        }
+        return capturingLogEvents(logger, block = block).map { it.formattedMessage }
     }
 
     /** A REAL in-memory sender: records what it was handed, answers a fixed Message-ID, or fails on request. */

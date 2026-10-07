@@ -2,7 +2,6 @@ package co.datapipelines.web
 
 import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
-import ch.qos.logback.core.read.ListAppender
 import co.datapipelines.events.ExecutionAborted
 import co.datapipelines.events.ExecutionStarted
 import co.datapipelines.executor.AbortReason
@@ -130,14 +129,7 @@ class EmitterDegradedDiagnosticsIntegrationTest {
 
     private fun captureEmitterLogs(block: () -> Unit): List<ILoggingEvent> {
         val logger = LoggerFactory.getLogger(WebEventEmitter::class.java) as Logger
-        val appender = ListAppender<ILoggingEvent>().apply { start() }
-        logger.addAppender(appender)
-        return try {
-            block()
-            appender.list
-        } finally {
-            logger.detachAppender(appender)
-        }
+        return capturingLogEvents(logger, block = block)
     }
 
     /** The production wiring over the shared Postgres and one private Redis — the D9 rig, minimal. */

@@ -1,7 +1,5 @@
 package co.datapipelines.auth
 
-import ch.qos.logback.classic.spi.ILoggingEvent
-import ch.qos.logback.core.read.ListAppender
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.booleans.shouldBeTrue
@@ -190,14 +188,7 @@ class LocalAdminSeederTest {
 
     private fun capturingLogs(block: () -> Unit): List<String> {
         val logger = LoggerFactory.getLogger(LocalAdminSeeder::class.java) as ch.qos.logback.classic.Logger
-        val appender = ListAppender<ILoggingEvent>().apply { start() }
-        logger.addAppender(appender)
-        return try {
-            block()
-            appender.list.map { it.formattedMessage }
-        } finally {
-            logger.detachAppender(appender)
-        }
+        return capturingLogEvents(logger, block = block).map { it.formattedMessage }
     }
 
     private fun auditEvents(event: String): Int =

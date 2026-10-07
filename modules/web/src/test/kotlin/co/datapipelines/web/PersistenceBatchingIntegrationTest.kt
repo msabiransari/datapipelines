@@ -1,8 +1,6 @@
 package co.datapipelines.web
 
 import ch.qos.logback.classic.Logger
-import ch.qos.logback.classic.spi.ILoggingEvent
-import ch.qos.logback.core.read.ListAppender
 import co.datapipelines.auth.AuditLogger
 import co.datapipelines.auth.AuditRow
 import co.datapipelines.auth.AuditRowSink
@@ -111,7 +109,7 @@ import javax.sql.DataSource
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @Timeout(value = 5, unit = TimeUnit.MINUTES)
 class PersistenceBatchingIntegrationTest {
-    private val logs = ListAppender<ILoggingEvent>()
+    private lateinit var logs: SnapshotListAppender
     private val watched =
         listOf(
             BatchingWriter::class.java,
@@ -122,14 +120,14 @@ class PersistenceBatchingIntegrationTest {
 
     @BeforeEach
     fun listen() {
-        logs.list.clear()
-        logs.start()
+        logs = SnapshotListAppender()
         watched.forEach { it.addAppender(logs) }
     }
 
     @AfterEach
     fun unlisten() {
         watched.forEach { it.detachAppender(logs) }
+        logs.stop()
     }
 
     // ------------------------------------------------------------------ D.1
@@ -201,7 +199,7 @@ class PersistenceBatchingIntegrationTest {
             }
             withClue("one WARN names the poison row by its ids — never its payload") {
                 val warn =
-                    logs.list.map { it.formattedMessage }.single {
+                    logs.messages().single {
                         it.startsWith(
                             "event=persistence.batch_retried writer=execution_events",
                         )
@@ -259,7 +257,7 @@ class PersistenceBatchingIntegrationTest {
                 withClue("the replay's unconfirmed entries are counted") {
                     rig.count("datapipelines.persistence.failures", "store" to "replay_log").toInt() shouldBeGreaterThan 0
                 }
-                logs.list.any { it.formattedMessage.contains("replay will be incomplete") } shouldBe true
+                logs.messages().any { it.contains("replay will be incomplete") } shouldBe true
                 // #266b (pass observation 5): the survivors are served in id order, each once — an
                 // indeterminate direct write that landed late must not reorder what a client replays.
                 var replayed = 0
@@ -320,15 +318,21 @@ class PersistenceBatchingIntegrationTest {
         val writer = BatchingWriter("audit", BatchingConfig(), AuditRowSink(jdbc))
         val marker = UUID.randomUUID().toString()
         val context = drainContext(writer)
-        holdingLock(SharedPostgres.postgres.jdbcUrl, "audit_log") { release ->
-            repeat(QUEUED) { n -> writer.submit(auditRow("persistence.it.drain", "k_drain_$n", marker)) shouldBe true }
-            val closer = Thread { context.close() }.apply { start() }
-            awaitCondition { logged("event=shutdown.persistence_drain_started") }
-            release()
-            closer.join(TimeUnit.MINUTES.toMillis(1))
+        context.use {
+            holdingLock(SharedPostgres.postgres.jdbcUrl, "audit_log") { release ->
+                repeat(QUEUED) { n -> writer.submit(auditRow("persistence.it.drain", "k_drain_$n", marker)) shouldBe true }
+                val closer = Thread { context.close() }.apply { start() }
+                try {
+                    awaitCondition { logged("event=shutdown.persistence_drain_started") }
+                } finally {
+                    release()
+                    closer.join(TimeUnit.MINUTES.toMillis(1))
+                    closer.isAlive shouldBe false
+                }
+            }
         }
         rowsWith(jdbc, marker) shouldBe QUEUED
-        val order = logs.list.map { it.formattedMessage }
+        val order = logs.messages()
         val executionDrain = order.indexOfFirst { it.startsWith("event=shutdown.drain_complete") }
         val persistenceDrain = order.indexOfFirst { it.startsWith("event=shutdown.persistence_drain_started") }
         val auditDrained = order.indexOfFirst { it.startsWith("event=persistence.drained writer=audit") }
@@ -345,14 +349,16 @@ class PersistenceBatchingIntegrationTest {
         val marker = UUID.randomUUID().toString()
         val context = drainContext(writer)
         var closedInMs = 0L
-        holdingLock(SharedPostgres.postgres.jdbcUrl, "audit_log") { release ->
-            repeat(QUEUED) { n -> writer.submit(auditRow("persistence.it.hung", "k_hung_$n", marker)) }
-            val t0 = System.nanoTime()
-            context.close()
-            closedInMs = (System.nanoTime() - t0) / NANOS_PER_MS
-            release()
+        context.use {
+            holdingLock(SharedPostgres.postgres.jdbcUrl, "audit_log") { release ->
+                repeat(QUEUED) { n -> writer.submit(auditRow("persistence.it.hung", "k_hung_$n", marker)) }
+                val t0 = System.nanoTime()
+                context.close()
+                closedInMs = (System.nanoTime() - t0) / NANOS_PER_MS
+                release()
+            }
         }
-        val line = logs.list.map { it.formattedMessage }.single { it.startsWith("event=persistence.drain_incomplete writer=audit") }
+        val line = logs.messages().single { it.startsWith("event=persistence.drain_incomplete writer=audit") }
         val lost = Regex("lost=(\\d+)").find(line)!!.groupValues[1].toInt()
         val inFlight = Regex("in_flight=(\\d+)").find(line)!!.groupValues[1].toInt()
         lost shouldBeGreaterThan 0
@@ -384,24 +390,29 @@ class PersistenceBatchingIntegrationTest {
             holdingLock(SharedPostgres.postgres.jdbcUrl, "audit_log") { release ->
                 val callers = Executors.newFixedThreadPool(CALLERS)
                 val done = CountDownLatch(CALLERS)
-                repeat(CALLERS) { n ->
-                    callers.execute {
-                        logger.log("persistence.it.saturation", keyId = "k_saturation", details = mapOf("marker" to marker, "n" to n))
-                        done.countDown()
+                try {
+                    repeat(CALLERS) { n ->
+                        callers.execute {
+                            logger.log("persistence.it.saturation", keyId = "k_saturation", details = mapOf("marker" to marker, "n" to n))
+                            done.countDown()
+                        }
                     }
+                    awaitCondition { writer.queueDepth() >= QUEUE_BOUND }
+                    depthSeen =
+                        registry
+                            .find("datapipelines.persistence.queue.depth")
+                            .tag("store", "audit")
+                            .gauge()!!
+                            .value()
+                    submitRefused = !writer.submit(auditRow("persistence.it.submit", "k_saturation", marker))
+                    Thread.sleep(SATURATION_HOLD_MS)
+                    release()
+                    done.await(1, TimeUnit.MINUTES) shouldBe true
+                } finally {
+                    release()
+                    callers.shutdown()
+                    callers.awaitTermination(1, TimeUnit.MINUTES) shouldBe true
                 }
-                awaitCondition { writer.queueDepth() >= QUEUE_BOUND }
-                depthSeen =
-                    registry
-                        .find("datapipelines.persistence.queue.depth")
-                        .tag("store", "audit")
-                        .gauge()!!
-                        .value()
-                submitRefused = !writer.submit(auditRow("persistence.it.submit", "k_saturation", marker))
-                Thread.sleep(SATURATION_HOLD_MS)
-                release()
-                done.await(1, TimeUnit.MINUTES) shouldBe true
-                callers.shutdown()
             }
             depthSeen shouldBe QUEUE_BOUND.toDouble()
             submitRefused shouldBe true
@@ -438,7 +449,7 @@ class PersistenceBatchingIntegrationTest {
                 .counter()!!
                 .count() shouldBe 1.0
             withClue("saturation is a state, logged once per interval — not once per caller") {
-                logs.list.count { it.formattedMessage.startsWith("event=persistence.saturated writer=audit") } shouldBe 1
+                logs.messages().count { it.startsWith("event=persistence.saturated writer=audit") } shouldBe 1
             }
         } finally {
             writer.close()
@@ -560,15 +571,19 @@ class PersistenceBatchingIntegrationTest {
                             }.awaitAll()
                     }
                 }.apply { start() }
-            Thread.sleep(LOAD_LEAD_MS)
-            val undo = outage()
             try {
-                Thread.sleep(OUTAGE_MS)
+                Thread.sleep(LOAD_LEAD_MS)
+                val undo = outage()
+                try {
+                    Thread.sleep(OUTAGE_MS)
+                } finally {
+                    undo()
+                }
             } finally {
-                undo()
+                stop.set(true)
+                loop.join(TimeUnit.MINUTES.toMillis(1))
+                loop.isAlive shouldBe false
             }
-            stop.set(true)
-            loop.join(TimeUnit.MINUTES.toMillis(1))
             return LoadRun(durations.max(), emitted.mapValues { it.value.toList() })
         }
 
@@ -635,7 +650,7 @@ class PersistenceBatchingIntegrationTest {
             Int::class.java,
         ) ?: 0
 
-    private fun logged(prefix: String): Boolean = logs.list.any { it.formattedMessage.startsWith(prefix) }
+    private fun logged(prefix: String): Boolean = logs.messages().any { it.startsWith(prefix) }
 
     private fun shared(): DataSource = SharedPostgres.dataSource()
 

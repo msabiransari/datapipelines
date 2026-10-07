@@ -2,7 +2,6 @@ package co.datapipelines.executor
 
 import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
-import ch.qos.logback.core.read.ListAppender
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -28,14 +27,7 @@ import java.util.UUID
 class JdbcExecutionProgressOutageTest {
     private fun captured(block: () -> Unit): List<ILoggingEvent> {
         val logger = LoggerFactory.getLogger(JdbcExecutionProgress::class.java) as Logger
-        val appender = ListAppender<ILoggingEvent>().apply { start() }
-        logger.addAppender(appender)
-        return try {
-            block()
-            appender.list
-        } finally {
-            logger.detachAppender(appender)
-        }
+        return capturingLogEvents(logger, block = block)
     }
 
     @Test
