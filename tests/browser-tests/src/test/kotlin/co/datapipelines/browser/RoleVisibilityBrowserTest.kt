@@ -131,21 +131,9 @@ class RoleVisibilityBrowserTest : BrowserSuite() {
         author.close()
 
         val viewer = signIn("rbv-exec-viewer", role = "viewer")
-        val badResponses = mutableListOf<String>()
-        var editorAdmissionStatus = 0
-        viewer.page.onResponse { response ->
-            if (response.status() >= 400) {
-                badResponses += "${response.status()} ${response.request().method()} ${response.url()}"
-            }
-            // #460 correction: the workspace is now admitted by a PREPARED BOOSTED swap (an
-            // XHR into the persistent shell), not a document navigation, so the admission is
-            // the destination response's status regardless of request kind. The viewer's
-            // editor-loads-and-executes contract is unchanged — #149's full-document transport
-            // was the old mechanism, not the requirement.
-            if (PipelineWorkspaceUrl.matches(response.url())) {
-                editorAdmissionStatus = response.status()
-            }
-        }
+        // #460 correction: admission is the destination response's status regardless of request
+        // kind — the workspace now arrives by a prepared boosted swap, not a document navigation.
+        val probe = watchNavigation(viewer.page)
 
         // Catalog → row → workspace, the app's own links the whole way (#350: the catalog row IS
         // the link; the explorer's detail pane and its Open are gone).
@@ -154,17 +142,12 @@ class RoleVisibilityBrowserTest : BrowserSuite() {
         viewer.roleBadge() shouldBe "viewer"
         val open = viewer.page.locator("#pipeline-list-wrapper a.tpl-result").first()
         open.waitFor()
-        badResponses shouldBe emptyList()
+        probe.badResponses shouldBe emptyList()
 
-        // #460 section A: markers that survive only if the row opens the workspace IN the shell,
-        // and a count that must stay zero — the entry reuses the already-mounted rail rather than
-        // re-fetching a tree level.
-        var treeRequests = 0
-        viewer.page.onRequest { if (it.url().contains("/tree")) treeRequests++ }
+        // #460 section A: markers that survive only if the row opens the workspace IN the shell.
         viewer.page.evaluate(
             "() => { window.__dpDoc = document; window.__dpRail = document.getElementById('app-rail'); }",
         )
-
         open.click()
         viewer.page.waitForURL(PipelineWorkspaceUrl.PATTERN)
         // LOAD, not the cards: at base the route answers 403 and no card ever comes, so the
@@ -174,15 +157,9 @@ class RoleVisibilityBrowserTest : BrowserSuite() {
         // The 403 the route used to answer IS the red this test is born with: assert the
         // listener first, so the failure names the refused request instead of timing out
         // on a note that never rendered.
-        badResponses shouldBe emptyList()
-        editorAdmissionStatus shouldBe 200
-        withClue("the editor opened in the shell — same document and rail, no tree refetch") {
-            viewer.page.evaluate(
-                "() => window.__dpDoc === document && " +
-                    "window.__dpRail === document.getElementById('app-rail')",
-            ) shouldBe true
-            treeRequests shouldBe 0
-        }
+        probe.badResponses shouldBe emptyList()
+        probe.admissionStatus shouldBe 200
+        assertInShellEntry(viewer.page, probe)
 
         // The graph's node cards are the signal that the editor finished loading (the same
         // wait every editor walk uses).
@@ -209,8 +186,46 @@ class RoleVisibilityBrowserTest : BrowserSuite() {
                     .setTimeout(EXECUTION_TIMEOUT_MS),
             )
         viewer.page.locator(".pe-status:has-text('Completed')").waitFor()
-        badResponses shouldBe emptyList()
+        probe.badResponses shouldBe emptyList()
         viewer.close()
+    }
+
+    /** The status and tree-request probes the editor-entry walk records. */
+    private class NavProbe {
+        val badResponses = mutableListOf<String>()
+        var admissionStatus = 0
+        var treeRequests = 0
+    }
+
+    /**
+     * #460 — record every refused response, the destination admission, and any sidebar-tree
+     * fetch. Admission is the destination response's status regardless of request kind: the
+     * workspace now arrives by a prepared boosted swap, not a document navigation.
+     */
+    private fun watchNavigation(page: Page): NavProbe {
+        val probe = NavProbe()
+        page.onResponse { response ->
+            if (response.status() >= 400) {
+                probe.badResponses += "${response.status()} ${response.request().method()} ${response.url()}"
+            }
+            if (PipelineWorkspaceUrl.matches(response.url())) probe.admissionStatus = response.status()
+        }
+        page.onRequest { if (it.url().contains("/tree")) probe.treeRequests++ }
+        return probe
+    }
+
+    /** #460 section A: the entry preserved the SAME document and rail and fetched no tree level. */
+    private fun assertInShellEntry(
+        page: Page,
+        probe: NavProbe,
+    ) {
+        withClue("the editor opened in the shell — same document and rail, no tree refetch") {
+            page.evaluate(
+                "() => window.__dpDoc === document && " +
+                    "window.__dpRail === document.getElementById('app-rail')",
+            ) shouldBe true
+            probe.treeRequests shouldBe 0
+        }
     }
 
     /** A one-node `fiscal_quarter` pipeline (102's fixture), created in-page by [page]'s cookies. */
