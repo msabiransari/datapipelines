@@ -239,13 +239,18 @@ class PipelineLifecycleDialogController(
     ): ResponseEntity<String> {
         val principal = LifecycleVerbs.requireSession()
         val workspaceId = principal.requireWorkspace().id
-        val record = pipelines.restoreVersion(workspaceId, id, version)
+        val result = pipelines.restoreVersion(workspaceId, id, version)
         LifecycleVerbs.audit(
             audit,
             LifecycleVerbs.AUDIT_VERSION_RESTORED,
             principal,
             workspaceId,
-            mapOf("pipeline_id" to id.toString(), "version" to version, "current_version_after" to record.currentVersion),
+            mapOf(
+                "pipeline_id" to id.toString(),
+                "version" to version,
+                "current_version_before" to result.currentVersionBefore,
+                "current_version_after" to result.record.currentVersion,
+            ),
         )
         return redirect(versionsTab(id, "restored")) // #395, as discard
     }

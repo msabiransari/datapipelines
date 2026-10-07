@@ -7,6 +7,7 @@ import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineRecord
 import co.datapipelines.pipeline.PipelineReleaseService
+import co.datapipelines.pipeline.PipelineRestoreResult
 import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.pipeline.PipelineVersionDetail
 import co.datapipelines.pipeline.PipelineVersionStatus
@@ -356,8 +357,9 @@ class PipelineLifecycleDialogControllerTest {
     }
 
     @Test
-    fun `#395 - restore from the workspace answers HX-Redirect onto its Versions tab`() {
-        every { pipelines.restoreVersion(WORKSPACE, PIPELINE, 1) } returns record(currentVersion = 2)
+    fun `#395 - restore from the workspace answers HX-Redirect onto its Versions tab, auditing the pointer pair (#379)`() {
+        every { pipelines.restoreVersion(WORKSPACE, PIPELINE, 1) } returns
+            PipelineRestoreResult(record(currentVersion = 2), currentVersionBefore = 1)
 
         mvc
             .perform(
@@ -368,6 +370,9 @@ class PipelineLifecycleDialogControllerTest {
             ).andExpect(status().isOk)
             .andExpect(header().string("HX-Redirect", "/pipelines/$PIPELINE?tab=versions&ok=restored"))
         verify(exactly = 1) { pipelines.restoreVersion(WORKSPACE, PIPELINE, 1) }
+        audit.events shouldBe listOf("pipeline.version.restored")
+        audit.details.single()["current_version_before"] shouldBe 1
+        audit.details.single()["current_version_after"] shouldBe 2
     }
 
     @Test

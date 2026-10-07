@@ -700,6 +700,49 @@ class PipelineServiceIntegrationTest {
     }
 
     @Test
+    fun `restore answers the statement's pointer pair and keeps the release stamps (#379)`() {
+        val created = createReleased()
+        val id = created.record.id
+        val v2 =
+            service.update(WORKSPACE_ID, id, body(renamed("Second")), created.version.bodyHash, owner, WriteSurface.SESSION)
+        val releasedV2 = service.release(WORKSPACE_ID, id, checkNotNull(v2.version).bodyHash, owner)
+
+        // lower → higher: v2 discarded while v1 held the pointer; the restore moves 1 → 2.
+        service.discardVersion(WORKSPACE_ID, id, 2, owner)
+        val moved = service.restoreVersion(WORKSPACE_ID, id, 2)
+        moved.currentVersionBefore shouldBe 1
+        moved.record.currentVersion shouldBe 2
+        withClue("the release stamps survive the discard round-trip; the discard stamps are gone") {
+            val detail = checkNotNull(repository.findVersionDetail(WORKSPACE_ID, id, 2))
+            detail.status shouldBe PipelineVersionStatus.RELEASED
+            detail.releasedAt shouldBe releasedV2.version.releasedAt
+            detail.releasedBy shouldBe releasedV2.version.releasedBy
+            detail.discardedAt.shouldBeNull()
+            detail.discardedBy.shouldBeNull()
+        }
+
+        // higher → unchanged: v1 discarded while v2 held the pointer; a restore cannot lower it.
+        service.discardVersion(WORKSPACE_ID, id, 1, owner)
+        val unchanged = service.restoreVersion(WORKSPACE_ID, id, 1)
+        unchanged.currentVersionBefore shouldBe 2
+        unchanged.record.currentVersion shouldBe 2
+
+        withClue("a RELEASED target refuses not_discarded - no pair, no flip") {
+            shouldThrow<DatapipelinesException> { service.restoreVersion(WORKSPACE_ID, id, 1) }
+                .code shouldBe PipelineErrorCodes.Versioning.NOT_DISCARDED
+        }
+
+        // null → restored: discarding the pipeline's LAST live version leaves the pointer NULL,
+        // and the restore answers the explicit null before, not an absent one.
+        service.discardVersion(WORKSPACE_ID, id, 1, owner)
+        service.discardVersion(WORKSPACE_ID, id, 2, owner)
+        checkNotNull(repository.findByIdAnyStatus(WORKSPACE_ID, id)).currentVersion.shouldBeNull()
+        val fromNull = service.restoreVersion(WORKSPACE_ID, id, 2)
+        fromNull.currentVersionBefore.shouldBeNull()
+        fromNull.record.currentVersion shouldBe 2
+    }
+
+    @Test
     fun `the lifecycle read helpers - any-status lookup, live probe, pin scans, row delete`() {
         val created = service.create(WORKSPACE_ID, body(Fixtures.pipeline()), owner, WriteSurface.SESSION)
         service.release(WORKSPACE_ID, created.record.id, checkNotNull(created.version).bodyHash, owner)

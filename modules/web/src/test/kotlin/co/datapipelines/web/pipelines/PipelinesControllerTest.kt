@@ -12,6 +12,7 @@ import co.datapipelines.pipeline.PipelineFolderLevel
 import co.datapipelines.pipeline.PipelineRecord
 import co.datapipelines.pipeline.PipelineReleaseService
 import co.datapipelines.pipeline.PipelineRepository
+import co.datapipelines.pipeline.PipelineRestoreResult
 import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.pipeline.PipelineValidator
 import co.datapipelines.pipeline.PipelineVersionDetail
@@ -459,6 +460,32 @@ class PipelinesControllerTest {
         every { releases.purge(any(), pipelineId, "hash-v2") } returns PipelineReleaseService.Purged.Version(0, record)
 
         controller.discard(pipelineId, "hash-v2")
+    }
+
+    @Test
+    fun `restore audits the statement's pointer pair - before and after (#379)`() {
+        authenticate()
+        every { repository.findByIdAnyStatus(workspaceId, pipelineId) } returns record
+        every { repository.findVersionDetail(workspaceId, pipelineId, 2) } returns
+            releasedDetail.copy(version = 2, status = PipelineVersionStatus.DISCARDED)
+        every { repository.restoreVersion(workspaceId, pipelineId, 2, any()) } returns
+            PipelineRestoreResult(record.copy(currentVersion = 3), currentVersionBefore = 2)
+        every { repository.findVersionBody(workspaceId, pipelineId, 3) } returns "{}"
+
+        val answered = controller.restoreVersion(pipelineId, 2)
+
+        audited.map { it.first } shouldBe listOf("pipeline.version.restored")
+        audited
+            .single()
+            .second shouldBe
+            mapOf(
+                "pipeline_id" to pipelineId.toString(),
+                "version" to 2,
+                "current_version_before" to 2,
+                "current_version_after" to 3,
+                "workspace_id" to workspaceId.toString(),
+            )
+        answered.data.get("current_version").asInt() shouldBe 3
     }
 
     @Test
