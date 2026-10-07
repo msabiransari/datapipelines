@@ -56,6 +56,8 @@ class DashboardWorkspaceController(
     private val themeResolver: ThemeResolver,
     /** 178 — the promoter lens: the page resolves and renders the caller's view. */
     private val lens: PromoterLens,
+    /** #473 — the dock's History pane is the refreshes partial, server-rendered at load. */
+    private val browse: DashboardBrowseModel,
 ) {
     @GetMapping("/dashboards/{id}")
     @RequiredScope(Permission.DASHBOARD_READ)
@@ -132,6 +134,13 @@ class DashboardWorkspaceController(
                 model.addAttribute("refusalCode", e.code)
                 model.addAttribute("refusalMessage", e.message)
             }
+        }
+        // #473 — the dock's History pane is the refreshes partial (board.html's th:replace),
+        // rendered AT LOAD from the same read the partial route serves. Without this the pane
+        // sits empty until its first 15s self-poll. Filled on the board tab only — the other
+        // tabs' documents render the same hidden markup but their readers are not in it.
+        if (activeTab == DashboardWorkspaceTab.BOARD) {
+            browse.fillRefreshes(model, principal, id)
         }
         return VIEW
     }

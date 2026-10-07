@@ -7,10 +7,12 @@ import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.visualization.ActionScope
 import co.datapipelines.visualization.ArtifactJson
 import co.datapipelines.visualization.ArtifactRecord
+import co.datapipelines.visualization.ArtifactRef
 import co.datapipelines.visualization.ArtifactVersion
 import co.datapipelines.visualization.ArtifactVersionDetail
 import co.datapipelines.visualization.DashboardBody
 import co.datapipelines.visualization.DashboardLayout
+import co.datapipelines.visualization.DashboardObjectType
 import co.datapipelines.visualization.DashboardRefreshRepository
 import co.datapipelines.visualization.DashboardRuntimeConfig
 import co.datapipelines.visualization.DashboardTimeouts
@@ -21,6 +23,7 @@ import co.datapipelines.visualization.RendererConfigValidators
 import co.datapipelines.visualization.RendererKind
 import co.datapipelines.visualization.RendererSpec
 import co.datapipelines.visualization.VisualizationBody
+import co.datapipelines.visualization.VisualizationOccurrence
 import com.fasterxml.jackson.databind.node.ObjectNode
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
@@ -119,6 +122,78 @@ class RuntimeSupportTest {
                 pinned(RendererKind.PLOTLY, """{"data":[{"type":"surface"}]}"""),
             ),
         ) shouldBe "3d"
+    }
+
+    @Test
+    fun `the runtime config carries each pinned visualization's display name and description for the card headings - 473`() {
+        val at = Instant.parse("2026-10-06T00:00:00Z")
+        val user = UUID.randomUUID()
+
+        fun pinned(
+            displayName: String,
+            description: String?,
+        ): ArtifactVersion<VisualizationBody> {
+            val id = UUID.randomUUID()
+            return ArtifactVersion(
+                ArtifactRecord(id, UUID.randomUUID(), "dbr/viz", "v", "", 1, at, at, user),
+                ArtifactVersionDetail(id, 1, PipelineVersionStatus.RELEASED, "h", at, user),
+                VisualizationBody(
+                    displayName = displayName,
+                    description = description,
+                    renderer = RendererSpec(RendererKind.TABLE, "1"),
+                    inputs = emptyMap(),
+                    config = ArtifactJson.mapper.readTree("""{"columns":[]}""") as ObjectNode,
+                ),
+            )
+        }
+
+        val occurrence =
+            VisualizationOccurrence(
+                name = "rev",
+                type = DashboardObjectType.VISUALIZATION,
+                visualization = ArtifactRef("v", 1),
+            )
+        val dashboardId = UUID.randomUUID()
+        val servedId = UUID.randomUUID()
+        val served =
+            ArtifactVersion(
+                ArtifactRecord(servedId, dashboardId, "dbr/dashboard", "Board", "", 3, at, at, user),
+                ArtifactVersionDetail(servedId, 3, PipelineVersionStatus.RELEASED, "h", at, user),
+                DashboardBody(
+                    displayName = "Board",
+                    visualizations = listOf(occurrence),
+                    layout = DashboardLayout(),
+                ),
+            )
+        val resolved =
+            ResolvedDashboard(
+                served = served,
+                visualizations = mapOf("rev" to pinned("Revenue by region", "Monthly revenue, every region")),
+                set = null,
+                sources = emptyMap(),
+                configurationId = "cfg-1",
+            )
+
+        val config = RuntimeViews.config(resolved, DashboardRuntimeConfig())
+        val visualization = config["visualizations"][0]
+
+        visualization["name"].asText() shouldBe "rev"
+        // The card heading's wire source: the pinned VERSION's display name and description,
+        // version-scoped — not the artifact record's name ("v"), not the dashboard's ("Board").
+        visualization["display_name"].asText() shouldBe "Revenue by region"
+        visualization["description"].asText() shouldBe "Monthly revenue, every region"
+
+        // An optional description the body omits rides as JSON null, never a missing key —
+        // the client reads the field unconditionally.
+        val withoutDescription =
+            ResolvedDashboard(
+                served = served,
+                visualizations = mapOf("rev" to pinned("Revenue by region", null)),
+                set = null,
+                sources = emptyMap(),
+                configurationId = "cfg-1",
+            )
+        RuntimeViews.config(withoutDescription, DashboardRuntimeConfig())["visualizations"][0]["description"].isNull shouldBe true
     }
 
     @Test

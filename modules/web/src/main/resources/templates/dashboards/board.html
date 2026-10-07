@@ -12,6 +12,10 @@
     <script th:src="@{/js/datapipelines-dashboard-plotly.js}"></script>
     <script th:src="@{/js/datapipelines-dashboard-table.js}"></script>
     <script th:src="@{/js/datapipelines-dashboard-kpi.js}"></script>
+    <!-- #473 — the dock's pure state/log/format module, before the page glue that drives it:
+         the catalog loads in order, once per document (page-assets.mjs's loaded map), so an
+         in-shell arrival has it defined before the mount runs. -->
+    <script th:src="@{/js/dashboards/events-dock.js}"></script>
     <script data-page-mount th:src="@{/js/dashboards-page.js}" defer></script>
   </th:block>
   <!-- #400 — the workspace's tab state (the shared core, and the dashboards glue over it; the
@@ -98,39 +102,137 @@
       </nav>
 
       <div class="dp-ws-panes">
-        <!-- BOARD — today's board page exactly: the runtime mounts the configuration's grid
-             in #dp-board, the refusal region stands in for a board that cannot run, and the
-             events pane sits beside it. The version attribute is the #369 channel: an
-             INTEGER for a named version, ABSENT for the default (the glue's init stays
-             "released", dashboards.md §6.1). -->
+        <!-- BOARD — #473's presentation: the FILTERS panel LEFT (the runtime mounts the
+             parameters pane there, through the adapter's parametersContainer — outside the
+             grid container, so the charts' measurements and the controls' home are
+             independent), the board RIGHT, and the bottom ACTIVITY DOCK beneath both. At
+             narrow widths the panel becomes an off-canvas drawer (the same controls — the
+             CSS moves the element, the glue moves the focus), opened by the toolbar's
+             trigger. The version attribute is the #369 channel: an INTEGER for a named
+             version, ABSENT for the default (the glue's init stays "released",
+             dashboards.md §6.1). -->
         <div class="dp-ws-pane" id="dp-pane-board" role="tabpanel" aria-labelledby="dp-tab-board"
              data-dp-pane="board" th:attr="hidden=${activeTab != 'board'} ? 'hidden' : null">
           <div class="dp-board-page">
-            <div class="dp-board-layout">
-              <main id="dp-board" class="dp-board"
-                    th:attr="data-dp-dashboard-id=${dashboardId}, data-dp-dashboard-version=${boardVersion}"></main>
-
-              <!-- The refusal state: the in-page answer to a board that cannot run (no
-                   release yet, a dependency missing) and to a runtime boot failure — the
-                   onNotification sink's region. The NAME stays in the h1 above (#409's
-                   refusal arm); never a blank pane. -->
-              <div id="dp-board-refusal" class="ds-empty" hidden
-                   th:attr="data-dp-refusal-code=${refusalCode}, data-dp-refusal-message=${refusalMessage}"
-                   th:hidden="${refusalCode == null}">
-                <p class="ds-empty-title">This dashboard cannot be shown</p>
-                <p class="ds-empty-description" id="dp-board-refusal-message"
-                   th:text="${refusalMessage}">The board could not start.</p>
-                <p class="ds-empty-description">
-                  <code id="dp-board-refusal-code" th:text="${refusalCode}">dashboard.not_found</code>
-                </p>
-              </div>
-
-              <!-- The events pane: the caller's refreshes, newest first, beside the board;
-                   the fragment's root re-fetches itself on a bounded poll. -->
-              <aside class="dp-board-side" aria-label="Refreshes">
-                <div th:replace="~{partials/dashboard-refreshes :: pane}"></div>
-              </aside>
+            <div class="dp-board-toolbar">
+              <button type="button" id="dp-board-filters-trigger" class="ds-button ds-button-secondary ds-button-sm"
+                      aria-expanded="false" aria-controls="dp-board-filters">
+                <svg class="ds-icon ds-icon-xs" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#sliders-horizontal"></use></svg>
+                Filters
+              </button>
             </div>
+            <div class="dp-board-layout">
+              <aside id="dp-board-filters" class="dp-board-filters" aria-label="Dashboard filters">
+                <button type="button" id="dp-board-filters-close"
+                        class="ds-button ds-button-ghost ds-button-sm dp-board-filters-close">
+                  <svg class="ds-icon ds-icon-xs" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#x"></use></svg>
+                  Close
+                </button>
+                <!-- The parameters pane mounts here (dashboards-page.js passes this element
+                     as the adapter's parametersContainer). -->
+              </aside>
+              <div class="dp-board-results">
+                <main id="dp-board" class="dp-board"
+                      th:attr="data-dp-dashboard-id=${dashboardId}, data-dp-dashboard-version=${boardVersion}"></main>
+
+                <!-- The refusal state: the in-page answer to a board that cannot run (no
+                     release yet, a dependency missing) and to a runtime boot failure — the
+                     onNotification sink's region. The NAME stays in the h1 above (#409's
+                     refusal arm); never a blank pane. -->
+                <div id="dp-board-refusal" class="ds-empty" hidden
+                     th:attr="data-dp-refusal-code=${refusalCode}, data-dp-refusal-message=${refusalMessage}"
+                     th:hidden="${refusalCode == null}">
+                  <p class="ds-empty-title">This dashboard cannot be shown</p>
+                  <p class="ds-empty-description" id="dp-board-refusal-message"
+                     th:text="${refusalMessage}">The board could not start.</p>
+                  <p class="ds-empty-description">
+                    <code id="dp-board-refusal-code" th:text="${refusalCode}">dashboard.not_found</code>
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <!-- #473 — the bottom ACTIVITY DOCK (the design record's §3.2): Events and Errors
+                 are the live witness's views (the runtime's sanitized onStreamEvent summary);
+                 History is the durable refresh listing — the SAME server partial the old
+                 right-side pane served, moved here, so the poll count does not grow. The
+                 standalone Refreshes workspace tab below keeps its own lazy copy, exactly as
+                 #400 built it. -->
+            <section id="dp-board-dock" class="dp-board-dock" data-dp-dock-active="events"
+                     aria-label="Dashboard activity">
+              <button type="button" class="dp-board-dock-splitter" data-dp-dock-resize
+                      aria-label="Resize the activity dock"></button>
+              <div class="dp-board-dock-head">
+                <div class="dp-board-dock-tabs" role="tablist" aria-label="Activity views">
+                  <button type="button" class="dp-board-dock-tab" role="tab" id="dp-board-dock-tab-events"
+                          aria-controls="dp-board-dock-pane-events" aria-selected="true" data-dp-dock-tab="events">
+                    Events <span class="dp-board-dock-count" data-dp-dock-count="events">0</span>
+                  </button>
+                  <button type="button" class="dp-board-dock-tab" role="tab" id="dp-board-dock-tab-errors"
+                          aria-controls="dp-board-dock-pane-errors" aria-selected="false" data-dp-dock-tab="errors">
+                    Errors <span class="dp-board-dock-count" data-dp-dock-count="errors">0</span>
+                  </button>
+                  <button type="button" class="dp-board-dock-tab" role="tab" id="dp-board-dock-tab-history"
+                          aria-controls="dp-board-dock-pane-history" aria-selected="false" data-dp-dock-tab="history">
+                    History
+                  </button>
+                </div>
+                <div class="dp-board-dock-tools">
+                  <label class="dp-board-dock-tool">
+                    <span class="dp-board-dock-tool-label">Severity</span>
+                    <select class="ds-input ds-input-sm" data-dp-dock-filter="severity" aria-label="Filter events by severity">
+                      <option value="">all</option>
+                      <option value="info">info</option>
+                      <option value="warning">warning</option>
+                      <option value="error">error</option>
+                    </select>
+                  </label>
+                  <label class="dp-board-dock-tool">
+                    <span class="dp-board-dock-tool-label">Kind</span>
+                    <select class="ds-input ds-input-sm" data-dp-dock-filter="kind" aria-label="Filter events by kind">
+                      <option value="">all</option>
+                      <option value="source">sources</option>
+                      <option value="visualization">visualizations</option>
+                      <option value="refresh">refreshes</option>
+                      <option value="abort">abort</option>
+                      <option value="connection">connection</option>
+                      <option value="parameters">parameters</option>
+                    </select>
+                  </label>
+                  <button type="button" class="ds-button ds-button-ghost ds-button-sm" data-dp-dock-clear>
+                    <svg class="ds-icon ds-icon-xs" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#rotate-ccw"></use></svg>
+                    Clear
+                  </button>
+                  <button type="button" class="ds-button ds-button-ghost ds-button-sm dp-board-dock-collapse"
+                          data-dp-dock-collapse aria-expanded="true">
+                    <svg class="ds-icon ds-icon-xs" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#chevrons-up-down"></use></svg>
+                    Collapse
+                  </button>
+                </div>
+              </div>
+              <div class="dp-board-dock-body" data-dp-dock-body>
+                <div id="dp-board-dock-pane-events" class="dp-board-dock-pane" role="tabpanel"
+                     aria-labelledby="dp-board-dock-tab-events" data-dp-dock-pane="events">
+                  <p class="dp-board-dock-empty" data-dp-dock-empty="events">
+                    Events from this dashboard's refreshes land here — sources, visualizations,
+                    completions, failures and recoveries, in order.
+                  </p>
+                  <ul class="dp-board-events" data-dp-dock-list="events"></ul>
+                </div>
+                <div id="dp-board-dock-pane-errors" class="dp-board-dock-pane" role="tabpanel"
+                     aria-labelledby="dp-board-dock-tab-errors" data-dp-dock-pane="errors" hidden>
+                  <p class="dp-board-dock-empty" data-dp-dock-empty="errors">
+                    No errors. Failures and connection losses appear here the moment they happen.
+                  </p>
+                  <ul class="dp-board-events" data-dp-dock-list="errors"></ul>
+                </div>
+                <div id="dp-board-dock-pane-history" class="dp-board-dock-pane" role="tabpanel"
+                     aria-labelledby="dp-board-dock-tab-history" data-dp-dock-pane="history" hidden>
+                  <div th:replace="~{partials/dashboard-refreshes :: pane}"></div>
+                </div>
+              </div>
+              <p class="dp-board-dock-foot" data-dp-dock-foot hidden></p>
+            </section>
           </div>
         </div>
 

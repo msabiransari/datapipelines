@@ -215,6 +215,30 @@
     return isObject(title) && title.text !== undefined && title.text !== null && String(title.text).length > 0;
   }
 
+  /**
+   * #473 — the card head carries the occurrence's name; a stored figure title that repeats it
+   * verbatim would print the same words twice in one card. An EXACT trimmed match is dropped
+   * (and the compact top margin stays), so the in-figure title remains only when it says
+   * something the heading does not. The comparison uses the same wire field the card heading
+   * prefers (`display_name`).
+   */
+  function suppressDuplicateTitle(layout, displayName) {
+    if (!displayName || !isObject(layout)) return layout;
+    var title = layout.title;
+    var text =
+      typeof title === "string"
+        ? title
+        : isObject(title) && typeof title.text === "string"
+          ? title.text
+          : null;
+    if (text !== null && text.trim() === String(displayName).trim()) {
+      var out = clone(layout);
+      delete out.title;
+      return out;
+    }
+    return layout;
+  }
+
   function withSizeDefaults(stored) {
     var out = clone(stored && isObject(stored) ? stored : {});
     var margin = Object.assign({}, COMPACT_MARGIN);
@@ -272,7 +296,10 @@
           throw new Error("Plotly is not loaded; the page must load one vendored bundle");
         }
         var config = substitute(stored, bindings || {}, escapeMarkup);
-        config.layout = mergeLayout(withSizeDefaults(config.layout), themeLayout(occurrence.presentation));
+        config.layout = mergeLayout(
+          withSizeDefaults(suppressDuplicateTitle(config.layout, occurrence.display_name)),
+          themeLayout(occurrence.presentation),
+        );
         var plotConfig = Object.assign({ responsive: true, displaylogo: false }, config.config || {});
         return new Promise(function (resolve, reject) {
           var settled = false;
@@ -338,6 +365,7 @@
       themeLayout: themeLayout,
       mergeLayout: mergeLayout,
       withSizeDefaults: withSizeDefaults,
+      suppressDuplicateTitle: suppressDuplicateTitle,
       COMPACT_MARGIN: COMPACT_MARGIN,
       COMPACT_TITLED_TOP: COMPACT_TITLED_TOP,
     },
