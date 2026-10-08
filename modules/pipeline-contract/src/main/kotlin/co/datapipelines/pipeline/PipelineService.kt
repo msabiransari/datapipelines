@@ -649,12 +649,15 @@ open class PipelineService(
      * stamp per version); the pointer moves only above-current-or-NULL (D60). No pin can
      * exist on a DISCARDED version (the `pinned` guard blocked its discard), so restore is
      * always safe. An authoring write (§5.5).
+     *
+     * Answers the statement's own pointer pair ([PipelineRestoreResult]) — the pair the
+     * `pipeline.version.restored` audit row carries (enums.md §15, #379), never a re-read.
      */
     open fun restoreVersion(
         workspaceId: UUID,
         pipelineId: UUID,
         version: Int,
-    ): PipelineRecord {
+    ): PipelineRestoreResult {
         authoring.requirePipelineAuthoring()
         // AnyStatus: restoring the first version of a DISCARDED entity is the one way back
         // (§3.5's `{X,X}` rows) — a live-only read would 404 the restore.

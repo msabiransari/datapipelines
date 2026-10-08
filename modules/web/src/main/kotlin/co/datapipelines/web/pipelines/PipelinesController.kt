@@ -341,7 +341,7 @@ class PipelinesController(
     ): ApiResponse<JsonNode> {
         val principal = LifecycleVerbs.requireSession()
         val workspaceId = principal.requireWorkspace().id
-        val record = pipelines.restoreVersion(workspaceId, id, version)
+        val result = pipelines.restoreVersion(workspaceId, id, version)
         LifecycleVerbs.audit(
             audit,
             LifecycleVerbs.AUDIT_VERSION_RESTORED,
@@ -350,10 +350,11 @@ class PipelinesController(
             mapOf(
                 "pipeline_id" to id.toString(),
                 "version" to version,
-                "current_version_after" to record.currentVersion,
+                "current_version_before" to result.currentVersionBefore,
+                "current_version_after" to result.record.currentVersion,
             ),
         )
-        return ApiResponse.of(PipelineResponses.full(record, bodyFor(workspaceId, id, record)))
+        return ApiResponse.of(PipelineResponses.full(result.record, bodyFor(workspaceId, id, result.record)))
     }
 
     /**

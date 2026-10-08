@@ -914,6 +914,12 @@ class PipelineRepository(
      * pointer moves only above-current-or-NULL (D60) — `GREATEST(COALESCE(cur, 0), x)` is
      * exactly that rule. Returns null when the target was not DISCARDED.
      *
+     * The row answers the pointer pair (#379): `current_version_before` is read by the
+     * `prev` CTE on the statement's own snapshot — every CTE of one statement sees the
+     * tables as of statement start, so it cannot observe `bumped`'s write — and the after
+     * is the bumped record's `current_version`. Statement-snapshot before semantics, the
+     * artifact-family exemplar's shape; never a separate re-read.
+     *
      * Deliberately NO entity-live predicate: restoring the first version of a DISCARDED
      * entity is the one way back (§3.5's `{X,X}` rows).
      */
@@ -922,7 +928,7 @@ class PipelineRepository(
         pipelineId: UUID,
         version: Int,
         draftEligible: Boolean,
-    ): PipelineRecord? =
+    ): PipelineRestoreResult? =
         jdbc
             .query(
                 RESTORE_VERSION_SQL,
@@ -932,8 +938,12 @@ class PipelineRepository(
                     "version" to version,
                     "draftEligible" to draftEligible,
                 ),
-                MAPPER,
-            ).singleOrNull()
+            ) { rs, _ ->
+                PipelineRestoreResult(
+                    record = requireNotNull(MAPPER.mapRow(rs, 0)),
+                    currentVersionBefore = rs.getInt("current_version_before").takeUnless { rs.wasNull() },
+                )
+            }.singleOrNull()
 
     /**
      * Manual switch (§3.4, D60): `current = v` where v must be a LIVE, posture-eligible
@@ -1768,6 +1778,11 @@ class PipelineRepository(
          * exactly D60's restore rule, evaluated on the OLD row by the same-statement SET.
          * No live predicate: restoring the first version of a DISCARDED entity is the one
          * way back.
+         *
+         * The row answers the pointer pair (#379): `prev` reads `current_version` on the
+         * statement's snapshot — before `bumped`'s write, which no CTE of the same
+         * statement can see — and the after rides `bumped`'s RETURNING. The artifact
+         * families' restore statement is the exemplar.
          */
         val RESTORE_VERSION_SQL =
             """
@@ -1778,6 +1793,10 @@ class PipelineRepository(
                  WHERE v.pipeline_id = :pipelineId AND v.version = :version AND v.status = 'DISCARDED'
                    AND p.id = v.pipeline_id AND p.workspace_id = :workspaceId
                 RETURNING v.version
+            ), prev AS (
+                SELECT current_version
+                  FROM pipelines
+                 WHERE id = :pipelineId AND workspace_id = :workspaceId
             ), bumped AS (
                 UPDATE pipelines
                    SET current_version = GREATEST(COALESCE(current_version, 0), (SELECT version FROM restored)),
@@ -1787,8 +1806,9 @@ class PipelineRepository(
                 RETURNING $COLUMNS
             )
             SELECT b.id, b.name, b.display_name, b.description, b.owner_id,
-                   b.current_version, b.created_at, b.updated_at
-              FROM bumped b
+                   b.current_version, b.created_at, b.updated_at,
+                   prev.current_version AS current_version_before
+              FROM bumped b, prev
             """.trimIndent()
 
         /**
