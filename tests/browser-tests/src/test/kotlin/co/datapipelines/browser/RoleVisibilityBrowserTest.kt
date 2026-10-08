@@ -143,6 +143,11 @@ class RoleVisibilityBrowserTest : BrowserSuite() {
         val open = viewer.page.locator("#pipeline-list-wrapper a.tpl-result").first()
         open.waitFor()
         probe.badResponses shouldBe emptyList()
+        // #460 A: from the entry click onward no REST tree level is re-fetched. Registered HERE,
+        // after the explorer document has loaded, so the first load's own requests — including
+        // the five `/js/tree/*.mjs` ES modules — are never counted (the loose `contains("/tree")`
+        // attached before the load read those modules as five refetches; #460c).
+        watchTreeRefetch(viewer.page, probe)
 
         // #460 section A: markers that survive only if the row opens the workspace IN the shell.
         viewer.page.evaluate(
@@ -190,7 +195,7 @@ class RoleVisibilityBrowserTest : BrowserSuite() {
         viewer.close()
     }
 
-    /** The status and tree-request probes the editor-entry walk records. */
+    /** The status and REST-tree probes the editor-entry walk records. */
     private class NavProbe {
         val badResponses = mutableListOf<String>()
         var admissionStatus = 0
@@ -198,9 +203,9 @@ class RoleVisibilityBrowserTest : BrowserSuite() {
     }
 
     /**
-     * #460 — record every refused response, the destination admission, and any sidebar-tree
-     * fetch. Admission is the destination response's status regardless of request kind: the
-     * workspace now arrives by a prepared boosted swap, not a document navigation.
+     * #460 — record every refused response and the destination admission. Admission is the
+     * destination response's status regardless of request kind: the workspace now arrives by a
+     * prepared boosted swap, not a document navigation.
      */
     private fun watchNavigation(page: Page): NavProbe {
         val probe = NavProbe()
@@ -210,11 +215,24 @@ class RoleVisibilityBrowserTest : BrowserSuite() {
             }
             if (PipelineWorkspaceUrl.matches(response.url())) probe.admissionStatus = response.status()
         }
-        page.onRequest { if (it.url().contains("/tree")) probe.treeRequests++ }
         return probe
     }
 
-    /** #460 section A: the entry preserved the SAME document and rail and fetched no tree level. */
+    /**
+     * #460 section A — from the entry onward, count only a REST tree level. The endpoints are
+     * the `/api/v1/` family `tree` and `tree/search` reads; a bare `contains("/tree")` also
+     * matched the five ES modules under `/js/tree/` (sidebar, component, render, rest-source,
+     * state) that a document load requests, so a full reload counted as five refetches. Here
+     * the whole point is that the entry reuses the mounted rail and fetches no REST tree level.
+     */
+    private fun watchTreeRefetch(
+        page: Page,
+        probe: NavProbe,
+    ) {
+        page.onRequest { if (it.url().contains("/api/v1/") && it.url().contains("/tree")) probe.treeRequests++ }
+    }
+
+    /** #460 section A: the entry preserved the SAME document and rail and fetched no REST tree level. */
     private fun assertInShellEntry(
         page: Page,
         probe: NavProbe,
