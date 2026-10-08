@@ -87,3 +87,22 @@ ignoreUntil = 2027-02-15
 id = "GHSA-pc63-qcmh-9cmg" # spring-webmvc 6.2.19 — XsltView never configured, no 6.2.x fix; owner ruling (triaged 2026-10-05, #461)
 reason = "XsltView is never configured (no XsltView/XsltViewResolver/XSLT in the sources); no fixed 6.2.x exists, the only fix is Spring 7.0.9 (Boot 4) — tracked in #461"
 ignoreUntil = 2026-11-05
+
+#  * spring-webmvc 6.2.19 (CRITICAL 9.8, CVE-2026-47890, SSE stream corruption
+#    with view fragments, CWE-93) — reviewed into the GitHub database
+#    2026-10-07. Spring's advisory names three conditions that must ALL hold:
+#    Spring MVC or WebFlux, VIEW FRAGMENTS sent over Server-Sent Events, and
+#    attacker control of the streamed data. The second never holds: every
+#    SseEmitter send in modules/web (ExecutionStream, SseLogStreamer,
+#    RefreshStream, ParameterEvaluationStream) passes a Jackson-serialised
+#    String with MediaType.APPLICATION_JSON, or a constant comment; no
+#    ModelAndView, FragmentsRendering or reactive return type reaches an SSE
+#    response, and spring-webflux is on no lockfile (git grep, 2026-10-08).
+#    No OSS 6.2.x fix exists (6.2.20 is enterprise-only); the only fix is
+#    Spring Framework 7.0.9, the same Boot 4 migration as the XsltView entry
+#    above. Same expiry, same tracker (#461).
+
+[[IgnoredVulns]]
+id = "GHSA-j9f9-w8pj-32f8" # spring-webmvc 6.2.19 — no view fragments over SSE, no 6.2.x OSS fix; owner ruling (triaged 2026-10-08, #461)
+reason = "No view fragment is ever sent over SSE (every SseEmitter payload is serialised JSON or a comment; no ModelAndView/FragmentsRendering on a stream, no webflux); no OSS 6.2.x fix exists, the only fix is Spring 7.0.9 (Boot 4) — tracked in #461"
+ignoreUntil = 2026-11-05
