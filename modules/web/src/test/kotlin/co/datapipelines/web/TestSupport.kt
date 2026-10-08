@@ -240,7 +240,14 @@ fun pipelineServiceOver(
         pipelines = pipelines,
         validator = validator,
         drafts = co.datapipelines.pipeline.PipelineDraftService(pipelines, authoring),
-        releases = co.datapipelines.pipeline.PipelineReleaseService(pipelines, templateVersions, validator, authoring),
+        releases =
+            co.datapipelines.pipeline.PipelineReleaseService(
+                pipelines,
+                templateVersions,
+                validator,
+                authoring,
+                dashboards = NO_DASHBOARDS,
+            ),
         authoring = authoring,
         // 101: the entity purge's port — empty offer (this helper's callers pin no templates).
         draftTemplates = NO_EXCLUSIVE_DRAFT_TEMPLATES,

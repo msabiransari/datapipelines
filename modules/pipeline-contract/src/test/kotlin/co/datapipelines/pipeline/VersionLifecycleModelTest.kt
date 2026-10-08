@@ -84,6 +84,8 @@ class VersionLifecycleModelTest {
     private lateinit var repository: PipelineRepository
     private val actor: UUID = UUID.randomUUID()
     private val deserializer = PipelineDeserializer()
+    private var generatedDraftPins = 0
+    private var refusedPinnedDraftPurges = 0
 
     private val dev: PipelineService by lazy { serviceFor(authoring = true) }
     private val hard: PipelineService by lazy { serviceFor(authoring = false) }
@@ -117,7 +119,7 @@ class VersionLifecycleModelTest {
     @Test
     fun `every lifecycle-table row replays against the real surface`() {
         val rows = VersionLifecycleTable.parse(Fixtures.repoFile(SPEC_PATH).readText())
-        withClue("the table must parse (the drift guard owns the floor)") { rows.size shouldBe 68 }
+        withClue("the table must parse (the drift guard owns the floor)") { rows.size shouldBe 71 }
 
         rows.forEachIndexed { index, row ->
             if (excluded(row)) return@forEachIndexed
@@ -199,6 +201,8 @@ class VersionLifecycleModelTest {
         val sequences = System.getProperty("versionLifecycle.sequences")?.toIntOrNull() ?: DEFAULT_SEQUENCES
         val started = System.nanoTime()
         var events = 0L
+        generatedDraftPins = 0
+        refusedPinnedDraftPurges = 0
 
         listOf("dev" to dev, "hard" to hard).forEach { (posture, service) ->
             val seedBase = SEED_BASE + (if (posture == "dev") 0L else 1_000_000_000L)
@@ -226,6 +230,9 @@ class VersionLifecycleModelTest {
             }
         }
 
+        withClue("462 sweep must actually pin drafts") { (generatedDraftPins > 0) shouldBe true }
+        withClue("462 sweep must actually refuse a pinned draft purge") { (refusedPinnedDraftPurges > 0) shouldBe true }
+        println("462 generatedDraftPins=$generatedDraftPins refusedPinnedDraftPurges=$refusedPinnedDraftPurges")
         val seconds = (System.nanoTime() - started) / 1_000_000_000.0
         println(
             "VersionLifecycleModelTest: $sequences sequences/posture, $events events total, " +
@@ -251,7 +258,11 @@ class VersionLifecycleModelTest {
 
         repeat(length) {
             val ev = generateEvent(random, model)
+            if (ev is Ev.AddPin && model.versions[ev.version] == 'D') generatedDraftPins++
             val outcome = applyEvent(id, ev, service)
+            if ((ev is Ev.Purge || ev is Ev.PurgeEntity) && outcome.code == PipelineErrorCodes.Versioning.PINNED) {
+                refusedPinnedDraftPurges++
+            }
             fired.add(ev)
             countEvents(1)
             if (ev is Ev.Purge && outcome.code == null) successfulPurges.add(ev.version)
@@ -418,14 +429,14 @@ class VersionLifecycleModelTest {
 
             8 -> {
                 model.versions
-                    .filterValues { it == 'R' }
+                    .filterValues { it != 'X' }
                     .keys
                     .randomOrNull(random)
                     ?.let { Ev.AddPin(it) }
                     ?: Ev.Noop
             }
 
-            // no released version: a pin would name a draft, which D58 refuses at save
+            // Executions target live versions, including drafts.
             else -> {
                 Ev.AddExecution(
                     model.versions
@@ -845,6 +856,7 @@ class VersionLifecycleModelTest {
                     TemplateVersionStatuses { _, _, _ -> PipelineVersionStatus.RELEASED },
                     validator,
                     guard,
+                    dashboards = NoDashboards,
                 ),
             authoring = guard,
             draftTemplates = NoExclusiveDraftTemplates,
@@ -1070,6 +1082,10 @@ internal class RefModel(
                         PipelineErrorCodes.Versioning.LAST_RELEASE to state
                     }
 
+                    ev.version in state.pinned -> {
+                        PipelineErrorCodes.Versioning.PINNED to state
+                    }
+
                     else -> {
                         val next = LinkedHashMap(state.versions)
                         next.remove(ev.version)
@@ -1092,6 +1108,10 @@ internal class RefModel(
 
                     state.versions.size != 1 || state.versions.values.single() != 'D' -> {
                         PipelineErrorCodes.Versioning.LAST_RELEASE to state
+                    }
+
+                    state.versions.keys.single() in state.pinned -> {
+                        PipelineErrorCodes.Versioning.PINNED to state
                     }
 
                     else -> {
@@ -1119,7 +1139,7 @@ internal class RefModel(
             // Environment events, not lifecycle verbs — the state they touch is asserted by
             // the invariants (pin targets stay live; purge clears executions).
             is VersionLifecycleModelTest.Ev.AddPin -> {
-                // The generator pins only currently-RELEASED versions; the pin persists until
+                // The generator pins live DRAFT and RELEASED versions; the pin persists until
                 // its parent goes (nothing in a sequence touches parents).
                 null to State(LinkedHashMap(state.versions), state.pointer, state.gone, state.pinned + ev.version)
             }

@@ -272,6 +272,30 @@ class PipelineLifecycleDialogControllerTest {
     }
 
     @Test
+    fun `462 direct purge POST rechecks the service refusal and emits no success audit`() {
+        every { pipelines.purgeVersion(WORKSPACE, PIPELINE, 4) } throws
+            DatapipelinesException(
+                PipelineErrorCodes.Versioning.PINNED,
+                "Version 4 is pinned by a pipeline; discard or repoint it first.",
+                mapOf("pinned_by" to listOf(mapOf("pipeline" to "test/new_parent", "version" to 1, "node" to "child"))),
+            )
+        val body =
+            mvc
+                .perform(
+                    post("/partials/pipelines/$PIPELINE/lifecycle/purge")
+                        .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                        .param("version", "4")
+                        .param("confirm", "v4")
+                        .header("HX-Request", "true"),
+                ).andExpect(status().isConflict)
+                .andReturn()
+                .response.contentAsString
+        body shouldContain "pipeline.version.pinned"
+        verify(exactly = 1) { pipelines.purgeVersion(WORKSPACE, PIPELINE, 4) }
+        audit.events shouldBe emptyList()
+    }
+
+    @Test
     fun `purge from the editor - the draft outcome redirects to the canonical workspace with its flash`() {
         // #348 merge follow-up: `/pipelines/{id}/editor` is a compatibility redirect that forwards only
         // `version` and `tab`, so an `ok` sent there was dropped and the toast never rendered.

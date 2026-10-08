@@ -103,7 +103,11 @@ open class PipelineReleaseService(
      * [TemplateReviewMarks.NONE] keeps pre-7e constructions releasing with no warnings.
      */
     private val reviewMarks: TemplateReviewMarks = TemplateReviewMarks.NONE,
+    /** Required dashboard pin evidence for purge; production supplies the workspace-scoped consumer. */
+    private val dashboards: PipelineVersionConsumers,
 ) {
+    private val pinGuard = PipelinePurgePinGuard(pipelines, dashboards)
+
     /** What a release produced: the bumped record, the released version, the released body. */
     data class Released(
         val record: PipelineRecord,
@@ -426,7 +430,8 @@ open class PipelineReleaseService(
      * become `current_version` (the development fallback) the pointer recomputes.
      *
      * @throws DatapipelinesException `pipeline.authoring.disabled` (§5.5) or
-     *   `pipeline.version.conflict` (stale hash / the draft vanished).
+     *   `pipeline.version.conflict` (stale hash / the draft vanished), or
+     *   `pipeline.version.pinned` (named parent/dashboard blockers, before deletion).
      */
     @Transactional("metadataTransactionManager")
     open fun purge(
@@ -436,6 +441,10 @@ open class PipelineReleaseService(
     ): Purged {
         // §5.5: purging authored content is authoring — a receiver's sole writer is promotion.
         authoring.requirePipelineAuthoring()
+
+        val draft = requirePurgeDraft(workspaceId, pipelineId, expectedHash)
+        val record = pipelines.findByIdAnyStatus(workspaceId, pipelineId) ?: throw notDraft(pipelineId)
+        pinGuard.refuseIfDraftPinned(workspaceId, record, draft.version)
 
         return when (
             val outcome =
@@ -450,6 +459,17 @@ open class PipelineReleaseService(
             is PurgeOutcome.EntityPurged -> Purged.Entity(outcome.executionsDeleted)
             null -> throw conflictAfterGuardFailure(workspaceId, pipelineId)
         }
+    }
+
+    private fun requirePurgeDraft(
+        workspaceId: UUID,
+        pipelineId: UUID,
+        expectedHash: String,
+    ): PipelineVersionDetail {
+        // Status and hash refusals precede the pin preflight.
+        val draft = pipelines.findDraftDetail(workspaceId, pipelineId) ?: throw notDraft(pipelineId)
+        if (draft.bodyHash != expectedHash) throw conflictAfterGuardFailure(workspaceId, pipelineId)
+        return draft
     }
 
     /**
