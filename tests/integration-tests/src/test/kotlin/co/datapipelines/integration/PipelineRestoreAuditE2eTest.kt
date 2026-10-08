@@ -55,8 +55,18 @@ class PipelineRestoreAuditE2eTest {
     fun `a REST restore that moves the pointer up persists ONE row with before 1 and after 2`() {
         val id = seedReleasedPipeline("pra/pipelines/restore_move_${UUID.randomUUID()}", currentVersion = 2, versions = 1 to 2)
 
-        given().port(port).asSession(ADMIN_SESSION).post("$API/pipelines/$id/versions/2/discard").then().statusCode(200)
-        given().port(port).asSession(ADMIN_SESSION).post("$API/pipelines/$id/versions/2/restore").then().statusCode(200)
+        given()
+            .port(port)
+            .asSession(ADMIN_SESSION)
+            .post("$API/pipelines/$id/versions/2/discard")
+            .then()
+            .statusCode(200)
+        given()
+            .port(port)
+            .asSession(ADMIN_SESSION)
+            .post("$API/pipelines/$id/versions/2/restore")
+            .then()
+            .statusCode(200)
 
         assertOneAuditRow(
             event = EVENT,
@@ -85,7 +95,12 @@ class PipelineRestoreAuditE2eTest {
     fun `the workspace dialog's restore persists the pair too - before 2 and after 2, a restore cannot lower the pointer`() {
         val id = seedReleasedPipeline("pra/pipelines/restore_hold_${UUID.randomUUID()}", currentVersion = 2, versions = 1 to 2)
 
-        given().port(port).asSession(ADMIN_SESSION).post("$API/pipelines/$id/versions/1/discard").then().statusCode(200)
+        given()
+            .port(port)
+            .asSession(ADMIN_SESSION)
+            .post("$API/pipelines/$id/versions/1/discard")
+            .then()
+            .statusCode(200)
 
         val dialog =
             given()
@@ -115,12 +130,22 @@ class PipelineRestoreAuditE2eTest {
     fun `restoring the pipeline's last live version answers an explicit NULL before`() {
         val id = seedReleasedPipeline("pra/pipelines/restore_null_${UUID.randomUUID()}", currentVersion = 1, versions = 1 to 1)
 
-        given().port(port).asSession(ADMIN_SESSION).post("$API/pipelines/$id/versions/1/discard").then().statusCode(200)
+        given()
+            .port(port)
+            .asSession(ADMIN_SESSION)
+            .post("$API/pipelines/$id/versions/1/discard")
+            .then()
+            .statusCode(200)
         withClue("discarding the only live version leaves the pointer NULL") {
             pointerOf(id) shouldBe null
         }
 
-        given().port(port).asSession(ADMIN_SESSION).post("$API/pipelines/$id/versions/1/restore").then().statusCode(200)
+        given()
+            .port(port)
+            .asSession(ADMIN_SESSION)
+            .post("$API/pipelines/$id/versions/1/restore")
+            .then()
+            .statusCode(200)
 
         assertOneAuditRow(
             event = EVENT,
@@ -158,7 +183,12 @@ class PipelineRestoreAuditE2eTest {
         val restBefore = auditRows(EVENT, restTarget).size
         val dialogBefore = auditRows(EVENT, dialogTarget).size
 
-        given().port(port).asSession(OTHER_SESSION).post("$API/pipelines/$restTarget/versions/2/restore").then().statusCode(404)
+        given()
+            .port(port)
+            .asSession(OTHER_SESSION)
+            .post("$API/pipelines/$restTarget/versions/2/restore")
+            .then()
+            .statusCode(404)
         given()
             .port(port)
             .asSession(OTHER_SESSION)
@@ -210,25 +240,34 @@ class PipelineRestoreAuditE2eTest {
     ): List<JsonNode> {
         val out = mutableListOf<JsonNode>()
         DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
-            connection
-                .prepareStatement(
-                    "SELECT user_id, details_json FROM audit_log WHERE event = ? AND details_json::text LIKE ? ORDER BY timestamp ASC",
-                ).use { ps ->
-                    ps.setString(1, event)
-                    ps.setString(2, "%$needle%")
-                    ps.executeQuery().use { rows ->
-                        while (rows.next()) {
-                            out.add(
-                                mapper
-                                    .createObjectNode()
-                                    .put("user_id", rows.getString("user_id"))
-                                    .set("details", mapper.readTree(rows.getString("details_json"))),
-                            )
-                        }
-                    }
-                }
+            collectRows(connection, event, needle, out)
         }
         return out
+    }
+
+    private fun collectRows(
+        connection: java.sql.Connection,
+        event: String,
+        needle: String,
+        out: MutableList<JsonNode>,
+    ) {
+        connection
+            .prepareStatement(
+                "SELECT user_id, details_json FROM audit_log WHERE event = ? AND details_json::text LIKE ? ORDER BY timestamp ASC",
+            ).use { ps ->
+                ps.setString(1, event)
+                ps.setString(2, "%$needle%")
+                ps.executeQuery().use { rows ->
+                    while (rows.next()) {
+                        out.add(
+                            mapper
+                                .createObjectNode()
+                                .put("user_id", rows.getString("user_id"))
+                                .set("details", mapper.readTree(rows.getString("details_json"))),
+                        )
+                    }
+                }
+            }
     }
 
     // ---- the fixtures ----------------------------------------------------------------------------------
@@ -279,20 +318,25 @@ class PipelineRestoreAuditE2eTest {
         }
     }
 
-    private fun pointerOf(id: String): Int? {
+    private fun pointerOf(id: String): Int? =
         DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
-            connection
-                .prepareStatement("SELECT current_version FROM pipelines WHERE id = ?::uuid")
-                .use { ps ->
-                    ps.setString(1, id)
-                    ps.executeQuery().use { rows ->
-                        rows.next()
-                        val value = rows.getInt("current_version")
-                        return if (rows.wasNull()) null else value
-                    }
-                }
+            readPointer(connection, id)
         }
-    }
+
+    private fun readPointer(
+        connection: java.sql.Connection,
+        id: String,
+    ): Int? =
+        connection
+            .prepareStatement("SELECT current_version FROM pipelines WHERE id = ?::uuid")
+            .use { ps ->
+                ps.setString(1, id)
+                ps.executeQuery().use { rows ->
+                    rows.next()
+                    val value = rows.getInt("current_version")
+                    if (rows.wasNull()) null else value
+                }
+            }
 
     /**
      * (released_at, released_by, discarded_at, discarded_by) of one version row, read straight
