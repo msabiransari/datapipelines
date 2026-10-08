@@ -735,10 +735,45 @@ that no longer holds (reconcile the doc), or a `SKIPPED` row — the case could 
 headroom the calibration needs, an environment verdict to re-run, not a bound. The worker itself
 no longer dies of a heap event: everything after a bomb runs inside the suite's OOM guard.
 
-**`verifyTestsExecuted` and filtered runs.** The zero-test guard fails whenever a module produced
-fewer result files than it has `*Test.kt` sources — which is *always* true of a `--tests` filtered
-run. That `BUILD FAILED` is the guard doing its job, not a red suite: read the XML (or run the
-recount) for the verdict. Filtered runs are for iterating; the gate is unfiltered.
+**Focused iteration with existing tasks.** Run the exact module-qualified test task and
+class (or `Class.method`) while editing. For example, this existing auth guard can run alone:
+
+```bash
+(
+  source scripts/lib/verification-lock.sh
+  verification::lock focused-auth "$PWD" || exit $?
+  ./gradlew :modules:auth:test \
+    --tests co.datapipelines.auth.ScopeMatrixSpecDriftTest \
+    -x :modules:auth:verifyTestsExecuted --rerun-tasks \
+    --no-parallel --max-workers=1 -Pdp.test.forks=1 -Pdp.test.forks.e2e=1 9>&-
+)
+# Read the command's exit, then recount this task's XML explicitly.
+python3 - <<'PYXML'
+from pathlib import Path
+from xml.etree import ElementTree as ET
+
+files = sorted(Path("modules/auth/build/test-results/test").glob("*.xml"))
+assert files, "no selected-task XML"
+suites = [ET.parse(path).getroot() for path in files]
+counts = {key: sum(int(suite.get(key, "0")) for suite in suites)
+          for key in ("tests", "failures", "errors", "skipped")}
+print(f"files={len(files)}", counts)
+assert counts["tests"] > 0 and counts["failures"] == counts["errors"] == 0
+PYXML
+```
+
+Use the shared cache root and coordinate the heavy-work slot before direct Gradle work;
+a busy lock exits 75, so wait for scheduling instead of bypassing it. For an existing browser
+test, substitute its exact class and `:tests:browser-tests:test` task and exclusion, and add
+`-Pdp.browser.ciPatience=true` when reproducing gate action patience. Keep the selected XML
+and task log together; an XML file left by a previous run cannot establish this run's result.
+A focused result is iteration evidence. A fresh complete pregate on the final committed tip
+is required for handback; Gate A remains the lander's whole-batch check.
+
+**`verifyTestsExecuted` and filtered runs.** The zero-test guard compares result files with
+all of a module's `*Test.kt` sources. Exclude that module's exact `verifyTestsExecuted` task
+for `--tests` iteration and filtered pregate stages, as above. Gradle's refusal when a filter
+discovers no tests stays enabled. Unfiltered module checks and Gate A keep the guard.
 
 **The pre-gate (before the first full gate).** `./scripts/pregate.sh [base]` runs, in a few
 minutes, exactly what a targeted test run cannot see and the full gate keeps finding two or
@@ -761,19 +796,44 @@ the run manifest and the verdict's `deferred=` field; a pregate PASS does not cl
 ran. Full browser/integration coverage belongs to the lander's Gate A and CI.
 `./scripts/pregate.sh --self-test` checks the selector, resource limits, evidence and overlap
 refusal using isolated fixtures and a refusing Gradle stand-in; (3) the
-cross-cutting guard classes, filtered, with the zero-test guard skipped for those modules — the
+cross-cutting guard classes still needed after stage 2, filtered, with the zero-test guard skipped for those modules — the
 spec-drift tests, the route and read floors, the coverage scans, the page-count and keyword pins,
 the served-manual guards, the config-key drift tests (the list lives in the script; a new guard that
 reads the whole tree or the docs is added there in the same commit). Iterate on its output,
 then deliver the lane for the lander's gate. It is not the gate: its exit code decides nothing
 about a merge. Every run appends its verdict line — `PRE-GATE PASS|FAIL`, the base, the merge-base, HEAD, the UTC time,
-the five stage exits, `snap` and the run id — to `.pregate-logs/0-verdict.log`, which is where the
-lander reads a delivered lane's verdict (the terminal is the only other place it is printed).
+the five stage exits, `snap`, `prune`, deferred work, elapsed time and the run id — to
+`.pregate-logs/0-verdict.log`, which is where the lander reads a delivered lane's verdict (the terminal is the only other place it is printed).
 Measured need (five lanes, 2026-09-19 to 21): 0–3 extra full gates each, all on lint,
 cross-cutting guards or foreign fixtures. Both this script and `scripts/gate.sh` pass
 `-Pdp.browser.ciPatience=true` to every Gradle invocation (#438), so the browser suite inside a
 gate or a pre-gate waits CI's 90 s per action while a plain `./gradlew :tests:browser-tests:test`
 keeps 30 s.
+
+**Preview and failure handling (#479).** `./scripts/pregate.sh --plan [base]` shows the
+resolved base, merge-base and HEAD, selected files (including staged, unstaged and untracked
+edits), touched modules, exact test classes, deferred coverage, guard candidates, stage order
+and intended commands. It also names files selected only by the supplied base or only by the
+current local-main comparison when those sets differ. It never narrows the supplied base.
+The shared planner feeds execution's argument arrays; printed commands are display records,
+never evaluated as shell code. Guard omission is explicitly conditional on stage-2 evidence.
+Preview does not take the lock, create evidence, prune runs or invoke Gradle. Unknown refs,
+extra bases, unknown flags and incompatible modes fail before mutation.
+
+Default execution captures a failed stage's log and XML, records its original exit and stops
+scheduling. Later stages have `status=not-run exit=125` with the failure reason, so they cannot
+look like successful zeroes. Mandatory evidence writes, recounts and retention failures also
+refuse PASS. `--continue-on-failure [base]` attempts later stages for diagnostics and remains
+FAIL after any failure. Skipped stages with no selected module, deferred tests and guards
+covered by stage 2 have separate dispositions. Deferred full-suite coverage still belongs to
+Gate A; it is not a claim that pregate exercised those classes.
+
+Each run retains `PLAN.txt` (intended commands and selections), `COMMANDS.txt` (actual commands
+and dispositions), the completed stage logs, and per-stage plus total monotonic milliseconds
+in `MANIFEST.txt`; the verdict includes total elapsed time. Stage timing includes evidence
+bookkeeping and guard decisions; total timing also includes work between stages. Compare
+observed equivalent runs before claiming faster wall time. Retained task statuses describe
+fresh, cached or missing provenance; inventories from different stages are never summed.
 
 **Local resource protection (#472).** Pregate runs serial Gradle tasks with
 `--no-parallel --max-workers=1 -Pdp.test.forks=1 -Pdp.test.forks.e2e=1`.
@@ -785,7 +845,7 @@ the lock when its holder exits. Standalone Gradle commands and old script versio
 participate: update lane copies before their next verification run and coordinate direct tests.
 This limits new wrapper runs; it does not change already-running builds or host OOM policy.
 
-**Per-stage evidence survives the run (#441).** Stage 3 reruns the guard classes FILTERED in
+**Per-stage evidence survives the run (#441).** Stage 3 may rerun guard classes FILTERED in
 modules stage 2 already ran, and Gradle deletes a test task's result directory before it writes:
 by the end of a pre-gate the touched modules' stage-2 XML is gone, so a post-run `test-recount.sh`
 used to read only the guards and under-report the bulk of the tests. Every run now gets its own
@@ -794,13 +854,23 @@ directory, `.pregate-logs/runs/<run-id>/` (run-id = UTC stamp + short HEAD + PID
 original exit) and one `<stage>/` mirror of that stage's XML (`2/modules/<m>/build/test-results/…`,
 `2b/tests/<m>/…`, `3/modules|tests/…`). Each test-producing stage is snapshotted immediately after
 it returns — before the next stage can overwrite it, and even when the stage failed, because the
-failing XML is the evidence. `2b` snapshots only the modules its own invocation actually ran, so a
-stale earlier result is never presented as this run's. Read one stage at a time:
+failing XML is the evidence. `2b` snapshots only the modules its own invocation actually ran.
+Other task directories copied from those modules retain explicit provenance, including
+missing-status annotations. Read one stage at a time:
 
 ```bash
 ./scripts/test-recount.sh .pregate-logs/runs/<run-id>/2   # that stage's inventory only
 ./scripts/test-recount.sh .pregate-logs/runs/<run-id>/3
 ```
+
+**Covered guards (#479, exact provenance #468).** Stage 3 omits a product module's guards
+only when this invocation's successful unfiltered stage 2 retained sufficient XML for every
+one of those classes and exactly one fresh `> Task :modules:<module>:test` status line.
+`testClasses` does not match `test`; cached, missing or ambiguous status, missing/malformed
+XML, inconsistent guard case counts, failed or skipped guard cases, a failed stage 2, and stage-2b filtered tests keep guards
+scheduled. `GUARD-COVERAGE.txt` names the omitted classes, covering stage and relative evidence
+path. All remaining module guards run. If all guard candidates are covered, stage 3 records
+`status=covered` without launching an empty Gradle command. No cross-run reuse is enabled.
 
 The stages are never summed: a guard class may legitimately run in stage 2 and in stage 3, so each
 root's counts stand alone and there is no "unique tests" total across stages. Each stage dir also

@@ -88,7 +88,7 @@ pgres::new_run_id() {
   short="$(git rev-parse --short HEAD 2>/dev/null || echo nogit)"
   base="${stamp}-${short}-$$"
   id="$base"; n=1
-  while [ -e "$logdir/runs/$id" ]; do
+  while [ -e "$logdir/runs/$id" ] || [ -L "$logdir/runs/$id" ]; do
     n=$((n + 1)); id="${base}-${n}"
   done
   printf '%s' "$id"
@@ -127,7 +127,7 @@ pgres::prune_runs() {
   fi
 
   local runs="$logdir/runs"
-  [ -e "$runs" ] || return 0
+  [ -e "$runs" ] || [ -L "$runs" ] || return 0
   if [ -L "$runs" ]; then
     echo "pgres::prune_runs: refusing symlinked runs root '$runs'" >&2; return 1
   fi
@@ -299,7 +299,7 @@ pgres::write_provenance() {
   {
     printf '# provenance for %s — test-task status lines from the stage log\n' "$(basename "$stage_dir")"
     if [ -f "$log" ]; then
-      grep -E '^> Task :(modules|tests):[a-z-]+:(test|breachSuite|editorJsTest|securityAssuranceTest)( [A-Z-]+)?' "$log" \
+      grep -E '^> Task :(modules|tests):[a-z-]+:(test|breachSuite|editorJsTest|securityAssuranceTest)([[:space:]]|$)' "$log" \
         | sort -u || true
     else
       printf '# (stage log %s is absent)\n' "$log"
@@ -357,6 +357,83 @@ pgres::capture() {
   return 0
 }
 
+# Monotonic milliseconds, replaceable as a FUNCTION in isolated copied libraries.
+pgres::now_ms() {
+  python3 -c 'import time; print(time.monotonic_ns() // 1_000_000)'
+}
+pgres::elapsed() {
+  local mf="$1" stage="$2" before="$3" after="$4"
+  [[ "$before" =~ ^[0-9]+$ && "$after" =~ ^[0-9]+$ ]] && [ "$after" -ge "$before" ] || return 1
+  printf 'timing stage=%s elapsed_ms=%s\n' "$stage" "$((after - before))" >> "$mf"
+}
+
+# Fresh exact task provenance PLUS retained XML for every guard in the module.
+# A duplicate task line is ambiguous; cache, helper tasks, missing/failed/skipped
+# suites and malformed XML cannot cover guards. Caller proves unfiltered stage 2.
+pgres::guards_covered() {
+  local stage_dir="$1" module="$2"; shift 2
+  local rel="${module#:}" task="$module:test" log="$stage_dir/PROVENANCE.txt" line token count=0 fresh=0
+  [ -f "$log" ] || return 1
+  while IFS= read -r line; do
+    [[ "$line" == '> Task '* ]] || continue
+    token="${line#> Task }"; token="${token%%[[:space:]]*}"
+    [ "$token" = "$task" ] || continue
+    count=$((count + 1))
+    [ "$line" != "> Task $task" ] || fresh=1
+  done < "$log"
+  [ "$count" -eq 1 ] && [ "$fresh" -eq 1 ] || return 1
+  python3 - "$stage_dir/${rel//:/\/}/build/test-results/test" "$@" <<'PYXML'
+import sys
+from pathlib import Path
+from xml.etree import ElementTree as ET
+
+root = Path(sys.argv[1])
+required = set(sys.argv[2:])
+covered: set[str] = set()
+try:
+    for path in sorted(root.glob("*.xml")):
+        tree = ET.parse(path).getroot()
+        suites = [tree] if tree.tag == "testsuite" else list(tree.iter("testsuite"))
+        if not suites:
+            sys.exit(1)
+        for suite in suites:
+            if int(suite.get("failures", "0")) or int(suite.get("errors", "0")):
+                sys.exit(1)
+            name = suite.get("name", "")
+            if name not in required:
+                continue
+            cases = list(suite.iter("testcase"))
+            if int(suite.get("tests", "0")) != len(cases) or not cases or int(suite.get("skipped", "0")):
+                sys.exit(1)
+            # Require actual non-skipped testcases, not a filename or summary alone.
+            for case in cases:
+                if any(case.find(tag) is not None for tag in ("skipped", "failure", "error")):
+                    sys.exit(1)
+            if all(case.get("classname") == name for case in cases):
+                covered.add(name)
+except (OSError, ValueError, ET.ParseError):
+    sys.exit(1)
+sys.exit(0 if required and required <= covered else 1)
+PYXML
+}
+
+pgres::coverage_report() {
+  python3 - "$@" <<'PYCOVERAGE'
+import sys
+from xml.etree import ElementTree as ET
+
+xml, module, floor = sys.argv[1:4]
+line = next((c for c in ET.parse(xml).getroot().findall("counter") if c.get("type") == "LINE"), None)
+if line is None:
+    print(f"     {module}: no LINE counter in {xml}, floor {floor}")
+else:
+    covered, missed = int(line.get("covered")), int(line.get("missed"))
+    total = covered + missed
+    pct = 100.0 * covered / total if total else 100.0
+    print(f"     {module}: line coverage {pct:.2f}% ({covered}/{total}), floor {floor}")
+PYCOVERAGE
+}
+
 # ---------------------------------------------------------------------------
 # Self-test: isolated fixtures, a refusing Gradle stand-in, and the REAL
 # scripts/pregate.sh orchestration run inside a throwaway checkout.
@@ -372,6 +449,7 @@ pgres::_write_standin() {
 set -u
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 printf '%s\n' "$*" >> "$ROOT/pregate-argv.log"
+printf '%q ' ./gradlew "$@" >> "$ROOT/pregate-quoted.log"; printf '\n' >> "$ROOT/pregate-quoted.log"
 args="$*"
 mode="$(cat "$ROOT/.standin-mode" 2>/dev/null || echo happy)"
 write_tests() { # write_tests <path> <name> <tests> <failures>
@@ -381,8 +459,8 @@ write_tests() { # write_tests <path> <name> <tests> <failures>
 XML
 }
 case "$args" in
-  *ktlintCheck*) exit 0 ;;
-  *compileTestKotlin*) exit 0 ;;
+  *ktlintCheck*) [ "$mode" != fail-1 ] || exit 81; exit 0 ;;
+  *compileTestKotlin*) [ "$mode" != fail-4 ] || exit 84; exit 0 ;;
   *:modules:auth:check*)
     write_tests "$ROOT/modules/auth/build/test-results/test/TEST-co.x.StageTwoTest.xml" co.x.StageTwoTest 3 "$([ "$mode" = fail ] && echo 1 || echo 0)"
     write_tests "$ROOT/modules/scripting/build/test-results/breachSuite/TEST-co.x.BreachTest.xml" co.x.BreachTest 1 0
@@ -390,17 +468,47 @@ case "$args" in
       write_tests "$ROOT/modules/auth/build/test-results/test/TEST-co.x.RunOneOnly.xml" co.x.RunOneOnly 1 0
       rm -f "$ROOT/.runone"
     fi
+    if [[ "$mode" == covered* || "$mode" == cached || "$mode" == helper || "$mode" == missing-xml || "$mode" == missing-line || "$mode" == ambiguous || "$mode" == malformed || "$mode" == skipped || "$mode" == partial || "$mode" == failed-xml ]]; then
+      for c in ScopeMatrixSpecDriftTest PublicPathsTest RoleMatrixTest PermissionResolutionTest; do
+        write_tests "$ROOT/modules/auth/build/test-results/test/TEST-co.datapipelines.auth.$c.xml" "co.datapipelines.auth.$c" 1 0
+        # Summary-only XML is deliberately insufficient; write real testcase identity.
+        printf '<testsuite name="co.datapipelines.auth.%s" tests="1" failures="0" errors="0"><testcase classname="co.datapipelines.auth.%s" name="guard"/></testsuite>' "$c" "$c" > "$ROOT/modules/auth/build/test-results/test/TEST-co.datapipelines.auth.$c.xml"
+      done
+      case "$mode" in
+        cached) echo '> Task :modules:auth:test FROM-CACHE' ;;
+        helper) echo '> Task :modules:auth:testClasses' ;;
+        missing-line) ;;
+        ambiguous) printf '> Task :modules:auth:test\n> Task :modules:auth:test UP-TO-DATE\n' ;;
+        *) echo '> Task :modules:auth:test' ;;
+      esac
+      case "$mode" in
+        covered-bookkeeping) rd=("$ROOT"/.pregate-logs/runs/*); mkdir "${rd[0]}/GUARD-COVERAGE.txt" ;;
+        partial) sed -i 's/tests="1"/tests="2"/' "$ROOT/modules/auth/build/test-results/test/TEST-co.datapipelines.auth.PublicPathsTest.xml" ;;
+        failed-xml) sed -i 's/failures="0"/failures="1"/' "$ROOT/modules/auth/build/test-results/test/TEST-co.datapipelines.auth.PublicPathsTest.xml" ;;
+        missing-xml) rm "$ROOT/modules/auth/build/test-results/test/TEST-co.datapipelines.auth.PublicPathsTest.xml" ;;
+        malformed) printf '<bad' > "$ROOT/modules/auth/build/test-results/test/TEST-co.datapipelines.auth.PublicPathsTest.xml" ;;
+        skipped) printf '<testsuite name="co.datapipelines.auth.PublicPathsTest" tests="1" failures="0" errors="0"><testcase classname="co.datapipelines.auth.PublicPathsTest" name="guard"><skipped/></testcase></testsuite>' > "$ROOT/modules/auth/build/test-results/test/TEST-co.datapipelines.auth.PublicPathsTest.xml" ;;
+      esac
+    fi
+    if [ "$mode" = snapshot-fail ]; then
+      rd=("$ROOT"/.pregate-logs/runs/*)
+      : > "${rd[0]}/2"
+    fi
+    [ "$mode" != fail-2 ] || exit 82
+    [ "$mode" != covered-fail ] || exit 82
     [ "$mode" = fail ] && exit 1
     exit 0 ;;
   *co.x.ChangedE2eTest*)
     rm -rf "$ROOT/tests/integration-tests/build/test-results/test"
     write_tests "$ROOT/tests/integration-tests/build/test-results/test/TEST-co.x.ChangedE2eTest.xml" co.x.ChangedE2eTest 4 0
+    [ "$mode" != fail-2b ] || exit 83
     exit 0 ;;
   *co.datapipelines.integration.*)
     rm -rf "$ROOT/modules/auth/build/test-results/test"
     write_tests "$ROOT/modules/auth/build/test-results/test/TEST-co.x.GuardTest.xml" co.x.GuardTest 2 0
     rm -rf "$ROOT/tests/integration-tests/build/test-results/test"
     write_tests "$ROOT/tests/integration-tests/build/test-results/test/TEST-co.datapipelines.integration.GuardE2eTest.xml" co.datapipelines.integration.GuardE2eTest 2 0
+    [ "$mode" != fail-3 ] || exit 85
     exit 0 ;;
 esac
 echo "stand-in refused: $args" >> "$ROOT/pregate-argv.log"
@@ -419,10 +527,10 @@ pgres::_fixture() {
            "$F/tests/integration-tests/src/test/kotlin/co/x" \
            "$F/buildSrc/src/main/kotlin"
   cp "$PGRES_LIB_DIR/pregate.sh" "$PGRES_LIB_DIR/pregate-results-lib.sh" \
-     "$PGRES_LIB_DIR/pregate-2b-lib.sh" "$PGRES_LIB_DIR/test-recount.sh" "$F/scripts/"
+     "$PGRES_LIB_DIR/pregate-2b-lib.sh" "$PGRES_LIB_DIR/pregate-plan-lib.sh" "$PGRES_LIB_DIR/test-recount.sh" "$F/scripts/"
   mkdir -p "$F/scripts/lib"
   cp "$PGRES_LIB_DIR/lib/verification-lock.sh" "$F/scripts/lib/"
-  printf 'build/\n.pregate-logs/\npregate-argv.log\npregate.out\n' > "$F/.gitignore"
+  printf 'build/\n.pregate-logs/\npregate-argv.log\npregate-quoted.log\npregate.out\n' > "$F/.gitignore"
   echo '// auth source' > "$F/modules/auth/src/main/kotlin/co/x/Auth.kt"
   echo '// scripting source' > "$F/modules/scripting/src/main/kotlin/co/x/Script.kt"
   echo '// auth build' > "$F/modules/auth/build.gradle.kts"
@@ -544,7 +652,7 @@ pgres::self_test() {
   ck_ok "fail-stage2-xml-survives" test -f "$frd/2/modules/auth/build/test-results/test/TEST-co.x.StageTwoTest.xml"
   fc="$(bash "$FF/scripts/test-recount.sh" "$frd/2" | head -n 1)"
   ck_eq "fail-stage2-counts-retain-failure" "files=2 tests=4 failures=1 errors=0 skipped=0 unreadable=0" "$fc"
-  ck_ok "fail-stage3-was-green" grep -q '^stage=stage-3 status=executed exit=0 ' "$frd/MANIFEST.txt"
+  ck_ok "fail-stage3-not-run" grep -q '^stage=stage-3 status=not-run exit=125 ' "$frd/MANIFEST.txt"
 
   # ---- 3. a second invocation cannot reuse the previous run's results ----------
   local R r1 r2 rid1 rid2
@@ -573,7 +681,7 @@ pgres::self_test() {
   fi
   ck_ok "blocked-verdict-fail" grep -q 'PRE-GATE FAIL' "$B/.pregate-logs/0-verdict.log"
   ck_ok "blocked-verdict-snap1" grep -q 'snap=1' "$B/.pregate-logs/0-verdict.log"
-  ck_ok "blocked-stages-were-green" grep -q 'lint=0 mod=0' "$B/.pregate-logs/0-verdict.log"
+  ck_ok "blocked-stages-not-run" grep -q 'lint=125 mod=125' "$B/.pregate-logs/0-verdict.log"
 
   # ---- 4. library boundary cases: malformed, missing root, missing output,
   #         capture-write failure, skipped stage ------------------------------
@@ -628,11 +736,13 @@ pgres::self_test() {
   {
     echo '> Task :modules:auth:test'
     echo '> Task :modules:auth:test UP-TO-DATE'
+    echo '> Task :modules:auth:testClasses UP-TO-DATE'
     echo '> Task :tests:integration-tests:test FROM-CACHE'
     echo 'BUILD SUCCESSFUL'
   } > "$PLC"
   pgres::snapshot "$PR" "$PS" "$PLC" modules/auth tests/integration-tests >/dev/null
   ck_ok "prov-status-lines-retained" grep -qF '> Task :modules:auth:test UP-TO-DATE' "$PS/PROVENANCE.txt"
+  ck_ok "prov-testClasses-not-recorded" bash -c "! grep -q testClasses '$PS/PROVENANCE.txt'"
   ck_ok "prov-from-cache-retained" grep -qF '> Task :tests:integration-tests:test FROM-CACHE' "$PS/PROVENANCE.txt"
   ck_ok "prov-logged-test-not-annotated" bash -c "! grep -qxF '# NO-STATUS-LINE modules/auth/build/test-results/test' '$PS/PROVENANCE.txt'"
   ck_ok "prov-logged-tests-not-annotated" bash -c "! grep -qxF '# NO-STATUS-LINE tests/integration-tests/build/test-results/test' '$PS/PROVENANCE.txt'"
@@ -739,7 +849,7 @@ pgres::self_test() {
   local W2
   W2="$T/wiring-bad"
   ck_ok "wiring-bad-fixture-built" pgres::_fixture "$W2" happy
-  if ( cd "$W2" && PREGATE_KEEP_RUNS=0 bash scripts/pregate.sh HEAD > wiring-bad.out 2>&1 ); then
+  if ( cd "$W2" && XDG_CACHE_HOME="$W2/.fixture-cache" PREGATE_KEEP_RUNS=0 bash scripts/pregate.sh HEAD > wiring-bad.out 2>&1 ); then
     echo "  FAIL wiring-bad-refuses-pass (exit was 0)"; fails=$((fails + 1))
   else echo "  ok   wiring-bad-refuses-pass"; fi
   ck_ok "wiring-bad-verdict-fail" grep -q 'PRE-GATE FAIL' "$W2/.pregate-logs/0-verdict.log"
