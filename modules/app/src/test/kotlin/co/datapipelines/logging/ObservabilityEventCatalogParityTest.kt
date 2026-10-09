@@ -138,8 +138,7 @@ class ObservabilityEventCatalogParityTest {
     }
 
     /** Computed event FIELD identities, with only the exact quoted audit-row formats exempt. */
-    private fun computedEventOffenders(): List<String> =
-        sourceTexts().flatMap { (path, text) -> computedEventOffenders(path, text) }
+    private fun computedEventOffenders(): List<String> = sourceTexts().flatMap { (path, text) -> computedEventOffenders(path, text) }
 
     private fun computedEventOffenders(
         path: String,
@@ -148,19 +147,21 @@ class ObservabilityEventCatalogParityTest {
         val namespaces = ENFORCED.keys.filter { codeEventRegex(it).containsMatchIn(text) }
         if (namespaces.isEmpty()) return emptyList()
         val computed = Regex("(?<![A-Za-z0-9_])event=(?:\\{|(?:" + namespaces.joinToString("|") + ")\\.\\{)")
-        return text.lineSequence().flatMapIndexed { index, line ->
-            val exemptRanges =
-                if (path == AUDIT_LOGGER_PATH) {
-                    LEGACY_AUDIT_EXCEPTIONS.flatMap { exception ->
-                        quotedFormatRegex(exception).findAll(line).map { it.range }.toList()
+        return text
+            .lineSequence()
+            .flatMapIndexed { index, line ->
+                val exemptRanges =
+                    if (path == AUDIT_LOGGER_PATH) {
+                        LEGACY_AUDIT_EXCEPTIONS.flatMap { exception ->
+                            quotedFormatRegex(exception).findAll(line).map { it.range }.toList()
+                        }
+                    } else {
+                        emptyList()
                     }
-                } else {
-                    emptyList()
+                computed.findAll(line).filter { match -> exemptRanges.none { match.range.first in it } }.map {
+                    "$path:${index + 1}: ${line.trim()}"
                 }
-            computed.findAll(line).filter { match -> exemptRanges.none { match.range.first in it } }.map {
-                "$path:${index + 1}: ${line.trim()}"
-            }
-        }.toList()
+            }.toList()
     }
 
     private fun legacyExceptionProblems(sources: Map<String, String>): List<String> =
