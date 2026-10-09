@@ -162,7 +162,9 @@ class PipelineSidebarTreeStateBrowserTest : RestTreeBrowserFixture() {
         page.waitForSelector("${leaf("acme/history/leaf")}[aria-current=page]")
         page.click(".app-nav-link[data-nav-section='/templates']")
         page.waitForSelector("#template-list-wrapper")
-        page.locator("$panel [aria-current=page]").count() shouldBe 0
+        // The rail drops the mark in markCurrent on htmx:afterSettle, a settle delay AFTER the swap
+        // that adds #template-list-wrapper: wait for the settled rail, never read it at the swap.
+        page.waitForFunction("() => !document.querySelector('$panel [aria-current=page]')")
         page.goBack()
         page.waitForURL("**/pipelines/$id")
         page.waitForFunction("() => !!window.__peInstance")

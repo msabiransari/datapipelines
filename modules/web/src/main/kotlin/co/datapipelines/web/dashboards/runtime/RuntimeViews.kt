@@ -82,6 +82,11 @@ internal object RuntimeViews {
         val refresh = refreshSeconds(body, runtime)
         return nodes.objectNode().also { v ->
             v.put("name", occurrence.name)
+            // #473 — the pinned VERSION's metadata (display_name is required on the body, description
+            // optional): what a card shows when the occurrence carries no authored presentation.title.
+            // Version-scoped on purpose — the artifact record's name names every version alike.
+            v.put("display_name", pinned.body.displayName)
+            v.put("description", pinned.body.description)
             v.putObject("artifact").also {
                 it.put("id", pinned.record.id.toString())
                 it.put("name", pinned.record.name)

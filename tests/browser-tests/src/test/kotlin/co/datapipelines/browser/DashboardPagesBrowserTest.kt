@@ -105,10 +105,10 @@ class DashboardPagesBrowserTest : DashboardBrowserSuite() {
         page.locator("#dp-board .plotly .main-svg").first().waitFor()
         page.locator("#dp-board .dp-dashboard-kpi-number").first().waitFor()
 
-        // The events pane is server-rendered at load — BEFORE the initial refresh finished —
-        // so the completed row arrives with the pane's first bounded poll; the reload renders
-        // the same read server-side and is what the assertion reads (no 15 s wait, no race).
-        page.reload()
+        // The refreshes listing moved (#473) into the activity dock's History tab — the same
+        // server partial, the same bounded poll. The tab click is part of the moved contract;
+        // the pane is hidden until then, so a visible-state wait would hang.
+        page.click("[data-dp-dock-tab='history']")
         page.waitForSelector(".dp-refreshes-row")
         val pane = page.locator(".dp-refreshes").first().innerText()
         pane shouldContain "COMPLETED"
@@ -276,14 +276,15 @@ class DashboardPagesBrowserTest : DashboardBrowserSuite() {
         )
 
         // The board page, light then dark: the shutter waits for the draws to settle, and the
-        // pane's completed row is in the shot (the page re-rendered AFTER the initial refresh
-        // completed — the pane is server-rendered at load).
+        // dock's History tab holds the completed row in the shot (#473 — the pane is server-
+        // rendered at load; the tab click is the moved contract).
         ensureTheme("light")
         page.navigate("$baseUrl/dashboards/$board")
         page.waitForFunction("() => window.__dpPage && window.__dpPage.ready === true")
         page.waitForFunction("() => window.__dpPage.notifications.some(function (n) { return n.code === 'refresh.completed'; })")
         page.reload()
         page.waitForFunction("() => window.__dpPage && window.__dpPage.ready === true")
+        page.click("[data-dp-dock-tab='history']")
         page.waitForSelector(".dp-refreshes-row")
         page.waitForTimeout(500.0)
         page.screenshot(

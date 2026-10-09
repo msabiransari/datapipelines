@@ -80,6 +80,10 @@
   --app-sidebar-width: 280px;
   --app-sidebar-collapsed: 0px;
   --app-detail-width: 320px;
+  /* #473 — the dashboard board's filters panel: its column beside the board, and the left
+     drawer it becomes below dashboards.css's breakpoint. */
+  --app-board-filters-width: clamp(240px, 22vw, 20rem);
+  --app-board-filters-drawer-width: min(20rem, 85vw);
   /* Banner state fills (pipeline-editor.css .pe-banner) — the graph itself now uses
      the --node-*-accent tokens below; a theme overriding these re-themes both. */
   --node-success-bg: var(--accent-success, #16a34a);

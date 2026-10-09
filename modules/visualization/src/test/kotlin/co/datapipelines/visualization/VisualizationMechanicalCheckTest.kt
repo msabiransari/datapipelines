@@ -119,9 +119,9 @@ class VisualizationMechanicalCheckTest {
         failure.message shouldContain "not accepted at this path"
         // Falsification: the DECIMAL column binds y; and the table itself is the pinned one.
         check.run(WORKSPACE, body()).ok shouldBe true
-        BindingTypes.accepts("data[0].y", LogicalType.INTEGER) shouldBe true
-        BindingTypes.accepts("data[0].y", LogicalType.BIGDECIMAL) shouldBe false // wire STRING, renders as text
-        BindingTypes.accepts("layout.title.text", LogicalType.STRING) shouldBe true // not a numeric leaf
+        BindingTypes.accepts(RendererKind.PLOTLY, "data[0].y", LogicalType.INTEGER) shouldBe true
+        BindingTypes.accepts(RendererKind.PLOTLY, "data[0].y", LogicalType.BIGDECIMAL) shouldBe false // wire STRING, renders as text
+        BindingTypes.accepts(RendererKind.PLOTLY, "layout.title.text", LogicalType.STRING) shouldBe true // not a numeric leaf
     }
 
     // ---- step 3: the fixture run ----------------------------------------------------------------------

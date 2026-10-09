@@ -514,12 +514,20 @@ Server-run, no browser, sub-second, at submit and again at release:
    attributes, wrong types and unsupported trace types are refused naming the path.
 2. **Binding**: every `bindings` path resolves in `config`; every bound column exists in the
    transform's output contract (or the input's) with a type the renderer accepts for that path
-   (numeric for `y`, any for `x`, and so on — the small per-path type table is part of the
-   validator and pinned by test).
+   (the renderer-specific type table is part of the validator and pinned by test). Plotly numeric
+   leaves `y`, `z`, `values`, `size`, `lat`, `lon`, `open`, `high`, `low`, `close`, `weight`
+   (including indexed leaves) accept INTEGER/DECIMAL, refusing BIGINTEGER/BIGDECIMAL string wire
+   values; other Plotly leaves accept any scalar type. Table `columns[n].values` accepts every
+   canonical scalar type. KPI `value` and `comparison.value` retain scalar compatibility, including
+   BIG wire strings; formatting feasibility remains subject to visual evidence.
 3. **Fixture run**: for every case, the pinned transformer evaluates the fixtures through
    `TemplateEvaluateService` (the type gate included); the output must bind (every bound column
-   present in every row's projection); an evaluation refusal or a missing column fails the case
-   with the code and path.
+   present in every row's projection). A present null passes only when the declared output column
+   is nullable; nullable Plotly y/z values remain gaps, never zero-filled. An absent bound key
+   fails `binding_unbound` even for a nullable column; a present nonnullable null fails
+   `test_case_invalid`, both naming case/row/column. Null supplies no assertion text, including
+   the literal `"null"`. An evaluation refusal keeps its own code and case path; failures retain
+   the existing bounded accounting.
 4. **Assertion feasibility**: `trace_count` compared with `config.data.length`; `no_data` cases
    must produce zero output rows; `text_visible`/`value_visible` strings must appear in the
    configuration or the bound values (a static check; the visual check is the agent's).

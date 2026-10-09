@@ -1,6 +1,6 @@
 # Dashboards
 
-**Status:** v0.38 — the board-width breakpoint on the composite host, with a 640 px default (#412) beside a target the refresh's own abort cancelled reports `abort` whichever side of the race wins (§6.6, #435) beside the declarative read-only rule (§5.1, #463), then draft dashboard dependencies (#459), then the Release dialogs post the draft hash they read (§7, #416) beside numeric bound-value assertion feasibility (§3.4, #377) beside the visualizations workspace's tab switches on the shared history helper, the parameter-set decision (§7, #426) beside the pipeline editor runs the shared tab core (§7, #420) beside the Versions tables' created/released relative with the UTC stamp on hover (§7, #422) beside Back/Forward across the dashboards workspace's tab switches (§7, #402) beside the visualizations workspace (§7, #399) beside the dashboards workspace (§5.2's `version`, §7's workspace, #400; #409 closes with it) beside the
+**Status:** v0.40 — the board presentation's filters panel, chart cards and activity dock (§6.1's `parametersContainer`, §6.2's card wrap and pane mount target, §6.6's border-speaks-the-state, §7's Board tab, #473) beside renderer-aware binding types and nullable transform output (§3.4, #458/#457) beside the board-width breakpoint on the composite host, with a 640 px default (#412) beside a target the refresh's own abort cancelled reports `abort` whichever side of the race wins (§6.6, #435) beside the declarative read-only rule (§5.1, #463), then draft dashboard dependencies (#459), then the Release dialogs post the draft hash they read (§7, #416) beside numeric bound-value assertion feasibility (§3.4, #377) beside the visualizations workspace's tab switches on the shared history helper, the parameter-set decision (§7, #426) beside the pipeline editor runs the shared tab core (§7, #420) beside the Versions tables' created/released relative with the UTC stamp on hover (§7, #422) beside Back/Forward across the dashboards workspace's tab switches (§7, #402) beside the visualizations workspace (§7, #399) beside the dashboards workspace (§5.2's `version`, §7's workspace, #400; #409 closes with it) beside the
 board's small-slot margins and its breakpoint collapse (§6.2, §6.3, #386/#387), 328's release-record judgement (§4.3)
 permissions (§4, lane L1b); the transfer routes and their limits' honest contract (§3.3, lanes L1c/L1c-b/L1c-c: the
 import's atomicity, the RELEASE rules on a landing, the aggregate count ceiling, the wire's per-family arms); the server
@@ -298,15 +298,25 @@ the preview page, the upload and the two tools — is §3.4.1 (#353).
 - **The mechanical check** (§11.3, D56 (b)) is server-run, no browser, sub-second (measured: one case, 1,000
   fixture rows through the deep schema, ~60 ms): the renderer's schema (for Plotly the reduced vendored
   4.1.1 plot-schema — unknown attributes, wrong types and unsupported traces refused with the path), every
-  binding's resolution and per-path type rules, every case's fixtures through the REAL bounded evaluator (a DRAFT
+  binding's resolution and renderer-specific type rules, every case's fixtures through the REAL bounded evaluator (a DRAFT
   transform pin is valid here and in an explicitly selected draft dashboard; published runtime requires RELEASED pins), every projected bound
-  column present in every row, and static assertion feasibility (`trace_count` against `config.data.length`,
+  column present in every row, with explicit null accepted only when its output contract column is nullable,
+  and static assertion feasibility (`trace_count` against `config.data.length`,
   `no_data` against zero produced rows, `text_visible`/`value_visible` strings present in the configuration or
   the bound values). Bound strings and INTEGER/DECIMAL values participate by their existing scalar text
   (for example, `42` and `10.5`), using substring matching without numeric normalization. Locale, currency,
   percent and rounded display text still need the agent's visual check in the preview. The rendered-state
   check records `not_available` today — a headless render check is a later
   lane, and nothing here claims a browser saw anything. The report is stored on the run and RE-RUN at release.
+  Plotly numeric leaves (`y`, `z`, `values`, `size`, `lat`, `lon`, `open`, `high`, `low`, `close`,
+  `weight`, including indexed leaves) accept INTEGER/DECIMAL; BIGINTEGER/BIGDECIMAL string wire values
+  remain refused there. Other Plotly leaves accept any scalar type. Table `columns[n].values` accepts
+  every canonical scalar type, including STRING, BOOLEAN, dates and BIG wire strings. KPI `value` and
+  `comparison.value` retain their scalar compatibility, including BIG wire strings; formatting feasibility
+  still requires visual evidence. For nullable Plotly y/z columns, present nulls remain gaps rather than
+  zeros. An absent bound key is `binding_unbound` even when nullable; a present nonnullable null is
+  `test_case_invalid`. Null supplies no assertion text (including the literal `"null"`). Evaluator refusals
+  retain their own code and case path, and the report keeps its existing failure bound.
 - **At a successful submission the server mints a SECOND, separate capability** for the screenshot upload —
   random, hash-only, bound to the exact run and purpose, expiring no later than the session's original deadline,
   its raw form shown exactly once. Submit revokes the preview and does NOT touch this one; atomic image storage
@@ -617,7 +627,7 @@ const instance = DatapipelinesDashboard.init({
   server: { baseUrl, credentials: "session" | { proxyBaseUrl } },
   dashboard: { id, version: "released" | 2 },  // the preview's named version (§5.2, #369)
   container: HTMLElement,
-  adapter: DatapipelinesDashboard.adapters(container),  // or the host's own §6.2 object
+  adapter: DatapipelinesDashboard.adapters(container, { parametersContainer }),  // or the host's own §6.2 object
   options: { renderTimeoutMs, onNotification },
 });
 instance.ready   // Promise — resolves after the bootstrap barrier, rejects with the failing step
@@ -648,8 +658,8 @@ of them, and a no-op is not conformant (the conformance suite drives real behavi
 | Function | The host does | The runtime guarantees |
 |---|---|---|
 | `mountLayout(layout) → Promise` | build the grid from the system layout; the first-party adapter's rows are each one `--dashboard-row-unit` (app.css, default `var(--space-20)` = 5rem), so a slot of `h` rows is `h` units plus the gaps between them tall and a figure's height is its slot's; the empty default slot takes no row (`dashboards.css`); below `layout.breakpoint_px` (640 when absent; clamped to the server's 1–10 000, a non-number is the default), measured on the composite host's content width, the adapter places every item across all 12 columns, stacked in grid order (by `y`, then `x`) with its own row span — the row unit unchanged. A 0-wide host holds the stored grid until layout; the host's `ResizeObserver` re-places on reveal and at a narrow/wide crossing, resizing mounted renderers on crossings, and disconnects on `dispose`; without `ResizeObserver` the stored grid holds. The gap is the `--space-4` token | awaited before anything mounts |
-| `mountVisualization(occurrence, renderer) → Promise<handle>` | create the placeholder and its renderer | the handle's `renderData` is the ONLY data path |
-| `renderParameters(state) → Promise` | render the FULL server state, hidden and disabled included | awaited INSIDE the parameter gate — the lock releases only after the render resolves |
+| `mountVisualization(occurrence, renderer) → Promise<handle>` | create the placeholder and its renderer | the handle's `renderData` is the ONLY data path; since #473 the composite wraps every occurrence in a CARD — a bordered article whose heading names the pinned version's `display_name` (the body's, falling back to `config.label`, then the occurrence name), whose `data-dp-viz` attribute the pin rides, and whose border carries the state (§6.6) |
+| `renderParameters(state) → Promise` | render the FULL server state, hidden and disabled included | awaited INSIDE the parameter gate — the lock releases only after the render resolves; the composite mounts the pane into `parametersContainer` when the factory's second argument names one (#473 — the first-party page's filters panel BESIDE the chart container, so no adapter's mount scope claims it), else into the layout container as before |
 | `readSelections() → {name: value}` | return every current committed value, in the wire's type | merged over the server state at each evaluation; hidden and disabled values included (D23) |
 | `onEdit/onCommit/onAction(callback)` | register the interaction callbacks | every callback carries `{instanceId, name, type, refreshId}` |
 | `renderData(occurrence, refreshId, rows, bindings) → Promise<'rendered'\|'no-data'>` | render native data | deadline-bounded; a late acknowledgment is discarded |
@@ -758,7 +768,13 @@ The loader establishes the existing CSP style marker before executing Plotly and
 ### 6.6 The states, notifications and the CSP
 
 Each occurrence carries the record's states client-side (`ready`, `in-progress`, `error`, `abort`,
-`no-data`, a brief `success` that settles to `ready`); `stale` rides BESIDE the state. Freshness is
+`no-data`, a brief `success` that settles to `ready`); `stale` rides BESIDE the state. **The card is
+how a state reads (#473):** every chart is a bordered card, and the border is the state's voice —
+busy, loud red on `error`/`abort` (the accent retiring to a quiet issue border after three seconds,
+the message persisting INSIDE the card), a dashed quiet frame for `no-data`, an amber edge while
+`stale`. At rest the card is quiet: a settled board shows no badge, no chip and no colour —
+`display:none` on the ready chip — and the `data-dp-state` attribute stays on the chip element for
+the reader that asks. Colour never alone: the message sentence and the attribute carry the same fact. Freshness is
 per instance, per occurrence: the newest refresh owns the target, an event touches an occurrence only
 through its owner, and a finished run cannot overwrite a newer view — an old run's late completion
 detaches silently. A stream that ends without `refresh_completed` is a transport failure: content is
@@ -846,20 +862,33 @@ one) is offered with its own link, and the sentence says there is no release yet
 board page answered an empty `h1` and "Dashboard '<uuid>' not found." for a dashboard the
 tree had just linked; it does not any more. The five tabs:
 
-- **Board** — today's board page exactly: the ONE bundle the server chose for the VIEWED
+- **Board** — the board page, reorganised by #473: the ONE bundle the server chose for the VIEWED
   version declared on its script tag (§6.4; the same read the client's bootstrap performs),
-  the glue (`static/js/dashboards-page.js`) UNCHANGED — it reads the dashboard id and, when
-  the URL named a version, the integer on `data-dp-dashboard-version` (the default writes
-  none, so its `init` stays `version: "released"`) — the refusal region, and the events pane
-  beside the board. Navigation onto it is never boosted; disposal stays the
-  `htmx:beforeHistorySave` hook.
+  the glue (`static/js/dashboards-page.js`) booting the runtime with the FILTERS panel as the
+  adapter's `parametersContainer` (§6.2 — the parameters pane lives BESIDE the chart container,
+  never inside it, so no adapter's mount scope claims it and §2.2's breakpoint measures the
+  board beside it; below 1100 px the panel is a drawer announced by the toolbar's Filters
+  button, opened from it and closed on Escape or on leaving the Board tab with focus returned,
+  and a widening back past the breakpoint ends an open drawer's state with it;
+  with no visible parameter — none declared, or every one hidden by the server's state — the
+  page reserves no panel and shows no trigger, and a change re-fits the charts) — the refusal
+  region, and beneath the board the ACTIVITY DOCK: three tabs (Events, the live witness's
+  events, `scope: "dashboard"` only; Errors, the error slice; History, the refreshes partial
+  rendered AT LOAD — the same read the Refreshes tab's fragment route serves, whose bounded poll
+  keeps it fresh) with count badges, a view-only Clear and a collapse; a splitter drags the
+  dock's height. Arrivals use prepared main-content navigation (§6.4, #460): the board mounts
+  per arrival without a document load. Disposal stays the `htmx:beforeHistorySave` hook, which
+  also runs the mount's teardown — the drawer's Escape and the splitter's drag listeners, the
+  tab-leave and filters observers, the dock's dragged height — so a board revisited in-shell
+  holds one listener set.
 - **Overview** — the viewed version's definition, read-only: the sources with their pinned
   pipeline versions and statuses, the parameter set, the pinned visualizations with each
   pin's status, and the layout summary. DRAFT pins are available during draft preview and
   must be released before publication. No authoring control anywhere: the browser
   never authors a dashboard (#396) — agents author over MCP, and a person releases from the
   Versions tab.
-- **Refreshes** — the events pane full width; the board pane keeps its own beside the board.
+- **Refreshes** — the refreshes listing full width (the same partial route; since #473 the board
+  pane's beside-board copy lives in the Board tab's activity dock's History tab instead).
 - **Versions** — the admitted history (newest first, served/draft/discarded markers; created and
   released relative in the cell, absolute UTC on hover — the keys page's shape, #422) and the
   lifecycle verbs' dialogs in the pipeline dialogs' shape: Release (the ONE D61 consent —
@@ -943,6 +972,8 @@ change (#426). The templates workspace adopts the helper after #398's rework lan
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-09 | v0.40 | #473 the board's filters panel, chart cards and activity dock — rebased in recovery onto #460's v0.36 and #412's v0.38, renumbered after #458's v0.39 | **§6.1/§6.2:** `adapters(container, { parametersContainer })` mounts the parameters pane in a host-supplied element; every occurrence renders in a card (heading from the pinned `display_name`, optional description, renderer body, status foot). **§6.6:** the border carries the state, a failure's loud accent settles after 3 s while its in-card message stays, ready shows no badge. **§7:** the Board tab's filters panel/drawer (absent with no visible parameter; a widening back past the breakpoint ends an open drawer), the bottom dock, and the mount's teardown under prepared navigation; the stale "never boosted" sentence corrected. |
+| 2026-10-09 | v0.39 | #458/#457 binding contracts — v0.37 in recovery after #460's v0.36, renumbered at merge after #435's v0.37 and #412's v0.38 | **§3.4:** renderer-specific scalar acceptance, Plotly numeric wire restrictions and unchanged KPI compatibility; transform output nullability distinguishes present null from missing keys. Null stays a gap and supplies no assertion text; visual evidence and release revalidation remain required. |
 | 2026-10-09 | v0.38 | #412 the layout breakpoint measures the composite host, default 640 — renumbered in recovery after #460's v0.36, then at merge after #435's v0.37 | **§2.2 and §6.2:** `breakpoint_px` is judged against the composite host's width; a zero-width host holds its stored grid until layout, and the `ResizeObserver` re-places on reveal or a crossing. The default is 640 so a 694 px board at a 1280 px viewport keeps its grid; the reader narrows the board by widening the user-resizable navigation rail (#460's separator, keyboard included), and the crossing stacks it. The client, KDoc and implementation spec use the same rule. |
 | 2026-10-08 | v0.37 | #435 a target the refresh's own abort cancelled reports `abort`, whichever side of the race wins — renumbered at merge after #460's v0.36 | **§6.6:** one paragraph — the target an abort's execution cancel ended reports `abort` in its status frame (the flag is raised before the cancel, so it is readable at record time) and, when the flag became readable only after (another instance), in the terminal frame's `targets`; an execution aborted with no request on the refresh stays an `error` at the `abort` stage (refresh `FAILED`); a delivered `ok` is never rewritten. The rule lives in the engine's two layers (`record`, `finish`); the client is unchanged. |
 | 2026-10-06 | v0.36 | #460 reusable REST navigation | §6.4/§7: one lazy compatible bundle in the signed-in shell, explicit per-container mounts and prepared navigation; standalone bundle choice and refresh cancellation preserved. |

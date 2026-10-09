@@ -768,7 +768,9 @@ test, substitute its exact class and `:tests:browser-tests:test` task and exclus
 `-Pdp.browser.ciPatience=true` when reproducing gate action patience. Keep the selected XML
 and task log together; an XML file left by a previous run cannot establish this run's result.
 A focused result is iteration evidence. A fresh complete pregate on the final committed tip
-is required for handback; Gate A remains the lander's whole-batch check.
+is required for handback; the whole-batch check is CI on `next` (the lander pushes the landed
+batch as `main:next` and fast-forwards `main` when it is green; `scripts/gate.sh` stays the local
+full run on request).
 
 **`verifyTestsExecuted` and filtered runs.** The zero-test guard compares result files with
 all of a module's `*Test.kt` sources. Exclude that module's exact `verifyTestsExecuted` task
@@ -793,7 +795,7 @@ deferred. At most **five exact classes per test module** run; larger selections 
 shared base affecting most browser classes) are deferred in their entirety, never truncated.
 Pregate cannot emit an unfiltered `tests/*:test` task. Deferred modules appear in the console,
 the run manifest and the verdict's `deferred=` field; a pregate PASS does not claim those tests
-ran. Full browser/integration coverage belongs to the lander's Gate A and CI.
+ran. Full browser/integration coverage belongs to CI on `next` (and on `main` after the fast-forward).
 `./scripts/pregate.sh --self-test` checks the selector, resource limits, evidence and overlap
 refusal using isolated fixtures and a refusing Gradle stand-in; (3) the
 cross-cutting guard classes still needed after stage 2, filtered, with the zero-test guard skipped for those modules — the

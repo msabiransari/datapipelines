@@ -44,6 +44,9 @@ class DashboardWorkspaceControllerTest {
 
     private val dashboards = mockk<DashboardService>()
     private val runtime = mockk<DashboardRuntime>()
+
+    /** #473 — the dock's History fill; the page test stubs it, the fill's own read is the partial test's. */
+    private val browse = mockk<DashboardBrowseModel> { every { fillRefreshes(any(), any(), any()) } returns "partials/dashboard-refreshes" }
     private val model = mockk<co.datapipelines.visualization.ArtifactVersion<DashboardBody>>(relaxed = true)
     private val controller =
         DashboardWorkspaceController(
@@ -51,6 +54,7 @@ class DashboardWorkspaceControllerTest {
             runtime = runtime,
             themeResolver = mockk<ThemeResolver> { every { resolve(any<HttpServletRequest>()) } returns "light" },
             lens = PromoterLens { LensedView.EVERYTHING },
+            browse = browse,
         )
 
     @AfterEach
@@ -294,6 +298,7 @@ class DashboardWorkspaceControllerTest {
                 runtime = runtime,
                 themeResolver = mockk<ThemeResolver> { every { resolve(any<HttpServletRequest>()) } returns "light" },
                 lens = narrow,
+                browse = browse,
             )
         authenticate(role = WorkspaceRole.PROMOTER)
         every {

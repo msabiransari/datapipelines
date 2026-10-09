@@ -13,10 +13,11 @@ import java.util.UUID
  * 1. **Schema** — `config` against the renderer's schema (for Plotly the reduced 4.1.1 plot-schema:
  *    unknown attributes, wrong types and unsupported traces refused with the path);
  * 2. **Binding** — every path resolves in `config`, every bound column is in the output contract, and the
- *    column's type is one the path accepts ([BindingTypes], the small per-path table);
+ *    column's type is one the renderer accepts at that path ([BindingTypes], the renderer-specific table);
  * 3. **Fixture run** — through the pinned transformer ([TestFixtureEvaluator], the real bounded evaluator
  *    over `TemplateEvaluateService`), or, with no transform, the single input's fixture values through the
- *    same wire-form rules; every bound column must be present in every row's projection;
+ *    same wire-form rules; every bound column must be present in every row's projection, and a present
+ *    null passes only when the output column is nullable;
  * 4. **Assertion feasibility** — `trace_count` against `config.data.length`, `no_data` against zero
  *    produced rows, `text_visible`/`value_visible` strings present in the configuration or the bound values;
  * 5. **Rendered state** — [RenderedStateCheck]; the default records `not_available` and never claims a
@@ -137,7 +138,7 @@ class VisualizationMechanicalCheck(
         schema(body, failures)
         val output = outputColumns(workspaceId, body)
         bindings(body, output, failures)
-        val cases = fixtureRun(workspaceId, body, failures)
+        val cases = fixtureRun(workspaceId, body, output, failures)
         assertions(body, cases, failures)
         val caseReports =
             cases.entries.associate { (name, outcome) ->
@@ -160,19 +161,19 @@ class VisualizationMechanicalCheck(
 
     // ---- step 2: bindings -----------------------------------------------------------------------------
 
-    /** The columns a binding may name, WITH their types — the pin's output, or the single input's. */
+    /** The columns a binding may name, WITH type and nullability — the pin's output, or the single input's. */
     private fun outputColumns(
         workspaceId: UUID,
         body: VisualizationBody,
-    ): Map<String, LogicalType> {
+    ): Map<String, TransformContractView.Column> {
         val transform =
             body.transform ?: return body.inputs.values
                 .singleOrNull()
                 ?.columns
-                ?.associate { it.name to it.type } ?: emptyMap()
+                ?.associate { it.name to TransformContractView.Column(it.name, it.type, it.nullable) } ?: emptyMap()
         return when (val pin = templates.pinOf(workspaceId, transform.template)) {
             is TemplatePin.Transform -> {
-                (pin.contract.output as? TransformContractView.Output.Table)?.columns?.associate { it.name to it.type } ?: emptyMap()
+                (pin.contract.output as? TransformContractView.Output.Table)?.columns?.associateBy { it.name } ?: emptyMap()
             }
 
             // The pin died after save; the fixture run's evaluator refusal names it per case.
@@ -184,7 +185,7 @@ class VisualizationMechanicalCheck(
 
     private fun bindings(
         body: VisualizationBody,
-        output: Map<String, LogicalType>,
+        output: Map<String, TransformContractView.Column>,
         failures: FailureSink,
     ) {
         body.bindings.forEach { (path, column) ->
@@ -199,13 +200,13 @@ class VisualizationMechanicalCheck(
                     failures += Failure("bindings", VisualizationErrorCodes.BINDING_UNBOUND, at, "Does not resolve inside config.")
                 }
             }
-            val type = output[column]
+            val type = output[column]?.type
             when {
                 type == null -> {
                     failures += Failure("bindings", VisualizationErrorCodes.BINDING_UNBOUND, at, "Column not in the output contract.")
                 }
 
-                !BindingTypes.accepts(path, type) -> {
+                !BindingTypes.accepts(body.renderer.kind, path, type) -> {
                     failures +=
                         Failure(
                             "bindings",
@@ -230,10 +231,11 @@ class VisualizationMechanicalCheck(
     private fun fixtureRun(
         workspaceId: UUID,
         body: VisualizationBody,
+        output: Map<String, TransformContractView.Column>,
         global: FailureSink,
     ): Map<String, CaseOutcome> {
         val cases = body.tests?.cases ?: return emptyMap()
-        val outcomes = cases.mapIndexed { index, case -> runCase(workspaceId, body, case, index) }
+        val outcomes = cases.mapIndexed { index, case -> runCase(workspaceId, body, output, case, index) }
         outcomes.forEach { global += it.failures }
         return outcomes.associateBy { it.name }
     }
@@ -241,6 +243,7 @@ class VisualizationMechanicalCheck(
     private fun runCase(
         workspaceId: UUID,
         body: VisualizationBody,
+        output: Map<String, TransformContractView.Column>,
         case: TestCase,
         index: Int,
     ): CaseOutcome {
@@ -263,24 +266,42 @@ class VisualizationMechanicalCheck(
                 is FixtureEvaluation.Rows -> {
                     outcome.rows = evaluation.rows.size
                     outcome.boundValues = boundValues(body.bindings.values, evaluation.rows)
-                    body.bindings.forEach { (path, column) ->
-                        evaluation.rows.forEachIndexed { rowIndex, row ->
-                            if (row[column] == null) {
-                                outcome.failures +=
-                                    Failure(
-                                        "fixtures",
-                                        VisualizationErrorCodes.BINDING_UNBOUND,
-                                        "tests.cases[$index].rows[$rowIndex].$column",
-                                        "The bound column is missing from the row that $path consumes.",
-                                        case.name,
-                                    )
-                            }
-                        }
-                    }
+                    projectedRows(body, output, evaluation.rows, index, outcome)
                 }
             }
         }
         return outcome
+    }
+
+    private fun projectedRows(
+        body: VisualizationBody,
+        output: Map<String, TransformContractView.Column>,
+        rows: List<Map<String, Any?>>,
+        caseIndex: Int,
+        outcome: CaseOutcome,
+    ) {
+        body.bindings.forEach { (path, column) ->
+            rows.forEachIndexed { rowIndex, row ->
+                val at = "tests.cases[$caseIndex].rows[$rowIndex].$column"
+                when {
+                    !row.containsKey(column) -> {
+                        outcome.failures +=
+                            Failure(
+                                "fixtures",
+                                VisualizationErrorCodes.BINDING_UNBOUND,
+                                at,
+                                "The bound column is missing from the row that $path consumes.",
+                                outcome.name,
+                            )
+                    }
+
+                    row[column] == null && output[column]?.nullable == false -> {
+                        outcome.failures +=
+                            Failure("fixtures", VisualizationErrorCodes.TEST_CASE_INVALID, at, "The column is not nullable.", outcome.name)
+                    }
+                }
+            }
+        }
     }
 
     /**
@@ -499,9 +520,9 @@ private object FixtureValues {
 }
 
 /**
- * The small per-path type table (the spec's §11.3 step 2): which leaf keys need a numeric column. A
- * path's LAST key decides; anything not in the table accepts any column. Pinned by test — changing a
- * row of this table is a spec amendment, not a refactor.
+ * The renderer-specific type table (the spec's §11.3 step 2). Plotly's last leaf key selects its
+ * numeric wire restrictions; table and KPI accept canonical scalars, preserving KPI's BIG wire strings.
+ * Pinned by test — changing a row of this table is a spec amendment, not a refactor.
  */
 object BindingTypes {
     /**
@@ -514,13 +535,18 @@ object BindingTypes {
 
     private val NUMERIC_TYPES: Set<LogicalType> = setOf(LogicalType.INTEGER, LogicalType.DECIMAL)
 
-    /** True when [type] may bind a column at [path]. */
+    /** True when [type] may bind a column at [path] for [renderer]. Reserved renderers refuse bindings. */
     fun accepts(
+        renderer: RendererKind,
         path: String,
         type: LogicalType,
     ): Boolean {
         val leaf = path.substringAfterLast('.').substringBefore('[')
-        return if (leaf in NUMERIC_LEAVES) type in NUMERIC_TYPES else true
+        return when (renderer) {
+            RendererKind.PLOTLY -> if (leaf in NUMERIC_LEAVES) type in NUMERIC_TYPES else true
+            RendererKind.TABLE, RendererKind.KPI -> true
+            RendererKind.HTML, RendererKind.SVG -> false
+        }
     }
 }
 
