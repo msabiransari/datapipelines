@@ -63,7 +63,8 @@ class WorkspaceSwitchOutcomeBrowserTest : BrowserSuite() {
             message shouldContain "request=POST $baseUrl/workspace/switch"
             message shouldContain "status=$status"
             message shouldContain "Location=$location"
-            message shouldContain "finalUrl="
+            val destination = if (location == "none") "$baseUrl/workspace/switch" else "$baseUrl$location"
+            message shouldContain "finalUrl=$destination"
             println("481 refused switch: $message")
         } finally {
             page.unroute("$baseUrl/workspace/switch")
