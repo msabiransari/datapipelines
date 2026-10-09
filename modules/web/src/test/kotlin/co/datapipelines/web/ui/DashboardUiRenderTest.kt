@@ -148,11 +148,11 @@ class DashboardUiRenderTest {
     }
 
     @Test
-    fun `the sidebar's EMPTY search offers the shared engine's clear - the box and the tree return together`() {
+    fun `the sidebar's EMPTY search offers no nav-scope clear button (the engine has its own)`() {
         val html = searchPartial(nav = true, rows = emptyList())
 
         html shouldContain "No dashboards match your search"
-        html shouldContain "data-nav-tree-clear"
+        html shouldNotContain "data-nav-tree-clear"
     }
 
     @Test

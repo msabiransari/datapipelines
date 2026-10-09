@@ -432,7 +432,7 @@ class ShellRenderTest {
         html shouldContain "aria-controls=\"nav-tree-dashboards\" aria-label=\"Dashboard folders\""
         html shouldContain "data-nav-tree=\"dashboards\""
         // #400 — the branch gains the search input in the Pipelines branch's exact markup:
-        // the shared engine (nav-tree.js) serves it with no JS change, and the results swap
+        // the shared engine (js/tree/) serves it with no JS change, and the results swap
         // into THIS panel's root (clearing returns to the tree by construction).
         html shouldNotContain "data-nav-label=\"Dashboard\""
         // The second tree engine is gone: no <details> disclosure of its own.
@@ -505,7 +505,7 @@ class ShellRenderTest {
         branch shouldContain "id=\"nav-tree-parameter-sets\" data-nav-tree=\"parameter-sets\" hidden"
         branch shouldContain "data-nav-workspace=\"acme\""
         // #415 — the branch gains the search input in the Pipelines branch's exact markup:
-        // the shared engine (nav-tree.js) serves it with no JS change, and the results swap
+        // the shared engine (js/tree/) serves it with no JS change, and the results swap
         // into THIS panel's root (clearing returns to the tree by construction).
         // The branch sits in Build, before Operate, and is one more item - not a second tree engine.
         html.indexOf("data-nav-branch=\"parameter-sets\"") shouldBeLessThan html.indexOf(">Operate<")

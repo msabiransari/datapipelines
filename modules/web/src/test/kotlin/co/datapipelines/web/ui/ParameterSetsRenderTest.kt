@@ -137,10 +137,10 @@ class ParameterSetsRenderTest {
 
     @Test
     fun `#415 - a failed search and an empty catalog say different things`() {
-        // A nav search with no hits: the match-miss state, whose clear is nav-tree.js's (it empties the box).
+        // A nav search with no hits: the match-miss state, with no nav-scope clear (the tree engine's own clears).
         val miss = search("nav", emptyList(), "geo")
         miss shouldContain "No parameter sets match your search"
-        miss shouldContain "data-nav-tree-clear"
+        miss shouldNotContain "data-nav-tree-clear"
         // The catalog's no-hit search: the clear re-fetches the route bare (the box is the page's own).
         val pageMiss = search("page", emptyList(), "geo")
         pageMiss shouldContain "No parameter sets match your search"

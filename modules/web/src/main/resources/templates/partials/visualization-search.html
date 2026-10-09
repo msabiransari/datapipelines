@@ -17,8 +17,6 @@
     <div class="ds-empty">
       <p class="ds-empty-title">No visualizations match your search</p>
       <div class="ds-empty-actions">
-        <button th:if="${nav}" type="button" class="ds-button ds-button-secondary ds-button-sm"
-                data-nav-tree-clear>Clear search</button>
         <button th:unless="${nav}" type="button" class="ds-button ds-button-secondary ds-button-sm"
                 th:attr="hx-get=@{/partials/visualizations}, hx-target='#' + ${rootId}, hx-swap='outerHTML'">Clear search</button>
       </div>

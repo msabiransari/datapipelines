@@ -221,9 +221,10 @@ class ParameterSetsBrowseModel(
 
         /**
          * The response header every sidebar fragment carries — the pipelines tree's own
-         * ([PipelineBrowseModel.NAV_STAMP_HEADER]): `<workspace>|<lens>`. nav-tree.js admits a tree
-         * swap only when the stamp matches the tree it lands in, so a level fetched under another
-         * workspace or another lens can never join rows rendered under this one.
+         * ([PipelineBrowseModel.NAV_STAMP_HEADER]): `<workspace>|<lens>`. Written so a client
+         * can tell which workspace a fragment was built under; since #460 the sidebar tree
+         * client (js/tree/) isolates its cache per workspace instead of reading the stamp, so
+         * nothing reads it today (tracked with the #491 nav-tree removal follow-up).
          */
         const val NAV_STAMP_HEADER = PipelineBrowseModel.NAV_STAMP_HEADER
 

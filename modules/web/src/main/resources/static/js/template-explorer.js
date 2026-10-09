@@ -11,7 +11,8 @@
 //     row NAVIGATES, so the arrow keys move FOCUS only (arrow-key "selection" would navigate
 //     on every keystroke — L3b's reason for leaving the dashboards tree unwired, now solved by
 //     the context rather than by opting out). Enter is the link's own activation.
-//     aria-selected/aria-current there mark the CURRENT PAGE's leaf, owned by nav-tree.js.
+//     aria-selected/aria-current there mark the CURRENT PAGE's leaf, owned by js/tree
+//     (sidebar.mjs reads the hook; render.mjs writes the attributes).
 //
 // The 047 tree needed no JS of its own — expansion is <details>/<summary> and htmx, and
 // that is STILL all the expansion needs. What this file adds is client state the server
@@ -334,7 +335,7 @@
   }
 
   // Exposed for editorJsTest (the init.js pattern): the navigation policy, DOM-free, plus
-  // init itself so a re-init test can drive it (076 §B), and the context helpers nav-tree.js
+  // init itself so a re-init test can drive it (076 §B), and the context helpers js/tree
   // reuses (#350) so the sidebar never grows a second notion of "the visible rows".
   window.templateExplorer = {
     loaded: true,

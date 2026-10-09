@@ -111,7 +111,7 @@ class VisualizationUiRenderTest {
 
         val none = list(scope = "nav", rootId = VisualizationBrowseModel.NAV_ROOT_ID, q = "zzz", rows = emptyList())
         none shouldContain "No visualizations match your search"
-        none shouldContain "data-nav-tree-clear"
+        none shouldNotContain "data-nav-tree-clear"
     }
 
     @Test

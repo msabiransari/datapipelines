@@ -474,8 +474,8 @@ class PipelineExplorerRenderTest {
                 setVariable("total", 0)
             }
         noMatch shouldContain "No pipelines match your search"
-        noMatch shouldContain "data-nav-tree-clear"
-        // The sidebar's clear is nav-tree.js's (it empties the box too) — no bare hx-get.
+        noMatch shouldNotContain "data-nav-tree-clear"
+        // The nav instance renders no clear button of its own (the tree engine has one) — no bare hx-get either.
         noMatch shouldNotContain "hx-get=\"/partials/pipelines\""
     }
 
