@@ -1,9 +1,12 @@
 package co.datapipelines.browser
 
 import com.google.gson.JsonObject
+import com.google.gson.JsonParser
+import com.microsoft.playwright.options.SelectOption
 import io.kotest.matchers.doubles.plusOrMinus
 import io.kotest.matchers.doubles.shouldBeLessThanOrEqual
 import io.kotest.matchers.shouldBe
+import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.MethodOrderer
 import org.junit.jupiter.api.Order
 import org.junit.jupiter.api.Test
@@ -207,5 +210,286 @@ class DashboardFiltersBrowserTest : DashboardBrowserSuite() {
         page.waitForFunction("() => getComputedStyle(document.querySelector('.dp-board-toolbar')).display !== 'none'")
         (page.evaluate("() => document.getElementById('dp-board-filters').classList.contains('is-open')") as Boolean) shouldBe false
         page.setViewportSize(1280, 900)
+    }
+
+    /**
+     * Where the first or the last field of the filters is: whether it holds the focus, and whether
+     * it lies inside the drawer's visible box and the viewport. The field list is every input and
+     * select of the mounted rows, in document order (the order Tab walks).
+     */
+    private fun fieldReach(which: String): Map<*, *> =
+        page.evaluate(
+            """(which) => { const panel = document.getElementById('dp-board-filters');
+              const fields = Array.from(panel.querySelectorAll('.dp-dashboard-parameter input, .dp-dashboard-parameter select'));
+              const field = which === 'first' ? fields[0] : fields[fields.length - 1];
+              const box = panel.getBoundingClientRect(); const r = field.getBoundingClientRect();
+              const focused = document.activeElement;
+              return { id: field.id, fields: fields.length, active: focused === field,
+                focusedId: focused ? focused.id : null, focusedInPanel: panel.contains(focused),
+                closeAfterFields: !!(document.getElementById('dp-board-filters-close').compareDocumentPosition(field) & Node.DOCUMENT_POSITION_PRECEDING),
+                inPanel: r.top >= box.top - 1 && r.bottom <= box.bottom + 1,
+                inViewport: r.top >= 0 && r.bottom <= window.innerHeight && r.left >= 0 && r.right <= window.innerWidth,
+                fieldTop: r.top, fieldBottom: r.bottom, panelTop: box.top, panelBottom: box.bottom,
+                panelScroll: panel.scrollTop, panelOverflowY: getComputedStyle(panel).overflowY }; }""",
+            which,
+        ) as Map<*, *>
+
+    /** The page's own scroll positions — the window's and the shell's scroll container's. */
+    private fun pageScroll(): Map<*, *> =
+        page.evaluate(
+            "() => { const m = document.querySelector('.app-main'); return { y: window.scrollY, main: m ? m.scrollTop : 0 }; }",
+        ) as Map<*, *>
+
+    /**
+     * #493 A — at a phone and a tablet viewport the drawer opens and BOTH ends of a long form are
+     * reachable: by keyboard (Tab walks from the close button to the first field and on to the last,
+     * never leaving the drawer, each focused field inside the drawer's visible box) and by pointer
+     * (the drawer scrolled to its top hides the last field — the non-vacuity floor — and the wheel
+     * over the drawer brings it into view). The page behind never scrolls and never scrolls sideways.
+     *
+     * Disabled on the landed board by #496: the runtime mounts the form BEFORE the drawer's Close
+     * button, so the drawer opens scrolled to the end and Tab from Close leaves it (measured at
+     * 390x844: closeAfterFields=true, scrollTop=710, focusedInPanel=false). Re-enable with that fix.
+     */
+    @Test
+    @Disabled("#496: the drawer's Close button renders after the form, so forward Tab never reaches the first field")
+    @Order(3)
+    fun `at 390x844 and 768x1024 the drawer reaches the first and the last field without scrolling the page`() {
+        startTrace()
+        val root = ready("dpreach")
+        val board = seedAcceptanceBoard(root)
+        for ((width, height) in listOf(390 to 844, 768 to 1024)) {
+            page.setViewportSize(width, height)
+            openBoard(board)
+            page.waitForFunction("() => document.querySelector('.dp-board-page').getAttribute('data-dp-filters') === 'some'")
+            page.waitForFunction(
+                "(n) => document.querySelectorAll('#dp-board-filters [data-dp-parameter=\"markets\"] input').length === n",
+                acceptanceMarkets,
+            )
+            val before = pageScroll()
+            page.click("#dp-board-filters-trigger")
+            page.waitForFunction(
+                """() => { const panel = document.getElementById('dp-board-filters'); const style = getComputedStyle(panel);
+                  return panel.classList.contains('is-open') && style.visibility === 'visible' && style.transform === 'none'; }""",
+            )
+            page.waitForFunction("() => document.activeElement && document.activeElement.id === 'dp-board-filters-close'")
+
+            page.keyboard().press("Tab")
+            val first = fieldReach("first")
+            println("493-reach ${width}x$height first=$first")
+            first["active"] shouldBe true
+            first["inPanel"] shouldBe true
+            first["inViewport"] shouldBe true
+
+            var presses = 1
+            var escaped = 0
+            while (fieldReach("last")["active"] != true && presses < MAX_TABS) {
+                page.keyboard().press("Tab")
+                presses++
+                val inside = page.evaluate("() => document.getElementById('dp-board-filters').contains(document.activeElement)")
+                if (inside != true) escaped++
+            }
+            val last = fieldReach("last")
+            println("493-reach ${width}x$height last=$last presses=$presses escaped=$escaped")
+            last["active"] shouldBe true
+            escaped shouldBe 0
+            last["inPanel"] shouldBe true
+            last["inViewport"] shouldBe true
+
+            // Pointer reach: from the drawer's top the last field is out of view (else the form is
+            // not long enough to prove anything), and the wheel over the drawer brings it in.
+            page.evaluate("() => { document.getElementById('dp-board-filters').scrollTop = 0; }")
+            fieldReach("last")["inPanel"] shouldBe false
+            page.mouse().move(width / 4.0, height / 2.0)
+            var wheels = 0
+            while (fieldReach("last")["inPanel"] != true && wheels < MAX_WHEELS) {
+                page.mouse().wheel(0.0, WHEEL_STEP)
+                page.waitForTimeout(WHEEL_SETTLE_MS)
+                wheels++
+            }
+            val wheeled = fieldReach("last")
+            println("493-reach ${width}x$height wheel=$wheeled wheels=$wheels")
+            wheeled["inPanel"] shouldBe true
+            wheeled["inViewport"] shouldBe true
+
+            pageScroll() shouldBe before
+            documentOverflowsX() shouldBe false
+            page.keyboard().press("Escape")
+            page.waitForFunction("() => !document.getElementById('dp-board-filters').classList.contains('is-open')")
+        }
+        page.setViewportSize(1280, 900)
+    }
+
+    /** The parsed `selections` of every refresh POST the page sent, oldest first. */
+    private fun selectionsOf(bodies: List<String>): List<JsonObject> =
+        synchronized(bodies) { bodies.toList() }.map { JsonParser.parseString(it).asJsonObject.getAsJsonObject("selections") }
+
+    /** Waits for the next refresh POST after [seen] bodies and answers its selections. */
+    private fun nextSelections(
+        bodies: List<String>,
+        seen: Int,
+    ): JsonObject {
+        page.waitForCondition { synchronized(bodies) { bodies.size } > seen }
+        return selectionsOf(bodies).last()
+    }
+
+    /**
+     * #493 B — on the product board, a click on an option's LABEL text selects its input; a change
+     * of a parent re-resolves its dependent's options; and every typed value reaches the refresh
+     * POST (read off the wire through `page.onRequest`) as the JSON type it was typed as — the
+     * radio's string, the BOOLEAN's true/false/null and the INTEGER's number. The leaves are bound
+     * to `refresh_all`, so each gesture alone sends its refresh.
+     */
+    @Test
+    @Order(4)
+    fun `a label click selects its option, a parent change re-resolves its dependent and typed values travel typed`() {
+        startTrace()
+        val root = ready("dpwire")
+        val board = seedAcceptanceBoard(root)
+        val bodies = java.util.Collections.synchronizedList(mutableListOf<String>())
+        page.onRequest { request ->
+            if (request.method() == "POST" && request.url().endsWith("/runtime/visualizations")) {
+                request.postData()?.let(bodies::add)
+            }
+        }
+        openBoard(board)
+        // The initial action's refresh settles first (the conformance case 13 rule: a gesture's
+        // refresh must not race the bootstrap's).
+        page.waitForFunction(
+            "() => window.__dpPage.notifications.some(function (n) { return n.code === 'refresh.completed'; })",
+        )
+        val granularity = "#dp-board-filters [data-dp-parameter=\"granularity\"]"
+        (page.evaluate("() => document.querySelector('$granularity input:checked').id") as String).endsWith("-1") shouldBe true
+
+        // The LABEL, not the input: the visible text selects its own radio.
+        var seen = bodies.size
+        page.click("$granularity label.dp-dashboard-parameter-option-label:text-is('Day')")
+        page.waitForFunction("() => document.querySelector('$granularity input:checked').id.endsWith('-0')")
+        val day = nextSelections(bodies, seen)
+        println("493-wire label-day selections=$day")
+        day.get("granularity").isJsonPrimitive shouldBe true
+        day.get("granularity").asJsonPrimitive.isString shouldBe true
+        day.get("granularity").asString shouldBe "DAY"
+
+        // The BOOLEAN's three states arrive as JSON true, false and null — never as strings.
+        val enabled = "#dp-board-filters [data-dp-parameter=\"enabled\"] select"
+        for ((option, expected) in listOf("true" to true, "false" to false)) {
+            seen = bodies.size
+            page.selectOption(enabled, option)
+            val sent = nextSelections(bodies, seen)
+            println("493-wire enabled=$option selections=$sent")
+            sent.get("enabled").asJsonPrimitive.isBoolean shouldBe true
+            sent.get("enabled").asBoolean shouldBe expected
+        }
+        seen = bodies.size
+        page.selectOption(enabled, "")
+        val unset = nextSelections(bodies, seen)
+        println("493-wire enabled=unset selections=$unset")
+        unset.has("enabled") shouldBe true
+        unset.get("enabled").isJsonNull shouldBe true
+
+        // The INTEGER input: typed text, sent as a JSON number.
+        seen = bodies.size
+        page.fill("#dp-board-filters [data-dp-parameter=\"limit\"] input", "42")
+        page.keyboard().press("Tab")
+        val limit = nextSelections(bodies, seen)
+        println("493-wire limit=42 selections=$limit")
+        limit.get("limit").asJsonPrimitive.isNumber shouldBe true
+        limit.get("limit").asInt shouldBe 42
+
+        // The dependent pair: Europe's cities, then the parent changes and the child re-resolves.
+        val city = "#dp-board-filters [data-dp-parameter=\"city\"] select"
+        val cityOptions = "() => Array.from(document.querySelector('$city').options).map(function (o) { return o.textContent; })"
+        page.evaluate(cityOptions) shouldBe listOf("", "EU city 1", "EU city 2", "EU city 3")
+        page.selectOption("#dp-board-filters [data-dp-parameter=\"region\"] select", SelectOption().setLabel("United States"))
+        page.waitForFunction("() => (document.querySelector('$city').options[1] || {}).textContent === 'US city 1'")
+        val resolved = page.evaluate(cityOptions)
+        println("493-wire city-after-region=US options=$resolved")
+        resolved shouldBe listOf("", "US city 1", "US city 2", "US city 3")
+        page.evaluate("() => window.__dpPage.instance._adapter.readSelections().city") shouldBe "US-1"
+    }
+
+    /** A second instance of [board] beside the host page's first, signalled at `window.__dp2`. */
+    private fun mountSecondInstance(board: String) {
+        page.evaluate(
+            """(id) => { const second = document.createElement('div'); second.id = 'board-2'; document.body.appendChild(second);
+              window.__dp2 = { ready: false, instance: null };
+              const instance = window.DatapipelinesDashboard.init({ server: { baseUrl: '', credentials: 'session' },
+                dashboard: { id: id, version: 'released' }, container: second,
+                adapter: window.DatapipelinesDashboard.adapters(second) });
+              window.__dp2.instance = instance;
+              instance.ready.then(function () { window.__dp2.ready = true; }, function () {}); }""",
+            board,
+        )
+        page.waitForFunction("() => window.__dp2.ready")
+    }
+
+    /** Each instance's checked granularity radio's option text, and whether every option label targets an input of its own group. */
+    private fun radioState(): Map<*, *> =
+        page.evaluate(
+            """() => { const one = function (host) {
+                const group = document.querySelector(host + ' [data-dp-parameter="granularity"]');
+                const checked = group.querySelector('input:checked');
+                const labels = Array.from(group.querySelectorAll('label.dp-dashboard-parameter-option-label'));
+                return { checked: checked ? group.querySelector('label[for="' + checked.id + '"]').textContent : null,
+                  name: group.querySelector('input').name,
+                  ownTargets: labels.every(function (l) { const t = document.getElementById(l.htmlFor); return !!t && group.contains(t); }) }; };
+              return { a: one('#board'), b: one('#board-2') }; }""",
+        ) as Map<*, *>
+
+    /**
+     * #493 D — two instances of the controls board in one document: a LABEL click in one moves only
+     * its own radio group (every label's `for` resolves inside its own group — the per-instance
+     * token keeps the ids apart), and the two groups carry different `name` attributes. The
+     * conformance suite's case 14 clicks the INPUTS; the label path is #473's and is what a shared
+     * token breaks first (a duplicated id resolves to the FIRST instance's input).
+     */
+    @Test
+    @Order(5)
+    fun `two instances on one page keep their radio groups apart under label clicks`() {
+        startTrace()
+        val root = ready("dptwo")
+        installHostPage()
+        val board = seedControlsBoard(root)
+        openHost(board)
+        mountSecondInstance(board)
+        page.waitForFunction(
+            "() => document.querySelectorAll('#board [data-dp-parameter=\"granularity\"] input[type=radio]').length === 3" +
+                " && document.querySelectorAll('#board-2 [data-dp-parameter=\"granularity\"] input[type=radio]').length === 3",
+        )
+        val start = radioState()
+        println("493-two start=$start")
+        (start["a"] as Map<*, *>)["checked"] shouldBe "Week"
+        (start["b"] as Map<*, *>)["checked"] shouldBe "Week"
+
+        page.click("#board-2 [data-dp-parameter=\"granularity\"] label.dp-dashboard-parameter-option-label:text-is('Day')")
+        val afterDay = radioState()
+        println("493-two after-b-day=$afterDay")
+        (afterDay["b"] as Map<*, *>)["checked"] shouldBe "Day"
+        (afterDay["a"] as Map<*, *>)["checked"] shouldBe "Week"
+
+        page.click("#board [data-dp-parameter=\"granularity\"] label.dp-dashboard-parameter-option-label:text-is('Month')")
+        val afterMonth = radioState()
+        println("493-two after-a-month=$afterMonth")
+        (afterMonth["a"] as Map<*, *>)["checked"] shouldBe "Month"
+        (afterMonth["b"] as Map<*, *>)["checked"] shouldBe "Day"
+
+        (afterMonth["a"] as Map<*, *>)["ownTargets"] shouldBe true
+        (afterMonth["b"] as Map<*, *>)["ownTargets"] shouldBe true
+        org.junit.jupiter.api.Assertions.assertNotEquals(
+            (afterMonth["a"] as Map<*, *>)["name"],
+            (afterMonth["b"] as Map<*, *>)["name"],
+            "the two instances' radio groups share a name",
+        )
+    }
+
+    private companion object {
+        /** Tab presses allowed from the first field to the last (the acceptance form has ~30 stops). */
+        const val MAX_TABS = 80
+
+        /** Wheel turns allowed to bring the last field into view. */
+        const val MAX_WHEELS = 40
+        const val WHEEL_STEP = 200.0
+        const val WHEEL_SETTLE_MS = 100.0
     }
 }

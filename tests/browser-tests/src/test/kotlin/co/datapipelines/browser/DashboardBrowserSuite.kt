@@ -456,6 +456,107 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
         return name
     }
 
+    /** The acceptance board's long list: options of its `markets` checkbox group. */
+    protected val acceptanceMarkets = 24
+
+    /**
+     * #493 — the ACCEPTANCE board: the filters panel's real workload in one set. In display order: a
+     * PARENT dropdown (`region`, EU/US) and its DEPENDENT (`city`, options from a selector template
+     * that reads `:region`, so a parent change re-resolves them through the evaluate path); the
+     * controls board's radio (`granularity`, Day/Week/Month, default Week) and optional BOOLEAN
+     * (`enabled`); a constrained INTEGER input (`limit`, 1–100, default 10 — the validation-prone
+     * one); and a LONG list (`markets`, 24 checkboxes), so the drawer must scroll to its last field.
+     * The three leaves are each bound to `refresh_all` (D42, `action_controls[].parameter`), so a
+     * change GESTURE sends the refresh whose body the cases read — no test-side refresh call.
+     */
+    protected fun seedAcceptanceBoard(root: String): String {
+        val datasource = registerSourceDatasource()
+        val cities = "test/${root}_cities.sql"
+        createTemplate("test/${root}_acceptance.sql", "SELECT CAST(:granularity AS TEXT) AS g")
+        createTemplate(
+            cities,
+            "SELECT CAST(:region AS TEXT) || '-' || g AS value, CAST(:region AS TEXT) || ' city ' || g AS display_value," +
+                " g = 1 AS is_default FROM generate_series(1, 3) g ORDER BY 1",
+        )
+        createPipeline(
+            "$root/pipelines/acceptance",
+            "test/${root}_acceptance.sql",
+            datasource,
+            parameters = """{"granularity":{"type":"STRING","required":true}}""",
+        )
+        releasePipelines(listOf("$root/pipelines/acceptance"))
+        val setName = createAndReleaseAcceptanceSet("$root/parameters/acceptance", cities, datasource)
+        val chart =
+            seedVisualization("$root/visualizations/acceptance", plotlyBody("""{"type":"bar","x":null,"y":null}""", "g", "g", "STRING"))
+        val board =
+            seedDashboard(
+                "$root/boards/acceptance",
+                sources = listOf("s1" to "$root/pipelines/acceptance"),
+                occurrences = listOf(Triple("acceptancechart", chart, "s1")),
+                initial = true,
+                parameterSet = setName,
+                sourceParameters = mapOf("s1" to """{"granularity":{"parameter":"granularity"}}"""),
+            )
+        val bindings =
+            listOf("enabled", "granularity", "limit").joinToString(",", "[", "]") {
+                """{"name":"apply_$it","type":"action_control","action":"refresh_all","label":"Apply","parameter":"$it"}"""
+            }
+        // The chart pinned full width (an unpinned occurrence auto-places into one 12th-width cell — the
+        // seedBoardWithGrid note), so the pictures show a board, not a sliver.
+        val grid = """[{"name":"acceptancechart","x":0,"y":0,"w":12,"h":4}]"""
+        sql(
+            "UPDATE dashboard_versions SET body_json = jsonb_set(jsonb_set(body_json, '{action_controls}', '$bindings'::jsonb), " +
+                "'{layout,grid}', '$grid'::jsonb) WHERE dashboard_id = '$board'::uuid",
+        )
+        return board
+    }
+
+    /** The acceptance set through its REAL routes; its selector template is released WITH it (`release_pinned_templates`). */
+    private fun createAndReleaseAcceptanceSet(
+        name: String,
+        cities: String,
+        datasource: String,
+    ): String {
+        val markets = (1..acceptanceMarkets).joinToString(",") { """{"value":"M$it","display_value":"Market $it"}""" }
+        val set =
+            """{"display_name":"Acceptance","description":"#493 fixture","parameters":[
+              {"name":"region","label":"Region","type":"STRING","kind":"SELECT","cardinality":"SINGLE","required":true,
+               "source":{"constants":[{"value":"EU","display_value":"Europe","is_default":true},
+                                      {"value":"US","display_value":"United States","is_default":false}]}},
+              {"name":"city","label":"City","type":"STRING","kind":"SELECT","cardinality":"SINGLE","required":true,
+               "depends_on":["region"],"source":{"template":{"id":"$cities","version":1},"datasource":"$datasource"}},
+              {"name":"granularity","label":"Granularity","type":"STRING","kind":"SELECT","cardinality":"SINGLE","required":true,
+               "source":{"constants":[{"value":"DAY","display_value":"Day","is_default":false},
+                                      {"value":"WEEK","display_value":"Week","is_default":true},
+                                      {"value":"MONTH","display_value":"Month","is_default":false}]},
+               "presentation":{"control":"radio"}},
+              {"name":"enabled","label":"Enabled","type":"BOOLEAN","kind":"INPUT","cardinality":"SINGLE","required":false},
+              {"name":"limit","label":"Row limit","type":"INTEGER","kind":"INPUT","cardinality":"SINGLE","required":true,
+               "default_value":10,"constraints":{"min":1,"max":100}},
+              {"name":"markets","label":"Markets","type":"STRING","kind":"SELECT","cardinality":"MULTI","required":false,
+               "source":{"constants":[$markets]}}]}"""
+        val result =
+            page.evaluate(
+                """async (args) => {
+                  const csrf = document.cookie.match(/(?:^|;\s*)dp_csrf=([^;]*)/);
+                  const headers = { 'Content-Type': 'application/json', 'DP-CSRF-Token': csrf ? decodeURIComponent(csrf[1]) : '' };
+                  const body = Object.assign({ name: args.name }, JSON.parse(args.set));
+                  const created = await fetch('/api/v1/parameter-sets', { method: 'POST', credentials: 'same-origin',
+                    headers, body: JSON.stringify(body) });
+                  if (!created.ok) return { error: created.status + ' ' + (await created.text()).slice(0, 300) };
+                  const document_ = await created.json();
+                  const released = await fetch('/api/v1/parameter-sets/' + document_.data.id + '/release?release_pinned_templates=true',
+                    { method: 'POST', credentials: 'same-origin',
+                      headers: Object.assign({}, headers, { 'If-Match': document_.data.body_hash }), body: '' });
+                  if (!released.ok) return { error: 'release ' + released.status + ' ' + (await released.text()).slice(0, 300) };
+                  return { id: document_.data.id };
+                }""",
+                mapOf("name" to name, "set" to set),
+            ) as Map<*, *>
+        check(result["error"] == null) { "the parameter set $name failed: ${result["error"]}" }
+        return name
+    }
+
     /** A board whose pinned visualization is a SURFACE trace — the server answers renderer.bundle "3d". */
     protected fun seedSurfaceBoard(root: String): String {
         val datasource = registerSourceDatasource()
