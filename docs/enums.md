@@ -827,7 +827,7 @@ The CHECK (`chk_executions_executed_by_key_kind`) admits these four and NULL. V3
 |---|---|
 | `plotly` | A Plotly figure (`data` traces, `layout`, Plotly's own `config`) — the preferred chart renderer (D12) |
 | `table` | A table of labelled columns ([Dashboards §2.1.2](dashboards.md)) |
-| `kpi` | A single value with a label, an optional format and comparison |
+| `kpi` | A single value with no label of its own, titled by its card heading; optional format and comparison (`comparison.label` names the comparison line) |
 | `html` | RESERVED — authored HTML (D13, D46); refused in round one |
 | `svg` | RESERVED — authored SVG (D13, D46); refused in round one |
 

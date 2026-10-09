@@ -1,6 +1,6 @@
 # Dashboards
 
-**Status:** v0.40 — the board presentation's filters panel, chart cards and activity dock (§6.1's `parametersContainer`, §6.2's card wrap and pane mount target, §6.6's border-speaks-the-state, §7's Board tab, #473) beside renderer-aware binding types and nullable transform output (§3.4, #458/#457) beside the board-width breakpoint on the composite host, with a 640 px default (#412) beside a target the refresh's own abort cancelled reports `abort` whichever side of the race wins (§6.6, #435) beside the declarative read-only rule (§5.1, #463), then draft dashboard dependencies (#459), then the Release dialogs post the draft hash they read (§7, #416) beside numeric bound-value assertion feasibility (§3.4, #377) beside the visualizations workspace's tab switches on the shared history helper, the parameter-set decision (§7, #426) beside the pipeline editor runs the shared tab core (§7, #420) beside the Versions tables' created/released relative with the UTC stamp on hover (§7, #422) beside Back/Forward across the dashboards workspace's tab switches (§7, #402) beside the visualizations workspace (§7, #399) beside the dashboards workspace (§5.2's `version`, §7's workspace, #400; #409 closes with it) beside the
+**Status:** v0.41 — the KPI has no label of its own and its card heading titles it (§2.1.2, §6.3, #475, owner ruling) beside the board presentation's filters panel, chart cards and activity dock (§6.1's `parametersContainer`, §6.2's card wrap and pane mount target, §6.6's border-speaks-the-state, §7's Board tab, #473) beside renderer-aware binding types and nullable transform output (§3.4, #458/#457) beside the board-width breakpoint on the composite host, with a 640 px default (#412) beside a target the refresh's own abort cancelled reports `abort` whichever side of the race wins (§6.6, #435) beside the declarative read-only rule (§5.1, #463), then draft dashboard dependencies (#459), then the Release dialogs post the draft hash they read (§7, #416) beside numeric bound-value assertion feasibility (§3.4, #377) beside the visualizations workspace's tab switches on the shared history helper, the parameter-set decision (§7, #426) beside the pipeline editor runs the shared tab core (§7, #420) beside the Versions tables' created/released relative with the UTC stamp on hover (§7, #422) beside Back/Forward across the dashboards workspace's tab switches (§7, #402) beside the visualizations workspace (§7, #399) beside the dashboards workspace (§5.2's `version`, §7's workspace, #400; #409 closes with it) beside the
 board's small-slot margins and its breakpoint collapse (§6.2, §6.3, #386/#387), 328's release-record judgement (§4.3)
 permissions (§4, lane L1b); the transfer routes and their limits' honest contract (§3.3, lanes L1c/L1c-b/L1c-c: the
 import's atomicity, the RELEASE rules on a landing, the aggregate count ceiling, the wire's per-family arms); the server
@@ -106,8 +106,13 @@ the author puts a placeholder there (`"x": "$.x"` above) — so the runtime's su
   non-blank string of at most 120 characters, `values` the placeholder a binding fills, `format` one of `text`,
   `number`, `integer`, `percent`, `date`, `datetime`, `align` one of `left`, `center`, `right`; `page_size` an
   integer 1–1000.
-- **`kpi`** — `label` (required, as a table label), `value` (the placeholder a binding fills), `format` one of
-  `number`, `integer`, `percent`, `currency`, `unit` (at most 16 characters), `comparison` `{label, value}`.
+- **`kpi`** — `value` (the placeholder a binding fills), optional `format` one of `number`, `integer`,
+  `percent`, `currency`, optional `unit` (at most 16 characters), optional `comparison` `{label, value}`.
+  A KPI has no label of its own: its card heading titles it (the occurrence's `presentation.title`, else the
+  pinned visualization's `display_name`); `comparison.label` still names the comparison line (#475, owner ruling).
+  A stored KPI body carrying `label` keeps rendering with that key ignored, but is refused at its next write or
+  release with `visualization.validation.config_schema_invalid` at `details.failures[].path` = `config.label`
+  (the renderer-schema path is `label`).
 
 #### 2.1.3 Test cases
 
@@ -713,9 +718,10 @@ boards in one document never share a native radio group); repeated renders REPLA
   `paper_bgcolor` or grid colour loses to the token at render. Neither touches the other's keys.
 - **Table.** `columns[]` (`label`, `values` — the path the binding fills, `format`, `align`),
   `page_size` capping the rows. Every cell is `textContent`.
-- **KPI.** `label`, `value` (the bound path), `format` (`number|integer|percent|currency`), `unit`,
-  and an optional `comparison` bound through the same map. A zero renders — a zero is a value, not
-  `no-data`.
+- **KPI.** `value` (the bound path), `format` (`number|integer|percent|currency`), `unit`,
+  and an optional `comparison` bound through the same map. A KPI has no label of its own: the card heading
+  titles it (the occurrence's `presentation.title`, else the pinned visualization's `display_name`).
+  `comparison.label` names the comparison line. A zero renders — a zero is a value, not `no-data`.
 
 ### 6.4 The two bundles
 
@@ -972,6 +978,7 @@ change (#426). The templates workspace adopts the helper after #398's rework lan
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-09 | v0.41 | #475 the KPI label is removed — owner ruling | **§2.1.2/§6.3:** no top-level KPI `label` key and no renderer label row; the card heading alone titles it (`presentation.title`, else the pinned `display_name`). `comparison.label` stays. Immutable stored versions render with legacy `label` ignored; a next write or release refuses it at path `label`. This ruling supersedes the former required-label schema. |
 | 2026-10-09 | v0.40 | #473 the board's filters panel, chart cards and activity dock — rebased in recovery onto #460's v0.36 and #412's v0.38, renumbered after #458's v0.39 | **§6.1/§6.2:** `adapters(container, { parametersContainer })` mounts the parameters pane in a host-supplied element; every occurrence renders in a card (heading from the pinned `display_name`, optional description, renderer body, status foot). **§6.6:** the border carries the state, a failure's loud accent settles after 3 s while its in-card message stays, ready shows no badge. **§7:** the Board tab's filters panel/drawer (absent with no visible parameter; a widening back past the breakpoint ends an open drawer), the bottom dock, and the mount's teardown under prepared navigation; the stale "never boosted" sentence corrected. |
 | 2026-10-09 | v0.39 | #458/#457 binding contracts — v0.37 in recovery after #460's v0.36, renumbered at merge after #435's v0.37 and #412's v0.38 | **§3.4:** renderer-specific scalar acceptance, Plotly numeric wire restrictions and unchanged KPI compatibility; transform output nullability distinguishes present null from missing keys. Null stays a gap and supplies no assertion text; visual evidence and release revalidation remain required. |
 | 2026-10-09 | v0.38 | #412 the layout breakpoint measures the composite host, default 640 — renumbered in recovery after #460's v0.36, then at merge after #435's v0.37 | **§2.2 and §6.2:** `breakpoint_px` is judged against the composite host's width; a zero-width host holds its stored grid until layout, and the `ResizeObserver` re-places on reveal or a crossing. The default is 640 so a 694 px board at a 1280 px viewport keeps its grid; the reader narrows the board by widening the user-resizable navigation rail (#460's separator, keyboard included), and the crossing stacks it. The client, KDoc and implementation spec use the same rule. |

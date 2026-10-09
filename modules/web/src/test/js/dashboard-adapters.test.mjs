@@ -340,12 +340,13 @@ test("the kpi renderer renders a zero, formats, carries the unit and the compari
       host,
       occurrence: {
         name: "k",
-        config: { label: "Revenue", value: "v", format: "currency", unit: "M", comparison: { label: "vs last", value: "c" } },
+        config: { value: "v", format: "currency", unit: "M", comparison: { label: "vs last", value: "c" } },
       },
     });
     assert.equal(await handle.renderData({ name: "k" }, 0, {}), "no-data");
     await handle.renderData({ name: "k" }, 1, { v: [0], c: [1234.5] });
     assert.equal(host.querySelector(".dp-dashboard-kpi-number").textContent, (0).toLocaleString(undefined, { style: "currency", currency: "USD" }), "a zero KPI renders");
+    assert.equal(host.querySelector(".dp-dashboard-kpi-label"), null);
     assert.equal(host.querySelector(".dp-dashboard-kpi-unit").textContent, " M");
     assert.equal(host.querySelector(".dp-dashboard-kpi-comparison-label").textContent, "vs last");
     await handle.renderData({ name: "k" }, 1, { v: [9876.54], c: [1] });
@@ -354,6 +355,26 @@ test("the kpi renderer renders a zero, formats, carries the unit and the compari
     await handle.renderData({ name: "k" }, 1, { v: ["<img onerror=alert(1)>"], c: [1] });
     const rendered = host.querySelector(".dp-dashboard-kpi-number").textContent;
     assert.ok(!rendered.includes("<"), "the kpi value is text: " + rendered);
+  } finally {
+    uninstallDom();
+  }
+});
+
+test("#475: a stored KPI with a legacy label renders without its own label row", async () => {
+  installDom();
+  try {
+    const runtime = require(resolveStatic("datapipelines-dashboard.js"));
+    require(resolveStatic("datapipelines-dashboard-kpi.js")).register(runtime);
+    const host = fakeElement("div");
+    const handle = runtime._internal.renderers().kpi.create({
+      host,
+      occurrence: { name: "k", config: { label: "Total", value: null, format: "integer", comparison: { label: "Previous", value: null } } },
+    });
+    assert.equal(await handle.renderData({ name: "k" }, 1, { value: [42], "comparison.value": [10] }), "rendered");
+    assert.equal(host.querySelector(".dp-dashboard-kpi-label"), null);
+    assert.equal(host.querySelector(".dp-dashboard-kpi-number").textContent, "42");
+    assert.equal(host.querySelector(".dp-dashboard-kpi-comparison-label").textContent, "Previous");
+    assert.equal(host.querySelector(".dp-dashboard-kpi-comparison-value").textContent, "10");
   } finally {
     uninstallDom();
   }

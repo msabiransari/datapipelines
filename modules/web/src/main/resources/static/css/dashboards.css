@@ -112,12 +112,6 @@ fieldset.dp-dashboard-parameter {
 }
 
 /* The KPI renderer: the value is the loudest thing on the card. */
-.dp-dashboard-kpi-label {
-  font-family: var(--font-sans);
-  font-size: var(--text-xs);
-  color: var(--text-muted);
-}
-
 .dp-dashboard-kpi-value {
   font-family: var(--font-sans);
   font-size: var(--text-xl);
