@@ -13,10 +13,11 @@ import java.util.UUID
  * 1. **Schema** — `config` against the renderer's schema (for Plotly the reduced 4.1.1 plot-schema:
  *    unknown attributes, wrong types and unsupported traces refused with the path);
  * 2. **Binding** — every path resolves in `config`, every bound column is in the output contract, and the
- *    column's type is one the path accepts ([BindingTypes], the small per-path table);
+ *    column's type is one the renderer accepts at that path ([BindingTypes], the renderer-specific table);
  * 3. **Fixture run** — through the pinned transformer ([TestFixtureEvaluator], the real bounded evaluator
  *    over `TemplateEvaluateService`), or, with no transform, the single input's fixture values through the
- *    same wire-form rules; every bound column must be present in every row's projection;
+ *    same wire-form rules; every bound column must be present in every row's projection, and a present
+ *    null passes only when the output column is nullable;
  * 4. **Assertion feasibility** — `trace_count` against `config.data.length`, `no_data` against zero
  *    produced rows, `text_visible`/`value_visible` strings present in the configuration or the bound values;
  * 5. **Rendered state** — [RenderedStateCheck]; the default records `not_available` and never claims a
