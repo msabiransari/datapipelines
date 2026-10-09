@@ -925,6 +925,7 @@ UI assertions lose their race. One gate step stands outside these knobs entirely
 | `dp.test.forks` | 3 | test classes of an ordinary module split across N JVMs | N × `dp.test.heap` per test task that is running |
 | `dp.test.forks.e2e` | 2 | the same for `tests/integration-tests` and `tests/browser-tests` | each fork boots its **own** containers, Spring contexts and Chromium — the expensive one |
 | `dp.test.heap` | 1g | the ordinary test JVM's `-Xmx` (integration-tests keeps 6g) | RAM, only when the JVM actually needs it |
+| `versionLifecycle.sequences` | 2000 (no property passed) | sizes `VersionLifecycleModelTest`'s random sweep; the pregate passes `-PversionLifecycle.sequences=200`, cutting that case from ~100 s to ~10 s | fewer random sequences in that pregate — only Gate A/CI run 2000 and are the bank |
 
 Both e2e suites pin their test-class order to alphabetical
 (`junit.jupiter.testclass.order.default=org.junit.jupiter.api.ClassOrderer$ClassName`, the default

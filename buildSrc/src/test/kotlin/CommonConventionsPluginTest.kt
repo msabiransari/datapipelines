@@ -25,6 +25,11 @@ import java.io.File
  *     without it. (The check→koverVerify task wiring is Kover's own and stays
  *     either way; what the flag removes is the floor rule.)
  *
+ * Case (d) is not about the coverage guard: it proves the plugin's -P →
+ * test-JVM forwarding list actually forwards a named key
+ * (versionLifecycle.sequences) — the knob VersionLifecycleModelTest documents,
+ * unreachable from the CLI until it traveled here (#483).
+ *
  * The probe projects reuse the repo's real version catalog — the plugin
  * resolves catalog aliases at apply time. Tests (a) and (b) stop at
  * configuration ("help"), but test (c) writes real sources and runs
@@ -168,5 +173,41 @@ class CommonConventionsPluginTest {
 
         val koverOff = runner(":modules:web:koverVerify", "-Pkover.off").build()
         assertTrue("BUILD SUCCESSFUL" in koverOff.output, koverOff.output)
+    }
+
+    @Test
+    fun `a gradle property on the forwarding list reaches the probe test JVM and an unpassed one does not`() {
+        writeSettings(":modules:web")
+        writeBuild("modules/web/build.gradle.kts")
+        // One test whose stdout records the property as the test JVM sees it.
+        // The XML's system-out is that stdout's durable record — read from
+        // there, not the console, whose lines depend on testLogging config.
+        probeDir.resolve("modules/web/src/test/kotlin/ProbeTest.kt").apply { parentFile.mkdirs() }.writeText(
+            """
+            import org.junit.jupiter.api.Test
+            class ProbeTest {
+                @Test fun printsForwardedProperty() {
+                    println("versionLifecycle.sequences=" + System.getProperty("versionLifecycle.sequences"))
+                }
+            }
+            """.trimIndent(),
+        )
+
+        fun forwardedValue(vararg extra: String): String {
+            runner(":modules:web:test", "--rerun-tasks", *extra).build()
+            val results = probeDir.resolve("modules/web/build/test-results/test")
+            val xml = results.listFiles()!!.single { it.name.startsWith("TEST-") && it.extension == "xml" }
+            val line = xml.readLines().single { "versionLifecycle.sequences=" in it }
+            return line.substringAfter("versionLifecycle.sequences=").substringBefore('<').trim()
+        }
+
+        assertTrue(
+            forwardedValue("-PversionLifecycle.sequences=7") == "7",
+            "-PversionLifecycle.sequences=7 did not reach the probe test JVM",
+        )
+        assertTrue(
+            forwardedValue() == "null",
+            "without the property the test JVM must see null — the documented default applies",
+        )
     }
 }
