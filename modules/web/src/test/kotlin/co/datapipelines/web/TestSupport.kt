@@ -169,7 +169,7 @@ object TestRedis {
     }
 
     /**
-     * The client configuration every factory here builds with: the two production bounds above.
+     * The client configuration every web test factory builds with: the two production bounds above.
      * The two-argument `LettuceConnectionFactory` constructor is the ONLY way to set them — the
      * one-argument form used before #482 silently fell back to Lettuce's 60 s command default.
      * The command timeout rides the builder directly; the connect timeout has no builder method,
@@ -177,7 +177,7 @@ object TestRedis {
      * `spring.data.redis.connect-timeout` binding itself uses (`LettuceConnectionConfiguration`,
      * Boot 3.5.16).
      */
-    private fun clientConfiguration(): LettuceClientConfiguration =
+    internal fun clientConfiguration(): LettuceClientConfiguration =
         LettuceClientConfiguration
             .builder()
             .commandTimeout(COMMAND_TIMEOUT)

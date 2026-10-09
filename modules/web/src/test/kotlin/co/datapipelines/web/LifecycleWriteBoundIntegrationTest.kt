@@ -292,6 +292,7 @@ class LifecycleWriteBoundIntegrationTest {
         private val factory =
             LettuceConnectionFactory(
                 RedisStandaloneConfiguration(container.host, container.getMappedPort(REDIS_PORT)),
+                TestRedis.clientConfiguration(),
             ).apply { afterPropertiesSet() }
         val template = StringRedisTemplate(factory).apply { afterPropertiesSet() }
 

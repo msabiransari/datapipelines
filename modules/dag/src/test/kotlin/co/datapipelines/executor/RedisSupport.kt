@@ -1,11 +1,15 @@
 package co.datapipelines.executor
 
+import io.lettuce.core.ClientOptions
+import io.lettuce.core.SocketOptions
 import org.springframework.data.redis.connection.RedisStandaloneConfiguration
+import org.springframework.data.redis.connection.lettuce.LettuceClientConfiguration
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory
 import org.springframework.data.redis.core.StringRedisTemplate
 import org.testcontainers.containers.GenericContainer
 import org.testcontainers.utility.DockerImageName
 import java.io.File
+import java.time.Duration
 
 /**
  * One Redis container shared by every `*IntegrationTest` in this module.
@@ -19,6 +23,11 @@ import java.io.File
  * documented way, which is why `build.gradle.kts` declares `libs.testcontainers`.
  */
 object RedisSupport {
+    // dag cannot import web test sources. TestRedisTimeoutParityTest reads these twins and
+    // pins them to application.yml, so this module exercises the shipped posture too (#486).
+    private val COMMAND_TIMEOUT: Duration = Duration.ofSeconds(2)
+    private val CONNECT_TIMEOUT: Duration = Duration.ofSeconds(2)
+
     private val container: GenericContainer<*> by lazy {
         GenericContainer(DockerImageName.parse(IMAGE))
             .withExposedPorts(PORT)
@@ -28,7 +37,7 @@ object RedisSupport {
     /** A live [StringRedisTemplate] against the shared container. */
     fun template(): StringRedisTemplate {
         val config = RedisStandaloneConfiguration(container.host, container.getMappedPort(PORT))
-        val factory = LettuceConnectionFactory(config).apply { afterPropertiesSet() }
+        val factory = LettuceConnectionFactory(config, clientConfiguration()).apply { afterPropertiesSet() }
         return StringRedisTemplate(factory).apply { afterPropertiesSet() }
     }
 
@@ -36,6 +45,21 @@ object RedisSupport {
     fun flush(template: StringRedisTemplate) {
         template.connectionFactory?.getConnection()?.use { it.serverCommands().flushAll() }
     }
+
+    private fun clientConfiguration(): LettuceClientConfiguration =
+        LettuceClientConfiguration
+            .builder()
+            .commandTimeout(COMMAND_TIMEOUT)
+            .clientOptions(
+                ClientOptions
+                    .builder()
+                    .socketOptions(
+                        SocketOptions
+                            .builder()
+                            .connectTimeout(CONNECT_TIMEOUT)
+                            .build(),
+                    ).build(),
+            ).build()
 
     private const val IMAGE = "redis:7-alpine"
     private const val PORT = 6379
