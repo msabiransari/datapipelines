@@ -113,7 +113,9 @@
              dashboards.md §6.1). -->
         <div class="dp-ws-pane" id="dp-pane-board" role="tabpanel" aria-labelledby="dp-tab-board"
              data-dp-pane="board" th:attr="hidden=${activeTab != 'board'} ? 'hidden' : null">
-          <div class="dp-board-page">
+          <!-- data-dp-filters: "none" until the runtime renders a visible parameter (the glue
+               flips it), so a board without parameters reserves no panel and shows no trigger. -->
+          <div class="dp-board-page" data-dp-filters="none">
             <div class="dp-board-toolbar">
               <button type="button" id="dp-board-filters-trigger" class="ds-button ds-button-secondary ds-button-sm"
                       aria-expanded="false" aria-controls="dp-board-filters">

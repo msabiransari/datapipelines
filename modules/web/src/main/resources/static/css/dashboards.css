@@ -269,6 +269,17 @@ fieldset.dp-dashboard-parameter {
   }
 }
 
+/* No visible parameter (dashboards-page.js keeps `data-dp-filters`): no panel, no drawer
+   trigger, and the board takes the whole row — at every width. */
+.dp-board-page[data-dp-filters="none"] .dp-board-layout {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.dp-board-page[data-dp-filters="none"] .dp-board-filters,
+.dp-board-page[data-dp-filters="none"] .dp-board-toolbar {
+  display: none;
+}
+
 /* The events pane: a quiet list beside the board — status as TEXT first, the shared badge
    a word, never a colour alone. */
 .dp-refreshes-title {

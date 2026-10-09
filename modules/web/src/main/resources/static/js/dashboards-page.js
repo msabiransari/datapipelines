@@ -179,6 +179,48 @@
     }
   }
 
+  // No visible parameter (none declared, or every one hidden by the server's state) means no
+  // panel and no Filters trigger: the page carries `data-dp-filters="none"` (the server renders
+  // it so), the CSS reserves no column, and the board takes the width. The glue re-reads the
+  // pane after every render the runtime makes (rows hide through their own display), and a
+  // change re-fits the mounted charts once laid out — the board's width moved, not the window's.
+  var boardPage = scope.querySelector(".dp-board-page");
+  function syncFiltersPresence() {
+    if (!boardPage || !filtersPanel) return;
+    var rows = filtersPanel.querySelectorAll(".dp-dashboard-parameter");
+    var visible = false;
+    for (var r = 0; r < rows.length && !visible; r++) {
+      visible = !rows[r].hidden && rows[r].style.display !== "none";
+    }
+    var next = visible ? "some" : "none";
+    if (boardPage.getAttribute("data-dp-filters") === next) return;
+    boardPage.setAttribute("data-dp-filters", next);
+    if (!visible) drawerSet(false, false);
+    var refit = function () {
+      if (!pageState.instance || typeof pageState.instance.resize !== "function") return;
+      try {
+        pageState.instance.resize();
+      } catch (e) {
+        /* a renderer's failed re-fit leaves the others laid out */
+      }
+    };
+    if (typeof window.requestAnimationFrame === "function") window.requestAnimationFrame(refit);
+    else setTimeout(refit, 0);
+  }
+  if (boardPage && filtersPanel && typeof window.MutationObserver === "function") {
+    var filtersObserver = new window.MutationObserver(syncFiltersPresence);
+    filtersObserver.observe(filtersPanel, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["style", "hidden"],
+    });
+    cleanups.push(function () {
+      filtersObserver.disconnect();
+    });
+  }
+  syncFiltersPresence();
+
   /* ---- #473 — the activity dock ------------------------------------------------------- */
 
   // The dock's wiring: the log (events-dock.js) holds the events; `render` rebuilds the two
