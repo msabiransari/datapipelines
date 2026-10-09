@@ -5,9 +5,7 @@ import jakarta.annotation.PostConstruct
 import org.slf4j.LoggerFactory
 import org.springframework.boot.context.properties.bind.Bindable
 import org.springframework.boot.context.properties.bind.Binder
-import org.springframework.boot.convert.DurationStyle
 import org.springframework.core.env.Environment
-import java.time.Duration
 import java.util.Base64
 
 /**
@@ -65,7 +63,7 @@ class ConfigValidator(
          * `checkRequestLimits` (§3.31). 32 since #10 L1a added
          * `VisualizationRules.checkVisualizationBounds` (§3.33). 33 since #10 L2 added
          * `DashboardRuntimeRules.checkDashboardRuntimeBounds` (§3.34). 34 since #488 added
-         * `checkRedisTimeoutBounds` (§3.1).
+         * `RedisRules.checkRedisTimeoutBounds` (§3.1).
          */
         internal const val CHECK_COUNT = 34
 
@@ -105,9 +103,6 @@ class ConfigValidator(
 
         private const val BYTES_PER_MB = 1024L * 1024L
 
-        /** §3.1 (#488) — the Redis client bounds' ceiling: Lettuce's own command default, never more. */
-        private val REDIS_TIMEOUT_MAX: Duration = Duration.ofSeconds(60)
-
         private val LOOPBACK_HOSTS = setOf("localhost", "127.0.0.1", "::1", "[::1]", "0:0:0:0:0:0:0:1")
 
         /** The §7 rules, against a snapshot. Pure — every branch is unit-tested without Spring. */
@@ -139,7 +134,8 @@ class ConfigValidator(
             checkStagingBudgetPressure(snapshot, warnings)
             checkExecutorQueryTimeoutByDialect(snapshot, violations)
             checkRedisAuthWarning(snapshot, warnings)
-            checkRedisTimeoutBounds(snapshot, violations)
+            // §3.1 (#488) — the Redis client bounds, their own file like the request limits.
+            RedisRules.checkRedisTimeoutBounds(snapshot, violations)
             checkOrgSettings(snapshot, violations)
             TransformRules.checkTransformBounds(snapshot, violations)
             // §3.30 (#194) — the parameter engine's limits, in their own file like the transform bounds.
@@ -802,38 +798,6 @@ class ConfigValidator(
                     "event=config.redis_no_password redis_host=$redisHost " +
                     "message=\"datapipelines.redis.password is empty and the host is not loopback; " +
                     "production Redis holds materialized caller results (deployment.md §9)\""
-            }
-        }
-
-        /**
-         * §7 / §3.1 (#488) — the two Redis client bounds must parse as a Duration in
-         * `(0, 60 s]`. Nothing binds the operator keys; Lettuce reads the §3.14 bridge
-         * (`spring.data.redis.timeout` / `.connect-timeout`), which carries the SAME
-         * placeholders — `TestRedisTimeoutParityTest` pins the two blocks to each other — so
-         * judging the operator key judges what Lettuce gets.
-         *
-         * Zero is the silent case: Lettuce 6.6 waits without a bound when the command timeout is
-         * `<= 0` (`Futures.awaitOrCancel`, `CommandExpiryWriter`), restoring the outage stall #482
-         * removed — `RedisZeroCommandTimeoutIntegrationTest` shows it. A blank value binds to null,
-         * which Boot does not apply, leaving Lettuce's own defaults (60 s per command, 10 s to
-         * connect). The ceiling is that 60 s: the default an operator may deliberately restore,
-         * never more. Unset = the yml default. Parsed untrimmed with Boot's own `DurationStyle`, so
-         * this accepts exactly what the binder does.
-         */
-        private fun checkRedisTimeoutBounds(
-            snapshot: ConfigSnapshot,
-            violations: MutableList<String>,
-        ) {
-            listOf(
-                "datapipelines.redis.command-timeout" to snapshot.redisCommandTimeout,
-                "datapipelines.redis.connect-timeout" to snapshot.redisConnectTimeout,
-            ).forEach { (key, raw) ->
-                if (raw == null) return@forEach
-                val parsed = runCatching { DurationStyle.detectAndParse(raw) }.getOrNull()
-                if (parsed == null || parsed <= Duration.ZERO || parsed > REDIS_TIMEOUT_MAX) {
-                    violations +=
-                        "$key is '$raw'; §3.1 requires a duration above 0 and at most 60s."
-                }
             }
         }
 

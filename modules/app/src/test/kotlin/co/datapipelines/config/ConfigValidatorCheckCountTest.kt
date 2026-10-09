@@ -75,6 +75,8 @@ class ConfigValidatorCheckCountTest {
                 "modules/app/src/main/kotlin/co/datapipelines/config/VisualizationRules.kt",
                 // #10 L2 — the §3.34 dashboard runtime's bounds and relations, likewise.
                 "modules/app/src/main/kotlin/co/datapipelines/config/DashboardRuntimeRules.kt",
+                // #488 — the §3.1 Redis client bounds, split out for the same size reason.
+                "modules/app/src/main/kotlin/co/datapipelines/config/RedisRules.kt",
             )
     }
 }

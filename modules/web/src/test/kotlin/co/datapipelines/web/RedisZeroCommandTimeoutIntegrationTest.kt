@@ -18,7 +18,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
 /**
- * Why `ConfigValidator.checkRedisTimeoutBounds` refuses `datapipelines.redis.command-timeout: 0s`
+ * Why `RedisRules.checkRedisTimeoutBounds` refuses `datapipelines.redis.command-timeout: 0s`
  * (#488), shown rather than cited. Lettuce 6.6 uses the one configured timeout twice:
  *
  *  - as the COMMAND bound, where zero means NO bound (`Futures.awaitOrCancel` waits only when
