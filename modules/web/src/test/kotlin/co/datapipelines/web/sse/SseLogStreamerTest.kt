@@ -239,6 +239,25 @@ class SseLogStreamerTest {
         emitter.frames().last() shouldContain "event_log_unavailable"
     }
 
+    /**
+     * #487 — the idempotent attach's question: only a KNOWN-absent log is "no log". A fault answers
+     * true, so the attach follows (and the follow rides the fault out or ends with the 503) instead
+     * of answering a terminal original with `410 event_log_expired` for a log that may be there.
+     */
+    @Test
+    fun `hasLog is false only for an absent log, and true on a read fault`() {
+        val log = mockk<SseEventLog>()
+        val emitter = CapturingSseEmitter()
+        val streamer = streamer(log, emitter)
+
+        every { log.replay(executionId) } returns ReplayRead.Absent
+        streamer.hasLog(executionId) shouldBe false
+        every { log.replay(executionId) } returns unavailable()
+        streamer.hasLog(executionId) shouldBe true
+        every { log.replay(executionId) } returns ReplayRead.Log(listOf(event(1, "execution_started")))
+        streamer.hasLog(executionId) shouldBe true
+    }
+
     /** The shape a Redis command timeout arrives in through Spring Data Redis (Lettuce's, translated). */
     private fun unavailable() = ReplayRead.Unavailable(QueryTimeoutException("Redis command timed out"))
 
