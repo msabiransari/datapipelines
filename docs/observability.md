@@ -1,9 +1,9 @@
 # Observability Specification
 
-**Status:** v1.39 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
+**Status:** v1.40 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
-**Last updated:** 2026-10-06
+**Last updated:** 2026-10-08
 
 ---
 
@@ -102,11 +102,11 @@ The switch is `datapipelines.observability.logging.format` ([configuration.md §
 | `mcp-server` | tool calls (tool name + caller), transport errors |
 | `web` | request log (method, path, status, duration), CORS preflight, SSE connections opened/closed |
 
-Each sub-section below catalogues one namespace's `event=` names. For the namespaces whose tables are already complete — `parameter`, `lake`, `mail`, `persistence`, `scheduler` — a build-time guard (`ObservabilityEventCatalogParityTest`, #439) fails the build when an `event=<namespace>.<name>` literal under `modules/<module>/src/main/kotlin` and the event column of these tables disagree, in either direction; the catalogued namespaces still drifting from the code are tracked in #443.
+The tables below catalogue twelve namespaces: `audit`, `dashboard`, `datasource`, `endpoint`, `execution`, `pipeline`, `shutdown`, `parameter`, `lake`, `mail`, `persistence` and `scheduler`. All twelve currently catalogued namespaces are enforced by `ObservabilityEventCatalogParityTest` (#439, #443): the `event=<namespace>.<name>` literals under `modules/<module>/src/main/kotlin` and the backticked names in these tables' event column must agree in both directions. Per-namespace non-vacuity floors prevent an empty extraction from passing. This is a source-text check (comments count), not an AST or runtime inventory; uncatalogued code namespaces remain outside it. Computed event identities in files logging an enforced namespace are refused. The two exact retained `audit_log write failed` formats in `AuditLogger.kt` (§3.4G) carry an audit-row identity in `event={}` rather than a structured-log identity; each exception is pinned to that file and required exactly once. `audit_event={}` is a separate field.
 
 #### 3.4A The pool-retirement events (094)
 
-A datasource that is edited or deleted has its pool RETIRED, not closed on the spot: it leaves the live map immediately, stops handing out connections, and closes once the statements already running on it finish ([Datasources §5.2](datasources.md#52-pool-lifecycle)). Four events name that lifecycle, and the third is the only one that is not routine.
+A datasource that is edited or deleted has its pool RETIRED, not closed on the spot: it leaves the live map immediately, stops handing out connections, and closes once the statements already running on it finish ([Datasources §5.2](datasources.md#52-pool-lifecycle)). Four pool events name that lifecycle; `pool_hard_closed` is its non-routine outcome. This section also catalogues bootstrap and invalidation failures under `datasource.*`.
 
 | Level | `event=` | When | Fields |
 |---|---|---|---|
@@ -114,8 +114,21 @@ A datasource that is edited or deleted has its pool RETIRED, not closed on the s
 | INFO | `datasource.pool_reconciled` | The (re)subscription comparison found a pool built from a row that has since changed or gone, and retired it | `datasource`, `reason` |
 | **WARN** | **`datasource.pool_hard_closed`** | **The retirement ceiling fired while connections were still out — the pool was closed anyway and those statements lost their connection** | `datasource`, `active_connections`, `ceiling_seconds` |
 | INFO | `datasource.pool_reconcile_on_subscribe` | The invalidation channel was (re)subscribed and the reconcile ran | `channel`, `retired` |
+| WARN | `datasource.pool_invalidation_publish_failed` | A committed datasource change could not be published to Redis; peers may keep stale pools. One line per failed publish, with no retry queue | `datasource`, `message` (exception message), `reason` (static explanation) |
+| WARN | `datasource.pool_invalidation_malformed` | One pub/sub message could not be parsed and was dropped; the subscriber remains alive. One line per malformed message | `reason=dropped`, `message` (first 200 characters of the parser exception's message) |
+| WARN | `datasource.pool_reconcile_failed` | The live-pool comparison at boot/reconnect subscription threw; retry is at the next (re)subscription, not a periodic tick | `message` (exception message), `reason` (static explanation) |
+| INFO | `datasource.bootstrap_start` | Before applying each configured bootstrap datasource file, after resolving the bootstrap actor; no configured files means no line | `file`, `actor_user_id`, `actor_provider` |
+| INFO | `datasource.bootstrap_registered` | An absent datasource was validated and saved; one line per newly registered entry during boot | `name`, `dialect`, `readonly`, `scope=global` |
+| INFO | `datasource.bootstrap_skipped` | One bootstrap entry already exists (soft-deleted rows count), or another instance won the insert race; its row is kept. Credential reconciliation and any eligible lake seed still follow the already-present case | `name`, `reason` (`already_present`/`concurrent_registration`), `message` (static explanation) |
+| WARN | `datasource.bootstrap_credential_resynced` | For one existing entry, the stored credential failed authentication and the file credential worked; only the credential was replaced. One line per resync, not for unchanged working credentials | `name`, `env_key` (environment-variable name or `<literal>`, never the credential), `message` (static explanation) |
+| ERROR | `datasource.bootstrap_credential_broken` | Both stored and file credentials failed authentication for one entry; the row stays unchanged and boot continues. Fix the named environment variable/database role or edit the datasource | `name`, `env_key` (variable name or `<literal>`), `message` (static explanation) |
+| ERROR | `datasource.bootstrap_credential_unreadable` | The stored credential could not be decrypted; it is not replaced, the row stays unchanged and boot continues. Check the deployment encryption key | `name`, `message` (static explanation; no key value) |
+| INFO | `datasource.bootstrap_lake_seed_skipped` | A bootstrap entry has a lake import but its datasource is soft-deleted; one line per skipped seed during boot | `name`, `reason=soft_deleted`, `message` (static explanation) |
+| INFO | `datasource.bootstrap_lake_imported` | The lake table import returned, for one eligible bootstrap entry; repeated boots can find all tables already registered | `name`, `registered`, `already_registered` (counts) |
+| INFO | `datasource.bootstrap_lake_seeded` | An eligible entry's lake seeder returned, even if the idempotent import added nothing; one line per completed seed during boot | `name` |
+| INFO | `datasource.bootstrap_complete` | The registrar finished one file without a propagated failure; counts describe that invocation, not the deployment total. Broken credentials can be counted while boot continues | `file`, `registered`, `skipped`, `resynced`, `broken`, `lake_seeded` (counts) |
 
-**The WARN is the one to alert on.** Every other line is the mechanism working. `pool_hard_closed` means a statement outlived `datapipelines.datasources.retire-ceiling-seconds` ([Configuration §3.26](configuration.md#326-datasource-pools)) — either a genuinely hung query, or a ceiling set below what this deployment's statements really take. It carries the number of connections it took down, which the matching `datapipelines.datasource.pool.hard_closed` counter deliberately does not (an unbounded tag value, §4.3).
+**The pool-retirement WARN `pool_hard_closed` is the one to alert on for lost connections.** Bootstrap credential ERRORs need operator repair; the resync WARN reports a credential replacement. The invalidation failure lines retain exception-message text (the malformed-message line caps it at 200 characters); they do not follow §3.4G's class/SQLSTATE-only shape, and their remaining review is tracked in #329. `pool_hard_closed` means a statement outlived `datapipelines.datasources.retire-ceiling-seconds` ([Configuration §3.26](configuration.md#326-datasource-pools)) — either a genuinely hung query, or a ceiling set below what this deployment's statements really take. It carries the number of connections it took down, which the matching `datapipelines.datasource.pool.hard_closed` counter deliberately does not (an unbounded tag value, §4.3).
 
 #### 3.4B The mail events (137)
 
@@ -158,6 +171,8 @@ A promoter sees only released, not-yet-promoted pipelines and templates ([Auth �
 | Level | `event=` | When | Fields |
 |---|---|---|---|
 | WARN | `pipeline.promotion.lens_unavailable` | The lens's inventory probe for a workspace failed — target unreachable, malformed, refusing, or no target configured — and the failure is now cached for one TTL window, during which every lensed read in that workspace answers nothing. Logged on the PROBE, never on the cached answers, so it is once per window by construction; `reason` is the transport class or configuration reason (`ConnectException`, `malformed_response`, `no_target_configured`), never the key | `target` (base URL), `reason`, `workspace`, `code` (the §13 code the promotion page would have shown) |
+| INFO | `pipeline.promotion.pushing` | After building and validating a promotion batch, immediately before pushing it; one line per push attempt, not evidence the target accepted it | `target` (base URL), `workspace`, `roots`, `templates`, `sets`, `pipelines`, `endpoints`, `visualizations`, `dashboards` (counts) |
+| INFO | `pipeline.promotion.target_refused` | The target returned a non-success HTTP response with a JSON body; one line per refusal read, including inventory reads. Its code is re-raised, or a missing code becomes a malformed-response error | `target` (base URL), `status`, `code` (`(none)` when absent); no response message/body |
 
 Sustained repeats every window mean the sender's promotion target is down or misconfigured: promoters see empty lists everywhere until it is back, and the promotion page shows the same code. Not an audit row.
 
@@ -184,14 +199,23 @@ A `scheduler.schedule_blocked` needs a person. A steady `scheduler.run_not_start
 
 #### 3.4F The legacy endpoint events (#274, #286)
 
-A `published_endpoints` row whose stored path fails today's grammar is RETIRED, never fatal ([Metadata DB §4.13](metadata-db.md#413-published_endpoints)): never served, listed flagged, unpublishing it is the fix. Two lines say so to an operator; both carry a COUNT, never a path.
+A `published_endpoints` row whose stored path fails today's grammar is RETIRED, never fatal ([Metadata DB §4.13](metadata-db.md#413-published_endpoints)): never served, listed flagged, unpublishing it is the fix. The first two lines say so to an operator; both carry a COUNT, never a path. The remaining rows describe serving, registry invalidation and key-budget failures.
 
 | Level | `event=` | When | Fields |
 |---|---|---|---|
 | WARN | `endpoint.legacy_rows` | Once per JVM, on the first repository query that meets a legacy row. `at_least` is THAT query's count — a floor, not the deployment's total (after V41 the registry warm-up reads enabled rows only, so the first sighting is usually one workspace's listing) | `at_least` |
 | WARN | `endpoint.promotion_legacy_omitted` | A promotion batch was built and legacy rows over its promoted pipelines were left out — the target's grammar would refuse them | `count` |
+| WARN | `endpoint.key_budget_exhausted` | A metered API-caller key exceeded its instance-local fixed-window budget; one line per refused request, answered 429 with Retry-After, before serving | `key_id`, `path` (request application path), `limit` (`requests/windowSeconds` followed by `s`) |
+| WARN | `endpoint.key_budget_table_saturated` | A new key cannot enter the bounded tracking table even after expired windows were removed; one line per unmetered admission, with the saturation counter incremented | `size`, `message` (static explanation) |
+| WARN | `endpoint.pipeline_not_released` | A matched live endpoint has no servable pipeline version; one line per refusal, answered 503. Check its pipeline release | `path` (stored pattern), `pipeline_id`, `message` (static explanation) |
+| ERROR | `endpoint.registry_pattern_unparseable` | A registry reload built fewer matchable endpoints than enabled rows: unparseable or reserved-category rows are omitted, surviving endpoints still serve. One line per affected reload | `loaded`, `matchable`, `reason` (static explanation); no path |
+| WARN | `endpoint.registry_invalidation_publish_failed` | A committed endpoint change could not be published to Redis; one line per failed publish. Peers may serve their previous snapshot until their next reload | `message` (exception message), `reason` (static explanation) |
+| WARN | `endpoint.registry_invalidation_malformed` | A pub/sub message could not be parsed and was dropped; one line per malformed message, subscriber stays alive | `reason=dropped`, `message` (first 200 characters of the parser exception's message) |
+| INFO | `endpoint.registry_invalidated_remotely` | A parsed message from another instance dropped this instance's snapshot; one line per peer message, own-origin messages are ignored. The next request reloads | `origin`, `message` (static explanation) |
 
-Neither is an alert: the API console lists every legacy row with its reason. A steady `promotion_legacy_omitted` means an endpoint that will not reach the target until someone republishes it at a legal path.
+Neither legacy-row line is an alert: the API console lists every legacy row with its reason. A steady `promotion_legacy_omitted` means an endpoint that will not reach the target until someone republishes it at a legal path.
+
+The invalidation WARNs retain exception-message text; only the malformed-message diagnostic is capped. They are not §3.4G's class/SQLSTATE-only shape (#329). A sustained key-budget saturation rate means new keys are being admitted unmetered.
 
 #### 3.4G The persistence events (#266)
 
@@ -235,10 +259,11 @@ The executor's two scheduled jobs on the `dp-scheduled` thread (§3.4H) — the 
 | WARN | `execution.idempotency_release_failed` | One release attempt for a never-started REST or MCP execution failed; the original refusal still reaches the client and the key expires by TTL | `user`, `execution`, `error` (class only; no key or exception message) |
 | WARN | `execution.sweep_failed` | The stale sweep's UPDATE threw; the tick is skipped and the next one retries | `cutoff`, `heartbeat_cutoff`, `error`, `sql_state` |
 | WARN | `execution.event_retention_failed` | The retention tick's DELETE threw; the next tick retries | `cutoff`, `error`, `sql_state` |
+| INFO | `execution.swept` | A stale-execution sweep (15 s fixed delay on `dp-scheduled`) marked at least one stale RUNNING row ABORTED with `pipeline.execution.instance_lost`; silent for zero rows. A stale heartbeat, or an old start with no heartbeat, triggers the UPDATE | `count`, `cutoff`, `heartbeat_cutoff`, `message` (static explanation) |
 
 #### 3.4J The dashboard refresh events (#10 L2)
 
-The dashboard runtime ([Dashboards §5](dashboards.md#5-the-runtime)) logs at these points. Every failure line names its cause by class (`error=`) and, for a store, by SQLState — never by message: an exception's text can carry a row, a selection or a driver's echo of a refused statement (the 321 rule, §3.4G). NO line carries a selection, a row, a binding value or an execution's message.
+The dashboard runtime ([Dashboards §5](dashboards.md#5-the-runtime)) logs at these points. The WARN/ERROR failure rows name their cause by class (`error=`) and, for a store, by SQLState — never by message (the 321 rule, §3.4G). The two DEBUG stream-write diagnostics attach a throwable; its message and stack remain diagnostic text, so this catalogue does not claim every dashboard log message is sanitized. No row below deliberately logs a selection, binding value, result row or execution message as a field.
 
 | Level | `event=` | When | Fields |
 |---|---|---|---|
@@ -256,6 +281,13 @@ The dashboard runtime ([Dashboards §5](dashboards.md#5-the-runtime)) logs at th
 | WARN | `dashboard.refresh_sweep_failed` | The sweep's UPDATE threw; the next tick retries | `error`, `sql_state` |
 | INFO | `dashboard.refreshes_purged` | The retention step deleted finished refreshes (nothing is logged for an empty tick) | `count`, `retention_days` |
 | WARN | `dashboard.refresh_retention_failed` | The retention DELETE threw; the next tick retries | `error`, `sql_state` |
+| WARN | `dashboard.refresh_start_marker_unwritable` | Redis failed while registering one in-flight start marker or its bounded per-principal index; the start proceeds without a reliable marker. A pre-row abort can therefore answer 404 | `refresh_id`, `error` (exception class) |
+| WARN | `dashboard.refresh_start_marker_unreadable` | One Redis marker lookup failed; it returns no marker and grants no abort authority on the fault. One line per failed lookup | `refresh_id`, `error` (exception class) |
+| WARN | `dashboard.refresh_start_marker_not_cleared` | One Redis cleanup of the start marker/index failed; their TTLs expire the residue. One line per failed clear | `refresh_id`, `error` (exception class) |
+| WARN | `dashboard.refresh_stream_authority_failed` | The subscriber-authority check threw; access is treated as revoked with no execution link (fail-closed). One line per failed check | `error` (exception class) |
+| WARN | `dashboard.refresh_tick_failed` | The registry heartbeat/disconnect-grace tick threw; the timer survives and the next tick retries at `datapipelines.sse.heartbeat-interval-seconds`. One line per failed tick | `error` (exception class) |
+| DEBUG | `dashboard.refresh_stream_gone` | An SSE frame or heartbeat write threw IOException, or a heartbeat found the emitter already completed; marks the stream disconnected. One line per failed write; throwable attached | `refresh_id`, `while` (frame event name or `heartbeat`), `state=completed` on the already-completed heartbeat variant |
+| DEBUG | `dashboard.refresh_stream_closed` | A frame write found the emitter already completed (IllegalStateException); marks the stream disconnected. One line per failed frame write; throwable attached | `refresh_id`, `while` (frame event name) |
 
 #### 3.4K The live-write outage events (#336)
 
@@ -302,6 +334,29 @@ The parameter-set evaluation history ([REST API §21.5](rest-api.md#215-the-obse
 | WARN | `parameter.evaluation_retention_failed` | The retention DELETE threw; the next tick retries | `error`, `sql_state` |
 | WARN | `parameter.evaluation_retention_incomplete` | A retention batch came back full (a backlog): records older than the cutoff remain and the next tick takes the next batch | `count`, `message` |
 | ERROR | `parameter.selector_statement_abandoned` | The evaluate's await was cancelled (its `withTimeout` deadline, or the caller — #375's disconnect-grace abort, a shutdown) while the selector statement still ran; the statement is cancelled best-effort, its connection discarded, the worker keeps its slot until the driver returns (`parameters.selectors.abandoned` counts it). One line, no stack trace, never the SQL or a bind | `set`, `parameter`, `datasource`, `cause` (`deadline`/`caller`) |
+
+#### 3.4N The audit retention events (#310, #443)
+
+Audit retention is the last step of the hourly fixed-delay retention sweep on `dp-scheduled` (§3.4H, §7). Each tick reads one cutoff from the database clock and deletes bounded batches. These lines describe that tick's committed deletions, including a tick that subsequently fails; they are not audit-row contents. Failures carry class and SQLSTATE under §3.4G's rule. A continuing incomplete/failed pattern means retention is falling behind or the metadata store is unavailable.
+
+| Level | `event=` | When | Fields |
+|---|---|---|---|
+| INFO | `audit.retention` | Once per tick that deleted at least one row, including a tick that later failed; silent for zero deletions | `purged`, `cutoff`, `batches` |
+| WARN | `audit.retention_failed` | A metadata-DB operation threw; the tick stops, prior batches stay committed and counted, the next tick retries. Once per failed tick | `purged`, `batches`, `cutoff` (null if reading it failed), `error` (exception class), `sql_state` |
+| WARN | `audit.retention_incomplete` | The tick reached its batch ceiling or time budget after a full batch, rather than observing a short batch. Once per bounded tick; the next tick continues with a fresh cutoff, without an additional query proving the backlog size | `purged`, `cutoff`, `batches`, `reason` (`batch_ceiling`/`time_budget`), `message` (static explanation) |
+
+`audit.write` is catalogued in §3.4G; these three rows complete the four-name `audit` namespace.
+
+#### 3.4O The execution shutdown drain events (#443)
+
+These lines occur once per execution-drain stop, after scheduler admission closes and before the web server's graceful shutdown and persistence drain (§3.4G). Readiness flips before cancellation; the drain then cancels local executions through their ordinary statement/job path and waits for deregistration, retrying cancellation during the wait. The default flush bound is 20 s, with 100 ms polls. This is a lifecycle sequence, not a periodic job. The persistence and scheduled-job shutdown outcomes remain in §3.4G/H.
+
+| Level | `event=` | When | Fields |
+|---|---|---|---|
+| INFO | `shutdown.readiness_refused` | Readiness was published REFUSING_TRAFFIC before cancelling work; `/ready` now reports 503 | `message` (static explanation) |
+| INFO | `shutdown.drain_cancelled` | The first cancellation pass returned; `live` is the registry's remaining count at logging time, not the number cancelled | `live`, `reason=shutdown` |
+| INFO | `shutdown.drain_complete` | The bounded wait ended with no local executions registered; their deregistration follows terminal bookkeeping attempts, not a guarantee every store write succeeded | — |
+| WARN | `shutdown.drain_incomplete` | Executions remain registered at the flush deadline; their rows may remain RUNNING after exit and need the stale sweep. One alternative outcome to `drain_complete` | `live`, `flush_timeout_ms`, `message` (static explanation) |
 
 ### 3.5 Log destination
 
@@ -594,6 +649,7 @@ This is a construction rule, not a filter — the redacting encoder covers logs,
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-08 | v1.40 | #443 event-catalogue parity | §3.4 adds 37 rows to complete the seven remaining catalogued namespaces; all twelve are enforced with count floors. Audit retention and execution shutdown receive additive §3.4N/O tables. Computed event fields are refused except the two exact, count-pinned legacy audit-row formats; production logs and §3.4G FailureShape/SQLSTATE prose are unchanged. |
 | 2026-10-06 | v1.39 | #446 bounded driver SQLSTATE (2026-10-06T03:09:15Z) | §3.4G defines the one-to-five ASCII letter/digit shape, fixed `invalid` replacement and preserved `none` fallback. Valid states pass unchanged; rejected driver values are never logged. |
 | 2026-10-04 | v1.38 | 329a (#329), store-failure log shapes | §3.4C lake outcome-recorder field list gains `sql_state` and defines `error` as the exception class; §3.4G records the narrow reuse of its rule at four existing failure lines. Event names and failure behavior stay unchanged; the remaining inventory stays open on #329. |
 | 2026-10-03 | v1.37 | #403 failed pre-start release | **§3.4I** gains `execution.idempotency_release_failed`: one WARN per failed cleanup attempt, user/execution ids and error class only; the original refusal is preserved. |

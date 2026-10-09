@@ -182,8 +182,10 @@ back exactly as stored plus the server-assigned `id`, `version`, `status`, `body
 - `parameter_state`: `inherit | force_true | force_false` per dimension (D20, §4.4 of the record);
   `outgoing_overrides`: per source, per pipeline parameter, a literal (D23).
 - `layout.grid`: 12-column units **(confirmed 2026-09-28)**; every visualization occurrence and action control appears exactly once, a group AT MOST once (the worked example places `overview_group` nowhere — L1a's ruling, confirmed at review); groups nest by listing members; responsive rule: below
-  `layout.breakpoint_px` (default 768) every item spans the full width in grid order.
-- `timeouts.refresh_seconds` and per-occurrence `timeout_seconds`: §9.6.
+  the board host's content width is below `layout.breakpoint_px` (default 640), every item spans
+  the full width in grid order; a 0-wide host keeps the stored grid until it is laid out. Owner
+  ruling on #412, 2026-10-03: use the board width rather than the viewport; the composite observes
+  its host, and without `ResizeObserver` the stored grid holds.
 - Validation runs whole at save (`PUT`), again at release (§11.4) and at every `runtime/config`
   read against the pinned dependencies' CURRENT state (a source whose release was purged is
   `dashboard.runtime.dependency_missing` at config time, never a 500).
@@ -621,7 +623,7 @@ Every `(confirmed 2026-09-28)` marker in the body refers to a row of this table.
 | `visualization` module coverage floor | 90 until measured | §1 |
 | Screenshot cap | 4 MiB, PNG/WebP | §2.1, §6.1 |
 | Refresh-record retention | the executions' policy | §2.2 |
-| Layout grid | 12 columns, breakpoint 768 px | §3.2 |
+| Layout grid | 12 columns, board-width breakpoint 640 px by default (owner ruling on #412, 2026-10-03) | §3.2 |
 | `visualization.read` lens rule for the promoter | admitted iff pinned by an admitted released dashboard, or own | §6.1 |
 | Admission | 4 refreshes per workspace, 16 executions per refresh, 40 dashboard executions per instance, 10 s max wait | §9.4 |
 | Result caps | 4 MiB per source, 32 MiB per refresh | §9.5 |

@@ -15,7 +15,7 @@ import java.nio.file.StandardOpenOption
  * #371 — the dashboard grid has a ROW UNIT, so a Plotly figure has a height on every page that
  * mounts the first-party composite adapter; #386 — a figure in a 2-row slot keeps a PLOT AREA
  * (compact margins with `automargin`, not Plotly's ≈100/80 px defaults, which ate the whole 176 px
- * slot); #387 — below `layout.breakpoint_px` (768 when absent) every item spans the full width in
+ * slot); #412 — below `layout.breakpoint_px` (640 when absent) every item spans the full width in
  * grid order, the row unit unchanged (the implementation spec §3.2, dashboards.md §2.2).
  *
  * Every assertion is a MEASUREMENT in a real browser, never a status code or a class name: for a
@@ -27,18 +27,17 @@ import java.nio.file.StandardOpenOption
  * "full width" is a number (12), not an inline style read back. The plot area is Plotly's own
  * `_fullLayout._size.h` (the `nsewdrag` rect beside it in the record).
  *
- * The 768 px breakpoint is pinned from both sides: 767 px collapses (12 columns each, stacked
- * revenue → cells → total → slowchart, the board 4 + 4 + 2 + 2 = 12 rows tall), 768 px holds the
- * stored 6/6/3/9 grid six rows tall. A live crossing (1280 → 767 → 1280) proves the viewport
- * listener: the slots re-place AND the figure re-measures to its new slot width, both ways.
+ * The 640 px breakpoint is measured on the board: the 735 px board at 767 px viewport holds its
+ * 6/6/3/9 grid, while the 694 px board at 1280 px collapses under an explicit 700 px threshold.
+ * A live host-width crossing proves the slots re-place AND the figure re-measures to its new width.
  */
 class DashboardGridRowUnitBrowserTest : DashboardBrowserSuite() {
     @Test
-    fun `the board page holds the stored grid at and above 768 px and the 2-row figure keeps a plot area, in both themes`() {
+    fun `the board page holds the stored grid at 767, 768 and 1280 px, in both themes`() {
         startTrace()
         val root = ready("dprow")
         val board = seedBoardWithGrid(root)
-        for (width in listOf(DESKTOP_WIDTH_PX, BREAKPOINT_PX)) {
+        for (width in listOf(DESKTOP_WIDTH_PX, TABLET_WIDTH_PX, INVERTED_VIEWPORT_PX)) {
             page.setViewportSize(width, VIEWPORT_HEIGHT_PX)
             for (theme in THEMES) {
                 openBoard(board, theme)
@@ -55,7 +54,7 @@ class DashboardGridRowUnitBrowserTest : DashboardBrowserSuite() {
     }
 
     @Test
-    fun `below 768 px every board item spans the full width in grid order, the row unit kept, in both themes`() {
+    fun `below 640 board px every board item spans full width in grid order, in both themes`() {
         startTrace()
         val root = ready("dprowm")
         val board = seedBoardWithGrid(root)
@@ -75,7 +74,7 @@ class DashboardGridRowUnitBrowserTest : DashboardBrowserSuite() {
     }
 
     @Test
-    fun `a viewport crossing the breakpoint re-places the slots and resizes the figures, both ways`() {
+    fun `a board width crossing the breakpoint re-places the slots and resizes the figures, both ways`() {
         startTrace()
         val root = ready("dprowx")
         val board = seedBoardWithGrid(root)
@@ -103,7 +102,104 @@ class DashboardGridRowUnitBrowserTest : DashboardBrowserSuite() {
     }
 
     @Test
-    fun `the visualization preview page gives its figure the same height in both themes, and its one item stays full width below 768 px`() {
+    fun `a configured breakpoint collapses a 694 px board at a 1280 px viewport`() {
+        startTrace()
+        val root = ready("dprow700")
+        val board = seedBoardWithGrid(root, CONFIGURED_BREAKPOINT_PX)
+        page.setViewportSize(DESKTOP_WIDTH_PX, VIEWPORT_HEIGHT_PX)
+        openBoard(board, THEMES.first())
+        val measured = measure(page, BOARD_SCOPE, BOARD_SLOTS_ALL.keys, "configured/$DESKTOP_WIDTH_PX")
+        record("configured viewport=$DESKTOP_WIDTH_PX tree=closed boardWidth=${measured.boardWidth} columns=full")
+        (measured.boardWidth < CONFIGURED_BREAKPOINT_PX) shouldBe true
+        assertColumns(measured, BOARD_SLOTS_ALL.keys.associateWith { GRID_COLUMNS })
+        assertStackedInGridOrder(measured, BOARD_GRID_ORDER)
+        drainCspViolations().shouldBeEmpty()
+    }
+
+    @Test
+    fun `widening the navigation rail stacks a narrow board and resetting it restores the stored grid`() {
+        startTrace()
+        val root = ready("dprowtree")
+        val board = seedBoardWithGrid(root)
+        page.setViewportSize(DESKTOP_WIDTH_PX, VIEWPORT_HEIGHT_PX)
+        openBoard(board, THEMES.first())
+
+        // The reader's rail control is the board host's narrowing cause: the rail is user-resizable
+        // (#460's separator; owner ruling 2026-10-09 — the Pipelines tree no longer reflows the page,
+        // it opens inside the rail). Two shifted presses take the rail from 232 to 332 px, the board
+        // from ~694 to ~594 px — one crossing below the 640 default. Home resets the rail to 232.
+        val separator = page.locator("#rail-resize")
+        separator.focus()
+        page.keyboard().press("Shift+ArrowRight")
+        page.keyboard().press("Shift+ArrowRight")
+        page.waitForFunction(
+            "() => { var board = document.querySelector('#dp-board .dp-dashboard'); " +
+                "return !!board && board.getBoundingClientRect().width > 0 && board.getBoundingClientRect().width < 640; }",
+        )
+        page.waitForFunction(SETTLED_JS, mapOf("scope" to BOARD_SCOPE, "slots" to BOARD_SLOTS.keys.toList(), "full" to true))
+        val narrow = measure(page, BOARD_SCOPE, BOARD_SLOTS_ALL.keys, "rail/wide/$DESKTOP_WIDTH_PX")
+        record("rail=wide viewport=$DESKTOP_WIDTH_PX boardWidth=${narrow.boardWidth} columns=full")
+        (narrow.boardWidth < BREAKPOINT_PX) shouldBe true
+        assertColumns(narrow, BOARD_SLOTS_ALL.keys.associateWith { GRID_COLUMNS })
+        assertStackedInGridOrder(narrow, BOARD_GRID_ORDER)
+
+        separator.focus()
+        page.keyboard().press("Home")
+        page.waitForFunction(SETTLED_JS, mapOf("scope" to BOARD_SCOPE, "slots" to BOARD_SLOTS.keys.toList(), "full" to false))
+        val restored = measure(page, BOARD_SCOPE, BOARD_SLOTS_ALL.keys, "rail/home/$DESKTOP_WIDTH_PX")
+        record("rail=home viewport=$DESKTOP_WIDTH_PX boardWidth=${restored.boardWidth} columns=stored")
+        (restored.boardWidth >= BREAKPOINT_PX) shouldBe true
+        assertColumns(restored, BOARD_STORED_COLUMNS)
+        drainCspViolations().shouldBeEmpty()
+    }
+
+    @Test
+    fun `a 767 px viewport keeps the 735 px board grid`() {
+        startTrace()
+        val root = ready("dpro767")
+        val board = seedBoardWithGrid(root)
+        page.setViewportSize(INVERTED_VIEWPORT_PX, VIEWPORT_HEIGHT_PX)
+        openBoard(board, THEMES.first())
+        val measured = measure(page, BOARD_SCOPE, BOARD_SLOTS_ALL.keys, "inverted/$INVERTED_VIEWPORT_PX")
+        record("inverted viewport=$INVERTED_VIEWPORT_PX tree=closed boardWidth=${measured.boardWidth} columns=stored")
+        (measured.boardWidth >= BREAKPOINT_PX) shouldBe true
+        assertColumns(measured, BOARD_STORED_COLUMNS)
+        drainCspViolations().shouldBeEmpty()
+    }
+
+    @Test
+    fun `a board booted in the hidden versions pane keeps its stored grid until reveal`() {
+        startTrace()
+        val root = ready("dprowhidden")
+        val board = seedBoardWithGrid(root)
+        page.setViewportSize(DESKTOP_WIDTH_PX, VIEWPORT_HEIGHT_PX)
+        page.navigate("$baseUrl/dashboards/$board?tab=versions")
+        ensureTheme(THEMES.first())
+        page.reload()
+        page.waitForFunction("() => window.__dpPage && window.__dpPage.ready === true")
+        val hiddenColumns =
+            page.evaluate(
+                """() => Object.fromEntries(Array.from(document.querySelectorAll("#dp-board [data-dp-slot]"),
+                    slot => [slot.getAttribute("data-dp-slot"), slot.style.gridColumnEnd]))""",
+            ) as Map<*, *>
+        record("hidden viewport=$DESKTOP_WIDTH_PX boardWidth=0 columns=$hiddenColumns")
+        hiddenColumns shouldBe mapOf("revenue" to "span 6", "cells" to "span 6", "total" to "span 3", "slowchart" to "span 9")
+
+        page.locator("[data-dp-tab='board']").click()
+        page.waitForFunction(
+            """() => {
+                var board = document.querySelector('#dp-board .dp-dashboard');
+                return !!board && board.getBoundingClientRect().width > 0;
+            }""",
+        )
+        val revealed = measure(page, BOARD_SCOPE, BOARD_SLOTS_ALL.keys, "hidden/revealed/$DESKTOP_WIDTH_PX")
+        record("revealed viewport=$DESKTOP_WIDTH_PX boardWidth=${revealed.boardWidth} columns=stored")
+        assertColumns(revealed, BOARD_STORED_COLUMNS)
+        drainCspViolations().shouldBeEmpty()
+    }
+
+    @Test
+    fun `the visualization preview page gives its figure the same height in both themes, and its one item follows the 640 px board rule`() {
         startTrace()
         val root = ready("dprowp")
         val previewUrl = startPreviewSession("$root/charts/rowunit")
@@ -407,9 +503,12 @@ class DashboardGridRowUnitBrowserTest : DashboardBrowserSuite() {
         val PREVIEW_SLOTS = mapOf("preview" to 4)
         const val PREVIEW_ROWS = 4
 
-        /** The dashboards document's default breakpoint (no `breakpoint_px` in the seeded layout) and its two sides. */
-        const val BREAKPOINT_PX = 768
+        /** The default is measured on the host; 640 itself holds and 639 collapses. */
+        const val BREAKPOINT_PX = 640
         const val NARROW_WIDTH_PX = BREAKPOINT_PX - 1
+        const val TABLET_WIDTH_PX = 768
+        const val INVERTED_VIEWPORT_PX = 767
+        const val CONFIGURED_BREAKPOINT_PX = 700
         const val DESKTOP_WIDTH_PX = 1280
         const val VIEWPORT_HEIGHT_PX = 900
 
@@ -430,7 +529,7 @@ class DashboardGridRowUnitBrowserTest : DashboardBrowserSuite() {
             })"""
 
         /**
-         * After a viewport crossing: every figure's slot is (full) or is not (stored) the board's width,
+         * After a board-width crossing: every figure's slot is (full) or is not (stored) the board's width,
          * AND Plotly's svg has caught up with its slot's width — the re-measure, not just the re-place.
          */
         const val SETTLED_JS =

@@ -26,6 +26,7 @@ function fakeElement(tag) {
     textContent: "",
     innerHTML: null, // written by NOBODY under test — the rendering rule
     scope: null,
+    clientWidth: 0,
     parentNode: null,
     firstChild: null,
     value: "",
@@ -104,6 +105,10 @@ function installDom() {
   globalThis.window = {
     document: doc,
     getComputedStyle: () => ({ color: "color(srgb 0.1 0.2 0.3)" }),
+    requestAnimationFrame: (callback) => {
+      callback();
+      return 1;
+    },
   };
   return doc;
 }
@@ -433,47 +438,40 @@ test("the composite adapter builds the grid, mounts renderers by kind and render
   }
 });
 
-/**
- * A `matchMedia` stand-in: answers the composite's "below N px" query against a settable viewport
- * width, and fires `change` on the queries whose answer a resize flips (the browser's contract).
- */
-function installViewport(width) {
-  const queries = [];
-  const viewport = {
-    width,
-    queries,
-    resize(next) {
-      const before = queries.map((q) => q.matches);
-      viewport.width = next;
-      queries.forEach((q, i) => {
-        if (q.matches !== before[i]) q.listeners.slice().forEach((fn) => fn({ matches: q.matches, media: q.media }));
+/** A ResizeObserver stand-in whose deliveries carry the host's content width. */
+function installResizeObserver() {
+  const observers = [];
+  class FakeResizeObserver {
+    constructor(callback) {
+      this.callback = callback;
+      this.targets = [];
+      this.disconnectCount = 0;
+      observers.push(this);
+    }
+    observe(target) {
+      this.targets.push(target);
+    }
+    disconnect() {
+      this.targets = [];
+      this.disconnectCount += 1;
+    }
+    fire(width) {
+      this.targets.forEach((target) => {
+        target.clientWidth = width;
+        this.callback([{ target, contentRect: { width } }]);
       });
+    }
+  }
+  globalThis.window.ResizeObserver = FakeResizeObserver;
+  return {
+    observers,
+    observed() {
+      return observers.reduce((count, observer) => count + observer.targets.length, 0);
     },
-    listening() {
-      return queries.reduce((n, q) => n + q.listeners.length, 0);
+    fire(width) {
+      observers.forEach((observer) => observer.fire(width));
     },
   };
-  globalThis.window.matchMedia = (media) => {
-    const parsed = /^not all and \(min-width: (\d+)px\)$/.exec(media);
-    assert.ok(parsed, "the composite asks one numeric 'below N px' query: " + media);
-    const query = {
-      media,
-      breakpoint: Number(parsed[1]),
-      listeners: [],
-      get matches() {
-        return viewport.width < this.breakpoint;
-      },
-      addEventListener(type, fn) {
-        if (type === "change") this.listeners.push(fn);
-      },
-      removeEventListener(type, fn) {
-        if (type === "change") this.listeners = this.listeners.filter((other) => other !== fn);
-      },
-    };
-    queries.push(query);
-    return query;
-  };
-  return viewport;
 }
 
 const SEEDED_GRID = [
@@ -489,17 +487,17 @@ const placement = (container, name) => {
   return [s.gridColumnStart, s.gridColumnEnd, s.gridRowStart, s.gridRowEnd].join(" / ");
 };
 
-test("#387: below breakpoint_px every item spans the full width in grid order, its own row span kept", async () => {
+test("#412: below breakpoint_px on the host width every item spans full width in grid order", async () => {
   installDom();
   try {
-    const viewport = installViewport(767);
+    const observer = installResizeObserver();
     const runtime = require(resolveStatic("datapipelines-dashboard.js"));
     runtime._internal.resetRenderers();
     const container = fakeElement("div");
+    container.clientWidth = 639;
     const adapter = runtime.adapters(container);
-    // breakpoint_px ABSENT — the wire omits a null (NON_NULL): the 768 case.
     await adapter.mountLayout({ columns: 12, grid: SEEDED_GRID });
-    assert.equal(viewport.queries[0].breakpoint, 768, "absent breakpoint_px is 768");
+    assert.equal(observer.observers.length, 1, "one observer watches the host");
     assert.equal(container.children[0].style.gridTemplateColumns, "repeat(12, minmax(0, 1fr))", "the track list stands; the items span it");
     // Grid order is row, then column — NOT the configuration's array order (slowchart is listed first).
     assert.equal(placement(container, "revenue"), "1 / span 12 / 1 / span 4");
@@ -515,76 +513,106 @@ test("#387: below breakpoint_px every item spans the full width in grid order, i
   }
 });
 
-test("#387: at and above breakpoint_px the stored spans hold; a viewport crossing re-places and resizes, both ways", async () => {
+test("#412: host width crossings re-place and resize once per crossing, then dispose disconnects", async () => {
   installDom();
   try {
-    const viewport = installViewport(768);
+    const observer = installResizeObserver();
     const runtime = require(resolveStatic("datapipelines-dashboard.js"));
     runtime._internal.resetRenderers();
-    let resized = 0;
+    const resized = [];
     runtime.registerRenderer({
       kind: "plotly",
       version: "4",
-      create: () => ({ renderData: () => Promise.resolve("rendered"), resize: () => (resized += 1) }),
+      create: (context) => ({ renderData: () => Promise.resolve("rendered"), resize: () => resized.push(context.occurrence.name) }),
     });
     const container = fakeElement("div");
+    container.clientWidth = 640;
     const adapter = runtime.adapters(container);
     await adapter.mountLayout({ columns: 12, grid: SEEDED_GRID });
     await adapter.mountVisualization({ name: "revenue", renderer: { kind: "plotly", version: "4" }, config: {} }, { kind: "plotly", version: "4" });
+    await adapter.mountVisualization({ name: "slowchart", renderer: { kind: "plotly", version: "4" }, config: {} }, { kind: "plotly", version: "4" });
     const stored = { revenue: "1 / span 6 / 1 / span 4", cells: "7 / span 6 / 1 / span 4", total: "1 / span 3 / 5 / span 2", slowchart: "4 / span 9 / 5 / span 2" };
-    for (const [name, expected] of Object.entries(stored)) assert.equal(placement(container, name), expected, name + " at 768 px");
-    assert.equal(viewport.listening(), 1, "one viewport listener");
-    viewport.resize(767);
+    for (const [name, expected] of Object.entries(stored)) assert.equal(placement(container, name), expected, name + " at 640 host px");
+    assert.equal(observer.observed(), 1, "the composite host is observed");
+    observer.fire(639);
     assert.equal(placement(container, "slowchart"), "1 / span 12 / 11 / span 2", "below: collapsed by the listener");
-    assert.equal(resized, 1, "the crossing resized the mounted renderer");
-    viewport.resize(1280);
+    assert.deepEqual(resized, ["revenue", "slowchart"], "the crossing resized each mounted renderer once");
+    observer.fire(600);
+    assert.deepEqual(resized, ["revenue", "slowchart"], "a second observation on the same side does not resize again");
+    observer.fire(640);
     for (const [name, expected] of Object.entries(stored)) assert.equal(placement(container, name), expected, name + " restored");
-    assert.equal(resized, 2);
+    assert.deepEqual(resized, ["revenue", "slowchart", "revenue", "slowchart"]);
     const defaultSlot = container.children[0].children.find((el) => el.getAttribute("data-dp-slot") === null);
     assert.equal(defaultSlot.style.gridColumnEnd, "", "the default slot's span is cleared above the breakpoint");
     // Teardown: dispose removes the listener; a later crossing touches nothing.
+    const slowchartSlot = container.querySelectorAll("[data-dp-slot]").find((el) => el.getAttribute("data-dp-slot") === "slowchart");
+    const placementBeforeDispose = Object.assign({}, slowchartSlot.style);
     adapter.dispose();
-    assert.equal(viewport.listening(), 0, "dispose removed the viewport listener");
-    viewport.resize(500);
-    assert.equal(resized, 2, "no resize after dispose");
+    assert.equal(observer.observed(), 0, "dispose disconnected the observer");
+    observer.fire(500);
+    assert.deepEqual(slowchartSlot.style, placementBeforeDispose, "no placement after dispose");
+    assert.deepEqual(resized, ["revenue", "slowchart", "revenue", "slowchart"], "no resize after dispose");
   } finally {
     uninstallDom();
   }
 });
 
-test("#387: breakpoint_px is honoured as a clamped NUMBER — 500 collapses at 499 and not at 500", async () => {
+test("#412: breakpoint_px remains a clamped number and uses host width", async () => {
   installDom();
   try {
+    installResizeObserver();
     const runtime = require(resolveStatic("datapipelines-dashboard.js"));
     runtime._internal.resetRenderers();
     const mountAt = async (width, layout) => {
-      const viewport = installViewport(width);
       const container = fakeElement("div");
+      container.clientWidth = width;
       const adapter = runtime.adapters(container);
       await adapter.mountLayout(Object.assign({ columns: 12, grid: SEEDED_GRID }, layout));
-      const result = { breakpoint: viewport.queries[0].breakpoint, revenue: placement(container, "revenue") };
+      const result = { revenue: placement(container, "revenue") };
       adapter.dispose();
       return result;
     };
     assert.equal((await mountAt(499, { breakpoint_px: 500 })).revenue, "1 / span 12 / 1 / span 4", "499 < 500: collapsed");
     assert.equal((await mountAt(500, { breakpoint_px: 500 })).revenue, "1 / span 6 / 1 / span 4", "500: the stored grid");
-    assert.equal((await mountAt(700, { breakpoint_px: 500 })).revenue, "1 / span 6 / 1 / span 4", "the default 768 is not what decides");
-    // Only a clamped number reaches the query: out of range clamps, a non-number is the default.
-    assert.equal((await mountAt(800, { breakpoint_px: 0 })).breakpoint, 1);
-    assert.equal((await mountAt(800, { breakpoint_px: 20000 })).breakpoint, 10000);
-    assert.equal((await mountAt(800, { breakpoint_px: "500px), (min-width: 0" })).breakpoint, 768);
-    assert.equal((await mountAt(800, { breakpoint_px: null })).breakpoint, 768);
+    assert.equal((await mountAt(700, { breakpoint_px: 500 })).revenue, "1 / span 6 / 1 / span 4", "the configured threshold decides");
+    assert.equal((await mountAt(640, {})).revenue, "1 / span 6 / 1 / span 4", "the 640 default is exclusive");
+    assert.equal((await mountAt(639, {})).revenue, "1 / span 12 / 1 / span 4", "the default is 640");
+    assert.equal((await mountAt(800, { breakpoint_px: 0 })).revenue, "1 / span 6 / 1 / span 4", "zero clamps to 1");
+    assert.equal((await mountAt(800, { breakpoint_px: 20000 })).revenue, "1 / span 12 / 1 / span 4", "large numbers clamp to 10000");
+    assert.equal((await mountAt(639, { breakpoint_px: "500px), (min-width: 0" })).revenue, "1 / span 12 / 1 / span 4", "strings use the default");
+    assert.equal((await mountAt(639, { breakpoint_px: null })).revenue, "1 / span 12 / 1 / span 4", "null uses the default");
   } finally {
     uninstallDom();
   }
 });
 
-test("#387: without matchMedia (a non-browser host) the stored grid always holds", async () => {
+test("#412: a zero-width host holds the stored grid until it is revealed", async () => {
+  installDom();
+  try {
+    const observer = installResizeObserver();
+    const runtime = require(resolveStatic("datapipelines-dashboard.js"));
+    runtime._internal.resetRenderers();
+    const container = fakeElement("div");
+    const adapter = runtime.adapters(container);
+    await adapter.mountLayout({ columns: 12, grid: SEEDED_GRID });
+    assert.equal(placement(container, "slowchart"), "4 / span 9 / 5 / span 2");
+    observer.fire(0);
+    assert.equal(placement(container, "slowchart"), "4 / span 9 / 5 / span 2", "zero is not treated as narrow");
+    observer.fire(639);
+    assert.equal(placement(container, "slowchart"), "1 / span 12 / 11 / span 2", "revealing the host applies the stored breakpoint");
+    adapter.dispose();
+  } finally {
+    uninstallDom();
+  }
+});
+
+test("#412: without ResizeObserver the stored grid always holds", async () => {
   installDom();
   try {
     const runtime = require(resolveStatic("datapipelines-dashboard.js"));
     runtime._internal.resetRenderers();
     const container = fakeElement("div");
+    container.clientWidth = 300;
     const adapter = runtime.adapters(container);
     await adapter.mountLayout({ columns: 12, grid: SEEDED_GRID });
     assert.equal(placement(container, "slowchart"), "4 / span 9 / 5 / span 2");

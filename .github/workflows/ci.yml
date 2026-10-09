@@ -139,6 +139,11 @@ jobs:
         run: ./scripts/verify-image-pins.sh
       - name: render the reference Helm chart (pinned helm — lint + the five template cases)
         run: ./scripts/helm-check.sh
+      # #485: the wrapper safety self-test (verification slots, memory floor, pregate
+      # planner and evidence guards) — fixture wrappers, a recording Gradle stand-in and
+      # their own cache dir, no JVM; ~45 s on the dev box. flock ships in util-linux.
+      - name: pregate and verification-lock self-test (fixtures, no JVM)
+        run: ./scripts/pregate.sh --self-test
       - name: build, ktlint, detekt (full unit suite incl. Testcontainers — Docker required, see header)
         id: build
         # --continue: one red module must not stop the others — every module's tests and

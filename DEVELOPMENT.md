@@ -835,15 +835,27 @@ bookkeeping and guard decisions; total timing also includes work between stages.
 observed equivalent runs before claiming faster wall time. Retained task statuses describe
 fresh, cached or missing provenance; inventories from different stages are never summed.
 
-**Local resource protection (#472).** Pregate runs serial Gradle tasks with
-`--no-parallel --max-workers=1 -Pdp.test.forks=1 -Pdp.test.forks.e2e=1`.
-Gate and pregate acquire the same nonblocking `flock` under
-`${XDG_CACHE_HOME:-~/.cache}/datapipelines/verification.lock` before touching logs or starting
-Gradle. A second wrapper exits 75 and prints the holder's PID, checkout and start time.
-Use the same cache root across sessions; never remove a held lock file. The kernel releases
-the lock when its holder exits. Standalone Gradle commands and old script versions do not
-participate: update lane copies before their next verification run and coordinate direct tests.
-This limits new wrapper runs; it does not change already-running builds or host OOM policy.
+**Local resource protection (#472, #485).** Pregate runs serial Gradle tasks with
+`--no-parallel --max-workers=1 -Pdp.test.forks=1 -Pdp.test.forks.e2e=1`. Every wrapper takes a
+nonblocking `flock` under `${XDG_CACHE_HOME:-~/.cache}/datapipelines/` before touching logs or
+starting Gradle, and every refusal exits 75 naming each live holder's slot, kind, PID, checkout
+and start time. Two slot files, `verification.slot.0` and `verification.slot.1`, admit two
+pregate-class holders (a pregate, a lane's focused run, `docsExport` under the lock: every kind but
+`gate`) at once, in different checkouts; a third is refused. A gate takes both slots and the
+pre-#485 `verification.lock`, so it is refused while any holder lives and refuses every contender
+while it runs, older script copies included. A second holder for the SAME checkout is refused even
+with a slot free: one `build/` and one `.pregate-logs/` per checkout. Before taking anything a
+wrapper reads `MemAvailable` from `/proc/meminfo` and refuses below
+`DATAPIPELINES_VERIFICATION_MEM_FLOOR_MB` (default 9216 MB, 1.5 × one pregate rounded up to the GB; `0` turns the floor off, a
+non-integer falls back to the default with a warning). A pregate-class holder keeps its slot on
+fd 9 only, which is why a hand-typed run such as the focused example above needs exactly `9>&-`
+on its `./gradlew` line: an idle daemon that inherits the descriptor would hold the slot after the
+wrapper exits. Use the same cache root across sessions; never remove a slot or lock file. The
+kernel releases a slot when its holder exits. Standalone Gradle commands do not participate, and
+older script copies only through `verification.lock`: a new wrapper refuses while an old one holds
+it and a gate keeps old ones out, but an old gate or pregate does not see new pregate-class slots; update
+lane copies before their next verification run and coordinate direct tests. This limits new
+wrapper runs; it does not change already-running builds or host OOM policy.
 
 **Per-stage evidence survives the run (#441).** Stage 3 may rerun guard classes FILTERED in
 modules stage 2 already ran, and Gradle deletes a test task's result directory before it writes:
@@ -925,6 +937,7 @@ UI assertions lose their race. One gate step stands outside these knobs entirely
 | `dp.test.forks` | 3 | test classes of an ordinary module split across N JVMs | N × `dp.test.heap` per test task that is running |
 | `dp.test.forks.e2e` | 2 | the same for `tests/integration-tests` and `tests/browser-tests` | each fork boots its **own** containers, Spring contexts and Chromium — the expensive one |
 | `dp.test.heap` | 1g | the ordinary test JVM's `-Xmx` (integration-tests keeps 6g) | RAM, only when the JVM actually needs it |
+| `versionLifecycle.sequences` | 2000 (no property passed) | sizes `VersionLifecycleModelTest`'s random sweep; the pregate passes `-PversionLifecycle.sequences=200`, cutting that case from ~100 s to ~10 s | fewer random sequences in that pregate — only Gate A/CI run 2000 and are the bank |
 
 Both e2e suites pin their test-class order to alphabetical
 (`junit.jupiter.testclass.order.default=org.junit.jupiter.api.ClassOrderer$ClassName`, the default

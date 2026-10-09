@@ -1,16 +1,17 @@
 package co.datapipelines.web.sse
 
 import ch.qos.logback.classic.Logger
-import ch.qos.logback.classic.spi.ILoggingEvent
-import ch.qos.logback.core.read.ListAppender
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.web.CapturingSseEmitter
+import co.datapipelines.web.SnapshotListAppender
+import co.datapipelines.web.capturingLogEvents
 import com.fasterxml.jackson.databind.json.JsonMapper
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.mockk.every
 import io.mockk.mockk
+import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.slf4j.LoggerFactory
 import java.util.UUID
@@ -31,6 +32,12 @@ import java.util.concurrent.atomic.AtomicInteger
 class SseLogStreamerAuthorityTest {
     private val scheduler = Executors.newSingleThreadScheduledExecutor()
     private val executionId = UUID.randomUUID()
+
+    @AfterEach
+    fun stopScheduler() {
+        scheduler.shutdownNow()
+        scheduler.awaitTermination(5, TimeUnit.SECONDS) shouldBe true
+    }
 
     private val subscriber =
         AuthenticatedPrincipal(UUID.randomUUID(), "m@acme.test", "Member", AuthMethod.OIDC, workspaceName = "acme")
@@ -61,6 +68,7 @@ class SseLogStreamerAuthorityTest {
     private fun event(
         id: Int,
         name: String,
+        executionId: UUID = this.executionId,
     ) = LoggedSseEvent(id, name, mapOf("execution_id" to executionId.toString(), "n" to id))
 
     private fun streamer(
@@ -137,24 +145,30 @@ class SseLogStreamerAuthorityTest {
         // an expired token read as a revocation (observability §4.2 keeps them apart); the reason
         // now comes from the SAME verdict that refused (#271), never a second read of the clock.
         val logger = LoggerFactory.getLogger(SseLogStreamer::class.java) as Logger
-        val appender = ListAppender<ILoggingEvent>().apply { start() }
-        logger.addAppender(appender)
-        try {
+        val appender = SnapshotListAppender()
+        capturingLogEvents(logger, appender) {
             listOf(StreamVerdict.EXPIRED to "expired", StreamVerdict.REVOKED to "revoked").forEach { (verdict, tag) ->
-                appender.list.clear()
-                val stored = listOf(event(1, "execution_started"), event(2, "pipeline_completed"))
+                val position = appender.events().size
+                if (verdict == StreamVerdict.REVOKED) {
+                    appender.messages().take(position).any { it.contains("cut, close_reason=expired:") } shouldBe true
+                }
+                val caseId = UUID.randomUUID()
+                val stored = listOf(event(1, "execution_started", caseId), event(2, "pipeline_completed", caseId))
                 val log = mockk<SseEventLog>()
-                every { log.replay(executionId) } returns stored
+                every { log.replay(caseId) } returns stored
                 val emitter = CapturingSseEmitter()
 
-                streamer(log, emitter, authorityRefusingFrom(2, verdict)).replay(executionId, subscriber)
+                streamer(log, emitter, authorityRefusingFrom(2, verdict)).replay(caseId, subscriber)
 
                 emitter.completed.await(5, TimeUnit.SECONDS) shouldBe true
-                val cut = appender.list.map { it.formattedMessage }.single { it.contains("cut") }
+                val cuts = appender.messages().drop(position).filter { it.contains("execution $caseId cut,") }
+                val cut = cuts.single()
+                // The first case stays captured, but cannot satisfy the second case's assertion.
+                appender.messages().take(position).none { it.contains("execution $caseId cut,") } shouldBe true
+                emitter.eventNames() shouldBe listOf("execution_started")
+                emitter.frames().any { it.contains("revoked") } shouldBe true
                 cut shouldContain "close_reason=$tag"
             }
-        } finally {
-            logger.detachAppender(appender)
         }
     }
 }

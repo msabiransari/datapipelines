@@ -23,6 +23,13 @@
        defect). This catalog is INERT — <template> content neither parses nor restores as
        executable script — and the runtime loads it in order, Alpine LAST, exactly once per
        document. Nothing in here may carry inline script bodies (InlineScriptAuditTest). -->
+  <!-- 102/#465: the lifecycle dialogs' client half — document-level wiring that must run ONCE per
+       document. It rides the shell's page-asset catalog (page-assets.mjs), the one registry the
+       dashboard and visualization pages load it through too, so crossing between those pages and
+       this one never executes it a second time (a separate runtime registry did, #465). -->
+  <template data-chart-assets>
+    <script th:src="@{/js/lifecycle-dialog.js}"></script>
+  </template>
   <template id="pe-runtime-scripts">
     <script th:src="@{/vendor/dagre/dagre.min.js}"></script>
     <script th:src="@{/vendor/cytoscape/cytoscape.min.js}"></script>
@@ -60,10 +67,6 @@
     <script th:src="@{/js/pipeline-editor/error.js}"></script>
     <script th:src="@{/js/pipeline-editor/result.js}"></script>
     <script th:src="@{/js/pipeline-editor/a11y.js}"></script>
-    <!-- 102: the lifecycle dialogs' client half — document-level wiring that must run ONCE
-           per document, so it loads through the runtime like the rest (a bare tag here
-           would replay its listeners on every cached restore). -->
-    <script th:src="@{/js/lifecycle-dialog.js}"></script>
     <!-- Alpine boots LAST: the modules above own the alpine:init registration by then. -->
     <script th:src="@{/vendor/alpinejs/alpine.min.js}"></script>
   </template>

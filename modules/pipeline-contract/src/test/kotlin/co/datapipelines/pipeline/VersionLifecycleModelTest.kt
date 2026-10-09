@@ -40,9 +40,10 @@ import kotlin.random.Random
  *    "(template twin)" marker like the other template-side rows.
  * 2. **Random sequences.** A seeded RNG (seed printed in every failure) generates event
  *    sequences (length 1–25) per posture; after EVERY event the database state must equal
- *    the reference model's state and the §13 invariants must hold. The gate runs
- *    `-DversionLifecycle.sequences=N` sequences per posture (default 2000) with a bounded,
- *    measured runtime, printed at the end.
+ *    the reference model's state and the §13 invariants must hold. The gate runs the default
+ *    2000 sequences per posture with a bounded, measured runtime, printed at the end;
+ *    `-PversionLifecycle.sequences=N` (a Gradle property, forwarded to this test JVM by the
+ *    conventions plugin) sizes the sweep for a quick local pass (DEVELOPMENT.md §9.5).
  * 3. **Shrinking.** A failing sequence is delta-debugged to a minimal counterexample
  *    before it is reported — reproduction is a re-run, never a guess.
  *
@@ -869,8 +870,9 @@ class VersionLifecycleModelTest {
 
         /**
          * The gate's default: 2000 sequences per posture (versioning §13). Override with
-         * `-DversionLifecycle.sequences=N` for a quick local pass; the round's gate ran the
-         * default and prints the count and the time.
+         * `-PversionLifecycle.sequences=N` — a Gradle property, forwarded to the test JVM by
+         * the conventions plugin (a `-D` stops at the build JVM and never reaches here) — for
+         * a quick local pass; the pregate passes 200. Prints the count and the time.
          */
         const val DEFAULT_SEQUENCES = 2000
 

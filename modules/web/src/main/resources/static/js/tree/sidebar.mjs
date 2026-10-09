@@ -32,7 +32,7 @@ document.querySelectorAll("[data-nav-branch]").forEach(branch => {
       const instance = mountSearchTree(panel, {
         source: restTreeSource(family), sourceKey: family, context: { workspace }, label: branch.querySelector(".app-nav-label")?.textContent?.trim() || family.replaceAll("-", " "),
         getHref: node => node.href,
-        onRendered() { window.htmx?.process(panel); markCurrent(); },
+        onRendered(region) { window.htmx?.process(region || panel); markCurrent(); },
       });
       instances.set(family, instance); markCurrent();
     }

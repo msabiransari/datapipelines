@@ -1,9 +1,9 @@
 # UI Screens Inventory
 
-**Status:** v1.122
+**Status:** v1.124
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
-**Last updated:** 2026-10-06 (#462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
+**Last updated:** 2026-10-09 (#465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
 
 ---
 
@@ -188,9 +188,20 @@ Build's **Pipelines** (#350), **Templates** (#398) and **Dashboards** (#10 L3b, 
 **Navigating-tree branches (#460).** Pipelines, Templates, Dashboards, Visualizations and Parameter Sets
 share the reusable REST search-and-tree. The catalog link and separate disclosure button retain their
 own actions. A hidden panel initializes on first open; initialization requests only the root and leaves
-all folders closed. Expanding a folder automatically exhausts bounded pages of its immediate children,
-including folders and leaves beyond 200, without fetching grandchildren. Complete valid levels remain
-in memory and keep keyed DOM rows, focus and scroll during navigation.
+all folders closed. Expanding a folder automatically pages its immediate children, including folders and
+leaves beyond 200, without fetching grandchildren, up to the **level ceiling**: ten 200-row pages per load
+(`PAGE_CEILING` in `tree/state.mjs`, #465). A level stopped at the ceiling states how many rows it holds and
+offers **Load more**, which continues from the kept cursor with a fresh ten-page budget; a page that lands
+re-renders only its own level, never the whole panel. Complete valid levels remain in memory and keep keyed
+DOM rows, focus and scroll during navigation.
+
+**Refresh (#465).** The named Refresh button, a return to the tab (`visibilitychange`, every mounted tree)
+and an affected-parent invalidation after a change all refresh the same way: the level is refetched into a
+hidden staging level and swapped in when that completes (or stops at the ceiling), so its rows, focus and
+scroll stay while the request runs and no Loading row appears. Every visible open level below then reloads
+the same way, after its parent; a closed level held in memory is emptied so its next expand fetches it
+fresh; a folder the refetch no longer lists leaves the open set with its cached levels. A failed refresh
+keeps the rows it had and offers Retry. In search mode the result set refreshes in the same staged way.
 
 Name search uses the family's `/api/v1/{family}/tree/search`, literal case-insensitive canonical/display
 name matching, and all matching artifacts plus their ancestors. Every returned path opens automatically;
@@ -212,7 +223,8 @@ fresh initialization does not reveal the current selection. Workspace/account sw
 
 Artifact, catalog and version navigation preserves the rail through `#app-main` swaps. The navigation host
 validates the destination and prepares dependencies before requesting the final freshly authorized boosted
-response; this adds one preparation GET. Failed or superseded preparation leaves the outgoing page usable,
+response; this adds one preparation GET (two server renders per navigation, by design). The shell's progress
+bar shows from the click: preparation counts as one in-flight request (#465). Failed or superseded preparation leaves the outgoing page usable,
 and late final replies are rejected. Signed-in charts share one lazily loaded vendored 3D Plotly bundle;
 standalone previews keep their isolated bundle selection. Cached history contains inert page markup and
 mounts each restored runtime once. Pipeline disposal detaches observation without cancelling execution;
@@ -1957,7 +1969,7 @@ and Clear collapses to the normal root. The catalog retains its flat search and 
 | Auth required | Yes — `dashboard.read` (D50 makes every reader an executor; the page must NOT declare `dashboard.execute` to "simplify"). Absent, foreign or lens-hidden → the family's 404. A NAMED version that does not resolve (absent, DISCARDED, or draft under a narrowing lens) → the family's 404 NAMING the version. No served release and none named → the choose-a-version state (#409): the heading shows the NAME, the draft is offered with its preview link, and "no release yet" says what state the dashboard is in — never the empty `h1` and the "not found" the old board page answered for a dashboard the tree had just linked |
 | Purpose | The tabbed, version-explicit workspace (#396's ruling): the Board tab is today's board page exactly; Overview, Refreshes, Versions and Keys are the other reading surfaces; the Versions tab carries the lifecycle verbs' dialogs. The browser NEVER authors — agents author over MCP; a person releases from the Versions tab |
 | Tabs (the floor) | **Board** — the runtime mounts the released or named version's grid, the refusal region stands in for a board that cannot run, and the events pane sits beside it exactly as the L3b page had it. **Overview** — the viewed version's definition, read-only: the sources with their pinned pipeline versions and statuses, the parameter set, the pinned visualizations with each pin's status (RELEASED, or DRAFT: previewable in a draft, released before publication, #459), the layout summary; no authoring control anywhere. **Refreshes** — the caller's refreshes full width (the board pane keeps its own beside the board), version-independent as #369 documents. **Versions** — the admitted history with served/draft/discarded markers, created and released relative in the cell and absolute UTC on hover (§3.7; the keys rule, §4.19), and the lifecycle dialogs: Release (the one D61 consent for a DRAFT visualization pin), Purge draft, Discard, Restore, Purge version, Switch (make current), Purge dashboard — each a confirm dialog into `#dp-dialog` whose POST calls the SAME service the REST route wires and answers `HX-Redirect` back onto this tab with a flash toast. **Keys** — the `dashboard` keys bound to this dashboard, read-only, linking the Keys page's editor; rendered only for a caller with `dashboard.key.bind` (workspace admin, super admin) |
-| Grid rows | Every row of the board's grid is one `--dashboard-row-unit` (app.css, `var(--space-20)` = 5rem) — a fixed track, so a slot of `h` rows is `h` units plus its gaps tall and a chart fills its slot instead of collapsing (#371). Below the layout's `breakpoint_px` (768 px when absent) the grid collapses to one column: every item spans the full width, stacked in grid order (row, then column) with its own row span, the row unit unchanged — 767 px stacks, 768 px holds the stored grid, and crossing the breakpoint re-places the slots and resizes the charts (#387). A chart in a 2-row slot keeps a plot area of at least half its slot: compact margins, the axes' labels sized by `automargin` (#386, dashboards.md §6.3). The visualization test preview (§4.22) mounts the same grid under the same rule |
+| Grid rows | Every row of the board's grid is one `--dashboard-row-unit` (app.css, `var(--space-20)` = 5rem) — a fixed track, so a slot of `h` rows is `h` units plus its gaps tall and a chart fills its slot instead of collapsing (#371). The layout's `breakpoint_px` (640 px when absent) is measured on the board host: a narrower board places every item across the full width, stacked in grid order (row, then column) with its row span unchanged. A 767 px viewport gives a 719 px board and keeps 6/6/3/9; a 1280 px viewport gives a 694 px board, which keeps the default grid but stacks with a configured 700 px threshold. Widening the user-resizable navigation rail (#460's separator, keyboard included) narrows the board below 640 px; resetting the rail (Home on the separator) restores the grid. A 0-wide host keeps its stored grid until the observer sees it laid out; without `ResizeObserver`, the stored grid holds (#412; implementation spec §3.2, dashboards.md §2.2/§6.2). A chart in a 2-row slot keeps a plot area of at least half its slot: compact margins, the axes' labels sized by `automargin` (#386, dashboards.md §6.3). The visualization test preview (§4.22) mounts the same grid under the same rule |
 | Design primitives | `dashboards.css` (the workspace chrome, the runtime's emitted classes and the page's layout) and the vendored `plotly.css` (the §6.6 design-around's real stylesheet) — both head-loaded (§3.0 is normative: no page template carries its own stylesheet link) |
 | JS | The board: `static/js/datapipelines-dashboard.js` + the three renderers and `static/js/dashboards-page.js` — singleton libraries with a per-container mount: it reads exactly two data attributes (the dashboard id on the container; the named version, when the URL named one, on `data-dp-dashboard-version`; the default resolution writes NONE, so the glue's init stays `version: "released"`), and `window.__dpPage` is its test seam. The workspace: `static/js/dashboards/workspace.js` over the SHARED tab core `static/js/workspace/tabs.js` (the one admission and transition rule; the pipeline editor's `pipeline-editor/tabs.js` runs the same machine since #420) — in-page tab switches (each one PUSHES a tab-only entry through `static/js/workspace/history.js`, #402 — Back/Forward re-select in page; a restored root re-wires once and re-paints the tab it left), lazy-once tab reads, and the Board pane's reveal running the runtime instance's OWN `resize()` (a chart booted into a hidden pane re-fits). The dialogs: `static/js/lifecycle-dialog.js` (the fifth container, `#dp-dialog`) |
 | htmx | The events pane's bounded poll (below), the lazy tabs' one read, the dialogs' GET/POST pairs. Every link that names a version or board uses prepared main-content navigation and one lazily loaded compatible Plotly bundle; the tab strip never navigates. A lifecycle POST answers `HX-Redirect` — a full navigation back onto the Versions tab, the flash bin rendering the toast |
@@ -2405,6 +2417,8 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-09 | v1.124 | #465 REST tree client polish — renumbered at merge after #412's v1.123 | §3.4: staged refresh that keeps rows and reloads visible open levels; the ten-page level ceiling with Load more; the progress bar during navigation preparation. |
+| 2026-10-09 | v1.123 | #412 the dashboard breakpoint follows board width, default 640 — renumbered in recovery after #460's v1.122 | **§4.21, Grid rows:** the threshold measures the board host; the 767 px viewport's 719 px board keeps the grid, a configured 700 px threshold stacks the 694 px board at 1280, and widening the user-resizable navigation rail narrows the default board below 640. A 0-wide board holds its stored grid until reveal. |
 | 2026-10-06 | v1.122 | #460 reusable REST navigation — renumbered at merge after #462's v1.121 | §3.4/§3.6: reusable REST trees, complete expanded name search and clear reset; user rail width up to the viewport; prepared artifact/version navigation and chart history. |
 | 2026-10-06 | v1.121 | #462 draft purge pins | §4.3d purge dialog: escaped named parent/dashboard blockers, sole/nonsole scope and no destructive form while pinned; direct POST rechecks. |
 | 2026-10-06 | v1.120 | 459 merge follow-up | **§4.21's dashboard workspace, Overview tab**: the sources show their pinned pipeline versions and statuses (not "releases"), and a DRAFT pin is previewable in a draft and released before publication (#459). The R1 "release hint" wording is withdrawn; #459 superseded #369's R1. |

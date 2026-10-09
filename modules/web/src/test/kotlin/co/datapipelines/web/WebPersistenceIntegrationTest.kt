@@ -41,6 +41,7 @@ import co.datapipelines.web.sse.WebEventEmitter
 import com.fasterxml.jackson.databind.json.JsonMapper
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldHaveSize
+import io.kotest.matchers.longs.shouldBeLessThan
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -402,7 +403,13 @@ class WebPersistenceIntegrationTest {
             val log = SseEventLog(disposable.template, co.datapipelines.executor.ExecutorJson.mapper)
             disposable.stopServer()
             val entry = log.entry(UUID.randomUUID(), LoggedSseEvent(1, "node_started", emptyMap()))
+            // #482 — one EVAL against a dead server pays at most one command timeout before it
+            // fails; the bound says the failure ARRIVES promptly, not merely that it happens.
+            val startedAt = System.nanoTime()
             runCatching { log.appendAll(listOf(entry)) }.isFailure shouldBe true
+            val elapsedMs = (System.nanoTime() - startedAt) / 1_000_000
+            println("#482: replay-log append against a stopped Redis failed in ${elapsedMs}ms (bound $OUTAGE_BOUND_MS ms)")
+            elapsedMs.shouldBeLessThan(OUTAGE_BOUND_MS)
         } finally {
             disposable.close()
         }
@@ -458,6 +465,11 @@ class WebPersistenceIntegrationTest {
         // The sibling of the test above, and the only place the ruling is proved end to end
         // against a real (absent) Redis rather than a thrown mock. No timing: the container is
         // STOPPED, so the fault is a fact of the world, not a race.
+        //
+        // #482 adds the one wall-clock assertion the ruling always implied: the refusal must be
+        // FAST, not merely correct — a 429 that arrives after a minute per Lettuce call is the
+        // defect this lane fixed. Both `consume`s after `stopServer()` are measured together
+        // against OUTAGE_BOUND_MS (5 × the configured command timeout; see the companion).
         val disposable = TestRedis.disposable()
         try {
             val limiter = RedisRateLimiter(disposable.template, RateLimitProperties())
@@ -466,6 +478,7 @@ class WebPersistenceIntegrationTest {
 
             disposable.stopServer()
 
+            val startedAt = System.nanoTime()
             val decision = limiter.consume(user)
             decision.allowed shouldBe false
             decision.unavailable shouldBe true
@@ -486,6 +499,13 @@ class WebPersistenceIntegrationTest {
             response.getHeader("Retry-After") shouldBe "1"
             response.contentAsString shouldContain "\"code\":\"rate_limit.unavailable\""
             verify(exactly = 0) { chain.doFilter(any(), any()) }
+
+            val elapsedMs = (System.nanoTime() - startedAt) / 1_000_000
+            println(
+                "#482: two consume calls against a stopped Redis refused in ${elapsedMs}ms " +
+                    "(bound $OUTAGE_BOUND_MS ms = 5 x command timeout ${TestRedis.COMMAND_TIMEOUT.toMillis()}ms)",
+            )
+            elapsedMs.shouldBeLessThan(OUTAGE_BOUND_MS)
         } finally {
             disposable.close()
         }
@@ -580,6 +600,17 @@ class WebPersistenceIntegrationTest {
         const val ONE_HOUR_SECONDS = 3_600L
         const val TTL_SLACK_SECONDS = 60L
         const val ROW_CONTENT = "row-content-266b-must-not-be-logged"
+
+        /**
+         * #482 — the wall-clock bound on the stopped-Redis cases. FORMULA: `5 × TestRedis.COMMAND_TIMEOUT`.
+         * After `stopServer()` Lettuce buffers each in-flight command until ITS command timeout, so the
+         * limiter's two fixed windows cost at most two timeouts per `consume`; the limiter case's two
+         * `consume`s plus one reconnect under the connect bound fit inside five. At the shipped `2s`
+         * default that is `10 s` — against the ~242 s the limiter case took under Lettuce's 60 s
+         * default. Derived from [TestRedis.COMMAND_TIMEOUT], never a literal, so a changed default
+         * widens the bound honestly.
+         */
+        val OUTAGE_BOUND_MS: Long = 5 * TestRedis.COMMAND_TIMEOUT.toMillis()
 
         /** Past Lua's unpack limit (~7,990) for one execution in one append. */
         const val HUGE_BATCH = 9_000

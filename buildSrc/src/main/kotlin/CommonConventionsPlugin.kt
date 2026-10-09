@@ -222,6 +222,7 @@ class CommonConventionsPlugin : Plugin<Project> {
                 "junit.jupiter.testmethod.order.default",
                 "junit.jupiter.testclass.order.default",
                 "junit.jupiter.execution.order.random.seed",
+                "versionLifecycle.sequences",
             ).forEach { key ->
                 project.providers.gradleProperty(key).orNull?.let { value -> systemProperty(key, value) }
             }

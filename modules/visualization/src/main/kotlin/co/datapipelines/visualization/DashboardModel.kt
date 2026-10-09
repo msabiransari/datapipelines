@@ -171,7 +171,7 @@ data class DashboardLayout(
     val grid: List<GridItem> = emptyList(),
     @field:JsonProperty("columns") @get:JsonProperty("columns") @param:JsonProperty("columns")
     val columns: Int = GRID_COLUMNS,
-    /** Below this width every item spans the full width in grid order (the spec's §3.2; 768 when absent). */
+    /** Below this board width every item spans the full width in grid order (the spec's §3.2; 640 when absent). */
     @field:JsonProperty("breakpoint_px") @get:JsonProperty("breakpoint_px") @param:JsonProperty("breakpoint_px")
     val breakpointPx: Int? = null,
 ) {
