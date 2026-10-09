@@ -29,7 +29,10 @@ pgplan::build() {
   PG_MODULES=(); PG_TEST_MODULES=(); PG_DEFERRED=(); PG_ROOTS2=(); PG_ROOTS2B=()
   PG_1=(ktlintCheck detekt composeEnvAudit composeArgvSecretsAudit verifyModuleDependencies verifyVerificationMetadataDocs --continue)
   PG_2=(); PG_2B=(); PG_4=(compileTestKotlin --continue)
-  PG_COMMON=(-Pdp.browser.ciPatience=true --no-parallel --max-workers=1 -Pdp.test.forks=1 -Pdp.test.forks.e2e=1)
+  # The trailing knob bounds VersionLifecycleModelTest's random sweep in the pregate
+  # only (#483, DEVELOPMENT.md §9.5); Gate A and CI keep the 2000 default and stay the bank.
+  # Appended AFTER the serial quartet: pregate-safety-test.sh pins that substring contiguous.
+  PG_COMMON=(-Pdp.browser.ciPatience=true --no-parallel --max-workers=1 -Pdp.test.forks=1 -Pdp.test.forks.e2e=1 -PversionLifecycle.sequences=200)
   declare -gA PG_SELECTIONS=()
   mapfile -t PG_MODULES < <(printf '%s\n' "$PG_FILES" | sed -nE 's|^modules/([a-z-]+)/.*|:modules:\1|p' | LC_ALL=C sort -u)
   mapfile -t PG_TEST_MODULES < <(printf '%s\n' "$PG_FILES" | sed -nE 's|^tests/([a-z-]+)/.*|\1|p' | LC_ALL=C sort -u)
