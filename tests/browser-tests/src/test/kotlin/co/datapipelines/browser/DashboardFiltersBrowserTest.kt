@@ -156,6 +156,7 @@ class DashboardFiltersBrowserTest : DashboardBrowserSuite() {
         openBoard(board)
         page.waitForFunction("() => window.__dpPage && window.__dpPage.ready")
         leaveAndReturnHoldsOneListenerSet()
+        // #492: this viewport also narrows the board region below its 820 px container boundary.
         page.setViewportSize(900, 900)
 
         page.waitForFunction(

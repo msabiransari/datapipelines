@@ -172,6 +172,8 @@ fieldset.dp-dashboard-parameter {
 }
 
 .dp-board-page {
+  container-type: inline-size;
+  container-name: dp-board;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
   gap: var(--gap-md);
@@ -224,10 +226,12 @@ fieldset.dp-dashboard-parameter {
   flex-direction: column;
 }
 
-/* Below the breakpoint the panel becomes an off-canvas DRAWER: the same element moves (the
-   CSS reads the layout, no script measures the viewport), the glue moves only the focus and
-   the aria-expanded state. Slide uses the token duration; reduced-motion flattens it. */
-@media (max-width: 1100px) {
+/* At 820 board-region px the panel becomes an off-canvas DRAWER: the same element moves,
+   including when only the rail width changes. The old 1100 viewport px boundary minus the
+   default 232 px rail and two 24 px gutters is 820 px. The query uses a literal because size
+   queries cannot resolve var() (verified in Chromium 151); this is the breakpoint's authority.
+   The glue reads the toolbar's display, never a width. Slide uses the token duration. */
+@container dp-board (max-width: 820px) {
   .dp-board-layout {
     grid-template-columns: minmax(0, 1fr);
   }
