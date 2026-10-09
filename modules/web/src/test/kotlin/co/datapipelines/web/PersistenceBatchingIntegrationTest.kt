@@ -32,10 +32,10 @@ import co.datapipelines.web.sse.ExecutionEventRowSink
 import co.datapipelines.web.sse.ExecutionStreamRegistry
 import co.datapipelines.web.sse.ReplayLogEntry
 import co.datapipelines.web.sse.ReplayLogSink
-import co.datapipelines.web.sse.ReplayRead
 import co.datapipelines.web.sse.SseEventLog
 import co.datapipelines.web.sse.WebEventEmitter
 import co.datapipelines.web.sse.loggedEvents
+import co.datapipelines.web.sse.loggedEventsOrNone
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import io.kotest.assertions.withClue
@@ -144,7 +144,10 @@ class PersistenceBatchingIntegrationTest {
             ids.forEach { id ->
                 withClue("execution $id") {
                     rig.events.findByExecution(id).map { it.eventId } shouldBe (1..EVENTS + 2).toList()
-                    rig.eventLog.replay(id).loggedEvents().map { it.eventId } shouldBe (1..EVENTS + 2).toList()
+                    rig.eventLog
+                        .replay(id)
+                        .loggedEvents()
+                        .map { it.eventId } shouldBe (1..EVENTS + 2).toList()
                     rig.executions.findById(DEFAULT_WORKSPACE, id)!!.status shouldBe ExecutionStatus.SUCCESS
                 }
             }
@@ -269,7 +272,7 @@ class PersistenceBatchingIntegrationTest {
                     val survivors =
                         rig.eventLog
                             .replay(id)
-                            .let { if (it == ReplayRead.Absent) emptyList() else it.loggedEvents() }
+                            .loggedEventsOrNone()
                             .map { it.eventId }
                     replayed += survivors.size
                     withClue("the replay of $id: $survivors") { survivors shouldBe survivors.distinct().sorted() }
@@ -341,7 +344,10 @@ class PersistenceBatchingIntegrationTest {
                 (tookMs >= SHORT_WAIT_MS) shouldBe true
             }
             awaitCondition { rig.events.findByExecution(id).any { it.eventType == "execution_aborted" } }
-            rig.eventLog.replay(id).loggedEvents().any { it.eventName == "execution_aborted" } shouldBe true
+            rig.eventLog
+                .replay(id)
+                .loggedEvents()
+                .any { it.eventName == "execution_aborted" } shouldBe true
             rig.events.findByExecution(id).map { it.eventId } shouldBe listOf(1, 2)
         }
     }

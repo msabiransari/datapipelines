@@ -18,6 +18,7 @@ import co.datapipelines.web.api.Pagination
 import co.datapipelines.web.api.cancellableBy
 import co.datapipelines.web.api.currentPrincipal
 import co.datapipelines.web.api.visibleTo
+import co.datapipelines.web.sse.LoggedSseEvent
 import co.datapipelines.web.sse.ReplayRead
 import co.datapipelines.web.sse.SseLogStreamer
 import org.springframework.http.HttpStatus
@@ -179,18 +180,27 @@ class ExecutionsController(
         val record =
             executions.findById(workspaceId, id)?.takeIf { it.visibleTo(principal) }
                 ?: throw ApiErrors.executionNotFound(id.toString())
-        // #487: ONE read of the log decides the answer and feeds the stream. A store that did not
-        // answer is 503, never the expiry's 410 — both before the stream is committed.
-        val events =
-            when (val read = streamer.load(record.executionId)) {
-                is ReplayRead.Log -> read.events
-                ReplayRead.Absent -> throw ApiErrors.resultExpired(id.toString())
-                is ReplayRead.Unavailable -> throw ApiErrors.eventLogUnavailable(id.toString(), read.cause)
-            }
+        // #487: ONE read of the log decides the answer and feeds the stream.
+        val events = replayableOrRefused(streamer.load(record.executionId), id)
         // #230 (P4): the replay carries its subscriber — every chunk it serves is re-judged
         // against the subscriber's CURRENT authority, not the open-time check above.
         return streamer.replay(record.executionId, events, principal)
     }
+
+    /**
+     * §10.3's answer to the route's one read (#487): the events to stream, or the refusal — a log that
+     * is gone is `410 result.expired`; a store that did not answer is `503 result.storage_unavailable`,
+     * never the expiry's 410. Both throw before the stream is committed.
+     */
+    private fun replayableOrRefused(
+        read: ReplayRead,
+        id: UUID,
+    ): List<LoggedSseEvent> =
+        when (read) {
+            is ReplayRead.Log -> read.events
+            ReplayRead.Absent -> throw ApiErrors.resultExpired(id.toString())
+            is ReplayRead.Unavailable -> throw ApiErrors.eventLogUnavailable(id.toString(), read.cause)
+        }
 
     /**
      * §10.3A (#9, scheduler design revision §5.4) — the DURABLE event record as JSON, for as long

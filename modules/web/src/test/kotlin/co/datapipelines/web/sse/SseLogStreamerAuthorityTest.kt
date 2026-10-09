@@ -153,7 +153,7 @@ class SseLogStreamerAuthorityTest {
                 val caseId = UUID.randomUUID()
                 val stored = listOf(event(1, "execution_started", caseId), event(2, "pipeline_completed", caseId))
                 val log = mockk<SseEventLog>()
-                        val emitter = CapturingSseEmitter()
+                val emitter = CapturingSseEmitter()
 
                 streamer(log, emitter, authorityRefusingFrom(2, verdict)).replay(caseId, stored, subscriber)
 

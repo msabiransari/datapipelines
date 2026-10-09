@@ -8,3 +8,6 @@ import io.kotest.matchers.types.shouldBeInstanceOf
  * pre-#487 `replay(id)!!` failed with a bare NPE for both an absent log and a store fault.
  */
 fun ReplayRead.loggedEvents(): List<LoggedSseEvent> = shouldBeInstanceOf<ReplayRead.Log>().events
+
+/** The events of a read whose log may legitimately be gone (none then); a store fault still fails the test. */
+fun ReplayRead.loggedEventsOrNone(): List<LoggedSseEvent> = if (this == ReplayRead.Absent) emptyList() else loggedEvents()
