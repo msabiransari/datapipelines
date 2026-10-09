@@ -58,25 +58,32 @@ export function createTreeRenderer(host, state, options) {
       element = document.createElement("div"); element.className = "dp-tree-status";
       element.setAttribute("role", "status"); element.setAttribute("aria-live", "polite"); notices.set(parent, element);
     }
+    // A failed staged refresh keeps its rows (#465); a level stopped at the page ceiling offers the next pages.
     const text = status.status === "loading" ? `Loading… ${status.nodes.size} loaded` :
+      status.refreshError ? "Could not refresh. " :
+      status.status === "more" ? `${status.nodes.size} loaded. ` :
       ["error", "incomplete"].includes(status.status) ? (status.nodes.size ? "Incomplete. " : "Could not load. ") :
       status.complete && !state.nodes(parent).length ? (state.query ? "No matches" : "No items") : "";
     if (element.dataset.status !== text) {
       element.replaceChildren(); element.append(document.createTextNode(text)); element.dataset.status = text;
-      if (["error", "incomplete"].includes(status.status)) {
-        const retry = document.createElement("button"); retry.type = "button"; retry.className = "ds-button ds-button-ghost ds-button-sm";
-        retry.textContent = "Retry"; retry.addEventListener("click", () => state.retry(parent)); element.append(retry);
+      const action = status.status === "loading" ? null : status.refreshError ? ["Retry", () => state.refresh(parent)] :
+        status.status === "more" ? ["Load more", () => state.more(parent)] :
+        ["error", "incomplete"].includes(status.status) ? ["Retry", () => state.retry(parent)] : null;
+      if (action) {
+        const button = document.createElement("button"); button.type = "button"; button.className = "ds-button ds-button-ghost ds-button-sm";
+        button.textContent = action[0]; button.addEventListener("click", action[1]); element.append(button);
       }
     }
     if (text) { if (element.parentNode !== group || group.lastChild !== element) group.append(element); }
     else element.remove();
     group.setAttribute("aria-busy", status.status === "loading" ? "true" : "false");
   }
-  function reconcile(parent, depth) {
+  function reconcile(parent, depth, shallow = false) {
     const group = groups.get(parent); if (!group) return;
     const nodes = state.nodes(parent); const wanted = new Set(nodes.map(node => node.key));
     Array.from(group.children).forEach(child => { if (child.hasAttribute("data-tree-key") && !wanted.has(child.getAttribute("data-tree-key"))) child.remove(); });
     nodes.forEach((node, index) => {
+      const fresh = !rows.has(node.key);
       const row = rows.get(node.key) || makeRow(node); row.node = node;
       if (row.label.textContent !== node.name) row.label.textContent = node.name;
       row.control.title = node.path; row.label.title = node.path;
@@ -97,13 +104,28 @@ export function createTreeRenderer(host, state, options) {
       if (node.kind === "folder") {
         const expanded = state.open.has(node.key); row.item.setAttribute("aria-expanded", String(expanded));
         row.group.hidden = !expanded; row.control.setAttribute("aria-label", `${expanded ? "Collapse" : "Expand"} ${node.name}`);
-        if (expanded) reconcile(node.key, depth + 1);
+        if (expanded && (!shallow || fresh)) reconcile(node.key, depth + 1, shallow);
       } else { row.group.hidden = true; row.item.removeAttribute("aria-expanded"); }
       const current = group.children[index]; if (current !== row.item) group.insertBefore(row.item, current || null);
     });
     notice(parent, group);
   }
-  function render() {
+  /**
+   * A page appended to one browse level reconciles that level's group only, so a page costs the
+   * level it lands in (bounded by the page ceiling), not the whole panel. Returns the region it
+   * rendered, or null after a full render.
+   */
+  function renderLevel(parent) {
+    const hadFocus = root.contains(document.activeElement);
+    const depth = parent === null ? 1 : Number(rows.get(parent).item.getAttribute("aria-level")) + 1;
+    reconcile(parent, depth, true);
+    if (!focusedKey || !rows.has(focusedKey)) setTabs();
+    if (hadFocus && !root.contains(document.activeElement)) rows.get(focusedKey)?.item.focus();
+    return groups.get(parent);
+  }
+  function render(scope) {
+    if (scope && !scope.searching && !state.query && groups.has(scope.parent) &&
+        (scope.parent === null || (rows.has(scope.parent) && state.open.has(scope.parent)))) return renderLevel(scope.parent);
     const hadFocus = root.contains(document.activeElement);
     const valid = new Set(Array.from(state.levels.values()).flatMap(level => Array.from(level.nodes.keys())));
     state.search.nodes.forEach((node, key) => valid.add(key));
@@ -120,6 +142,7 @@ export function createTreeRenderer(host, state, options) {
     });
     setTabs();
     if (hadFocus && !root.contains(document.activeElement)) rows.get(focusedKey)?.item.focus();
+    return null;
   }
   const keydown = event => {
     const item = event.target.closest('[role="treeitem"]'); if (!item || !root.contains(item)) return;
@@ -142,5 +165,5 @@ export function createTreeRenderer(host, state, options) {
     event.preventDefault(); next?.focus();
   };
   root.addEventListener("keydown", keydown);
-  return { render, focusFirst() { visibleRows()[0]?.focus(); }, select(key) { selectedKey = key; render(); }, dispose() { root.removeEventListener("keydown", keydown); root.remove(); rows.clear(); groups.clear(); } };
+  return { render, focusFirst() { visibleRows()[0]?.focus(); }, select(key) { if (key === selectedKey) return; selectedKey = key; render(); }, dispose() { root.removeEventListener("keydown", keydown); root.remove(); rows.clear(); groups.clear(); } };
 }

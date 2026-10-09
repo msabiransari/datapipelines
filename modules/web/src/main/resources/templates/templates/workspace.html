@@ -382,6 +382,10 @@
        the Versions tab's per-row menus open dialogs served into it; their POSTs answer
        HX-Redirect onto this workspace (or the catalog) with a flash. -->
   <div id="tx-dialog"></div>
-  <script th:src="@{/js/lifecycle-dialog.js}" defer></script>
+  <!-- #465: its client half loads through the shell's page-asset catalog (page-assets.mjs), once per
+       document — a bare tag re-executed on every boosted arrival and stacked its document listeners. -->
+  <template data-chart-assets>
+    <script th:src="@{/js/lifecycle-dialog.js}"></script>
+  </template>
 </th:block>
 </html>

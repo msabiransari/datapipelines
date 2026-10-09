@@ -637,10 +637,19 @@ button.app-busy::after {
    lets the grid row shrink below its content so the overflow is main's, not the
    shell's; without it the row grows with the content and nothing scrolls. */
 .app-shell > .app-main {
-  padding-inline: min(var(--gap-lg), max(0px, calc((100vw - var(--app-rail-width)) / 2)));
   min-height: 0;
   overflow-y: auto;
   overflow-x: auto;
+}
+
+/* The gutter yields to a rail that takes the width — only where the rail IS a column (#465).
+   Below 768px the rail is an off-canvas drawer, so a saved wide preference (which makes
+   --app-rail-width ~100vw) must not zero the phone gutter: there main keeps the phone band's
+   .app-container --gap-md. */
+@media (min-width: 768px) {
+  .app-shell > .app-main {
+    padding-inline: min(var(--gap-lg), max(0px, calc((100vw - var(--app-rail-width)) / 2)));
+  }
 }
 
 /* Signed out (login, the public docs, error pages): no rail, no top bar, one

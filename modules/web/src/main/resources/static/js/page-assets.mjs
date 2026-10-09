@@ -8,6 +8,8 @@ const PROVIDED = {
   "/js/workspace/tabs.js": "WorkspaceTabs",
   "/js/workspace/history.js": "WorkspaceHistory",
   "/js/workspace/panes.js": "WorkspacePanes",
+  // #465: document-level dialog wiring that must run once per document whichever page loads it first.
+  "/js/lifecycle-dialog.js": "lifecycleDialog",
 };
 const MOUNTS = {
   "/js/dashboards-page.js": "DashboardPageMount",
@@ -84,7 +86,9 @@ export async function mountCharts(main = document.getElementById("app-main")) {
     }
   })().catch(error => {
     if (!live() || main.__chartMount !== own) return;
-    delete main.__chartMount;
+    // Remembered per catalog (#465): later settles of this page (its partial polls) neither retry
+    // nor stack notices (main.__chartMount stays this catalog's); a navigation or history restore
+    // brings a new catalog and a new attempt.
     const notice = document.createElement("p"); notice.className = "ds-error"; notice.setAttribute("role", "alert");
     notice.textContent = error.message; main.prepend(notice);
   });
