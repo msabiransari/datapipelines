@@ -631,7 +631,7 @@ class RefreshEngineTest {
     }
 
     @Test
-    fun `an abort raised inside the signal's cache window - after the last real remote read - still ends ABORTED with the target's abort`() {
+    fun `an abort raised inside the signal's cache window still ends ABORTED with the target's abort`() {
         runTest {
             // #489 (the cross-instance half of #435's acceptance): the job-start read is the last REAL remote
             // read — negative; another instance raises the flag and cancels the executions INSIDE the poll
