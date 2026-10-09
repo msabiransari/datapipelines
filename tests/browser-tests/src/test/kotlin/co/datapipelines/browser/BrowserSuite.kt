@@ -3,9 +3,13 @@ package co.datapipelines.browser
 import com.microsoft.playwright.Browser
 import com.microsoft.playwright.BrowserContext
 import com.microsoft.playwright.BrowserType
+import com.microsoft.playwright.Frame
 import com.microsoft.playwright.Locator
 import com.microsoft.playwright.Page
 import com.microsoft.playwright.Playwright
+import com.microsoft.playwright.PlaywrightException
+import com.microsoft.playwright.Request
+import com.microsoft.playwright.Response
 import com.microsoft.playwright.Tracing
 import de.mkammerer.argon2.Argon2Factory
 import org.junit.jupiter.api.AfterAll
@@ -19,6 +23,7 @@ import java.nio.file.Paths
 import java.security.SecureRandom
 import java.sql.DriverManager
 import java.util.Base64
+import java.util.function.Consumer
 
 /**
  * The browser suite's boot harness (module-structure §5.12, TEST-GAP-2026-09.md).
@@ -206,8 +211,62 @@ abstract class BrowserSuite {
         page.locator("#workspace-switcher").waitFor(Locator.WaitForOptions().setTimeout(FIRST_RENDER_TIMEOUT_MS))
         // `force`: the select is an invisible overlay on the switcher card (the label is the
         // hit target), so Playwright's visibility precondition never clears on it.
-        page.selectOption("#workspace-switcher", arrayOf(name), Page.SelectOptionOptions().setForce(true))
-        page.waitForURL("**/dashboard")
+        val outcome = WorkspaceSwitchOutcome("$baseUrl/workspace/switch")
+        val requested = Consumer<Request> { if (outcome.matches(it)) outcome.request = it }
+        val responded = Consumer<Response> { if (outcome.matches(it.request())) outcome.response = it }
+        val failed = Consumer<Request> { if (outcome.matches(it)) outcome.failure = it.failure() }
+        val navigated = Consumer<Frame> { if (it == page.mainFrame()) outcome.navigationUrl = it.url() }
+        page.onRequest(requested)
+        page.onResponse(responded)
+        page.onRequestFailed(failed)
+        page.onFrameNavigated(navigated)
+        try {
+            page.selectOption("#workspace-switcher", arrayOf(name), Page.SelectOptionOptions().setForce(true))
+            // Observe the POST itself: an abort has no response and must fail immediately;
+            // an absent request must be distinguishable from a response redirecting elsewhere.
+            page.waitForCondition { outcome.failure != null || (outcome.response != null && outcome.navigationUrl != null) }
+            val location = outcome.response?.headerValue("location")
+            if (outcome.failure != null || location !in setOf("/dashboard", "$baseUrl/dashboard")) {
+                outcome.fail(page, name)
+            }
+            page.waitForURL("$baseUrl/dashboard")
+            if (page.locator("#workspace-switcher").inputValue() != name) outcome.fail(page, name)
+        } catch (e: PlaywrightException) {
+            outcome.fail(page, name, e)
+        } finally {
+            page.offRequest(requested)
+            page.offResponse(responded)
+            page.offRequestFailed(failed)
+            page.offFrameNavigated(navigated)
+        }
+    }
+
+    /** Only the switch's transport metadata; never cookies, headers containing tokens or bodies. */
+    private class WorkspaceSwitchOutcome(
+        private val url: String,
+    ) {
+        var request: Request? = null
+        var response: Response? = null
+        var failure: String? = null
+        var navigationUrl: String? = null
+
+        fun matches(request: Request): Boolean = request.url() == url && request.method() == "POST"
+
+        fun fail(
+            page: Page,
+            name: String,
+            cause: Throwable? = null,
+        ): Nothing = throw AssertionError(message(page, name), cause)
+
+        private fun message(
+            page: Page,
+            name: String,
+        ): String =
+            "Workspace switch to '$name' did not reach /dashboard with the requested workspace: " +
+                "request=${request?.method() ?: "none"} $url, " +
+                "status=${response?.status() ?: "none"}, " +
+                "Location=${response?.headerValue("location") ?: "none"}, " +
+                "failure=${failure ?: "none"}, finalUrl=${page.url()}"
     }
 
     /** A logged-out session — a fresh context+page pair the test must [Session.close]. */
