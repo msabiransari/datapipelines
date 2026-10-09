@@ -2,14 +2,23 @@ package co.datapipelines.web.visualizations
 
 import co.datapipelines.application.templates.TemplateEvaluateService
 import co.datapipelines.pipeline.PipelineErrorCodes
+import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.TemplateDryRenderer
 import co.datapipelines.pipeline.TransformContractView
 import co.datapipelines.templates.TransformTestInput
 import co.datapipelines.typesystem.DatapipelinesException
+import co.datapipelines.typesystem.LogicalType
 import co.datapipelines.visualization.ArtifactRef
 import co.datapipelines.visualization.FixtureEvaluation
+import co.datapipelines.visualization.RendererConfigValidators
+import co.datapipelines.visualization.TemplateContractFacts
+import co.datapipelines.visualization.TemplatePin
+import co.datapipelines.visualization.VisualizationErrorCodes
+import co.datapipelines.visualization.VisualizationMechanicalCheck
+import co.datapipelines.visualization.VisualizationReader
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.node.ObjectNode
+import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeInstanceOf
 import io.mockk.every
@@ -101,4 +110,89 @@ class WebVisualizationFixtureEvaluatorTest {
             .shouldBeInstanceOf<FixtureEvaluation.Refused>()
             .code shouldBe PipelineErrorCodes.Transform.ROW_SHAPE_MISMATCH
     }
+
+    @Test
+    fun `real adapter keeps explicit nullable null keys through the full mechanical report`() {
+        listOf("data[0].y", "data[0].z[0]").forEach { path ->
+            val check = mechanicalCheck(nullable = true)
+            every { evaluate.evaluate(any(), any(), any(), any()) } returns
+                TemplateEvaluateService.Evaluation(listOf(mapOf("amount" to null)), emptyList(), emptyList())
+            val report = check.run(workspace, mechanicalBody(path))
+            report.ok shouldBe true
+            report.failures.shouldBeEmpty()
+            report.cases.getValue("rows").let {
+                it.ok shouldBe true
+                it.rows shouldBe 1
+                it.rendered shouldBe "not_available"
+            }
+
+            every { evaluate.evaluate(any(), any(), any(), any()) } returns
+                TemplateEvaluateService.Evaluation(listOf(emptyMap<String, Any?>()), emptyList(), emptyList())
+            val missing = check.run(workspace, mechanicalBody(path))
+            missing.ok shouldBe false
+            missing.cases.getValue("rows").ok shouldBe false
+            missing.failures.single().let {
+                it.code shouldBe VisualizationErrorCodes.BINDING_UNBOUND
+                it.path shouldBe "tests.cases[0].rows[0].amount"
+                it.case shouldBe "rows"
+            }
+        }
+    }
+
+    @Test
+    fun `real adapter nonnullable null and evaluator type refusal retain distinct report codes and paths`() {
+        val check = mechanicalCheck(nullable = false)
+        every { evaluate.evaluate(any(), any(), any(), any()) } returns
+            TemplateEvaluateService.Evaluation(listOf(mapOf("amount" to null)), emptyList(), emptyList())
+        val invalid = check.run(workspace, mechanicalBody("data[0].y"))
+        invalid.ok shouldBe false
+        invalid.cases.getValue("rows").ok shouldBe false
+        invalid.failures.single().let {
+            it.code shouldBe VisualizationErrorCodes.TEST_CASE_INVALID
+            it.path shouldBe "tests.cases[0].rows[0].amount"
+        }
+
+        every { evaluate.evaluate(any(), any(), any(), any()) } throws
+            DatapipelinesException("template.type_gate_refused", "row 0 column 'amount' is not nullable")
+        val refused = check.run(workspace, mechanicalBody("data[0].y"))
+        refused.ok shouldBe false
+        refused.cases.getValue("rows").ok shouldBe false
+        refused.dropped shouldBe 0
+        refused.failures.single().let {
+            it.step shouldBe "fixtures"
+            it.code shouldBe "template.type_gate_refused"
+            it.path shouldBe "tests.cases[0]"
+            it.case shouldBe "rows"
+            it.message shouldBe "row 0 column 'amount' is not nullable"
+        }
+    }
+
+    private fun mechanicalCheck(nullable: Boolean): VisualizationMechanicalCheck {
+        val contract =
+            modeView(TransformContractView.Mode.TABLE).copy(
+                output = TransformContractView.Output.Table(listOf(TransformContractView.Column("amount", LogicalType.DECIMAL, nullable))),
+            )
+        every { contracts.transformContract(any(), any()) } returns contract
+        return VisualizationMechanicalCheck(
+            renderers = RendererConfigValidators.deep(),
+            fixtures = WebVisualizationFixtureEvaluator(evaluate, contracts),
+            templates = TemplateContractFacts { _, _ -> TemplatePin.Transform(PipelineVersionStatus.RELEASED, contract) },
+        )
+    }
+
+    private fun mechanicalBody(path: String) =
+        VisualizationReader()
+            .readOrThrow(
+                ObjectMapper().readTree(
+                    """
+                    {"name":"finance/visualizations/null_contract","display_name":"Nullable output",
+                     "renderer":{"kind":"plotly","version":"4"},
+                     "inputs":{"revenue":{"columns":[{"name":"amount","type":"DECIMAL","nullable":false}]}},
+                     "transform":{"template":{"name":"${pin.name}","version":${pin.version}},"inputs":{"rows":"revenue"}},
+                     "config":{"data":[${if (path.endsWith("z[0]")) """{"type":"heatmap","z":[[]]}""" else """{"type":"bar","y":[]}"""}]},
+                     "bindings":{"$path":"amount"},
+                     "tests":{"cases":[{"name":"rows","fixtures":{"revenue":[{"amount":1}]},"assertions":[{"kind":"rendered"}]}]}}
+                    """.trimIndent(),
+                ),
+            ).body
 }

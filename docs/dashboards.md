@@ -1,6 +1,6 @@
 # Dashboards
 
-**Status:** v0.38 — the board-width breakpoint on the composite host, with a 640 px default (#412) beside a target the refresh's own abort cancelled reports `abort` whichever side of the race wins (§6.6, #435) beside the declarative read-only rule (§5.1, #463), then draft dashboard dependencies (#459), then the Release dialogs post the draft hash they read (§7, #416) beside numeric bound-value assertion feasibility (§3.4, #377) beside the visualizations workspace's tab switches on the shared history helper, the parameter-set decision (§7, #426) beside the pipeline editor runs the shared tab core (§7, #420) beside the Versions tables' created/released relative with the UTC stamp on hover (§7, #422) beside Back/Forward across the dashboards workspace's tab switches (§7, #402) beside the visualizations workspace (§7, #399) beside the dashboards workspace (§5.2's `version`, §7's workspace, #400; #409 closes with it) beside the
+**Status:** v0.39 — renderer-aware binding types and nullable transform output (§3.4, #458/#457) beside the board-width breakpoint on the composite host, with a 640 px default (#412) beside a target the refresh's own abort cancelled reports `abort` whichever side of the race wins (§6.6, #435) beside the declarative read-only rule (§5.1, #463), then draft dashboard dependencies (#459), then the Release dialogs post the draft hash they read (§7, #416) beside numeric bound-value assertion feasibility (§3.4, #377) beside the visualizations workspace's tab switches on the shared history helper, the parameter-set decision (§7, #426) beside the pipeline editor runs the shared tab core (§7, #420) beside the Versions tables' created/released relative with the UTC stamp on hover (§7, #422) beside Back/Forward across the dashboards workspace's tab switches (§7, #402) beside the visualizations workspace (§7, #399) beside the dashboards workspace (§5.2's `version`, §7's workspace, #400; #409 closes with it) beside the
 board's small-slot margins and its breakpoint collapse (§6.2, §6.3, #386/#387), 328's release-record judgement (§4.3)
 permissions (§4, lane L1b); the transfer routes and their limits' honest contract (§3.3, lanes L1c/L1c-b/L1c-c: the
 import's atomicity, the RELEASE rules on a landing, the aggregate count ceiling, the wire's per-family arms); the server
@@ -298,15 +298,25 @@ the preview page, the upload and the two tools — is §3.4.1 (#353).
 - **The mechanical check** (§11.3, D56 (b)) is server-run, no browser, sub-second (measured: one case, 1,000
   fixture rows through the deep schema, ~60 ms): the renderer's schema (for Plotly the reduced vendored
   4.1.1 plot-schema — unknown attributes, wrong types and unsupported traces refused with the path), every
-  binding's resolution and per-path type rules, every case's fixtures through the REAL bounded evaluator (a DRAFT
+  binding's resolution and renderer-specific type rules, every case's fixtures through the REAL bounded evaluator (a DRAFT
   transform pin is valid here and in an explicitly selected draft dashboard; published runtime requires RELEASED pins), every projected bound
-  column present in every row, and static assertion feasibility (`trace_count` against `config.data.length`,
+  column present in every row, with explicit null accepted only when its output contract column is nullable,
+  and static assertion feasibility (`trace_count` against `config.data.length`,
   `no_data` against zero produced rows, `text_visible`/`value_visible` strings present in the configuration or
   the bound values). Bound strings and INTEGER/DECIMAL values participate by their existing scalar text
   (for example, `42` and `10.5`), using substring matching without numeric normalization. Locale, currency,
   percent and rounded display text still need the agent's visual check in the preview. The rendered-state
   check records `not_available` today — a headless render check is a later
   lane, and nothing here claims a browser saw anything. The report is stored on the run and RE-RUN at release.
+  Plotly numeric leaves (`y`, `z`, `values`, `size`, `lat`, `lon`, `open`, `high`, `low`, `close`,
+  `weight`, including indexed leaves) accept INTEGER/DECIMAL; BIGINTEGER/BIGDECIMAL string wire values
+  remain refused there. Other Plotly leaves accept any scalar type. Table `columns[n].values` accepts
+  every canonical scalar type, including STRING, BOOLEAN, dates and BIG wire strings. KPI `value` and
+  `comparison.value` retain their scalar compatibility, including BIG wire strings; formatting feasibility
+  still requires visual evidence. For nullable Plotly y/z columns, present nulls remain gaps rather than
+  zeros. An absent bound key is `binding_unbound` even when nullable; a present nonnullable null is
+  `test_case_invalid`. Null supplies no assertion text (including the literal `"null"`). Evaluator refusals
+  retain their own code and case path, and the report keeps its existing failure bound.
 - **At a successful submission the server mints a SECOND, separate capability** for the screenshot upload —
   random, hash-only, bound to the exact run and purpose, expiring no later than the session's original deadline,
   its raw form shown exactly once. Submit revokes the preview and does NOT touch this one; atomic image storage
@@ -943,6 +953,7 @@ change (#426). The templates workspace adopts the helper after #398's rework lan
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-09 | v0.39 | #458/#457 binding contracts — v0.37 in recovery after #460's v0.36, renumbered at merge after #435's v0.37 and #412's v0.38 | **§3.4:** renderer-specific scalar acceptance, Plotly numeric wire restrictions and unchanged KPI compatibility; transform output nullability distinguishes present null from missing keys. Null stays a gap and supplies no assertion text; visual evidence and release revalidation remain required. |
 | 2026-10-09 | v0.38 | #412 the layout breakpoint measures the composite host, default 640 — renumbered in recovery after #460's v0.36, then at merge after #435's v0.37 | **§2.2 and §6.2:** `breakpoint_px` is judged against the composite host's width; a zero-width host holds its stored grid until layout, and the `ResizeObserver` re-places on reveal or a crossing. The default is 640 so a 694 px board at a 1280 px viewport keeps its grid; the reader narrows the board by widening the user-resizable navigation rail (#460's separator, keyboard included), and the crossing stacks it. The client, KDoc and implementation spec use the same rule. |
 | 2026-10-08 | v0.37 | #435 a target the refresh's own abort cancelled reports `abort`, whichever side of the race wins — renumbered at merge after #460's v0.36 | **§6.6:** one paragraph — the target an abort's execution cancel ended reports `abort` in its status frame (the flag is raised before the cancel, so it is readable at record time) and, when the flag became readable only after (another instance), in the terminal frame's `targets`; an execution aborted with no request on the refresh stays an `error` at the `abort` stage (refresh `FAILED`); a delivered `ok` is never rewritten. The rule lives in the engine's two layers (`record`, `finish`); the client is unchanged. |
 | 2026-10-06 | v0.36 | #460 reusable REST navigation | §6.4/§7: one lazy compatible bundle in the signed-in shell, explicit per-container mounts and prepared navigation; standalone bundle choice and refresh cancellation preserved. |
