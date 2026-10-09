@@ -55,7 +55,13 @@ class WorkspaceSwitchOutcomeBrowserTest : BrowserSuite() {
         val workspace = prepareWorkspace()
         page.route("$baseUrl/workspace/switch") { route ->
             val headers = if (location == "none") emptyMap() else mapOf("Location" to location)
-            route.fulfill(Route.FulfillOptions().setStatus(status).setHeaders(headers).setBody("Switch refused"))
+            route.fulfill(
+                Route
+                    .FulfillOptions()
+                    .setStatus(status)
+                    .setHeaders(headers)
+                    .setBody("Switch refused"),
+            )
         }
         try {
             val failure = shouldThrow<AssertionError> { enterWorkspace(page, workspace) }
