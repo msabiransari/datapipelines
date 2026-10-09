@@ -5,7 +5,9 @@ import jakarta.annotation.PostConstruct
 import org.slf4j.LoggerFactory
 import org.springframework.boot.context.properties.bind.Bindable
 import org.springframework.boot.context.properties.bind.Binder
+import org.springframework.boot.convert.DurationStyle
 import org.springframework.core.env.Environment
+import java.time.Duration
 import java.util.Base64
 
 /**
@@ -62,9 +64,10 @@ class ConfigValidator(
          * `ParametersRules.checkParametersBounds` (§3.30). 31 since #279 added
          * `checkRequestLimits` (§3.31). 32 since #10 L1a added
          * `VisualizationRules.checkVisualizationBounds` (§3.33). 33 since #10 L2 added
-         * `DashboardRuntimeRules.checkDashboardRuntimeBounds` (§3.34).
+         * `DashboardRuntimeRules.checkDashboardRuntimeBounds` (§3.34). 34 since #488 added
+         * `checkRedisTimeoutBounds` (§3.1).
          */
-        internal const val CHECK_COUNT = 33
+        internal const val CHECK_COUNT = 34
 
         /**
          * `users.provider` values the system writes itself (`UserService.BOOTSTRAP_PROVIDER`,
@@ -102,6 +105,9 @@ class ConfigValidator(
 
         private const val BYTES_PER_MB = 1024L * 1024L
 
+        /** §3.1 (#488) — the Redis client bounds' ceiling: Lettuce's own command default, never more. */
+        private val REDIS_TIMEOUT_MAX: Duration = Duration.ofSeconds(60)
+
         private val LOOPBACK_HOSTS = setOf("localhost", "127.0.0.1", "::1", "[::1]", "0:0:0:0:0:0:0:1")
 
         /** The §7 rules, against a snapshot. Pure — every branch is unit-tested without Spring. */
@@ -133,6 +139,7 @@ class ConfigValidator(
             checkStagingBudgetPressure(snapshot, warnings)
             checkExecutorQueryTimeoutByDialect(snapshot, violations)
             checkRedisAuthWarning(snapshot, warnings)
+            checkRedisTimeoutBounds(snapshot, violations)
             checkOrgSettings(snapshot, violations)
             TransformRules.checkTransformBounds(snapshot, violations)
             // §3.30 (#194) — the parameter engine's limits, in their own file like the transform bounds.
@@ -799,6 +806,38 @@ class ConfigValidator(
         }
 
         /**
+         * §7 / §3.1 (#488) — the two Redis client bounds must parse as a Duration in
+         * `(0, 60 s]`. Nothing binds the operator keys; Lettuce reads the §3.14 bridge
+         * (`spring.data.redis.timeout` / `.connect-timeout`), which carries the SAME
+         * placeholders — `TestRedisTimeoutParityTest` pins the two blocks to each other — so
+         * judging the operator key judges what Lettuce gets.
+         *
+         * Zero is the silent case: Lettuce 6.6 waits without a bound when the command timeout is
+         * `<= 0` (`Futures.awaitOrCancel`, `CommandExpiryWriter`), restoring the outage stall #482
+         * removed — `RedisZeroCommandTimeoutIntegrationTest` shows it. A blank value binds to null,
+         * which Boot does not apply, leaving Lettuce's own defaults (60 s per command, 10 s to
+         * connect). The ceiling is that 60 s: the default an operator may deliberately restore,
+         * never more. Unset = the yml default. Parsed untrimmed with Boot's own `DurationStyle`, so
+         * this accepts exactly what the binder does.
+         */
+        private fun checkRedisTimeoutBounds(
+            snapshot: ConfigSnapshot,
+            violations: MutableList<String>,
+        ) {
+            listOf(
+                "datapipelines.redis.command-timeout" to snapshot.redisCommandTimeout,
+                "datapipelines.redis.connect-timeout" to snapshot.redisConnectTimeout,
+            ).forEach { (key, raw) ->
+                if (raw == null) return@forEach
+                val parsed = runCatching { DurationStyle.detectAndParse(raw) }.getOrNull()
+                if (parsed == null || parsed <= Duration.ZERO || parsed > REDIS_TIMEOUT_MAX) {
+                    violations +=
+                        "$key is '$raw'; §3.1 requires a duration above 0 and at most 60s."
+                }
+            }
+        }
+
+        /**
          * Reads the snapshot out of the live [Environment] (relaxed binding, per module keys).
          *
          * A flat property-by-property mapping onto every §7-checked key, not complex logic — the
@@ -812,6 +851,8 @@ class ConfigValidator(
                 datasourcePassword = environment.getProperty("spring.datasource.password"),
                 redisHost = environment.getProperty("datapipelines.redis.host"),
                 redisPassword = environment.getProperty("datapipelines.redis.password"),
+                redisCommandTimeout = environment.getProperty("datapipelines.redis.command-timeout"),
+                redisConnectTimeout = environment.getProperty("datapipelines.redis.connect-timeout"),
                 jwtSecret = environment.getProperty("datapipelines.jwt.secret"),
                 dbEncryptionKey = environment.getProperty("datapipelines.db.encryption-key"),
                 // §3.20 — the provider seam. The rotation keys are a MAP whose entries a property
@@ -1065,6 +1106,9 @@ internal data class ConfigSnapshot(
     val datasourcePassword: String?,
     val redisHost: String?,
     val redisPassword: String?,
+    /** §3.1 (#488) — the two client bounds as raw text, so a bad value is a NAMED violation; null = unset. */
+    val redisCommandTimeout: String? = null,
+    val redisConnectTimeout: String? = null,
     val jwtSecret: String?,
     val dbEncryptionKey: String?,
     /** §3.20 — which [co.datapipelines.datasources.crypto.KeyProvider] supplies data keys; unset = `env`. */
@@ -1172,6 +1216,8 @@ internal data class ConfigSnapshot(
             "datasourcePassword=<redacted>, " +
             "redisHost=$redisHost, " +
             "redisPassword=<redacted>, " +
+            "redisCommandTimeout=$redisCommandTimeout, " +
+            "redisConnectTimeout=$redisConnectTimeout, " +
             "jwtSecret=<redacted>, " +
             "dbEncryptionKey=<redacted>, " +
             "dbKeyProvider=$dbKeyProvider, " +
