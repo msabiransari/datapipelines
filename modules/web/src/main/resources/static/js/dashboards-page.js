@@ -166,11 +166,22 @@
     // button, or a drawer that springs open on the next narrowing). The CSS owns the
     // breakpoint — the glue reads its effect (the toolbar's display), never a width of its own.
     var filtersToolbar = scope.querySelector(".dp-board-toolbar");
-    listen(window, "resize", function () {
+    function closeDrawerInColumn() {
       if (drawerOpen && filtersToolbar && window.getComputedStyle(filtersToolbar).display === "none") {
         drawerSet(false, false);
       }
-    });
+    }
+    listen(window, "resize", closeDrawerInColumn);
+    // #492: widening the board by resizing the rail changes the container query without a
+    // window resize. Observe the query container, and read the same CSS effect after layout.
+    var filtersRegion = scope.querySelector(".dp-board-page");
+    if (filtersRegion && typeof window.ResizeObserver === "function") {
+      var filtersObserver = new window.ResizeObserver(closeDrawerInColumn);
+      filtersObserver.observe(filtersRegion);
+      cleanups.push(function () {
+        filtersObserver.disconnect();
+      });
+    }
     // A history snapshot never carries an open drawer: the restored copy mounts closed.
     cleanups.push(function () {
       drawerSet(false, false);
