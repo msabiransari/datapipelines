@@ -62,9 +62,10 @@ class ConfigValidator(
          * `ParametersRules.checkParametersBounds` (§3.30). 31 since #279 added
          * `checkRequestLimits` (§3.31). 32 since #10 L1a added
          * `VisualizationRules.checkVisualizationBounds` (§3.33). 33 since #10 L2 added
-         * `DashboardRuntimeRules.checkDashboardRuntimeBounds` (§3.34).
+         * `DashboardRuntimeRules.checkDashboardRuntimeBounds` (§3.34). 34 since #488 added
+         * `RedisRules.checkRedisTimeoutBounds` (§3.1).
          */
-        internal const val CHECK_COUNT = 33
+        internal const val CHECK_COUNT = 34
 
         /**
          * `users.provider` values the system writes itself (`UserService.BOOTSTRAP_PROVIDER`,
@@ -133,6 +134,8 @@ class ConfigValidator(
             checkStagingBudgetPressure(snapshot, warnings)
             checkExecutorQueryTimeoutByDialect(snapshot, violations)
             checkRedisAuthWarning(snapshot, warnings)
+            // §3.1 (#488) — the Redis client bounds, their own file like the request limits.
+            RedisRules.checkRedisTimeoutBounds(snapshot, violations)
             checkOrgSettings(snapshot, violations)
             TransformRules.checkTransformBounds(snapshot, violations)
             // §3.30 (#194) — the parameter engine's limits, in their own file like the transform bounds.
@@ -812,6 +815,8 @@ class ConfigValidator(
                 datasourcePassword = environment.getProperty("spring.datasource.password"),
                 redisHost = environment.getProperty("datapipelines.redis.host"),
                 redisPassword = environment.getProperty("datapipelines.redis.password"),
+                redisCommandTimeout = environment.getProperty("datapipelines.redis.command-timeout"),
+                redisConnectTimeout = environment.getProperty("datapipelines.redis.connect-timeout"),
                 jwtSecret = environment.getProperty("datapipelines.jwt.secret"),
                 dbEncryptionKey = environment.getProperty("datapipelines.db.encryption-key"),
                 // §3.20 — the provider seam. The rotation keys are a MAP whose entries a property
@@ -1065,6 +1070,9 @@ internal data class ConfigSnapshot(
     val datasourcePassword: String?,
     val redisHost: String?,
     val redisPassword: String?,
+    /** §3.1 (#488) — the two client bounds as raw text, so a bad value is a NAMED violation; null = unset. */
+    val redisCommandTimeout: String? = null,
+    val redisConnectTimeout: String? = null,
     val jwtSecret: String?,
     val dbEncryptionKey: String?,
     /** §3.20 — which [co.datapipelines.datasources.crypto.KeyProvider] supplies data keys; unset = `env`. */
@@ -1172,6 +1180,8 @@ internal data class ConfigSnapshot(
             "datasourcePassword=<redacted>, " +
             "redisHost=$redisHost, " +
             "redisPassword=<redacted>, " +
+            "redisCommandTimeout=$redisCommandTimeout, " +
+            "redisConnectTimeout=$redisConnectTimeout, " +
             "jwtSecret=<redacted>, " +
             "dbEncryptionKey=<redacted>, " +
             "dbKeyProvider=$dbKeyProvider, " +
