@@ -147,21 +147,10 @@ class SchedulesShotsBrowserTest : BrowserSuite() {
             v.fill("#login-password", viewer.oneTimePassword)
             v.click("form button[type=submit]")
             v.waitForURL("**/dashboard")
-            // The switch is a form POST that re-issues the session: wait for ITS answer, not for a
-            // URL the page is already on.
-            v.waitForResponse({ it.url().contains("/workspace/switch") }) {
-                v.selectOption("#workspace-switcher", arrayOf(ws), Page.SelectOptionOptions().setForce(true))
-            }
-            // The switch's answer REDIRECTS: a completed response is not a completed navigation, so
-            // the schedules navigation below raced the redirect and was interrupted by it (#354's
-            // red: "navigation interrupted by another navigation to /dashboard"). Wait for the
-            // redirect to LAND, naming the state on a timeout.
-            try {
-                v.waitForURL("**/dashboard")
-            } catch (e: com.microsoft.playwright.PlaywrightException) {
-                throw AssertionError("the workspace switch's redirect never landed (still at ${v.url()})", e)
-            }
-            v.waitForLoadState()
+            // The page is already at /dashboard, so a URL wait is satisfied by the document from
+            // BEFORE the switch and the schedules navigation raced the redirect (#354). The fixture
+            // waits for the switch's own response and the redirected document.
+            enterWorkspace(v, ws)
             v.navigate("$baseUrl/schedules?id=$main")
             v.locator("#schedule-detail .sch-runrow").first().waitFor()
             v.waitForFunction("() => document.fonts.ready.then(() => document.fonts.status === 'loaded')")
