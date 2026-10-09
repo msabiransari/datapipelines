@@ -866,14 +866,20 @@ tree had just linked; it does not any more. The five tabs:
   version declared on its script tag (§6.4; the same read the client's bootstrap performs),
   the glue (`static/js/dashboards-page.js`) booting the runtime with the FILTERS panel as the
   adapter's `parametersContainer` (§6.2 — the parameters pane lives BESIDE the chart container,
-  never inside it, so no adapter's mount scope claims it; below 1100 px the panel is a drawer
-  announced by the toolbar's Filters button, opened from it and closed on Escape with focus
-  returned) — the refusal region, and beneath the board the ACTIVITY DOCK: three tabs (Events,
-  the live witness's events, `scope: "dashboard"` only; Errors, the error slice; History, the
-  refreshes partial rendered AT LOAD — the same read the Refreshes tab's fragment route serves,
-  whose bounded poll keeps it fresh) with count badges, a view-only Clear and a collapse; a
-  splitter drags the dock's height. Navigation onto it is never boosted; disposal stays the
-  `htmx:beforeHistorySave` hook (which also unwires the drawer's Escape handler).
+  never inside it, so no adapter's mount scope claims it and §2.2's breakpoint measures the
+  board beside it; below 1100 px the panel is a drawer announced by the toolbar's Filters
+  button, opened from it and closed on Escape or on leaving the Board tab with focus returned;
+  with no visible parameter — none declared, or every one hidden by the server's state — the
+  page reserves no panel and shows no trigger, and a change re-fits the charts) — the refusal
+  region, and beneath the board the ACTIVITY DOCK: three tabs (Events, the live witness's
+  events, `scope: "dashboard"` only; Errors, the error slice; History, the refreshes partial
+  rendered AT LOAD — the same read the Refreshes tab's fragment route serves, whose bounded poll
+  keeps it fresh) with count badges, a view-only Clear and a collapse; a splitter drags the
+  dock's height. Arrivals use prepared main-content navigation (§6.4, #460): the board mounts
+  per arrival without a document load. Disposal stays the `htmx:beforeHistorySave` hook, which
+  also runs the mount's teardown — the drawer's Escape and the splitter's drag listeners, the
+  tab-leave and filters observers, the dock's dragged height — so a board revisited in-shell
+  holds one listener set.
 - **Overview** — the viewed version's definition, read-only: the sources with their pinned
   pipeline versions and statuses, the parameter set, the pinned visualizations with each
   pin's status, and the layout summary. DRAFT pins are available during draft preview and
@@ -965,6 +971,7 @@ change (#426). The templates workspace adopts the helper after #398's rework lan
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-09 | v0.40 | #473 the board's filters panel, chart cards and activity dock — rebased in recovery onto #460's v0.36 and #412's v0.38, renumbered after #458's v0.39 | **§6.1/§6.2:** `adapters(container, { parametersContainer })` mounts the parameters pane in a host-supplied element; every occurrence renders in a card (heading from the pinned `display_name`, optional description, renderer body, status foot). **§6.6:** the border carries the state, a failure's loud accent settles after 3 s while its in-card message stays, ready shows no badge. **§7:** the Board tab's filters panel/drawer (absent with no visible parameter), the bottom dock, and the mount's teardown under prepared navigation; the stale "never boosted" sentence corrected. |
 | 2026-10-09 | v0.39 | #458/#457 binding contracts — v0.37 in recovery after #460's v0.36, renumbered at merge after #435's v0.37 and #412's v0.38 | **§3.4:** renderer-specific scalar acceptance, Plotly numeric wire restrictions and unchanged KPI compatibility; transform output nullability distinguishes present null from missing keys. Null stays a gap and supplies no assertion text; visual evidence and release revalidation remain required. |
 | 2026-10-09 | v0.38 | #412 the layout breakpoint measures the composite host, default 640 — renumbered in recovery after #460's v0.36, then at merge after #435's v0.37 | **§2.2 and §6.2:** `breakpoint_px` is judged against the composite host's width; a zero-width host holds its stored grid until layout, and the `ResizeObserver` re-places on reveal or a crossing. The default is 640 so a 694 px board at a 1280 px viewport keeps its grid; the reader narrows the board by widening the user-resizable navigation rail (#460's separator, keyboard included), and the crossing stacks it. The client, KDoc and implementation spec use the same rule. |
 | 2026-10-08 | v0.37 | #435 a target the refresh's own abort cancelled reports `abort`, whichever side of the race wins — renumbered at merge after #460's v0.36 | **§6.6:** one paragraph — the target an abort's execution cancel ended reports `abort` in its status frame (the flag is raised before the cancel, so it is readable at record time) and, when the flag became readable only after (another instance), in the terminal frame's `targets`; an execution aborted with no request on the refresh stays an `error` at the `abort` stage (refresh `FAILED`); a delivered `ok` is never rewritten. The rule lives in the engine's two layers (`record`, `finish`); the client is unchanged. |

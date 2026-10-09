@@ -1,6 +1,6 @@
 # REST API + SSE Specification
 
-**Status:** v2.89 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
+**Status:** v2.90 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
 **Last updated:** 2026-10-08
@@ -2797,6 +2797,7 @@ browser persistence. Clients must reject foreign/stale responses even after abor
 
 ## Appendix A: Change Log
 
+| 2026-10-09 | v2.90 | #473 runtime config card metadata — rebased in recovery after #419's v2.89 | **§23.3** (additive): each `visualizations[]` entry of `GET /{id}/runtime/config` carries the PINNED version's `display_name` and `description` (`display_name` is required on the body; `description` is null when the pinned body has none), read from the version the configuration pins, never today's artifact record. |
 | 2026-10-08 | v2.89 | 419 (#419) the parameter-sets flat listing takes `q` — renumbered at recovery after #417 took v2.79 while the lane sat, and at merge after #462's v2.87 and #460's v2.88 | **§21.2's `GET /api/v1/parameter-sets` row**: the existing flat handler gains an optional `q` — additive only, blank/absent `q` is today's listing byte for byte. A non-blank `q` limits the listing to the lensed sets whose name, display name or description contains it, case-insensitively (names are paths, so `q` matches the full path) through the same `ParameterSetService.search` the pages use, and the `total` stays lens-true. A `q` under `?prefix=` is ignored — the §5.7 pipelines rule; no new route, handler, field, status code or permission ([MCP §6.2.44](mcp-server.md) v1.72). |
 | 2026-10-06 | v2.88 | 460 merge follow-up — the section #460 added without a row — renumbered at merge after #462's v2.87 | **§24 added (additive)**: `GET /api/v1/{pipelines,templates,dashboards,visualizations,parameter-sets}/tree` and `/tree/search`, session-only first-party navigation reads under each family's existing read permission — keyset pages of at most 200 immediate folders and artifacts (folders first, binary path order) under a 1 MiB response budget, literal case-insensitive name search with every ancestor a match needs, signed continuations bound to the request, the actor, the workspace and the lens, `Cache-Control: no-store`, and a 503 rather than an empty level when the promotion view is unavailable. No existing route, shape or code changed. |
 | 2026-10-06 | v2.87 | #462 draft purge pins | §5.11 and §5.14: 409 `pipeline.version.pinned` on both draft purges, named blockers, sole/nonsole scope, hash precedence and unchanged stored state on refusal. |
