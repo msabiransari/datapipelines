@@ -463,6 +463,36 @@ class ParameterSetServiceIntegrationTest {
         }
 
         @Test
+        fun `a needle of MAX_QUERY_LENGTH characters searches on both lenses and one more is refused before any read (#490)`() {
+            val limit = ParameterSetService.MAX_QUERY_LENGTH
+            val bounded = "q".repeat(limit)
+            val hit = h.create(setWith("acme/sales/long_hit", "Long hit", bounded))
+            h.service.release(WORKSPACE, hit.record.id, hit.detail.bodyHash, AUTHOR)
+            val lens = ReadLens.Only(setOf("acme/sales/long_hit"))
+
+            // 200 characters is a search like any other — the SQL arm and the in-memory arm both answer it,
+            // and the bound is measured AFTER the trim, so surrounding blanks never push a term over it.
+            for (view in listOf(ReadLens.Everything, lens)) {
+                h.service.search(WORKSPACE, view, bounded, 0, 50).map { it.record.name } shouldBe listOf("acme/sales/long_hit")
+                h.service.countSearch(WORKSPACE, view, "  $bounded  ") shouldBe 1
+            }
+
+            // 201 is refused on both reads and both lenses with ONE typed failure carrying the two numbers.
+            val over = bounded + "q"
+            for (view in listOf(ReadLens.Everything, lens)) {
+                listOf(
+                    shouldThrow<ParameterSetQueryTooLongException> { h.service.search(WORKSPACE, view, over, 0, 50) },
+                    shouldThrow<ParameterSetQueryTooLongException> { h.service.countSearch(WORKSPACE, view, " $over ") },
+                ).forEach { refused ->
+                    refused.code shouldBe ParameterErrorCodes.QUERY_TOO_LONG
+                    refused.details shouldBe mapOf("limit" to limit, "length" to limit + 1)
+                    // The length is reported, the needle never reflected into the error.
+                    (refused.message ?: "").contains(over) shouldBe false
+                }
+            }
+        }
+
+        @Test
         fun `the search keeps the listing's D55 rule - a draft-only set matches under the everything lens and is absent under the lens`() {
             h.create(setWith("acme/sales/draft_hit", "Draft hit", "Never released."))
 

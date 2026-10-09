@@ -23,6 +23,8 @@ import co.datapipelines.typesystem.DatapipelinesException
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -209,6 +211,35 @@ class ParameterSetsToolsTest {
                     .call(McpArguments(mapOf("q" to 5)), ctx)
             }
         refusal.jsonRpcError.code() shouldBe McpArguments.INVALID_PARAMS
+    }
+
+    /**
+     * #490 — the tool over the REAL service (only its repository mocked), because the bound is the
+     * service's: a `q` of [ParameterSetService.MAX_QUERY_LENGTH] searches, one more is `-32602` naming
+     * the limit and the length — never a tool result, never the term echoed, nothing read.
+     */
+    @Test
+    fun `parameter_sets_list refuses a q over the service's bound as invalid params and searches one at it`() {
+        every { repository.searchAll(workspaceId, any(), any(), any()) } returns emptyList()
+        every { repository.countSearchAll(workspaceId, any()) } returns 0
+        val tool = ParameterSetsListTool(ParameterSetService(repository, mockk(), mockk(), mockk(), mockk()), McpFixtures.EVERYTHING_LENS)
+        val limit = ParameterSetService.MAX_QUERY_LENGTH
+        val bounded = "r".repeat(limit)
+
+        val answer = tool.call(McpArguments(mapOf("q" to bounded)), ctx) as Map<*, *>
+        answer["total"] shouldBe 0
+        verify(exactly = 1) { repository.searchAll(workspaceId, bounded, 0, 50) }
+
+        val over = bounded + "r"
+        val refusal = shouldThrow<McpError> { tool.call(McpArguments(mapOf("q" to over)), ctx) }
+        refusal.jsonRpcError.code() shouldBe McpArguments.INVALID_PARAMS
+        val message = refusal.jsonRpcError.message()
+        message shouldContain "at most $limit"
+        message shouldContain "${limit + 1} characters"
+        message shouldContain ParameterErrorCodes.QUERY_TOO_LONG
+        message shouldNotContain over
+        verify(exactly = 0) { repository.searchAll(workspaceId, over, any(), any()) }
+        verify(exactly = 0) { repository.countSearchAll(workspaceId, over) }
     }
 
     @Test

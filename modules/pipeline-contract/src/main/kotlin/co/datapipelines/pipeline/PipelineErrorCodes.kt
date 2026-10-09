@@ -1661,6 +1661,8 @@ object PipelineErrorCodes {
 
         const val SELECTOR_ORDER_BY_MISSING = "parameter.validation.selector_order_by_missing"
 
+        const val QUERY_TOO_LONG = "parameter.validation.query_too_long"
+
         const val EVALUATE_UNKNOWN_PARAMETER = "parameter.evaluate.unknown_parameter"
 
         const val EVALUATE_TOO_MANY_VALUES = "parameter.evaluate.too_many_values"

@@ -1,9 +1,9 @@
 # Pipeline Contract Specification
 
-**Status:** v1.55 (revised — see Change Log)
+**Status:** v1.56 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
-**Last updated:** 2026-10-06
+**Last updated:** 2026-10-09
 
 ---
 
@@ -1515,6 +1515,7 @@ The parameter engine's refusals (#194; the [parameter-engine design record](supe
 | `parameter.validation.selector_value_type_mismatch` | 400 | the selector's `value` column type does not pass the record's §6.4 against the declared type (decided from metadata, never rows); `details.hint` |
 | `parameter.validation.input_source_multiple_rows` | 400 | a database-fed `INPUT`'s template returned two or more rows at save's dry run against its parents' defaults (owner ruling 2026-09-27; the record's §4 step 6 — the save-time twin of `parameter.evaluate.input_source_multiple_rows`) |
 | `parameter.validation.selector_order_by_missing` | 400 | a `SELECT`'s rendered SQL carries no `ORDER BY` (P7 — the check proves a clause is present, not that the order is total) |
+| `parameter.validation.query_too_long` | 400 | a listing search's `q` (`GET /api/v1/parameter-sets?q=`, MCP `parameter_sets_list {q}`) over 200 characters after the trim (#490) — refused before any read, `details.limit` / `details.length`; the needle is never echoed. On MCP the refusal is JSON-RPC `-32602` (an argument to fix), never a tool result; the web UI's search boxes truncate to the same bound and never meet it |
 | `parameter.evaluate.unknown_parameter` | 400 | a `selections` key names no parameter of the set — the whole request is refused (the caller's error) |
 | `parameter.evaluate.too_many_values` | — | not an error response — reported per parameter in `state.errors[]` of a 200 evaluate: a `MULTI` longer than `max-multi-bind-values` |
 | `parameter.evaluate.too_many_binds` | — | not an error response — per parameter in `state.errors[]`: a rendered statement over `max-binds-per-statement` placeholders, every expanded one counted |
@@ -1874,6 +1875,7 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-09 | v1.56 | 490 (#490) the search needle's bound | §13.20 gains `parameter.validation.query_too_long` (400): the parameter-set listing search refuses a `q` over 200 characters after the trim on REST, and on MCP as `-32602`, `details.limit`/`details.length`, the needle never echoed; the bound is `ParameterSetService.MAX_QUERY_LENGTH`, the number the UI boxes already truncated to. Landed in the same commit as its constants and catalog row (§13 row count 376 → 377). |
 | 2026-10-06 | v1.55 | #462 draft purge pins | §13 pinned-error row states sole-draft dashboard history scope and refusal before destructive writes. |
 | 2026-10-06 | v1.54 | 459 (#459) + merge follow-up | **§4.9 / §12.9 / the error table**, written by the lane: a PIPELINE node may pin a live DRAFT child while the parent is a draft, and release and import still require RELEASED children (`pipeline_reference_not_released`). Composition verdicts describe a draft child's current body, and release revalidates them. The follow-up adds this row and the bump. The error row's old reason ("a DRAFT child can be purged out from under its parent") still holds for drafts: the pipeline draft purges have no pin guard yet (versioning §3 rule 3, #462). |
 | 2026-10-04 | v1.53 | #382 merge follow-up | **§13.21** — the strict-reader sentence names five routes that bind a typed request DTO, `POST /dashboards/bindings` added (#382 moved it onto the reader; #382 review F1). No code, status or error shape changed. |

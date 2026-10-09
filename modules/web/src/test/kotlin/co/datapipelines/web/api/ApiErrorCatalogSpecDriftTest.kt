@@ -316,8 +316,12 @@ class ApiErrorCatalogSpecDriftTest {
          * the SAME commit as its constants (pipeline-contract v1.49).
          *
          * 375 → 376 with #442a: schedule.validation.notifications_invalid (400).
+         *
+         * 376 → 377 with #490: §13.20 gains `parameter.validation.query_too_long` (400 — the
+         * parameter-set search needle over its bound), landed in the SAME commit as its constants
+         * (pipeline-contract v1.56). Re-derived from the document's own parse.
          */
-        const val SECTION_13_ROW_COUNT = 376
+        const val SECTION_13_ROW_COUNT = 377
 
         /**
          * §12's distinct validation codes.

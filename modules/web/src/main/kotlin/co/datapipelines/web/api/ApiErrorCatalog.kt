@@ -1,5 +1,6 @@
 package co.datapipelines.web.api
 
+import co.datapipelines.parameters.ParameterSetService
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.scheduler.ScheduleErrorCodes
 import org.springframework.http.HttpStatus
@@ -558,6 +559,10 @@ object ApiErrorCatalog {
                 "This template is still used by a pipeline, a parameter set or a visualization, so it can't be removed yet.",
             PipelineErrorCodes.Parameters.IN_USE to
                 "This parameter set is still used by a dashboard, so it can't be removed yet.",
+            // #490 — a search refusal, not a document one: the `parameter.validation.` family line
+            // ("every problem is listed with the field it concerns") would describe a set nobody sent.
+            PipelineErrorCodes.Parameters.QUERY_TOO_LONG to
+                "That search term is too long. Search with ${ParameterSetService.MAX_QUERY_LENGTH} characters or fewer.",
             PipelineErrorCodes.Datasource.DUPLICATE_NAME to
                 "A connection with that name already exists. Pick a different name.",
             PipelineErrorCodes.Datasource.NOT_FOUND to
