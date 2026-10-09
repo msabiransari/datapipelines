@@ -80,6 +80,7 @@ STRICT="${2:-}"
 cd "$(dirname "$0")/.." || exit 2
 ROOT="$PWD"
 # Shared with pregate, including other worktrees; refuse before clearing evidence.
+# A gate holds every slot (fd 9, 10) and the pre-#485 lock (fd 11): exclusive (#485).
 source "$ROOT/scripts/lib/verification-lock.sh"
 verification::lock gate "$ROOT" || exit $?
 LOGDIR="$ROOT/.gate-logs"
@@ -120,7 +121,7 @@ read -r -a GATE_EXTRA_ARGS <<< "${GATE_GRADLE_ARGS:-}"
 
 run() { # run <logfile> <args...>  → echoes exit code, never pipes gradle
   local log="$1"; shift
-  ./gradlew "$@" -Pdp.browser.ciPatience=true "${GATE_EXTRA_ARGS[@]}" 9>&- > "$log" 2>&1
+  ./gradlew "$@" -Pdp.browser.ciPatience=true "${GATE_EXTRA_ARGS[@]}" 9>&- 10>&- 11>&- > "$log" 2>&1
   echo $?
 }
 
@@ -219,6 +220,21 @@ case "$(gate_classify_buildsrc "$btest" "$LOGDIR/buildsrc-test.log" "$ROOT/build
     echo "  buildSrc tests  EXIT=$btest  (genuine failure; log: $LOGDIR/buildsrc-test.log)"
     ;;
 esac
+
+# ---- wrapper safety self-test (#485) ------------------------------------------
+# The verification-slot, pregate planner and evidence guards: fixture wrappers with
+# a recording Gradle stand-in and their own cache dir, so no JVM starts and the
+# gate's held slots are not contended. No crash class: a non-zero exit is a FAIL.
+echo
+stest=0
+./scripts/pregate.sh --self-test 9>&- 10>&- 11>&- > "$LOGDIR/pregate-selftest.log" 2>&1 || stest=$?
+if [ "$stest" -eq 0 ]; then
+  echo "  pregate self-test  PASS — slots, floor, planner and evidence guards (log: $LOGDIR/pregate-selftest.log)"
+else
+  fails=$((fails + 1))
+  echo "  pregate self-test  EXIT=$stest  (log: $LOGDIR/pregate-selftest.log)"
+  grep -E 'FAIL' "$LOGDIR/pregate-selftest.log" | head -n 5 | sed 's/^/             /' || true
+fi
 
 # ---- security assurance (#217; record §10.2, owner decision P1) ---------------------
 # The local merge gate is the enforcement point (P1: direct push), so the security

@@ -24,6 +24,9 @@ if [ "$help" -eq 1 ]; then
 fi
 if [ "$selftest" -eq 1 ]; then
   [ "$#" -eq 1 ] || { usage >&2; exit 2; }
+  # Fixture wrappers start no JVM: the box's free memory must not decide this verdict
+  # (CI's 7 GB runner sits under the default floor). The floor's own cases set it.
+  export DATAPIPELINES_VERIFICATION_MEM_FLOOR_MB=0
   (pg2b::self_test); s_sel=$?
   (pgres::self_test); s_res=$?
   bash "$ROOT/scripts/pregate-safety-test.sh"; s_safe=$?
