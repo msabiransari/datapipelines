@@ -117,29 +117,38 @@ class DashboardGridRowUnitBrowserTest : DashboardBrowserSuite() {
     }
 
     @Test
-    fun `opening the pipelines tree stacks a narrow board and closing it restores the stored grid`() {
+    fun `widening the navigation rail stacks a narrow board and resetting it restores the stored grid`() {
         startTrace()
         val root = ready("dprowtree")
         val board = seedBoardWithGrid(root)
         page.setViewportSize(DESKTOP_WIDTH_PX, VIEWPORT_HEIGHT_PX)
         openBoard(board, THEMES.first())
 
-        page.locator("[data-nav-branch='pipelines'] [data-nav-tree-toggle]").click()
+        // The reader's rail control is the board host's narrowing cause: the rail is user-resizable
+        // (#460's separator; owner ruling 2026-10-09 — the Pipelines tree no longer reflows the page,
+        // it opens inside the rail). Two shifted presses take the rail from 232 to 332 px, the board
+        // from ~694 to ~594 px — one crossing below the 640 default. Home resets the rail to 232.
+        val separator = page.locator("#rail-resize")
+        separator.focus()
+        page.keyboard().press("Shift+ArrowRight")
+        page.keyboard().press("Shift+ArrowRight")
         page.waitForFunction(
             "() => { var board = document.querySelector('#dp-board .dp-dashboard'); " +
                 "return !!board && board.getBoundingClientRect().width > 0 && board.getBoundingClientRect().width < 640; }",
         )
         page.waitForFunction(SETTLED_JS, mapOf("scope" to BOARD_SCOPE, "slots" to BOARD_SLOTS.keys.toList(), "full" to true))
-        val narrow = measure(page, BOARD_SCOPE, BOARD_SLOTS_ALL.keys, "tree/open/$DESKTOP_WIDTH_PX")
-        record("tree=open viewport=$DESKTOP_WIDTH_PX boardWidth=${narrow.boardWidth} columns=full")
+        val narrow = measure(page, BOARD_SCOPE, BOARD_SLOTS_ALL.keys, "rail/wide/$DESKTOP_WIDTH_PX")
+        record("rail=wide viewport=$DESKTOP_WIDTH_PX boardWidth=${narrow.boardWidth} columns=full")
         (narrow.boardWidth < BREAKPOINT_PX) shouldBe true
         assertColumns(narrow, BOARD_SLOTS_ALL.keys.associateWith { GRID_COLUMNS })
         assertStackedInGridOrder(narrow, BOARD_GRID_ORDER)
 
-        page.locator("[data-nav-branch='pipelines'] [data-nav-tree-toggle]").click()
+        separator.focus()
+        page.keyboard().press("Home")
         page.waitForFunction(SETTLED_JS, mapOf("scope" to BOARD_SCOPE, "slots" to BOARD_SLOTS.keys.toList(), "full" to false))
-        val restored = measure(page, BOARD_SCOPE, BOARD_SLOTS_ALL.keys, "tree/closed/$DESKTOP_WIDTH_PX")
-        record("tree=closed viewport=$DESKTOP_WIDTH_PX boardWidth=${restored.boardWidth} columns=stored")
+        val restored = measure(page, BOARD_SCOPE, BOARD_SLOTS_ALL.keys, "rail/home/$DESKTOP_WIDTH_PX")
+        record("rail=home viewport=$DESKTOP_WIDTH_PX boardWidth=${restored.boardWidth} columns=stored")
+        (restored.boardWidth >= BREAKPOINT_PX) shouldBe true
         assertColumns(restored, BOARD_STORED_COLUMNS)
         drainCspViolations().shouldBeEmpty()
     }
