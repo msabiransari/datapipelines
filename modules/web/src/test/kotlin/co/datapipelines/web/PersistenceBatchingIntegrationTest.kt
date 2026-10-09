@@ -70,6 +70,7 @@ import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
@@ -388,9 +389,8 @@ class PersistenceBatchingIntegrationTest {
         var submitRefused = false
         try {
             holdingLock(SharedPostgres.postgres.jdbcUrl, "audit_log") { release ->
-                val callers = Executors.newFixedThreadPool(CALLERS)
                 val done = CountDownLatch(CALLERS)
-                try {
+                joinedPool(CALLERS, beforeJoin = release) { callers ->
                     repeat(CALLERS) { n ->
                         callers.execute {
                             logger.log("persistence.it.saturation", keyId = "k_saturation", details = mapOf("marker" to marker, "n" to n))
@@ -408,10 +408,6 @@ class PersistenceBatchingIntegrationTest {
                     Thread.sleep(SATURATION_HOLD_MS)
                     release()
                     done.await(1, TimeUnit.MINUTES) shouldBe true
-                } finally {
-                    release()
-                    callers.shutdown()
-                    callers.awaitTermination(1, TimeUnit.MINUTES) shouldBe true
                 }
             }
             depthSeen shouldBe QUEUE_BOUND.toDouble()
@@ -788,6 +784,25 @@ class PersistenceBatchingIntegrationTest {
                 block(release)
             } finally {
                 release()
+            }
+        }
+
+        /**
+         * Runs [block] on a fixed pool of [threads]; even when it throws, [beforeJoin] runs (e.g. a
+         * [holdingLock] release the workers wait on), then the pool shuts down and is joined (#391).
+         */
+        fun joinedPool(
+            threads: Int,
+            beforeJoin: () -> Unit,
+            block: (ExecutorService) -> Unit,
+        ) {
+            val pool = Executors.newFixedThreadPool(threads)
+            try {
+                block(pool)
+            } finally {
+                beforeJoin()
+                pool.shutdown()
+                check(pool.awaitTermination(1, TimeUnit.MINUTES)) { "pool workers did not finish within 1 min" }
             }
         }
 

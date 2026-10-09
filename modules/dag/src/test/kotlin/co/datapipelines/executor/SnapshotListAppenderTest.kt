@@ -98,13 +98,14 @@ class SnapshotListAppenderTest {
         val worker = Executors.newSingleThreadExecutor()
         try {
             capturingLogEvents(logger, appender) {
-                val producer = worker.submit {
-                    repeat(EVENTS) { index ->
-                        logger.info("event=producer n={}", index)
-                        produced.release()
-                        check(next.tryAcquire(WAIT_SECONDS, TimeUnit.SECONDS)) { "reader did not release producer" }
+                val producer =
+                    worker.submit {
+                        repeat(EVENTS) { index ->
+                            logger.info("event=producer n={}", index)
+                            produced.release()
+                            check(next.tryAcquire(WAIT_SECONDS, TimeUnit.SECONDS)) { "reader did not release producer" }
+                        }
                     }
-                }
                 try {
                     repeat(EVENTS) { index ->
                         produced.tryAcquire(WAIT_SECONDS, TimeUnit.SECONDS) shouldBe true
