@@ -553,11 +553,19 @@ class RefreshEngineTest {
 
             withClue("target=${result.targets["v"]} lastStatus=${lastStatusOf("v")} completed=${completedOutcomeOf("v")}") {
                 result.status shouldBe RefreshStatus.ABORTED
-                result.targets.getValue("v") shouldBe TargetOutcome.Aborted
                 lastStatusOf("v") shouldBe "abort"
                 completedOutcomeOf("v") shouldBe "abort"
+                result.targets.getValue("v") shouldBe TargetOutcome.Aborted
             }
             finishes.single().status shouldBe RefreshStatus.ABORTED
+            finishes
+                .single()
+                .summary
+                .path("targets")
+                .path("v")
+                .path("outcome")
+                .asText() shouldBe "abort"
+            audited.single().targets.getValue("v") shouldBe TargetOutcome.Aborted
         }
     }
 
@@ -578,8 +586,9 @@ class RefreshEngineTest {
 
             withClue("target=${result.targets["v"]} lastStatus=${lastStatusOf("v")} completed=${completedOutcomeOf("v")}") {
                 result.status shouldBe RefreshStatus.ABORTED
-                result.targets.getValue("v") shouldBe TargetOutcome.Aborted
+                lastStatusOf("v") shouldBe "error" // the cached remote signal was false at record time
                 completedOutcomeOf("v") shouldBe "abort"
+                result.targets.getValue("v") shouldBe TargetOutcome.Aborted
             }
             finishes.single().status shouldBe RefreshStatus.ABORTED
             finishes
@@ -596,18 +605,29 @@ class RefreshEngineTest {
     @Test
     fun `an abort rewrites only what it cancelled - a target delivered Ok before the abort stays Ok`() {
         runTest {
-            // Two targets: v1's rows deliver at once, v2's execution ends aborted at t=30 after the flag (t=10). The
-            // delivered one is NEVER rewritten; the cancelled one is the abort's; the refresh ends ABORTED.
+            // Ok and ordinary failure settle immediately; a hung target times out at t=1000. The flag rises at
+            // t=1010 and the cancelled source ends at t=1030, before the next watcher poll (t=1100).
+            // Only the cancelled target becomes abort; the delivered Ok, ordinary error and timeout stay intact.
             val body =
                 dashboard(
-                    listOf(source("s1"), source("s2")),
-                    listOf(occurrence("v1", inputs = mapOf("main" to "s1")), occurrence("v2", inputs = mapOf("main" to "s2"))),
+                    listOf(source("s1"), source("s2"), source("s3"), source("s4")),
+                    listOf(
+                        occurrence("v1", inputs = mapOf("main" to "s1")),
+                        occurrence("v2", inputs = mapOf("main" to "s2")),
+                        occurrence("v3", inputs = mapOf("main" to "s3")),
+                        occurrence("v4", inputs = mapOf("main" to "s4"), timeoutSeconds = 1),
+                    ),
                 )
             scripts = {
-                if (it == "s1") Script.Rows(columns("x" to LogicalType.INTEGER), listOf(listOf(1))) else Script.After(30, Script.Aborted)
+                when (it) {
+                    "s1" -> Script.Rows(columns("x" to LogicalType.INTEGER), listOf(listOf(1)))
+                    "s2" -> Script.After(1_030, Script.Aborted)
+                    "s3" -> Script.Fail("pipeline.node.failed")
+                    else -> Script.Hang
+                }
             }
             launch {
-                delay(10)
+                delay(1_010)
                 abortFlag.set(true)
             }
 
@@ -619,6 +639,35 @@ class RefreshEngineTest {
             completedOutcomeOf("v1") shouldBe "ok"
             completedOutcomeOf("v2") shouldBe "abort"
             lastStatusOf("v2") shouldBe "abort"
+            result.targets.getValue("v3") shouldBe TargetOutcome.Error("source", "pipeline.node.failed")
+            result.targets.getValue("v4") shouldBe TargetOutcome.Error("timeout", PipelineErrorCodes.Execution.TIMEOUT)
+            listOf("v3", "v4").forEach { name ->
+                completedOutcomeOf(name) shouldBe "error"
+                lastStatusOf(name) shouldBe "error"
+                audited.single().targets.getValue(name) shouldBe result.targets.getValue(name)
+                finishes
+                    .single()
+                    .summary
+                    .path("targets")
+                    .path(name)
+                    .path("outcome")
+                    .asText() shouldBe "error"
+            }
+            finishes
+                .single()
+                .summary
+                .path("targets")
+                .path("v1")
+                .path("outcome")
+                .asText() shouldBe "ok"
+            finishes
+                .single()
+                .summary
+                .path("targets")
+                .path("v2")
+                .path("outcome")
+                .asText() shouldBe "abort"
+            events.last().shouldBeInstanceOf<RefreshEvent.Completed>().status shouldBe "ABORTED"
         }
     }
 
@@ -747,7 +796,7 @@ class RefreshEngineTest {
         }
 
     @Test
-    fun `a fault in the abort read at a cancelled target's record ends the refresh FAILED - the row is closed, nothing escapes`() =
+    fun `a fault in the abort read at a cancelled target's record ends the refresh FAILED - the row is closed, nothing escapes`() {
         runTest {
             // #435's record-time read sits in the target's own coroutine: the store going away between the job-start
             // check and the execution's end is a bug in the work, ended FAILED at the one boundary — never a target left
@@ -765,6 +814,7 @@ class RefreshEngineTest {
             finishes.single().status shouldBe RefreshStatus.FAILED
             events.last().shouldBeInstanceOf<RefreshEvent.Completed>().status shouldBe "FAILED"
         }
+    }
 
     @Test
     fun `a bug in the work still ends the refresh - the row is closed FAILED and nothing escapes`() =

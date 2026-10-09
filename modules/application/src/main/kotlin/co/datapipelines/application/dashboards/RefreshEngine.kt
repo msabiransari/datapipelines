@@ -406,7 +406,7 @@ class RefreshEngine(
         }
 
         /**
-         * Records [outcome] unless the target already has one — the first outcome wins, and the status frame goes out
+         * Records [reported] unless the target already has one — the first outcome wins, and the status frame goes out
          * at record time. One rule decides WHICH outcome is first (#435): an execution that ended aborted
          * ([cancelledByAbort]) while the refresh's OWN abort is requested was cancelled by that abort, so the target
          * reports `abort`, not the error the cancel's side effect would otherwise record — the outcome must not depend

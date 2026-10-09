@@ -1,6 +1,6 @@
 # Dashboards
 
-**Status:** v0.36 — a target the refresh's own abort cancelled reports `abort` whichever side of the race wins (§6.6, #435) beside the read-only rule is stated as declarative (§5.1, #463), then draft dashboard dependencies (#459), then the Release dialogs post the draft hash they read (§7, #416) beside numeric bound-value assertion feasibility (§3.4, #377) beside the visualizations workspace's tab switches on the shared history helper, the parameter-set decision (§7, #426) beside the pipeline editor runs the shared tab core (§7, #420) beside the Versions tables' created/released relative with the UTC stamp on hover (§7, #422) beside Back/Forward across the dashboards workspace's tab switches (§7, #402) beside the visualizations workspace (§7, #399) beside the dashboards workspace (§5.2's `version`, §7's workspace, #400; #409 closes with it) beside the
+**Status:** v0.36 — a target the refresh's own abort cancelled reports `abort` whichever side of the race wins (§6.6, #435) beside the declarative read-only rule (§5.1, #463), then draft dashboard dependencies (#459), then the Release dialogs post the draft hash they read (§7, #416) beside numeric bound-value assertion feasibility (§3.4, #377) beside the visualizations workspace's tab switches on the shared history helper, the parameter-set decision (§7, #426) beside the pipeline editor runs the shared tab core (§7, #420) beside the Versions tables' created/released relative with the UTC stamp on hover (§7, #422) beside Back/Forward across the dashboards workspace's tab switches (§7, #402) beside the visualizations workspace (§7, #399) beside the dashboards workspace (§5.2's `version`, §7's workspace, #400; #409 closes with it) beside the
 board's small-slot margins and its breakpoint collapse (§6.2, §6.3, #386/#387), 328's release-record judgement (§4.3)
 permissions (§4, lane L1b); the transfer routes and their limits' honest contract (§3.3, lanes L1c/L1c-b/L1c-c: the
 import's atomicity, the RELEASE rules on a landing, the aggregate count ceiling, the wire's per-family arms); the server
@@ -773,13 +773,14 @@ stream's end) decides what really happened: a target whose real outcome was `ok`
 state restored, because a server-aborted target never reports `ok`. The stream stays open through the
 abort either way — the server's own terminal frame, never the click, ends the refresh client-side.
 
-A target the refresh's OWN abort cancelled reports `abort` — in its `visualization_status` frame and in the terminal
-frame's `targets` — whichever ends first, the execution's cancel or the engine's read of the abort flag (#435). The
-route raises the flag before it cancels, so an execution that ends aborted while the refresh's abort is requested is
-recorded as `abort`; when the flag only becomes readable afterwards (another instance's request, read through the
-remote poll), the terminal frame — which is the truth — reports `abort` for it and the chip ends there. An execution
-aborted by anything else, with no request on the refresh (the executor's own abort), is an `error` at the `abort`
-stage and the refresh `FAILED`; a target already delivered `ok` is never rewritten.
+A target the refresh's own abort cancelled ends with the `abort` outcome, whichever ends first: the execution's
+cancel or the engine's read of the abort flag (#435). The route raises the flag before it cancels, so on the owning
+instance the target is recorded as `abort` and its `visualization_status` frame reports `abort`. When the flag only
+becomes readable after the target was recorded (another instance's request, read through the remote poll), the earlier
+status frame can report `error`; once the refresh observes the request and ends `ABORTED`, its terminal frame and
+durable target summary report `abort`, and the chip settles there. An execution aborted with no request on the
+refresh (the executor's own abort) stays an `error` at the `abort` stage and the refresh `FAILED`. A delivered `ok`,
+an ordinary error and a timeout keep their recorded outcomes.
 
 Notifications are structured — `{instanceId, scope, severity, code, message, retryable, recover}` —
 deduplicated per outcome, delivered to the adapter and `options.onNotification`, and recovered ONLY
