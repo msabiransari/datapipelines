@@ -283,6 +283,27 @@ class RefreshStreamRegistryTest {
         abort.requested(local).shouldBeTrue() // no Redis read needed
     }
 
+    @Test
+    fun `the final fresh read - requestedNow - ignores the poll interval, counts as a read and records the read (#489)`() {
+        val id = UUID.randomUUID()
+        abort.register(id)
+
+        abort.requested(id).shouldBeFalse() // read 1: the window starts
+        flags.set = true // another instance raises the flag inside the window
+        abort.requested(id).shouldBeFalse() // the cheap read: cached false, whatever the flag says
+        flags.reads shouldBe 1
+
+        abort.requestedNow(id).shouldBeTrue() // finalization's one honest read, inside the window
+        flags.reads shouldBe 2
+        abort.requested(id).shouldBeFalse() // the fresh read was RECORDED — the window restarted from it
+        flags.reads shouldBe 2
+
+        val local = UUID.randomUUID()
+        abort.triggerLocal(local)
+        abort.requestedNow(local).shouldBeTrue() // a local trigger is fresh by construction: no read
+        flags.reads shouldBe 2
+    }
+
     private class RecordingFlags : RefreshAbortFlags {
         var set = false
         var reads = 0

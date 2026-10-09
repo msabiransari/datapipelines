@@ -148,8 +148,9 @@ class RefreshStreamRegistry(
 /**
  * The [co.datapipelines.application.dashboards.AbortSignal] of this instance: an abort asked for HERE (the disconnect
  * grace, the abort route landing on the owning instance) is a set membership; an abort asked for on ANOTHER instance
- * is the Redis flag ([RefreshAbortFlags]), read at most once per [remotePollMillis] per refresh so the engine's cheap
- * poll never becomes a Redis read per tick.
+ * is the Redis flag ([RefreshAbortFlags]), read at most once per [remotePollMillis] per refresh by [requested] so the
+ * engine's cheap poll never becomes a Redis read per tick — and once more, UNCACHED, at the refresh's end
+ * ([requestedNow], #489): a request raised inside the cache window must still be observed when the refresh finalizes.
  *
  * It also knows which refreshes THIS instance runs ([register] / [forget]): the abort route uses [owns] to abort
  * locally and immediately when it can, and to leave the flag for the owner when it cannot.
@@ -189,6 +190,14 @@ class RefreshAbortSignal(
         val last = lastRemoteRead[refreshId]
         if (last != null && now - last < remotePollMillis) return false
         lastRemoteRead[refreshId] = now
+        return flags.isRequested(refreshId)
+    }
+
+    override fun requestedNow(refreshId: UUID): Boolean {
+        if (refreshId in local) return true
+        // One honest read past the cache (#489), which then counts as A read: the window restarts from it,
+        // so a poll right after is still cached. The engine calls this once per refresh, at its end.
+        lastRemoteRead[refreshId] = nowMillis()
         return flags.isRequested(refreshId)
     }
 }

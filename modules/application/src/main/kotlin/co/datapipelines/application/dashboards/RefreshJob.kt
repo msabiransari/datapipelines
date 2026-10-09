@@ -154,9 +154,19 @@ fun interface RefreshAudit {
     )
 }
 
-/** Has an abort of the refresh been asked for — by the local trigger or by another instance's flag? */
+/**
+ * Has an abort of the refresh been asked for — by the local trigger or by another instance's flag?
+ *
+ * The two reads (#489): [requested] is the cheap one — a remote flag at most once per poll interval, the
+ * signal caching what it reads — and is what the watcher and a target's record poll with. [requestedNow]
+ * ignores any read cache, for the ONE finalization read per refresh end, so a request raised inside the
+ * cache window is still observed when the refresh ends.
+ */
 fun interface AbortSignal {
     fun requested(refreshId: UUID): Boolean
+
+    /** The uncached read; the default degrades to [requested] for a signal with no cache to bypass. */
+    fun requestedNow(refreshId: UUID): Boolean = requested(refreshId)
 }
 
 /** Cancels one running execution (the executor's own cancel path); used when an abort or a deadline stops a source. */
