@@ -55,7 +55,9 @@ class TestRedisTimeoutParityTest {
         TestRedis.CONNECT_TIMEOUT shouldBe DurationStyle.detectAndParse(defaultOf(BRIDGE_CONNECT, CONNECT_VAR))
         val client = TestRedis.clientConfiguration()
         client.commandTimeout shouldBe TestRedis.COMMAND_TIMEOUT
-        client.clientOptions.orElseThrow().socketOptions.connectTimeout shouldBe TestRedis.CONNECT_TIMEOUT
+        client.clientOptions
+            .orElseThrow()
+            .socketOptions.connectTimeout shouldBe TestRedis.CONNECT_TIMEOUT
     }
 
     @Test
@@ -138,29 +140,31 @@ class TestRedisTimeoutParityTest {
     /** Count only top-level nonempty arguments, so nested calls and trailing commas cannot fake a second argument. */
     private fun factoryCalls(source: String): List<FactoryCall> {
         val code = codeOnly(source)
-        return Regex("""\bLettuceConnectionFactory\s*\(""").findAll(code).map { match ->
-            val start = match.range.last + 1
-            var depth = 0
-            var arguments = 0
-            var argumentStart = start
-            var cursor = start
-            while (cursor < code.length) {
-                val char = code[cursor]
-                if (depth == 0 && (char == ',' || char == ')')) {
-                    if (code.substring(argumentStart, cursor).isNotBlank()) arguments++
-                    argumentStart = cursor + 1
-                    if (char == ')') break
-                } else {
-                    when (char) {
-                        '(', '[', '{', '<' -> depth++
-                        ')', ']', '}', '>' -> depth--
+        return Regex("""\bLettuceConnectionFactory\s*\(""")
+            .findAll(code)
+            .map { match ->
+                val start = match.range.last + 1
+                var depth = 0
+                var arguments = 0
+                var argumentStart = start
+                var cursor = start
+                while (cursor < code.length) {
+                    val char = code[cursor]
+                    if (depth == 0 && (char == ',' || char == ')')) {
+                        if (code.substring(argumentStart, cursor).isNotBlank()) arguments++
+                        argumentStart = cursor + 1
+                        if (char == ')') break
+                    } else {
+                        when (char) {
+                            '(', '[', '{', '<' -> depth++
+                            ')', ']', '}', '>' -> depth--
+                        }
                     }
+                    cursor++
                 }
-                cursor++
-            }
-            check(cursor < code.length) { "Unclosed LettuceConnectionFactory call" }
-            FactoryCall(line = source.take(match.range.first).count { it == '\n' } + 1, arguments = arguments)
-        }.toList()
+                check(cursor < code.length) { "Unclosed LettuceConnectionFactory call" }
+                FactoryCall(line = source.take(match.range.first).count { it == '\n' } + 1, arguments = arguments)
+            }.toList()
     }
 
     /** Mask comments (including nested Kotlin block comments) and literals, retaining offsets and newlines. */
@@ -188,7 +192,10 @@ class TestRedisTimeoutParityTest {
         token: String,
     ): Int =
         when (token) {
-            "//" -> source.indexOf('\n', start).takeIf { it >= 0 } ?: source.length
+            "//" -> {
+                source.indexOf('\n', start).takeIf { it >= 0 } ?: source.length
+            }
+
             "/*" -> {
                 var depth = 1
                 var cursor = start + token.length
@@ -200,7 +207,11 @@ class TestRedisTimeoutParityTest {
                 }
                 cursor
             }
-            "\"\"\"" -> source.indexOf(token, start + token.length).takeIf { it >= 0 }?.plus(token.length) ?: source.length
+
+            "\"\"\"" -> {
+                source.indexOf(token, start + token.length).takeIf { it >= 0 }?.plus(token.length) ?: source.length
+            }
+
             else -> {
                 var cursor = start + 1
                 while (cursor < source.length && source[cursor].toString() != token) {
