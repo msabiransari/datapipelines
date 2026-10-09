@@ -270,9 +270,14 @@ class ReusableRestTreeBrowserTest : BrowserSuite() {
         val parents = mutableListOf<String>()
         page.route(java.util.function.Predicate { url -> url.contains("/api/v1/pipelines/tree") }, { route ->
             val parent =
-                URI(route.request().url()).query.orEmpty().split('&')
-                    .firstOrNull { it.startsWith("parent=") }?.substringAfter('=')
-                    ?.let { URLDecoder.decode(it, StandardCharsets.UTF_8) }.orEmpty()
+                URI(route.request().url())
+                    .query
+                    .orEmpty()
+                    .split('&')
+                    .firstOrNull { it.startsWith("parent=") }
+                    ?.substringAfter('=')
+                    ?.let { URLDecoder.decode(it, StandardCharsets.UTF_8) }
+                    .orEmpty()
             parents += parent
             val answer = {
                 val nodes =
@@ -296,7 +301,8 @@ class ReusableRestTreeBrowserTest : BrowserSuite() {
               const row = document.querySelector('#nav-tree-pipelines [data-tree-key="artifact:root/item40"]');
               row.focus(); scroll.scrollTop = 600;
               const folder = document.querySelector('#nav-tree-pipelines [data-tree-key="folder:root"]');
-              window.__refresh = { scroll, row, top: scroll.scrollTop, folder, loading: 0, removed: 0 };
+              const offset = () => Math.round(row.getBoundingClientRect().top - scroll.getBoundingClientRect().top);
+              window.__refresh = { scroll, row, top: scroll.scrollTop, offset, at: offset(), folder, loading: 0, removed: 0 };
               new MutationObserver(records => records.forEach(record => {
                 if ((record.target.textContent || '').includes('Loading')) window.__refresh.loading += 1;
                 record.removedNodes.forEach(node => {
@@ -315,18 +321,21 @@ class ReusableRestTreeBrowserTest : BrowserSuite() {
         // Held: the refetch is in flight and the reader still has every row, the focus and the scroll.
         page.locator("#nav-tree-pipelines [data-tree-key^='artifact:root/item']").count() shouldBe 80
         page.evaluate(
-            "() => document.activeElement === window.__refresh.row && window.__refresh.scroll.scrollTop === window.__refresh.top",
-        ) shouldBe true
+            "() => ({ focus: document.activeElement === window.__refresh.row, scroll: Math.round(window.__refresh.scroll.scrollTop) })",
+        ) shouldBe mapOf("focus" to true, "scroll" to 600)
         page.locator("#nav-tree-pipelines .dp-tree-status").allTextContents().none { it.contains("Loading") } shouldBe true
         hold = false
         held.removeAt(0).invoke()
         page.waitForSelector("#nav-tree-pipelines [data-tree-key='artifact:root/added']")
         parents shouldBe listOf("", "root")
+        // One field per witness, so a red names the one that moved. "added" sorts above the focused row: the
+        // browser's scroll anchoring moves scrollTop by that row so the reader's rows stay put on screen —
+        // the witness is the focused row's place in the viewport, not the raw scrollTop.
         page.evaluate(
-            """() => document.activeElement === window.__refresh.row && window.__refresh.scroll.scrollTop === window.__refresh.top &&
-              window.__refresh.folder === document.querySelector('#nav-tree-pipelines [data-tree-key="folder:root"]') &&
-              window.__refresh.folder.getAttribute('aria-expanded') === 'true'""",
-        ) shouldBe true
+            """() => ({ focus: document.activeElement === window.__refresh.row, rowAt: window.__refresh.offset() - window.__refresh.at,
+              folder: window.__refresh.folder === document.querySelector('#nav-tree-pipelines [data-tree-key="folder:root"]'),
+              expanded: window.__refresh.folder.getAttribute('aria-expanded') })""",
+        ) shouldBe mapOf("focus" to true, "rowAt" to 0, "folder" to true, "expanded" to "true")
         (page.evaluate("() => window.__refresh.loading + window.__refresh.removed") as Number).toInt() shouldBe 0
     }
 

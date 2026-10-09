@@ -348,13 +348,14 @@ class PersistentChartNavigationBrowserTest : VisualizationBrowserSuite() {
         page.waitForFunction("() => !!window.__peInstance && !document.querySelector('.pe-root[x-ignore]')")
         val template = "/templates/test/${root}_chart.sql"
         inShell(template)
-        page.waitForSelector("#tx-dialog")
+        page.waitForFunction("() => !!document.getElementById('tx-dialog')")
         page.goBack()
         page.waitForURL("**/pipelines/$pipeline")
         page.waitForFunction("() => !!window.__peInstance && !document.querySelector('.pe-root[x-ignore]')")
         page.goForward()
-        page.waitForURL("**$template")
-        page.waitForSelector("#tx-dialog")
+        // The template workspace rewrites its query (tab) with replaceState, so the restored URL carries one.
+        page.waitForURL("**$template*")
+        page.waitForFunction("() => !!document.getElementById('tx-dialog')")
         page.evaluate("async () => { const assets = await import('/js/page-assets.mjs'); await assets.mountCharts(); }")
         page.evaluate("() => window.__lifecycleDialogEvaluations") shouldBe 1
     }
@@ -366,7 +367,13 @@ class PersistentChartNavigationBrowserTest : VisualizationBrowserSuite() {
         val attempts = mutableListOf<String>()
         page.route("**/js/datapipelines-dashboard-kpi.js") {
             attempts += it.request().url()
-            it.fulfill(Route.FulfillOptions().setStatus(503).setContentType("text/plain").setBody("unavailable"))
+            it.fulfill(
+                Route
+                    .FulfillOptions()
+                    .setStatus(503)
+                    .setContentType("text/plain")
+                    .setBody("unavailable"),
+            )
         }
         page.navigate("$baseUrl/dashboards/$board")
         page.waitForSelector("#app-main > p.ds-error")
