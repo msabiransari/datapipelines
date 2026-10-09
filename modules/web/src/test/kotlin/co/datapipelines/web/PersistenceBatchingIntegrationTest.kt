@@ -272,6 +272,38 @@ class PersistenceBatchingIntegrationTest {
                     withClue("the replay of $id: $survivors") { survivors shouldBe survivors.distinct().sorted() }
                 }
                 withClue("non-vacuity: the replay served entries to order") { replayed shouldBeGreaterThan 0 }
+                println(
+                    "#486 D4-redis maxEmitMs=${run.maxEmitMs} " +
+                        "replay_log_failures=${rig.count("datapipelines.persistence.failures", "store" to "replay_log")} " +
+                        "replayed=$replayed assertions=passed",
+                )
+            }
+        }
+    }
+
+    @Test
+    fun `a private Redis GET carries the shipped command bound while the server is paused`() {
+        privateRedis().use { redis ->
+            redis.template.opsForValue().get("timeout-probe")
+            val undo = pause(redis.container)
+            val resumed = AtomicBoolean(false)
+            val resumeRedis = { if (resumed.compareAndSet(false, true)) undo() }
+            val recovery = Executors.newSingleThreadScheduledExecutor()
+            val resume = recovery.schedule({ resumeRedis() }, TestRedis.COMMAND_TIMEOUT.toMillis() * 3, TimeUnit.MILLISECONDS)
+            try {
+                val start = System.nanoTime()
+                val result = runCatching { redis.template.opsForValue().get("timeout-probe") }
+                val elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start)
+                val causes = generateSequence(result.exceptionOrNull()) { it.cause }.map { it.javaClass.simpleName }.toList()
+                println("#486 private Redis paused GET elapsed_ms=$elapsedMs causes=$causes")
+                withClue("the private factory must fail with Lettuce's command timeout") {
+                    causes.contains("RedisCommandTimeoutException") shouldBe true
+                }
+                elapsedMs shouldBeLessThan TestRedis.COMMAND_TIMEOUT.toMillis() * 2
+            } finally {
+                resume.cancel(false)
+                resumeRedis()
+                recovery.shutdownNow()
             }
         }
     }
@@ -680,6 +712,7 @@ class PersistenceBatchingIntegrationTest {
         private val factory =
             LettuceConnectionFactory(
                 RedisStandaloneConfiguration(container.host, container.getMappedPort(REDIS_PORT)),
+                TestRedis.clientConfiguration(),
             ).apply { afterPropertiesSet() }
         val template = StringRedisTemplate(factory).apply { afterPropertiesSet() }
 

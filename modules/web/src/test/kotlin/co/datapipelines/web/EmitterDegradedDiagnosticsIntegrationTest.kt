@@ -261,8 +261,10 @@ class EmitterDegradedDiagnosticsIntegrationTest {
                 ).withExposedPorts(6379)
                 .also { it.start() }
         private val factory =
-            LettuceConnectionFactory(RedisStandaloneConfiguration(container.host, container.getMappedPort(6379)))
-                .apply { afterPropertiesSet() }
+            LettuceConnectionFactory(
+                RedisStandaloneConfiguration(container.host, container.getMappedPort(6379)),
+                TestRedis.clientConfiguration(),
+            ).apply { afterPropertiesSet() }
         val template = StringRedisTemplate(factory).apply { afterPropertiesSet() }
 
         override fun close() {
