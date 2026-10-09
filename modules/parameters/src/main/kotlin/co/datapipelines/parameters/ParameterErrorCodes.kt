@@ -3,8 +3,8 @@ package co.datapipelines.parameters
 /**
  * The parameter engine's catalogued error codes — pipeline-contract.md **§13.20**, the single
  * catalog (record §10). `PipelineErrorCodes.Parameters` in `pipeline-contract` carries the same
- * set (the `ApiErrorCatalog` in `web` reads it there, since `web` does not depend on this module
- * yet); `ParameterErrorCodesTest` pins the two equal by reflection and
+ * set, and the `ApiErrorCatalog` in `web` maps its rows from there; `ParameterErrorCodesTest` pins
+ * the two equal by reflection and
  * `ParameterErrorCodesSpecDriftTest` holds this object and §13.20 together in both directions.
  *
  * Codes are additive — never reused, never renamed (§13). Families: `parameter.validation.*` is the
