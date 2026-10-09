@@ -409,13 +409,18 @@ class ParameterSetsController(
     }
 
     /**
-     * §21 — the flat listing (offset/limit), the pipelines §5.7 shape without its owner/datasource
-     * filters. A FLAT read (#312): every set the caller's lens admits, paged — never the ROOT tree
-     * level, whose folder cut would answer `[]` for a grammar where every name carries a folder.
+     * §21 — the flat listing (offset/limit) with the optional `q` name search, the pipelines §5.7
+     * shape without its owner/datasource filters. A FLAT read (#312): every set the caller's lens
+     * admits — or, with a non-blank `q`, the lensed matches (#415's [ParameterSetService.search],
+     * the same three columns the UI searches) — paged, never the ROOT tree level, whose folder cut
+     * would answer `[]` for a grammar where every name carries a folder. A blank/absent `q` IS the
+     * plain listing, and under `?prefix=` the browse handler above is selected by mapping and `q`
+     * is silently ignored — exactly the pipelines pair.
      */
     @GetMapping(params = ["!prefix"])
     @RequiredScope(Permission.PARAMETER_SET_READ)
     fun list(
+        @RequestParam(required = false) q: String? = null,
         @RequestParam(required = false) offset: Int?,
         @RequestParam(required = false) limit: Int?,
     ): ApiResponse<PagedData<Map<String, Any?>>> {
@@ -424,8 +429,10 @@ class ParameterSetsController(
         val principal = currentPrincipal()
         val workspaceId = principal.requireWorkspace().id
         val view = lens.viewFor(principal).parameterSets
-        val loaded = sets.listAll(workspaceId, view, page, size)
-        val total = sets.countAll(workspaceId, view)
+        // `q` travels VERBATIM: the service trims it and reads blank as "no search" (a blank
+        // needle is `listAll`), so the surface never normalizes a term the client sent.
+        val loaded = sets.search(workspaceId, view, q, page, size)
+        val total = sets.countSearch(workspaceId, view, q)
         val items = loaded.map { ParameterSetResponses.listEntry(it) }
         return ApiResponse.of(PagedData(items, Pagination.of(page, size, total.toLong(), items.size)))
     }
