@@ -1,13 +1,4 @@
-<!-- ONE level of the sidebar's Visualizations tree (#399) — partials/dashboard-tree-level.html's
-     shape down to the class names (template-tree.css dresses every tree): server-side prefix
-     queries, one level per request, the root a directory of folders only, nothing assembled in JS.
-
-     Folders are virtual (a name prefix): no folder CRUD anywhere. A leaf NAVIGATES to the
-     workspace /visualizations/{id} as a FULL navigation — hx-boost="false": the workspace page
-     declares one Plotly bundle for the viewed version (dashboards.md §6.4's one-bundle rule).
-
-     Folder expansion is <details>/<summary>; htmx loads the level on the summary's FIRST click
-     only. ARIA: the root list is role=tree; a nested level's container is role=group. -->
+<!-- Artifact and version links use prepared main-content navigation, preserving the sidebar. -->
 <div xmlns:th="http://www.thymeleaf.org" th:fragment="level"
      th:id="${levelId}" class="tpl-level"
      th:attr="role=${#strings.isEmpty(prefix)} ? null : 'group'">
@@ -55,7 +46,7 @@
          version, and an unreleased one carries the draft badge (versioning §7). -->
     <li class="tpl-node" role="none" th:each="v : ${visualizations}">
       <a th:href="@{'/visualizations/' + ${v.id}}" class="tpl-leaf" role="treeitem" aria-selected="false"
-         hx-boost="false"
+         hx-boost="true"
          th:attr="data-leaf-id=${v.id}">
         <svg class="ds-icon ds-icon-sm tpl-row-icon" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#chart-line"></use></svg>
         <span class="tpl-label" th:text="${v.segment}" th:title="${v.name}">revenue_by_region</span>

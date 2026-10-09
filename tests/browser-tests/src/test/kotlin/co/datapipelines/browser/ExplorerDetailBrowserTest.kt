@@ -115,12 +115,29 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
         page.waitForSelector(".tw-root")
     }
 
-    /** #350: the probe pipeline's workspace, reached the same way. */
+    /**
+     * #350: the probe pipeline's workspace, reached the same way.
+     *
+     * #460 correction: the row's click is a PREPARED BOOSTED swap, so `.pe-root` lands before
+     * the editor's runtime has loaded its modules and activated the Alpine component. Its
+     * `data-pe-runtime-epoch` is stamped only after `Alpine.initTree`, which is what binds the
+     * tab buttons and their `@click` handlers; waiting for the root alone let a tab click arrive
+     * first and be dropped (the version row never became visible, #469). This is a readiness
+     * wait, not a sleep — the same observable the editor's own navigation witnesses use.
+     */
     private fun openProbeWorkspace() {
         page.navigate("$baseUrl/pipelines?q=detail_probe")
         page.locator("#pipeline-list-wrapper a.tpl-result").first().click()
         page.waitForURL(PipelineWorkspaceUrl.PATTERN)
         page.waitForSelector(".pe-root")
+        page.waitForSelector(".pe-root[data-pe-runtime-epoch]")
+    }
+
+    /** [openProbeWorkspace] then the Versions tab, with the row actually visible. */
+    private fun openProbeVersions() {
+        openProbeWorkspace()
+        page.locator("#pe-tab-versions").click()
+        page.locator("#pe-pane-versions tr[data-version-row]").first().waitFor()
     }
 
     private fun overflow(): Long =
@@ -426,9 +443,7 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
 
         listOf(1440, 1920, 2560).forEach { width ->
             page.setViewportSize(width, 900)
-            openProbeWorkspace()
-            page.locator("#pe-tab-versions").click()
-            page.locator("#pe-pane-versions tr[data-version-row]").first().waitFor()
+            openProbeVersions()
 
             @Suppress("UNCHECKED_CAST")
             val meta =

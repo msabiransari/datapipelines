@@ -103,6 +103,10 @@ class ParameterSetService(
     private val transactions: TransactionOperations = DIRECT,
     private val newId: () -> UUID = UUID::randomUUID,
 ) {
+    /** Repository-owned, lens-filtered navigation metadata only. */
+    fun navigation(request: co.datapipelines.pipeline.NavigationRequest): List<co.datapipelines.pipeline.NavigationRow> =
+        repository.navigation(request)
+
     // ---- writes ---------------------------------------------------------------------------------------
 
     /** Creates the set as version 1 DRAFT (D55 — a human releases), validated in full (record §4, steps 1–6). */

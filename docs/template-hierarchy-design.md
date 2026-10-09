@@ -1,7 +1,7 @@
 # Template Hierarchy & Typed Templates — v1 Design
 
 **Status:** normative — implemented by rounds 043 (§4 naming, §9.6 addressing), 046 (§5–§7 typing, §10) and 047 (§9 UI: the tree, the create/edit forms, the pipeline-editor reference)
-**Revision:** v1.6 — 2026-09-02 (round 047 implemented §9 — the templates tree, browse-vs-search, the create/edit forms and the pipeline-editor reference — completing the design; the Status line goes NORMATIVE, which also ends its docs-audit check-C exemption. Earlier v1.5: round 046 implemented §5–§7 and §10; the typing migration's stray V7 references corrected to V8 — naming shipped alone as V7 in 043. Earlier v1.4: round 043 implemented §4 naming and §9.6 addressing; §5.1's migration renamed `V8__typed_templates.sql`. Earlier v1.3: §9.6 measured and resolved; UI section §9; hash-input decision §5.2; legacy-name gate §4.6; `html` acceptance bar §2)
+**Revision:** v1.7 — 2026-10-05 (#460: reusable REST sidebar tree and complete ancestor search). Previous v1.6 — 2026-09-02 (round 047 implemented §9 — the templates tree, browse-vs-search, the create/edit forms and the pipeline-editor reference — completing the design; the Status line goes NORMATIVE, which also ends its docs-audit check-C exemption. Earlier v1.5: round 046 implemented §5–§7 and §10; the typing migration's stray V7 references corrected to V8 — naming shipped alone as V7 in 043. Earlier v1.4: round 043 implemented §4 naming and §9.6 addressing; §5.1's migration renamed `V8__typed_templates.sql`. Earlier v1.3: §9.6 measured and resolved; UI section §9; hash-input decision §5.2; legacy-name gate §4.6; `html` acceptance bar §2)
 **Owner:** datapipelines.co core
 **Depends on:** [Templates spec](templates.md), [Pipeline Contract spec](pipeline-contract.md), [Metadata DB spec](metadata-db.md), [Enums](enums.md)
 **Date:** 2026-09-01
@@ -285,19 +285,21 @@ Two screens are affected, and the second is the easy one to miss: the templates 
 
 The screen today is a paged htmx table: `TemplateUiController.list` serves `GET /templates` (`TemplateUiController.kt:20`), `TemplatePartialController` serves the `GET /partials/templates` fragment (`TemplatePartialController.kt:20`), and `templates/list.html:16-35` wires a `q` search box and a `dialect` select at swap root `#template-list-wrapper` with `hx-swap="outerHTML"` and an `htmx-indicator` spinner. (The REST list at `TemplatesController.kt:130` is a different surface — it backs the API, not this screen.)
 
-The tree keeps that contract rather than replacing it:
+Since #398 the tree lives in the global sidebar; `/templates` remains the flat, filtered
+catalog. Since #460 the sidebar uses `GET /api/v1/templates/tree` and `/tree/search`
+through the shared search-and-tree component (ui-screens §3.4, rest-api §24).
 
-- **One level per request.** Expanding a folder issues `hx-get="/partials/templates?prefix=acme/finance"` and swaps that folder's child container. The stable swap root and the OOB/indicator conventions of the existing SPA table (`ui-screens.md` §4.5) carry over unchanged — this is a new fragment shape on an existing surface, not a new surface.
-- **Leaves expand to versions**, with RELEASED/DRAFT lifecycle badges (`V6__version_lifecycle.sql`).
-- **Filters:** `dialect` and `q` keep working; a `type` filter joins them.
-- **The root level holds FOLDERS ONLY (077).** §4.1 requires a folder, so no template sits directly at the root and the level does not query for one. `V12__folder_required.sql` is what makes that true of stored rows: a deployment carrying a flat template name aborts rather than rendering a root the tree cannot represent. Nothing is renamed or reorganized — §4.5 forbids it and §4.6 explains what happens to names that cannot survive a grammar change.
+- Initialization fetches only closed top-level folders. Expanding a folder automatically
+  exhausts bounded pages of its immediate folders and leaves, without fetching grandchildren.
+- Template grammar requires a folder (§4.1, `V12__folder_required.sql`), so templates do
+  not sit directly at the root. Folder and artifact identities stay distinct.
+- Server-side canonical/display-name search returns every match and its ancestors, initially
+  expanded, without browse requests. Clearing search closes all folders to the normal root.
+- Leaves enter `/templates/{name}` through prepared main-content navigation, retaining the
+  rail, loaded rows and query state. The workspace owns version selection.
 
-**Browse vs. search are different presentations (decided, §13.8).** Browsing shows the tree, one level per request. A non-empty `q` shows a **flat result list of full paths**, not a tree pruned to matching leaves: pruning requires walking ancestors of every match, which is precisely the whole-list-in-the-browser work §9.1 forbids, and a flat list of full paths is what a user searching `finance/agg` actually wants to see. Clearing `q` returns to the tree.
-
-**Since #398 the tree lives in the global sidebar** (ui-screens §3.4's Templates branch): the
-same fragments serve one prefix level per request under `scope=nav` in the rail, a leaf is a
-full-document link into the template workspace `/templates/{name}`, and the `/templates` page
-itself is the flat catalog (§9.2's swap-root contract above is the sidebar's now).
+The catalog's `dialect`, `type` and `q` filters keep their existing flat presentation. The old
+prefix fragments remain compatible for existing consumers; they no longer transport sidebar data.
 
 ### 9.3 Create and edit forms
 
@@ -313,7 +315,7 @@ That makes the gap narrower than "add a tree to the picker", and sharper:
 
 1. **The existing display must survive paths.** `acme/finance/monthly_revenue @ v3` in a narrow inspector panel needs single-line truncation with the full path in `title`, not a wrapped or clipped href. Both call sites above, plus the `template-missing` empty state (`partials/pipeline-node-sql.html:34-38`).
 2. **The link itself is the risk** — see §9.6. `encodeURIComponent` is already there and is correct, but correct encoding is not sufficient.
-3. **If a picker is added later** it reuses the §9.2 prefix fragment. It does not get its own client-side tree. Recording this here is the point: the constraint is easy to lose because the picker would be built on a different screen, by a different task, from the one that establishes the rule.
+3. **If a picker is added later** it can mount the shared search-and-tree component with a selection activation target (§9.2). It does not copy the tree implementation. Recording this here is the point: the constraint is easy to lose because the picker would be built on a different screen, by a different task, from the one that establishes the rule.
 
 ### 9.5 Client-side name validation is a convenience, never an authority
 

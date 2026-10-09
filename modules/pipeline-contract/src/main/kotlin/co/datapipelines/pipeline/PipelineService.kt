@@ -110,6 +110,10 @@ open class PipelineService(
 ) {
     private val pinGuard = PipelinePurgePinGuard(pipelines, dashboards)
 
+    /** Repository-owned, lens-filtered navigation metadata only. */
+    open fun navigation(request: co.datapipelines.pipeline.NavigationRequest): List<co.datapipelines.pipeline.NavigationRow> =
+        pipelines.navigation(request)
+
     /** A body that passed §12 validation, paired with the canonical JSON that gets stored. */
     data class ValidatedPipeline(
         val pipeline: Pipeline,

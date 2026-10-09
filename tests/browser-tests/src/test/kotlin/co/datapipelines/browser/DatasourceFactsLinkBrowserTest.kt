@@ -8,20 +8,26 @@ import io.kotest.matchers.string.shouldMatch
 import org.junit.jupiter.api.Test
 
 /**
- * #149 — the datasource facts' source-pipeline link opens the editor as a FULL document load.
- * The editor cannot initialise on a boosted swap: Alpine binds the component the moment the
- * swapped markup lands, before the editor's scripts execute, and every binding throws (159's
- * live symptom) — the reason every other route into the editor is `hx-boost="false"`. The
- * facts link was the one `<a>` into the editor that still boosted; it carries
- * `hx-boost="false"` like its siblings (301 #149).
+ * #460 correction — the datasource facts' source-pipeline link opens the editor IN THE
+ * PERSISTENT SHELL, and the editor mounts and runs there.
  *
- * Red on the pre-fix tree reproduces the issue's own evidence: the navigation entry still
- * names /datasources (a boosted swap, not a load), the canvas never mounts, and the page
- * errors carry `pipelineEditor is not defined`.
+ * #149's original rule required a FULL document load because, before #460, a boosted swap
+ * landed the editor's markup while Alpine bound the component before its scripts had executed,
+ * so no canvas mounted (159's live symptom). #460's runtime loads the editor's modules in order
+ * and activates the component on the boosted arrival — its `data-pe-runtime-epoch` is stamped
+ * only after `Alpine.initTree` — so the transport expectation is replaced by the stronger
+ * in-shell contract: the SAME document and rail survive the click (no reload), the canonical
+ * workspace URL is admitted, the component mounts with real node geometry, and a permitted Run
+ * reaches Completed.
+ *
+ * On the pre-fix tree the click is a same-document swap and the reader is left on /datasources
+ * (the transport mismatch the lander refused); forcing the old full-document transport instead
+ * detaches the document and rail, so the rail-identity guard goes red. Both falsifications are
+ * recorded in the handback.
  */
 class DatasourceFactsLinkBrowserTest : BrowserSuite() {
     @Test
-    fun `the facts' source-pipeline link opens the editor as a full document load`() {
+    fun `the facts' source-pipeline link opens the editor in the persistent shell and runs`() {
         startTrace()
         val wsName = "dfl149-" + generatedPassword("w").take(8).lowercase()
         val email = uniqueEmail("dfl149-" + generatedPassword("u").take(8))
@@ -49,18 +55,46 @@ class DatasourceFactsLinkBrowserTest : BrowserSuite() {
             link.count() shouldBeGreaterThan 0
         }
 
-        link.first().click()
-        // The editor's root exists on BOTH legs — swapped (the defect) or loaded (the fix) —
-        // so this wait is a settle, never the assertion.
-        page.locator("#app-main .pe-root, .pe-root").first().waitFor()
+        // Same-document markers: they survive only if the click is an in-shell swap, never a
+        // reload. The rail element identity is the #460 acceptance criterion.
+        page.evaluate("() => { window.__dpDoc = document; window.__dpRail = document.getElementById('app-rail'); }")
 
-        val nav = page.evaluate("() => performance.getEntriesByType('navigation')[0].name") as String
-        withClue("the editor arrived as a FULL document load (navigation entry: $nav; page errors: $pageErrors)") {
-            // The fact's link is the compatibility URL; the entry names the canonical page it landed on (#348).
-            nav shouldMatch PipelineWorkspaceUrl.DOCUMENT
+        link.first().click()
+        // The runtime activates the component asynchronously after the swap; the epoch is
+        // stamped only after Alpine.initTree has bound the tabs and Run. Readiness, not a sleep.
+        page.locator(".pe-root[data-pe-runtime-epoch]").first().waitFor()
+
+        withClue("the editor opened in the shell — the document did not reload") {
+            page.evaluate("() => window.__dpDoc === document") shouldBe true
         }
-        withClue("the editor initialised — the canvas mounted (page errors: $pageErrors)") {
-            page.locator("#cy-canvas").count() shouldBeGreaterThan 0
+        withClue("the rail is the SAME element after editor entry") {
+            page.evaluate("() => window.__dpRail === document.getElementById('app-rail')") shouldBe true
+        }
+        withClue("the destination URL is the canonical workspace (authorized admission)") {
+            page.url() shouldMatch PipelineWorkspaceUrl.DOCUMENT
+        }
+        withClue("the editor initialised and rendered real node geometry (page errors: $pageErrors)") {
+            page.locator(".pe-card").first().waitFor()
+            val cardGeometry =
+                page.evaluate(
+                    "() => { const c = document.querySelector('.pe-card'); const r = c.getBoundingClientRect();" +
+                        " return { w: r.width, h: r.height }; }",
+                ) as Map<*, *>
+            (cardGeometry["w"] as Number).toInt() shouldBeGreaterThan 0
+            (cardGeometry["h"] as Number).toInt() shouldBeGreaterThan 0
+        }
+        withClue("the permitted Run is enabled and a real execution reaches Completed") {
+            val run = page.locator("[data-verb='pipeline-execute']")
+            run.isEnabled shouldBe true
+            run.click()
+            page
+                .locator("[data-verb='pipeline-execute']:not([disabled])")
+                .waitFor(
+                    com.microsoft.playwright.Locator
+                        .WaitForOptions()
+                        .setTimeout(EXECUTION_TIMEOUT_MS),
+                )
+            page.locator(".pe-status:has-text('Completed')").waitFor()
         }
         withClue("no page error on the way in") { pageErrors.shouldBeEmpty() }
     }
@@ -159,5 +193,10 @@ class DatasourceFactsLinkBrowserTest : BrowserSuite() {
                 mapOf("method" to method, "url" to url, "body" to body, "ifMatch" to ifMatch),
             ) as Map<String, Any?>
         return (result["status"] as Number).toInt() to (result["body"] as String?)
+    }
+
+    private companion object {
+        /** A calculator run is engine-internal (no datasource); 60 s is already generous. */
+        const val EXECUTION_TIMEOUT_MS = 60_000.0
     }
 }

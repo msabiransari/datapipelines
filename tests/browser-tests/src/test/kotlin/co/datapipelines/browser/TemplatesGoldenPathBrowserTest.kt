@@ -51,6 +51,8 @@ class TemplatesGoldenPathBrowserTest : BrowserSuite() {
         val name = "test/$leaf"
 
         page.navigate("$baseUrl/templates")
+        page.click("[data-nav-branch='templates'] [data-nav-tree-toggle]")
+        page.waitForFunction("() => window.DatapipelinesSidebarTrees.get('templates')?.state.levels.get(null)?.complete")
         page.click("text=Create Template")
         page.locator("#create-template-modal").isVisible shouldBe true
 
@@ -84,27 +86,27 @@ class TemplatesGoldenPathBrowserTest : BrowserSuite() {
         // FOLDERS ONLY (077), the `test` folder expands with ONE prefix request (§9.1), and
         // its leaf is a link with the same label rule.
         page.click("[data-nav-tree-reveal='templates']")
-        page.waitForSelector("#nav-tree-templates details.tpl-folder")
+        page.waitForSelector("#nav-tree-templates [aria-expanded]")
         val folder =
             page.locator(
-                "#nav-tree-templates summary.tpl-summary",
+                "#nav-tree-templates [data-tree-key='folder:test'] > .dp-tree-line button",
                 com.microsoft.playwright.Page
                     .LocatorOptions()
                     .setHasText("test"),
             )
         page.waitForResponse(
-            { response -> response.url().contains("/partials/templates") && response.url().contains("prefix=test") },
+            { response -> response.url().contains("/api/v1/templates/tree") && response.url().contains("parent=test") },
             { folder.click() },
         )
         val leafLink =
             page.locator(
-                "#nav-tree-templates a.tpl-leaf",
+                "#nav-tree-templates a.dp-tree-activate",
                 com.microsoft.playwright.Page
                     .LocatorOptions()
                     .setHasText(leaf),
             )
         leafLink.waitFor()
-        leafLink.locator("span.tpl-label").getAttribute("title") shouldBe name
+        leafLink.locator("span[title='$name']").getAttribute("title") shouldBe name
 
         // A leaf NAVIGATES — a full document into the template workspace.
         leafLink.click()

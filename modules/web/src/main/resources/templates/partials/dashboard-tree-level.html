@@ -1,34 +1,4 @@
-<!-- ONE level of the dashboard tree (#10 L3b), rendered in BOTH instances that show it: the
-     tree page's pane and the sidebar's lazy branch. Deliberately the same shape as
-     partials/pipeline-tree-level.html, down to the class names: one stylesheet
-     (template-tree.css) dresses all three trees, and a reader who knows one tree knows
-     the others.
-
-     The tree is backed by server-side prefix queries: this fragment renders the direct
-     sub-folders and the direct dashboard children of one prefix, and expanding a folder issues
-     ONE more request for ONE more level. Nothing here ships the flat list to the browser and
-     nothing assembles a tree in JS — at any size (the template-hierarchy design's §9.1).
-
-     Folders are virtual: a folder is a name prefix with no table, no column, no id and no CRUD.
-     There is deliberately no New folder / rename / move / delete control anywhere in this file.
-
-     A leaf NAVIGATES: it opens /dashboards/{id}, the board page, as a FULL navigation —
-     hx-boost="false" (dashboards.md §6.4: the two Plotly bundles must never travel between
-     pages, so a dashboard link opts out of boosting; the layout's logout/members precedent).
-     Because a leaf navigates rather than selects, the shared explorer keyboard layer
-     (template-explorer.js, keyed on [data-explorer-pane]) is deliberately NOT wired to the
-     dashboards tree: arrow-key "selection" would trigger navigation. The tree keeps its ARIA
-     roles, and a link row keeps the browser's own Enter/Tab semantics.
-
-     Folder expansion is <details>/<summary>: the browser owns open/closed state and the
-     keyboard and screen-reader semantics, and htmx loads the level on the summary's FIRST
-     click only (hx-trigger="click once"). No JS of our own is involved in expansion.
-
-     Root ids are PER INSTANCE (page / nav — DashboardBrowseModel.levelId): the sidebar's tree
-     and the page's tree can coexist in one document, so their containers can never share an id.
-
-     ARIA: the ROOT level's list is role=tree; a NESTED level's container is role=group under
-     its folder's treeitem. -->
+<!-- Artifact and version links use prepared main-content navigation, preserving the sidebar. -->
 <div xmlns:th="http://www.thymeleaf.org" th:fragment="level"
      th:id="${levelId}" class="tpl-level"
      th:attr="role=${#strings.isEmpty(prefix)} ? null : 'group'">
@@ -84,15 +54,10 @@
       </details>
     </li>
 
-    <!-- LEAVES. A leaf NAVIGATES to the board page — a FULL navigation (hx-boost="false",
-         §6.4's one-bundle rule; the layout's members-link precedent). The label is the leaf's
-         own segment; the full path always rides on `title` (§9.4's rule for every surface that
-         shows a path-shaped name). The version badge names the WORKING version; a dashboard
-         with no release carries the draft badge — opening one is the board page's refusal
-         state, not an error, and versioning §7 keeps unreleased edits visible in the list. -->
+    <!-- Artifact and version links use prepared main-content navigation, preserving the sidebar. -->
     <li class="tpl-node" role="none" th:each="d : ${dashboards}">
       <a th:href="@{'/dashboards/' + ${d.id}}" class="tpl-leaf" role="treeitem" aria-selected="false"
-         hx-boost="false"
+         hx-boost="true"
          th:attr="data-leaf-id=${d.id}">
         <svg class="ds-icon ds-icon-sm tpl-row-icon" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#boxes"></use></svg>
         <span class="tpl-label" th:text="${d.segment}" th:title="${d.name}">revenue_overview</span>

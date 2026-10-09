@@ -43,6 +43,11 @@ import java.util.UUID
 class ParameterSetRepository(
     private val jdbc: NamedParameterJdbcTemplate,
 ) {
+    /** Complete, body-free tree pages; authorization precedes folder derivation. */
+    fun navigation(request: co.datapipelines.pipeline.NavigationRequest): List<co.datapipelines.pipeline.NavigationRow> =
+        co.datapipelines.pipeline.NavigationSource
+            .page(jdbc, co.datapipelines.pipeline.NavigationFamily.PARAMETER_SETS, request)
+
     // ---- reads ----------------------------------------------------------------------------------------
 
     /** The index row, live or discarded, or null when the workspace holds no such set. */

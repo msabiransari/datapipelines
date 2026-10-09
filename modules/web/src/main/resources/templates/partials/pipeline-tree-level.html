@@ -1,41 +1,4 @@
-<!-- ONE level of the pipeline tree (067), as the GLOBAL SIDEBAR renders it since #350.
-
-     Deliberately the same shape as partials/template-tree-level.html and
-     partials/dashboard-tree-level.html, down to the class names: one stylesheet
-     (template-tree.css) dresses every tree, a reader who knows one tree knows the others, and
-     the browser-test selectors (details.tpl-folder, summary.tpl-summary, .tpl-leaf) transfer.
-
-     The tree is backed by server-side prefix queries: this fragment renders the direct
-     sub-folders and the direct pipeline children of one prefix, and expanding a folder issues
-     ONE more request for ONE more level. Nothing here ships the flat list to the browser and
-     nothing assembles a tree in JS — at any size (§9.1).
-
-     Folders are virtual (§3.1): a folder is a name prefix with no table, no column, no id and
-     no CRUD. There is deliberately no New folder / rename / move / delete control anywhere in
-     this file, and no empty-folder state — a folder is derived from the live rows beneath it,
-     so one with nothing beneath it does not exist to be rendered.
-
-     #350: a leaf NAVIGATES. It is a link to the canonical workspace `/pipelines/{id}` (no
-     version: the page's current-first rule resolves it, workspace spec §3.1), and a FULL
-     document load — hx-boost="false", the graph entry spec §2 keeps until boosted
-     initialization is proven (the dashboards tree's leaf precedent). The old explorer's
-     select-into-a-detail-pane is gone with the pane.
-
-     Folder expansion is <details>/<summary>: the browser owns open/closed state and the
-     keyboard and screen-reader semantics, and htmx loads the level on the summary's FIRST
-     click only (hx-trigger="click once"). nav-tree.js owns what the sidebar adds around it —
-     the visible failure + retry, the stale-response guard, the width fit and the
-     per-workspace state — without a second expansion path.
-
-     The root level's id is #pipeline-nav-root, the sidebar's stable swap root (its search and
-     "clear" address it too); nested levels get a derived id from PipelineBrowseModel.levelId,
-     so a placeholder and the fragment that replaces it cannot disagree.
-
-     ARIA: the ROOT level's list is role=tree; a NESTED level's container is role=group under
-     its folder's treeitem. aria-expanded and the roving tabindex are owned by
-     static/js/template-explorer.js (its nav context); aria-selected / aria-current mark the
-     leaf of the page being viewed and are nav-tree.js's — the server cannot know which page
-     the sidebar sits beside. -->
+<!-- Artifact and version links use prepared main-content navigation, preserving the sidebar. -->
 <div xmlns:th="http://www.thymeleaf.org" th:fragment="level"
      th:id="${levelId}" class="tpl-level"
      th:attr="role=${#strings.isEmpty(prefix)} ? null : 'group'">
@@ -93,11 +56,9 @@
       </details>
     </li>
 
-    <!-- LEAVES. #350: a leaf is a LINK to the pipeline's workspace — a full navigation
-         (hx-boost="false", see the header). Enter on it is the browser's own link activation;
-         the arrow keys only move focus (template-explorer.js's nav context). -->
+    <!-- Artifact and version links use prepared main-content navigation, preserving the sidebar. -->
     <li class="tpl-node" role="none" th:each="p : ${pipelines}">
-      <a class="tpl-leaf" role="treeitem" aria-selected="false" hx-boost="false"
+      <a class="tpl-leaf" role="treeitem" aria-selected="false" hx-boost="true"
          th:href="@{/pipelines/{id}(id=${p.id})}"
          th:attr="data-leaf-id=${p.id}">
         <!-- The label is the leaf's own segment; the full path always rides on `title`

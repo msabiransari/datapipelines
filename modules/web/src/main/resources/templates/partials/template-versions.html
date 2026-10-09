@@ -55,7 +55,7 @@
           </td>
           <td th:text="${v.usageLabel}">2 uses</td>
           <td class="num">
-            <a class="ds-button ds-button-ghost ds-button-sm" hx-boost="false"
+            <a class="ds-button ds-button-ghost ds-button-sm" hx-boost="true"
                th:href="@{${'/templates/' + templateName}(version=${v.version}, tab=${'source'})}"
                th:title="'Open v' + ${v.version} + ' in the workspace'">Open</a>
 

@@ -4,7 +4,8 @@
      success node) there — its arrival is what closes the modal. The refreshed CATALOG list
      rides along out-of-band (the modal lives on the catalog page, #398); no HX-Redirect, so
      the screen never navigates and the toast survives. -->
-<div xmlns:th="http://www.thymeleaf.org">
+<div xmlns:th="http://www.thymeleaf.org" data-artifact-change-family="templates"
+     th:attr="data-artifact-change-path=${createdName}">
   <p class="u-success u-text-sm"
      th:text="'Template ' + ${createdName} + ' created.'">created</p>
   <!-- outerHTML OOB: the catalog's list root already carries id="template-list-wrapper" (the

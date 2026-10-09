@@ -121,6 +121,11 @@ data class TemplateVersionSummary(
 class TemplateRepository(
     private val jdbc: NamedParameterJdbcTemplate,
 ) {
+    /** Complete, body-free tree pages; authorization precedes folder derivation. */
+    fun navigation(request: co.datapipelines.pipeline.NavigationRequest): List<co.datapipelines.pipeline.NavigationRow> =
+        co.datapipelines.pipeline.NavigationSource
+            .page(jdbc, co.datapipelines.pipeline.NavigationFamily.TEMPLATES, request)
+
     /** The current-version projection of a live template in [workspaceId], or null when absent/soft-deleted. */
     fun findLatest(
         workspaceId: UUID,

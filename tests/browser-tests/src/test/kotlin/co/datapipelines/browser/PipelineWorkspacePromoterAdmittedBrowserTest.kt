@@ -332,39 +332,38 @@ class PipelineWorkspacePromoterAdmittedBrowserTest : BrowserSuite() {
         val promoter = openPromoterSession(workspaceName)
         val stamps = mutableListOf<String>()
         promoter.page.onResponse { response ->
-            if (response.url().contains("/partials/pipelines?")) stamps += (response.headers()["dp-nav-stamp"] ?: "none")
+            if (response.url().contains("/api/v1/pipelines/tree?")) stamps += response.text()
         }
         promoter.page.navigate("$baseUrl/pipelines/$id")
         promoter.page.waitForSelector(".pe-root")
         promoter.page.click("[data-nav-branch='pipelines'] [data-nav-tree-toggle]")
-        promoter.page.waitForSelector("#nav-tree-pipelines a.tpl-leaf[aria-current='page']")
+        promoter.page.waitForSelector("#nav-tree-pipelines [data-tree-key='folder:p348']")
+        promoter.page.locator("#nav-tree-pipelines [aria-expanded=true]").count() shouldBe 0
+        promoter.page.click("#nav-tree-pipelines [data-tree-key='folder:p348'] > .dp-tree-line button")
+        promoter.page.waitForSelector("#nav-tree-pipelines a.dp-tree-activate[aria-current='page']")
 
         val titles =
             (
                 promoter.page.evaluate(
-                    "() => [...document.querySelectorAll('#nav-tree-pipelines .tpl-label[title]')].map(e => e.getAttribute('title'))",
+                    "() => [...document.querySelectorAll('#nav-tree-pipelines " +
+                        ".dp-tree-activate[title]')].map(e => e.getAttribute('title'))",
                 ) as List<*>
             ).map { it.toString() }
         titles.contains("p348/promoted") shouldBe true
         (titles.contains("p348/hidden_draft")) shouldBe false
-        promoter.page
-            .locator(
-                "#nav-tree-pipelines details.tpl-folder:has(> summary span[title='p348']) .tpl-count",
-            ).first()
-            .innerText() shouldBe
-            "1"
+        promoter.page.locator("#nav-tree-pipelines [data-tree-key='folder:p348'] > .dp-tree-group > [role=treeitem]").count() shouldBe 1
 
         // The wire: the same level, read directly, carries no trace of the hidden row.
         val level =
             promoter.page
                 .evaluate(
-                    "async () => (await fetch('/partials/pipelines?prefix=p348'," +
+                    "async () => (await fetch('/api/v1/pipelines/tree?parent=p348'," +
                         " { credentials: 'same-origin', headers: { 'HX-Request': 'true' } })).text()",
                 ).toString()
         level shouldContain "p348/promoted"
         level shouldNotContain "hidden_draft"
         (stamps.isNotEmpty()) shouldBe true
-        stamps.all { it == "$workspaceName|lens" } shouldBe true
+        stamps.all { it.contains("view_token") && !it.contains("hidden_draft") } shouldBe true
         promoter.close()
     }
 

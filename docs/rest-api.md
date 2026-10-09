@@ -1,6 +1,6 @@
 # REST API + SSE Specification
 
-**Status:** v2.87 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
+**Status:** v2.88 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
 **Last updated:** 2026-10-06
@@ -2759,8 +2759,45 @@ window. A dashboard execution has no stored result: `GET /api/v1/executions/{id}
 | `dashboard.refresh.not_found` | 404 | No such refresh for the caller on this dashboard, or it already finished (abort), or it is still starting for someone else — the four answer the identical body |
 | `rate_limit.exceeded` | 429 | The per-user concurrent-stream cap (§12.1) — execution, refresh and observed-evaluation (§21.5) streams count together |
 
+## 24. First-party navigation trees
+
+`GET /api/v1/<family>/tree` and `GET /api/v1/<family>/tree/search` are literal session-only
+reads for `pipelines`, `templates`, `dashboards`, `visualizations` and `parameter-sets`.
+Each declares its existing read permission and derives the workspace from the principal.
+Keys gain no surface. Every response uses the §4.1 envelope and `Cache-Control: no-store`.
+An unavailable promotion view returns a retryable 503, rather than a completed empty level.
+
+Browse takes optional `root`, `parent` and `cursor`; omitted parent means root. Empty root is
+the family root. A nonempty root names a folder boundary; parent cannot escape it. A page
+contains at most 200 immediate folders AND artifacts, folders first, in binary path order.
+The client automatically exhausts continuation for this one level; no grandchildren are read.
+Search takes `root`, required `q` and `cursor`, and pages all case-insensitive literal substring
+matches of canonical or display NAME, never descriptions. Each page includes all ancestors
+needed to connect its matches to root. Search does not crawl browse endpoints.
+
+A 1 MiB serialized response budget may shorten a page before 200 logical results; continuation
+then resumes at the last delivered result. It never drops matches or required ancestors.
+
+The typed payload has `family`, `mode` (`browse` or `search`), `root`, `parent`, normalized
+`query`, server-derived `workspace_id`, `view_token`, `nodes` and nullable `next_cursor`.
+Nodes have `key`, `parent_key`, `kind` (`folder` or `artifact`), `name`, canonical `path`,
+`has_children` and `match`. Artifacts also have `resource_id`, canonical relative `href`,
+listed `version` and nullable `draft_version`. A narrowing view emits released metadata only.
+Folder and artifact keys are distinct even at the same path. Search ancestors may repeat
+across pages; deduplicate by key. No stored body, SQL, description, fixture or secret travels.
+
+Continuation uses signed keyset ordering, bound to family/mode/root/parent/query, workspace,
+caller and actual admitted-name membership. A changed view, foreign or malformed cursor is a
+safe 400 and must be retried from the beginning. Process restart expires outstanding cursors.
+Completeness applies to an unchanged dataset; Refresh revalidates external changes. There is
+no immutable snapshot promise. Personalized rows and expansions stay in memory, never in
+browser persistence. Clients must reject foreign/stale responses even after aborting fetch.
+
+---
+
 ## Appendix A: Change Log
 
+| 2026-10-06 | v2.88 | 460 merge follow-up — the section #460 added without a row — renumbered at merge after #462's v2.87 | **§24 added (additive)**: `GET /api/v1/{pipelines,templates,dashboards,visualizations,parameter-sets}/tree` and `/tree/search`, session-only first-party navigation reads under each family's existing read permission — keyset pages of at most 200 immediate folders and artifacts (folders first, binary path order) under a 1 MiB response budget, literal case-insensitive name search with every ancestor a match needs, signed continuations bound to the request, the actor, the workspace and the lens, `Cache-Control: no-store`, and a 503 rather than an empty level when the promotion view is unavailable. No existing route, shape or code changed. |
 | 2026-10-06 | v2.87 | #462 draft purge pins | §5.11 and §5.14: 409 `pipeline.version.pinned` on both draft purges, named blockers, sole/nonsole scope, hash precedence and unchanged stored state on refusal. |
 | 2026-10-06 | v2.86 | 459 merge follow-up | §23's runtime error table, the `dashboard.runtime.dependency_missing` row (additive, no code or status change): it names the lifecycle per mode (released dashboard RELEASED-only; an explicitly selected draft admits DRAFT or RELEASED), the `.reason` values, the draft walk's reach (nested pipelines, templates, imports), and the stream-side admission before execution, which fails a source with this code or `dashboard.validation.source_not_read_only`. |
 | 2026-10-05 | v2.85 | #459 draft dashboard dependencies | §23.3: explicitly selected draft runtime admits live draft dependencies transitively, with nested content in configuration identity. Released views, release/import, permissions and key restrictions remain strict. No new route or wire field. |

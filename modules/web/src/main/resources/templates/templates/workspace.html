@@ -3,12 +3,12 @@
       th:replace="~{layouts/default :: page(~{::content})}">
 <th:block th:fragment="content">
 
-  <!--/* #398 — the global sidebar's current-leaf hook: which template this page shows, by id
-          AND full path (they are the same thing — the id IS the name), so the rail's Templates
-          tree (nav-tree.js) can mark the leaf and reveal its folders one level at a time — on a
-          full-document entry, a boosted arrival and a history restore alike (it rides inside
-          #app-main). The record is the one this page already resolved through the caller's
-          lens; nothing here is new information. */-->
+  <!--/* #398/#460 — the global sidebar's current-leaf hook: which template this page shows, by
+          id AND full path (they are the same thing — the id IS the name), so the rail's
+          Templates tree can mark the leaf and reveal its folders one level at a time — on any
+          arrival: a full load, prepared in-shell navigation or a history restore alike (it
+          rides inside #app-main). The record is the one this page already resolved through the
+          caller's lens; nothing here is new information. */-->
   <span hidden data-nav-current="templates"
         th:attr="data-nav-current-id=${templateName},data-nav-current-path=${navCurrentPath}"></span>
 
@@ -64,7 +64,7 @@
       <span th:unless="${#lists.isEmpty(versions)}">has versions — pick one to view its source, render and history.</span>
     </p>
     <p class="ds-empty-actions">
-      <a th:each="v : ${versions}" class="ds-button ds-button-secondary" hx-boost="false"
+      <a th:each="v : ${versions}" class="ds-button ds-button-secondary" hx-boost="true"
          th:href="@{${'/templates/' + templateName}(version=${v.version})}"
          th:text="'v' + ${v.version} + ' — ' + ${v.status.name().toLowerCase()} + (${v.isCurrent} ? ' · current' : '')">v1 — released · current</a>
     </p>
@@ -93,15 +93,15 @@
         <span th:if="${template?.needsReview == true}" class="ds-badge ds-badge-warning" data-needs-review
               title="A fact this version cites was retired or superseded — re-verify before you lean on it.">needs review</span>
       </div>
-      <!-- #398 — the version selector: READ navigation over the admitted history (R5: a
-           selected version is never made the write target — a full navigation resolves the
+      <!-- #398/#460 — the version selector: READ navigation over the admitted history (R5: a
+           selected version is never made the write target — the destination resolves the
            version server-side, and a draft is an explicit choice, visibly a draft). The row's
            href is the canonical deep link with the CURRENT tab carried along (the tab module
            re-stamps it after an in-page switch); there is no active run to protect, so the
-           navigation is a full document — the same resolution the workspace's own default
-           rule runs. -->
+           navigation is prepared main-content navigation (the same rail-preserving resolution
+           the workspace's own default rule runs). -->
       <nav class="tw-versions" aria-label="View another version">
-        <a th:each="v : ${versions}" class="ds-button ds-button-ghost ds-button-sm tw-version-link" hx-boost="false"
+        <a th:each="v : ${versions}" class="ds-button ds-button-ghost ds-button-sm tw-version-link" hx-boost="true"
            th:href="@{${'/templates/' + templateName}(version=${v.version}, tab=${activeTab})}"
            th:attr="aria-current=${v.isViewed} ? 'true' : null,
                     data-version=${v.version},

@@ -301,13 +301,13 @@ class ExplorerPaneGeometryBrowserTest : SchedulesBrowserSuite() {
         page.setViewportSize(WIDTHS.first(), 900)
         page.navigate("$baseUrl/dashboard")
         page.click("[data-nav-branch='pipelines'] [data-nav-tree-toggle]")
-        page.waitForSelector("#nav-tree-pipelines summary.tpl-summary")
-        page.waitForResponse({ it.url().contains("prefix=") }) {
-            page.locator("#nav-tree-pipelines summary.tpl-summary").first().click()
+        page.waitForSelector("#nav-tree-pipelines [aria-expanded] > .dp-tree-line button")
+        page.waitForResponse({ it.url().contains("/api/v1/pipelines/tree") && it.url().contains("parent=") }) {
+            page.locator("#nav-tree-pipelines [aria-expanded] > .dp-tree-line button").first().click()
         }
-        page.waitForSelector("#nav-tree-pipelines .tpl-leaf")
+        page.waitForSelector("#nav-tree-pipelines a.dp-tree-activate")
 
-        val leaf = page.locator("#nav-tree-pipelines .tpl-leaf").first()
+        val leaf = page.locator("#nav-tree-pipelines a.dp-tree-activate").first()
         withClue("the version badge", "a never-released pipeline names its DRAFT's version, not 'vnull'") {
             leaf
                 .locator(".ds-badge-default")

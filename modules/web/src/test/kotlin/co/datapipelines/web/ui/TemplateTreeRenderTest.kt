@@ -59,7 +59,7 @@ class TemplateTreeRenderTest {
         html shouldContain "hx-target=\"next .tpl-level\""
         // #398: a leaf is a LINK to the workspace, a full document — never a detail-pane fetch.
         html shouldContain "href=\"/templates/legacy_flat.sql\""
-        html shouldContain "hx-boost=\"false\""
+        html shouldContain "hx-boost=\"true\""
         html shouldContain "data-leaf-id=\"legacy_flat.sql\""
         html shouldNotContain "/partials/templates/versions"
         // The full path is on `title` at every leaf, and the count comes from the subtree.
@@ -154,7 +154,7 @@ class TemplateTreeRenderTest {
         // Both are links into the workspace, full documents, carrying the leaf id.
         listOf(catalog, nav).forEach {
             it shouldContain "href=\"/templates/$DEEP_PATH\""
-            it shouldContain "hx-boost=\"false\""
+            it shouldContain "hx-boost=\"true\""
             it shouldContain "data-leaf-id=\"$DEEP_PATH\""
             it shouldNotContain "hx-target=\"#template-detail\""
             it shouldNotContain "prefix="

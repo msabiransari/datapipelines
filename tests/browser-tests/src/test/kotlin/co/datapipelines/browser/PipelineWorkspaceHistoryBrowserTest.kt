@@ -652,12 +652,12 @@ class PipelineWorkspaceHistoryBrowserTest : BrowserSuite() {
 
     private fun openTree() {
         page.click("[data-nav-branch='pipelines'] [data-nav-tree-toggle]")
-        page.waitForSelector("#pipeline-nav-root .tpl-tree, #pipeline-nav-root .ds-empty")
+        page.waitForSelector("#nav-tree-pipelines [role=tree]")
     }
 
     /** The sidebar tree's current leaf — #350's own history proof, read, never driven here. */
     private fun currentLeaves(): Int =
-        (page.evaluate("() => document.querySelectorAll(\"#nav-tree-pipelines a.tpl-leaf[aria-current='page']\").length") as Number)
+        (page.evaluate("() => document.querySelectorAll(\"#nav-tree-pipelines a.dp-tree-activate[aria-current='page']\").length") as Number)
             .toInt()
 
     /** An IN-PAGE version switch through the header selector, synced on the landed body. */
@@ -715,7 +715,9 @@ class PipelineWorkspaceHistoryBrowserTest : BrowserSuite() {
         page.navigate("$baseUrl/pipelines/$id?version=1")
         page.waitForSelector(".pe-root")
         waitActivated()
-        page.waitForSelector("#nav-tree-pipelines a.tpl-leaf[aria-current='page']")
+        page.waitForSelector("#nav-tree-pipelines [aria-expanded]")
+        page.locator("#nav-tree-pipelines [aria-expanded] > .dp-tree-line button").first().click()
+        page.waitForSelector("#nav-tree-pipelines a.dp-tree-activate[aria-current='page']")
         seedHistoryCounters()
         val identity = runtimeIdentity()
         val length = historyLength()

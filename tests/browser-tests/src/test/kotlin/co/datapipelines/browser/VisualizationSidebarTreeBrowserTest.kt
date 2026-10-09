@@ -20,20 +20,23 @@ class VisualizationSidebarTreeBrowserTest : VisualizationBrowserSuite() {
 
     private fun openTree() {
         page.click("[data-nav-branch='visualizations'] [data-nav-tree-toggle]")
-        page.waitForSelector("#viz-tree-nav .tpl-tree, #viz-tree-nav .ds-empty")
+        page.waitForFunction("() => window.DatapipelinesSidebarTrees.get('visualizations')?.state.levels.get(null)?.complete")
     }
 
-    private fun folder(path: String) = "$panel details.tpl-folder:has(> summary > span.tpl-label[title='$path'])"
+    private fun folder(path: String) = "$panel [data-tree-key='folder:$path']"
 
     private fun expand(path: String) {
-        page.click("${folder(path)} > summary")
-        page.waitForSelector("${folder(path)} > .tpl-level:not(.tpl-level-pending)")
+        page.click("${folder(path)} > .dp-tree-line button")
+        page.waitForFunction(
+            "key => window.DatapipelinesSidebarTrees.get('visualizations').state.levels.get(key)?.complete",
+            "folder:$path",
+        )
     }
 
-    private fun leaf(id: String) = "$panel a.tpl-leaf[data-leaf-id='$id']"
+    private fun leaf(id: String) = "$panel a[href='/visualizations/$id']"
 
     @Test
-    fun `the branch sits between Dashboards and Parameter Sets, a folder loads once, and a leaf opens the workspace as a full document`() {
+    fun `branch order and complete folder caching survive a persistent leaf navigation`() {
         startTrace()
         page.setViewportSize(DESKTOP_W, DESKTOP_H)
         val root = ready("vtree")
@@ -55,19 +58,19 @@ class VisualizationSidebarTreeBrowserTest : VisualizationBrowserSuite() {
         page.evaluate("() => window.__v399Tree") shouldBe 1 // opening a tree is not navigating
         expand(root)
         expand("$root/charts")
-        page.locator(leaf(id)).getAttribute("hx-boost") shouldBe "false"
+        page.locator(leaf(id)).getAttribute("hx-boost") shouldBe null
         page.locator(leaf(id)).getAttribute("href") shouldBe "/visualizations/$id"
 
         page.click(leaf(id))
         page.waitForURL("**/visualizations/$id")
         page.waitForSelector("#viz-pane-preview:not([hidden])")
-        page.evaluate("() => window.__v399Tree === undefined") shouldBe true // a FULL document
+        page.evaluate("() => window.__v399Tree") shouldBe 1 // preserved document
         page.waitForSelector("${leaf(id)}[aria-current='page']")
         drainCspViolations().shouldBeEmpty()
     }
 
     @Test
-    fun `the search swaps flat results into the root, clearing returns the tree, and the catalog deep-links q`() {
+    fun `server search expands the full ancestor path and clearing collapses to the root, and the catalog deep-links q`() {
         startTrace()
         page.setViewportSize(DESKTOP_W, DESKTOP_H)
         val root = ready("vsrch")
@@ -76,18 +79,18 @@ class VisualizationSidebarTreeBrowserTest : VisualizationBrowserSuite() {
         page.navigate("$baseUrl/dashboard")
         openTree()
 
-        page.fill("$panel [data-nav-tree-search]", "revenue")
-        page.waitForSelector("#viz-tree-nav[data-visualization-list] a[data-leaf-id='$revenue']")
-        page.locator("#viz-tree-nav[data-visualization-list] a[data-leaf-id]").count() shouldBe 1
-        page.fill("$panel [data-nav-tree-search]", "")
-        page.waitForSelector("#viz-tree-nav .tpl-tree details.tpl-folder")
-        page.locator("#viz-tree-nav[data-visualization-list]").count() shouldBe 0
+        page.fill("$panel input[type=search]", "revenue")
+        page.waitForSelector(leaf(revenue))
+        page.locator("$panel a").count() shouldBe 1
+        page.fill("$panel input[type=search]", "")
+        page.waitForSelector(folder(root))
+        page.locator("$panel [aria-expanded=true]").count() shouldBe 0
 
         // The catalog: flat rows, `q` a deep link, a row a full navigation onto the workspace.
         page.navigate("$baseUrl/visualizations?q=revenue")
         page.waitForSelector("#viz-list-wrapper a.tpl-result")
         page.locator("#viz-list-wrapper a.tpl-result").count() shouldBe 1
-        page.locator("#viz-list-wrapper a.tpl-result").getAttribute("hx-boost") shouldBe "false"
+        page.locator("#viz-list-wrapper a.tpl-result").getAttribute("hx-boost") shouldBe "true"
         page.navigate("$baseUrl/visualizations")
         page.waitForSelector("#viz-list-wrapper a.tpl-result")
         page.locator("#viz-list-wrapper a.tpl-result").count() shouldBe 2
@@ -109,6 +112,8 @@ class VisualizationSidebarTreeBrowserTest : VisualizationBrowserSuite() {
             page.navigate("$baseUrl/visualizations/$id")
             page.waitForSelector("#viz-pane-preview:not([hidden])")
             if (!page.locator(panel).isVisible) openTree()
+            expand(root)
+            expand("$root/charts")
             page.waitForSelector("${leaf(id)}[aria-current='page']")
             documentOverflowsX() shouldBe false
             shot("tree-$theme-1440")
@@ -124,6 +129,8 @@ class VisualizationSidebarTreeBrowserTest : VisualizationBrowserSuite() {
             page.click("#rail-open")
             page.waitForSelector("html.rail-open")
             if (!page.locator(panel).isVisible) openTree()
+            expand(root)
+            expand("$root/charts")
             page.waitForSelector("${leaf(id)}[aria-current='page']")
             documentOverflowsX() shouldBe false
             shot("tree-$theme-390")

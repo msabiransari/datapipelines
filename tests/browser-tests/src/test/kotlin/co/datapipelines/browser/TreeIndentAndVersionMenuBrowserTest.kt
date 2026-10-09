@@ -89,13 +89,11 @@ class TreeIndentAndVersionMenuBrowserTest : BrowserSuite() {
     private fun openTestFolder(root: String) {
         val branch = if (root == PIPELINES) "pipelines" else "templates"
         page.click("[data-nav-branch='$branch'] [data-nav-tree-toggle]")
-        page.waitForSelector("$root summary.tpl-summary")
-        if (page.locator("$root details.tpl-folder[open]").count() == 0) {
-            page.waitForResponse({ it.url().contains("prefix=test") }) {
-                page.locator("$root summary.tpl-summary").first().click()
-            }
+        page.waitForSelector("$root [data-tree-key='folder:test']")
+        page.waitForResponse({ it.url().contains("/tree?") && it.url().contains("parent=test") }) {
+            page.click("$root [data-tree-key='folder:test'] > .dp-tree-line button")
         }
-        page.waitForSelector("$root .tpl-leaf")
+        page.waitForSelector("$root a.dp-tree-activate")
     }
 
     @Suppress("UNCHECKED_CAST")
@@ -138,18 +136,18 @@ class TreeIndentAndVersionMenuBrowserTest : BrowserSuite() {
             val m =
                 measure(
                     """() => {
-                      const parent = document.querySelector('$root details.tpl-folder[open] > summary.tpl-summary');
-                      const level = parent.nextElementSibling;
-                      const leaf = level.querySelector(':scope > .tpl-tree > .tpl-node > .tpl-leaf');
-                      const sibling = level.querySelector(':scope > .tpl-tree > .tpl-node > details > summary.tpl-summary');
+                      const parent = document.querySelector('$root [data-tree-key=\"folder:test\"] > .dp-tree-line > button');
+                      const level = parent.closest('[role=treeitem]').querySelector(':scope > .dp-tree-group');
+                      const leaf = level.querySelector(':scope > [data-tree-key^=\"artifact:\"] > .dp-tree-line > a');
+                      const sibling = level.querySelector(':scope > [aria-expanded] > .dp-tree-line > button');
                       const left = (el, sel) => el.querySelector(sel).getBoundingClientRect().left;
                       return {
                         indent: parseFloat(getComputedStyle(level).paddingLeft),
-                        parentLabel: left(parent, '.tpl-label'),
-                        leafLabel: left(leaf, '.tpl-label'),
-                        siblingLabel: left(sibling, '.tpl-label'),
-                        leafIcon: left(leaf, '.tpl-row-icon'),
-                        siblingIcon: left(sibling, '.tpl-icon-folder'),
+                        parentLabel: left(parent, 'span[title]'),
+                        leafLabel: left(leaf, 'span[title]'),
+                        siblingLabel: left(sibling, 'span[title]'),
+                        leafIcon: left(leaf, 'svg'),
+                        siblingIcon: left(sibling, 'svg'),
                       };
                     }""",
                 )
@@ -183,6 +181,8 @@ class TreeIndentAndVersionMenuBrowserTest : BrowserSuite() {
                 page.locator("#pipeline-list-wrapper a.tpl-result").first().click()
                 page.waitForURL(PipelineWorkspaceUrl.PATTERN)
                 page.waitForSelector(".pe-root")
+                // Boosted markup arrives before the observer finishes its mount.
+                page.waitForFunction("() => !!window.__peInstance")
                 page.locator("#pe-tab-versions").click()
                 page.waitForSelector("$panel tr[data-version-row]")
             } else {

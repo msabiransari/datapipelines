@@ -130,39 +130,39 @@ class ParameterSetPagesBrowserTest : ParameterSetBrowserSuite() {
     }
 
     @Test
-    fun `the branch's search swaps the flat results into the tree's root and clearing returns the tree (#415)`() {
+    fun `the branch search expands matching paths and clearing closes the root (#415)`() {
         startTrace()
         val root = ready("psnavsearch")
         val (id, _) = createSet(setBody("$root/parameters/nav_search_me", "[${constants("kind", listOf("a"))}]"))
         page.navigate("$baseUrl/dashboard")
         page.waitForSelector("[data-nav-branch='parameter-sets']")
         page.click("[data-nav-branch='parameter-sets'] [data-nav-tree-toggle]")
-        page.waitForSelector("#params-tree-nav .tpl-summary")
+        page.waitForSelector("#nav-tree-parameter-sets [aria-expanded] > .dp-tree-line button")
 
         // A non-empty query swaps the FLAT results into the SAME nav root (role=listbox), the
         // shared engine serving it with no JS change.
-        page.fill("[data-nav-branch='parameter-sets'] [data-nav-tree-search]", "nav_search_me")
-        page.waitForSelector("#params-tree-nav a.tpl-result")
-        page.locator("#params-tree-nav a.tpl-result").count() shouldBe 1
-        page.locator("#params-tree-nav a.tpl-result").getAttribute("role") shouldBe "option"
+        page.fill("[data-nav-branch='parameter-sets'] input[type=search]", "nav_search_me")
+        page.waitForSelector("#nav-tree-parameter-sets a.dp-tree-activate")
+        page.locator("#nav-tree-parameter-sets a.dp-tree-activate").count() shouldBe 1
+        page.locator("#nav-tree-parameter-sets [data-tree-key^='artifact:']").getAttribute("role") shouldBe "treeitem"
         // The listbox is the results list itself; its label names the presentation.
-        page.locator("#params-tree-nav ul.tpl-results").getAttribute("aria-label") shouldBe "Parameter set search results"
+        page.locator("#nav-tree-parameter-sets [role=tree]").getAttribute("aria-label") shouldBe "parameter sets"
 
         // The search box's ArrowDown moves focus into the first result (the explorers' NAV keyboard).
-        page.focus("[data-nav-branch='parameter-sets'] [data-nav-tree-search]")
+        page.focus("[data-nav-branch='parameter-sets'] input[type=search]")
         page.keyboard().press("ArrowDown")
-        page.evaluate("() => document.activeElement && document.activeElement.getAttribute('role')") shouldBe "option"
+        page.evaluate("() => document.activeElement && document.activeElement.getAttribute('role')") shouldBe "treeitem"
 
         // Clearing the box returns the tree by construction: the dispatcher answers the empty
         // query with the root level again, and the set hides behind its folders as before.
-        page.fill("[data-nav-branch='parameter-sets'] [data-nav-tree-search]", "")
-        page.waitForSelector("#params-tree-nav .tpl-summary")
-        page.locator("#params-tree-nav a.tpl-result").count() shouldBe 0
-        page.click("#nav-tree-parameter-sets .tpl-summary:has(span[title='$root'])")
-        page.waitForSelector("#nav-tree-parameter-sets .tpl-summary:has(span[title='$root/parameters'])")
-        page.click("#nav-tree-parameter-sets .tpl-summary:has(span[title='$root/parameters'])")
-        page.waitForSelector("#nav-tree-parameter-sets a.tpl-leaf:has(span[title='$root/parameters/nav_search_me'])")
-        page.click("#nav-tree-parameter-sets a.tpl-leaf:has(span[title='$root/parameters/nav_search_me'])")
+        page.fill("[data-nav-branch='parameter-sets'] input[type=search]", "")
+        page.waitForSelector("#nav-tree-parameter-sets [aria-expanded] > .dp-tree-line button")
+        page.locator("#nav-tree-parameter-sets a.dp-tree-activate").count() shouldBe 0
+        page.click("#nav-tree-parameter-sets [data-tree-key='folder:$root'] > .dp-tree-line button")
+        page.waitForSelector("#nav-tree-parameter-sets [data-tree-key='folder:$root/parameters'] > .dp-tree-line button")
+        page.click("#nav-tree-parameter-sets [data-tree-key='folder:$root/parameters'] > .dp-tree-line button")
+        page.waitForSelector("#nav-tree-parameter-sets a.dp-tree-activate:has(span[title='$root/parameters/nav_search_me'])")
+        page.click("#nav-tree-parameter-sets a.dp-tree-activate:has(span[title='$root/parameters/nav_search_me'])")
         page.waitForURL("**/parameter-sets/$id")
     }
 
@@ -179,14 +179,14 @@ class ParameterSetPagesBrowserTest : ParameterSetBrowserSuite() {
         promoter.page.navigate("$baseUrl/dashboard")
         promoter.page.waitForSelector("[data-nav-branch='parameter-sets']")
         promoter.page.click("[data-nav-branch='parameter-sets'] [data-nav-tree-toggle]")
-        promoter.page.waitForSelector("#params-tree-nav .tpl-summary")
+        promoter.page.waitForSelector("#nav-tree-parameter-sets [aria-expanded] > .dp-tree-line button")
 
         // One term that matches BOTH names; her search returns the released one only — the
         // draft-only set is filtered in the service, never hidden by CSS in the panel.
-        promoter.page.fill("[data-nav-branch='parameter-sets'] [data-nav-tree-search]", "_")
-        promoter.page.waitForSelector("#params-tree-nav a.tpl-result")
-        promoter.page.locator("#params-tree-nav a.tpl-result").count() shouldBe 1
-        val branchPanel = promoter.page.locator("#params-tree-nav").innerText()
+        promoter.page.fill("[data-nav-branch='parameter-sets'] input[type=search]", "_")
+        promoter.page.waitForSelector("#nav-tree-parameter-sets a.dp-tree-activate")
+        promoter.page.locator("#nav-tree-parameter-sets a.dp-tree-activate").count() shouldBe 1
+        val branchPanel = promoter.page.locator("#nav-tree-parameter-sets").innerText()
         branchPanel.contains("draft_miss") shouldBe false
 
         // The catalog's search agrees with the branch's.
@@ -212,10 +212,10 @@ class ParameterSetPagesBrowserTest : ParameterSetBrowserSuite() {
             .locator("[data-nav-branch='parameter-sets'] a.app-nav-link use")
             .getAttribute("href") shouldContain "#sliders-horizontal"
         page.click("[data-nav-branch='parameter-sets'] [data-nav-tree-toggle]")
-        page.waitForSelector("#nav-tree-parameter-sets .tpl-summary")
-        page.click("#nav-tree-parameter-sets .tpl-summary:has(span[title='$root'])")
-        page.click("#nav-tree-parameter-sets .tpl-summary:has(span[title='$root/parameters'])")
-        page.click("#nav-tree-parameter-sets a.tpl-leaf:has(span[title='$root/parameters/nav_set'])")
+        page.waitForSelector("#nav-tree-parameter-sets [aria-expanded] > .dp-tree-line button")
+        page.click("#nav-tree-parameter-sets [data-tree-key='folder:$root'] > .dp-tree-line button")
+        page.click("#nav-tree-parameter-sets [data-tree-key='folder:$root/parameters'] > .dp-tree-line button")
+        page.click("#nav-tree-parameter-sets a.dp-tree-activate:has(span[title='$root/parameters/nav_set'])")
         page.waitForURL("**/parameter-sets/$id")
         page.waitForSelector("[data-ps-viewed-label]")
 
@@ -223,8 +223,8 @@ class ParameterSetPagesBrowserTest : ParameterSetBrowserSuite() {
         createWorkspace("psother" + suffix())
         page.navigate("$baseUrl/dashboard")
         page.click("[data-nav-branch='parameter-sets'] [data-nav-tree-toggle]")
-        page.waitForSelector("#nav-tree-parameter-sets .ds-empty")
-        page.locator("#nav-tree-parameter-sets .tpl-summary").count() shouldBe 0
+        page.waitForSelector("#nav-tree-parameter-sets .dp-tree-status")
+        page.locator("#nav-tree-parameter-sets [aria-expanded] > .dp-tree-line button").count() shouldBe 0
     }
 
     @Test

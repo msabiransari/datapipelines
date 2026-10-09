@@ -60,7 +60,7 @@
           </thead>
           <tbody>
             <tr th:each="p : ${usage.parents}">
-              <td class="u-mono"><a class="u-mono" hx-boost="false" th:href="@{'/pipelines/' + ${p.pipelineId}}"
+              <td class="u-mono"><a class="u-mono" hx-boost="true" th:href="@{'/pipelines/' + ${p.pipelineId}}"
                      th:text="${p.pipelineName}">nyc/rollup</a></td>
               <td class="u-mono" th:text="${'v' + p.pipelineVersion}">v2</td>
               <td class="u-mono" th:text="'node ' + ${p.nodeId}">node child</td>

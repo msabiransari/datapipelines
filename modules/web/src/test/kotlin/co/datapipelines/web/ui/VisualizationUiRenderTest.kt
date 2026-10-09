@@ -65,7 +65,7 @@ class VisualizationUiRenderTest {
 
         html shouldContain "href=\"/visualizations/$vizId\""
         html shouldContain "data-leaf-id=\"$vizId\""
-        Regex("class=\"tpl-leaf\"[^>]*hx-boost=\"false\"").findAll(html).toList().size shouldBe 2
+        Regex("class=\"tpl-leaf\"[^>]*hx-boost=\"true\"").findAll(html).toList().size shouldBe 2
         html shouldContain "lucide-sprite.svg#chart-line"
         // Exactly one draft badge: the unreleased leaf's.
         Regex("tpl-leaf-draft").findAll(html).toList().size shouldBe 1
@@ -98,7 +98,7 @@ class VisualizationUiRenderTest {
 
         html shouldContain "id=\"viz-list-wrapper\""
         html shouldContain "data-visualization-list=\"page\""
-        Regex("class=\"tpl-result\"[^>]*hx-boost=\"false\"").findAll(html).toList().size shouldBe 2
+        Regex("class=\"tpl-result\"[^>]*hx-boost=\"true\"").findAll(html).toList().size shouldBe 2
         html shouldContain "draft v1 pending release"
         html shouldNotContain "role=\"listbox\""
     }
@@ -147,7 +147,7 @@ class VisualizationUiRenderTest {
             val body = html.replace(Regex("<!--[\\s\\S]*?-->"), "")
 
             Regex("<script[^>]*plotly-[23]d\\.min\\.js").findAll(body).toList().size shouldBe 1
-            body shouldContain "data-dp-plotly-bundle=\"$bundle\""
+            body shouldContain "data-chart-assets"
             body shouldContain "/js/visualization-preview.js"
             body shouldContain ">acme/charts/revenue<"
             body shouldContain "v3 · released · current"

@@ -1,21 +1,4 @@
-<!-- A FLAT list of dashboards (#400), in TWO instances — chosen by `scope`, which also names
-     the stable swap root (partials/pipeline-search.html's shape, one family over):
-
-     - `nav`  — the global sidebar's search results, under #dash-tree-nav. Clearing the box
-                returns the sidebar to its tree (partials/dashboards dispatches on exactly
-                that). The rows are role=option in a role=listbox — a result list, not a
-                tree — and template-explorer.js's nav context gives them the same keyboard
-                as the tree.
-     - `page` — the /dashboards CATALOG, under #dash-list-wrapper: every dashboard the caller
-                may read when `q` is empty, the matches otherwise. Plain links in a plain
-                list; the page has no tree and no detail pane.
-
-     Every row is a LINK to the workspace /dashboards/{id} — a full document load
-     (hx-boost="false", dashboards.md §6.4's one-bundle rule: the workspace loads a Plotly
-     bundle), never a selection into a pane. A DRAFT-listing row says so (versioning §7:
-     unreleased edits stay visible from first paint); a dashboard whose listing version is
-     the draft and ONLY version has no release at all — the row says so, and opening it is
-     the workspace's choose-a-version state, not an error. -->
+<!-- Artifact and version links use prepared main-content navigation, preserving the sidebar. -->
 <div xmlns:th="http://www.thymeleaf.org" th:fragment="results" th:id="${rootId}"
      th:with="nav=${scope == 'nav'}" th:attr="data-dashboard-list=${scope}">
   <th:block th:if="${lensUnavailable != null and #lists.isEmpty(dashboards)}">
@@ -51,7 +34,7 @@
       th:attr="role=${nav} ? 'listbox' : null,
                aria-label=${nav} ? 'Dashboard search results' : 'Dashboards'">
     <li th:attr="role=${nav} ? 'none' : null" th:each="d : ${dashboards}">
-      <a class="tpl-result" hx-boost="false"
+      <a class="tpl-result" hx-boost="true"
          th:href="@{'/dashboards/' + ${d.id}}"
          th:attr="role=${nav} ? 'option' : null,
                   aria-selected=${nav} ? 'false' : null,

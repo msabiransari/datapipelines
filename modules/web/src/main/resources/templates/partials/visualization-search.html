@@ -1,15 +1,4 @@
-<!-- A FLAT list of visualizations (#399), in TWO instances chosen by `scope`, which also names the
-     stable swap root (partials/dashboard-search.html's shape, one family over):
-
-     - `nav`  — the sidebar's search results, under #viz-tree-nav; role=option rows in a
-                role=listbox. Clearing the box returns the sidebar to its tree.
-     - `page` — the /visualizations CATALOG, under #viz-list-wrapper: every visualization the
-                caller may read when `q` is empty, the matches otherwise.
-
-     The search is the lensed ILIKE over name, display name and description (server-side and
-     paged), so `total` is the truthful count of every match — there is no read ceiling to state.
-     Every row is a LINK to the workspace — a full document load (hx-boost="false", the one-bundle
-     rule). An unreleased row says so (versioning §7). -->
+<!-- Artifact and version links use prepared main-content navigation, preserving the sidebar. -->
 <div xmlns:th="http://www.thymeleaf.org" th:fragment="results" th:id="${rootId}"
      th:with="nav=${scope == 'nav'}" th:attr="data-visualization-list=${scope}">
   <th:block th:if="${lensUnavailable != null and #lists.isEmpty(visualizations)}">
@@ -41,7 +30,7 @@
       th:attr="role=${nav} ? 'listbox' : null,
                aria-label=${nav} ? 'Visualization search results' : 'Visualizations'">
     <li th:attr="role=${nav} ? 'none' : null" th:each="v : ${visualizations}">
-      <a class="tpl-result" hx-boost="false"
+      <a class="tpl-result" hx-boost="true"
          th:href="@{'/visualizations/' + ${v.id}}"
          th:attr="role=${nav} ? 'option' : null,
                   aria-selected=${nav} ? 'false' : null,

@@ -72,7 +72,7 @@ class ParameterSetsRenderTest {
         val html = level("acme", emptyList(), listOf(released, draft))
         html shouldContain "href=\"/parameter-sets/$setId\""
         html shouldContain "data-leaf-id=\"$setId\""
-        html shouldContain "hx-boost=\"false\""
+        html shouldContain "hx-boost=\"true\""
         html shouldContain "title=\"acme/geo_filters\""
         html shouldContain "tpl-leaf-draft"
         html shouldContain ">v3<"
@@ -121,7 +121,7 @@ class ParameterSetsRenderTest {
         html shouldContain "role=\"listbox\""
         html shouldContain "aria-label=\"Parameter set search results\""
         html shouldContain "href=\"/parameter-sets/$setId\""
-        html shouldContain "hx-boost=\"false\""
+        html shouldContain "hx-boost=\"true\""
         html shouldContain "title=\"acme/geo_filters\""
         // The pager keeps the query AND the nav scope: a page two that lost either would lie.
         html shouldContain "/partials/parameter-sets/tree?q=geo&amp;scope=nav&amp;offset=25"

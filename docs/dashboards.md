@@ -1,6 +1,6 @@
 # Dashboards
 
-**Status:** v0.35 — the read-only rule is stated as declarative (§5.1, #463), then draft dashboard dependencies (#459), then the Release dialogs post the draft hash they read (§7, #416) beside numeric bound-value assertion feasibility (§3.4, #377) beside the visualizations workspace's tab switches on the shared history helper, the parameter-set decision (§7, #426) beside the pipeline editor runs the shared tab core (§7, #420) beside the Versions tables' created/released relative with the UTC stamp on hover (§7, #422) beside Back/Forward across the dashboards workspace's tab switches (§7, #402) beside the visualizations workspace (§7, #399) beside the dashboards workspace (§5.2's `version`, §7's workspace, #400; #409 closes with it) beside the
+**Status:** v0.36 — the read-only rule is stated as declarative (§5.1, #463), then draft dashboard dependencies (#459), then the Release dialogs post the draft hash they read (§7, #416) beside numeric bound-value assertion feasibility (§3.4, #377) beside the visualizations workspace's tab switches on the shared history helper, the parameter-set decision (§7, #426) beside the pipeline editor runs the shared tab core (§7, #420) beside the Versions tables' created/released relative with the UTC stamp on hover (§7, #422) beside Back/Forward across the dashboards workspace's tab switches (§7, #402) beside the visualizations workspace (§7, #399) beside the dashboards workspace (§5.2's `version`, §7's workspace, #400; #409 closes with it) beside the
 board's small-slot margins and its breakpoint collapse (§6.2, §6.3, #386/#387), 328's release-record judgement (§4.3)
 permissions (§4, lane L1b); the transfer routes and their limits' honest contract (§3.3, lanes L1c/L1c-b/L1c-c: the
 import's atomicity, the RELEASE rules on a landing, the aggregate count ceiling, the wire's per-family arms); the server
@@ -711,16 +711,15 @@ boards in one document never share a native radio group); repeated renders REPLA
 
 Plotly is vendored as two self-contained custom bundles (D63): `plotly-2d.min.js` (scatter, bar, pie,
 histogram, box, heatmap — the default) and `plotly-3d.min.js` (those plus scatter3d, surface, mesh3d —
-WebGL). The SERVER chooses: `runtime/config` carries `renderer.bundle: "2d" | "3d"` derived from the
-pinned visualizations' trace types, and the page loads exactly one — the two are never on one page.
-The host DECLARES what it loaded on the script tag: `<script src="…/plotly-2d.min.js"
-data-dp-plotly-bundle="2d">`. The runtime judges the pair at bootstrap: two bundle declarations on one
-page, a renderer kind nothing registered, a version mismatch, or a 3D board on a page that loaded the
-2D bundle all fail `ready` before anything executes.
+WebGL). The SERVER's `runtime/config` carries `renderer.bundle: "2d" | "3d"` derived from pinned trace types.
+Standalone previews/embeds load exactly one matching bundle and declare it with `data-dp-plotly-bundle`.
+The runtime refuses two declarations, unsupported renderers, incompatible versions and a 3D config on a 2D bundle.
 
-Because the two bundles must never travel between pages, a host that navigates with htmx boosting
-opts its dashboard links OUT (`hx-boost="false"`, the layout's precedent for routes that must not
-boost); the first-party pages apply that (L3b), and the runtime's two-bundle refusal is the backstop.
+The signed-in shell (#460) lazily loads the existing 3D superset once and reuses it for 2D and 3D artifacts.
+Artifact/catalog/version links preserve the rail through main-content navigation. Destination validation and
+asset preparation precede outgoing disposal. Cached history contains inert markup and mounts once; pipeline
+observation detaches without cancelling execution, while dashboard disposal retains refresh cancellation.
+The loader establishes the existing CSP style marker before executing Plotly and adds no CSP allowance.
 
 ### 6.5 Credentials: session and proxy
 
@@ -815,14 +814,13 @@ the lifecycle dialogs, which floor at their verbs' own permissions
 pipelines catalog's shape, one row per dashboard the caller may read (or the matches of
 `?q=`), each row linking the workspace. The L3b tree page is retired: the folder tree is the
 SIDEBAR's navigating-tree branch (the link to the catalog, a separate toggle, the lazy panel)
-— and since #400 the branch carries the search box in the Pipelines branch's exact markup: a
-non-empty query swaps the flat results into the same nav root, clearing returns the tree by
-construction, and the shared engine (`nav-tree.js`) serves it with no JS change. Both the
-branch's tree and the catalog render server-side through the dashboards service's LENSED
-reads (a hidden dashboard is absent from the tree, its counts and the catalog; nothing is
-filtered in a template), the root level listing folders only. A row — catalog or tree leaf —
-opens the workspace as a FULL navigation (`hx-boost="false"`, §6.4's rule: the bundles must
-never travel between pages). A draft-only dashboard's row says so (`draft v1 pending
+— using the reusable REST search-and-tree component since #460 (ui-screens §3.4).
+Initialization loads closed top-level nodes only; expansion exhausts bounded pages of immediate
+children. Name search returns every matching path with ancestors, initially expanded; clear closes
+all folders back to the normal top level. Both browse and search filter through the service's lens
+before metadata projection. The flat catalog retains its existing server-rendered search contract.
+A row — catalog or tree leaf —
+opens the workspace through prepared main-content navigation (#460, §6.4). A draft-only dashboard's row says so (`draft v1 pending
 release`): the list page's promise, kept as a ROW state.
 
 **The workspace.** One URL names one dashboard, one viewed version and one tab. The
@@ -877,14 +875,14 @@ Tab state is IN-PAGE (`static/js/dashboards/workspace.js` over the SHARED tab co
 `static/js/workspace/tabs.js`, the one admission and transition rule; the pipeline editor's
 `pipeline-editor/tabs.js` runs the same machine since #420): a tab switch swaps no version and cancels no poll, the
 URL's `?tab=` moves with a pushed history entry of the workspace's own (#402,
-`static/js/workspace/history.js`, tab only — the version switch stays a full navigation) so
+`static/js/workspace/history.js`, tab only — version switches use prepared main-content navigation) so
 Back/Forward re-select the tab in page (a cached restore re-wires the strip once and shows the
 tab it left), and lazy tabs (Overview,
 Refreshes, Versions, Keys) load their fragment once, on the tab's first activation — a
 hidden tab causes no fetch. The Board pane's reveal runs the runtime instance's OWN
 `resize()`, so a chart that booted while the pane was hidden (a `?tab=versions` deep link, a
-lifecycle redirect) re-fits its slot. EVERY version switch is a FULL navigation
-(`hx-boost="false"` — a draft's bundle can differ from the release's; #369 review F1), and
+lifecycle redirect) re-fits its slot. Every version switch preserves the rail through prepared
+main-content navigation (#460, the compatible superset bundle), and
 the version selector over the admitted history renders those deep links. **The draft
 preview is the named-version view**: `/dashboards/{id}/preview?version=N` answers 303 onto
 `/dashboards/{id}?version=N&tab=board`, so #369's deep links land in the workspace's Board
@@ -920,15 +918,15 @@ version a 400 that never echoes it. Its five tabs ([ui-screens §4.24](ui-screen
   route wires, is session-only, is audited as the REST route audits it (a cascaded template's own
   event first) and answers `HX-Redirect` back onto this tab.
 
-Every version switch is a full navigation (the one-bundle rule, §6.4): the workspace declares the
-ONE Plotly bundle the viewed version's traces need, and the choose-a-version state loads none.
+Every version switch uses prepared main-content navigation (§6.4), retaining the rail and the
+single compatible Plotly bundle. The choose-a-version state mounts no chart.
 
 The visualizations workspace's tab switches go through the same history helper as the dashboards'
 (`static/js/workspace/history.js`, family `visualizations`, tab only — the pushed-entry wording of §7's
 dashboards workspace above; the shared pane glue `workspace/panes.js` carries it, so Back/Forward
 re-select the tab in page and a cached restore re-wires the strip once, #426). The parameter-set
-workspace deliberately does NOT adopt the helper: its sections are full-document links
-(`hx-boost="false"`, `?version=&tab=history` — the History arm renders no live form), there is no in-page
+workspace does not adopt tab-only history: its sections use prepared main-content links
+(`?version=&tab=history` — the History arm renders no live form), there is no in-page
 switch to make navigable, and the browser's own history already carries every section and version
 change (#426). The templates workspace adopts the helper after #398's rework lands (follow-up to #426).
 
@@ -936,6 +934,7 @@ change (#426). The templates workspace adopts the helper after #398's rework lan
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-06 | v0.36 | #460 reusable REST navigation | §6.4/§7: one lazy compatible bundle in the signed-in shell, explicit per-container mounts and prepared navigation; standalone bundle choice and refresh cancellation preserved. |
 | 2026-10-06 | v0.35 | 459 merge follow-up | "Sources are read-only" now says what the rule checks: declared node types, output targets and sources, enforced at the listed points. It is not a read-only database connection, and with draft previews running unreviewed source bodies that difference matters. Database-enforced read-only is #463. "Last updated" brought current (the lane's v0.34 row left it at 2026-10-04). |
 | 2026-10-05 | v0.34 | #459 draft dashboard dependencies | Draft save and explicitly selected draft runtime admit live draft dependencies transitively. Released runtime, release and import remain strict. Configuration identity includes mutable nested pipeline and template/import content; each loaded source/child is admitted for lifecycle and read-only execution. Overview explains draft availability and release requirements. Supersedes #369 R1 for draft development. |
 | 2026-10-04 | v0.33 | #416 the Release dialogs post the hash they read | **§7:** the dashboards and visualizations workspaces' Release dialog forms carry a hidden hash of the draft the dialog read (`bodyHash`; `body_hash` for visualizations), the POST requires it (a missing one is a 400 at binding) and releases AT it. Before, the POST re-read the draft and released whatever hash it found, so a draft changed after the dialog opened went live unseen. A stale hash is `*.version.conflict` (409) and, for a cascading release, rolls the cascade back (§3.2). The same change covers the pipelines and templates dialogs ([UI Screens §4.3d](ui-screens.md)). No service, REST or matrix change. |

@@ -82,7 +82,7 @@ class DashboardUiRenderTest {
 
         // A leaf NAVIGATES: a real href (the workspace page), full navigation —
         // hx-boost="false", the §6.4 one-bundle rule — and the full path on `title`.
-        html shouldContain "hx-boost=\"false\""
+        html shouldContain "hx-boost=\"true\""
         html shouldContain "href=\"/dashboards/${board1.id}\""
         html shouldContain "title=\"acme/dashboards/revenue\""
         // versioning §7: the unreleased edits stay visible, marked.
@@ -123,7 +123,7 @@ class DashboardUiRenderTest {
         html shouldContain "href=\"/dashboards/${board1.id}\""
         html shouldContain "href=\"/dashboards/${board2.id}\""
         // Full navigations only: the workspace loads a Plotly bundle.
-        html shouldContain "hx-boost=\"false\""
+        html shouldContain "hx-boost=\"true\""
         html shouldNotContain "tpl-summary"
         html shouldNotContain "partials/dashboards/tree"
     }
@@ -206,9 +206,9 @@ class DashboardUiRenderTest {
         val html = workspacePage(bundle = "2d")
 
         Regex("<script[^>]*plotly-\\d+d?\\.min\\.js[^>]*>").findAll(html).toList().size shouldBe 1
-        html shouldContain "src=\"/vendor/plotly/plotly-2d.min.js\""
-        html shouldContain "data-dp-plotly-bundle=\"2d\""
-        html shouldNotContain "plotly-3d.min.js"
+        html shouldContain "src=\"/vendor/plotly/plotly-3d.min.js\""
+        html shouldContain "data-chart-assets"
+        html shouldNotContain "plotly-2d.min.js"
         // The runtime and its three renderers ride the page, then the glue — and the container
         // carries the dashboard id, the only server value the glue reads. The DEFAULT
         // resolution writes NO version attribute (the glue's init stays "released").
@@ -234,7 +234,7 @@ class DashboardUiRenderTest {
 
         Regex("<script[^>]*plotly-\\d+d?\\.min\\.js[^>]*>").findAll(html).toList().size shouldBe 1
         html shouldContain "src=\"/vendor/plotly/plotly-3d.min.js\""
-        html shouldContain "data-dp-plotly-bundle=\"3d\""
+        html shouldContain "data-chart-assets"
         html shouldNotContain "plotly-2d.min.js"
     }
 
@@ -248,7 +248,7 @@ class DashboardUiRenderTest {
         html shouldContain "v2 · draft"
         // The selector rows never boost: a draft's bundle can differ from the release's
         // (the one-bundle rule, #369 review F1).
-        Regex("<a[^>]*hx-boost=\"false\"[^>]*href=\"/dashboards/${board1.id}\\?version=[12][^>]*>").findAll(html).toList().size shouldBe 2
+        Regex("<a[^>]*hx-boost=\"true\"[^>]*href=\"/dashboards/${board1.id}\\?version=[12][^>]*>").findAll(html).toList().size shouldBe 2
         html shouldContain "href=\"/dashboards/${board1.id}?version=1"
     }
 

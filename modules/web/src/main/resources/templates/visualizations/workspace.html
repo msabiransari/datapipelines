@@ -2,25 +2,12 @@
 <html xmlns:th="http://www.thymeleaf.org"
       th:replace="~{layouts/default :: page(~{::content})}">
 <th:block th:fragment="content">
-  <!-- #399 — the visualization WORKSPACE (the parent ruling #396's tabbed, version-explicit page,
-        ui-screens.md §4.24): one URL names one visualization, one viewed version and one tab.
-        Preview (fixture mode, the default) | Overview | Evidence | Used by | Versions — every pane
-        a lazy, read-only partial on visualization.read; Versions carries the lifecycle verbs'
-        dialogs. The browser never authors a visualization (#396): no create/update/import here.
-
-        The ONE-bundle rule (dashboards.md §6.4) governs this page as it does the dashboard's:
-        every link ONTO it carries hx-boost="false" (tree leaf, catalog rows, the selector, the
-        choose-a-version links), so the scripts below run on full document loads alone. Tab
-        switches are in-page (visualizations/workspace.js); version switches are full
-        navigations (a version's renderer chooses its Plotly bundle); lifecycle dialogs answer
-        HX-Redirect (a full navigation back onto the Versions tab).
-
-        The runtime's scripts ride ONLY a page whose version resolved. The Preview pane mounts
-        in the runtime's FIXTURE mode — no server base URL, no credentials, so the preview can
-        reach no /api/v1 route (the capability page's own contract, visualization-preview.js). -->
-  <th:block th:if="${bundle != null}">
-    <script th:src="@{/vendor/plotly/plotly-{bundle}.min.js(bundle=${bundle})}"
-            th:attr="data-dp-plotly-bundle=${bundle}"></script>
+  <!-- Signed-in chart pages share the shell's lazy 3D superset bundle. This inert catalog
+       declares reusable libraries and per-page mount glue; prepared navigation and cached
+       history preserve the rail and mount each live root once. Standalone embeds remain isolated. -->
+  <template data-chart-assets>
+    <th:block th:if="${bundle != null}">
+    <script th:src="@{/vendor/plotly/plotly-3d.min.js}"></script>
     <script th:src="@{/js/datapipelines-dashboard.js}"></script>
     <script th:src="@{/js/datapipelines-dashboard-plotly.js}"></script>
     <script th:src="@{/js/datapipelines-dashboard-table.js}"></script>
@@ -31,9 +18,11 @@
   <script th:src="@{/js/workspace/tabs.js}"></script>
   <script th:src="@{/js/workspace/history.js}"></script>
   <script th:src="@{/js/workspace/panes.js}"></script>
-  <script th:src="@{/js/visualizations/workspace.js}" defer></script>
+  <script data-page-mount th:src="@{/js/visualizations/workspace.js}" defer></script>
   <!-- 102: the lifecycle dialogs' client half — the ONE per-screen container is #dp-dialog. -->
   <script th:src="@{/js/lifecycle-dialog.js}" defer></script>
+
+  </template>
 
   <!-- #350 — the sidebar's current-leaf hook: the rail's Visualizations tree marks this leaf and
         reveals its folders. -->
@@ -53,7 +42,7 @@
       </div>
       <nav class="dp-versions" aria-label="View another version"
            th:if="${!#lists.isEmpty(versions)}">
-        <a th:each="row : ${versions}" class="ds-button ds-button-ghost ds-button-sm" hx-boost="false"
+        <a th:each="row : ${versions}" class="ds-button ds-button-ghost ds-button-sm" hx-boost="true"
            th:href="@{/visualizations/{id}(id=${visualizationId}, version=${row.version}, tab=${activeTab})}"
            th:attr="aria-current=${row.isSelected} ? 'true' : null"
            th:title="${'v' + row.version + ' — ' + row.status.toLowerCase() + (row.isCurrent ? ' · current' : '')}"
@@ -72,7 +61,7 @@
         <span>has no version to show by default — pick one below.</span>
       </p>
       <p class="ds-empty-actions">
-        <a th:each="row : ${versions}" class="ds-button ds-button-secondary" hx-boost="false"
+        <a th:each="row : ${versions}" class="ds-button ds-button-secondary" hx-boost="true"
            th:href="@{/visualizations/{id}(id=${visualizationId}, version=${row.version}, tab='preview')}"
            th:text="'v' + ${row.version} + ' — ' + ${row.status.toLowerCase()} + (${row.isCurrent} ? ' · current' : '')">v2 — draft</a>
       </p>
