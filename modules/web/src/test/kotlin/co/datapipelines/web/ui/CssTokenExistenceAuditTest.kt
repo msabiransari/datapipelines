@@ -102,8 +102,11 @@ class CssTokenExistenceAuditTest {
     @Test
     fun `the fallback pinned undefined names are exactly the known debt`() {
         val pinned = fallbackUses.keys - definedBy.keys
-        withClue("new fallback-pinned undefined names — repair them or list them here deliberately: " +
-            (pinned - KNOWN_FALLBACK_UNDEFINED).joinToString("; ") { token -> "$token <- used by ${fallbackUses.getValue(token).sorted()}" }) {
+        val clue =
+            "new fallback-pinned undefined names — repair them or list them here deliberately: " +
+                (pinned - KNOWN_FALLBACK_UNDEFINED)
+                    .joinToString("; ") { token -> "$token <- used by ${fallbackUses.getValue(token).sorted()}" }
+        withClue(clue) {
             (pinned - KNOWN_FALLBACK_UNDEFINED).shouldBeEmpty()
         }
         withClue("remove these entries from KNOWN_FALLBACK_UNDEFINED: their last use is gone") {
