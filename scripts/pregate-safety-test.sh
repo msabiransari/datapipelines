@@ -60,33 +60,190 @@ while IFS= read -r args; do
 done < "$F/pregate-argv.log"
 ok 'real pregate defers browser coverage and limits every Gradle invocation'
 
-# Separate checkouts, same user's cache: both wrappers must refuse, without
-# deleting prior gate evidence or reaching the recording stand-in.
+# #485: two pregate-class slots across checkouts, the gate exclusive, one holder per
+# checkout, older copies respected, a memory floor. Every holder lives in a subshell;
+# every contender closes the inherited descriptors, exactly like an independent session.
 G="$T/other-checkout"
 mkdir -p "$G/scripts/lib" "$G/.gate-logs"
 cp "$ROOT/scripts/gate.sh" "$G/scripts/"
 cp "$ROOT/scripts/lib/verification-lock.sh" "$G/scripts/lib/"
 printf 'prior gate evidence\n' > "$G/.gate-logs/sentinel"
 export XDG_CACHE_HOME="$F/.fixture-cache"
+CACHE="$XDG_CACHE_HOME/datapipelines"
 source "$ROOT/scripts/lib/verification-lock.sh"
-before="$(cat "$F/pregate-argv.log")"
+# The pre-#485 library verbatim: what a lane copy made before this change runs.
+cat > "$T/old-verification-lock.sh" <<'OLDLOCK'
+# shellcheck shell=bash
+# One gate/pregate per user across worktrees. Acquire BEFORE deleting logs or
+# starting Gradle. Keep fd 9 in the wrapper, close it in Gradle children so an
+# idle daemon cannot retain the lock after the wrapper exits. Never unlink it:
+# replacing a locked inode would let a second wrapper acquire a different lock.
+verification::lock() {
+  local kind="$1" root="$2"
+  local dir="${XDG_CACHE_HOME:-$HOME/.cache}/datapipelines"
+  command -v flock >/dev/null 2>&1 || {
+    echo "verification refused: flock is required (install util-linux)." >&2
+    return 2
+  }
+  mkdir -p "$dir" || return 2
+  exec 9>>"$dir/verification.lock" || return 2
+  if ! flock -n 9; then
+    echo "verification busy: another gate/pregate holds $dir/verification.lock" >&2
+    if [ -r "$dir/verification-holder.txt" ]; then
+      cat "$dir/verification-holder.txt" >&2
+    fi
+    exec 9>&-
+    return 75
+  fi
+  printf 'kind=%s pid=%s cwd=%s started=%s\n' "$kind" "$$" "$root" \
+    "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" > "$dir/verification-holder.txt" || {
+      exec 9>&-
+      return 2
+    }
+}
+OLDLOCK
+contend() { # script → rc, combined output in $T/refused; a gate fixture is only ever refused
+  local args=()
+  [[ "$1" != */pregate.sh ]] || args=(HEAD)
+  rc=0
+  bash "$1" "${args[@]}" 9>&- 10>&- 11>&- > "$T/refused" 2>&1 || rc=$?
+}
+argv_count() { wc -l < "$F/pregate-argv.log"; }
+evidence_state() { (cd "$F" && find .pregate-logs pregate-argv.log -type f -exec cksum {} + | sort); }
+refused_pregate() { # case → the pregate contender refused before any work
+  local before; before="$(evidence_state)"
+  contend "$F/scripts/pregate.sh"
+  [ "$rc" -eq 75 ] || fail "$1: pregate not refused ($rc)"
+  [ "$before" = "$(evidence_state)" ] || fail "$1: refused pregate touched evidence or launched Gradle"
+}
+refused_gate() { # case → the gate contender refused before erasing evidence
+  contend "$G/scripts/gate.sh"
+  [ "$rc" -eq 75 ] || fail "$1: gate not refused ($rc)"
+  [ "$(cat "$G/.gate-logs/sentinel")" = 'prior gate evidence' ] || fail "$1: refused gate erased evidence"
+}
+
+# (1) one pregate-class holder elsewhere: a pregate in another checkout RUNS on slot 1.
 (
-  verification::lock fixture "$T"
-  for script in "$F/scripts/pregate.sh" "$G/scripts/gate.sh"; do
-    rc=0
-    # Close the inherited holder fd in the contender, exactly like an independent session.
-    wrapper_args=()
-    [[ "$script" != */pregate.sh ]] || wrapper_args=(HEAD)
-    bash "$script" "${wrapper_args[@]}" 9>&- > "$T/refused" 2>&1 || rc=$?
-    [ "$rc" -eq 75 ] || fail "overlap was not refused: $script ($rc)"
-    grep -q "kind=fixture.*cwd=$T" "$T/refused" || fail 'holder not named'
-  done
+  verification::lock fixture "$T" || fail 'case 1: holder'
+  before="$(argv_count)"
+  contend "$F/scripts/pregate.sh"
+  [ "$rc" -eq 0 ] || fail "case 1: second pregate refused ($rc): $(grep -m2 '^verification' "$T/refused")"
+  [ "$(argv_count)" -gt "$before" ] || fail 'case 1: second pregate launched no Gradle'
+  grep -q "^kind=fixture pid=.* cwd=$T " "$CACHE/verification-holder.0.txt" || fail 'case 1: holder record'
+  grep -q "^kind=pregate pid=.* cwd=$F " "$CACHE/verification-holder.1.txt" || fail 'case 1: second holder record'
 )
-[ "$before" = "$(cat "$F/pregate-argv.log")" ] || fail 'busy pregate launched Gradle'
-[ "$(cat "$G/.gate-logs/sentinel")" = 'prior gate evidence' ] || fail 'busy gate erased evidence'
-(verification::lock after-exit "$T") || fail 'lock was not released after exit'
-pgres::_run_fixture "$F" || fail 'pregate could not run after holder exited'
-ok 'cross-checkout overlap refused before work; lock released on exit'
+ok 'case 1: two pregate-class holders coexist in different checkouts'
+
+# (2) both slots held: a third pregate-class contender is refused naming both.
+(
+  verification::lock fixture-a "$T/a" || fail 'case 2: holder a'
+  (
+    verification::lock fixture-b "$T/b" || fail 'case 2: holder b'
+    refused_pregate 'case 2'
+    grep -q "slot=0 kind=fixture-a .*cwd=$T/a " "$T/refused" || fail 'case 2: holder a not named'
+    grep -q "slot=1 kind=fixture-b .*cwd=$T/b " "$T/refused" || fail 'case 2: holder b not named'
+  )
+)
+ok 'case 2: a third pregate-class contender is refused with both holders named'
+
+# (3) one pregate-class holder: a gate contender is refused and erases nothing.
+(
+  verification::lock fixture "$T" || fail 'case 3: holder'
+  refused_gate 'case 3'
+  grep -q "slot=0 kind=fixture .*cwd=$T " "$T/refused" || fail 'case 3: holder not named'
+  ! verification::_held "$CACHE/verification.slot.1" || fail 'case 3: refused gate kept slot 1'
+  ! verification::_held "$CACHE/verification.lock" || fail 'case 3: refused gate kept the old lock'
+)
+ok 'case 3: a gate is refused while a pregate-class holder lives, releasing what it took'
+
+# (3b) only slot 1 held: the gate takes slot 0 first, then must give it back.
+(
+  exec 9>>"$CACHE/verification.slot.1"; flock -n 9 || fail 'case 3b: slot-1 holder'
+  printf 'kind=fixture-1 pid=%s cwd=%s started=x\n' "$$" "$T/one" > "$CACHE/verification-holder.1.txt"
+  refused_gate 'case 3b'
+  grep -q "slot=1 kind=fixture-1 .*cwd=$T/one " "$T/refused" || fail 'case 3b: slot-1 holder not named'
+  ! verification::_held "$CACHE/verification.slot.0" || fail 'case 3b: refused gate kept slot 0'
+  ! verification::_held "$CACHE/verification.lock" || fail 'case 3b: refused gate kept the old lock'
+  # A caller that continues after 75 (the process exit above releases anyway).
+  (
+    exec 9>&- 10>&- 11>&-
+    rc=0; verification::lock gate "$T/in-process" 2> "$T/refused" || rc=$?
+    [ "$rc" -eq 75 ] || fail "case 3b: in-process gate not refused ($rc)"
+    ! verification::_held "$CACHE/verification.slot.0" || fail 'case 3b: in-process refused gate kept slot 0'
+    ! verification::_held "$CACHE/verification.lock" || fail 'case 3b: in-process refused gate kept the old lock'
+  )
+)
+ok 'case 3b: a gate that gets one slot and not the other releases what it took'
+
+# (4) a gate holder: both contenders are refused, nothing erased, nothing launched.
+(
+  verification::lock gate "$T" || fail 'case 4: gate holder'
+  refused_pregate 'case 4'
+  grep -q "kind=gate .*cwd=$T " "$T/refused" || fail 'case 4: gate not named to pregate'
+  refused_gate 'case 4'
+  grep -q "kind=gate .*cwd=$T " "$T/refused" || fail 'case 4: gate not named to gate'
+)
+ok 'case 4: a gate holder refuses pregate and gate before either touches evidence'
+
+# (5) a live holder in THIS checkout: refused for the checkout even with slot 1 free.
+(
+  verification::lock fixture "$F" || fail 'case 5: holder'
+  refused_pregate 'case 5'
+  grep -q 'this checkout already has a live holder' "$T/refused" || fail 'case 5: same-checkout reason missing'
+  grep -q "slot=0 kind=fixture .*cwd=$F " "$T/refused" || fail 'case 5: holder not named'
+  ! verification::_held "$CACHE/verification.slot.1" || fail 'case 5: slot 1 was not free'
+)
+ok 'case 5: a second holder for one checkout is refused with a slot free'
+
+# (6) an older copy holding verification.lock: both new contenders are refused.
+(
+  exec 9>>"$CACHE/verification.lock"; flock -n 9 || fail 'case 6: legacy holder'
+  printf 'kind=legacy pid=%s cwd=%s started=x\n' "$$" "$T/legacy" > "$CACHE/verification-holder.txt"
+  refused_pregate 'case 6'
+  grep -q "kind=legacy .*cwd=$T/legacy " "$T/refused" || fail 'case 6: legacy holder not named to pregate'
+  refused_gate 'case 6'
+  grep -q "kind=legacy .*cwd=$T/legacy " "$T/refused" || fail 'case 6: legacy holder not named to gate'
+)
+ok 'case 6: an older copy holding the pre-#485 lock refuses new pregate and gate'
+
+# (6b) a new gate holds the pre-#485 lock too: an older copy is refused, naming the gate.
+(
+  verification::lock gate "$T" || fail 'case 6b: gate holder'
+  rc=0
+  bash -c 'source "$1"; verification::lock old-copy "$2"' _ "$T/old-verification-lock.sh" "$T/old" \
+    9>&- 10>&- 11>&- > "$T/refused" 2>&1 || rc=$?
+  [ "$rc" -eq 75 ] || fail "case 6b: older copy not refused by a gate ($rc)"
+  grep -q "kind=gate .*cwd=$T " "$T/refused" || fail 'case 6b: gate not named to the older copy'
+)
+ok 'case 6b: a gate refuses an older pregate copy'
+
+# (7) the kernel released every slot and the old lock: a gate takes them all after exit.
+(verification::lock gate "$T") || fail 'case 7: slots or lock not released after exit'
+pgres::_run_fixture "$F" || fail 'case 7: pregate could not run after holders exited'
+ok 'case 7: every slot and the old lock are released on exit'
+
+# (9)/(10) the memory floor refuses before any record or evidence; 0 admits.
+FC="$T/floor-cache"
+memtotal="$(awk '/^MemTotal:/ { print int($2 / 1024) + 1; exit }' /proc/meminfo)"
+before="$(evidence_state)"
+rc=0
+DATAPIPELINES_VERIFICATION_MEM_FLOOR_MB="$memtotal" XDG_CACHE_HOME="$FC" \
+  bash "$F/scripts/pregate.sh" HEAD 9>&- > "$T/refused" 2>&1 || rc=$?
+[ "$rc" -eq 75 ] || fail "case 9: pregate under the floor not refused ($rc)"
+grep -q "^verification refused: MemAvailable [0-9]* MB below floor $memtotal MB" "$T/refused" || fail 'case 9: floor message'
+[ "$before" = "$(evidence_state)" ] || fail 'case 9: refused pregate touched evidence or launched Gradle'
+[ ! -e "$FC" ] || fail 'case 9: refused pregate created the cache or a holder record'
+rc=0
+(DATAPIPELINES_VERIFICATION_MEM_FLOOR_MB="$memtotal" XDG_CACHE_HOME="$FC" verification::lock gate "$T") 2> "$T/refused" || rc=$?
+[ "$rc" -eq 75 ] && [ ! -e "$FC" ] || fail "case 9: gate under the floor not refused ($rc)"
+before="$(argv_count)"; rc=0
+DATAPIPELINES_VERIFICATION_MEM_FLOOR_MB=0 XDG_CACHE_HOME="$FC" \
+  bash "$F/scripts/pregate.sh" HEAD 9>&- > "$T/refused" 2>&1 || rc=$?
+[ "$rc" -eq 0 ] && [ "$(argv_count)" -gt "$before" ] || fail "case 10: floor 0 did not admit ($rc)"
+garbage="$(DATAPIPELINES_VERIFICATION_MEM_FLOOR_MB=12x verification::_mem_floor_mb 2> "$T/garbage")"
+[ "$garbage" = "$VERIFICATION_MEM_FLOOR_DEFAULT_MB" ] && grep -q "'12x' is not an integer" "$T/garbage" || fail 'garbage floor'
+[ "$(DATAPIPELINES_VERIFICATION_MEM_FLOOR_MB= verification::_mem_floor_mb 2>&1)" = "$VERIFICATION_MEM_FLOOR_DEFAULT_MB" ] || fail 'empty floor'
+ok 'cases 9-10: the floor refuses gate and pregate before any record; 0 admits; garbage reads the default'
 echo '  resource safety self-test: PASS'
 
 # #479: the production wrappers, planner and evidence reducer, with no real tools.
@@ -240,11 +397,12 @@ ok 'final manifest failure cannot publish PASS'
 export XDG_CACHE_HOME="$P/.fixture-cache"
 (
   verification::lock preview-holder "$T"
-  cp "$XDG_CACHE_HOME/datapipelines/verification-holder.txt" "$T/holder-before"
+  cp "$XDG_CACHE_HOME/datapipelines/verification-holder.0.txt" "$T/holder-before"
   cp -a "$P/.pregate-logs" "$T/evidence-before"
   cp "$P/pregate-argv.log" "$T/argv-before"
   (cd "$P" && bash scripts/pregate.sh --plan HEAD 9>&- > "$T/locked-preview") || fail 'preview took heavy-work lock'
-  cmp "$T/holder-before" "$XDG_CACHE_HOME/datapipelines/verification-holder.txt" || fail 'preview overwrote holder'
+  cmp "$T/holder-before" "$XDG_CACHE_HOME/datapipelines/verification-holder.0.txt" || fail 'preview overwrote holder'
+  [ ! -e "$XDG_CACHE_HOME/datapipelines/verification-holder.1.txt" ] || fail 'preview took a second slot'
   diff -qr "$T/evidence-before" "$P/.pregate-logs" || fail 'preview wrote or pruned evidence'
   cmp "$T/argv-before" "$P/pregate-argv.log" || fail 'preview launched Gradle'
 )
