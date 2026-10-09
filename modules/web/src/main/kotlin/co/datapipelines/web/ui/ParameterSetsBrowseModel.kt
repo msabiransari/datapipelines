@@ -96,10 +96,9 @@ class ParameterSetsBrowseModel(
         val page = maxOf(0, offset)
         // The trim is the model's, in one place: a blank `q` is no search (the dispatcher's level,
         // or the catalog's plain listing), and what renders back into the box is the trimmed term.
-        // The length is bounded because this `q` becomes a bound ILIKE pattern (#415's new SQL
-        // path): a needle is at most [MAX_QUERY_LENGTH] characters, longer input truncated to what
-        // a search box is for. The sibling searches predate the bound and carry none — this is the
-        // new path's stated posture, not a copied house rule.
+        // The length is the service's bound (#490, `ParameterSetService.MAX_QUERY_LENGTH`), which
+        // refuses a longer needle on REST and MCP; a search box TRUNCATES to it before the call
+        // instead, so a typed overflow never errors the box (#415's posture, unchanged).
         val needle = q?.trim()?.takeIf { it.isNotEmpty() }?.take(MAX_QUERY_LENGTH)
         val loaded = sets.search(workspaceId, view.parameterSets, needle, page, PAGE_SIZE)
         val total = sets.countSearch(workspaceId, view.parameterSets, needle)
@@ -197,8 +196,8 @@ class ParameterSetsBrowseModel(
         /** The explorers' page size — the value the three sibling trees use. */
         const val PAGE_SIZE = 25
 
-        /** The search needle's length bound (#415) — a search box is not a text field. */
-        const val MAX_QUERY_LENGTH = 200
+        /** The search needle's length bound — the service's own (#490), which this box truncates to. */
+        const val MAX_QUERY_LENGTH = ParameterSetService.MAX_QUERY_LENGTH
 
         const val LEVEL_VIEW = "partials/parameter-set-tree-level"
         const val SEARCH_VIEW = "partials/parameter-set-search"

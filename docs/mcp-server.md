@@ -1,9 +1,9 @@
 # MCP Server Specification
 
-**Status:** v1.72 (frozen contract — additive-only changes after this point)
+**Status:** v1.73 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [REST API spec](rest-api.md), [Auth spec](auth.md), [Templates spec](templates.md)
-**Last updated:** 2026-10-08
+**Last updated:** 2026-10-09
 
 ---
 
@@ -1799,14 +1799,14 @@ List the key's pinned workspace's parameter sets, or browse ONE level of the nam
                   "type": "object",
                   "properties": {
                     "prefix": {"type": "string", "description": "Browse ONE level of the name tree at this prefix. Empty string browses the roots."},
-                    "q": {"type": "string", "description": "Case-insensitive substring search over name, display name and description (the whole path counts as the name); ignored when prefix is present — pass prefix to browse, q to search."},
+                    "q": {"type": "string", "description": "Case-insensitive substring search over name, display name and description (the whole path counts as the name); ignored when prefix is present — pass prefix to browse, q to search. At most 200 characters after trimming; a longer q is refused as invalid params."},
                     "limit": {"type": "integer", "default": 50, "maximum": 200}
                   }
                 }
 }
 ```
 
-**Permission:** `parameter_set.read` — every role (the promoter lensed). **Returns:** `{prefix, folders: [{path, segment, parameter_set_count}], parameter_sets: [{id, name, display_name, version, status, current_version}], returned}`. With `q` (no `prefix`) the search shape is `{q, parameter_sets: [the same rows], returned, total}` — no `folders` (a search is not a level), and `total` is the full match count so a truncated `limit` is visible.
+**Permission:** `parameter_set.read` — every role (the promoter lensed). **Returns:** `{prefix, folders: [{path, segment, parameter_set_count}], parameter_sets: [{id, name, display_name, version, status, current_version}], returned}`. With `q` (no `prefix`) the search shape is `{q, parameter_sets: [the same rows], returned, total}` — no `folders` (a search is not a level), and `total` is the full match count so a truncated `limit` is visible. A `q` over 200 characters after the trim is refused `-32602 invalid params` before any read (#490; the message names the limit, the length and `parameter.validation.query_too_long`, never the term) — the same `ParameterSetService` bound REST answers with `400`.
 
 #### 6.2.45 `parameter_sets_get`
 
@@ -3118,6 +3118,7 @@ the audit green over the exported set.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-09 | v1.73 | 490 (#490) the search needle's bound | **§6.2.44 `parameter_sets_list`**: `q` is bounded at 200 characters after the trim — the `inputSchema`'s `q` description says so, and a longer `q` is refused JSON-RPC `-32602 invalid params` (§9.1, the route a non-string `q` already takes) naming the limit, the length and `parameter.validation.query_too_long`, before any read and without echoing the term. The bound is `ParameterSetService`'s, shared with REST (`400`, [REST §21.2](rest-api.md#212-routes) v2.91); no tool, argument, count or permission changed. |
 | 2026-10-08 | v1.72 | 419 (#419) the `parameter_sets_list` `q` search | **§6.2.44 `parameter_sets_list` gains the optional `q`**: with no `prefix` and a non-blank `q` it searches name, display name and description case-insensitively through the same lensed `ParameterSetService.search` the first-party pages use, answering `{q, parameter_sets, returned, total}` — no `folders` (a search is not a level), and `total` is the full match count so an agent sees a truncated `limit`. A present `prefix` (including `""`) still browses and `q` is ignored — the branch switch is `has("prefix")`, not `string`, so an absent prefix with a blank/absent `q` keeps today's root browse byte-identically. No tool, argument name, count or permission changed; the `inputSchema` gains one property ([REST §21.2](rest-api.md#212-routes) v2.89). |
 | 2026-10-05 | v1.71 | #459 draft dashboard dependencies | Dashboard list/get/create descriptions and source schemas name exact live DRAFT or RELEASED versions during authoring and explicit draft preview. Publication and imports retain released dependencies. No tool, argument, permission or role change. |
 | 2026-10-03 | v1.70 | 405 (#405) a datasource's own timeout tightens the probe | **§6.2.34 `sql_probe`: a datasource's own `query_timeout_seconds` tightens the dialect ceiling, never loosens it** — the bound is `min(ceiling, query_timeout_seconds)`, so a probe on a datasource set below the ceiling runs no longer than that datasource's nodes; v1.69's "not consulted" is replaced. The payload's `timeout_seconds` reports the tightened value. No tool, argument, `inputSchema`, count or permission changed ([Datasources §7D](datasources.md#7d-the-sql-probe) v2.52). |

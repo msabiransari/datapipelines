@@ -78,3 +78,18 @@ class ParameterSetValidationException(
                     },
             ),
     )
+
+/**
+ * A search needle over [ParameterSetService.MAX_QUERY_LENGTH] (#490) — `parameter.validation.query_too_long`,
+ * `details.limit` and `details.length`. A type of its own so the agent surface can translate exactly this
+ * refusal into a protocol error (an argument it must fix) while REST answers it through the catalog's 400.
+ * The message carries the two numbers, never the needle: a long term is not reflected into an error body.
+ */
+class ParameterSetQueryTooLongException(
+    val limit: Int,
+    val length: Int,
+) : DatapipelinesException(
+        code = ParameterErrorCodes.QUERY_TOO_LONG,
+        message = "The search term is $length characters; at most $limit are searched.",
+        details = mapOf("limit" to limit, "length" to length),
+    )

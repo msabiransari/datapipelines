@@ -197,6 +197,12 @@ object ParameterErrorCodes {
     /** A `SELECT`'s rendered SQL carries no `ORDER BY` (P7). */
     const val SELECTOR_ORDER_BY_MISSING = "parameter.validation.selector_order_by_missing"
 
+    /**
+     * A listing search's `q` over `ParameterSetService.MAX_QUERY_LENGTH` characters after the trim (#490) —
+     * `details.limit` / `details.length`; REST answers 400, MCP `-32602`. The needle is never echoed.
+     */
+    const val QUERY_TOO_LONG = "parameter.validation.query_too_long"
+
     // ---- evaluate (record §5; the runtime is lane C's) ----------------------------------------------
 
     /** 400 — a `selections` key names no parameter of the set; the whole request is refused. */

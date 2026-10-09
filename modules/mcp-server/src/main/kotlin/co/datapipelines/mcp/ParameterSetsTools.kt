@@ -11,6 +11,7 @@ import co.datapipelines.parameters.ParameterEvaluator
 import co.datapipelines.parameters.ParameterSetBody
 import co.datapipelines.parameters.ParameterSetImported
 import co.datapipelines.parameters.ParameterSetJson
+import co.datapipelines.parameters.ParameterSetQueryTooLongException
 import co.datapipelines.parameters.ParameterSetReader
 import co.datapipelines.parameters.ParameterSetRepository
 import co.datapipelines.parameters.ParameterSetService
@@ -68,7 +69,7 @@ class ParameterSetsListTool(
                   "type": "object",
                   "properties": {
                     "prefix": {"type": "string", "description": "Browse ONE level of the name tree at this prefix. Empty string browses the roots."},
-                    "q": {"type": "string", "description": "Case-insensitive substring search over name, display name and description (the whole path counts as the name); ignored when prefix is present — pass prefix to browse, q to search."},
+                    "q": {"type": "string", "description": "Case-insensitive substring search over name, display name and description (the whole path counts as the name); ignored when prefix is present — pass prefix to browse, q to search. At most 200 characters after trimming; a longer q is refused as invalid params."},
                     "limit": {"type": "integer", "default": 50, "maximum": 200}
                   }
                 }
@@ -112,21 +113,33 @@ class ParameterSetsListTool(
      * The flat search (#419) — the same lensed [ParameterSetService.search] the pages use, with the
      * FULL match count as `total` so an agent sees when `limit` truncated. No `folders` key: a
      * search is not a level.
+     *
+     * A `q` over the service's bound (#490, [ParameterSetService.MAX_QUERY_LENGTH]) is an argument the
+     * agent must fix, so the service's typed refusal becomes `-32602` here — the route a non-string `q`
+     * already takes — naming the limit and the length, never echoing the term. `SwallowedException`:
+     * the refusal is fully carried by the protocol error's message (its code and both numbers); the
+     * exception has no cause to keep.
      */
+    @Suppress("SwallowedException")
     private fun search(
         workspaceId: UUID,
         view: ReadLens,
         q: String,
         limit: Int,
-    ): Map<String, Any?> {
-        val loaded = sets.search(workspaceId, view, q, 0, limit)
-        return mapOf(
-            "q" to q,
-            "parameter_sets" to loaded.map(::row),
-            "returned" to loaded.size,
-            "total" to sets.countSearch(workspaceId, view, q),
-        )
-    }
+    ): Map<String, Any?> =
+        try {
+            val loaded = sets.search(workspaceId, view, q, 0, limit)
+            mapOf(
+                "q" to q,
+                "parameter_sets" to loaded.map(::row),
+                "returned" to loaded.size,
+                "total" to sets.countSearch(workspaceId, view, q),
+            )
+        } catch (e: ParameterSetQueryTooLongException) {
+            throw McpArguments.invalidParams(
+                "Argument 'q' is ${e.length} characters after trimming; at most ${e.limit} are searched (${e.code}).",
+            )
+        }
 
     private fun row(it: ParameterSetVersion): Map<String, Any?> =
         mapOf(

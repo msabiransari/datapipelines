@@ -1,9 +1,12 @@
 package co.datapipelines.web.api
 
+import co.datapipelines.parameters.ParameterErrorCodes
+import co.datapipelines.parameters.ParameterSetService
 import co.datapipelines.scheduler.ScheduleErrorCodes
 import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
+import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
 
 /**
@@ -51,5 +54,13 @@ class ApiErrorCatalogUserMessageTest {
         }
         // The session codes keep the family line: restarting IS the remedy there.
         ApiErrorCatalog.userMessageFor(co.datapipelines.visualization.VisualizationErrorCodes.TEST_SESSION_EXPIRED) shouldBe family
+    }
+
+    @Test
+    fun `the search-needle refusal speaks about the search term and its bound - never the document family's line`() {
+        val family = ApiErrorCatalog.userMessageFor("parameter.validation.no_such_code_probe")
+        val message = ApiErrorCatalog.userMessageFor(ParameterErrorCodes.QUERY_TOO_LONG)
+        message shouldNotBe family
+        message shouldContain "${ParameterSetService.MAX_QUERY_LENGTH} characters"
     }
 }

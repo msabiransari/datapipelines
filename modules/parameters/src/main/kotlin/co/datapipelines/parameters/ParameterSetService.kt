@@ -574,6 +574,10 @@ class ParameterSetService(
      * the [listAll] lensed shape, the per-request admitted set being something no SQL pager can
      * take — matching the SAME three columns the SQL matches, so the two arms answer one predicate.
      * Name-ordered, stable paging; the truthful total is [countSearch]'s, never the page's size.
+     *
+     * A trimmed needle longer than [MAX_QUERY_LENGTH] is refused with [ParameterSetQueryTooLongException]
+     * (#490) — every surface reads this one rule: REST and MCP answer the refusal, the UI boxes truncate
+     * to the same constant before they call.
      */
     fun search(
         workspaceId: UUID,
@@ -582,7 +586,7 @@ class ParameterSetService(
         offset: Int = 0,
         limit: Int = ParameterSetRepository.DEFAULT_PAGE_LIMIT,
     ): List<ParameterSetVersion> {
-        val needle = query?.trim()?.takeIf { it.isNotEmpty() } ?: return listAll(workspaceId, lens, offset, limit)
+        val needle = needleOf(query) ?: return listAll(workspaceId, lens, offset, limit)
         if (lens.isEverything) return repository.searchAll(workspaceId, needle, offset, limit)
         return searchInMemory(workspaceId, lens, needle)
             .drop(maxOf(0, offset))
@@ -593,19 +597,30 @@ class ParameterSetService(
      * The truthful total of [search] over the WHOLE workspace — the [countAll] shape, lens-true:
      * the everything lens counts in SQL, a narrowing lens counts in memory with the very predicate
      * [search] filters by, so the count and the listing can never drift apart. A blank `q` is
-     * [countAll].
+     * [countAll]; an over-long one is [search]'s refusal.
      */
     fun countSearch(
         workspaceId: UUID,
         lens: ReadLens,
         query: String?,
     ): Int {
-        val needle = query?.trim()?.takeIf { it.isNotEmpty() } ?: return countAll(workspaceId, lens)
+        val needle = needleOf(query) ?: return countAll(workspaceId, lens)
         return if (lens.isEverything) {
             repository.countSearchAll(workspaceId, needle)
         } else {
             searchInMemory(workspaceId, lens, needle).size
         }
+    }
+
+    /**
+     * The `q` rule's input half, in one place for [search] and [countSearch]: trimmed, blank is no
+     * search (null), and a needle over [MAX_QUERY_LENGTH] is refused BEFORE any read — the length is
+     * reported, the needle itself never echoed.
+     */
+    private fun needleOf(query: String?): String? {
+        val needle = query?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        if (needle.length > MAX_QUERY_LENGTH) throw ParameterSetQueryTooLongException(MAX_QUERY_LENGTH, needle.length)
+        return needle
     }
 
     /**
@@ -777,16 +792,24 @@ class ParameterSetService(
         )
     }
 
-    private companion object {
+    companion object {
+        /**
+         * The search needle's length bound (#490), in characters after the trim. 200 is the number the
+         * UI boxes truncated to since #415, kept so no box changes behaviour: it is above any name a
+         * person types into a search box, and it bounds the pattern the everything lens's `ILIKE` scans
+         * over every set's three columns (cost, not injection — the needle is bound and escaped).
+         */
+        const val MAX_QUERY_LENGTH = 200
+
         /** No transaction manager: the action runs directly — a directly constructed test's default (PipelineReleaseService's). */
-        val DIRECT: TransactionOperations =
+        private val DIRECT: TransactionOperations =
             object : TransactionOperations {
                 override fun <T : Any?> execute(action: TransactionCallback<T>): T? = action.doInTransaction(SimpleTransactionStatus())
             }
 
-        fun scope(prefix: String?): String = if (prefix.isNullOrEmpty()) "" else "$prefix/"
+        private fun scope(prefix: String?): String = if (prefix.isNullOrEmpty()) "" else "$prefix/"
 
-        fun notFound(
+        private fun notFound(
             id: UUID,
             version: Int? = null,
         ) = DatapipelinesException(
@@ -798,14 +821,14 @@ class ParameterSetService(
             },
         )
 
-        fun notDraft(id: UUID) =
+        private fun notDraft(id: UUID) =
             DatapipelinesException(
                 ParameterErrorCodes.VERSION_NOT_DRAFT,
                 "Parameter set $id has no draft.",
                 mapOf("id" to id.toString()),
             )
 
-        fun lastRelease(
+        private fun lastRelease(
             id: UUID,
             version: Int,
         ) = DatapipelinesException(
@@ -814,7 +837,7 @@ class ParameterSetService(
             mapOf("id" to id.toString(), "version" to version),
         )
 
-        fun wrongStatus(
+        private fun wrongStatus(
             code: String,
             id: UUID,
             version: Int,
@@ -829,7 +852,7 @@ class ParameterSetService(
             ),
         )
 
-        fun renamed(
+        private fun renamed(
             stored: String,
             asked: String,
         ) = ParameterSetValidationException(
@@ -845,14 +868,14 @@ class ParameterSetService(
             ),
         )
 
-        fun duplicateName(name: String) =
+        private fun duplicateName(name: String) =
             DatapipelinesException(
                 ParameterErrorCodes.DUPLICATE_NAME,
                 "A parameter set named '${name.safeEcho()}' already exists here.",
                 mapOf("name" to name.safeEcho()),
             )
 
-        fun hashRefused(
+        private fun hashRefused(
             reason: String,
             declared: String?,
             actual: String?,

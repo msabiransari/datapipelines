@@ -2,6 +2,7 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.application.lens.LensedView
 import co.datapipelines.parameters.ParameterSetFolder
+import co.datapipelines.parameters.ParameterSetRepository
 import co.datapipelines.parameters.ParameterSetService
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.ReadLens
@@ -170,6 +171,26 @@ class ParameterSetsBrowseModelTest {
         val m = ExtendedModelMap()
         browse.fillSearch(m, ws, everything, "  " + "x".repeat(500) + "  ", 0, ParameterSetsBrowseModel.SCOPE_PAGE)
         m["q"] shouldBe bounded
+    }
+
+    /**
+     * #490 — the service refuses a needle over its bound on REST and MCP; the box must never meet that
+     * refusal. Over the REAL service (its repository mocked) a 500-character paste renders a search for
+     * the truncated term instead of an error.
+     */
+    @Test
+    fun `a typed overflow never errors the box - it truncates to the bound the real service accepts (#490)`() {
+        val repository = mockk<ParameterSetRepository>()
+        val bounded = "x".repeat(ParameterSetService.MAX_QUERY_LENGTH)
+        every { repository.searchAll(ws, bounded, 0, PAGE_SIZE) } returns emptyList()
+        every { repository.countSearchAll(ws, bounded) } returns 0
+        val real = ParameterSetsBrowseModel(ParameterSetService(repository, mockk(), mockk(), mockk(), mockk()))
+        val m = ExtendedModelMap()
+
+        real.fillSearch(m, ws, everything, "x".repeat(500), 0, ParameterSetsBrowseModel.SCOPE_PAGE) shouldBe
+            ParameterSetsBrowseModel.SEARCH_VIEW
+        m["q"] shouldBe bounded
+        ParameterSetsBrowseModel.MAX_QUERY_LENGTH shouldBe ParameterSetService.MAX_QUERY_LENGTH
     }
 
     @Test
