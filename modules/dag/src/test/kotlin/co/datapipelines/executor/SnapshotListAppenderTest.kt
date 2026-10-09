@@ -46,7 +46,7 @@ class SnapshotListAppenderTest {
         val logger = logger()
         val appender = SnapshotListAppender()
         val failure = IllegalStateException("synthetic failure")
-        val event = LoggingEvent(javaClass.name, logger, Level.WARN, "event={} value={}", failure, arrayOf("metadata", 7))
+        val event = LoggingEvent(javaClass.name, logger, Level.WARN, "event={} value={}", failure, arrayOf<Any>("metadata", 7))
         capturingLogEvents(logger, appender) {
             appender.doAppend(event)
             val captured = appender.events().single()
