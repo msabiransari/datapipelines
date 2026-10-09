@@ -48,6 +48,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  * a source is linked before it is announced, and no multi-input transform ever runs on a stand-in.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
+@Suppress("LargeClass") // the engine's scenarios as one table of cases over one scripted fixture (starter, ports, recorders)
 class RefreshEngineTest {
     private val log = CopyOnWriteArrayList<String>()
     private val events = CopyOnWriteArrayList<RefreshEvent>()
@@ -207,6 +208,15 @@ class RefreshEngineTest {
             .single()
             .targets
             .getValue(name)["outcome"]
+
+    private fun finishedOutcomeOf(name: String): String =
+        finishes
+            .single()
+            .summary
+            .path("targets")
+            .path(name)
+            .path("outcome")
+            .asText()
 
     private fun TestScope.engine(config: DashboardRuntimeConfig = DashboardRuntimeConfig()) =
         RefreshEngine(
@@ -558,13 +568,7 @@ class RefreshEngineTest {
                 result.targets.getValue("v") shouldBe TargetOutcome.Aborted
             }
             finishes.single().status shouldBe RefreshStatus.ABORTED
-            finishes
-                .single()
-                .summary
-                .path("targets")
-                .path("v")
-                .path("outcome")
-                .asText() shouldBe "abort"
+            finishedOutcomeOf("v") shouldBe "abort"
             audited.single().targets.getValue("v") shouldBe TargetOutcome.Aborted
         }
     }
@@ -591,13 +595,7 @@ class RefreshEngineTest {
                 result.targets.getValue("v") shouldBe TargetOutcome.Aborted
             }
             finishes.single().status shouldBe RefreshStatus.ABORTED
-            finishes
-                .single()
-                .summary
-                .path("targets")
-                .path("v")
-                .path("outcome")
-                .asText() shouldBe "abort"
+            finishedOutcomeOf("v") shouldBe "abort"
             audited.single().targets.getValue("v") shouldBe TargetOutcome.Aborted
         }
     }
@@ -675,28 +673,10 @@ class RefreshEngineTest {
                 completedOutcomeOf(name) shouldBe "error"
                 lastStatusOf(name) shouldBe "error"
                 audited.single().targets.getValue(name) shouldBe result.targets.getValue(name)
-                finishes
-                    .single()
-                    .summary
-                    .path("targets")
-                    .path(name)
-                    .path("outcome")
-                    .asText() shouldBe "error"
+                finishedOutcomeOf(name) shouldBe "error"
             }
-            finishes
-                .single()
-                .summary
-                .path("targets")
-                .path("v1")
-                .path("outcome")
-                .asText() shouldBe "ok"
-            finishes
-                .single()
-                .summary
-                .path("targets")
-                .path("v2")
-                .path("outcome")
-                .asText() shouldBe "abort"
+            finishedOutcomeOf("v1") shouldBe "ok"
+            finishedOutcomeOf("v2") shouldBe "abort"
             events.last().shouldBeInstanceOf<RefreshEvent.Completed>().status shouldBe "ABORTED"
         }
     }
