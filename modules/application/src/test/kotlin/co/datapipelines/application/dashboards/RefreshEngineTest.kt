@@ -603,6 +603,36 @@ class RefreshEngineTest {
     }
 
     @Test
+    fun `an abort observed at record time remains ABORTED when the next remote read is cached false`() {
+        runTest {
+            // The production remote signal rate-limits every read, including a positive read. Once record sees the
+            // request, noticeLateAbort can see false within that interval; the observed request must stay retained.
+            val body = dashboard(listOf(source("s1")), listOf(occurrence("v", inputs = mapOf("main" to "s1"))))
+            scripts = { Script.After(30, Script.Aborted) }
+            launch {
+                delay(10)
+                abortFlag.set(true)
+            }
+            onEvent = { event ->
+                if (event is RefreshEvent.VisualizationStatus && event.state == "abort") abortFlag.set(false)
+            }
+
+            val result = engine().run(RefreshFixtures.job(body), ports)
+
+            abortFlag.get() shouldBe false // the final signal read cannot rescue a forgotten record-time observation
+            withClue("target=${result.targets["v"]} lastStatus=${lastStatusOf("v")} completed=${completedOutcomeOf("v")}") {
+                result.status shouldBe RefreshStatus.ABORTED
+                lastStatusOf("v") shouldBe "abort"
+                completedOutcomeOf("v") shouldBe "abort"
+                result.targets.getValue("v") shouldBe TargetOutcome.Aborted
+            }
+            finishes.single().status shouldBe RefreshStatus.ABORTED
+            audited.single().status shouldBe RefreshStatus.ABORTED
+            events.last().shouldBeInstanceOf<RefreshEvent.Completed>().status shouldBe "ABORTED"
+        }
+    }
+
+    @Test
     fun `an abort rewrites only what it cancelled - a target delivered Ok before the abort stays Ok`() {
         runTest {
             // Ok and ordinary failure settle immediately; a hung target times out at t=1000. The flag rises at

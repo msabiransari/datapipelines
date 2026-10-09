@@ -412,13 +412,21 @@ class RefreshEngine(
          * reports `abort`, not the error the cancel's side effect would otherwise record — the outcome must not depend
          * on whether the execution's end or the watcher's flag read came first (#370's principle). The route raises the
          * flag before it cancels, so on the owning instance the flag is readable here by construction; an execution
-         * aborted with no request (the executor's own abort) stays an error at the abort stage.
+         * aborted with no request (the executor's own abort) stays an error at the abort stage. A request observed here
+         * is retained in [abortRequested]: a later cached remote read returning false cannot undo that observation.
          */
         private fun record(
             name: String,
             reported: TargetOutcome,
         ) {
-            val outcome = if (reported.cancelledByAbort() && ports.abort.requested(job.refreshId)) TargetOutcome.Aborted else reported
+            val outcome =
+                if (reported.cancelledByAbort() && ports.abort.requested(job.refreshId)) {
+                    // Retain this observation: the remote signal can return false again inside its read-cache interval.
+                    abortRequested.set(true)
+                    TargetOutcome.Aborted
+                } else {
+                    reported
+                }
             if (outcomes.putIfAbsent(name, outcome) != null) return
             val status =
                 when (outcome) {
