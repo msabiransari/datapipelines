@@ -14,9 +14,11 @@
 # Never unlink a slot or lock file: replacing a locked inode would let a second
 # wrapper acquire a different lock.
 
-# Default floor: 1.5 x one measured pregate's MemAvailable cost, rounded up to the
-# GB (#485 section A, run REPLACE_RUN_ID: cost REPLACE_COST MB -> REPLACE_ARITHMETIC).
-VERIFICATION_MEM_FLOOR_DEFAULT_MB=8192 # REPLACE_PROVISIONAL
+# Default floor: 1.5 x one pregate's memory, rounded up to the GB (#485 section A,
+# run 20261009T134317Z-b3fef5b0-1423801). Peak RSS of the daemons it started: Gradle
+# 1.08 GB + Kotlin 3.65 GB, plus the one test fork at its 1 GB heap cap = 5.73 GB;
+# x 1.5 = 8.6 GB -> 9 GB. (Box-wide MemAvailable drift swamped a before-minus-min read.)
+VERIFICATION_MEM_FLOOR_DEFAULT_MB=9216
 VERIFICATION_SLOTS=(0 1)
 
 # Prints the floor in MB; garbage falls back to the default with a stderr line.

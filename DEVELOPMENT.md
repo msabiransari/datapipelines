@@ -846,7 +846,7 @@ pre-#485 `verification.lock`, so it is refused while any holder lives and refuse
 while it runs, older script copies included. A second holder for the SAME checkout is refused even
 with a slot free: one `build/` and one `.pregate-logs/` per checkout. Before taking anything a
 wrapper reads `MemAvailable` from `/proc/meminfo` and refuses below
-`DATAPIPELINES_VERIFICATION_MEM_FLOOR_MB` (default REPLACE_FLOOR_DOC; `0` turns the floor off, a
+`DATAPIPELINES_VERIFICATION_MEM_FLOOR_MB` (default 9216 MB, 1.5 × one pregate rounded up to the GB; `0` turns the floor off, a
 non-integer falls back to the default with a warning). A pregate-class holder keeps its slot on
 fd 9 only, which is why a hand-typed run such as the focused example above needs exactly `9>&-`
 on its `./gradlew` line: an idle daemon that inherits the descriptor would hold the slot after the
