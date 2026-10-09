@@ -1,9 +1,9 @@
 # UI Screens Inventory
 
-**Status:** v1.125
+**Status:** v1.126
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
-**Last updated:** 2026-10-09 (#465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
+**Last updated:** 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
 
 ---
 
@@ -643,7 +643,7 @@ place, its workspace. Since 067 pipeline names are **folder paths**
   there); the tree-badge refresh → an explicit Refresh or affected-parent invalidation.
 - Guards: `PipelineSidebarTreeBrowserTest`, `PipelineSidebarTreeStateBrowserTest`,
   `PipelinePartialControllerTest`, `PipelineUiControllerTest`, `PipelineExplorerRenderTest`,
-  `nav-tree.test.mjs`, `template-explorer.test.mjs`.
+  `template-explorer.test.mjs`.
 
 #### 4.3a The divider handle — the pane explorers (104)
 
@@ -2419,6 +2419,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-09 | v1.126 | #491 nav-tree orphan removal — renumbered at merge after #473's v1.125 | §3.4 note: the old client (`nav-tree.js` + its node test) deleted with its CSS surface — the `rail-tree-open`/`is-measuring` blocks, the `--app-rail-tree-*` tokens, the nav-scope tree-region and `.tpl-*` scoped rules; the five search partials no longer render a nav-scope clear button (the tree engine has its own); §3.4's guard list drops `nav-tree.test.mjs`. |
 | 2026-10-09 | v1.125 | #473 dashboard presentation — rebased in recovery onto #460 and #412 | **§4.21's Board tab**: the filters panel LEFT of the board (the parameters pane mounted outside the chart container; below 1100 px a drawer behind the toolbar's Filters button, closed by a widening back past it; no panel and no button while no parameter is visible), every chart a bordered titled card whose border carries its state with no visible ready badge, and the bottom activity dock (Events, Errors, History — the refreshes partial moved from the right-hand pane); the glue's document and window listeners leave with each in-shell mount. |
 | 2026-10-09 | v1.124 | #465 REST tree client polish — renumbered at merge after #412's v1.123 | §3.4: staged refresh that keeps rows and reloads visible open levels; the ten-page level ceiling with Load more; the progress bar during navigation preparation. |
 | 2026-10-09 | v1.123 | #412 the dashboard breakpoint follows board width, default 640 — renumbered in recovery after #460's v1.122 | **§4.21, Grid rows:** the threshold measures the board host; the 767 px viewport's 719 px board keeps the grid, a configured 700 px threshold stacks the 694 px board at 1280, and widening the user-resizable navigation rail narrows the default board below 640. A 0-wide board holds its stored grid until reveal. |

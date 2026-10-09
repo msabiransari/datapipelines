@@ -41,7 +41,7 @@ import java.util.UUID
  *    `pattern` must be the SERVER's regex source, not a copy of it.
  *  - **#398: a leaf NAVIGATES** — a full-document link into `/templates/{name}`, never a
  *    selection into a pane (the pane is gone); the sidebar's rows carry `data-leaf-id` for
- *    nav-tree.js's current-leaf marking.
+ *    js/tree's current-leaf marking (sidebar.mjs reads it, render.mjs writes it).
  *
  * Engine infra mirrors [DatasourcesTemplateRenderTest] (same WebContext shape).
  */
@@ -162,14 +162,14 @@ class TemplateTreeRenderTest {
         // The pager keeps every active filter, including 046's `type` — on the page instance.
         catalog shouldContain "q=revenue"
         catalog shouldContain "type=sql"
-        // The nav's clear is nav-tree.js's (it empties the sidebar's own box too) and lives on
-        // the EMPTY branch — the no-match case; the catalog's clear is a bare re-fetch.
+        // The nav instance renders no clear button of its own (the tree engine has one) and the
+        // empty branch is where that would have lived; the catalog's clear is a bare re-fetch.
         val emptyNav =
             render("partials/template-search") {
                 fillSearch(TemplateListScope.NAV)
                 setVariable("templates", emptyList<Template>())
             }
-        emptyNav shouldContain "data-nav-tree-clear"
+        emptyNav shouldNotContain "data-nav-tree-clear"
         val emptyCatalog =
             render("partials/template-search") {
                 fillSearch(TemplateListScope.CATALOG)

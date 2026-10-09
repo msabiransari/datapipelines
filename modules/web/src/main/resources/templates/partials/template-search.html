@@ -21,10 +21,6 @@
     <div class="ds-empty">
       <p class="ds-empty-title">No templates match your search</p>
       <div class="ds-empty-actions">
-        <!-- The sidebar's clear also empties ITS box, so it is nav-tree.js's (data-nav-tree-clear):
-             a bare hx-get would bring the tree back under a box still holding the old query. -->
-        <button th:if="${nav}" type="button" class="ds-button ds-button-secondary ds-button-sm"
-                data-nav-tree-clear>Clear search</button>
         <button th:unless="${nav}" type="button" class="ds-button ds-button-secondary ds-button-sm"
                 th:attr="hx-get=@{/partials/templates}, hx-target='#' + ${rootId}, hx-swap='outerHTML'">Clear search</button>
       </div>

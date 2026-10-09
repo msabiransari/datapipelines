@@ -316,10 +316,10 @@
         <!-- D58 (#10 L3b): the Dashboards item — every role (dashboard.read is an every-role
              read, the promoter through the lens), so unlike Executions/Promotion it rides no
              advice boolean. The PARENT item is the link to the catalog; BESIDE it, the
-             disclosure expands IN PLACE into the hierarchy (D58), lazy: the first open fetches
-             ONE level (the same /partials/dashboards/tree fragment, scope=nav) into the
-             placeholder below. #350: the branch adopts the sidebar's ONE navigating-tree
-             pattern above (toggle + panel, nav-tree.js + the explorer keyboard's nav context)
+             disclosure expands IN PLACE into the hierarchy (D58), lazy: the first open has
+             js/tree fetch ONE level (the dashboards tree API) into the placeholder below.
+             #350: the branch adopts the sidebar's ONE navigating-tree
+             pattern above (toggle + panel, js/tree/sidebar.mjs + the explorer keyboard's nav context)
              instead of its own <details> — two tree engines in one rail is what the workspace
              spec forbids. #400: the branch gains the search input in the Pipelines branch's
              exact markup — the shared engine serves it with no JS change (a non-empty `q`
@@ -711,9 +711,9 @@
   <script th:src="@{/js/data-table.js}"></script>
   <!-- #350 — the sidebar's navigating trees: the shared explorer keyboard (template-explorer.js,
        loaded ONCE here; an explorer page's own tag re-executing on a boosted visit is a re-init,
-       never a second set of listeners) and the rail branches' lifecycle (nav-tree.js). Both are
-       footer scripts OUTSIDE #app-main, so the region-scoped history cache (#358) never replays
-       them. -->
+       never a second set of listeners) and the rail branches' lifecycle (js/tree/sidebar.mjs).
+       Both are footer scripts OUTSIDE #app-main, so the region-scoped history cache (#358) never
+       replays them. -->
   <script th:src="@{/js/template-explorer.js}"></script>
   <script type="module" th:src="@{/js/tree/sidebar.mjs}"></script>
   <script type="module" th:src="@{/js/rail-resize.mjs}"></script>

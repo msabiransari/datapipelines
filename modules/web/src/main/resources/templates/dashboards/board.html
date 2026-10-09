@@ -32,8 +32,8 @@
   </template>
 
   <!-- #350 — the global sidebar's current-leaf hook: which dashboard this page shows, by id
-        AND full path, so the rail's Dashboards tree (nav-tree.js) can mark the leaf and
-        reveal its folders (editor.html:11's shape, for the second family). -->
+        AND full path, so the rail's Dashboards tree (js/tree/sidebar.mjs) can mark the leaf
+        and reveal its folders (editor.html:11's shape, for the second family). -->
   <span hidden data-nav-current="dashboards"
         th:attr="data-nav-current-id=${dashboardId},data-nav-current-path=${navCurrentPath}"></span>
 

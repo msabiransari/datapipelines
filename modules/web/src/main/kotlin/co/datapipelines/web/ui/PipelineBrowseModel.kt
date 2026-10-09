@@ -527,10 +527,11 @@ class PipelineBrowseModel(
 
         /**
          * #350 — the response header every sidebar fragment carries: `<workspace>|<lens>` (`all`
-         * or `lens`). The rail's nav-tree.js admits a tree swap only when the stamp matches the
-         * tree it lands in, so a level fetched under another workspace or another lens can never
-         * join rows rendered under this one (spec §5: never reuse another workspace's rows or
-         * lens). Read by the client; carries nothing the page does not already show.
+         * or `lens`). Written so a client can tell which workspace and lens a tree fragment was
+         * built under; since #460 the sidebar tree client (js/tree/) isolates its cache per
+         * workspace instead of reading the stamp, so nothing reads it today (its fate is
+         * tracked with the #491 nav-tree removal follow-up). Read by no one; carries nothing
+         * the page does not already show.
          */
         const val NAV_STAMP_HEADER = "DP-Nav-Stamp"
 
