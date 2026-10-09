@@ -58,6 +58,8 @@ class DashboardFiltersBrowserTest : DashboardBrowserSuite() {
               return { panelLeft: panel.left, panelRight: panel.right, panelWidth: panel.width,
                 boardLeft: board.left, boardWidth: board.width, layoutLeft: layout.left, layoutWidth: layout.width,
                 panelDisplay: getComputedStyle(document.getElementById('dp-board-filters')).display,
+                panelPosition: getComputedStyle(document.getElementById('dp-board-filters')).position,
+                panelTransform: getComputedStyle(document.getElementById('dp-board-filters')).transform,
                 triggerDisplay: getComputedStyle(document.querySelector('.dp-board-toolbar')).display,
                 filters: document.querySelector('.dp-board-page').getAttribute('data-dp-filters'),
                 fields: document.querySelectorAll('#dp-board-filters .dp-dashboard-parameter').length }; }""",
@@ -181,9 +183,18 @@ class DashboardFiltersBrowserTest : DashboardBrowserSuite() {
               return !panel.classList.contains('is-open') &&
                 document.getElementById('dp-board-filters-trigger').getAttribute('aria-expanded') === 'false'; }""",
         )
+        // The panel settles INTO its grid column: in flow, at the layout's left edge, not left
+        // displaced by a drawer transform carried across the boundary.
+        page.waitForFunction(
+            """() => { const panel = document.getElementById('dp-board-filters');
+              const layout = document.querySelector('.dp-board-layout');
+              return Math.abs(panel.getBoundingClientRect().left - layout.getBoundingClientRect().left) <= 1; }""",
+        )
         val wide = regions()
         println("473b-filters-resize-back $wide")
         wide["panelDisplay"] shouldBe "block"
+        wide["panelPosition"] shouldBe "relative"
+        wide["panelLeft"].px() shouldBe (wide["layoutLeft"].px() plusOrMinus 1.0)
         wide["triggerDisplay"] shouldBe "none"
         wide["panelRight"].px() shouldBeLessThanOrEqual wide["boardLeft"].px()
         documentOverflowsX() shouldBe false
