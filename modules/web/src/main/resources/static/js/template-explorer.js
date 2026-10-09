@@ -335,8 +335,9 @@
   }
 
   // Exposed for editorJsTest (the init.js pattern): the navigation policy, DOM-free, plus
-  // init itself so a re-init test can drive it (076 §B), and the context helpers js/tree
-  // reuses (#350) so the sidebar never grows a second notion of "the visible rows".
+  // init itself so a re-init test (076 §B) and the schedules explorer can drive it. The
+  // context helpers (contextOf, items, maintainTabindex) were nav-tree.js's (#350); since
+  // #491 removed it no shipped script reads them (#466 tracks the remaining nav residue).
   window.templateExplorer = {
     loaded: true,
     nextIndex: nextIndex,

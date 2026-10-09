@@ -224,7 +224,7 @@ class ParameterSetsBrowseModel(
          * ([PipelineBrowseModel.NAV_STAMP_HEADER]): `<workspace>|<lens>`. Written so a client
          * can tell which workspace a fragment was built under; since #460 the sidebar tree
          * client (js/tree/) isolates its cache per workspace instead of reading the stamp, so
-         * nothing reads it today (tracked with the #491 nav-tree removal follow-up).
+         * nothing reads it today (its removal is tracked on #466).
          */
         const val NAV_STAMP_HEADER = PipelineBrowseModel.NAV_STAMP_HEADER
 

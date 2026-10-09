@@ -529,8 +529,8 @@ class PipelineBrowseModel(
          * #350 — the response header every sidebar fragment carries: `<workspace>|<lens>` (`all`
          * or `lens`). Written so a client can tell which workspace and lens a tree fragment was
          * built under; since #460 the sidebar tree client (js/tree/) isolates its cache per
-         * workspace instead of reading the stamp, so nothing reads it today (its fate is
-         * tracked with the #491 nav-tree removal follow-up). Read by no one; carries nothing
+         * workspace instead of reading the stamp, so nothing reads it today (its removal is
+         * tracked on #466). Read by no one; carries nothing
          * the page does not already show.
          */
         const val NAV_STAMP_HEADER = "DP-Nav-Stamp"
