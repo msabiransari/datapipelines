@@ -82,10 +82,9 @@ class SseLogStreamerAuthorityTest {
         val stored =
             listOf(event(1, "execution_started"), event(2, "node_started"), event(3, "pipeline_completed"), event(4, "data_ready"))
         val log = mockk<SseEventLog>()
-        every { log.replay(executionId) } returns stored
         val emitter = CapturingSseEmitter()
 
-        streamer(log, emitter, authorityRefusingFrom(2)).replay(executionId, subscriber)
+        streamer(log, emitter, authorityRefusingFrom(2)).replay(executionId, stored, subscriber)
 
         emitter.completed.await(5, TimeUnit.SECONDS) shouldBe true
         // Exactly one chunk served; nothing of the second — and never the terminal sequence.
@@ -97,10 +96,9 @@ class SseLogStreamerAuthorityTest {
     fun `an unchanged authority replays everything`() {
         val stored = listOf(event(1, "execution_started"), event(2, "pipeline_completed"), event(3, "data_ready"))
         val log = mockk<SseEventLog>()
-        every { log.replay(executionId) } returns stored
         val emitter = CapturingSseEmitter()
 
-        streamer(log, emitter, authorityAlwaysAllowed()).replay(executionId, subscriber)
+        streamer(log, emitter, authorityAlwaysAllowed()).replay(executionId, stored, subscriber)
 
         emitter.completed.await(5, TimeUnit.SECONDS) shouldBe true
         emitter.eventNames() shouldBe listOf("execution_started", "pipeline_completed", "data_ready")
@@ -114,7 +112,7 @@ class SseLogStreamerAuthorityTest {
         val script = listOf(event(1, "execution_started"), event(2, "pipeline_failed"))
         val reads = AtomicInteger(0)
         val log = mockk<SseEventLog>()
-        every { log.replay(executionId) } answers { script.take(reads.incrementAndGet()) }
+        every { log.replay(executionId) } answers { ReplayRead.Log(script.take(reads.incrementAndGet())) }
         val emitter = CapturingSseEmitter()
 
         streamer(log, emitter, authorityRefusingFrom(2)).follow(executionId, subscriber)
@@ -129,7 +127,7 @@ class SseLogStreamerAuthorityTest {
         val script = listOf(event(1, "execution_started"), event(2, "node_started"), event(3, "pipeline_failed"))
         val reads = AtomicInteger(0)
         val log = mockk<SseEventLog>()
-        every { log.replay(executionId) } answers { script.take(reads.incrementAndGet()) }
+        every { log.replay(executionId) } answers { ReplayRead.Log(script.take(reads.incrementAndGet())) }
         val emitter = CapturingSseEmitter()
 
         streamer(log, emitter, authorityAlwaysAllowed()).follow(executionId, subscriber)
@@ -155,10 +153,9 @@ class SseLogStreamerAuthorityTest {
                 val caseId = UUID.randomUUID()
                 val stored = listOf(event(1, "execution_started", caseId), event(2, "pipeline_completed", caseId))
                 val log = mockk<SseEventLog>()
-                every { log.replay(caseId) } returns stored
                 val emitter = CapturingSseEmitter()
 
-                streamer(log, emitter, authorityRefusingFrom(2, verdict)).replay(caseId, subscriber)
+                streamer(log, emitter, authorityRefusingFrom(2, verdict)).replay(caseId, stored, subscriber)
 
                 emitter.completed.await(5, TimeUnit.SECONDS) shouldBe true
                 val cuts = appender.messages().drop(position).filter { it.contains("execution $caseId cut,") }

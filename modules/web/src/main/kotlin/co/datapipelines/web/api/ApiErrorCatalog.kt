@@ -239,6 +239,10 @@ object ApiErrorCatalog {
             PipelineErrorCodes.Result.EXECUTION_FAILED to HttpStatus.GONE,
             PipelineErrorCodes.Result.EXPIRED to HttpStatus.GONE,
             PipelineErrorCodes.Result.FORMAT_UNSUPPORTED to HttpStatus.BAD_REQUEST,
+            // #487 (owner's ruling, 2026-10-09) — Redis did not answer: a transient fault of OUR
+            // store, 503 like `pipeline.transform.pool_exhausted`, against the family's 500. The row is what
+            // keeps §10.3's unanswered replay read apart from the expiry's 410.
+            PipelineErrorCodes.Result.STORAGE_UNAVAILABLE to HttpStatus.SERVICE_UNAVAILABLE,
             PipelineErrorCodes.Limits.RATE_LIMIT_EXCEEDED to HttpStatus.TOO_MANY_REQUESTS,
             // 083 — the fail-closed refusal shares the 429 and differs only in the code, so a
             // client back-off written against `rate_limit.*` needs no change to honour it.

@@ -1,6 +1,6 @@
 # Enumerations Reference
 
-**Status:** v1.33 (living document — updated as enums evolve)
+**Status:** v1.34 (living document — updated as enums evolve)
 **Owner:** datapipelines.co core
 **Purpose:** Single source of truth for every enum value used across the system. Prevents spelling drift across specs and across the codebase.
 
@@ -563,9 +563,9 @@ Error codes follow `{domain}.{entity}.{failure}` — three segments, all lowerca
 | `410 Gone` | Resource expired / terminally unavailable | `result.expired`, `result.execution_failed` |
 | `429 Too Many Requests` | Rate limited | `rate_limit.exceeded`, `rate_limit.unavailable`, `pipeline.execution.concurrency_limit` |
 | `413 Content Too Large` | Request body over the platform cap (#279) | `request.body_too_large` |
-| `500 Internal Server Error` | Server error | Uncaught exceptions, `pipeline.staging.*`, `result.storage_unavailable` |
+| `500 Internal Server Error` | Server error | Uncaught exceptions, `pipeline.staging.*` |
 | `502 Bad Gateway` | Upstream failure | `pipeline.node.datasource_connection_failed`, `pipeline.node.query_execution_failed` |
-| `503 Service Unavailable` | Service not ready | Readiness check failure |
+| `503 Service Unavailable` | Service not ready, or a transient fault of a store it depends on | Readiness check failure, `result.storage_unavailable` (#487), `pipeline.transform.pool_exhausted` |
 | `504 Gateway Timeout` | Execution timeout | `pipeline.execution.timeout`, `pipeline.node.query_timeout` |
 
 ---
@@ -1074,6 +1074,7 @@ No mail for skipped ticks or pause/resume. Empty recipients means off; recipient
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-09 | v1.34 | 487 (#487) | The HTTP status table moves `result.storage_unavailable` from 500 to 503 ([Pipeline Contract §13.10](pipeline-contract.md#1310-result-retrieval) v1.56) and names `pipeline.transform.pool_exhausted` beside it, the 503 the catalog already carried. |
 | 2026-10-03 | v1.33 | 442a (#442) | §15 audit details gain counts/events without addresses; new §42 defines NotificationEvent and its defaults. Settings delivered; mail remains off pending part b. |
 | 2026-10-02 | v1.32 | S3 (#376) the parameter-set evaluation history | **§39 `EvaluationCaller`** (PAGE, DASHBOARD, PIPELINE — dormant, REST, MCP; the owner's §11.10 ruling), **§40 `ParameterEvaluationStatus`** (the spec's five plus `ABORTED`, the §11.7 ruling) and **§41 `QueryAttemptOutcome`** (the spec's four plus `ABORTED`) — the three V48 CHECKs, each pinned to its Kotlin enum by `ParameterEnumsSpecDriftTest`. No audit event (§15 unchanged): recording is the evaluate's side effect, visible through the History tab; the spec names an awaited `parameter.evaluation` row only if review rules one necessary. |
 | 2026-10-02 | v1.31 | 372 (#372, #373) the families' lifecycle rows carry the mould's full shape | §15's three family rows now promise the pointer pair `current_version_before`/`current_version_after` on a discard AND a restore, `from`/`to` on a switch and `scope` on every purge — produced by the verbs' own results inside the write's transaction (the artifact services' discard/restore/switch statements answer the pair; the purge's own version-count branch is the scope), never a controller re-read. The false "the artifact services answer no record read" clause is gone. Authority: rest-api §21/§22/§23; versioning §7. |
