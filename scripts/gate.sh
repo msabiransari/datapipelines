@@ -11,6 +11,15 @@
 #     ./gradlew build      → must exit 0   (clean-state build)
 #     ./gradlew build      → must exit 0   (incremental build)
 #
+# Both `build` invocations EXCLUDE the browser suite (GATE_BUILD_BROWSER_ARGS below:
+# `-x :tests:browser-tests:test -x :tests:browser-tests:verifyTestsExecuted`, the
+# same pair CI's gate job uses for the integration module, plus an explicit
+# `:tests:browser-tests:testClasses` so the suite still COMPILES). Owner ruling
+# 2026-10-09: the local full gate runs everything after a merge EXCEPT the browser
+# suite, whose only full run is CI on `next` (DEVELOPMENT.md §9.0, §9.4). Every
+# other test task `build` carries still runs here — the unit and integration
+# suites, scripting's breachSuite, web's editorJsTest, every coverage floor.
+#
 # After the cycles, three extra stages:
 #   1. buildSrc guard tests (Gradle TestKit) — a consumer build only builds
 #      buildSrc through its JAR (verified: `build --dry-run` stops at
@@ -89,7 +98,7 @@ rm -rf "$LOGDIR"; mkdir -p "$LOGDIR"
 echo "=============================================================="
 echo " Gate A — $CYCLES cycle(s)   |   $(date '+%Y-%m-%d %H:%M:%S %z')"
 echo " logs: $LOGDIR"
-echo " browser patience: CI's 90 s per action (-Pdp.browser.ciPatience=true, #438)"
+echo " browser suite: EXCLUDED from the build cycles — CI on next is its only full run (owner ruling 2026-10-09)"
 echo "=============================================================="
 
 # ---- rule 3: other build actors -------------------------------------------
@@ -113,15 +122,23 @@ fi
 # `-P` reaches the project properties: `-D` system properties and
 # ORG_GRADLE_PROJECT_* env vars lose to the repo's gradle.properties (measured
 # 2026-09-19). Word-split on purpose; quote nothing that needs a space.
-# run() also appends `-Pdp.browser.ciPatience=true` (#438), so this gate's browser
-# suite gets CI's 90 s per-action patience; because GATE_GRADLE_ARGS is appended
-# AFTER it, a `-Pdp.browser.ciPatience=false` passed here overrides it for the run.
+# (`-Pdp.browser.ciPatience=true` is no longer appended: the browser suite does not
+# run in this gate; pregate.sh still passes it for the browser classes it selects.)
 read -r -a GATE_EXTRA_ARGS <<< "${GATE_GRADLE_ARGS:-}"
 [ "${#GATE_EXTRA_ARGS[@]}" -gt 0 ] && echo " gradle args: ${GATE_EXTRA_ARGS[*]}"
 
+# The browser suite is CI's (owner ruling 2026-10-09, header above). Excluding the
+# module's `test` alone would leave its zero-test guard red (it depends on `test` and
+# counts result files), so the guard is excluded with it. `-x` also drops every task
+# only `test` needed — the module's compileTestKotlin among them (measured by
+# `build --dry-run`, 2026-10-09) — so `testClasses` is requested explicitly: a browser
+# test that no longer compiles is still red here. Lint and the floor-less koverVerify
+# of the module stay in `build` on their own.
+GATE_BUILD_BROWSER_ARGS=(-x :tests:browser-tests:test -x :tests:browser-tests:verifyTestsExecuted :tests:browser-tests:testClasses)
+
 run() { # run <logfile> <args...>  → echoes exit code, never pipes gradle
   local log="$1"; shift
-  ./gradlew "$@" -Pdp.browser.ciPatience=true "${GATE_EXTRA_ARGS[@]}" 9>&- 10>&- 11>&- > "$log" 2>&1
+  ./gradlew "$@" "${GATE_EXTRA_ARGS[@]}" 9>&- 10>&- 11>&- > "$log" 2>&1
   echo $?
 }
 
@@ -137,8 +154,8 @@ source "$ROOT/scripts/lib/gate-stages.sh"
 
 for i in $(seq 1 "$CYCLES"); do
   c=$(run "$LOGDIR/cycle${i}-1-clean.log" clean)
-  b=$(run "$LOGDIR/cycle${i}-2-build.log" build)
-  n=$(run "$LOGDIR/cycle${i}-3-incremental.log" build)
+  b=$(run "$LOGDIR/cycle${i}-2-build.log" build "${GATE_BUILD_BROWSER_ARGS[@]}")
+  n=$(run "$LOGDIR/cycle${i}-3-incremental.log" build "${GATE_BUILD_BROWSER_ARGS[@]}")
 
   status="PASS"
   for pair in "clean:$c:1-clean" "build:$b:2-build" "incremental:$n:3-incremental"; do

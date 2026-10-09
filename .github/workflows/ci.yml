@@ -90,9 +90,10 @@
 # them is the owner's call once their typical duration is known.
 #
 # PROMOTION FLOW (owner ruling 2026-10-09) — `next` is the gate, `main` is what passed it.
-# The lander merges every delivered handback onto local main, pushes `main:next`, and this
-# workflow is the whole-batch check (no local Gate A in the landing loop any more; scripts/
-# gate.sh stays the local full run on request). On a green run the lander fast-forwards
+# The lander merges every delivered handback onto local main, runs scripts/gate.sh on the
+# batch tip (every test but the browser suite, which that script excludes), pushes `main:next`,
+# and this workflow is the browser suite's only full run and the whole-batch check on a cold
+# runner. On a green run the lander fast-forwards
 # `origin/main` to the SAME SHA, so a `main` run repeats a verdict `next` already gave.
 # A red run on `next` is read from `gh run view <id> --log-failed` plus the `gate-reports`
 # artifact; the fix lands as its own commit on main and `next` is pushed again.
