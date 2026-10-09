@@ -240,12 +240,13 @@ class SseLogStreamerTest {
     }
 
     /**
-     * #487 — the idempotent attach's question: only a KNOWN-absent log is "no log". A fault answers
-     * true, so the attach follows (and the follow rides the fault out or ends with the 503) instead
-     * of answering a terminal original with `410 event_log_expired` for a log that may be there.
+     * #487 — the idempotent attach's question keeps its pre-#487 answer: only a log that ANSWERED
+     * is a log. A fault answering true would make the attach a follow, and for a terminal original
+     * whose log expired that follow ends with the never-started 410 about an execution that ran;
+     * the attach's own 503 is #505 (the launcher reads [ReplayRead] itself).
      */
     @Test
-    fun `hasLog is false only for an absent log, and true on a read fault`() {
+    fun `hasLog is true only for a log that answered, never on a read fault`() {
         val log = mockk<SseEventLog>()
         val emitter = CapturingSseEmitter()
         val streamer = streamer(log, emitter)
@@ -253,7 +254,7 @@ class SseLogStreamerTest {
         every { log.replay(executionId) } returns ReplayRead.Absent
         streamer.hasLog(executionId) shouldBe false
         every { log.replay(executionId) } returns unavailable()
-        streamer.hasLog(executionId) shouldBe true
+        streamer.hasLog(executionId) shouldBe false
         every { log.replay(executionId) } returns ReplayRead.Log(listOf(event(1, "execution_started")))
         streamer.hasLog(executionId) shouldBe true
     }

@@ -60,15 +60,15 @@ class SseLogStreamer(
     private val follows = ConcurrentHashMap<SseEmitter, FollowState>()
 
     /**
-     * False only when the log is known ABSENT — the idempotent attach's question (§3.5), whose
-     * answer for false is to consult the execution row.
+     * True when a (possibly still-growing) event log ANSWERED for [executionId] — the idempotent
+     * attach's question (§3.5), whose answer for false is to consult the execution row.
      *
-     * A read fault answers true (#487): it says nothing about the log, so the attach becomes a
-     * [follow], whose ticks ride the fault out or end with `503 result.storage_unavailable` after
-     * [UNAVAILABLE_TICKS_BEFORE_END] — before #487 the fault read as "no log" and a terminal
-     * original answered `410 result.expired` (`reason: event_log_expired`) for a log that was there.
+     * A read fault answers false, as before #487, on purpose: true would turn the fault into a
+     * [follow], and for a terminal original whose log really expired that follow gives up with
+     * the never-started 410 — "never started" about an execution that ran. The attach's own
+     * fault answer (503, not `event_log_expired`) needs the launcher to read [ReplayRead] (#505).
      */
-    fun hasLog(executionId: UUID): Boolean = eventLog.replay(executionId) != ReplayRead.Absent
+    fun hasLog(executionId: UUID): Boolean = eventLog.replay(executionId) is ReplayRead.Log
 
     /**
      * §10.3's one read of the log (#487): the route decides 410 / 503 / stream on it, then hands the
