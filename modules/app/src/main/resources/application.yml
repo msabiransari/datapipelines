@@ -26,6 +26,13 @@ spring:
       host: ${DATAPIPELINES_REDIS_HOST}
       port: ${DATAPIPELINES_REDIS_PORT:6379}
       password: ${DATAPIPELINES_REDIS_PASSWORD:}
+      # #482 — Lettuce's own defaults are 60 s per command and no connect bound: with Redis
+      # unreachable, every rate-limited request waited on the order of a minute before the
+      # documented `429 rate_limit.unavailable` (rest-api §12.3). Both bounds come from the
+      # operator keys under `datapipelines.redis` below — the SAME placeholders, so there is
+      # one env var per value and no second authority.
+      timeout: ${DATAPIPELINES_REDIS_COMMAND_TIMEOUT:2s}
+      connect-timeout: ${DATAPIPELINES_REDIS_CONNECT_TIMEOUT:2s}
 
   # Flyway runs on startup against the metadata DB. Migrations live only in this
   # module (module-structure.md §3.1 rule 2); the DDL authority is metadata-db.md §4.
@@ -141,6 +148,15 @@ datapipelines:
     host: ${DATAPIPELINES_REDIS_HOST}
     port: ${DATAPIPELINES_REDIS_PORT:6379}
     password: ${DATAPIPELINES_REDIS_PASSWORD:}
+    # #482 — the operator-facing names for the two client bounds; configuration.md §3.1.
+    # Nothing binds these paths (there is no @ConfigurationProperties("datapipelines.redis")
+    # yet — the TODO above): the bridge under `spring.data.redis` carries the SAME
+    # placeholders, so an operator setting DATAPIPELINES_REDIS_COMMAND_TIMEOUT /
+    # DATAPIPELINES_REDIS_CONNECT_TIMEOUT reaches Lettuce. `command-timeout` is the per-
+    # command READ timeout (Boot's `spring.data.redis.timeout`), `connect-timeout` the TCP
+    # connect bound.
+    command-timeout: ${DATAPIPELINES_REDIS_COMMAND_TIMEOUT:2s}
+    connect-timeout: ${DATAPIPELINES_REDIS_CONNECT_TIMEOUT:2s}
 
   jwt:
     secret: ${DATAPIPELINES_JWT_SECRET}

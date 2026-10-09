@@ -81,6 +81,10 @@ services:
       # and declared beside it in the compose-env-audit allowlist.
       DATAPIPELINES_REDIS_PORT: 6379
       DATAPIPELINES_REDIS_PASSWORD: ${DATAPIPELINES_REDIS_PASSWORD:-}
+      # #482 — the Redis client's two bounds (configuration.md §3.1), same defaults as
+      # application.yml: a Redis outage refuses in seconds, not a minute per command.
+      DATAPIPELINES_REDIS_COMMAND_TIMEOUT: ${DATAPIPELINES_REDIS_COMMAND_TIMEOUT:-2s}
+      DATAPIPELINES_REDIS_CONNECT_TIMEOUT: ${DATAPIPELINES_REDIS_CONNECT_TIMEOUT:-2s}
 
       # REQUIRED, no fallback. Exactly 32 bytes base64.
       DATAPIPELINES_JWT_SECRET: ${DATAPIPELINES_JWT_SECRET}

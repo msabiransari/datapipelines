@@ -1,6 +1,9 @@
 package co.datapipelines.web
 
+import io.lettuce.core.ClientOptions
+import io.lettuce.core.SocketOptions
 import org.springframework.data.redis.connection.RedisStandaloneConfiguration
+import org.springframework.data.redis.connection.lettuce.LettuceClientConfiguration
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory
 import org.springframework.data.redis.core.StringRedisTemplate
 import org.springframework.web.servlet.mvc.method.annotation.ResponseBodyEmitter
@@ -9,6 +12,7 @@ import org.testcontainers.containers.GenericContainer
 import org.testcontainers.utility.DockerImageName
 import java.io.File
 import java.io.IOException
+import java.time.Duration
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.CountDownLatch
 
@@ -113,6 +117,20 @@ fun tablesResultSet(
  * `dag`'s RedisSupport established (one image startup, Ryuk reaps it at JVM exit).
  */
 object TestRedis {
+    /**
+     * The two client bounds EVERY factory this object builds carries — the production posture,
+     * not a test convenience (#482). Before this lane, `LettuceConnectionFactory(config)` built
+     * Lettuce's own defaults (60 s per command), which is precisely the production defect: with
+     * Redis stopped, the limiter's fail-closed refusal arrived only after Lettuce gave up.
+     * application.yml ships the same two defaults (`${DATAPIPELINES_REDIS_COMMAND_TIMEOUT:2s}` /
+     * `${DATAPIPELINES_REDIS_CONNECT_TIMEOUT:2s}`, fed to Lettuce through the §3.14 bridge), and
+     * [TestRedisTimeoutParityTest] goes red when either side changes alone. The stopped-Redis
+     * cases in `WebPersistenceIntegrationTest` derive their wall-clock bounds from
+     * [COMMAND_TIMEOUT], so a slower default widens the bound honestly.
+     */
+    val COMMAND_TIMEOUT: Duration = Duration.ofSeconds(2)
+    val CONNECT_TIMEOUT: Duration = Duration.ofSeconds(2)
+
     private val container: GenericContainer<*> by lazy {
         GenericContainer(DockerImageName.parse(IMAGE))
             .withExposedPorts(PORT)
@@ -122,7 +140,7 @@ object TestRedis {
     /** A live [StringRedisTemplate] against the shared container. */
     fun template(): StringRedisTemplate {
         val config = RedisStandaloneConfiguration(container.host, container.getMappedPort(PORT))
-        val factory = LettuceConnectionFactory(config).apply { afterPropertiesSet() }
+        val factory = LettuceConnectionFactory(config, clientConfiguration()).apply { afterPropertiesSet() }
         return StringRedisTemplate(factory).apply { afterPropertiesSet() }
     }
 
@@ -146,9 +164,33 @@ object TestRedis {
                 .withExposedPorts(PORT)
                 .also { it.start() }
         val config = RedisStandaloneConfiguration(container.host, container.getMappedPort(PORT))
-        val factory = LettuceConnectionFactory(config).apply { afterPropertiesSet() }
+        val factory = LettuceConnectionFactory(config, clientConfiguration()).apply { afterPropertiesSet() }
         return Disposable(container, StringRedisTemplate(factory).apply { afterPropertiesSet() })
     }
+
+    /**
+     * The client configuration every factory here builds with: the two production bounds above.
+     * The two-argument `LettuceConnectionFactory` constructor is the ONLY way to set them — the
+     * one-argument form used before #482 silently fell back to Lettuce's 60 s command default.
+     * The command timeout rides the builder directly; the connect timeout has no builder method,
+     * so it goes through `SocketOptions` — the same mechanism Spring Boot's
+     * `spring.data.redis.connect-timeout` binding itself uses (`LettuceConnectionConfiguration`,
+     * Boot 3.5.16).
+     */
+    private fun clientConfiguration(): LettuceClientConfiguration =
+        LettuceClientConfiguration
+            .builder()
+            .commandTimeout(COMMAND_TIMEOUT)
+            .clientOptions(
+                ClientOptions
+                    .builder()
+                    .socketOptions(
+                        SocketOptions
+                            .builder()
+                            .connectTimeout(CONNECT_TIMEOUT)
+                            .build(),
+                    ).build(),
+            ).build()
 
     /** A private Redis and the template on it; [close] stops the container. */
     class Disposable(
