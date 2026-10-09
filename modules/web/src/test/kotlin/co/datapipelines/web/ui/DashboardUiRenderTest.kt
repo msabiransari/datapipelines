@@ -365,9 +365,13 @@ class DashboardUiRenderTest {
         html shouldContain "href=\"/executions/${execution.executionId}\""
         html shouldContain "COMPLETED"
         html shouldContain "5 minutes ago"
-        // The bounded poll: the first re-fetch is delayed (the server just rendered), then
-        // every 15s, and the pane re-fetches ITSELF so the poll survives the swap.
-        html shouldContain "hx-trigger=\"load delay:15s, every 15s\""
+        // 476 (#476): the pane declares only the REQUEST — the page glue's single shared timer
+        // pokes `dp:refresh` on whichever copies are visible, so two mounted copies never mean
+        // two self-scheduled pollers. The swap re-processes the fresh copy, so the poke keeps
+        // landing after every re-fetch.
+        html shouldContain "hx-trigger=\"dp:refresh\""
+        html shouldNotContain "every 15s"
+        html shouldNotContain "closest("
         html shouldContain "hx-swap=\"outerHTML\""
         html shouldContain "shared"
     }

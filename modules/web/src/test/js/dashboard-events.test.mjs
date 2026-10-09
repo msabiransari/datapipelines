@@ -118,3 +118,27 @@ test("shortId: the timeline's 8-character shape, shorter ids untouched", () => {
   assert.equal(dock.shortId(null), "");
   assert.equal(dock.shortId(undefined), "");
 });
+
+// #476 — the board mounts the refreshes pane TWICE (the dock's History tab, the workspace's
+// Refreshes tab), and each copy used to self-poll on `every 15s` — two timers for one
+// read-only listing. The cadence cannot live on the copies: the enforced CSP keeps htmx's
+// allowEval off (the layout's #188 config), and without it htmx never RUNS a trigger FILTER
+// expression — the filter shape was measured live reaching the page on both copies,
+// unfiltered. So the partial declares only the request and the page glue owns the ONE timer.
+// The browser case (DashboardEventsBrowserTest) counts the wire; this pins both sources.
+
+const refreshesPartialPath = path.resolve(here, "../../main/resources/templates/partials/dashboard-refreshes.html");
+const pageGluePath = path.resolve(here, "../../main/resources/static/js/dashboards-page.js");
+
+test("the refreshes partial only answers a poke, and exactly one glue timer does the poking", () => {
+  const html = require("node:fs").readFileSync(refreshesPartialPath, "utf8");
+  const attr = /hx-trigger='([^']+)'/.exec(html);
+  assert.ok(attr, "the pane root declares its trigger in one attribute");
+  assert.equal(attr[1], "dp:refresh", "a plain event trigger: the glue pokes it, it never self-schedules");
+
+  const glue = require("node:fs").readFileSync(pageGluePath, "utf8");
+  assert.equal(glue.match(/setInterval\(/g).length, 1, "exactly one interval on the page — the shared poller");
+  assert.match(glue, /htmx\.trigger\(pane, "dp:refresh"\)/, "the timer pokes through htmx, on the element now in the document");
+  assert.match(glue, /closest\("\[hidden\]"\)/, "hidden copies are never poked");
+  assert.match(glue, /clearInterval\(refreshTimer\)/, "the timer is a teardown cleanup, not a leak");
+});

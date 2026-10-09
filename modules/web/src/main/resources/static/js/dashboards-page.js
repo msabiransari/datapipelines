@@ -450,6 +450,29 @@
   var dockApi = wireDock();
   pageState.dock = dockApi;
 
+  // #476 — ONE poller for the page's refreshes panes. The dock's History tab and the
+  // workspace's Refreshes tab render the same partial; each copy used to carry its own
+  // `every 15s`, so two timers polled one read-only listing whenever both were mounted.
+  // The partial now declares only the request (`hx-trigger="dp:refresh"`, a plain event:
+  // the enforced CSP keeps htmx's allowEval off, so a trigger FILTER expression could never
+  // condition a per-copy cadence on visibility), and this single timer decides who polls —
+  // every 15s it pokes the copies the reader can actually see, and none when both are
+  // hidden. htmx re-processes every swapped-in copy, so each tick lands on the element now
+  // in the document; the timer is a teardown cleanup, so a boosted navigation takes it.
+  var REFRESH_POLL_MS = 15000;
+  if (typeof window.setInterval === "function" && window.htmx) {
+    var refreshTimer = window.setInterval(function () {
+      var panes = document.querySelectorAll(".dp-refreshes");
+      for (var i = 0; i < panes.length; i++) {
+        var pane = panes[i];
+        if (!pane.closest("[hidden]")) window.htmx.trigger(pane, "dp:refresh");
+      }
+    }, REFRESH_POLL_MS);
+    cleanups.push(function () {
+      window.clearInterval(refreshTimer);
+    });
+  }
+
   function refusalRegion() {
     return document.getElementById("dp-board-refusal");
   }

@@ -459,7 +459,7 @@ fieldset.dp-dashboard-parameter {
 
 .dp-crumb-name {
   font-family: var(--font-sans);
-  font-size: var(--text-md);
+  font-size: var(--text-base);
   font-weight: var(--weight-semibold);
   margin: 0;
   overflow-wrap: anywhere;
@@ -506,7 +506,7 @@ fieldset.dp-dashboard-parameter {
 }
 
 .dp-ws-tab[aria-selected="true"] {
-  border-bottom-color: var(--accent);
+  border-bottom-color: var(--accent-primary);
   color: var(--text-primary);
   font-weight: var(--weight-medium);
 }
