@@ -180,17 +180,27 @@ class RefreshEngine(
         /**
          * The abort route cancels the running executions AND raises the flag, and an execution ended that way can finish
          * the work before the watcher's next poll — every target failed, nobody told the engine why, the row closed
-         * FAILED for a refresh its viewer aborted. One last look at the flag records the request here, after the work
+         * FAILED for a refresh its viewer aborted. One last look for the request records it here, after the work
          * joined; WHAT the request means is the ending's rule alone (`run`'s check at the DONE/ABORTED fork): an abort
          * that arrives after the last visualization completed changes nothing (#370), while a refresh the abort
          * actually interrupted — targets unrecorded, or recorded failed — ends ABORTED.
          *
+         * That last look is UNCACHED (#489): the poll window can cover the execution's end, a target's `record` and
+         * this notice alike, so a cached read here would answer false whatever the flag says, the request another
+         * instance raised after the last real poll would stay invisible, and the refresh would derive FAILED with the
+         * abort's own abort-stage error. One extra remote read per refresh end, never per tick — the watcher and
+         * `record` keep the cached read (#435's cheapness contract).
+         *
          * What the request means for a TARGET is `record`'s and `finish`'s rule (#435): the target the refresh's own
          * abort cancelled reports `abort`, on whichever side of this race the flag is read.
+         *
+         * A fault in this read is a bug in the work, like any other: it lands after the body joined and before
+         * `finish`, propagates out of `work` to `run`'s catch, and the refresh ends FAILED — `run`'s `NonCancellable`
+         * finish still closes the row, audits it and sends the last frame.
          */
         private fun noticeLateAbort() {
             if (abortRequested.get()) return
-            if (ports.abort.requested(job.refreshId)) abortRequested.set(true)
+            if (ports.abort.requestedNow(job.refreshId)) abortRequested.set(true)
         }
 
         /**

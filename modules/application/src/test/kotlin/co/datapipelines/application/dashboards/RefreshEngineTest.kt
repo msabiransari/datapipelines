@@ -631,6 +631,39 @@ class RefreshEngineTest {
     }
 
     @Test
+    fun `an abort raised inside the signal's cache window still ends ABORTED with the target's abort`() {
+        runTest {
+            // #489 (the cross-instance half of #435's acceptance): the job-start read is the last REAL remote
+            // read — negative; another instance raises the flag and cancels the executions INSIDE the poll
+            // window, which then covers the execution's end, the target's record and noticeLateAbort. Every
+            // cached read answers false, the engine never observes the request, and the refresh derived
+            // FAILED with the abort's own abort-stage error. Finalization is the one place a fresh read is
+            // owed: one extra remote read per refresh end, never per tick.
+            val body = dashboard(listOf(source("s1")), listOf(occurrence("v", inputs = mapOf("main" to "s1"))))
+            scripts = { Script.After(30, Script.Aborted) }
+            val signal = CachedRemoteSignal(abortFlag, remotePollMillis = 15_000L, nowMillis = { testScheduler.currentTime })
+            val cachedPorts = RefreshPorts(ports.events, ports.ledger, ports.audit, signal, ports.canceller)
+            launch {
+                delay(10)
+                abortFlag.set(true)
+            }
+
+            val result = engine().run(RefreshFixtures.job(body), cachedPorts)
+
+            withClue("reads=${signal.reads} target=${result.targets["v"]} lastStatus=${lastStatusOf("v")}") {
+                result.status shouldBe RefreshStatus.ABORTED
+                result.targets.getValue("v") shouldBe TargetOutcome.Aborted
+                lastStatusOf("v") shouldBe "error" // the cached window answered false at record time
+                signal.reads shouldBe 2 // job start + the one fresh final read; the window cached the rest away
+            }
+            finishes.single().status shouldBe RefreshStatus.ABORTED
+            finishedOutcomeOf("v") shouldBe "abort"
+            audited.single().status shouldBe RefreshStatus.ABORTED
+            events.last().shouldBeInstanceOf<RefreshEvent.Completed>().status shouldBe "ABORTED"
+        }
+    }
+
+    @Test
     fun `an abort rewrites only what it cancelled - a target delivered Ok before the abort stays Ok`() {
         runTest {
             // Ok and ordinary failure settle immediately; a hung target times out at t=1000. The flag rises at
@@ -827,6 +860,29 @@ class RefreshEngineTest {
     }
 
     @Test
+    fun `a fault in the final fresh read ends the refresh FAILED - the row is closed, nothing escapes`() {
+        runTest {
+            // #489's fresh read is a new call site: inside noticeLateAbort, after the body joined, before
+            // finish. A read that THROWS there is a bug in the work — it propagates out of `work` to `run`'s
+            // catch, the refresh ends FAILED at the one boundary, and `run`'s NonCancellable finish still
+            // writes the row, audits it and sends the terminal frame (the same shape as the record-time fault).
+            val body = dashboard(listOf(source("s1")), listOf(occurrence("v", inputs = mapOf("main" to "s1"))))
+            scripts = { Script.Rows(columns("x" to LogicalType.INTEGER), listOf(listOf(1))) }
+            val signal = CachedRemoteSignal(abortFlag, remotePollMillis = 15_000L, nowMillis = { testScheduler.currentTime })
+            signal.freshFault = true
+            val cachedPorts = RefreshPorts(ports.events, ports.ledger, ports.audit, signal, ports.canceller)
+
+            val result = engine().run(RefreshFixtures.job(body), cachedPorts)
+
+            signal.reads shouldBe 1 // job start only: the fault is the fresh read's own
+            result.status shouldBe RefreshStatus.FAILED
+            finishes.single().status shouldBe RefreshStatus.FAILED
+            audited.single().status shouldBe RefreshStatus.FAILED
+            events.last().shouldBeInstanceOf<RefreshEvent.Completed>().status shouldBe "FAILED"
+        }
+    }
+
+    @Test
     fun `a bug in the work still ends the refresh - the row is closed FAILED and nothing escapes`() =
         runTest {
             val body = dashboard(listOf(source("s1")), listOf(occurrence("v", inputs = mapOf("main" to "s1"))))
@@ -920,4 +976,42 @@ class RefreshEngineTest {
             finishes.single().status shouldBe RefreshStatus.ABORTED
             running.join()
         }
+
+    /**
+     * The production remote signal's real rule (the web module's RefreshAbortSignal, modeled on its own
+     * shape — a clock, one poll window, a read count — never a hand-rolled boolean): [requested] answers
+     * from the cache inside the window — `false`, whatever the flag now says — and reads otherwise;
+     * [requestedNow] reads past the window and records the read, exactly once at finalization (#489); a
+     * read that throws is the store-fault case the engine ends FAILED.
+     */
+    private class CachedRemoteSignal(
+        private val flag: AtomicBoolean,
+        private val remotePollMillis: Long,
+        private val nowMillis: () -> Long,
+    ) : AbortSignal {
+        private var lastRemoteRead: Long? = null
+        var freshFault = false
+
+        var reads = 0
+            private set
+
+        override fun requested(refreshId: UUID): Boolean {
+            val now = nowMillis()
+            val last = lastRemoteRead
+            if (last != null && now - last < remotePollMillis) return false
+            lastRemoteRead = now
+            return read()
+        }
+
+        override fun requestedNow(refreshId: UUID): Boolean {
+            lastRemoteRead = nowMillis()
+            return read()
+        }
+
+        private fun read(): Boolean {
+            reads++
+            if (freshFault) error("abort store unreachable")
+            return flag.get()
+        }
+    }
 }
