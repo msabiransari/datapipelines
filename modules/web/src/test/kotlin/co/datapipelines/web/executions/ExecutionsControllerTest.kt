@@ -12,7 +12,14 @@ import co.datapipelines.executor.ExecutionRecord
 import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ExecutionStatus
 import co.datapipelines.executor.ExecutionTrigger
+import co.datapipelines.web.CapturingSseEmitter
+import co.datapipelines.web.api.ApiErrorCatalog
 import co.datapipelines.web.api.ApiException
+import co.datapipelines.web.sse.LoggedSseEvent
+import co.datapipelines.web.sse.ReplayRead
+import co.datapipelines.web.sse.SseEventLog
+import co.datapipelines.web.sse.SseLogStreamer
+import com.fasterxml.jackson.databind.json.JsonMapper
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
 import io.mockk.every
@@ -20,17 +27,23 @@ import io.mockk.mockk
 import io.mockk.verify
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
+import org.springframework.dao.QueryTimeoutException
+import org.springframework.http.HttpStatus
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
 import org.springframework.security.core.context.SecurityContextHolder
 import java.time.Instant
 import java.util.UUID
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * The ownership rules of §10 (carry-forward #2): a non-owner's cancel/get is a 404, never a 403;
  * cancelling a terminal execution is `409 pipeline.execution.not_running`; the admin listing reads
  * `findAll`, a member's `findVisible` — their own runs plus the workspace's SCHEDULED runs (#9 R3).
  * And the durable event record (§10.3A): paged by `event_id`, `410` past retention, the metadata
- * read's visibility and session-only rule.
+ * read's visibility and session-only rule. And §10.3's SSE replay (#487): one log read, `410` for
+ * an absent log, `503` for a read Redis did not answer, visibility before the read.
  */
 class ExecutionsControllerTest {
     private val executions = mockk<ExecutionRepository>()
@@ -335,6 +348,98 @@ class ExecutionsControllerTest {
 
         shouldThrow<ApiException> { controller.durableEvents(executionId, null, null) }.code shouldBe "auth.session.required"
         verify(exactly = 0) { executions.findById(any(), any()) }
+    }
+
+    /**
+     * §10.3's SSE replay route (#487), against a REAL [SseLogStreamer] over a mocked [SseEventLog]
+     * — the log mock is where "read once" is countable. [emitters] counts the streams opened: an
+     * error answer must be thrown before one exists (nothing committed, the advice renders the
+     * envelope with the catalog's status).
+     */
+    private val eventLog = mockk<SseEventLog>()
+    private val replayScheduler = Executors.newSingleThreadScheduledExecutor()
+    private val emitters = AtomicInteger(0)
+    private val replayEmitter = CapturingSseEmitter()
+    private val replayController =
+        ExecutionsController(
+            executions = executions,
+            cancellation = cancellation,
+            cursor = mockk(),
+            resultStore = mockk(),
+            resultUrls = mockk(),
+            streamer =
+                SseLogStreamer(eventLog, JsonMapper.builder().build(), replayScheduler) {
+                    emitters.incrementAndGet()
+                    replayEmitter
+                },
+            pipelines = pipelines,
+            eventRecords = events,
+        )
+
+    @AfterEach
+    fun stopReplayScheduler() {
+        replayScheduler.shutdownNow()
+    }
+
+    @Test
+    fun `the replay route reads the log ONCE and streams what that read returned`() {
+        authenticate(owner)
+        every { executions.findById(any(), executionId) } returns record(ExecutionStatus.SUCCESS)
+        every { eventLog.replay(executionId) } returns
+            ReplayRead.Log(
+                listOf(
+                    LoggedSseEvent(1, "execution_started", mapOf("n" to 1)),
+                    LoggedSseEvent(2, "pipeline_completed", mapOf("n" to 2)),
+                ),
+            )
+
+        replayController.events(executionId)
+
+        replayEmitter.completed.await(5, TimeUnit.SECONDS) shouldBe true
+        replayEmitter.eventNames() shouldBe listOf("execution_started", "pipeline_completed")
+        // Before #487: hasLog read the whole log, then the replay read it again (a fault on the
+        // second read was an empty stream that completed).
+        verify(exactly = 1) { eventLog.replay(executionId) }
+    }
+
+    @Test
+    fun `an absent log is 410 result_expired, thrown before a stream exists`() {
+        authenticate(owner)
+        every { executions.findById(any(), executionId) } returns record(ExecutionStatus.SUCCESS)
+        every { eventLog.replay(executionId) } returns ReplayRead.Absent
+
+        val refused = shouldThrow<ApiException> { replayController.events(executionId) }
+
+        refused.code shouldBe "result.expired"
+        ApiErrorCatalog.statusFor(refused.code) shouldBe HttpStatus.GONE
+        refused.details shouldBe mapOf("execution_id" to executionId.toString())
+        emitters.get() shouldBe 0
+    }
+
+    @Test
+    fun `a log read Redis did not answer is 503 result_storage_unavailable, reason event_log_unavailable, never 410`() {
+        authenticate(owner)
+        every { executions.findById(any(), executionId) } returns record(ExecutionStatus.SUCCESS)
+        val timeout = QueryTimeoutException("Redis command timed out")
+        every { eventLog.replay(executionId) } returns ReplayRead.Unavailable(timeout)
+
+        val refused = shouldThrow<ApiException> { replayController.events(executionId) }
+
+        refused.code shouldBe "result.storage_unavailable"
+        ApiErrorCatalog.statusFor(refused.code) shouldBe HttpStatus.SERVICE_UNAVAILABLE
+        refused.details shouldBe mapOf("execution_id" to executionId.toString(), "reason" to "event_log_unavailable")
+        refused.cause shouldBe timeout
+        emitters.get() shouldBe 0
+        verify(exactly = 1) { eventLog.replay(executionId) }
+    }
+
+    @Test
+    fun `another member's run is 404 on the replay, and its log is never read`() {
+        authenticate(UUID.randomUUID())
+        every { executions.findById(any(), executionId) } returns record(ExecutionStatus.SUCCESS)
+
+        shouldThrow<ApiException> { replayController.events(executionId) }.code shouldBe "result.execution_not_found"
+        verify(exactly = 0) { eventLog.replay(any()) }
     }
 
     private fun event(id: Int) =

@@ -2,6 +2,7 @@ package co.datapipelines.web.sse
 
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.pipeline.PipelineErrorCodes
+import co.datapipelines.web.api.ApiErrors
 import co.datapipelines.web.api.ApiException
 import com.fasterxml.jackson.databind.ObjectMapper
 import org.slf4j.LoggerFactory
@@ -58,21 +59,36 @@ class SseLogStreamer(
     private val log = LoggerFactory.getLogger(SseLogStreamer::class.java)
     private val follows = ConcurrentHashMap<SseEmitter, FollowState>()
 
-    /** True when a (possibly still-growing) event log exists for [executionId]. */
-    fun hasLog(executionId: UUID): Boolean = eventLog.replay(executionId) != null
+    /**
+     * False only when the log is known ABSENT — the idempotent attach's question (§3.5), whose
+     * answer for false is to consult the execution row.
+     *
+     * A read fault answers true (#487): it says nothing about the log, so the attach becomes a
+     * [follow], whose ticks ride the fault out or end with `503 result.storage_unavailable` after
+     * [UNAVAILABLE_TICKS_BEFORE_END] — before #487 the fault read as "no log" and a terminal
+     * original answered `410 result.expired` (`reason: event_log_expired`) for a log that was there.
+     */
+    fun hasLog(executionId: UUID): Boolean = eventLog.replay(executionId) != ReplayRead.Absent
 
     /**
-     * §10.3: emits the stored stream once, in original order, then completes.
+     * §10.3's one read of the log (#487): the route decides 410 / 503 / stream on it, then hands the
+     * events to [replay] — the stream is served from this read, never from a second one.
+     */
+    fun load(executionId: UUID): ReplayRead = eventLog.replay(executionId)
+
+    /**
+     * §10.3: emits [events] — the stored stream [load] returned — once, in original order, then
+     * completes.
      *
      * Each chunk re-asks the subscriber's authority first (#230, P4): a refusal ends the replay
      * at that chunk — a partially-consumed replay is the contract, not an error.
      */
     fun replay(
         executionId: UUID,
+        events: List<LoggedSseEvent>,
         subscriber: AuthenticatedPrincipal? = null,
     ): SseEmitter {
         val emitter = emitterFactory()
-        val events = eventLog.replay(executionId).orEmpty()
         scheduler.execute {
             for (event in events) {
                 if (!authorizedBeforeWrite(emitter, executionId, subscriber)) return@execute
@@ -129,6 +145,9 @@ class SseLogStreamer(
 
         @Volatile var emptyPolls: Int = 0
 
+        /** Consecutive ticks whose read Redis did not answer (#487); any answered read resets it. */
+        @Volatile var unavailableTicks: Int = 0
+
         /** Ticks since `pipeline_completed` was served without a `data_ready` appearing. */
         @Volatile var closePendingTicks: Int = -1
 
@@ -160,32 +179,13 @@ class SseLogStreamer(
         executionId: UUID,
         state: FollowState,
     ) {
-        val events = eventLog.replay(executionId)
-        if (events == null) {
-            // No log yet (or any more). Only a follow that has served nothing gives up on it.
-            if (state.lastSentEventId == 0 && ++state.emptyPolls >= GIVE_UP_AFTER_POLLS) {
-                cancel(emitter)
-                // #324 — a follow that never served an event was attached to an original that
-                // never started: the id does not resolve (there is no row to GET), so the give-up
-                // is the ID-FREE 410 (`reason: original_not_started`), completed with an error
-                // the way `ExecutionStreamLauncher.failBeforeStart` completes — nothing was sent,
-                // so the response is uncommitted and the advice renders the envelope on the async
-                // dispatch (wire-proven since #404, `IdempotentAttachRowOrderE2eTest`). A follow
-                // that HAS served events keeps the quiet completion below.
-                completeWithErrorQuietly(
-                    emitter,
-                    executionId,
-                    ApiException(
-                        PipelineErrorCodes.Result.EXPIRED,
-                        "The original execution of this idempotency key never started; its id does not " +
-                            "resolve. Re-execute with a fresh Idempotency-Key.",
-                        mapOf("reason" to "original_not_started"),
-                    ),
-                )
-            }
+        val read = eventLog.replay(executionId)
+        if (read !is ReplayRead.Log) {
+            if (read is ReplayRead.Unavailable) onUnavailable(emitter, executionId, state, read) else onAbsent(emitter, executionId, state)
             return
         }
-        val fresh = events.filter { it.eventId > state.lastSentEventId }
+        state.unavailableTicks = 0
+        val fresh = read.events.filter { it.eventId > state.lastSentEventId }
         for (event in fresh) {
             // The re-judge (#230, P4) runs before every served event; a refusal has already
             // cancelled and completed the stream, so the follow simply ends.
@@ -210,6 +210,72 @@ class SseLogStreamer(
                 cancel(emitter)
                 completeQuietly(emitter, executionId)
             }
+        }
+    }
+
+    /** No log yet (or any more) — an ANSWERED read, so it also ends a run of faults (#487). */
+    private fun onAbsent(
+        emitter: SseEmitter,
+        executionId: UUID,
+        state: FollowState,
+    ) {
+        state.unavailableTicks = 0
+        // No log yet (or any more). Only a follow that has served nothing gives up on it.
+        if (state.lastSentEventId == 0 && ++state.emptyPolls >= GIVE_UP_AFTER_POLLS) {
+            cancel(emitter)
+            // #324 — a follow that never served an event was attached to an original that
+            // never started: the id does not resolve (there is no row to GET), so the give-up
+            // is the ID-FREE 410 (`reason: original_not_started`), completed with an error
+            // the way `ExecutionStreamLauncher.failBeforeStart` completes — nothing was sent,
+            // so the response is uncommitted and the advice renders the envelope on the async
+            // dispatch (wire-proven since #404, `IdempotentAttachRowOrderE2eTest`). A follow
+            // that HAS served events never gives up on an absent log: it keeps polling.
+            completeWithErrorQuietly(
+                emitter,
+                executionId,
+                ApiException(
+                    PipelineErrorCodes.Result.EXPIRED,
+                    "The original execution of this idempotency key never started; its id does not " +
+                        "resolve. Re-execute with a fresh Idempotency-Key.",
+                    mapOf("reason" to "original_not_started"),
+                ),
+            )
+        }
+    }
+
+    /**
+     * A tick Redis did not answer (#487). Not "no log yet": it never counts toward
+     * [GIVE_UP_AFTER_POLLS] and never ends a follow that served events on its own — the next tick
+     * reads again. The first fault of a run logs once, with its cause; [UNAVAILABLE_TICKS_BEFORE_END]
+     * consecutive faults end the follow, never quietly: before the first event the response is
+     * still uncommitted, so it completes with `503 result.storage_unavailable` (the #324 error
+     * completion, id-free — a fault cannot say whether the original's id resolves); after one, the
+     * status is spent, so a final `event_log_unavailable` comment (§6.6's comment form, the revoked
+     * cut's shape) names why the stream stops short of its terminal event.
+     */
+    private fun onUnavailable(
+        emitter: SseEmitter,
+        executionId: UUID,
+        state: FollowState,
+        read: ReplayRead.Unavailable,
+    ) {
+        val faults = ++state.unavailableTicks
+        if (faults == 1) {
+            log.warn("SSE follow of execution {}: the event log read failed; retrying next tick.", executionId, read.cause)
+        }
+        if (faults < UNAVAILABLE_TICKS_BEFORE_END) return
+        log.warn(
+            "SSE follow of execution {} ended: the event log read failed {} ticks in a row ({} event(s) served).",
+            executionId,
+            faults,
+            state.lastSentEventId,
+        )
+        cancel(emitter)
+        if (state.lastSentEventId == 0) {
+            completeWithErrorQuietly(emitter, executionId, ApiErrors.eventLogUnavailable(null, read.cause))
+        } else {
+            runCatching { emitter.send(SseEmitter.event().comment(ApiErrors.EVENT_LOG_UNAVAILABLE)) }
+            completeQuietly(emitter, executionId)
         }
     }
 
@@ -328,6 +394,14 @@ class SseLogStreamer(
          * nothing → the id-free never-started 410; events → the quiet completion.
          */
         const val GIVE_UP_AFTER_POLLS = 60
+
+        /**
+         * #487 — consecutive unanswered reads that end a follow. A read on the shipped client fails
+         * at its 2 s command timeout (Lettuce queues commands while it reconnects), so eight ticks
+         * are ~18 s with the 250 ms delay — past the give-up patience above, so a Redis restart
+         * inside that window is ridden out; a read refused at once ends the follow in ~2 s.
+         */
+        const val UNAVAILABLE_TICKS_BEFORE_END = 8
 
         const val PIPELINE_COMPLETED = "pipeline_completed"
 

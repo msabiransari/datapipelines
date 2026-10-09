@@ -1,6 +1,6 @@
 # Pipeline Contract Specification
 
-**Status:** v1.55 (revised — see Change Log)
+**Status:** v1.56 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
 **Last updated:** 2026-10-06
@@ -1279,7 +1279,7 @@ Defined and described in [REST API §7](rest-api.md#7-result-delivery).
 | `result.expired` | 410 | Result TTL elapsed; re-run the pipeline |
 | `result.format_unsupported` | 400 | Unknown `format` parameter |
 | `result.too_large` | 500 | Caller result exceeded `datapipelines.result.max-size-bytes`; execution failed |
-| `result.storage_unavailable` | 500 | Redis unavailable at result-write time; execution failed |
+| `result.storage_unavailable` | 503 | Redis unavailable. At result-write time the execution fails (the code in its `pipeline_failed`); on a read — [REST API §10.3](rest-api.md#103-replay-sse-stream)'s replay log, `details.reason: event_log_unavailable` — the request is refused and may be retried. Was 500 until v1.56 (#487) |
 
 ### 13.11 Rate limiting / idempotency
 
@@ -1874,6 +1874,7 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-09 | v1.56 | 487 (#487) a replay-log read fault is not an expiry | **§13.10** `result.storage_unavailable`: **500 → 503** (owner's ruling, 2026-10-09) — a transient fault of the server's own store, like `pipeline.transform.pool_exhausted`. The row also names the read surface it gains: §10.3's replay answers a log read Redis did not answer with this code (`details.reason: event_log_unavailable`) instead of `410 result.expired`. A deliberate status change on a frozen contract: the result-write path's code and behaviour are unchanged (it fails the execution; no HTTP status), and every REST or UI read whose stored result header cannot be parsed — the result cursor, `GET /executions/{id}`, a published endpoint's serve, the execution detail page — now answers this code with 503 where it answered 500. |
 | 2026-10-06 | v1.55 | #462 draft purge pins | §13 pinned-error row states sole-draft dashboard history scope and refusal before destructive writes. |
 | 2026-10-06 | v1.54 | 459 (#459) + merge follow-up | **§4.9 / §12.9 / the error table**, written by the lane: a PIPELINE node may pin a live DRAFT child while the parent is a draft, and release and import still require RELEASED children (`pipeline_reference_not_released`). Composition verdicts describe a draft child's current body, and release revalidates them. The follow-up adds this row and the bump. The error row's old reason ("a DRAFT child can be purged out from under its parent") still holds for drafts: the pipeline draft purges have no pin guard yet (versioning §3 rule 3, #462). |
 | 2026-10-04 | v1.53 | #382 merge follow-up | **§13.21** — the strict-reader sentence names five routes that bind a typed request DTO, `POST /dashboards/bindings` added (#382 moved it onto the reader; #382 review F1). No code, status or error shape changed. |

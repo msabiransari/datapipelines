@@ -38,6 +38,7 @@ import co.datapipelines.web.sse.RecordedEvent
 import co.datapipelines.web.sse.ReplayLogSink
 import co.datapipelines.web.sse.SseEventLog
 import co.datapipelines.web.sse.WebEventEmitter
+import co.datapipelines.web.sse.loggedEvents
 import com.fasterxml.jackson.databind.json.JsonMapper
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldHaveSize
@@ -192,7 +193,7 @@ class WebPersistenceIntegrationTest {
                     .asText() shouldBe correlationId.toString()
             }
 
-            val replayed = eventLog.replay(executionId).shouldNotBeNull()
+            val replayed = eventLog.replay(executionId).loggedEvents()
             replayed.map { it.eventName } shouldBe
                 listOf("execution_started", "node_started", "node_completed", "pipeline_completed", "data_ready")
             replayed.map { it.eventId } shouldBe listOf(1, 2, 3, 4, 5)
@@ -279,7 +280,7 @@ class WebPersistenceIntegrationTest {
                         .get("correlation_id")
                         .asText() shouldBe correlationId.toString()
                 }
-                eventLog.replay(executionId).shouldNotBeNull().map { it.eventId } shouldBe listOf(1, 2, 3, 4, 5)
+                eventLog.replay(executionId).loggedEvents().map { it.eventId } shouldBe listOf(1, 2, 3, 4, 5)
                 withClue("every event went through the writers, not around them") {
                     rowsCommitted.get() shouldBe 5
                     replayCommitted.get() shouldBe 5
@@ -328,8 +329,8 @@ class WebPersistenceIntegrationTest {
         delta.filterKeys { it != "eval" && it != "evalsha" } shouldBe mapOf("rpush" to 2, "pexpire" to 2)
         // One script call: EVALSHA — or EVAL, the first time the script meets this server.
         (delta.getOrDefault("evalsha", 0) + delta.getOrDefault("eval", 0) in 1..2) shouldBe true
-        eventLog.replay(first).shouldNotBeNull().map { it.eventId } shouldBe (1..BATCH_EVENTS).toList()
-        eventLog.replay(second).shouldNotBeNull().map { it.eventId } shouldBe (1..BATCH_EVENTS).toList()
+        eventLog.replay(first).loggedEvents().map { it.eventId } shouldBe (1..BATCH_EVENTS).toList()
+        eventLog.replay(second).loggedEvents().map { it.eventId } shouldBe (1..BATCH_EVENTS).toList()
         val ttl = redis.getExpire("dp:events:$first").shouldNotBeNull()
         (ttl in (ONE_HOUR_SECONDS - TTL_SLACK_SECONDS)..ONE_HOUR_SECONDS) shouldBe true
     }
@@ -346,7 +347,7 @@ class WebPersistenceIntegrationTest {
         eventLog.appendAll((1..HUGE_BATCH).map { eventLog.entry(executionId, LoggedSseEvent(it, "node_started", emptyMap())) })
 
         val after = commandCalls()
-        eventLog.replay(executionId).shouldNotBeNull().map { it.eventId } shouldBe (1..HUGE_BATCH).toList()
+        eventLog.replay(executionId).loggedEvents().map { it.eventId } shouldBe (1..HUGE_BATCH).toList()
         val delta = after.mapValues { (k, v) -> v - (before[k] ?: 0) }.filterValues { it > 0 }
         withClue("server-side command counts for one 9,000-entry append: $delta") {
             delta["rpush"] shouldBe HUGE_BATCH / APPEND_CHUNK
@@ -368,7 +369,7 @@ class WebPersistenceIntegrationTest {
         io.kotest.assertions.withClue("connections the server received across $BATCHES batches: ${after - before}") {
             (after - before <= 1) shouldBe true
         }
-        eventLog.replay(executionId).shouldNotBeNull().size shouldBe BATCHES
+        eventLog.replay(executionId).loggedEvents().size shouldBe BATCHES
     }
 
     private fun connectionsReceived(): Long =
@@ -393,7 +394,7 @@ class WebPersistenceIntegrationTest {
         eventLog.appendAll(batch)
         eventLog.appendAll(batch.subList(1, 3))
 
-        eventLog.replay(executionId).shouldNotBeNull().map { it.eventId } shouldBe listOf(1, 2, 3)
+        eventLog.replay(executionId).loggedEvents().map { it.eventId } shouldBe listOf(1, 2, 3)
     }
 
     @Test

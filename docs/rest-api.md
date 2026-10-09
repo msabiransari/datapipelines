@@ -1,6 +1,6 @@
 # REST API + SSE Specification
 
-**Status:** v2.90 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
+**Status:** v2.91 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
 **Last updated:** 2026-10-08
@@ -664,6 +664,7 @@ off the request thread, still before any byte is sent — and answer exactly the
 |---|---|---|
 | `429` | `pipeline.execution.concurrency_limit` | The executor has no execution slot for the caller (`details.scope`: `per_user` or `global`, `details.limit`; §12.1). The reservation of an `Idempotency-Key`, if one was sent, is released before this response (§3.5, #403), so the same key re-executes once a slot is free; only a retry that attached before the release meets the next row. |
 | `410` | `result.expired` | An idempotent retry (§3.5) attached to an original that never started: no event appeared within the follow's patience (~15 s). `details.reason: original_not_started` and NO `execution_id` — that id never resolves. Re-execute with a fresh `Idempotency-Key`. |
+| `503` | `result.storage_unavailable` | An idempotent retry (§3.5) whose follow met eight consecutive event-log reads Redis did not answer (~18 s at the 2 s command timeout) before serving an event (#487). `details.reason: event_log_unavailable`, NO `execution_id` (a fault cannot say whether it resolves). Retry with the same key. A follow that already served events ends instead with a final `event_log_unavailable` SSE comment — the status is spent once a frame went out. Faults never count toward the row above's patience. |
 
 Until v2.80 both answered `401 auth.api_key.missing` ("No credentials provided") to a fully
 authenticated caller: the stream's completion re-enters the server as an async dispatch, and the
@@ -1055,7 +1056,7 @@ Registry of record: [Pipeline Contract §13.10](pipeline-contract.md#1310-result
 | `result.expired` | 410 | TTL elapsed; result no longer available |
 | `result.format_unsupported` | 400 | Unknown `format` parameter |
 | `result.too_large` | 500 | (During execution) result exceeded the size cap; execution failed |
-| `result.storage_unavailable` | 500 | (During execution) Redis unavailable; execution failed |
+| `result.storage_unavailable` | 503 | Redis unavailable: during execution the execution fails; on a read the request is refused (§10.3's replay, `details.reason: event_log_unavailable`) and may be retried. 500 until v2.91 (#487) |
 
 ---
 
@@ -1628,7 +1629,7 @@ Accept: text/event-stream
 
 Re-emits the SSE event stream from the Redis event log, in original order with original timestamps — `node_progress` samples included, each with the `observed_at` it was taken at (§6.4.9). Useful for debugging pipelines after the fact. The same revoked-subscriber cut as the live stream applies per chunk (§6.8, #230): a replay re-checks the caller's authority before each chunk it serves.
 
-Availability: the Redis event log lives **1 hour** past completion (not configurable); afterwards this endpoint returns `410 result.expired`. The durable per-event record survives 7 days in the `execution_events` table (`datapipelines.executions.event-retention-days`) and is queryable via ordinary execution metadata — only the *replayable stream* expires at 1 hour. The replay is also the answer to "I was not attached (or left early) while it ran": the live stream's delivery guarantee runs only to a connected consumer (§10.4), and everything else is read back from here.
+Availability: the Redis event log lives **1 hour** past completion (not configurable); afterwards this endpoint returns `410 result.expired`. A log read Redis does not answer — Redis down, or the read slower than the client's command timeout (`datapipelines.redis.command-timeout`, 2 s) — is NOT an expiry: it answers `503 result.storage_unavailable` with `details.reason: event_log_unavailable` and the `execution_id`, before any byte of the stream, and the request may be retried (#487). The log is read once per request: the answer and the stream come from the same read. Measured on the shipped client (#487): the whole-log read of 100,000 `node_progress` entries (~600 bytes each) takes ~0.1–0.15 s, and the largest log the shipped defaults produce is a few thousand entries. The durable per-event record survives 7 days in the `execution_events` table (`datapipelines.executions.event-retention-days`) and is queryable via ordinary execution metadata — only the *replayable stream* expires at 1 hour. The replay is also the answer to "I was not attached (or left early) while it ran": the live stream's delivery guarantee runs only to a connected consumer (§10.4), and everything else is read back from here.
 
 ### 10.3A Durable event record (JSON)
 
@@ -2797,6 +2798,7 @@ browser persistence. Clients must reject foreign/stale responses even after abor
 
 ## Appendix A: Change Log
 
+| 2026-10-09 | v2.91 | 487 (#487) a replay-log read fault is not an expiry | **A deliberate status change on the frozen contract (owner's ruling, 2026-10-09):** `result.storage_unavailable` is **503**, was 500 ([Pipeline Contract §13.10](pipeline-contract.md#1310-result-retrieval) v1.56; §7.6 mirrors it). **§10.3:** a log read Redis did not answer — down, or slower than the 2 s command timeout (#482) — answered `410 result.expired` as if the log had expired; it now answers `503 result.storage_unavailable` (`details.reason: event_log_unavailable`), before the stream; the log is read once per request (it was read twice — a fault on the second read served an empty stream). **§6.1.3** gains the idempotent attach's row: a follow that meets 8 consecutive unanswered reads before its first event ends with the same 503, id-free; after an event, with a final `event_log_unavailable` comment. Faults no longer count toward the attach's ~15 s never-started patience, and a fault on the attach's first read follows the log instead of answering `410 event_log_expired` for a terminal original. No route, field or permission is added. |
 | 2026-10-09 | v2.90 | #473 runtime config card metadata — rebased in recovery after #419's v2.89 | **§23.3** (additive): each `visualizations[]` entry of `GET /{id}/runtime/config` carries the PINNED version's `display_name` and `description` (`display_name` is required on the body; `description` is null when the pinned body has none), read from the version the configuration pins, never today's artifact record. |
 | 2026-10-08 | v2.89 | 419 (#419) the parameter-sets flat listing takes `q` — renumbered at recovery after #417 took v2.79 while the lane sat, and at merge after #462's v2.87 and #460's v2.88 | **§21.2's `GET /api/v1/parameter-sets` row**: the existing flat handler gains an optional `q` — additive only, blank/absent `q` is today's listing byte for byte. A non-blank `q` limits the listing to the lensed sets whose name, display name or description contains it, case-insensitively (names are paths, so `q` matches the full path) through the same `ParameterSetService.search` the pages use, and the `total` stays lens-true. A `q` under `?prefix=` is ignored — the §5.7 pipelines rule; no new route, handler, field, status code or permission ([MCP §6.2.44](mcp-server.md) v1.72). |
 | 2026-10-06 | v2.88 | 460 merge follow-up — the section #460 added without a row — renumbered at merge after #462's v2.87 | **§24 added (additive)**: `GET /api/v1/{pipelines,templates,dashboards,visualizations,parameter-sets}/tree` and `/tree/search`, session-only first-party navigation reads under each family's existing read permission — keyset pages of at most 200 immediate folders and artifacts (folders first, binary path order) under a 1 MiB response budget, literal case-insensitive name search with every ancestor a match needs, signed continuations bound to the request, the actor, the workspace and the lens, `Cache-Control: no-store`, and a 503 rather than an empty level when the promotion view is unavailable. No existing route, shape or code changed. |

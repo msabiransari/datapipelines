@@ -18,6 +18,26 @@ data class LoggedSseEvent(
 )
 
 /**
+ * The three answers one read of the replay log can give (#487). A fault is its own answer: before
+ * #487 it was `null`, the same value as an expired log, so a Redis outage — and, since #482's 2 s
+ * command timeout, a read slower than that — was served as `410 result.expired`.
+ */
+sealed interface ReplayRead {
+    /** The log exists: its events, each id once, in event-id order. */
+    data class Log(
+        val events: List<LoggedSseEvent>,
+    ) : ReplayRead
+
+    /** No log under the key: expired (one hour past completion) or never written. */
+    data object Absent : ReplayRead
+
+    /** Redis did not answer the read; nothing is known about the log. */
+    data class Unavailable(
+        val cause: DataAccessException,
+    ) : ReplayRead
+}
+
+/**
  * One replay-log entry, serialized once by [SseEventLog.entry] — so the batching writer can weigh it
  * against its byte bounds and a payload that cannot be serialized fails before it is queued.
  */
@@ -112,8 +132,11 @@ class SseEventLog(
     }
 
     /**
-     * The stored stream in event-id order, or null when the log has expired or never existed —
-     * which §10.3 answers with `410`, and which the caller must distinguish from an empty list.
+     * One read of the stored stream (#487): [ReplayRead.Log] in event-id order,
+     * [ReplayRead.Absent] when the log has expired or never existed — which §10.3 answers with
+     * `410` — or [ReplayRead.Unavailable] when Redis could not answer at all (a fault, or a read
+     * slower than the command timeout, #482), which is NOT an expiry and must never read as one.
+     * Not logged here: each caller knows whether a fault is its answer or a tick it will retry.
      *
      * Each event id is served ONCE, the first stored copy (#266): the batched append is
      * at-least-once, and a client resuming by `Last-Event-ID` must never see an event twice.
@@ -123,22 +146,23 @@ class SseEventLog(
      * event's entry is batched, and the list then holds whichever reached Redis first. The durable
      * record orders by `event_id` in SQL; the replay says the same thing the same way.
      */
-    fun replay(executionId: UUID): List<LoggedSseEvent>? {
+    fun replay(executionId: UUID): ReplayRead {
         val stored =
             try {
                 redis.opsForList().range(key(executionId), 0, -1)
             } catch (e: DataAccessException) {
-                log.warn("SSE event log read failed for execution {}.", executionId, e)
-                return null
+                return ReplayRead.Unavailable(e)
             }
-        if (stored.isNullOrEmpty()) return null
-        return stored
-            .mapNotNull { raw ->
-                runCatching { mapper.readValue<LoggedSseEvent>(raw) }
-                    .onFailure { log.warn("Unreadable event in the log for execution {}; skipped.", executionId, it) }
-                    .getOrNull()
-            }.distinctBy { it.eventId }
-            .sortedBy { it.eventId }
+        if (stored.isNullOrEmpty()) return ReplayRead.Absent
+        return ReplayRead.Log(
+            stored
+                .mapNotNull { raw ->
+                    runCatching { mapper.readValue<LoggedSseEvent>(raw) }
+                        .onFailure { log.warn("Unreadable event in the log for execution {}; skipped.", executionId, it) }
+                        .getOrNull()
+                }.distinctBy { it.eventId }
+                .sortedBy { it.eventId },
+        )
     }
 
     private fun key(executionId: UUID) = "$KEY_PREFIX$executionId"

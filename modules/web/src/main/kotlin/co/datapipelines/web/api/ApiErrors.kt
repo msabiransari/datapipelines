@@ -307,6 +307,29 @@ object ApiErrors {
             mapOf("execution_id" to id),
         )
 
+    /** `details.reason` of [eventLogUnavailable] — the store failed, which is not an expiry (#487). */
+    const val EVENT_LOG_UNAVAILABLE = "event_log_unavailable"
+
+    /**
+     * §10.3 (#487): Redis did not answer the replay log's read — a fault, or a read slower than the
+     * command timeout — so nothing is known about the log, and `410 result.expired` would be a
+     * guess. `503` through the catalog's `result.storage_unavailable` row. [id] is null where the
+     * caller may not be told one (the idempotent attach, whose original may never have started).
+     */
+    fun eventLogUnavailable(
+        id: String?,
+        cause: Throwable,
+    ): ApiException =
+        ApiException(
+            PipelineErrorCodes.Result.STORAGE_UNAVAILABLE,
+            "The event log of this execution could not be read; retry the request shortly.",
+            buildMap {
+                id?.let { put("execution_id", it) }
+                put(REASON, EVENT_LOG_UNAVAILABLE)
+            },
+            cause,
+        )
+
     /** Cancel requested for an execution that is already terminal (rest-api §10.4). */
     fun executionNotRunning(
         id: String,
