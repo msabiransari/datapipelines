@@ -169,6 +169,27 @@ class DashboardFiltersBrowserTest : DashboardBrowserSuite() {
         )
         // Focus returned to the trigger that opened the drawer.
         page.waitForFunction("() => document.activeElement && document.activeElement.id === 'dp-board-filters-trigger'")
+
+        // Open again, then cross back to desktop while it is open: the panel is a column beside
+        // the board again and the drawer state is gone with the trigger — nothing still claims
+        // to be expanded, and the next narrowing starts closed.
+        page.click("#dp-board-filters-trigger")
+        page.waitForFunction("() => document.getElementById('dp-board-filters').classList.contains('is-open')")
+        page.setViewportSize(1280, 900)
+        page.waitForFunction(
+            """() => { const panel = document.getElementById('dp-board-filters');
+              return !panel.classList.contains('is-open') &&
+                document.getElementById('dp-board-filters-trigger').getAttribute('aria-expanded') === 'false'; }""",
+        )
+        val wide = regions()
+        println("473b-filters-resize-back $wide")
+        wide["panelDisplay"] shouldBe "block"
+        wide["triggerDisplay"] shouldBe "none"
+        wide["panelRight"].px() shouldBeLessThanOrEqual wide["boardLeft"].px()
+        documentOverflowsX() shouldBe false
+        page.setViewportSize(900, 900)
+        page.waitForFunction("() => getComputedStyle(document.querySelector('.dp-board-toolbar')).display !== 'none'")
+        (page.evaluate("() => document.getElementById('dp-board-filters').classList.contains('is-open')") as Boolean) shouldBe false
         page.setViewportSize(1280, 900)
     }
 }

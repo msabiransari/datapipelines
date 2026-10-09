@@ -161,6 +161,16 @@
     listen(document, "keydown", function (e) {
       if (e && e.key === "Escape") drawerSet(false);
     });
+    // Back across the presentation boundary the panel is a column again and the trigger is
+    // gone: an open drawer's state must not outlive it (aria-expanded="true" on a hidden
+    // button, or a drawer that springs open on the next narrowing). The CSS owns the
+    // breakpoint — the glue reads its effect (the toolbar's display), never a width of its own.
+    var filtersToolbar = scope.querySelector(".dp-board-toolbar");
+    listen(window, "resize", function () {
+      if (drawerOpen && filtersToolbar && window.getComputedStyle(filtersToolbar).display === "none") {
+        drawerSet(false, false);
+      }
+    });
     // A history snapshot never carries an open drawer: the restored copy mounts closed.
     cleanups.push(function () {
       drawerSet(false, false);
