@@ -2478,9 +2478,11 @@
           // #473 — every visualization renders INSIDE a card: a bordered shell with a heading (the
           // authored title, else the pinned visualization's display name, else a renderer label such
           // as the KPI's, else the occurrence name), an optional description, the renderer's own
-          // host body, and a status foot. The `data-dp-viz` marker and the status chip keep their
+          // host body, and a message foot. The `data-dp-viz` marker and the status chip keep their
           // DOM relationship (`[data-dp-viz="name"] .dp-dashboard-status`) — the marker moved from
-          // the renderer body to the card that now wraps it.
+          // the renderer body to the card that now wraps it. #501 — the chip sits on the HEADING
+          // line and the foot overlays the body's lower edge, so neither reserves a row: the body
+          // keeps the slot's height less one heading line (a 2-row chart keeps #386's plot area).
           var cardEl = document.createElement("article");
           cardEl.className = "dp-dashboard-card";
           cardEl.setAttribute("data-dp-viz", occurrence.name);
@@ -2495,18 +2497,18 @@
           var description = document.createElement("p");
           description.className = "dp-dashboard-card-description";
           description.textContent = (occurrence.description || "").trim();
+          var chip = document.createElement("div");
+          chip.className = "dp-dashboard-status";
+          chip.setAttribute("role", "status");
           head.appendChild(heading);
+          head.appendChild(chip);
           head.appendChild(description);
           var body = document.createElement("div");
           body.className = "dp-dashboard-viz";
           var foot = document.createElement("div");
           foot.className = "dp-dashboard-card-foot";
-          var chip = document.createElement("div");
-          chip.className = "dp-dashboard-status";
-          chip.setAttribute("role", "status");
           var message = document.createElement("div");
           message.className = "dp-dashboard-card-message";
-          foot.appendChild(chip);
           foot.appendChild(message);
           cardEl.appendChild(head);
           cardEl.appendChild(body);

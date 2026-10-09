@@ -18,18 +18,21 @@ import java.nio.file.StandardOpenOption
  * slot); #412 — below `layout.breakpoint_px` (640 when absent) every item spans the full width in
  * grid order, the row unit unchanged (the implementation spec §3.2, dashboards.md §2.2).
  *
- * Every assertion is a MEASUREMENT in a real browser, never a status code or a class name: for a
- * slot of `h` rows the figure must stand between `h × unit − (h − 1) × gap` and the slot's own
- * box, where the unit is read from the page's own `--dashboard-row-unit` token (resolved to pixels
- * through a probe element, so a rem value counts) and the gap from the board's computed `row-gap`.
- * The unit and the gap being positive lengths are asserted FIRST: with neither every bound below is
- * vacuous. A slot's COLUMN count is derived from its width against the board's track geometry, so
- * "full width" is a number (12), not an inline style read back. The plot area is Plotly's own
- * `_fullLayout._size.h` (the `nsewdrag` rect beside it in the record).
+ * Every assertion is a MEASUREMENT in a real browser, never a status code or a class name: a slot
+ * of `h` rows is `h × unit + (h − 1) × gap` tall, where the unit is read from the page's own
+ * `--dashboard-row-unit` token (resolved to pixels through a probe element, so a rem value counts)
+ * and the gap from the board's computed `row-gap`. Since #473 the figure lives in a CARD (border,
+ * padding, a heading line); #501 keeps that chrome compact, so the card's chart area is the slot
+ * less at most [CARD_CHROME_MAX_PX] and the figure fills the chart area — the figure's height still
+ * follows the row unit. The unit and the gap being positive lengths are asserted FIRST: with neither
+ * every bound below is vacuous. A slot's COLUMN count is derived from its width against the board's
+ * track geometry, so "full width" is a number (12), not an inline style read back. The plot area is
+ * Plotly's own `_fullLayout._size.h` (the `nsewdrag` rect beside it in the record).
  *
  * The 640 px breakpoint is measured on the board: the 735 px board at 767 px viewport holds its
- * 6/6/3/9 grid, while the 694 px board at 1280 px collapses under an explicit 700 px threshold.
- * A live host-width crossing proves the slots re-place AND the figure re-measures to its new width.
+ * 6/6/3/9 grid, while the 1000 px board at 1280 px (the History lives in the bottom dock since #473)
+ * holds it under the default and collapses under an explicit 1024 px threshold. A live host-width
+ * crossing proves the slots re-place AND the figure re-measures to its new width.
  */
 class DashboardGridRowUnitBrowserTest : DashboardBrowserSuite() {
     @Test
@@ -102,15 +105,17 @@ class DashboardGridRowUnitBrowserTest : DashboardBrowserSuite() {
     }
 
     @Test
-    fun `a configured breakpoint collapses a 694 px board at a 1280 px viewport`() {
+    fun `a configured breakpoint collapses a board the 640 px default keeps, at a 1280 px viewport`() {
         startTrace()
-        val root = ready("dprow700")
+        val root = ready("dprow1024")
         val board = seedBoardWithGrid(root, CONFIGURED_BREAKPOINT_PX)
         page.setViewportSize(DESKTOP_WIDTH_PX, VIEWPORT_HEIGHT_PX)
         openBoard(board, THEMES.first())
         val measured = measure(page, BOARD_SCOPE, BOARD_SLOTS_ALL.keys, "configured/$DESKTOP_WIDTH_PX")
         record("configured viewport=$DESKTOP_WIDTH_PX tree=closed boardWidth=${measured.boardWidth} columns=full")
-        (measured.boardWidth < CONFIGURED_BREAKPOINT_PX) shouldBe true
+        withClue("the board is wide enough for the default ($BREAKPOINT_PX) and narrower than the configured threshold: $measured") {
+            (measured.boardWidth >= BREAKPOINT_PX && measured.boardWidth < CONFIGURED_BREAKPOINT_PX) shouldBe true
+        }
         assertColumns(measured, BOARD_SLOTS_ALL.keys.associateWith { GRID_COLUMNS })
         assertStackedInGridOrder(measured, BOARD_GRID_ORDER)
         drainCspViolations().shouldBeEmpty()
@@ -126,12 +131,12 @@ class DashboardGridRowUnitBrowserTest : DashboardBrowserSuite() {
 
         // The reader's rail control is the board host's narrowing cause: the rail is user-resizable
         // (#460's separator; owner ruling 2026-10-09 — the Pipelines tree no longer reflows the page,
-        // it opens inside the rail). Two shifted presses take the rail from 232 to 332 px, the board
-        // from ~694 to ~594 px — one crossing below the 640 default. Home resets the rail to 232.
+        // it opens inside the rail). Each shifted press widens the rail by 50 px: eight take it from
+        // 232 to 632 px, the board from ~1000 to ~600 px — one crossing below the 640 default (seven
+        // would leave ~650). Home resets the rail to 232.
         val separator = page.locator("#rail-resize")
         separator.focus()
-        page.keyboard().press("Shift+ArrowRight")
-        page.keyboard().press("Shift+ArrowRight")
+        repeat(RAIL_WIDENING_PRESSES) { page.keyboard().press("Shift+ArrowRight") }
         page.waitForFunction(
             "() => { var board = document.querySelector('#dp-board .dp-dashboard'); " +
                 "return !!board && board.getBoundingClientRect().width > 0 && board.getBoundingClientRect().width < 640; }",
@@ -338,14 +343,17 @@ class DashboardGridRowUnitBrowserTest : DashboardBrowserSuite() {
     ) {
         for ((name, rows) in slots) {
             val slotHeight = m.slot(name, "height")
+            val chartHeight = m.slot(name, "chartHeight")
             val figureHeight = m.slot(name, "figure")
             val expectedSlot = rows * m.unit + (rows - 1) * m.rowGap
-            val lowerBound = rows * m.unit - (rows - 1) * m.rowGap - TOLERANCE_PX
             withClue("the '$name' slot spans $rows rows of the unit plus its gaps ($expectedSlot): $m") {
                 (Math.abs(slotHeight - expectedSlot) <= TOLERANCE_PX) shouldBe true
             }
-            withClue("the '$name' figure is at least $lowerBound px (rows × unit − gaps): $m") {
-                (figureHeight >= lowerBound) shouldBe true
+            withClue("the '$name' card's chrome (${slotHeight - chartHeight} px) is at most $CARD_CHROME_MAX_PX px: $m") {
+                (slotHeight - chartHeight <= CARD_CHROME_MAX_PX) shouldBe true
+            }
+            withClue("the '$name' figure fills its card's chart area ($chartHeight): $m") {
+                (Math.abs(figureHeight - chartHeight) <= TOLERANCE_PX) shouldBe true
             }
             withClue("the '$name' figure is no taller than its slot ($slotHeight): $m") {
                 (figureHeight <= slotHeight + TOLERANCE_PX) shouldBe true
@@ -353,14 +361,21 @@ class DashboardGridRowUnitBrowserTest : DashboardBrowserSuite() {
         }
     }
 
-    /** The figure follows its slot's WIDTH too: after a collapse (or a crossing) Plotly re-measured. */
+    /**
+     * The figure follows its slot's WIDTH too: after a collapse (or a crossing) Plotly re-measured to
+     * its card's chart area, which is the slot less the card's border and padding ([CARD_INSET_MAX_PX]).
+     */
     private fun assertFiguresSpanTheirSlots(
         m: Measured,
         names: Collection<String>,
     ) {
         for (name in names) {
-            withClue("the '$name' figure is as wide as its slot (${m.slot(name, "width")}): $m") {
-                (Math.abs(m.slot(name, "figureWidth") - m.slot(name, "width")) <= WIDTH_TOLERANCE_PX) shouldBe true
+            val chartWidth = m.slot(name, "chartWidth")
+            withClue("the '$name' chart area ($chartWidth) is its slot's width less at most $CARD_INSET_MAX_PX px: $m") {
+                (m.slot(name, "width") - chartWidth <= CARD_INSET_MAX_PX) shouldBe true
+            }
+            withClue("the '$name' figure is as wide as its chart area ($chartWidth): $m") {
+                (Math.abs(m.slot(name, "figureWidth") - chartWidth) <= WIDTH_TOLERANCE_PX) shouldBe true
             }
         }
     }
@@ -508,12 +523,26 @@ class DashboardGridRowUnitBrowserTest : DashboardBrowserSuite() {
         const val NARROW_WIDTH_PX = BREAKPOINT_PX - 1
         const val TABLET_WIDTH_PX = 768
         const val INVERTED_VIEWPORT_PX = 767
-        const val CONFIGURED_BREAKPOINT_PX = 700
+        const val CONFIGURED_BREAKPOINT_PX = 1024
         const val DESKTOP_WIDTH_PX = 1280
         const val VIEWPORT_HEIGHT_PX = 900
 
+        /** Eight 50 px steps of the rail separator: 232 -> 632 px, the 1280 px board ~1000 -> ~600 px. */
+        const val RAIL_WIDENING_PRESSES = 8
+
         const val TOLERANCE_PX = 3.0
         const val WIDTH_TOLERANCE_PX = 3.0
+
+        /**
+         * #501's compact card around a figure with no description: its border (2 × 1) and padding
+         * (2 × `--gap-sm`, 16), one heading line (`--space-6`, 24, the chip on it) and one gap
+         * (`--gap-sm`, 8) — 50 px, plus [TOLERANCE_PX]. A reserved status row (#473's foot, 24 px
+         * plus a gap) or the old `--gap-md` padding exceeds it.
+         */
+        const val CARD_CHROME_MAX_PX = 53.0
+
+        /** The card's border and padding across the width: 2 × (1 + 8) = 18 px, plus [WIDTH_TOLERANCE_PX]. */
+        const val CARD_INSET_MAX_PX = 21.0
         const val HALF_LOW = 0.35
         const val HALF_HIGH = 0.65
         const val PLOT_AREA_FLOOR = 0.5
@@ -530,7 +559,8 @@ class DashboardGridRowUnitBrowserTest : DashboardBrowserSuite() {
 
         /**
          * After a board-width crossing: every figure's slot is (full) or is not (stored) the board's width,
-         * AND Plotly's svg has caught up with its slot's width — the re-measure, not just the re-place.
+         * AND Plotly's svg has caught up with its card's chart-area width — the re-measure, not just the
+         * re-place.
          */
         const val SETTLED_JS =
             """(args) => {
@@ -540,14 +570,18 @@ class DashboardGridRowUnitBrowserTest : DashboardBrowserSuite() {
               return args.slots.every(function (name) {
                 var slot = board.querySelector("[data-dp-slot='" + name + "']");
                 var svg = slot && slot.querySelector('.plotly .main-svg');
-                if (!svg) return false;
+                var chart = slot && slot.querySelector('.dp-dashboard-viz');
+                if (!svg || !chart) return false;
                 var slotWidth = slot.getBoundingClientRect().width;
                 var full = Math.abs(slotWidth - width) <= 1;
-                return full === args.full && Math.abs(svg.getBoundingClientRect().width - slotWidth) <= 3;
+                return full === args.full && Math.abs(svg.getBoundingClientRect().width - chart.getBoundingClientRect().width) <= 3;
               });
             }"""
 
-        /** The token resolved to pixels through a probe, the board's gaps and box, and each slot's and figure's geometry. */
+        /**
+         * The token resolved to pixels through a probe, the board's gaps and box, and each slot's, card chart
+         * area's and figure's geometry.
+         */
         const val MEASURE_JS =
             """(args) => {
               var root = document.querySelector(args.scope);
@@ -574,6 +608,11 @@ class DashboardGridRowUnitBrowserTest : DashboardBrowserSuite() {
                 var slot = board.querySelector("[data-dp-slot='" + name + "']");
                 var box = slot.getBoundingClientRect();
                 var entry = { top: box.top - boardBox.top, left: box.left - boardBox.left, width: box.width, height: box.height };
+                var chart = slot.querySelector('.dp-dashboard-viz');
+                if (chart) {
+                  entry.chartWidth = chart.getBoundingClientRect().width;
+                  entry.chartHeight = chart.getBoundingClientRect().height;
+                }
                 var svg = slot.querySelector('.plotly .main-svg');
                 if (svg) {
                   var graph = slot.querySelector('.js-plotly-plot');

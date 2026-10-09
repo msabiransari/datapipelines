@@ -605,8 +605,13 @@ fieldset.dp-dashboard-parameter {
 /* Every visualization lives in a CARD: a bordered panel with its own heading and (optional)
    description, whose BORDER carries the state (loading / loaded / failed) — the state lives
    in the border and the in-card message, NOT in a resting badge (the chip only appears for
-   states worth announcing). Colours name nothing alone: each state also sets its class. */
+   states worth announcing). Colours name nothing alone: each state also sets its class.
+   #501 — the chrome stays COMPACT, so the body keeps the slot's height less one heading line
+   (a 2-row chart keeps #386's plot area): the chip shares the heading line, the description
+   takes a line only when it has text, and the message foot overlays the body's lower edge
+   instead of reserving a row. */
 .dp-dashboard-card {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: var(--gap-sm);
@@ -616,18 +621,30 @@ fieldset.dp-dashboard-parameter {
   border: 1px solid var(--border-default);
   border-radius: var(--radius-md);
   background: var(--surface-default);
-  padding: var(--gap-md);
+  padding: var(--gap-sm);
   transition: border-color var(--duration-base) linear;
 }
 
+/* The heading line holds the chip's height whether or not the chip shows, so a state change
+   never resizes the body. */
 .dp-dashboard-card-head {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: minmax(var(--space-6), auto);
+  align-items: center;
+  column-gap: var(--gap-sm);
+  row-gap: var(--space-1);
   min-width: 0;
 }
 
+.dp-dashboard-card-head > .dp-dashboard-status {
+  grid-column: 2;
+  grid-row: 1;
+}
+
 .dp-dashboard-card-title {
+  grid-column: 1;
+  grid-row: 1;
   font-family: var(--font-sans);
   font-size: var(--text-base);
   font-weight: var(--weight-semibold);
@@ -637,6 +654,8 @@ fieldset.dp-dashboard-parameter {
 }
 
 .dp-dashboard-card-description {
+  grid-column: 1 / -1;
+  grid-row: 2;
   font-family: var(--font-sans);
   font-size: var(--text-xs);
   color: var(--text-muted);
@@ -644,12 +663,18 @@ fieldset.dp-dashboard-parameter {
   overflow-wrap: anywhere;
 }
 
+.dp-dashboard-card-description:empty {
+  display: none;
+}
+
+/* The foot only POSITIONS the message over the body's lower edge; empty, it has no box to see. */
 .dp-dashboard-card-foot {
+  position: absolute;
+  inset-inline: var(--gap-sm);
+  bottom: var(--gap-sm);
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--gap-sm);
-  min-height: var(--space-6);
+  justify-content: flex-start;
+  min-width: 0;
 }
 
 /* The visualization body scrolls INSIDE the card (tables get their own scroll region via the
@@ -668,6 +693,10 @@ fieldset.dp-dashboard-parameter {
   font-size: var(--text-sm);
   color: var(--text-muted);
   min-width: 0;
+  background: var(--surface-default);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-2);
 }
 
 .dp-dashboard-card-message:empty {

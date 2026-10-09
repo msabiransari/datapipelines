@@ -149,7 +149,7 @@ async function cardOf(adapter, occurrence) {
 
 // --------------------------------------------------------------------------------------------------- tests
 
-test("#473: every visualization mounts inside a card shell — heading, description, body, status foot", async () => {
+test("#473/#501: every visualization mounts inside a card shell — heading with its chip, description, body, message foot", async () => {
   installDom();
   try {
     const runtime = require(resolveStatic("datapipelines-dashboard.js"));
@@ -167,7 +167,7 @@ test("#473: every visualization mounts inside a card shell — heading, descript
     assert.equal(heading.textContent, "Revenue", "the pinned display name is the heading");
     const description = card.querySelector(".dp-dashboard-card-description");
     assert.equal(description.textContent, "Monthly revenue by region");
-    // The renderer's host is the card body; the foot carries chip + message.
+    // The renderer's host is the card body; the foot carries the message only (#501).
     const body = card.querySelector(".dp-dashboard-viz");
     assert.ok(body, "the body exists");
     assert.ok(card.querySelector(".dp-dashboard-card-foot"), "the foot exists");
@@ -178,7 +178,13 @@ test("#473: every visualization mounts inside a card shell — heading, descript
     // (a real browser resolves `[data-dp-viz='rev'] .dp-dashboard-status`; the fake DOM walks
     // containment directly).
     assert.equal(card.querySelector(".dp-dashboard-status"), chip);
-    assert.equal(chip.parentNode.className, "dp-dashboard-card-foot");
+    // #501: the chip shares the heading line (its own head row), so no row of the card is
+    // reserved for it; the foot holds the message alone.
+    assert.equal(chip.parentNode.className, "dp-dashboard-card-head");
+    assert.deepEqual(chip.parentNode.children, [heading, chip, description], "heading, its chip, then the description");
+    const foot = card.querySelector(".dp-dashboard-card-foot");
+    assert.equal(foot.children.length, 1, "the foot carries the message only");
+    assert.equal(foot.children[0].className, "dp-dashboard-card-message");
     // The renderer was created with the BODY as its host, not the slot.
     adapter.dispose();
   } finally {
