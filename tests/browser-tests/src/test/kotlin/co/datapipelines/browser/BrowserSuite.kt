@@ -288,8 +288,9 @@ abstract class BrowserSuite {
      * widths…`, `the dialog screenshot set`) — dozens of navigations each — exceeded it on a
      * single page load (2026-09-11, every GitHub run) while every assertion they make held.
      * The same assertions get 90 s of patience per action under `CI=true` (GitHub sets it) OR
-     * under the gates' `dp.browser.ciPatience` (scripts/gate.sh and scripts/pregate.sh pass
-     * `-Pdp.browser.ciPatience=true`, #438): a loaded local gate and a 2-vCPU runner are the
+     * under `dp.browser.ciPatience` (scripts/pregate.sh passes `-Pdp.browser.ciPatience=true`
+     * for the browser classes it selects, #438; scripts/gate.sh no longer runs this suite,
+     * owner ruling 2026-10-09): a loaded local pre-gate and a 2-vCPU runner are the
      * same condition, and the setting is dedicated rather than an exported `CI=true` because a
      * third-party reader of `CI` would flip too. A plain local run keeps the 30 s, because on a
      * laptop a 30 s wait IS the defect.

@@ -478,8 +478,12 @@ Integration tests use **Testcontainers** to spin up real Postgres, Redis, and so
 
 Both live in `tests/browser-tests`, download a chromium binary on first use and launch a real
 browser. Only the **screenshot driver** is outside `build`/`check`. The **browser suite** is the
-module's `test` task, so `build` runs it like any module's tests — every `scripts/gate.sh` build
-stage and CI's gate job, whose long pole it is (§9.5); `browserTest` runs it alone. (This
+module's `test` task, so `build` runs it like any module's tests in CI's gate job, whose long pole
+it is (§9.5); `browserTest` runs it alone. **`scripts/gate.sh` excludes it** from both of its
+`build` invocations (`-x :tests:browser-tests:test -x :tests:browser-tests:verifyTestsExecuted`, plus
+`:tests:browser-tests:testClasses` requested explicitly because `-x` would drop the compile too;
+owner ruling 2026-10-09): the local full gate after a merge runs every other test, and CI on
+`next` is the browser suite's only full run; the module still compiles and lints in the gate. (This
 section said until #283 that the suite, too, was outside `build`; every gate log says otherwise.
 The comments in the root build and the module's build file carried the same claim until #297.)
 
@@ -768,9 +772,9 @@ test, substitute its exact class and `:tests:browser-tests:test` task and exclus
 `-Pdp.browser.ciPatience=true` when reproducing gate action patience. Keep the selected XML
 and task log together; an XML file left by a previous run cannot establish this run's result.
 A focused result is iteration evidence. A fresh complete pregate on the final committed tip
-is required for handback; the whole-batch check is CI on `next` (the lander pushes the landed
-batch as `main:next` and fast-forwards `main` when it is green; `scripts/gate.sh` stays the local
-full run on request).
+is required for handback; the whole-batch check is `scripts/gate.sh` on the batch tip (every test
+but the browser suite, §9.0) and then CI on `next` (the browser suite's only full run: the lander
+pushes the landed batch as `main:next` and fast-forwards `main` when it is green).
 
 **`verifyTestsExecuted` and filtered runs.** The zero-test guard compares result files with
 all of a module's `*Test.kt` sources. Exclude that module's exact `verifyTestsExecuted` task
@@ -789,7 +793,8 @@ failed two gates on floors no pregate had run, #297); (2b) for the two `tests/*`
 changed test classes, focused — where the changed file is not itself a runnable test class (an
 abstract base, an interface, an object, a helper), its real runnable consumers run, found through
 intermediate bases; when consumers cannot be established — an orphan helper, a deleted or renamed
-file, a changed test resource or build file — coverage is **DEFERRED to Gate A**.
+file, a changed test resource or build file — coverage is **DEFERRED**: the integration module's
+to Gate A and CI, the browser module's to CI on `next` only (the gate excludes the browser suite, §9.0).
 The selection uses declared class names, never file names. An ambiguous declaration is also
 deferred. At most **five exact classes per test module** run; larger selections (including a
 shared base affecting most browser classes) are deferred in their entirety, never truncated.
@@ -807,10 +812,10 @@ about a merge. Every run appends its verdict line — `PRE-GATE PASS|FAIL`, the 
 the five stage exits, `snap`, `prune`, deferred work, elapsed time and the run id — to
 `.pregate-logs/0-verdict.log`, which is where the lander reads a delivered lane's verdict (the terminal is the only other place it is printed).
 Measured need (five lanes, 2026-09-19 to 21): 0–3 extra full gates each, all on lint,
-cross-cutting guards or foreign fixtures. Both this script and `scripts/gate.sh` pass
-`-Pdp.browser.ciPatience=true` to every Gradle invocation (#438), so the browser suite inside a
-gate or a pre-gate waits CI's 90 s per action while a plain `./gradlew :tests:browser-tests:test`
-keeps 30 s.
+cross-cutting guards or foreign fixtures. This script passes `-Pdp.browser.ciPatience=true` to
+every Gradle invocation (#438), so the browser classes inside a pre-gate wait CI's 90 s per action
+while a plain `./gradlew :tests:browser-tests:test` keeps 30 s (`scripts/gate.sh` passed it too
+until the browser suite left the gate, owner ruling 2026-10-09).
 
 **Preview and failure handling (#479).** `./scripts/pregate.sh --plan [base]` shows the
 resolved base, merge-base and HEAD, selected files (including staged, unstaged and untracked
@@ -828,7 +833,7 @@ look like successful zeroes. Mandatory evidence writes, recounts and retention f
 refuse PASS. `--continue-on-failure [base]` attempts later stages for diagnostics and remains
 FAIL after any failure. Skipped stages with no selected module, deferred tests and guards
 covered by stage 2 have separate dispositions. Deferred full-suite coverage still belongs to
-Gate A; it is not a claim that pregate exercised those classes.
+Gate A (integration) and CI on `next` (browser); it is not a claim that pregate exercised those classes.
 
 Each run retains `PLAN.txt` (intended commands and selections), `COMMANDS.txt` (actual commands
 and dispositions), the completed stage logs, and per-stage plus total monotonic milliseconds
@@ -1364,7 +1369,7 @@ datapipelines/
 ├── scripts/
 │   ├── sync-design-system.sh   ← copies design system CSS from ../design-system-starter (§5)
 │   ├── docs-audit.sh           ← mechanical doc consistency check (§10.1); must exit 0
-│   ├── gate.sh                 ← Gate A: clean/build/build cycles + buildSrc guard tests + security-assurance + vuln-scan + docs audit (242a: docsExport first)
+│   ├── gate.sh                 ← Gate A: clean/build/build cycles (browser suite excluded — CI's) + buildSrc guard tests + security-assurance + vuln-scan + docs audit (242a: docsExport first)
 │   ├── install-hooks.sh        ← one-time: point git's core.hooksPath at .githooks/
 │   ├── secret-scan.sh          ← gitleaks secret scan (full history / --staged for the hook)
 │   ├── vuln-scan.sh            ← OSV-Scanner over the committed lockfiles (§10.2)
