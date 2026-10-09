@@ -67,6 +67,25 @@ class DashboardFiltersBrowserTest : DashboardBrowserSuite() {
 
     private fun Any?.px(): Double = (this as Number).toDouble()
 
+    /**
+     * #460's persistent shell: leave in-shell and come back twice (a cached restoration re-mounts
+     * the board without a document load). Each visit's Escape listener must leave with its board,
+     * so the document holds exactly the first visit's keydown count.
+     */
+    private fun leaveAndReturnHoldsOneListenerSet() {
+        val firstMount = documentListenerCount("keydown")
+        repeat(2) { visit ->
+            page.evaluate("() => { window.__leftBoard = window.__dpPage; }")
+            page.click(".app-nav-link[data-nav-section='/templates']")
+            page.waitForSelector("#template-list-wrapper")
+            page.goBack()
+            page.waitForFunction("() => window.__dpPage !== window.__leftBoard && window.__dpPage.ready === true")
+            val count = documentListenerCount("keydown")
+            println("473b-keydown-listeners visit=${visit + 2} first=$firstMount now=$count")
+            count shouldBe firstMount
+        }
+    }
+
     @Test
     @Order(1)
     fun `the filters are a panel beside the board - holding the controls, never inside the chart container`() {
@@ -133,21 +152,7 @@ class DashboardFiltersBrowserTest : DashboardBrowserSuite() {
         val board = seedParameterisedBoard(root)
         openBoard(board)
         page.waitForFunction("() => window.__dpPage && window.__dpPage.ready")
-        val firstMount = documentListenerCount("keydown")
-
-        // #460's persistent shell: leave in-shell and come back twice (a cached restoration
-        // re-mounts the board without a document load). Each visit's Escape listener must leave
-        // with its board — the document holds exactly the first visit's count.
-        repeat(2) { visit ->
-            page.evaluate("() => { window.__leftBoard = window.__dpPage; }")
-            page.click(".app-nav-link[data-nav-section='/templates']")
-            page.waitForSelector("#template-list-wrapper")
-            page.goBack()
-            page.waitForFunction("() => window.__dpPage !== window.__leftBoard && window.__dpPage.ready === true")
-            val count = documentListenerCount("keydown")
-            println("473b-keydown-listeners visit=${visit + 2} first=$firstMount now=$count")
-            count shouldBe firstMount
-        }
+        leaveAndReturnHoldsOneListenerSet()
         page.setViewportSize(900, 900)
 
         page.waitForFunction(
