@@ -48,6 +48,9 @@
   "use strict";
 
   var SUCCESS_SETTLE_MS = 1200;
+  // #473 — how long a card keeps its loud error/abort accent before falling back to the quiet
+  // issue border. The failure MESSAGE inside the card persists; only the loud border settles.
+  var ERROR_ACCENT_MS = 3000;
   var MOUNTED_ATTRIBUTE = "data-datapipelines-dashboard";
   var STYLE_ELEMENT_ID = "plotly.js-style-global";
 
@@ -75,6 +78,46 @@
     source: "from source",
     none: "no value",
   };
+
+  /**
+   * #473 — the card's failure sentences: fixed words for the wire's refresh-reason codes
+   * (the runtime's reason catalogue), falling back to the code itself. A reason's raw
+   * `message` is never rendered — the same rule the chip's text has always followed.
+   */
+  var STATUS_CODE_TEXT = {
+    timeout: "The refresh took too long",
+    budget_exceeded: "The refresh exceeded its data budget",
+    source_unavailable: "A data source was unavailable",
+    cancelled: "The refresh was cancelled",
+    render_failed: "The visualization failed to render",
+    aborted: "The refresh was stopped",
+  };
+
+  /**
+   * #473 — a card's heading, first non-empty wins: the occurrence's authored
+   * `presentation.title`, else the pinned visualization version's `display_name`,
+   * else a renderer-level label from its stored config (the KPI's `label`), else
+   * the occurrence name. The fallback exists so an unnamed card is never headless.
+   */
+  function cardHeading(occurrence) {
+    var presentationTitle = occurrence && occurrence.presentation ? occurrence.presentation.title : null;
+    if (presentationTitle && String(presentationTitle).trim()) return String(presentationTitle).trim();
+    if (occurrence.display_name && String(occurrence.display_name).trim()) return String(occurrence.display_name).trim();
+    var configLabel = occurrence && occurrence.config ? occurrence.config.label : null;
+    if (configLabel && String(configLabel).trim()) return String(configLabel).trim();
+    return occurrence.name;
+  }
+
+  /** #473 — a completion frame's per-target outcomes, reduced to the outcome WORDS (`ok`/`no-data`/`error`/`abort`). */
+  function targetOutcomeSummary(targets) {
+    var out = {};
+    for (var name in targets) {
+      if (Object.prototype.hasOwnProperty.call(targets, name)) {
+        out[name] = targets[name] && targets[name].outcome ? String(targets[name].outcome) : "unknown";
+      }
+    }
+    return out;
+  }
 
   function isPlainObject(value) {
     return !!value && typeof value === "object" && !Array.isArray(value);
@@ -862,7 +905,15 @@
     });
   };
 
-  /** The host's optional frame witness (`initParameters`' `onStreamEvent`): every frame and stream fact, once. */
+  /**
+   * The host's optional witness (`options.onStreamEvent`): every frame and stream fact, once,
+   * isolated — the handler cannot block or throw into the runtime. Two vocabularies share the
+   * hook (#473): `initParameters`'s parameter-attempt frames (`evaluation_id`, `event`,
+   * `name`, `applied`, …) and the board's `scope: "dashboard"` summaries — raw refresh frames
+   * (codes/states/outcome words only, never rows, bindings or raw error payloads), the card's
+   * rendered/stale client facts, abort intents, and the deduped notifications. A frame of an
+   * unknown or already-retired refresh is recorded with `applied: false`.
+   */
   DashboardInstance.prototype._streamEvent = function (info) {
     var host = this._options.onStreamEvent;
     if (typeof host !== "function") return;
@@ -1223,6 +1274,15 @@
         recover: null,
       });
     }
+    // #473 — the witness's render outcomes: the two card facts NO wire frame carries. A rendered
+    // visualization is confirmed only here (the render is asynchronous); staleness is the client's
+    // freshness gate. Everything else a card shows arrives as a frame the _onFrame witness already
+    // recorded — this must not double-report it.
+    if (status.state === "success") {
+      this._streamEvent({ scope: "dashboard", event: "visualization_rendered", name: name, refresh_id: status.refreshId || null, applied: true });
+    } else if (status.state === "ready" && status.stale === true) {
+      this._streamEvent({ scope: "dashboard", event: "visualization_stale", name: name, refresh_id: status.refreshId || null, applied: true });
+    }
   };
 
   /**
@@ -1233,6 +1293,32 @@
     if (this._disposed) return;
     var refreshId = payload && payload.refresh_id;
     var refresh = this._refreshes[refreshId];
+    // #473 — the witness sees EVERY frame once, before any ownership gate: a frame of an unknown
+    // refresh (another instance's) or of a run this instance already retired is recorded with
+    // applied=false and can never alter state. The summary carries codes, states, stages, names and
+    // per-target outcome WORDS only — never rows, bindings, SQL, or a raw error payload.
+    if (event === "visualization_data") {
+      this._streamEvent({
+        scope: "dashboard",
+        event: event,
+        name: payload ? payload.name : undefined,
+        refresh_id: refreshId || null,
+        applied: !!(refresh && !refresh.ended),
+      });
+    } else {
+      this._streamEvent({
+        scope: "dashboard",
+        event: event,
+        name: payload ? payload.name : undefined,
+        state: payload ? payload.state : undefined,
+        code: payload && payload.error && payload.error.code ? payload.error.code : undefined,
+        stage: payload ? payload.stage : undefined,
+        status: event === "refresh_completed" && payload ? payload.status : undefined,
+        outcomes: event === "refresh_completed" && payload && payload.targets ? targetOutcomeSummary(payload.targets) : undefined,
+        refresh_id: refreshId || null,
+        applied: !!(refresh && !refresh.ended),
+      });
+    }
     if (!refresh) return;
     if (event === "refresh_started") {
       refresh.deadline = payload.deadline_at || null;
@@ -1479,6 +1565,9 @@
     var refresh = this._refreshes[refreshId];
     if (!refresh || refresh.ended || refresh.abortRequested) return Promise.resolve({ abort_requested: false });
     refresh.abortRequested = true;
+    // #473 — the click is a client fact the wire never sends: the dock records the intent, and the
+    // acked / not-acked outcome follows (acked here; not-acked as the `abort.not_acked` notification).
+    this._streamEvent({ scope: "dashboard", event: "abort_requested", refresh_id: refreshId, applied: true });
     for (var i = 0; i < refresh.targets.length; i++) {
       var name = refresh.targets[i];
       if (this._owns(name, refreshId)) {
@@ -1494,6 +1583,7 @@
     return this._call(this._abortPath(refreshId), { instance_id: this._instanceId }).then(
       function () {
         refresh.abortAcked = true;
+        self._streamEvent({ scope: "dashboard", event: "abort_acked", refresh_id: refreshId, applied: true });
         return { abort_requested: true };
       },
       function (error) {
@@ -1724,6 +1814,20 @@
         /* the host's handler failing is the host's business */
       }
     }
+    // #473 — the witness rides the SAME deduped, enriched record the other sinks get: failures,
+    // connection losses, abort outcomes and recovery offers reach the dock exactly once. The
+    // message is the runtime's own fixed sentence — never a raw error body.
+    this._streamEvent({
+      scope: "dashboard",
+      event: "notification",
+      severity: enriched.severity,
+      code: enriched.code,
+      message: enriched.message,
+      recover: enriched.recover,
+      pending: enriched.pending,
+      refresh_id: enriched.refreshId,
+      applied: true,
+    });
     if (enriched.configurationStale) {
       // 409: the client reloads — nothing further happens on this instance.
       this._dispose("configuration_stale");
@@ -2144,20 +2248,35 @@
   /**
    * The first-party composite adapter (§10.3): the object a host passes to `init` when it wants the
    * shipped renderers. `adapters(container)` takes the SAME element init will mount — the composite
-   * builds its grid into it. The contract functions are the composite's; `mountVisualization` and
-   * `renderData` dispatch by the occurrence's renderer kind to the registered implementations; the
-   * layout, parameters, callbacks and notifications are the composite's own (a grid host for the
-   * layout, text-only controls for the parameters, `textContent` everywhere).
+   * builds its grid into it. `adapters(container, { parametersContainer })` (#473) additionally
+   * names the element that hosts the parameters pane, so a page can keep the controls in their own
+   * panel outside the grid container; absent, the pane mounts into `container` as before. The
+   * contract functions are the composite's; `mountVisualization` and `renderData` dispatch by the
+   * occurrence's renderer kind to the registered implementations; the layout, parameters, card
+   * presentation, callbacks and notifications are the composite's own (a grid host for the layout,
+   * text-only controls for the parameters, `textContent` everywhere).
    */
   function adapters(container, adapterOptions) {
     // #374 — `provenance: true` (the parameter-set workspace's form) adds each row's value ORIGIN and RESET marks;
     // absent, the board's rows render exactly as before.
     var provenance = !!(adapterOptions && adapterOptions.provenance === true);
+    // #473 — `parametersContainer` (optional) hosts the parameters pane OUTSIDE the layout container:
+    // the board page keeps the filters in their own panel, so the grid container's measurements and
+    // the parameters pane's position are independent. Absent, the pane mounts into `container` —
+    // exactly the pre-#473 behaviour (first child, before the grid).
+    var parametersContainer =
+      adapterOptions && adapterOptions.parametersContainer ? adapterOptions.parametersContainer : null;
     if (typeof document === "undefined") {
       throw DashboardError("adapter.no_dom", "the first-party adapter needs a DOM");
     }
     if (!container || typeof container.setAttribute !== "function") {
       throw DashboardError("adapter.no_container", "adapters(container) needs the element init will mount");
+    }
+    if (parametersContainer && typeof parametersContainer.setAttribute !== "function") {
+      throw DashboardError(
+        "adapter.no_container",
+        "adapters({parametersContainer}) needs the element that hosts the parameters pane",
+      );
     }
     var implemented = {};
     var listeners = { edit: null, commit: null, action: null };
@@ -2165,7 +2284,82 @@
     // Radio groups are named PER ADAPTER: two composites in one document (two boards, a preview
     // beside a board) must never share a native radio group — one instance's pick would clear the
     // other's. The token is stable for the adapter's lifetime, so re-renders regroup correctly.
+    // It also namespaces the cards' aria ids (#473): two boards never collide.
     var radioGroupToken = randomUuid();
+    // #473 — per-occurrence card DOM ({ card, body, chip, message, timer, generation, heading }),
+    // keyed by occurrence name; the cards map is the ONLY lookup renderStatus needs (no selector
+    // walk), and the generation counter retires a card's pending accent timer on every new status.
+    var cards = {};
+
+    /**
+     * #473 — the card's status treatment. The chip keeps its element, `role=status`, text and
+     * `data-dp-state` exactly as before (tests and assistive tech read them); what changes is the
+     * PRESENTATION around it: a state class on the card (border colour/animation), a persistent
+     * in-card message for failure/no-data/stale, and a LOUD accent border that settles after
+     * ERROR_ACCENT_MS while the message stays. `ready` is visually quiet (the chip is hidden by
+     * CSS), never colour-only: the message text and the chip's `data-dp-state` carry the fact.
+     */
+    function applyCardStatus(card, status) {
+      // Any new status retires the pending accent timer of the previous one.
+      card.generation += 1;
+      if (card.timer) {
+        clearTimeout(card.timer);
+        card.timer = null;
+      }
+      var state = status.state;
+      var stale = status.stale === true;
+      var classes = "dp-dashboard-card";
+      var message = "";
+      var loud = null;
+      if (state === "in-progress") {
+        classes += " dp-dashboard-card--busy";
+        card.card.setAttribute("aria-busy", "true");
+        // The retained result stays visible while the new one loads — say so, rather than
+        // leaving the viewer to guess whether the chart is old or new.
+        message = card.body && card.body.firstChild ? "Loading — showing the previous result." : "Loading…";
+      } else {
+        card.card.removeAttribute("aria-busy");
+        if (state === "success") {
+          classes += " dp-dashboard-card--success";
+          // The runtime settles success → ready after SUCCESS_SETTLE_MS; the accent rides along.
+        } else if (state === "error") {
+          classes += " dp-dashboard-card--error";
+          loud = "dp-dashboard-card--issue";
+          message = cardStatusText(status.reason, "could not load this visualization");
+        } else if (state === "abort") {
+          classes += " dp-dashboard-card--aborted";
+          loud = "dp-dashboard-card--issue";
+          message = "Refresh cancelled.";
+        } else if (state === "no-data") {
+          classes += " dp-dashboard-card--empty";
+          message = "No data for this selection.";
+        } else if (state === "ready") {
+          if (stale) {
+            classes += " dp-dashboard-card--stale";
+            message = "Showing out-of-date data.";
+          }
+        }
+      }
+      card.card.className = classes;
+      card.message.textContent = message;
+      if (loud) {
+        // Loud now, quiet later — but the message (and the quiet issue border) persist.
+        var gen = card.generation;
+        card.timer = setTimeout(function () {
+          if (card.generation !== gen) return; // a newer status owns the card now
+          card.timer = null;
+          card.card.className = "dp-dashboard-card dp-dashboard-card--has-issue" + (stale ? " dp-dashboard-card--stale" : "");
+        }, ERROR_ACCENT_MS);
+      }
+    }
+
+    /** The safe failure sentence: words from a fixed dictionary plus the wire's CODE — never a raw message. */
+    function cardStatusText(reason, fallback) {
+      if (!reason || !reason.code) return fallback;
+      var text = STATUS_CODE_TEXT[reason.code] || reason.code;
+      if (reason.stage && reason.stage !== "refresh") text += " (" + reason.stage + ")";
+      return text + ".";
+    }
 
     function ensure(kind) {
       var implementation = REGISTERED_RENDERERS[kind];
@@ -2281,14 +2475,57 @@
       mountVisualization: function (occurrence, renderer) {
         try {
           var slot = this.grid && this.grid[occurrence.name] ? this.grid[occurrence.name] : this.defaultSlot;
-          var host = document.createElement("div");
-          host.className = "dp-dashboard-viz";
-          host.setAttribute("data-dp-viz", occurrence.name);
-          slot.appendChild(host);
+          // #473 — every visualization renders INSIDE a card: a bordered shell with a heading (the
+          // authored title, else the pinned visualization's display name, else a renderer label such
+          // as the KPI's, else the occurrence name), an optional description, the renderer's own
+          // host body, and a status foot. The `data-dp-viz` marker and the status chip keep their
+          // DOM relationship (`[data-dp-viz="name"] .dp-dashboard-status`) — the marker moved from
+          // the renderer body to the card that now wraps it.
+          var cardEl = document.createElement("article");
+          cardEl.className = "dp-dashboard-card";
+          cardEl.setAttribute("data-dp-viz", occurrence.name);
+          var titleId = "dp-card-" + radioGroupToken + "-" + occurrence.name;
+          cardEl.setAttribute("aria-labelledby", titleId);
+          var head = document.createElement("div");
+          head.className = "dp-dashboard-card-head";
+          var heading = document.createElement("h3");
+          heading.className = "dp-dashboard-card-title";
+          heading.id = titleId;
+          heading.textContent = cardHeading(occurrence);
+          var description = document.createElement("p");
+          description.className = "dp-dashboard-card-description";
+          description.textContent = (occurrence.description || "").trim();
+          head.appendChild(heading);
+          head.appendChild(description);
+          var body = document.createElement("div");
+          body.className = "dp-dashboard-viz";
+          var foot = document.createElement("div");
+          foot.className = "dp-dashboard-card-foot";
+          var chip = document.createElement("div");
+          chip.className = "dp-dashboard-status";
+          chip.setAttribute("role", "status");
+          var message = document.createElement("div");
+          message.className = "dp-dashboard-card-message";
+          foot.appendChild(chip);
+          foot.appendChild(message);
+          cardEl.appendChild(head);
+          cardEl.appendChild(body);
+          cardEl.appendChild(foot);
+          slot.appendChild(cardEl);
+          cards[occurrence.name] = {
+            card: cardEl,
+            body: body,
+            chip: chip,
+            message: message,
+            heading: heading,
+            description: description,
+            timer: null,
+            generation: 0,
+          };
           var implementation = ensure(renderer.kind);
           var context = {
             instanceId: null,
-            host: host,
+            host: body,
             occurrence: occurrence,
             notify: this.notify,
             signal: function (name, payload) {
@@ -2323,7 +2560,9 @@
           root = this.parametersRoot = document.createElement("div");
           root.className = "dp-dashboard-parameters";
         }
-        var parent = this.container || this.defaultSlot;
+        // #473 — the pane mounts where the HOST pointed (its own filters panel when
+        // `parametersContainer` was given), else into the layout container as before.
+        var parent = parametersContainer || this.container || this.defaultSlot;
         if (parent) {
           if (root.parentNode !== parent) {
             if (root.parentNode && typeof root.parentNode.removeChild === "function") root.parentNode.removeChild(root);
@@ -2342,16 +2581,30 @@
           let override = overrides[parameter.name] || {};
           let hidden = override.visible === false || (override.visible === undefined && definitionState.hidden === true);
           let enabled = override.enabled === true || (override.enabled === undefined && definitionState.disabled !== true);
-          let row = document.createElement("div");
-          row.className = "dp-dashboard-parameter";
-          row.setAttribute("data-dp-parameter", parameter.name);
-          let label = document.createElement("label");
-          label.textContent = parameter.label || parameter.name || "";
-          row.appendChild(label);
-
           let controlType =
             parameter.presentation && parameter.presentation.control ? parameter.presentation.control : null;
           let isMulti = parameter.cardinality === "MULTI";
+          // #473 — a MULTI/checkbox/radio group is a FIELDSET: its caption is a legend (a <label>
+          // may name only ONE control), and every option's text is a <label for> over its own
+          // input, so clicking the visible text selects it. Single-control rows keep the label[for]
+          // caption with a stable per-instance id (`dp-param-<token>-<name>`).
+          let isGroup = isMulti || controlType === "checkboxes" || controlType === "radio";
+          let controlId = "dp-param-" + radioGroupToken + "-" + parameter.name;
+          let row = document.createElement(isGroup ? "fieldset" : "div");
+          row.className = "dp-dashboard-parameter";
+          row.setAttribute("data-dp-parameter", parameter.name);
+          if (isGroup) {
+            let legend = document.createElement("legend");
+            legend.className = "dp-dashboard-parameter-label";
+            legend.textContent = parameter.label || parameter.name || "";
+            row.appendChild(legend);
+          } else {
+            let label = document.createElement("label");
+            label.className = "dp-dashboard-parameter-label";
+            label.setAttribute("for", controlId);
+            label.textContent = parameter.label || parameter.name || "";
+            row.appendChild(label);
+          }
           let read = null;
           let interactives = [];
           if (parameter.kind === "SELECT") {
@@ -2381,8 +2634,11 @@
                 box.setAttribute("type", "checkbox");
                 box.checked = pickedKeys[wireKey(typedValues[b])] === true;
                 if (!enabled) box.disabled = true;
-                let boxText = document.createElement("span");
+                let boxText = document.createElement("label");
+                boxText.className = "dp-dashboard-parameter-option-label";
+                boxText.setAttribute("for", controlId + "-" + b);
                 boxText.textContent = displayText(options[b]);
+                box.id = controlId + "-" + b;
                 row.appendChild(box);
                 row.appendChild(boxText);
                 boxes.push({ element: box, value: typedValues[b] });
@@ -2402,8 +2658,11 @@
                 input.setAttribute("name", "dp-param-" + radioGroupToken + "-" + parameter.name);
                 input.checked = selected === r;
                 if (!enabled) input.disabled = true;
-                let radioText = document.createElement("span");
+                let radioText = document.createElement("label");
+                radioText.className = "dp-dashboard-parameter-option-label";
+                radioText.setAttribute("for", controlId + "-" + r);
                 radioText.textContent = displayText(options[r]);
+                input.id = controlId + "-" + r;
                 row.appendChild(input);
                 row.appendChild(radioText);
                 radios.push({ element: input, value: typedValues[r] });
@@ -2417,6 +2676,9 @@
               // dropdown/list (the derived default included): one <select>; its option value is
               // the INDEX into the wire values.
               let selectControl = document.createElement("select");
+              // #473 — the themed field appearance (the design system's control), never a bare UA select.
+              selectControl.className = "ds-input";
+              selectControl.id = controlId;
               let placeholder = document.createElement("option");
               placeholder.setAttribute("value", "");
               selectControl.appendChild(placeholder);
@@ -2442,6 +2704,8 @@
             // the round trip untouched. The `toggle`/`checkbox` hints are deliberately not
             // honoured yet (P23 lets a renderer ignore a hint): neither shows the third state.
             let booleanSelect = document.createElement("select");
+            booleanSelect.className = "ds-input";
+            booleanSelect.id = controlId;
             let unset = document.createElement("option");
             unset.setAttribute("value", "");
             unset.textContent = "— not given —";
@@ -2466,6 +2730,8 @@
             // INPUT: one free control; the read parses toward the wire type (typedInputRead).
             let free = document.createElement("input");
             free.setAttribute("type", "text");
+            free.className = "ds-input";
+            free.id = controlId;
             let raw = definitionState.value;
             free.value = raw === null || raw === undefined ? "" : String(raw);
             if (!enabled) free.disabled = true;
@@ -2555,22 +2821,17 @@
           handle.renderStatus(occurrence, status);
           return;
         }
-        // The composite's own status chip: accessible, not colour-only.
-        var slot = this.grid && this.grid[occurrence.name] ? this.grid[occurrence.name] : this.defaultSlot;
-        var host = slot.querySelector('[data-dp-viz="' + occurrence.name + '"]');
-        if (!host) return;
-        var chip = host.querySelector(".dp-dashboard-status");
-        if (!chip) {
-          chip = document.createElement("div");
-          chip.className = "dp-dashboard-status";
-          chip.setAttribute("role", "status");
-          host.insertBefore(chip, host.firstChild);
-        }
+        // The composite's own status chip: accessible, not colour-only — and (#473) the card's
+        // border/message treatment, driven by the same status. The chip keeps its element, text
+        // and `data-dp-state` exactly as before.
+        var card = cards[occurrence.name];
+        if (!card) return;
         var text = status.state;
         if (status.stale) text += " (stale)";
         if (status.reason && status.reason.code) text += ": " + status.reason.code;
-        chip.textContent = text;
-        chip.setAttribute("data-dp-state", status.state);
+        card.chip.textContent = text;
+        card.chip.setAttribute("data-dp-state", status.state);
+        applyCardStatus(card, status);
       },
       notify: function (notification) {
         notifications.push(notification);
@@ -2586,6 +2847,13 @@
           }
         }
         implemented = {};
+        // #473 — no card's accent timer may outlive the composite: a disposed card must never
+        // reach back into the DOM after its instance is gone.
+        var cardNames = Object.keys(cards);
+        for (var c = 0; c < cardNames.length; c++) {
+          if (cards[cardNames[c]].timer) clearTimeout(cards[cardNames[c]].timer);
+        }
+        cards = {};
         // The composite removes everything IT mounted — the grid and the parameters pane — so a
         // dispose/re-init cycle leaves exactly one layout/control set. Host-owned DOM (the
         // container itself, a neighbouring instance's subtree) stands untouched.
@@ -2609,6 +2877,8 @@
     /** Internal, for the node tests: the required-function list and a fresh renderer table. */
     _internal: {
       REQUIRED_ADAPTER_FUNCTIONS: REQUIRED_ADAPTER_FUNCTIONS,
+      /** #473 — how long a card's loud error/abort accent lasts before the quiet issue border. */
+      ERROR_ACCENT_MS: ERROR_ACCENT_MS,
       resetRenderers: function () {
         var keys = Object.keys(REGISTERED_RENDERERS);
         for (var i = 0; i < keys.length; i++) delete REGISTERED_RENDERERS[keys[i]];

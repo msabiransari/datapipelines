@@ -8,16 +8,26 @@
  * the conformance host page loads it directly.
  */
 
-/* The status chip: state as TEXT first (accessible without colour), colour only as reinforcement. */
+/* The status chip (#473): the element, its text, `role=status` and `data-dp-state` stay in the
+   DOM for assistive technology and the tests, but a RESTING card shows no badge — the element
+   is display:none until a state worth announcing arrives. State as TEXT first, colour only as
+   reinforcement. */
 .dp-dashboard-status {
+  display: none;
   font-family: var(--font-sans);
   font-size: var(--text-xs);
   color: var(--text-muted);
   background: var(--surface-inset);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
-  padding: 2px var(--space-2, 8px);
-  margin-bottom: 8px;
+  padding: 2px var(--space-2);
+}
+
+.dp-dashboard-status[data-dp-state="in-progress"],
+.dp-dashboard-status[data-dp-state="error"],
+.dp-dashboard-status[data-dp-state="abort"],
+.dp-dashboard-status[data-dp-state="no-data"],
+.dp-dashboard-status[data-dp-state="success"] {
   display: inline-block;
 }
 
@@ -35,25 +45,47 @@
   color: var(--text-success);
 }
 
-/* The parameters pane: one row per parameter; the control is the engine's own select. */
+/* The parameters pane (#473): the board hosts it in its own LEFT panel, so the rows run as a
+   vertical form — one captioned control per row, the design system's field treatment. */
 .dp-dashboard-parameters {
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--gap-sm);
-  align-items: end;
-  margin-bottom: var(--gap-md);
+  flex-direction: column;
+  gap: var(--gap-md);
+  min-width: 0;
 }
 
 .dp-dashboard-parameter {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--gap-xs);
+  min-width: 0;
 }
 
-.dp-dashboard-parameter label {
+/* A group row is a FIELDSET: strip the UA chrome, keep the semantics (the caption is a legend). */
+fieldset.dp-dashboard-parameter {
+  border: none;
+  margin: 0;
+  padding: 0;
+  min-inline-size: auto;
+}
+
+.dp-dashboard-parameter-label,
+.dp-dashboard-parameter legend {
   font-family: var(--font-sans);
   font-size: var(--text-xs);
   color: var(--text-muted);
+  padding: 0;
+}
+
+.dp-dashboard-parameter input[type="checkbox"],
+.dp-dashboard-parameter input[type="radio"] {
+  accent-color: var(--accent-primary);
+}
+
+.dp-dashboard-parameter-option-label {
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  color: var(--text-primary);
 }
 
 /* The table renderer: text-only cells, the app's data-table voice. */
@@ -123,33 +155,129 @@
 
 /* ---- The first-party pages (#10 L3b) ---------------------------------------------- */
 
-/* The board page: the board LEFT (it owns the space), the events pane RIGHT (a fixed,
-   bounded column). Below the breakpoint the pane drops under the board — the grid reads
-   the layout, no script measures the viewport. */
+/* The board page (#473): one full-height column — the TOOLBAR row, the board+filters row,
+   and the ACTIVITY DOCK beneath both, visible without scrolling past every chart. The height
+   arithmetic is the pipeline editor's `.pe-root` verbatim (the same shell above us) — but the
+   workspace page carries its own chrome above the pane (back link, crumb, tabs), so the
+   constraint lands on the WORKSPACE while the board tab is the one showing (`:has`, the
+   cascade-consent's house pattern); the other tabs keep their ordinary flow. */
+.dp-workspace:has(.dp-ws-pane[data-dp-pane="board"]:not([hidden])) {
+  height: calc(100dvh - var(--header-height) - var(--space-px) - (var(--gap-lg) * 2));
+}
+
+.dp-ws-pane[data-dp-pane="board"] {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
 .dp-board-page {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: var(--gap-md);
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* The board row: the FILTERS panel LEFT (outside the grid container), the board RIGHT —
+   the runtime's measurements and the controls' home are independent. */
+.dp-board-layout {
+  display: grid;
+  grid-template-columns: clamp(240px, 22vw, 20rem) minmax(0, 1fr);
   gap: var(--gap-md);
   min-height: 0;
 }
 
-.dp-board-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) clamp(240px, 22vw, 20rem);
-  gap: var(--gap-lg);
-  min-height: 0;
+.dp-board-toolbar {
+  display: none;
+  align-items: center;
+  gap: var(--gap-sm);
+}
+
+/* The filters panel: a quiet bordered panel, its own scroll (long forms), the parameters
+   pane mounted inside by the glue. */
+.dp-board-filters {
+  position: relative;
+  min-width: 0;
+  overflow-y: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-default);
+  padding: var(--gap-md);
+}
+
+.dp-board-filters-close {
+  display: none;
 }
 
 /* The board region itself: the composite adapter mounts the configuration's grid inside. */
 .dp-board {
-  min-height: 20rem;
+  min-height: 0;
   min-width: 0;
+  overflow-y: auto;
 }
 
+.dp-board-results {
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Below the breakpoint the panel becomes an off-canvas DRAWER: the same element moves (the
+   CSS reads the layout, no script measures the viewport), the glue moves only the focus and
+   the aria-expanded state. Slide uses the token duration; reduced-motion flattens it. */
 @media (max-width: 1100px) {
   .dp-board-layout {
     grid-template-columns: minmax(0, 1fr);
   }
+
+  .dp-board-toolbar {
+    display: flex;
+  }
+
+  .dp-board-filters {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: min(20rem, 85vw);
+    z-index: var(--z-drawer);
+    border-radius: 0;
+    border-top: none;
+    border-bottom: none;
+    border-left: none;
+    transform: translateX(-100%);
+    visibility: hidden;
+    transition:
+      transform var(--duration-normal) var(--ease-out, ease-out),
+      visibility 0s linear var(--duration-normal);
+    box-shadow: var(--shadow-lg);
+  }
+
+  .dp-board-filters.is-open {
+    transform: none;
+    visibility: visible;
+    transition:
+      transform var(--duration-normal) var(--ease-out, ease-out),
+      visibility 0s;
+  }
+
+  .dp-board-filters-close {
+    display: inline-flex;
+    margin-bottom: var(--gap-md);
+  }
+}
+
+/* No visible parameter (dashboards-page.js keeps `data-dp-filters`): no panel, no drawer
+   trigger, and the board takes the whole row — at every width. */
+.dp-board-page[data-dp-filters="none"] .dp-board-layout {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.dp-board-page[data-dp-filters="none"] .dp-board-filters,
+.dp-board-page[data-dp-filters="none"] .dp-board-toolbar {
+  display: none;
 }
 
 /* The events pane: a quiet list beside the board — status as TEXT first, the shared badge
@@ -470,4 +598,318 @@
   display: flex;
   align-items: baseline;
   gap: var(--gap-sm);
+}
+
+/* ---- The board's presentation cards (#473) ----------------------------------------- */
+
+/* Every visualization lives in a CARD: a bordered panel with its own heading and (optional)
+   description, whose BORDER carries the state (loading / loaded / failed) — the state lives
+   in the border and the in-card message, NOT in a resting badge (the chip only appears for
+   states worth announcing). Colours name nothing alone: each state also sets its class. */
+.dp-dashboard-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--surface-default);
+  padding: var(--gap-md);
+  transition: border-color var(--duration-base) linear;
+}
+
+.dp-dashboard-card-head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.dp-dashboard-card-title {
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+  color: var(--text-primary);
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.dp-dashboard-card-description {
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.dp-dashboard-card-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gap-sm);
+  min-height: 1.5rem;
+}
+
+/* The visualization body scrolls INSIDE the card (tables get their own scroll region via the
+   table rules; everything else fits the box it was measured for). */
+.dp-dashboard-viz {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.dp-dashboard-viz:has(.dp-dashboard-table) {
+  overflow: auto;
+}
+
+.dp-dashboard-card-message {
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  min-width: 0;
+}
+
+.dp-dashboard-card-message:empty {
+  display: none;
+}
+
+/* States. A QUIET card shows the default border. */
+.dp-dashboard-card--busy {
+  border-color: var(--border-focus);
+}
+
+.dp-dashboard-card--error,
+.dp-dashboard-card--abort {
+  border-color: var(--accent-danger);
+}
+
+.dp-dashboard-card--no-data {
+  border-color: var(--border-default);
+  border-style: dashed;
+}
+
+.dp-dashboard-card--has-issue {
+  border-color: var(--accent-warning);
+}
+
+.dp-dashboard-card--error .dp-dashboard-card-message,
+.dp-dashboard-card--abort .dp-dashboard-card-message {
+  color: var(--text-danger);
+}
+
+.dp-dashboard-card--has-issue .dp-dashboard-card-message {
+  color: var(--text-warning);
+}
+
+.dp-dashboard-card--busy .dp-dashboard-card-message {
+  color: var(--text-secondary);
+}
+
+/* The dock's in-card status vocabulary (data-dp-state carries the word; the colours are the
+   same accents the rest of the app uses for the same words). */
+.dp-dashboard-card--error .dp-dashboard-status,
+.dp-dashboard-card--abort .dp-dashboard-status {
+  color: var(--accent-danger-text);
+  background: var(--surface-inset);
+  border-color: var(--border-danger);
+}
+
+.dp-dashboard-card--has-issue .dp-dashboard-status {
+  color: var(--text-warning);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dp-dashboard-card {
+    transition: none;
+  }
+}
+
+/* ---- The board's activity dock (#473) ---------------------------------------------- */
+
+/* The dock: a bordered strip at the BOTTOM of the board page — always visible, the board
+   scrolls above it. Collapsing folds it to its header row (the CSS class, the glue sets
+   it); the splitter drag writes --dp-dock-pane-h. */
+.dp-board-dock {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-default);
+  --dp-dock-pane-h: 200px;
+}
+
+.dp-board-dock[data-dp-dock-collapsed] {
+  --dp-dock-pane-h: 0px;
+}
+
+.dp-board-dock-body {
+  height: var(--dp-dock-pane-h);
+  overflow-y: auto;
+  border-top: 1px solid var(--border-subtle);
+  padding: var(--gap-sm) var(--gap-md);
+  min-height: 0;
+}
+
+.dp-board-dock-splitter {
+  appearance: none;
+  background: none;
+  border: none;
+  cursor: ns-resize;
+  height: var(--space-1-5);
+  padding: 0;
+  margin: calc(var(--space-1) * -1) 0;
+}
+
+.dp-board-dock-splitter::after {
+  content: "";
+  display: block;
+  height: var(--space-0-5);
+  border-radius: var(--radius-pill);
+  background: var(--border-subtle);
+}
+
+.dp-board-dock-splitter:hover::after,
+.dp-board-dock-splitter:focus-visible::after {
+  background: var(--border-hover);
+}
+
+.dp-board-dock-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap-sm);
+  padding: var(--gap-xs) var(--gap-md);
+}
+
+.dp-board-dock-tabs {
+  display: flex;
+  gap: var(--gap-xs);
+}
+
+.dp-board-dock-tab {
+  appearance: none;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  padding: var(--gap-xs) var(--gap-sm);
+}
+
+.dp-board-dock-tab:hover {
+  color: var(--text-primary);
+}
+
+.dp-board-dock-tab[aria-selected="true"] {
+  border-bottom-color: var(--accent-primary);
+  color: var(--text-primary);
+  font-weight: var(--weight-medium);
+}
+
+.dp-board-dock-count {
+  display: inline-block;
+  min-width: 1.25rem;
+  text-align: center;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  background: var(--surface-inset);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-pill);
+  padding: 0 var(--gap-xs);
+}
+
+.dp-board-dock-count[data-dp-count-zero="true"] {
+  visibility: hidden;
+}
+
+.dp-board-dock-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gap-sm);
+}
+
+.dp-board-dock-tool {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gap-xs);
+}
+
+.dp-board-dock-tool-label {
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.dp-board-dock-empty {
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  margin: 0;
+  padding: var(--gap-sm) 0;
+}
+
+.dp-board-events {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.dp-board-event {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--gap-sm);
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+.dp-board-event-time {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.dp-board-event-severity {
+  font-weight: var(--weight-semibold);
+  color: var(--text-muted);
+}
+
+.dp-board-event-severity[data-dp-severity="error"] {
+  color: var(--accent-danger-text);
+}
+
+.dp-board-event-severity[data-dp-severity="warning"] {
+  color: var(--text-warning);
+}
+
+.dp-board-event-kind {
+  color: var(--text-muted);
+}
+
+.dp-board-event-text {
+  color: var(--text-primary);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.dp-board-event-id {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+.dp-board-dock-foot {
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  margin: 0;
+  padding: 0 var(--gap-md) var(--gap-xs);
 }
