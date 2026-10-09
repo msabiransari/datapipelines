@@ -259,6 +259,131 @@ class ReusableRestTreeBrowserTest : BrowserSuite() {
         page.locator("#picker-2 [data-tree-key='artifact:two']").count() shouldBe 1
     }
 
+    @Test
+    @Suppress("LongMethod") // one held refresh: the witnesses must stay live from the refocus to the reloaded child level
+    fun `a refocus refresh keeps rows focus and scroll while held and reloads the open level without a toggle`() {
+        ready()
+        val workspace = page.locator("html").getAttribute("data-dp-workspace-id")
+        var added = false
+        var hold = false
+        val held = mutableListOf<() -> Unit>()
+        val parents = mutableListOf<String>()
+        page.route(java.util.function.Predicate { url -> url.contains("/api/v1/pipelines/tree") }, { route ->
+            val parent =
+                URI(route.request().url()).query.orEmpty().split('&')
+                    .firstOrNull { it.startsWith("parent=") }?.substringAfter('=')
+                    ?.let { URLDecoder.decode(it, StandardCharsets.UTF_8) }.orEmpty()
+            parents += parent
+            val answer = {
+                val nodes =
+                    if (parent.isEmpty()) {
+                        listOf(node("root", null, true))
+                    } else {
+                        List(80) { node("root/item%02d".format(it), "folder:root", false) } +
+                            if (added) listOf(node("root/added", "folder:root", false)) else emptyList()
+                    }
+                fulfillTree(route, "pipelines", parent, nodes, workspace)
+            }
+            if (hold) held += answer else answer()
+        })
+        page.click("[data-nav-branch=pipelines] [data-nav-tree-toggle]")
+        page.waitForSelector("#nav-tree-pipelines [data-tree-key='folder:root']")
+        page.click("#nav-tree-pipelines [data-tree-key='folder:root'] > .dp-tree-line button")
+        page.waitForSelector("#nav-tree-pipelines [data-tree-key='artifact:root/item79']")
+        page.evaluate(
+            """() => {
+              const scroll = document.querySelector('#nav-tree-pipelines .dp-tree-scroll');
+              const row = document.querySelector('#nav-tree-pipelines [data-tree-key="artifact:root/item40"]');
+              row.focus(); scroll.scrollTop = 600;
+              const folder = document.querySelector('#nav-tree-pipelines [data-tree-key="folder:root"]');
+              window.__refresh = { scroll, row, top: scroll.scrollTop, folder, loading: 0, removed: 0 };
+              new MutationObserver(records => records.forEach(record => {
+                if ((record.target.textContent || '').includes('Loading')) window.__refresh.loading += 1;
+                record.removedNodes.forEach(node => {
+                  if (node.nodeType === 1 && node.hasAttribute('data-tree-key')) window.__refresh.removed += 1;
+                });
+              })).observe(document.getElementById('nav-tree-pipelines'), { subtree: true, childList: true, characterData: true });
+            }""",
+        )
+        (page.evaluate("() => window.__refresh.top") as Number).toInt() shouldBe 600
+        page.evaluate("() => document.hidden") shouldBe false
+        added = true
+        hold = true
+        parents.clear()
+        page.evaluate("() => document.dispatchEvent(new Event('visibilitychange'))")
+        page.waitForCondition { held.size == 1 }
+        // Held: the refetch is in flight and the reader still has every row, the focus and the scroll.
+        page.locator("#nav-tree-pipelines [data-tree-key^='artifact:root/item']").count() shouldBe 80
+        page.evaluate(
+            "() => document.activeElement === window.__refresh.row && window.__refresh.scroll.scrollTop === window.__refresh.top",
+        ) shouldBe true
+        page.locator("#nav-tree-pipelines .dp-tree-status").allTextContents().none { it.contains("Loading") } shouldBe true
+        hold = false
+        held.removeAt(0).invoke()
+        page.waitForSelector("#nav-tree-pipelines [data-tree-key='artifact:root/added']")
+        parents shouldBe listOf("", "root")
+        page.evaluate(
+            """() => document.activeElement === window.__refresh.row && window.__refresh.scroll.scrollTop === window.__refresh.top &&
+              window.__refresh.folder === document.querySelector('#nav-tree-pipelines [data-tree-key="folder:root"]') &&
+              window.__refresh.folder.getAttribute('aria-expanded') === 'true'""",
+        ) shouldBe true
+        (page.evaluate("() => window.__refresh.loading + window.__refresh.removed") as Number).toInt() shouldBe 0
+    }
+
+    @Test
+    fun `a saved wide rail keeps the main gutter at phone width`() {
+        ready()
+        val workspace = page.locator("html").getAttribute("data-dp-workspace")
+        page.evaluate("workspace => localStorage.setItem('dp-rail-width:' + workspace, '2000')", workspace)
+        page.setViewportSize(390, 844)
+        page.reload()
+        page.waitForSelector("#app-main")
+        // The preference is in force (the drawer reads it as ~100vw), yet main keeps the phone band's gutter.
+        page.evaluate("() => document.documentElement.style.getPropertyValue('--app-rail-preferred')") shouldBe "2000px"
+        val gutter =
+            page.evaluate(
+                """() => {
+                  const probe = document.createElement('div'); probe.style.setProperty('padding-left', 'var(--gap-md)');
+                  document.body.append(probe); const expected = parseFloat(getComputedStyle(probe).paddingLeft); probe.remove();
+                  const main = getComputedStyle(document.getElementById('app-main'));
+                  return [expected, parseFloat(main.paddingLeft), parseFloat(main.paddingRight)];
+                }""",
+            ) as List<*>
+        println("465-phone-gutter expected/left/right=$gutter")
+        ((gutter[0] as Number).toDouble() > 0) shouldBe true
+        (gutter[1] as Number).toDouble() shouldBe (gutter[0] as Number).toDouble()
+        (gutter[2] as Number).toDouble() shouldBe (gutter[0] as Number).toDouble()
+    }
+
+    private fun fulfillTree(
+        route: Route,
+        family: String,
+        parent: String,
+        nodes: List<Map<String, Any?>>,
+        workspace: String?,
+    ) {
+        val data =
+            mapOf(
+                "family" to family,
+                "mode" to "browse",
+                "root" to "",
+                "parent" to parent,
+                "workspace_id" to workspace,
+                "view_token" to "fixture-view",
+                "nodes" to nodes,
+            )
+        val encoded =
+            page.evaluate(
+                """value => {
+                  value.data.query = null; value.data.next_cursor = null;
+                  value.data.nodes.forEach(node => {node.parent_key ??= null;node.href ??= null});
+                  return JSON.stringify(value);
+                }""",
+                mapOf("schema_version" to 1, "data" to data),
+            ) as String
+        route.fulfill(Route.FulfillOptions().setContentType("application/json").setBody(encoded))
+    }
+
     private fun node(
         path: String,
         parent: String?,

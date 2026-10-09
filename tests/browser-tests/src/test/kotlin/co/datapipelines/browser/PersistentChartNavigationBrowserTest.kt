@@ -4,6 +4,7 @@ import com.microsoft.playwright.Route
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
+import java.net.URI
 
 /** Real charts and runtime ownership across prepared navigation, failed preparation and cached history. */
 class PersistentChartNavigationBrowserTest : VisualizationBrowserSuite() {
@@ -299,6 +300,105 @@ class PersistentChartNavigationBrowserTest : VisualizationBrowserSuite() {
         )
         page.url().endsWith("/dashboard") shouldBe true
         page.evaluate("() => window.__homeHeading===document.querySelector('#app-main h1')") shouldBe true
+    }
+
+    @Test
+    fun `a held navigation preparation shows the shell progress bar and the destination renders twice`() {
+        val root = ready("busyprep")
+        val (id, _) = createVisualization("$root/charts/flat")
+        openVisualizations(root)
+        val renders = mutableListOf<String>()
+        page.onRequest { if (URI(it.url()).path == "/visualizations/$id") renders += (it.headers()["hx-request"] ?: "preparation") }
+        var held: Route? = null
+        page.route("**/visualizations/$id") { route ->
+            if (route.request().headers()["hx-request"] == null && held == null) held = route else route.resume()
+        }
+        val outgoing = page.url()
+        page.click("#nav-tree-visualizations a[href='/visualizations/$id']")
+        page.waitForCondition { held != null }
+        // No htmx request is in flight yet — only the preparation GET — and the bar already says "working".
+        page.evaluate("() => document.getElementById('app-progress').classList.contains('active')") shouldBe true
+        page.url() shouldBe outgoing
+        checkNotNull(held).resume()
+        page.waitForURL("**/visualizations/$id")
+        preview()
+        page.waitForFunction("() => !document.getElementById('app-progress').classList.contains('active')")
+        // Reported, not changed: the preparation GET plus the freshly authorized boosted GET (ui-screens §3.4).
+        println("465-destination-renders $renders")
+        renders shouldBe listOf("preparation", "true")
+    }
+
+    @Test
+    @Suppress("LongMethod") // one document across editor, dashboard, template workspace and history: the counter must stay live
+    fun `lifecycle dialogs execute once per document across editor dashboard editor template and history`() {
+        val root = ready("onedialog")
+        val board = seedBoard(root)
+        val pipeline = api("POST", "/api/v1/pipelines", calculator("$root/flow")).at("data", "id") as String
+        // Counts every evaluation: the script's last act is `window.lifecycleDialog = api`.
+        page.addInitScript(
+            """(() => { let value; window.__lifecycleDialogEvaluations = 0;
+              Object.defineProperty(window, 'lifecycleDialog', { configurable: true, get() { return value; },
+                set(next) { window.__lifecycleDialogEvaluations += 1; value = next; } }); })()""",
+        )
+        page.navigate("$baseUrl/pipelines/$pipeline")
+        page.waitForFunction("() => !!window.__peInstance && window.__lifecycleDialogEvaluations > 0")
+        inShell("/dashboards/$board")
+        page.waitForFunction("() => window.__dpPage?.ready===true")
+        inShell("/pipelines/$pipeline")
+        page.waitForFunction("() => !!window.__peInstance && !document.querySelector('.pe-root[x-ignore]')")
+        val template = "/templates/test/${root}_chart.sql"
+        inShell(template)
+        page.waitForSelector("#tx-dialog")
+        page.goBack()
+        page.waitForURL("**/pipelines/$pipeline")
+        page.waitForFunction("() => !!window.__peInstance && !document.querySelector('.pe-root[x-ignore]')")
+        page.goForward()
+        page.waitForURL("**$template")
+        page.waitForSelector("#tx-dialog")
+        page.evaluate("async () => { const assets = await import('/js/page-assets.mjs'); await assets.mountCharts(); }")
+        page.evaluate("() => window.__lifecycleDialogEvaluations") shouldBe 1
+    }
+
+    @Test
+    fun `a failed chart mount shows one notice across repeated settles of the refreshes poll`() {
+        val root = ready("mountfail")
+        val board = seedBoard(root)
+        val attempts = mutableListOf<String>()
+        page.route("**/js/datapipelines-dashboard-kpi.js") {
+            attempts += it.request().url()
+            it.fulfill(Route.FulfillOptions().setStatus(503).setContentType("text/plain").setBody("unavailable"))
+        }
+        page.navigate("$baseUrl/dashboards/$board")
+        page.waitForSelector("#app-main > p.ds-error")
+        // Four settles driven by the board's own poll partial (its 15 s timer, triggered now).
+        page.evaluate(
+            """async () => {
+              for (let i = 0; i < 4; i++) {
+                const pane = document.querySelector('.dp-refreshes');
+                const settled = new Promise(resolve => document.body.addEventListener('htmx:afterSettle', resolve, { once: true }));
+                htmx.ajax('GET', pane.getAttribute('hx-get'), { source: pane, target: pane, swap: 'outerHTML' });
+                await settled;
+              }
+              // The settle listener's mount attempt (if any) has finished once this resolves.
+              const assets = await import('/js/page-assets.mjs'); await assets.mountCharts();
+            }""",
+        )
+        println("465-failed-mount kpi-requests=${attempts.size}")
+        page.locator("#app-main p.ds-error").count() shouldBe 1
+        page.locator("#app-main p.ds-error").innerText() shouldContain "dependencies"
+        attempts.size shouldBe 1
+    }
+
+    /** An in-shell navigation from a link inside main, as an artifact link on any page would make it. */
+    private fun inShell(path: String) {
+        page.evaluate(
+            """path => { const a = document.createElement('a'); a.href = path; a.textContent = 'Go'; a.id = 'in-shell-link';
+              document.getElementById('in-shell-link')?.remove(); document.getElementById('app-main').append(a); htmx.process(a); }""",
+            path,
+        )
+        page.click("#in-shell-link")
+        page.waitForURL("**$path")
+        page.waitForFunction("() => !document.getElementById('app-main').classList.contains('htmx-settling')")
     }
 
     private fun preview() {

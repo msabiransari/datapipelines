@@ -1,6 +1,9 @@
 import { preparePage, mountCharts } from "./page-assets.mjs";
 
 const FAMILIES = /^\/(?:pipelines|templates|dashboards|visualizations|parameter-sets)(?:\/|$)/;
+// shell.js's busy pair (NAVIGATION_PREPARE_START/END): the bar counts a preparation like a request.
+const PREPARE_START = "dp:navigation-prepare-start";
+const PREPARE_END = "dp:navigation-prepare-end";
 let generation = 0; let pending = null;
 const tickets = new WeakMap();
 const requests = new WeakMap();
@@ -19,6 +22,7 @@ document.body.addEventListener("htmx:confirm", async event => {
       anchor.closest('[hx-boost="false"]')) return;
   event.preventDefault(); pending?.abort(); const controller = new AbortController(); pending = controller;
   const own = ++generation;
+  document.body.dispatchEvent(new CustomEvent(PREPARE_START));
   try {
     const response = await fetch(detail.path, { signal: controller.signal, credentials: "same-origin", cache: "no-store", headers: { Accept: "text/html" } });
     if (!response.ok || !response.headers.get("content-type")?.includes("text/html")) throw new Error("Could not open destination");
@@ -32,6 +36,9 @@ document.body.addEventListener("htmx:confirm", async event => {
     detail.issueRequest(true);
   } catch (error) {
     if (own === generation && !controller.signal.aborted) notice(error.message);
+  } finally {
+    // After issueRequest: htmx's own request already holds the bar, so it never blinks off.
+    document.body.dispatchEvent(new CustomEvent(PREPARE_END));
   }
 });
 document.body.addEventListener("htmx:beforeRequest", event => {

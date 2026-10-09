@@ -1,9 +1,9 @@
 # UI Screens Inventory
 
-**Status:** v1.122
+**Status:** v1.123
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
-**Last updated:** 2026-10-06 (#462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
+**Last updated:** 2026-10-09 (#465; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
 
 ---
 
@@ -188,9 +188,20 @@ Build's **Pipelines** (#350), **Templates** (#398) and **Dashboards** (#10 L3b, 
 **Navigating-tree branches (#460).** Pipelines, Templates, Dashboards, Visualizations and Parameter Sets
 share the reusable REST search-and-tree. The catalog link and separate disclosure button retain their
 own actions. A hidden panel initializes on first open; initialization requests only the root and leaves
-all folders closed. Expanding a folder automatically exhausts bounded pages of its immediate children,
-including folders and leaves beyond 200, without fetching grandchildren. Complete valid levels remain
-in memory and keep keyed DOM rows, focus and scroll during navigation.
+all folders closed. Expanding a folder automatically pages its immediate children, including folders and
+leaves beyond 200, without fetching grandchildren, up to the **level ceiling**: ten 200-row pages per load
+(`PAGE_CEILING` in `tree/state.mjs`, #465). A level stopped at the ceiling states how many rows it holds and
+offers **Load more**, which continues from the kept cursor with a fresh ten-page budget; a page that lands
+re-renders only its own level, never the whole panel. Complete valid levels remain in memory and keep keyed
+DOM rows, focus and scroll during navigation.
+
+**Refresh (#465).** The named Refresh button, a return to the tab (`visibilitychange`, every mounted tree)
+and an affected-parent invalidation after a change all refresh the same way: the level is refetched into a
+hidden staging level and swapped in when that completes (or stops at the ceiling), so its rows, focus and
+scroll stay while the request runs and no Loading row appears. Every visible open level below then reloads
+the same way, after its parent; a closed level held in memory is emptied so its next expand fetches it
+fresh; a folder the refetch no longer lists leaves the open set with its cached levels. A failed refresh
+keeps the rows it had and offers Retry. In search mode the result set refreshes in the same staged way.
 
 Name search uses the family's `/api/v1/{family}/tree/search`, literal case-insensitive canonical/display
 name matching, and all matching artifacts plus their ancestors. Every returned path opens automatically;
@@ -212,7 +223,8 @@ fresh initialization does not reveal the current selection. Workspace/account sw
 
 Artifact, catalog and version navigation preserves the rail through `#app-main` swaps. The navigation host
 validates the destination and prepares dependencies before requesting the final freshly authorized boosted
-response; this adds one preparation GET. Failed or superseded preparation leaves the outgoing page usable,
+response; this adds one preparation GET (two server renders per navigation, by design). The shell's progress
+bar shows from the click: preparation counts as one in-flight request (#465). Failed or superseded preparation leaves the outgoing page usable,
 and late final replies are rejected. Signed-in charts share one lazily loaded vendored 3D Plotly bundle;
 standalone previews keep their isolated bundle selection. Cached history contains inert page markup and
 mounts each restored runtime once. Pipeline disposal detaches observation without cancelling execution;
@@ -2405,6 +2417,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-09 | v1.123 | #465 REST tree client polish | §3.4: staged refresh that keeps rows and reloads visible open levels; the ten-page level ceiling with Load more; the progress bar during navigation preparation. |
 | 2026-10-06 | v1.122 | #460 reusable REST navigation — renumbered at merge after #462's v1.121 | §3.4/§3.6: reusable REST trees, complete expanded name search and clear reset; user rail width up to the viewport; prepared artifact/version navigation and chart history. |
 | 2026-10-06 | v1.121 | #462 draft purge pins | §4.3d purge dialog: escaped named parent/dashboard blockers, sole/nonsole scope and no destructive form while pinned; direct POST rechecks. |
 | 2026-10-06 | v1.120 | 459 merge follow-up | **§4.21's dashboard workspace, Overview tab**: the sources show their pinned pipeline versions and statuses (not "releases"), and a DRAFT pin is previewable in a draft and released before publication (#459). The R1 "release hint" wording is withdrawn; #459 superseded #369's R1. |

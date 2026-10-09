@@ -15,7 +15,10 @@ export function mountSearchTree(host, options) {
   const scroll = document.createElement("div"); scroll.className = "dp-tree-scroll";
   host.replaceChildren(controls, scroll);
   let renderer; let timer = null;
-  const state = createTreeState(options, () => { if (state.status().error?.resetTree) input.value = ""; renderer?.render(); clear.hidden = !normalizeQuery(input.value); options.onRendered?.(); });
+  const state = createTreeState(options, scope => {
+    if (state.status().error?.resetTree) input.value = "";
+    const region = renderer?.render(scope); clear.hidden = !normalizeQuery(input.value); options.onRendered?.(region || null);
+  });
   renderer = createTreeRenderer(scroll, state, options);
   function clearTree() { clearTimeout(timer); timer = null; input.value = ""; scroll.scrollTop = 0; scroll.scrollLeft = 0; state.clear(); input.focus(); }
   function queryChanged() {

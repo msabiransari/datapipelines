@@ -287,6 +287,14 @@
      recorded, so a stray terminal event can never hide a bar another request
      is still holding open or strip a marker it did not set. */
   var SKELETON_DELAY_MS = 150;
+  /* #465 — the prepared navigation (persistent-navigation.mjs) holds a family link's click inside
+     htmx:confirm while it fetches and warms the destination; no htmx request is in flight yet, so
+     the bar would stay dark and the click look dead. The navigation announces the preparation with
+     this pair on <body> (never on the link, which a newer swap may have detached) and the tracker
+     counts it like one request: bar only — the link's own busy mark comes with the htmx request,
+     which the navigation issues BEFORE it sends the end, so the count never touches zero between. */
+  var NAVIGATION_PREPARE_START = "dp:navigation-prepare-start";
+  var NAVIGATION_PREPARE_END = "dp:navigation-prepare-end";
   var SKELETON_CLASS = "app-target-skeleton";
   /* Shell-owned, not htmx's .htmx-request: htmx 2.0.10 applies ITS class to
      the hx-indicator target when the element carries hx-indicator
@@ -1126,6 +1134,12 @@
       if (!evt.detail) return;
       busy.end(doc, evt.detail.elt, swapTargetFor(evt.detail, doc));
     });
+    doc.body.addEventListener(NAVIGATION_PREPARE_START, function () {
+      busy.begin(doc, null, null);
+    });
+    doc.body.addEventListener(NAVIGATION_PREPARE_END, function () {
+      busy.end(doc, null, null);
+    });
     /* Header note 9: the history snapshot carries no transient chrome, and a
        restored page carries no orphan of one. 287 (#287): it carries no style
        attribute a script wrote either — the registered cleanups (data-table's
@@ -1542,6 +1556,8 @@
     ENTER_CLASS: ENTER_CLASS,
     ENTER_FALLBACK_MS: ENTER_FALLBACK_MS,
     SKELETON_DELAY_MS: SKELETON_DELAY_MS,
+    NAVIGATION_PREPARE_START: NAVIGATION_PREPARE_START,
+    NAVIGATION_PREPARE_END: NAVIGATION_PREPARE_END,
     SKELETON_CLASS: SKELETON_CLASS,
     BUSY_CLASS: BUSY_CLASS,
     init: init,
