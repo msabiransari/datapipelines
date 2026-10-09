@@ -1,8 +1,8 @@
 # Configuration Reference
 
-**Status:** v1.50 (single source of truth for every config key)
+**Status:** v1.51 (single source of truth for every config key)
 **Owner:** datapipelines.co core
-**Last updated:** 2026-10-03
+**Last updated:** 2026-10-09
 
 ---
 
@@ -54,6 +54,8 @@ The deployment defines these env var names in `application.yml` — they're not 
 |---|---|---|
 | `datapipelines.redis.port` | `6379` | Redis port |
 | `datapipelines.redis.password` | (none) | Redis password. Empty while `datapipelines.redis.host` is not loopback is a WARN under `development` and a **refusal under `hardened`** (§3.23, §7; #189) |
+| `datapipelines.redis.command-timeout` | `2s` | (#482) The Redis client's per-command READ timeout (carried to Lettuce by the §3.14 bridge as `spring.data.redis.timeout`). Lettuce's own default is 60 s, which made a Redis outage stall every rate-limited request on the order of a minute per call before the documented `429 rate_limit.unavailable` ([REST API §12.3](rest-api.md#123-when-the-limiter-itself-is-unavailable)). Sized at ≥ 10× headroom over the slowest legitimate command the suites exercise (the replay log's 7,000-entry Lua append — the #482 evidence records the measurement) |
+| `datapipelines.redis.connect-timeout` | `2s` | (#482) The TCP connect timeout (the bridge's `spring.data.redis.connect-timeout`) — bounds the client's (re)connect attempt against a Redis host that drops packets instead of refusing |
 
 > Env vars are derived per §1 (e.g. `DATAPIPELINES_REDIS_PORT`) and are omitted from the tables below for brevity.
 
@@ -211,7 +213,7 @@ These framework key paths appear in `application.yml` as internal wiring. They a
 | Path | Why it exists |
 |---|---|
 | `spring.application.name` | Log/metric attribution (`datapipelines`) |
-| `spring.data.redis.host` / `.port` / `.password` | Bridge binding the canonical `DATAPIPELINES_REDIS_*` env vars onto Spring Boot's Redis autoconfiguration (see the binding note under §5) |
+| `spring.data.redis.host` / `.port` / `.password` / `.timeout` / `.connect-timeout` | Bridge binding the canonical `DATAPIPELINES_REDIS_*` env vars onto Spring Boot's Redis autoconfiguration (see the binding note under §5); the timeout pair carries §3.1's command/connect bounds under the SAME placeholders (#482) |
 | `spring.flyway.enabled` / `.locations` / `.baseline-on-migrate` | Migration wiring — Flyway always runs on startup ([Deployment §8.2](deployment.md#82-database-migrations)) |
 | `management.endpoints.web.exposure.include` | `"health"` — served on the **management port** only; `prometheus` joins it when the metrics registry lands ([Observability §6.4](observability.md#64-actuator-security)). **Must not be set to `""` or `exclude: "*"`:** Spring's `@ConditionalOnAvailableEndpoint` keys bean creation off exposure, so an empty include falls back to Boot's default set (re-exposing health on whatever port serves actuator), and excluding everything deletes the `HealthEndpoint` bean the root `/health` controller injects — context startup fails outright. |
 | `management.health.diskspace.enabled` | `false` — the health contract has no disk component ([REST API §11.1](rest-api.md#111-health-check)) |
@@ -639,6 +641,8 @@ spring:
       host: ${DATAPIPELINES_REDIS_HOST}
       port: ${DATAPIPELINES_REDIS_PORT:6379}
       password: ${DATAPIPELINES_REDIS_PASSWORD:}
+      timeout: ${DATAPIPELINES_REDIS_COMMAND_TIMEOUT:2s}        # §3.1 (#482)
+      connect-timeout: ${DATAPIPELINES_REDIS_CONNECT_TIMEOUT:2s} # §3.1 (#482)
   flyway:
     enabled: true
     locations: classpath:db/migration
@@ -669,6 +673,8 @@ datapipelines:
     host: ${DATAPIPELINES_REDIS_HOST}
     port: ${DATAPIPELINES_REDIS_PORT:6379}
     password: ${DATAPIPELINES_REDIS_PASSWORD:}
+    command-timeout: ${DATAPIPELINES_REDIS_COMMAND_TIMEOUT:2s}       # §3.1 (#482)
+    connect-timeout: ${DATAPIPELINES_REDIS_CONNECT_TIMEOUT:2s}       # §3.1 (#482)
 
   jwt:
     secret: ${DATAPIPELINES_JWT_SECRET}
@@ -1037,6 +1043,7 @@ Validation runs in `@PostConstruct` of a `ConfigValidator` bean. Failures stop s
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-09 | v1.51 | 482 (#482) | New **§3.1 rows**: `datapipelines.redis.command-timeout` and `.connect-timeout` (both `2s`) — no client timeout was configured anywhere, so Lettuce's 60 s per-command default made a Redis outage stall every rate-limited request on the order of a minute before the documented `429 rate_limit.unavailable` (and the stopped-Redis suite case alone took ~242 s). §3.14's bridge row extended: `spring.data.redis.timeout` / `.connect-timeout` carry the SAME `DATAPIPELINES_REDIS_COMMAND_TIMEOUT` / `DATAPIPELINES_REDIS_CONNECT_TIMEOUT` placeholders; §5's template and the deploy mirrors updated. No consumer code changed — every Redis fault path already routes a timeout (a `DataAccessException` subclass) through its existing failure handling; `TestRedis` builds its factories with the same two bounds under a placeholder-parity test. |
 | 2026-10-03 | v1.50 | 442a (#442) | Saved schedule notification settings: recipients and five event choices, validated and shown by role; omitted PUT settings preserved; mail remains off pending part b. |
 | 2026-10-02 | v1.49 | S3 (#376) the evaluation history's retention | §3.30 states that the parameter-evaluation history has NO key of its own: the execution-event retention (§3.11) deletes finished records on its hourly tick, and the stale sweep's cutoff is `evaluate-timeout-seconds` plus a fixed one-minute margin. No key, default or bound added or changed (the owner's §11.5 ruling). |
 | 2026-10-02 | v1.48 | 140 (#140) the Helm chart maps the DuckDB operator keys | §3.25's operator instruction names the Helm route: the reference chart's `duckdb.extensionDirectory` and `duckdb.memoryLimit` values render these two env vars when non-empty, an empty value renders no entry (inheriting the image's bundled extension directory), and an `extraEnv` double mapping is refused at render time. No key, default or bound changed. |
