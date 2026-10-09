@@ -191,3 +191,24 @@ test("a second wiring (a restored root) keeps ONE window listener, and the LIVE 
     restoreGlobals();
   }
 });
+
+// #474 — the tab strip's selected rule and the board crumb paint only tokens the design system
+// DEFINES: they used to read `--text-md` and `--accent`, two names no vendored or first-party
+// sheet declares, so the browser resolved `var()` to the guaranteed-invalid value — the crumb
+// fell back to the inherited size, the underline to `currentColor`, both silently. The JVM
+// sweep (CssTokenExistenceAuditTest) holds the whole first-party set to this; this case pins
+// the two rules that paid for it, in the source the browser loads.
+
+const dashboardsCssPath = path.resolve(here, "../../main/resources/static/css/dashboards.css");
+
+test("the selected tab's underline and the crumb's size name tokens the design system defines", () => {
+  const css = require("node:fs").readFileSync(dashboardsCssPath, "utf8");
+  const selectedRule = /\.dp-ws-tab\[aria-selected="true"\]\s*\{[^}]*\}/.exec(css);
+  assert.ok(selectedRule, "the workspace tab strip has a selected-state rule");
+  assert.match(selectedRule[0], /border-bottom-color:\s*var\(--accent-primary\)/);
+  const crumbRule = /\.dp-crumb-name\s*\{[^}]*\}/.exec(css);
+  assert.ok(crumbRule, "the board crumb has its own rule");
+  assert.match(crumbRule[0], /font-size:\s*var\(--text-base\)/);
+  assert.doesNotMatch(css, /var\(--text-md\)/);
+  assert.doesNotMatch(css, /var\(--accent\)/);
+});

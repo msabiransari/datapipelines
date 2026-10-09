@@ -15,13 +15,19 @@
      execution.read_all reader's wider view), not one live instance's in-memory notifications;
      the hooks fire only for refreshes THIS browser started and would need a second, client-side
      row renderer duplicating the server's markup; and the poll keeps working when the runtime
-     instance failed to boot (a refusal state above the pane). The first poll is DELAYED — the
-     server just rendered the rows; `every 15s` bounds the cost after that — and the poll dies
+     instance failed to boot (a refusal state above the pane). The board mounts this pane TWICE
+     (the dock's History tab and the workspace's Refreshes tab), so the element declares only
+     the REQUEST — `hx-trigger="dp:refresh"`, a plain event — and the page glue owns the ONE
+     15s timer, poking whichever copies the reader can actually see (#476, the shared poller).
+     A per-copy cadence here cannot be conditioned on visibility: the enforced CSP has htmx's
+     `allowEval` off (the layout's #188 config), and without it htmx never RUNS a trigger
+     FILTER expression — both copies would simply keep polling. htmx re-processes every
+     swapped-in copy, so each tick lands on the element now in the document; the poll dies
      with the page: the board route opts out of boosting, so leaving the page is a full
-     navigation and the element (and its timer) leaves the DOM with it. -->
+     navigation and the element (and the glue's timer, a teardown cleanup) leave with it. -->
 <div xmlns:th="http://www.thymeleaf.org" th:fragment="pane"
      class="dp-refreshes"
-     th:attr="hx-get=@{/partials/dashboards/{id}/refreshes(id=${dashboardId})}, hx-trigger='load delay:15s, every 15s', hx-swap='outerHTML'">
+     th:attr="hx-get=@{/partials/dashboards/{id}/refreshes(id=${dashboardId})}, hx-trigger='dp:refresh', hx-swap='outerHTML'">
 
   <h2 class="dp-refreshes-title">Refreshes</h2>
 
