@@ -99,7 +99,7 @@ verification::lock() {
   if [ "$kind" = gate ]; then
     exec 11>>"$dir/verification.lock" || return 2
     if ! flock -n 11; then
-      echo "verification busy: an older gate/pregate holds $dir/verification.lock" >&2
+      echo "verification busy: a gate, or an older gate/pregate copy, holds $dir/verification.lock" >&2
       [ ! -r "$dir/verification-holder.txt" ] || cat "$dir/verification-holder.txt" >&2
       verification::_release; return 75
     fi
