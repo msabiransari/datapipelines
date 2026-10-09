@@ -183,7 +183,7 @@ fieldset.dp-dashboard-parameter {
    the runtime's measurements and the controls' home are independent. */
 .dp-board-layout {
   display: grid;
-  grid-template-columns: clamp(240px, 22vw, 20rem) minmax(0, 1fr);
+  grid-template-columns: var(--app-board-filters-width) minmax(0, 1fr);
   gap: var(--gap-md);
   min-height: 0;
 }
@@ -241,7 +241,7 @@ fieldset.dp-dashboard-parameter {
     top: 0;
     bottom: 0;
     left: 0;
-    width: min(20rem, 85vw);
+    width: var(--app-board-filters-drawer-width);
     z-index: var(--z-drawer);
     border-radius: 0;
     border-top: none;
@@ -649,7 +649,7 @@ fieldset.dp-dashboard-parameter {
   flex-wrap: wrap;
   align-items: center;
   gap: var(--gap-sm);
-  min-height: 1.5rem;
+  min-height: var(--space-6);
 }
 
 /* The visualization body scrolls INSIDE the card (tables get their own scroll region via the
@@ -813,7 +813,7 @@ fieldset.dp-dashboard-parameter {
 
 .dp-board-dock-count {
   display: inline-block;
-  min-width: 1.25rem;
+  min-width: var(--space-5);
   text-align: center;
   font-size: var(--text-xs);
   color: var(--text-secondary);
