@@ -23,7 +23,18 @@ function fakeElement(tag) {
     children,
     style: {},
     className: "",
-    textContent: "",
+    // Real-DOM semantics: a direct assignment wins (the runtime sets leaf text), otherwise the
+    // value composes from the children (text nodes' text, elements' own textContent) — the
+    // #498 error row is appendChild-composed, so reading its textContent must see the parts.
+    get textContent() {
+      if (el._text !== undefined) return el._text;
+      return children
+        .map((c) => (c.nodeType === 3 ? c.text : c.textContent))
+        .join("");
+    },
+    set textContent(v) {
+      el._text = String(v);
+    },
     innerHTML: null, // written by NOBODY under test — the rendering rule
     scope: null,
     clientWidth: 0,
@@ -916,14 +927,46 @@ test("hidden and disabled parameters still render and still read (D23); override
     const row2 = container.querySelectorAll("[data-dp-parameter]")[0];
     assert.equal(row2.style.display, "none");
     assert.deepEqual(adapter.readSelections(), { year: 2026 }, "a disabled control's value still reads");
-    // Per-parameter errors render as accessible TEXT.
+    // #498 — per-parameter errors render as accessible TEXT: the sentence first, the catalogued
+    // code after it in the runtime's own <code> span (data-dp-code carries the codes). The only
+    // element child is that span — the old `!problem.innerHTML` pin restated structurally, so a
+    // future innerHTML write cannot pass while the fake's property stays null.
     const state3 = compositeState({ valid: false });
     state3.parameters[0].state.errors = [{ code: "parameter.evaluate.required", message: "a value is required", details: {} }];
     await adapter.renderParameters(state3);
     const problem = container.querySelectorAll(".dp-dashboard-parameter-error")[0];
     assert.ok(problem, "an error element exists");
+    assert.ok(problem.textContent.includes("a value is required"), problem.textContent);
     assert.ok(problem.textContent.includes("parameter.evaluate.required"), problem.textContent);
-    assert.ok(!problem.innerHTML, "the error is text-built");
+    assert.ok(
+      problem.textContent.indexOf("a value is required") < problem.textContent.indexOf("parameter.evaluate.required"),
+      "the sentence precedes the code",
+    );
+    assert.deepEqual(
+      [...problem.children].filter((c) => c.nodeType !== 3).map((c) => c.tagName),
+      ["CODE"],
+      "the only element child is the runtime's own code span",
+    );
+    assert.equal(problem.getAttribute("data-dp-code"), "parameter.evaluate.required");
+    // A markup-looking message stays text: it produces no element, and the raw string is preserved.
+    const state4 = compositeState({ valid: false });
+    state4.parameters[0].state.errors = [{ code: "parameter.evaluate.required", message: '<img src=x onerror="alert(1)">', details: {} }];
+    await adapter.renderParameters(state4);
+    const problem4 = container.querySelectorAll(".dp-dashboard-parameter-error")[0];
+    assert.deepEqual(
+      [...problem4.children].filter((c) => c.nodeType !== 3).map((c) => c.tagName),
+      ["CODE"],
+      "the injected-looking message produced no element",
+    );
+    assert.ok(problem4.textContent.includes('<img src=x onerror="alert(1)">'), problem4.textContent);
+    // While the row is in error, its design-system control wears the vendored error treatment;
+    // a fresh render rebuilds the row without it (#498).
+    const row3 = container.querySelectorAll("[data-dp-parameter]")[0];
+    const control3 = row3.querySelectorAll(".ds-input")[0];
+    assert.ok(/\bds-input-error\b/.test(control3.className), control3.className);
+    await adapter.renderParameters(compositeState());
+    const controlClean = container.querySelectorAll("[data-dp-parameter]")[0].querySelectorAll(".ds-input")[0];
+    assert.ok(!/\bds-input-error\b/.test(controlClean.className), "a fresh render rebuilds the row without the error class");
   } finally {
     uninstallDom();
   }

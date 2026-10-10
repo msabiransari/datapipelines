@@ -2762,15 +2762,31 @@
             }
           }
           if (definitionState.errors && definitionState.errors.length) {
+            // #498 — the design system's field-error voice (dashboards.css restates
+            // .ds-field-error's tokens): the sentence first, the catalogued code after it in a
+            // muted <code> span (data-dp-code carries the codes for the tests). Composed with
+            // createElement/textNode only — no server string ever reaches markup. While the row
+            // is in error, its design-system controls wear the vendored .ds-input-error
+            // (border + focus ring); the bare checkboxes/radios keep their native accent.
             let problem = document.createElement("div");
             problem.className = "dp-dashboard-parameter-error";
             problem.setAttribute("role", "alert");
-            let text = "";
+            let codes = [];
             for (let e = 0; e < definitionState.errors.length; e++) {
               let one = definitionState.errors[e] || {};
-              text += (one.code || "parameter.error") + (one.message ? ": " + one.message : "") + " ";
+              let code = one.code || "parameter.error";
+              codes.push(code);
+              if (e > 0) problem.appendChild(document.createTextNode(" "));
+              if (one.message) problem.appendChild(document.createTextNode(one.message));
+              let codeSpan = document.createElement("code");
+              codeSpan.textContent = code;
+              problem.appendChild(codeSpan);
             }
-            problem.textContent = text.trim();
+            problem.setAttribute("data-dp-code", codes.join(" "));
+            let controls = row.querySelectorAll(".ds-input");
+            for (let c = 0; c < controls.length; c++) {
+              controls[c].className += " ds-input-error";
+            }
             row.appendChild(problem);
           }
           // One edit + one commit per change gesture, on every interactive element of the row.
