@@ -243,6 +243,23 @@ class DashboardFiltersBrowserTest : DashboardBrowserSuite() {
         ) as Map<*, *>
 
     /**
+     * Opens the drawer from its trigger, waits until it is shown and Close holds the focus, and
+     * answers [fieldReach] of the first field read at that moment (before any Tab), printed as the
+     * #496 `496-drawer-open` line: the drawer's `scrollTop` on open and whether Close follows the form.
+     */
+    private fun openDrawer(viewport: String): Map<*, *> {
+        page.click("#dp-board-filters-trigger")
+        page.waitForFunction(
+            """() => { const panel = document.getElementById('dp-board-filters'); const style = getComputedStyle(panel);
+              return panel.classList.contains('is-open') && style.visibility === 'visible' && style.transform === 'none'; }""",
+        )
+        page.waitForFunction("() => document.activeElement && document.activeElement.id === 'dp-board-filters-close'")
+        val opened = fieldReach("first")
+        println("496-drawer-open $viewport scrollTop=${opened["panelScroll"]} closeAfterFields=${opened["closeAfterFields"]}")
+        return opened
+    }
+
+    /**
      * #493 A — at a phone and a tablet viewport the drawer opens and BOTH ends of a long form are
      * reachable: by keyboard (Tab walks from the close button to the first field and on to the last,
      * never leaving the drawer, each focused field inside the drawer's visible box) and by pointer
@@ -251,8 +268,8 @@ class DashboardFiltersBrowserTest : DashboardBrowserSuite() {
      *
      * #496: the pane mounts AFTER the drawer's Close button, so the drawer opens at its top (read
      * before the first Tab, asserted after the first-field reach) and Tab from Close enters the form.
-     * Before the fix the form came first (measured at 390x844: closeAfterFields=true, scrollTop=710,
-     * focusedInPanel=false).
+     * Before the fix the form came first (measured at 390x844: closeAfterFields=true,
+     * focusedInPanel=false, scrollTop=710 at #493 and 251 after #498's one-row options).
      */
     @Test
     @Order(3)
@@ -269,14 +286,7 @@ class DashboardFiltersBrowserTest : DashboardBrowserSuite() {
                 acceptanceMarkets,
             )
             val before = pageScroll()
-            page.click("#dp-board-filters-trigger")
-            page.waitForFunction(
-                """() => { const panel = document.getElementById('dp-board-filters'); const style = getComputedStyle(panel);
-                  return panel.classList.contains('is-open') && style.visibility === 'visible' && style.transform === 'none'; }""",
-            )
-            page.waitForFunction("() => document.activeElement && document.activeElement.id === 'dp-board-filters-close'")
-            val opened = fieldReach("first")
-            println("496-drawer-open ${width}x$height scrollTop=${opened["panelScroll"]} closeAfterFields=${opened["closeAfterFields"]}")
+            val opened = openDrawer("${width}x$height")
 
             page.keyboard().press("Tab")
             val first = fieldReach("first")
