@@ -124,9 +124,11 @@ class DashboardParametersPaneBrowserTest : ParameterSetBrowserSuite() {
         (measured["hasCodeChip"] as Boolean) shouldBe true
         (measured["firstChildIsSentence"] as Boolean) shouldBe true
         val text = measured["text"] as String
-        val code = measured["dataCode"] as String
-        code.isNotEmpty() shouldBe true
-        text shouldContain code
+        // A row can carry several failing messages; the codes ride space-joined in
+        // data-dp-code but are interleaved with their sentences in the text.
+        val codes = (measured["dataCode"] as String).split(" ").filter { it.isNotEmpty() }
+        (codes.isNotEmpty()) shouldBe true
+        for (c in codes) text shouldContain c
     }
 
     private fun openBoard(board: String) {
