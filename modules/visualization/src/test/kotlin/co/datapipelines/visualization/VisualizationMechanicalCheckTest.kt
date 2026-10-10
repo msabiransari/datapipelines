@@ -390,7 +390,7 @@ class VisualizationMechanicalCheckTest {
                     {"name":"finance/visualizations/direct","display_name":"Direct",
                      "renderer":{"kind":"kpi","version":"1"},
                      "inputs":{"revenue":{"columns":[{"name":"amount","type":"$type","nullable":$nullable}]}},
-                     "config":{"label":"Total","value":"$.amount"},"bindings":{"value":"amount"},
+                     "config":{"value":"$.amount"},"bindings":{"value":"amount"},
                      "tests":{"cases":[{"name":"rows","fixtures":{"revenue":[{"amount":$value}]},
                                         "assertions":[{"kind":"rendered"},{"kind":"$kind","text":"$text"}]}]}}
                     """.trimIndent(),

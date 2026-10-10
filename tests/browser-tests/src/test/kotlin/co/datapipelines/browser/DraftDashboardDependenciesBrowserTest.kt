@@ -122,7 +122,7 @@ class DraftDashboardDependenciesBrowserTest : DashboardBrowserSuite() {
             {"name":"$root/visualizations/kpi","display_name":"Draft KPI","renderer":{"kind":"kpi","version":"1"},
              "inputs":{"main":{"columns":[{"name":"n","type":"INTEGER","nullable":false},
                                                {"name":"previous","type":"INTEGER","nullable":false}]}},
-             "config":{"label":"Total","value":null,"format":"integer","comparison":{"label":"Previous","value":null}},
+             "config":{"value":null,"format":"integer","comparison":{"label":"Previous","value":null}},
              "bindings":{"value":"n","comparison.value":"previous"}}
             """.trimIndent(),
             201,

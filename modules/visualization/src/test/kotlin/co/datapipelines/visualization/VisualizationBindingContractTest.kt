@@ -112,7 +112,7 @@ class VisualizationBindingContractTest {
                 }
 
                 RendererKind.KPI -> {
-                    """{"label":"Total","value":null,"comparison":{"label":"Previous","value":null}}"""
+                    """{"value":null,"comparison":{"label":"Previous","value":null}}"""
                 }
 
                 RendererKind.PLOTLY -> {
