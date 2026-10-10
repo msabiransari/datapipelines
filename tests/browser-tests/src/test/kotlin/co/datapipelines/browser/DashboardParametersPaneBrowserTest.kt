@@ -145,7 +145,9 @@ class DashboardParametersPaneBrowserTest : ParameterSetBrowserSuite() {
             page.fill("$limitRow input", "500")
             page.keyboard().press("Tab")
             page.waitForSelector("$limitRow .dp-dashboard-parameter-error[role=alert]")
-            assertErrorVoice(evalVoice(limitRow))
+            val measured = evalVoice(limitRow)
+            println("498-voice board/$mode measured=$measured")
+            assertErrorVoice(measured)
         }
     }
 
@@ -155,6 +157,9 @@ class DashboardParametersPaneBrowserTest : ParameterSetBrowserSuite() {
         val root = ready("dpp2")
         val board = seedAcceptanceBoard(root)
         openBoard(board)
+        // The pane mounts asynchronously at bootstrap — never probe before the rows exist.
+        page.waitForSelector("$panel [data-dp-parameter=\"markets\"]")
+        page.waitForSelector("$panel [data-dp-parameter=\"granularity\"]")
         val groups = evalGroups(listOf("markets", "granularity"))
         for ((name, m) in groups) {
             (m["display"] as String) shouldBe "grid"
@@ -180,7 +185,9 @@ class DashboardParametersPaneBrowserTest : ParameterSetBrowserSuite() {
             page.waitForSelector("$itemRow select")
             page.selectOption("#ps-form-host [data-dp-parameter='kind'] select", SelectOption().setLabel("BOOM"))
             page.waitForSelector("$itemRow .dp-dashboard-parameter-error:not(:empty)")
-            assertErrorVoice(evalVoice(itemRow))
+            val measured = evalVoice(itemRow)
+            println("498-voice ps/$mode measured=$measured")
+            assertErrorVoice(measured)
         }
     }
 
