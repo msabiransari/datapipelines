@@ -280,6 +280,13 @@ open class PipelineService(
      * Datasource filtering is pushed down to SQL ([PipelineRepository.findAllByDatasource]);
      * `q` stays in memory because it matches across three columns.
      *
+     * ## The `q` rule (#504a)
+     * The needle is normalised HERE, once, for every caller (the REST list and the MCP tool pass
+     * the query parameter raw): trimmed, a blank term means NO SEARCH (the rows come back
+     * unfiltered), then lowercased — a case-insensitive substring of name, display name or
+     * description ([matches]). A whitespace-only `q` used to keep only the records containing
+     * that whitespace, and `q=""` matched everything by accident of `contains("")`.
+     *
      * ## The lens (178)
      * Every read here takes a [ReadLens] and no default — the promoter lens (roles design §3.1)
      * narrows what a lensed principal sees on EVERY surface, and the surfaces that hold the
@@ -300,7 +307,7 @@ open class PipelineService(
             } else {
                 pipelines.findAll(workspaceId, ownerId)
             }.through(lens) { it.name }
-        val needle = query?.lowercase() ?: return records
+        val needle = query?.trim()?.lowercase()?.takeIf { it.isNotEmpty() } ?: return records
         return records.filter { it.matches(needle) }
     }
 
@@ -324,9 +331,10 @@ open class PipelineService(
         offset: Int,
         size: Int,
     ): PipelinePage {
-        val needle = query?.trim()?.takeIf { it.isNotEmpty() }
+        // The needle rule lives in [list] (#504a); this blankness check only picks the fast SQL
+        // paging path from the in-memory one.
         val page =
-            if (needle == null && lens.isEverything) {
+            if (query.isNullOrBlank() && lens.isEverything) {
                 val rows = pipelines.findAll(workspaceId, null, size + 1, offset)
                 PipelinePage(rows.take(size), pipelines.countAll(workspaceId), rows.size > size, emptyMap())
             } else {
@@ -334,7 +342,7 @@ open class PipelineService(
                 // set is a per-request name set the SQL pager cannot take, and it is small by
                 // construction (what is promotable, never the workspace). Its total is the
                 // filtered size — the same rule the search path already follows.
-                val all = list(workspaceId, lens, query = needle)
+                val all = list(workspaceId, lens, query = query)
                 PipelinePage(all.drop(offset).take(size), all.size, all.size > offset + size, emptyMap())
             }
         // versioning §7: the "unreleased edits exist" badge, for the rows actually shown.

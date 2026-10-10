@@ -213,6 +213,10 @@ class UserRepository(
      * email and display name; a blank [query] lists every PERSON — `human` rows only (#215 A3: a
      * key identity and the System actor are managed through their key, or not at all). Paged by
      * [offset]/[limit] with a stable ordering so pages do not overlap.
+     *
+     * The term's own `%` and `_` are matched LITERALLY: the trimmed, lowercased term is escaped
+     * ([escapeLike]) and both LIKEs carry an explicit `ESCAPE '\'` (the house form), so a search
+     * for `100%` finds `100%` instead of scanning every row. The term stays a bound parameter.
      */
     fun search(
         query: String,
@@ -225,18 +229,33 @@ class UserRepository(
             SELECT * FROM users
              WHERE kind = 'human'
                AND (:term = ''
-                    OR LOWER(email) LIKE '%' || :term || '%'
-                    OR LOWER(display_name) LIKE '%' || :term || '%')
+                    OR LOWER(email) LIKE :pattern ESCAPE '\'
+                    OR LOWER(display_name) LIKE :pattern ESCAPE '\')
              ORDER BY email
              OFFSET :offset LIMIT :limit
             """.trimIndent(),
             MapSqlParameterSource()
                 .addValue("term", term)
+                .addValue("pattern", "%${escapeLike(term)}%")
                 .addValue("offset", offset)
                 .addValue("limit", limit),
             ::map,
         )
     }
+
+    /**
+     * Escapes `\`, `%` and `_` so a search term is matched **literally** by
+     * `LIKE … ESCAPE '\'` — the house form (TemplateRepository carries the same private
+     * helper; #504b consolidates the copies). Without it a `q` of `%`
+     * matches every row and a `q` of `_` matches every row with at least one character — a
+     * search box that silently becomes a wildcard scan. The backslash is escaped FIRST so the
+     * escapes introduced for `%`/`_` are not doubled.
+     */
+    private fun escapeLike(term: String): String =
+        term
+            .replace("\\", "\\\\")
+            .replace("%", "\\%")
+            .replace("_", "\\_")
 
     /**
      * The local-login credential fields (auth.md §5A, metadata-db §4.1) — the ONLY

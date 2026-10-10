@@ -211,7 +211,9 @@ class TemplateRepository(
      *
      * `q` is bound as a parameter and its own LIKE metacharacters are escaped ([escapeLike]), so
      * a search for `100%_off` searches for that literal string instead of turning into a wildcard
-     * that scans everything.
+     * that scans everything. The term is trimmed first and a blank (whitespace-only) `q` means NO
+     * search — the pattern binds NULL (#504a), so the REST and MCP callers that pass it raw are
+     * right too.
      *
      * [implements] (7e, transform-nodes design §8.3) keeps the templates whose LISTED version
      * cites that fact — a parameterised join on `template_implements`, the fact joined through
@@ -243,7 +245,7 @@ class TemplateRepository(
                 // type to infer and the statement will not even prepare.
                 "dialect" to dialect?.wire,
                 "type" to type?.wire,
-                "pattern" to q?.let { "%${escapeLike(it)}%" },
+                "pattern" to searchPattern(q),
                 "implements" to implements,
                 "workspaceId" to workspaceId,
                 "limit" to limit.coerceIn(1, MAX_PAGE_LIMIT),
@@ -276,7 +278,7 @@ class TemplateRepository(
                 mapOf(
                     "dialect" to dialect?.wire,
                     "type" to type?.wire,
-                    "pattern" to q?.let { "%${escapeLike(it)}%" },
+                    "pattern" to searchPattern(q),
                     "implements" to implements,
                     "workspaceId" to workspaceId,
                 ),
@@ -1108,6 +1110,15 @@ class TemplateRepository(
                 .replace("\\", "\\\\")
                 .replace("%", "\\%")
                 .replace("_", "\\_")
+
+        /**
+         * The `q` of [list] and [count], normalised once for every caller (#504a): trimmed, a
+         * blank term bound as NULL (the SQL's `CAST(:pattern AS TEXT) IS NULL` arm — no search),
+         * otherwise the escaped `%needle%` the house LIKE binds. Before the trim a whitespace-only
+         * `q` matched only the rows with a space in a searched column, and `q=""` bound `%%`.
+         */
+        private fun searchPattern(q: String?): String? =
+            q?.trim()?.takeIf { it.isNotEmpty() }?.let { "%${escapeLike(it)}%" }
 
         /**
          * A generated name for a create that omitted one (templates.md §3.2). A hex suffix
