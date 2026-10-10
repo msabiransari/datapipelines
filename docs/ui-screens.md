@@ -1,9 +1,9 @@
 # UI Screens Inventory
 
-**Status:** v1.128
+**Status:** v1.129
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
-**Last updated:** 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
+**Last updated:** 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
 
 ---
 
@@ -2420,6 +2420,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-10 | v1.129 | #502 undefined CSS custom properties defined or migrated | §2.3: every custom property a first-party sheet reads now exists — the fifteen undefined names are gone. `--accent-danger-bg` becomes an app token (a `color-mix` tint of `--accent-danger` on `--surface-default`; 4% is the strongest tint keeping `--accent-danger` text at 4.5:1 in light, #fef6f6; dark tops out at 3.6:1 — the accent itself is 3.67:1 on the dark surface, reported on #502); `--surface-secondary` migrates to `--surface-inset` (the read-only pane) and `--surface-default` (the context-row inputs, `.ds-input`'s fill); `--accent` → `--accent-primary`, `--accent-soft` → `--surface-selected` (which gains §2.8's accent bar, the house selected pattern), `--text` → `--text-primary`, `--border` → `--border-subtle`, `--gap-2xs` → `--space-0-5`; new app lengths at today's values: `--focus-ring-width: 2px` (mirrors the design system's ring), `--app-content-max: 1600px`, `--measure: 44rem`, `--measure-wide: 60rem`; `--te-side-w`/`--tplx-tree-w` are splitter's runtime-written defaults and keep their fallbacks — the existence audit now reads the splitter's `prop:` declarations as definitions. `CssTokenExistenceAuditTest`'s two ledgers end empty. No visible change except the danger chips (which painted no background before) and the version link's new bar; no route, permission or role changed. |
 | 2026-10-10 | v1.128 | #473 merge follow-up: the parameter-set workspace's frame log keeps attempt frames only | **§4.23:** #473 made the runtime's `onStreamEvent` witness carry the board's `scope: "dashboard"` vocabulary too, so the workspace (a parameters-only `initParameters` host, no board) logged the deduped `parameters.applied` notification after the terminal frame and `ParameterWorkspaceStreamBrowserTest` scenarios 3, 6 and 7b read it as the attempt's last frame (CI on `next`). The workspace now ignores `scope: "dashboard"` entries before its log and graph; no visible change, no route, permission or role changed. |
 | 2026-10-09 | v1.127 | #492 filters drawer by board-region width | **§4.21:** the board page is the filters presentation's CSS container; at 820 px or narrower it shows the drawer, otherwise the column. Rail resizing clears an open drawer on the return to a column. `DashboardFiltersBreakpointBrowserTest` pins the rail crossings, focus and overflow. |
 | 2026-10-09 | v1.126 | #491 nav-tree orphan removal — renumbered at merge after #473's v1.125 | §3.4 note: the old client (`nav-tree.js` + its node test) deleted with its CSS surface — the `rail-tree-open`/`is-measuring` blocks, the `--app-rail-tree-*` tokens, the nav-scope tree-region and `.tpl-*` scoped rules; the five search partials no longer render a nav-scope clear button (the tree engine has its own); §3.4's guard list drops `nav-tree.test.mjs`. |

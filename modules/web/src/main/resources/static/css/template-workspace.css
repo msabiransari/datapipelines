@@ -38,7 +38,7 @@
 }
 
 .tw-back:hover {
-  color: var(--text, #0f172a);
+  color: var(--text-primary);
 }
 
 .tw-crumb {
@@ -90,8 +90,14 @@
 }
 
 .tw-version-link[aria-current="true"] {
-  background: var(--accent-soft, #e0e7ff);
-  color: var(--accent, #4338ca);
+  /* #502 — was `--accent-soft`/`--accent`, neither ever defined; the house selected fill
+     is `--surface-selected` with `--brand`'s token `--accent-primary` for the text. §2.8
+     is normative that a `surface-selected` fill carries the accent bar (the house pattern,
+     app.css `.app-nav-link[aria-current]`, same expression), so the bar comes with the fill;
+     drawn as a border over `.ds-button`'s own 1px transparent border, the house way. */
+  background: var(--surface-selected);
+  color: var(--accent-primary);
+  border-left: var(--focus-ring-offset, 3px) solid var(--border-focus);
 }
 
 .tw-topbar-actions {
@@ -106,8 +112,10 @@
 .tw-tabs {
   display: flex;
   align-items: center;
-  gap: var(--gap-2xs, 2px);
-  border-bottom: 1px solid var(--border, #e2e8f0);
+  gap: var(--space-0-5);
+  /* #502 — was `--border`, never defined; the tab strip's rule is a separator, and the
+     house separator floor is `--border-subtle` (dashboards.css `.dp-ws-tabs`). */
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .tw-tab {
@@ -124,16 +132,20 @@
 }
 
 .tw-tab:hover {
-  color: var(--text, #0f172a);
+  color: var(--text-primary);
 }
 
 .tw-tab[aria-selected="true"] {
-  color: var(--accent, #4338ca);
-  border-bottom-color: var(--accent, #4338ca);
+  /* #502 — was `--accent`, never defined; the selected tab reads `--accent-primary`, the
+     dashboards tab strip's own selected token (.dp-ws-tab[aria-selected]). */
+  color: var(--accent-primary);
+  border-bottom-color: var(--accent-primary);
 }
 
 .tw-tab:focus-visible {
-  outline: var(--focus-width, 2px) solid var(--accent, #4338ca);
+  /* #502 — was `--focus-width`/`--accent`, neither ever defined; the house focus ring is
+     `--focus-ring-width` of `--focus-ring` (the design system's focus state, primitives.css). */
+  outline: var(--focus-ring-width) solid var(--focus-ring);
   outline-offset: -2px;
   border-radius: var(--radius-sm, 6px);
 }
@@ -150,7 +162,7 @@
 }
 
 .tw-doc {
-  max-width: var(--measure-wide, 60rem);
+  max-width: var(--measure-wide);
 }
 
 /* The Source pane keeps the editor's two-region shape: the column fragments, then the
@@ -172,7 +184,7 @@
 
 /* The Overview's reading measures like the explorer's Overview did. */
 .tw-measure {
-  max-width: var(--measure, 44rem);
+  max-width: var(--measure);
 }
 
 .tw-kv {

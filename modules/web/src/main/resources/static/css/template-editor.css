@@ -160,7 +160,9 @@
   padding: var(--gap-sm);
   border: 1px solid var(--border-default);
   border-radius: var(--radius-base);
-  background: var(--surface-secondary);
+  /* #502 — was `--surface-secondary`, never defined anywhere; the read-only pane is the
+     sunken surface, the design system's `--surface-inset` (#f1f3f6 light / #030712 dark). */
+  background: var(--surface-inset);
   color: var(--text-primary);
   font-family: var(--font-mono);
   font-size: var(--text-sm);
@@ -196,7 +198,9 @@
   padding: var(--gap-xs) var(--gap-sm);
   border: 1px solid var(--border-default);
   border-radius: var(--radius-base);
-  background: var(--surface-secondary);
+  /* #502 — was `--surface-secondary`, never defined anywhere; the row's inputs are plain
+     `.ds-input`-shaped fields, whose fill is `--surface-default` (primitives.css .ds-input). */
+  background: var(--surface-default);
   /* #243 — a flex item's automatic minimum is its intrinsic size, and an <input>'s
      intrinsic size is its `size` attribute (~20 characters): the row sat at 476px in a
      320px rail at every width, the value field cut and the remove button off-screen.
