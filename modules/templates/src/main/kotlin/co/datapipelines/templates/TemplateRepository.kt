@@ -1117,8 +1117,7 @@ class TemplateRepository(
          * otherwise the escaped `%needle%` the house LIKE binds. Before the trim a whitespace-only
          * `q` matched only the rows with a space in a searched column, and `q=""` bound `%%`.
          */
-        private fun searchPattern(q: String?): String? =
-            q?.trim()?.takeIf { it.isNotEmpty() }?.let { "%${escapeLike(it)}%" }
+        private fun searchPattern(q: String?): String? = q?.trim()?.takeIf { it.isNotEmpty() }?.let { "%${escapeLike(it)}%" }
 
         /**
          * A generated name for a create that omitted one (templates.md §3.2). A hex suffix
