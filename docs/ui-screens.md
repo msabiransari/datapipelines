@@ -1,9 +1,9 @@
 # UI Screens Inventory
 
-**Status:** v1.127
+**Status:** v1.128
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
-**Last updated:** 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
+**Last updated:** 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
 
 ---
 
@@ -2114,8 +2114,9 @@ STATE: each applied frame moves its parameter's node through waiting → admitte
 selector → failed, carrying the frame's catalogued code; a parameter without a terminal state fails from the
 `evaluation_failed` terminal frame), the terminal response's `reset` parameters carry a dashed reset mark, the
 live region announces one short sentence per frame (`city is running`, never the frame's JSON), and the page
-keeps a frame log (`window.PSWorkspace.frames`, in memory only, reset per mount — never persisted) the guards
-read; the **inspector** (`#ps-inspector`: the selected
+keeps a frame log (`window.PSWorkspace.frames`, in memory only, reset per mount — never persisted) of the
+attempt's frames the guards read — the runtime witness's board vocabulary (`scope: "dashboard"`, #473) is not
+recorded and changes nothing here; the **inspector** (`#ps-inspector`: the selected
 parameter's definition and, once evaluated, its state — value, origin, reset, hidden, disabled, options,
 errors — as TEXT only, plus the stream's code and detail for a parameter a live frame marked failed); and the
 **live form** (`#ps-form-host`).
@@ -2419,6 +2420,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-10 | v1.128 | #473 merge follow-up: the parameter-set workspace's frame log keeps attempt frames only | **§4.23:** #473 made the runtime's `onStreamEvent` witness carry the board's `scope: "dashboard"` vocabulary too, so the workspace (a parameters-only `initParameters` host, no board) logged the deduped `parameters.applied` notification after the terminal frame and `ParameterWorkspaceStreamBrowserTest` scenarios 3, 6 and 7b read it as the attempt's last frame (CI on `next`). The workspace now ignores `scope: "dashboard"` entries before its log and graph; no visible change, no route, permission or role changed. |
 | 2026-10-09 | v1.127 | #492 filters drawer by board-region width | **§4.21:** the board page is the filters presentation's CSS container; at 820 px or narrower it shows the drawer, otherwise the column. Rail resizing clears an open drawer on the return to a column. `DashboardFiltersBreakpointBrowserTest` pins the rail crossings, focus and overflow. |
 | 2026-10-09 | v1.126 | #491 nav-tree orphan removal — renumbered at merge after #473's v1.125 | §3.4 note: the old client (`nav-tree.js` + its node test) deleted with its CSS surface — the `rail-tree-open`/`is-measuring` blocks, the `--app-rail-tree-*` tokens, the nav-scope tree-region and `.tpl-*` scoped rules; the five search partials no longer render a nav-scope clear button (the tree engine has its own); §3.4's guard list drops `nav-tree.test.mjs`. |
 | 2026-10-09 | v1.125 | #473 dashboard presentation — rebased in recovery onto #460 and #412 | **§4.21's Board tab**: the filters panel LEFT of the board (the parameters pane mounted outside the chart container; below 1100 px a drawer behind the toolbar's Filters button, closed by a widening back past it; no panel and no button while no parameter is visible), every chart a bordered titled card whose border carries its state with no visible ready badge, and the bottom activity dock (Events, Errors, History — the refreshes partial moved from the right-hand pane); the glue's document and window listeners leave with each in-shell mount. |

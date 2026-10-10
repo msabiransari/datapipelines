@@ -80,6 +80,10 @@
    * id, applied: false) are logged and change nothing. The frame log is memory only — never persisted.
    */
   function handleStreamEvent(root, state, structure, info) {
+    // #473 — the runtime's witness also carries the board's `scope: "dashboard"` vocabulary (here: the deduped
+    // notifications, e.g. parameters.applied). This page has no board: those entries are not attempt frames, so they
+    // neither enter the log nor touch the graph — the log stays the attempt frames the guards read.
+    if (info && info.scope === "dashboard") return;
     // The log is the entry AS THE RUNTIME SENT IT (evaluation_id, event, name?, code?, detail?, response?, applied,
     // reason?) — the guards read the code, the close reason and the terminal response off it.
     window.PSWorkspace.frames.push(Object.assign({}, info));
