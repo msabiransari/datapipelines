@@ -2,11 +2,12 @@ package co.datapipelines.browser
 
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
+import com.microsoft.playwright.Page
 import com.microsoft.playwright.options.SelectOption
+import com.microsoft.playwright.options.WaitForSelectorState
 import io.kotest.matchers.doubles.plusOrMinus
 import io.kotest.matchers.doubles.shouldBeLessThanOrEqual
 import io.kotest.matchers.shouldBe
-import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.MethodOrderer
 import org.junit.jupiter.api.Order
 import org.junit.jupiter.api.Test
@@ -248,12 +249,12 @@ class DashboardFiltersBrowserTest : DashboardBrowserSuite() {
      * (the drawer scrolled to its top hides the last field — the non-vacuity floor — and the wheel
      * over the drawer brings it into view). The page behind never scrolls and never scrolls sideways.
      *
-     * Disabled on the landed board by #496: the runtime mounts the form BEFORE the drawer's Close
-     * button, so the drawer opens scrolled to the end and Tab from Close leaves it (measured at
-     * 390x844: closeAfterFields=true, scrollTop=710, focusedInPanel=false). Re-enable with that fix.
+     * #496: the pane mounts AFTER the drawer's Close button, so the drawer opens at its top (read
+     * before the first Tab, asserted after the first-field reach) and Tab from Close enters the form.
+     * Before the fix the form came first (measured at 390x844: closeAfterFields=true, scrollTop=710,
+     * focusedInPanel=false).
      */
     @Test
-    @Disabled("#496: the drawer's Close button renders after the form, so forward Tab never reaches the first field")
     @Order(3)
     fun `at 390x844 and 768x1024 the drawer reaches the first and the last field without scrolling the page`() {
         startTrace()
@@ -274,6 +275,8 @@ class DashboardFiltersBrowserTest : DashboardBrowserSuite() {
                   return panel.classList.contains('is-open') && style.visibility === 'visible' && style.transform === 'none'; }""",
             )
             page.waitForFunction("() => document.activeElement && document.activeElement.id === 'dp-board-filters-close'")
+            val opened = fieldReach("first")
+            println("496-drawer-open ${width}x$height scrollTop=${opened["panelScroll"]} closeAfterFields=${opened["closeAfterFields"]}")
 
             page.keyboard().press("Tab")
             val first = fieldReach("first")
@@ -281,6 +284,8 @@ class DashboardFiltersBrowserTest : DashboardBrowserSuite() {
             first["active"] shouldBe true
             first["inPanel"] shouldBe true
             first["inViewport"] shouldBe true
+            opened["closeAfterFields"] shouldBe false
+            opened["panelScroll"].px() shouldBe 0.0
 
             var presses = 1
             var escaped = 0
@@ -482,6 +487,75 @@ class DashboardFiltersBrowserTest : DashboardBrowserSuite() {
             (afterMonth["b"] as Map<*, *>)["name"],
             "the two instances' radio groups share a name",
         )
+    }
+
+    /**
+     * #497 option (a), owner ruling 2026-10-09, refined 2026-10-10 — a typed value past `limit`'s
+     * declared maximum stays in its field beside its error, and the board keeps the LAST VALID value:
+     * the rejected commit starts no refresh (the gate refuses it while the state is invalid), a
+     * change of ANOTHER control re-evaluates with 10 and its bound refresh carries 10 while the field
+     * still shows `500` and its alert, and correcting the field to 50 clears the alert and refreshes
+     * with 50. Every refresh body is read off the wire. The acceptance board's granularity defaults
+     * to Week, so the other control's gesture is Month.
+     */
+    @Test
+    @Order(6)
+    fun `a rejected typed value stays in its field beside its error while the refreshes carry the last valid value`() {
+        startTrace()
+        val root = ready("dpkeep")
+        val board = seedAcceptanceBoard(root)
+        val bodies = java.util.Collections.synchronizedList(mutableListOf<String>())
+        page.onRequest { request ->
+            if (request.method() == "POST" && request.url().endsWith("/runtime/visualizations")) {
+                request.postData()?.let(bodies::add)
+            }
+        }
+        openBoard(board)
+        page.waitForFunction(
+            "() => window.__dpPage.notifications.some(function (n) { return n.code === 'refresh.completed'; })",
+        )
+        val limit = "#dp-board-filters [data-dp-parameter=\"limit\"]"
+        val alert = "$limit .dp-dashboard-parameter-error[role=alert]"
+        val granularity = "#dp-board-filters [data-dp-parameter=\"granularity\"]"
+
+        // 500 is past the maximum: the alert names it, the field keeps it, and no refresh leaves —
+        // the bound refresh is refused aloud by the gate (parameters.invalid) instead.
+        var seen = bodies.size
+        page.fill("$limit input", "500")
+        page.keyboard().press("Tab")
+        page.waitForSelector(alert)
+        page.waitForFunction(
+            "() => window.__dpPage.notifications.some(function (n) { return n.code === 'parameters.invalid'; })",
+        )
+        val rejectedText = page.textContent(alert)
+        val rejectedShown = page.inputValue("$limit input")
+        println("497-keep rejected alert=$rejectedText shown=$rejectedShown refreshes-after=${bodies.size - seen}")
+        rejectedShown shouldBe "500"
+        rejectedText.contains("above the declared maximum 100") shouldBe true
+        bodies.size shouldBe seen
+
+        // Another control's change: the re-evaluation carries 10, its bound refresh carries 10, and
+        // the field still shows the person's 500 beside its error.
+        seen = bodies.size
+        page.click("$granularity label.dp-dashboard-parameter-option-label:text-is('Month')")
+        val month = nextSelections(bodies, seen)
+        println("497-keep month selections=$month shown=${page.inputValue("$limit input")}")
+        month.get("limit").asJsonPrimitive.isNumber shouldBe true
+        month.get("limit").asInt shouldBe 10
+        month.get("granularity").asString shouldBe "MONTH"
+        page.inputValue("$limit input") shouldBe "500"
+        page.textContent(alert).contains("above the declared maximum 100") shouldBe true
+
+        // Corrected to 50: the alert goes and the next refresh carries 50.
+        seen = bodies.size
+        page.fill("$limit input", "50")
+        page.keyboard().press("Tab")
+        val corrected = nextSelections(bodies, seen)
+        page.waitForSelector(alert, Page.WaitForSelectorOptions().setState(WaitForSelectorState.DETACHED))
+        println("497-keep corrected selections=$corrected shown=${page.inputValue("$limit input")}")
+        corrected.get("limit").asInt shouldBe 50
+        corrected.get("granularity").asString shouldBe "MONTH"
+        page.inputValue("$limit input") shouldBe "50"
     }
 
     private companion object {
