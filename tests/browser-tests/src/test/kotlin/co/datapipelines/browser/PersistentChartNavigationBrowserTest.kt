@@ -19,22 +19,13 @@ class PersistentChartNavigationBrowserTest : VisualizationBrowserSuite() {
         page.evaluate(
             "() => " +
                 "{window.__rail=document.getElementById('app-rail');window.__rootRow=document.querySelector" +
-                "('#nav-tree-visualizations [role=treeitem]');window.__start=performance.now()}",
+                "('#nav-tree-visualizations [role=treeitem]')}",
         )
         val treeRequests = mutableListOf<String>()
         page.onRequest { if (it.url().contains("/api/v1/visualizations/tree")) treeRequests += it.url() }
         page.click("#nav-tree-visualizations a[href='/visualizations/$flat']")
         preview()
         page.evaluate("() => {window.__plotly=window.Plotly;window.__runtime=window.DatapipelinesDashboard}")
-        println(
-            "460-chart-first " +
-                page.evaluate(
-                    "() => " +
-                        "({latency_ms:performance.now()-window.__start,resources:performance.getEntriesByType('reso" +
-                        "urce').filter(x=>x.name.includes('plotly-3d.min.js')).map(x=>({encoded:x.encodedBodySize,t" +
-                        "ransferred:x.transferSize,duration:x.duration}))})",
-                ),
-        )
         sameShell()
         page.locator("#rail-resize").focus()
         page.keyboard().press("End")

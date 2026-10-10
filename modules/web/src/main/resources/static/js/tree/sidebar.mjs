@@ -64,10 +64,6 @@ document.body.addEventListener("htmx:afterSettle", () => {
   markCurrent();
 });
 document.body.addEventListener("htmx:historyRestore", markCurrent);
-document.body.addEventListener("dp:artifacts-changed", event => {
-  const instance = instances.get(event.detail?.family);
-  if (instance) instance.refresh(event.detail.parentKey || null);
-});
 document.body.addEventListener("click", event => {
   const control = event.target.closest("[data-nav-tree-reveal]");
   if (control) reveal.get(control.dataset.navTreeReveal)?.();

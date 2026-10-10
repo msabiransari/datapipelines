@@ -8,6 +8,7 @@ import com.microsoft.playwright.options.WaitForSelectorState
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.ints.shouldBeGreaterThanOrEqual
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldMatch
 import org.junit.jupiter.api.Test
 
 /**
@@ -241,6 +242,9 @@ class ShellBusyBrowserTest : BrowserSuite() {
             expandFolder("nyc")
             // REST tree work has local progress; htmx's global busy policy still owns catalog requests.
             page.waitForSelector("$navRoot [data-tree-key='folder:nyc'] > .dp-tree-group[aria-busy=true]")
+            page
+                .locator("$navRoot [data-tree-key='folder:nyc'] > .dp-tree-group[aria-busy=true] > .dp-tree-status")
+                .innerText() shouldMatch Regex("^Loading… \\d+ loaded$")
             throttle.awaitCaptured(1)
             throttle.releaseAll()
             page.waitForSelector(folderSummary("nyc/lib"))

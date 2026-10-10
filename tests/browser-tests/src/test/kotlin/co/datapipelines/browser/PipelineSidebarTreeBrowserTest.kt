@@ -94,6 +94,7 @@ class PipelineSidebarTreeBrowserTest : RestTreeBrowserFixture() {
         val id = seedPipeline("acme/keys/one")
         seedPipeline("acme/keys/two")
         openTree()
+        val start = page.url()
         page.focus("$panel input")
         page.keyboard().press("ArrowDown")
         focused() shouldBe "folder:acme"
@@ -103,6 +104,8 @@ class PipelineSidebarTreeBrowserTest : RestTreeBrowserFixture() {
         focused() shouldBe "folder:acme/keys"
         page.keyboard().press("ArrowRight")
         page.waitForSelector(leaf("acme/keys/two"))
+        page.keyboard().press("Home")
+        focused() shouldBe "folder:acme"
         page.keyboard().press("End")
         page.evaluate("() => document.activeElement.querySelector('a').title") shouldBe "acme/keys/two"
         page.keyboard().press("ArrowUp")
@@ -111,6 +114,7 @@ class PipelineSidebarTreeBrowserTest : RestTreeBrowserFixture() {
         page.keyboard().press("ArrowLeft")
         focused() shouldBe "folder:acme/keys"
         page.keyboard().press("ArrowDown")
+        page.url() shouldBe start
         page.keyboard().press("Enter")
         page.waitForURL("**/pipelines/$id")
     }

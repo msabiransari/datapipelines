@@ -84,7 +84,6 @@ class NavigationSourceIntegrationTest {
                     String::class.java,
                 )
             plan.any { it.contains("Execution Time:") } shouldBe true
-            println("460-query-plan family=${family.route} search=$searching\n" + plan.joinToString("\n"))
         }
         insert(family, "scope/literal_percent", display = "100% real")
         exhaust(family, ReadLens.Everything, "%").map { it.path } shouldContainExactly listOf("scope/literal_percent")
