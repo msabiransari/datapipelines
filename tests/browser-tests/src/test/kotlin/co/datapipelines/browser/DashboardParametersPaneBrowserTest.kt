@@ -99,9 +99,17 @@ class DashboardParametersPaneBrowserTest : ParameterSetBrowserSuite() {
           return result;
         }"""
 
+    /** Playwright hands maps back untyped; the unchecked casts live in these two reads only. */
+    @Suppress("UNCHECKED_CAST")
+    private fun evalVoice(selector: String): Map<String, Any?> =
+        page.evaluate(probeErrorVoice, listOf(selector)) as Map<String, Any?>
+
+    @Suppress("UNCHECKED_CAST")
+    private fun evalGroups(names: List<String>): Map<String, Map<String, Any?>> =
+        page.evaluate(probeOptionRows, names) as Map<String, Map<String, Any?>>
+
     /** The voice assertions the board and the parameter-set page share, per theme. */
-    private fun assertErrorVoice(measured: Map<String, Any?>) {
-        (measured["role"] as String) shouldBe "alert"
+    private fun assertErrorVoice(measured: Map<String, Any?>) {        (measured["role"] as String) shouldBe "alert"
         (measured["errColor"] as String) shouldBe (measured["accentDanger"] as String)
         (measured["errColor"] as String) shouldNotBe (measured["textPrimary"] as String)
         (measured["fontSize"] as String) shouldBe (measured["textXs"] as String)
@@ -137,7 +145,7 @@ class DashboardParametersPaneBrowserTest : ParameterSetBrowserSuite() {
             page.fill("$limitRow input", "500")
             page.keyboard().press("Tab")
             page.waitForSelector("$limitRow .dp-dashboard-parameter-error[role=alert]")
-            assertErrorVoice(page.evaluate(probeErrorVoice, listOf(limitRow)) as Map<String, Any?>)
+            assertErrorVoice(evalVoice(limitRow))
         }
     }
 
@@ -147,7 +155,7 @@ class DashboardParametersPaneBrowserTest : ParameterSetBrowserSuite() {
         val root = ready("dpp2")
         val board = seedAcceptanceBoard(root)
         openBoard(board)
-        val groups = page.evaluate(probeOptionRows, listOf("markets", "granularity")) as Map<String, Map<String, Any?>>
+        val groups = evalGroups(listOf("markets", "granularity"))
         for ((name, m) in groups) {
             (m["display"] as String) shouldBe "grid"
             ((m["rows"] as Number).toInt() > 0) shouldBe true
@@ -172,7 +180,7 @@ class DashboardParametersPaneBrowserTest : ParameterSetBrowserSuite() {
             page.waitForSelector("$itemRow select")
             page.selectOption("#ps-form-host [data-dp-parameter='kind'] select", SelectOption().setLabel("BOOM"))
             page.waitForSelector("$itemRow .dp-dashboard-parameter-error:not(:empty)")
-            assertErrorVoice(page.evaluate(probeErrorVoice, listOf(itemRow)) as Map<String, Any?>)
+            assertErrorVoice(evalVoice(itemRow))
         }
     }
 
