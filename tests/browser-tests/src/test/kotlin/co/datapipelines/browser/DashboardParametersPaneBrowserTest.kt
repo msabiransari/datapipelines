@@ -106,9 +106,7 @@ class DashboardParametersPaneBrowserTest : ParameterSetBrowserSuite() {
 
     /** Playwright hands maps back untyped; the unchecked casts live in these two reads only. */
     @Suppress("UNCHECKED_CAST")
-    private fun evalVoice(selector: String): Map<String, Any?> =
-        page.evaluate(probeErrorVoice, listOf(selector)) as Map<String, Any?>
-
+    private fun evalVoice(selector: String): Map<String, Any?> = page.evaluate(probeErrorVoice, listOf(selector)) as Map<String, Any?>
     @Suppress("UNCHECKED_CAST")
     private fun evalGroups(names: List<String>): Map<String, Map<String, Any?>> =
         page.evaluate(probeOptionRows, names) as Map<String, Map<String, Any?>>
