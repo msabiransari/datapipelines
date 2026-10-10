@@ -39,11 +39,9 @@ class DashboardFiltersBreakpointBrowserTest : DashboardBrowserSuite() {
         assertPresentation("drawer")
         assertClosed()
 
-        // The rail's actual maximum is the full viewport; main's content track has zero width.
+        // At the rail's maximum the remaining board region still uses the filters drawer.
         resizeRail("End")
-        // Zero-width main-content overflow also occurs on the unchanged base; its shell
-        // follow-up is #503. Here pin only the drawer's presentation at the maximum.
-        assertPresentation("drawer", checkOverflow = false)
+        assertPresentation("drawer")
         resizeRail("Home")
         assertPresentation("column")
         assertClosed()

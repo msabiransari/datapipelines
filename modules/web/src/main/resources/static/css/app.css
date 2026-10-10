@@ -80,6 +80,8 @@
   --app-sidebar-width: 280px;
   --app-sidebar-collapsed: 0px;
   --app-detail-width: 320px;
+  /* #503 — the main track's floor where the rail is a grid column. */
+  --app-main-min-width: 320px;
   /* #473 — the dashboard board's filters panel: its column beside the board, and the left
      drawer it becomes below dashboards.css's breakpoint. */
   --app-board-filters-width: clamp(240px, 22vw, 20rem);
@@ -644,6 +646,9 @@ button.app-busy::after {
    --app-rail-width ~100vw) must not zero the phone gutter: there main keeps the phone band's
    .app-container --gap-md. */
 @media (min-width: 768px) {
+  :root {
+    --app-rail-expanded: min(var(--app-rail-preferred, 232px), max(232px, calc(100vw - var(--app-main-min-width))));
+  }
   .app-shell > .app-main {
     padding-inline: min(var(--gap-lg), max(0px, calc((100vw - var(--app-rail-width)) / 2)));
   }

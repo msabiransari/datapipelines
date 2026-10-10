@@ -1,6 +1,9 @@
 /** The preferred width is never overwritten by a temporary viewport clamp. */
 export function effectiveWidth(preferred, available, minimum) { return Math.min(available, Math.max(minimum, preferred)); }
 
+/** Column rails reserve the main track's geometry token without shrinking below their own floor. */
+export function maximumRailWidth(viewport, minMain, minimum = 232) { return Math.max(minimum, viewport - minMain); }
+
 /** Host-owned global rail control; width survives navigation, collapse and viewport changes. */
 export function mountRailResize(document) {
   const html = document.documentElement; const rail = document.getElementById("app-rail");
@@ -9,7 +12,12 @@ export function mountRailResize(document) {
   const key = `dp-rail-width:${html.dataset.dpWorkspace}`;
   let preferred = Number.parseFloat(html.style.getPropertyValue("--app-rail-preferred")) || 232;
   let pointer = null;
-  function available() { return html.clientWidth; }
+  function available() {
+    if (!window.matchMedia("(min-width: 768px)").matches) return html.clientWidth;
+    // The CSS geometry token owns this value; absent styles fall back to no reservation (0).
+    const minMain = Number.parseFloat(getComputedStyle(html).getPropertyValue("--app-main-min-width")) || 0;
+    return maximumRailWidth(html.clientWidth, minMain);
+  }
   function apply(width, persist = true) {
     preferred = Math.max(232, Math.min(100000, width));
     html.style.setProperty("--app-rail-preferred", `${preferred}px`);
