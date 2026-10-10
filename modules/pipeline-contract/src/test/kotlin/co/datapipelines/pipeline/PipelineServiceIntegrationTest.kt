@@ -664,6 +664,29 @@ class PipelineServiceIntegrationTest {
         withClue("no query means no filtering") { service.list(WORKSPACE_ID, ReadLens.Everything).size shouldBe 2 }
     }
 
+    /**
+     * #504a: `q` once reached [PipelineService.list]'s matcher raw, so `q=" "` kept only the
+     * records CONTAINING that whitespace and `q=""` matched everything by accident of
+     * `contains("")`. The service owns the needle rule — trim, blank means no search, then
+     * case-fold — so the REST and MCP callers that pass the parameter raw are right too.
+     */
+    @Test
+    fun `a blank or whitespace q is no search - the whitespace-only term drops no row`() {
+        service.create(WORKSPACE_ID, body(named("test/tight", "TightRows", "no-whitespace-anywhere")), owner, WriteSurface.SESSION)
+        service.create(WORKSPACE_ID, body(named("test/spaced", "Spaced Rows", "has a space")), owner, WriteSurface.SESSION)
+
+        service.list(WORKSPACE_ID, ReadLens.Everything, query = "   ").map { it.name } shouldContainExactly
+            listOf("test/spaced", "test/tight")
+        service.list(WORKSPACE_ID, ReadLens.Everything, query = "").map { it.name } shouldContainExactly
+            listOf("test/spaced", "test/tight")
+        withClue("a surrounded needle searches as the bare needle") {
+            service.list(WORKSPACE_ID, ReadLens.Everything, query = "  TIGHT  ").map { it.name } shouldContainExactly
+                listOf("test/tight")
+            service.list(WORKSPACE_ID, ReadLens.Everything, query = "tight").map { it.name } shouldContainExactly
+                listOf("test/tight")
+        }
+    }
+
     @Test
     fun `the owner filter is pushed to SQL`() {
         val other = insertUser(email = "other@example.com", subject = "sub-2")
