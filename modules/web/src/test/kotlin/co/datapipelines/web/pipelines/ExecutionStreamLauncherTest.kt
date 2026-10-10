@@ -22,11 +22,13 @@ import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineSettings
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.LogicalType
+import co.datapipelines.web.api.ApiErrors
 import co.datapipelines.web.api.ApiException
 import co.datapipelines.web.config.IdempotencyProperties
 import co.datapipelines.web.config.SseProperties
 import co.datapipelines.web.metrics.WebMetrics
 import co.datapipelines.web.sse.ExecutionStreamRegistry
+import co.datapipelines.web.sse.ReplayRead
 import co.datapipelines.web.sse.SseLogStreamer
 import com.fasterxml.jackson.databind.json.JsonMapper
 import io.kotest.assertions.throwables.shouldThrow
@@ -49,6 +51,7 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
 import org.slf4j.LoggerFactory
+import org.springframework.dao.QueryTimeoutException
 import org.springframework.test.util.ReflectionTestUtils
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter
 import java.time.Instant
@@ -547,7 +550,7 @@ class ExecutionStreamLauncherTest {
     fun `a retry with the same key attaches to the original instead of re-executing`() {
         val executionId = UUID.randomUUID()
         every { idempotencyStore.reserve(any(), "key-1", any(), any(), any()) } returns IdempotencyOutcome.Existing(executionId)
-        every { streamer.hasLog(executionId) } returns true
+        every { streamer.load(executionId) } returns ReplayRead.Log(emptyList())
         val followEmitter =
             org.springframework.web.servlet.mvc.method.annotation
                 .SseEmitter(0L)
@@ -583,7 +586,7 @@ class ExecutionStreamLauncherTest {
     fun `a retry whose original finished and its log expired keeps the 410 with the id and reason`() {
         val executionId = UUID.randomUUID()
         every { idempotencyStore.reserve(any(), "key-1", any(), any(), any()) } returns IdempotencyOutcome.Existing(executionId)
-        every { streamer.hasLog(executionId) } returns false
+        every { streamer.load(executionId) } returns ReplayRead.Absent
         // A relaxed mock's findById answer is NOT a null — stub the terminal row explicitly.
         every { executionRepository.findById(workspaceId, executionId) } returns rowRecord(executionId, Instant.now())
 
@@ -599,7 +602,7 @@ class ExecutionStreamLauncherTest {
     fun `a retry whose original has no row yet waits by following it`() {
         val executionId = UUID.randomUUID()
         every { idempotencyStore.reserve(any(), "key-1", any(), any(), any()) } returns IdempotencyOutcome.Existing(executionId)
-        every { streamer.hasLog(executionId) } returns false
+        every { streamer.load(executionId) } returns ReplayRead.Absent
         every { executionRepository.findById(workspaceId, executionId) } returns null
         val followEmitter =
             org.springframework.web.servlet.mvc.method.annotation
@@ -616,7 +619,7 @@ class ExecutionStreamLauncherTest {
     fun `a retry whose original is still running follows it instead of answering 410`() {
         val executionId = UUID.randomUUID()
         every { idempotencyStore.reserve(any(), "key-1", any(), any(), any()) } returns IdempotencyOutcome.Existing(executionId)
-        every { streamer.hasLog(executionId) } returns false
+        every { streamer.load(executionId) } returns ReplayRead.Absent
         every { executionRepository.findById(workspaceId, executionId) } returns rowRecord(executionId, null)
         val followEmitter =
             org.springframework.web.servlet.mvc.method.annotation
@@ -627,5 +630,39 @@ class ExecutionStreamLauncherTest {
 
         result shouldBe followEmitter
         verify(exactly = 1) { streamer.follow(executionId, any()) }
+    }
+
+    /**
+     * #505 — the attach reads the log's three answers itself: a fault is not "no log", so a
+     * TERMINAL original answers the 503 with the id, never the expired 410, and no follow starts.
+     */
+    @Test
+    fun `a log read fault on a finished original answers the 503 with the id, never the expired 410`() {
+        val executionId = UUID.randomUUID()
+        every { idempotencyStore.reserve(any(), "key-1", any(), any(), any()) } returns IdempotencyOutcome.Existing(executionId)
+        every { streamer.load(executionId) } returns ReplayRead.Unavailable(QueryTimeoutException("Redis command timed out"))
+        every { executionRepository.findById(workspaceId, executionId) } returns rowRecord(executionId, Instant.now())
+
+        val error = shouldThrow<ApiException> { launcher(executorFactory = mockk()).launch(launchRequest(key = "key-1")) }
+        error.code shouldBe PipelineErrorCodes.Result.STORAGE_UNAVAILABLE
+        error.details["reason"] shouldBe ApiErrors.EVENT_LOG_UNAVAILABLE
+        // The reservation already handed this caller the id — the same grant the 410 path states.
+        error.details["execution_id"] shouldBe executionId.toString()
+        verify(exactly = 0) { streamer.follow(any(), any()) }
+    }
+
+    /** #505 — a fault is not a row question: a RUNNING original answers the same 503. */
+    @Test
+    fun `a log read fault on a running original answers the same 503 instead of following`() {
+        val executionId = UUID.randomUUID()
+        every { idempotencyStore.reserve(any(), "key-1", any(), any(), any()) } returns IdempotencyOutcome.Existing(executionId)
+        every { streamer.load(executionId) } returns ReplayRead.Unavailable(QueryTimeoutException("Redis command timed out"))
+        every { executionRepository.findById(workspaceId, executionId) } returns rowRecord(executionId, null)
+
+        val error = shouldThrow<ApiException> { launcher(executorFactory = mockk()).launch(launchRequest(key = "key-1")) }
+        error.code shouldBe PipelineErrorCodes.Result.STORAGE_UNAVAILABLE
+        error.details["reason"] shouldBe ApiErrors.EVENT_LOG_UNAVAILABLE
+        error.details["execution_id"] shouldBe executionId.toString()
+        verify(exactly = 0) { streamer.follow(any(), any()) }
     }
 }
