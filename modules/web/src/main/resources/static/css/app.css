@@ -222,10 +222,11 @@
      sibling. The vendored design system ships no `--accent-danger-bg` and is never edited
      here, so the token is defined as a tint of `--accent-danger` on `--surface-default`,
      the same shape as `--type-transform-bg` above. 4% is the strongest tint whose LIGHT
-     rendering still carries `--accent-danger` text at the 4.5:1 floor (#fef6f6, 4.54:1;
-     at 6% it is 4.41:1). Dark renders #191927 at 3.60:1 — the accent itself tops out at
-     3.67:1 on the dark `--surface-default`, so no N of this mix reaches 4.5 there; the
-     gap is reported on #502 rather than papered over with a literal. */
+     rendering still carries `--accent-danger` text at the 4.5:1 floor (a near-white tint,
+     4.54:1; at 6% it is 4.41:1). Dark renders a near-surface dark red at 3.60:1 — the
+     accent itself tops out at 3.67:1 on the dark `--surface-default`, so no N of this mix
+     reaches 4.5 there; the gap is reported on #502 rather than papered over with a
+     literal. */
   --accent-danger-bg: color-mix(in srgb, var(--accent-danger) 4%, var(--surface-default));
 
   /* #502 — the focus RING's width, the length half of the design system's focus state:
