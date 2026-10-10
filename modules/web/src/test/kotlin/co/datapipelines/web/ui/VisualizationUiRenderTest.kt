@@ -142,27 +142,37 @@ class VisualizationUiRenderTest {
 
     @Test
     fun `the workspace declares ONE Plotly bundle, the viewed chip, five tabs and lazy panes for the viewed version`() {
-        for (bundle in listOf("2d", "3d")) {
-            val html = workspace(bundle = bundle, activeTab = "preview")
-            val body = html.replace(Regex("<!--[\\s\\S]*?-->"), "")
+        val html = workspace(bundle = "2d", activeTab = "preview")
+        val body = html.replace(Regex("<!--[\\s\\S]*?-->"), "")
 
-            Regex("<script[^>]*plotly-[23]d\\.min\\.js").findAll(body).toList().size shouldBe 1
-            body shouldContain "data-chart-assets"
-            body shouldContain "/js/visualization-preview.js"
-            body shouldContain ">acme/charts/revenue<"
-            body shouldContain "v3 · released · current"
-            Regex("data-dp-tab=\"").findAll(body).toList().size shouldBe 5
-            body shouldContain "Preview (test fixtures)"
-            body shouldContain "data-lazy-url=\"/partials/visualizations/$vizId/preview?version=3\""
-            body shouldContain "data-lazy-url=\"/partials/visualizations/$vizId/overview?version=3\""
-            body shouldContain "data-lazy-url=\"/partials/visualizations/$vizId/versions?version=3\""
-            body shouldContain "data-lazy-url=\"/partials/visualizations/$vizId/evidence\""
-            body shouldContain "data-lazy-url=\"/partials/visualizations/$vizId/used-by\""
-            body shouldContain "data-nav-current=\"visualizations\""
-            body shouldContain "id=\"dp-dialog\""
-            // Every version switch is a full navigation that keeps the tab.
-            body shouldContain "href=\"/visualizations/$vizId?version=2&amp;tab=preview\""
-        }
+        Regex("<script[^>]*plotly-[23]d\\.min\\.js").findAll(body).toList().size shouldBe 1
+        body shouldContain "/vendor/plotly/plotly-3d.min.js"
+        body shouldContain "data-chart-assets"
+        body shouldContain "/js/visualization-preview.js"
+        body shouldContain ">acme/charts/revenue<"
+        body shouldContain "v3 · released · current"
+        Regex("data-dp-tab=\"").findAll(body).toList().size shouldBe 5
+        body shouldContain "Preview (test fixtures)"
+        body shouldContain "data-lazy-url=\"/partials/visualizations/$vizId/preview?version=3\""
+        body shouldContain "data-lazy-url=\"/partials/visualizations/$vizId/overview?version=3\""
+        body shouldContain "data-lazy-url=\"/partials/visualizations/$vizId/versions?version=3\""
+        body shouldContain "data-lazy-url=\"/partials/visualizations/$vizId/evidence\""
+        body shouldContain "data-lazy-url=\"/partials/visualizations/$vizId/used-by\""
+        body shouldContain "data-nav-current=\"visualizations\""
+        body shouldContain "id=\"dp-dialog\""
+        // Every version switch is a full navigation that keeps the tab.
+        body shouldContain "href=\"/visualizations/$vizId?version=2&amp;tab=preview\""
+    }
+
+    @Test
+    fun `a selected workspace with no bundle declares no Plotly or preview runtime`() {
+        val body = workspace(bundle = null, activeTab = "preview").replace(Regex("<!--[\\s\\S]*?-->"), "")
+
+        Regex("<script[^>]*plotly-[23]d\\.min\\.js").findAll(body).toList().size shouldBe 0
+        body shouldNotContain "/js/visualization-preview.js"
+        body shouldNotContain "/js/datapipelines-dashboard"
+        body shouldContain "data-chart-assets"
+        body shouldContain "v3 · released · current"
     }
 
     @Test
@@ -550,7 +560,7 @@ class VisualizationUiRenderTest {
     }
 
     private fun workspace(
-        bundle: String,
+        bundle: String?,
         activeTab: String,
     ): String =
         engine.process(

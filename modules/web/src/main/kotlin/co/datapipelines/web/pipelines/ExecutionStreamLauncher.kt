@@ -37,6 +37,7 @@ import co.datapipelines.web.api.ApiException
 import co.datapipelines.web.sse.ExecutionContext
 import co.datapipelines.web.sse.ExecutionStream
 import co.datapipelines.web.sse.ExecutionStreamRegistry
+import co.datapipelines.web.sse.ReplayRead
 import co.datapipelines.web.sse.SseEventLog
 import co.datapipelines.web.sse.SseLogStreamer
 import co.datapipelines.web.sse.WebEventEmitter
@@ -195,7 +196,7 @@ class ExecutionStreamLauncher(
     /**
      * §3.5 — "a retried request with the same key returns the original execution instead of
      * re-executing". The original's events are served from the Redis log; if the original is
-     * still running the stream follows it live. A log that has already expired (> 1h, §10.3) is
+     * still running the stream follows it live. A log with no entry anymore (> 1h, §10.3) is
      * the same `410` the replay endpoint gives. The retry's own principal rides along (#230, P4):
      * the follow re-judges THIS subscriber before every event it serves.
      *
@@ -209,22 +210,42 @@ class ExecutionStreamLauncher(
      * runs on the streamer's scheduler, never on the servlet thread. Only a TERMINAL row has
      * truly finished and lost its log, and that keeps the 410 with the id (the reservation already
      * gave this caller the id) and `reason: event_log_expired`.
+     *
+     * #505 — the attach makes the ONE read of the log itself ([SseLogStreamer.load] — no boolean
+     * pre-read that would consult the log a second time) and acts on all three answers: [ReplayRead.Log] follows;
+     * [ReplayRead.Absent] is the row question above, unchanged; [ReplayRead.Unavailable] — Redis
+     * did not answer, so nothing is known about the log — is `503 result.storage_unavailable`
+     * with `reason: event_log_unavailable` ([ApiErrors.eventLogUnavailable]), thrown BEFORE any
+     * stream is committed: a fault is neither an expiry nor a missing log, for a terminal and a
+     * running original alike. The id is disclosed because the reservation already gave this
+     * caller the id — the same grant the `410` path states.
      */
     private fun attachToOriginal(
         executionId: UUID,
         principal: AuthenticatedPrincipal,
     ): SseEmitter {
-        if (streamer.hasLog(executionId)) return streamer.follow(executionId, principal)
-        val record = executionRepository.findById(principal.requireWorkspace().id, executionId)
-        if (record == null || record.completedAt == null) {
-            return streamer.follow(executionId, principal)
+        return when (val read = streamer.load(executionId)) {
+            is ReplayRead.Log -> {
+                streamer.follow(executionId, principal)
+            }
+
+            is ReplayRead.Unavailable -> {
+                throw ApiErrors.eventLogUnavailable(executionId.toString(), read.cause)
+            }
+
+            ReplayRead.Absent -> {
+                val record = executionRepository.findById(principal.requireWorkspace().id, executionId)
+                if (record == null || record.completedAt == null) {
+                    return streamer.follow(executionId, principal)
+                }
+                throw ApiException(
+                    PipelineErrorCodes.Result.EXPIRED,
+                    "The original execution '$executionId' finished and its event stream has expired; " +
+                        "its record remains available via GET /executions/{id}.",
+                    mapOf("execution_id" to executionId.toString(), "reason" to "event_log_expired"),
+                )
+            }
         }
-        throw ApiException(
-            PipelineErrorCodes.Result.EXPIRED,
-            "The original execution '$executionId' finished and its event stream has expired; " +
-                "its record remains available via GET /executions/{id}.",
-            mapOf("execution_id" to executionId.toString(), "reason" to "event_log_expired"),
-        )
     }
 
     @Suppress("LongMethod")

@@ -1,6 +1,7 @@
 package co.datapipelines.browser
 
 import com.microsoft.playwright.Route
+import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
 import java.net.URI
@@ -160,7 +161,6 @@ class ReusableRestTreeBrowserTest : BrowserSuite() {
                     "nodes" to nodes,
                     "next_cursor" to next,
                 )
-            println("460-fixture-answer family=$family mode=${data["mode"]} parent=$parent workspace=$workspace nodes=${nodes.size}")
             val encoded =
                 page.evaluate(
                     """value => {
@@ -170,8 +170,6 @@ class ReusableRestTreeBrowserTest : BrowserSuite() {
                 }""",
                     mapOf("schema_version" to 1, "data" to data),
                 ) as String
-            if (parent.isEmpty() && !search) println("460-fixture-json $encoded")
-            println("460-page-bytes family=$family mode=${data["mode"]} nodes=${nodes.size} bytes=${encoded.toByteArray().size}")
             route.fulfill(Route.FulfillOptions().setContentType("application/json").setBody(encoded))
         })
         listOf("pipelines", "templates", "dashboards", "visualizations", "parameter-sets").forEach { family ->
@@ -182,16 +180,17 @@ class ReusableRestTreeBrowserTest : BrowserSuite() {
                     "!!document.querySelector(selector + ' .dp-tree-status button')",
                 panel,
             )
-            page.locator("$panel .dp-tree-status").allTextContents().also {
-                println(
-                    "460-root-status $family $it requests=$requests error=" +
-                        page.evaluate(
-                            "family => window.DatapipelinesSidebarTrees.get(family).state.levels.get(null)?.error?.message",
-                            family,
-                        ),
-                )
+            withClue({
+                "root-status $family ${page.locator("$panel .dp-tree-status").allTextContents()} requests=$requests error=" +
+                    page.evaluate(
+                        "family => window.DatapipelinesSidebarTrees.get(family).state.levels.get(null)?.error?.message",
+                        family,
+                    )
+            }) {
+                named(page, "$family root folder loaded") {
+                    page.waitForSelector("$panel [data-tree-key='folder:root']")
+                }
             }
-            page.waitForSelector("$panel [data-tree-key='folder:root']")
             page.click("$panel [data-tree-key='folder:root'] > .dp-tree-line button")
             page.waitForFunction(
                 "selector => document.querySelector(selector)?.getAttribute('aria-busy') === 'false'",
