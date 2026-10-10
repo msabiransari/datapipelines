@@ -1,6 +1,6 @@
 # Dashboards
 
-**Status:** v0.42 — the filters drawer follows the board region at 820 px (§7, #492) beside the compact chart card: the chip on the heading line, the message over the body's lower edge (§6.2, §6.6, #501) beside the board presentation's filters panel, chart cards and activity dock (§6.1's `parametersContainer`, §6.2's card wrap and pane mount target, §6.6's border-speaks-the-state, §7's Board tab, #473) beside renderer-aware binding types and nullable transform output (§3.4, #458/#457) beside the board-width breakpoint on the composite host, with a 640 px default (#412) beside a target the refresh's own abort cancelled reports `abort` whichever side of the race wins (§6.6, #435) beside the declarative read-only rule (§5.1, #463), then draft dashboard dependencies (#459), then the Release dialogs post the draft hash they read (§7, #416) beside numeric bound-value assertion feasibility (§3.4, #377) beside the visualizations workspace's tab switches on the shared history helper, the parameter-set decision (§7, #426) beside the pipeline editor runs the shared tab core (§7, #420) beside the Versions tables' created/released relative with the UTC stamp on hover (§7, #422) beside Back/Forward across the dashboards workspace's tab switches (§7, #402) beside the visualizations workspace (§7, #399) beside the dashboards workspace (§5.2's `version`, §7's workspace, #400; #409 closes with it) beside the
+**Status:** v0.43 — the KPI has no label of its own and its card heading titles it (§2.1.2, §6.3, #475, owner ruling) beside the filters drawer follows the board region at 820 px (§7, #492) beside the compact chart card: the chip on the heading line, the message over the body's lower edge (§6.2, §6.6, #501) beside the board presentation's filters panel, chart cards and activity dock (§6.1's `parametersContainer`, §6.2's card wrap and pane mount target, §6.6's border-speaks-the-state, §7's Board tab, #473) beside renderer-aware binding types and nullable transform output (§3.4, #458/#457) beside the board-width breakpoint on the composite host, with a 640 px default (#412) beside a target the refresh's own abort cancelled reports `abort` whichever side of the race wins (§6.6, #435) beside the declarative read-only rule (§5.1, #463), then draft dashboard dependencies (#459), then the Release dialogs post the draft hash they read (§7, #416) beside numeric bound-value assertion feasibility (§3.4, #377) beside the visualizations workspace's tab switches on the shared history helper, the parameter-set decision (§7, #426) beside the pipeline editor runs the shared tab core (§7, #420) beside the Versions tables' created/released relative with the UTC stamp on hover (§7, #422) beside Back/Forward across the dashboards workspace's tab switches (§7, #402) beside the visualizations workspace (§7, #399) beside the dashboards workspace (§5.2's `version`, §7's workspace, #400; #409 closes with it) beside the
 board's small-slot margins and its breakpoint collapse (§6.2, §6.3, #386/#387), 328's release-record judgement (§4.3)
 permissions (§4, lane L1b); the transfer routes and their limits' honest contract (§3.3, lanes L1c/L1c-b/L1c-c: the
 import's atomicity, the RELEASE rules on a landing, the aggregate count ceiling, the wire's per-family arms); the server
@@ -15,7 +15,7 @@ page, the screenshot upload and the two test tools — §3.4.1 (lane L4b, #353).
 [MCP Server](mcp-server.md) (§6.2.50–§6.2.62 — the tools), [Auth](auth.md) (§7.6 — the permissions)
 **Design:** the [dashboard implementation spec](superpowers/specs/2026-09-28-dashboard-implementation-spec.md) and
 the [design record](superpowers/specs/2026-09-25-dashboard-authoring-design-draft.md) (decisions D1–D63)
-**Last updated:** 2026-10-09
+**Last updated:** 2026-10-10
 
 A dashboard presents pipeline results. Draft development admits draft dependencies; published boards require released dependencies. It is built from two versioned artifacts: **visualizations** —
 a chart, table or KPI bound to named inputs, reusable across dashboards — and **dashboards**, which pin exact pipeline versions as sources, map their results onto visualization inputs, and arrange visualizations, groups, actions and
@@ -106,8 +106,13 @@ the author puts a placeholder there (`"x": "$.x"` above) — so the runtime's su
   non-blank string of at most 120 characters, `values` the placeholder a binding fills, `format` one of `text`,
   `number`, `integer`, `percent`, `date`, `datetime`, `align` one of `left`, `center`, `right`; `page_size` an
   integer 1–1000.
-- **`kpi`** — `label` (required, as a table label), `value` (the placeholder a binding fills), `format` one of
-  `number`, `integer`, `percent`, `currency`, `unit` (at most 16 characters), `comparison` `{label, value}`.
+- **`kpi`** — `value` (the placeholder a binding fills), optional `format` one of `number`, `integer`,
+  `percent`, `currency`, optional `unit` (at most 16 characters), optional `comparison` `{label, value}`.
+  A KPI has no label of its own: its card heading titles it (the occurrence's `presentation.title`, else the
+  pinned visualization's `display_name`); `comparison.label` still names the comparison line (#475, owner ruling).
+  A stored KPI body carrying `label` keeps rendering with that key ignored, but is refused at its next write or
+  release with `visualization.validation.config_schema_invalid` at `details.failures[].path` = `config.label`
+  (the renderer-schema path is `label`).
 
 #### 2.1.3 Test cases
 
@@ -713,9 +718,10 @@ boards in one document never share a native radio group); repeated renders REPLA
   `paper_bgcolor` or grid colour loses to the token at render. Neither touches the other's keys.
 - **Table.** `columns[]` (`label`, `values` — the path the binding fills, `format`, `align`),
   `page_size` capping the rows. Every cell is `textContent`.
-- **KPI.** `label`, `value` (the bound path), `format` (`number|integer|percent|currency`), `unit`,
-  and an optional `comparison` bound through the same map. A zero renders — a zero is a value, not
-  `no-data`.
+- **KPI.** `value` (the bound path), `format` (`number|integer|percent|currency`), `unit`,
+  and an optional `comparison` bound through the same map. A KPI has no label of its own: the card heading
+  titles it (the occurrence's `presentation.title`, else the pinned visualization's `display_name`).
+  `comparison.label` names the comparison line. A zero renders — a zero is a value, not `no-data`.
 
 ### 6.4 The two bundles
 
@@ -975,6 +981,7 @@ change (#426). The templates workspace adopts the helper after #398's rework lan
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-10 | v0.43 | #475 the KPI label is removed — owner ruling; renumbered at merge after #501's v0.41 and #492's v0.42 | **§2.1.2/§6.3:** no top-level KPI `label` key and no renderer label row; the card heading alone titles it (`presentation.title`, else the pinned `display_name`). `comparison.label` stays. Immutable stored versions render with legacy `label` ignored; a next write or release refuses it at path `label`. This ruling supersedes the former required-label schema. |
 | 2026-10-09 | v0.42 | #492 filters drawer by board-region width — renumbered at merge after #501's v0.41 | **§7:** a named CSS container on the board page switches the filters to a drawer at 820 px or narrower (1100 viewport px minus the default 232 px rail and two 24 px gutters). Rail resizing crosses the same boundary without a viewport resize; returning to a column clears open drawer state. `DashboardFiltersBreakpointBrowserTest` pins both directions, Escape/focus return and drawer presentation at the maximum rail width; the column/drawer crossings have no horizontal overflow. |
 | 2026-10-09 | v0.41 | #501 the compact chart card (a #473 merge follow-up) | **§6.2:** the card puts the status chip on the heading line (a row held at `--space-6` whether or not the chip shows), takes a description line only when there is text, overlays the message on the body's lower edge, and pads by `--gap-sm`. The chrome around a chart with no description is 50 px (it was 102: `--gap-md` padding and a reserved status row), so a 2-row slot's figure is 126 px with a 92 px plot area, above #386's half-slot floor (it was 74 and 58). **§6.6:** a state change never resizes the chart. |
 | 2026-10-09 | v0.40 | #473 the board's filters panel, chart cards and activity dock — rebased in recovery onto #460's v0.36 and #412's v0.38, renumbered after #458's v0.39 | **§6.1/§6.2:** `adapters(container, { parametersContainer })` mounts the parameters pane in a host-supplied element; every occurrence renders in a card (heading from the pinned `display_name`, optional description, renderer body, status foot). **§6.6:** the border carries the state, a failure's loud accent settles after 3 s while its in-card message stays, ready shows no badge. **§7:** the Board tab's filters panel/drawer (absent with no visible parameter; a widening back past the breakpoint ends an open drawer), the bottom dock, and the mount's teardown under prepared navigation; the stale "never boosted" sentence corrected. |

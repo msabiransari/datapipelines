@@ -6,7 +6,7 @@
  * The value and the comparison value are DATA: `textContent`, never `innerHTML`.
  *
  * ## The configuration (Dashboards §2.1.2's kpi schema)
- * `label`, `value` (the path the binding fills), optional `format` (`number|integer|percent|currency`),
+ * `value` (the path the binding fills), optional `format` (`number|integer|percent|currency`),
  * optional `unit` (≤ 16 chars, the schema's bound) and optional `comparison` (`{label, value}` — the
  * comparison value is bound through the SAME map). A zero KPI renders (a zero is a value, not
  * `no-data`).
@@ -39,10 +39,6 @@
     function build() {
       root = document.createElement("div");
       root.className = "dp-dashboard-kpi";
-      var label = document.createElement("div");
-      label.className = "dp-dashboard-kpi-label";
-      label.textContent = stored.label !== undefined && stored.label !== null ? String(stored.label) : "";
-      root.appendChild(label);
       var value = document.createElement("div");
       value.className = "dp-dashboard-kpi-value";
       var number = document.createElement("span");

@@ -57,13 +57,23 @@ class RendererConfigValidatorsTest {
     }
 
     @Test
-    fun `kpi - a label and a value a binding fills, an optional format, unit and comparison`() {
+    fun `kpi - a value a binding fills, an optional format, unit and comparison`() {
         problems(
             RendererKind.KPI,
-            """{"label":"Revenue","value":null,"format":"currency","unit":"USD","comparison":{"label":"vs last month","value":null}}""",
+            """{"value":null,"format":"currency","unit":"USD","comparison":{"label":"vs last month","value":null}}""",
         ) shouldBe emptyList()
-        problems(RendererKind.KPI, """{"label":" ","format":"ratio","unit":"x","comparison":[]}""") shouldContainExactlyInAnyOrder
-            listOf("label" to "wrong_type", "value" to "missing", "format" to "not_allowed", "comparison" to "wrong_type")
+        problems(RendererKind.KPI, """{"format":"ratio","unit":"x","comparison":[]}""") shouldContainExactlyInAnyOrder
+            listOf("value" to "missing", "format" to "not_allowed", "comparison" to "wrong_type")
+    }
+
+    @Test
+    fun `kpi - a label is refused as an unknown key`() {
+        problems(RendererKind.KPI, """{"label":"Total","value":null}""") shouldBe listOf("label" to "unknown_key")
+    }
+
+    @Test
+    fun `kpi - a label-free config is valid`() {
+        problems(RendererKind.KPI, """{"value":null}""") shouldBe emptyList()
     }
 
     @Test

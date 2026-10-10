@@ -55,6 +55,18 @@ class DashboardCardsBrowserTest : DashboardBrowserSuite() {
         byViz.keys shouldBe setOf("revenue", "cells", "total", "slowchart")
         byViz["cells"]!!["heading"] shouldBe "Cells"
         byViz["total"]!!["heading"] shouldBe "Total"
+        page.evaluate(
+            """() => {
+              const card = document.querySelector('#dp-board article.dp-dashboard-card[data-dp-viz="total"]');
+              const walker = document.createTreeWalker(card, NodeFilter.SHOW_TEXT);
+              let count = 0;
+              while (walker.nextNode()) {
+                if (walker.currentNode.textContent.trim() === 'Total') count++;
+              }
+              return count;
+            }""",
+        ) shouldBe 1
+
         byViz["revenue"]!!["heading"] shouldBe "Chart"
 
         // Settled boards are quiet: no error voice is on any card, and a VISIBLE chip is never

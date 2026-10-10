@@ -42,7 +42,7 @@ object RendererConfigValidators {
     val TABLE_COLUMN_KEYS: Set<String> = setOf("label", "values", "format", "align")
     val TABLE_FORMATS: List<String> = listOf("text", "number", "integer", "percent", "date", "datetime")
     val TABLE_ALIGNMENTS: List<String> = listOf("left", "center", "right")
-    val KPI_KEYS: Set<String> = setOf("label", "value", "format", "unit", "comparison")
+    val KPI_KEYS: Set<String> = setOf("value", "format", "unit", "comparison")
     val KPI_COMPARISON_KEYS: Set<String> = setOf("label", "value")
     val KPI_FORMATS: List<String> = listOf("number", "integer", "percent", "currency")
 
@@ -172,7 +172,6 @@ object RendererConfigValidators {
         problems: MutableList<ConfigProblem>,
     ) {
         unknownKeys(config, KPI_KEYS, "", problems)
-        label(config.get("label"), "label", required = true, problems)
         if (!config.has("value")) problems += ConfigProblem("value", "missing", "A KPI's value is the path a binding fills.")
         literal(config.get("format"), "format", KPI_FORMATS, problems)
         config.get("unit")?.let { unit ->
