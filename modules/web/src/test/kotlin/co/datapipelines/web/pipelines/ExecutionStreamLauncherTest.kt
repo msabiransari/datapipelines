@@ -550,7 +550,7 @@ class ExecutionStreamLauncherTest {
     fun `a retry with the same key attaches to the original instead of re-executing`() {
         val executionId = UUID.randomUUID()
         every { idempotencyStore.reserve(any(), "key-1", any(), any(), any()) } returns IdempotencyOutcome.Existing(executionId)
-        every { streamer.hasLog(executionId) } returns true
+        every { streamer.load(executionId) } returns ReplayRead.Log(emptyList())
         val followEmitter =
             org.springframework.web.servlet.mvc.method.annotation
                 .SseEmitter(0L)
@@ -586,7 +586,7 @@ class ExecutionStreamLauncherTest {
     fun `a retry whose original finished and its log expired keeps the 410 with the id and reason`() {
         val executionId = UUID.randomUUID()
         every { idempotencyStore.reserve(any(), "key-1", any(), any(), any()) } returns IdempotencyOutcome.Existing(executionId)
-        every { streamer.hasLog(executionId) } returns false
+        every { streamer.load(executionId) } returns ReplayRead.Absent
         // A relaxed mock's findById answer is NOT a null — stub the terminal row explicitly.
         every { executionRepository.findById(workspaceId, executionId) } returns rowRecord(executionId, Instant.now())
 
@@ -602,7 +602,7 @@ class ExecutionStreamLauncherTest {
     fun `a retry whose original has no row yet waits by following it`() {
         val executionId = UUID.randomUUID()
         every { idempotencyStore.reserve(any(), "key-1", any(), any(), any()) } returns IdempotencyOutcome.Existing(executionId)
-        every { streamer.hasLog(executionId) } returns false
+        every { streamer.load(executionId) } returns ReplayRead.Absent
         every { executionRepository.findById(workspaceId, executionId) } returns null
         val followEmitter =
             org.springframework.web.servlet.mvc.method.annotation
@@ -619,7 +619,7 @@ class ExecutionStreamLauncherTest {
     fun `a retry whose original is still running follows it instead of answering 410`() {
         val executionId = UUID.randomUUID()
         every { idempotencyStore.reserve(any(), "key-1", any(), any(), any()) } returns IdempotencyOutcome.Existing(executionId)
-        every { streamer.hasLog(executionId) } returns false
+        every { streamer.load(executionId) } returns ReplayRead.Absent
         every { executionRepository.findById(workspaceId, executionId) } returns rowRecord(executionId, null)
         val followEmitter =
             org.springframework.web.servlet.mvc.method.annotation
@@ -640,7 +640,6 @@ class ExecutionStreamLauncherTest {
     fun `a log read fault on a finished original answers the 503 with the id, never the expired 410`() {
         val executionId = UUID.randomUUID()
         every { idempotencyStore.reserve(any(), "key-1", any(), any(), any()) } returns IdempotencyOutcome.Existing(executionId)
-        every { streamer.hasLog(executionId) } returns false
         every { streamer.load(executionId) } returns ReplayRead.Unavailable(QueryTimeoutException("Redis command timed out"))
         every { executionRepository.findById(workspaceId, executionId) } returns rowRecord(executionId, Instant.now())
 
@@ -657,7 +656,6 @@ class ExecutionStreamLauncherTest {
     fun `a log read fault on a running original answers the same 503 instead of following`() {
         val executionId = UUID.randomUUID()
         every { idempotencyStore.reserve(any(), "key-1", any(), any(), any()) } returns IdempotencyOutcome.Existing(executionId)
-        every { streamer.hasLog(executionId) } returns false
         every { streamer.load(executionId) } returns ReplayRead.Unavailable(QueryTimeoutException("Redis command timed out"))
         every { executionRepository.findById(workspaceId, executionId) } returns rowRecord(executionId, null)
 
