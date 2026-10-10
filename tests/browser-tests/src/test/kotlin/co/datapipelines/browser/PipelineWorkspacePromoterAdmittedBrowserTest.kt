@@ -3,11 +3,15 @@ package co.datapipelines.browser
 import com.microsoft.playwright.Locator
 import com.sun.net.httpserver.HttpServer
 import io.kotest.matchers.collections.shouldBeEmpty
+import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
 import java.net.InetSocketAddress
+import java.security.MessageDigest
+import java.util.Base64
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
@@ -311,15 +315,20 @@ class PipelineWorkspacePromoterAdmittedBrowserTest : BrowserSuite() {
 
     /**
      * #350 (A3 repeated, A11's lensed catalog) — the promoter's SIDEBAR tree is the lens's answer:
-     * the admitted released pipeline is a leaf (and the current page's), a draft-only sibling the
+     * the admitted released pipelines are leaves (one the current page's), a draft-only sibling the
      * lens does not admit is absent from the rows AND from the wire (a direct read of the same
      * level carries no trace of it — no route returns hidden rows for CSS to hide), the folder's
-     * count is the lensed count, and every sidebar answer is stamped `<workspace>|lens`.
+     * count is the lensed count, and every sidebar answer carries the same actor/lens digest,
+     * distinct from the admin's unrestricted view.
      */
     @Test
-    fun `#350 - an admitted promoter's sidebar tree lists only the admitted pipeline, stamped with the lens`() {
+    fun `#350 - an admitted promoter's sidebar tree lists only admitted pipelines, stamped with the lens`() {
         val workspaceName = "p350ws-" + generatedPassword("w").take(8).lowercase()
         val id = seedThreeVersions("p350l" + generatedPassword("s").take(6).lowercase(), workspaceName)
+        // Two admitted names in reverse lexical order make membership sorting observable.
+        val sibling = must("POST", "/api/v1/pipelines", calcBody("n_alpha").replace("p348/promoted", "p348/alpha"))
+        val siblingId = jsonField(sibling, "id")
+        must("POST", "/api/v1/pipelines/$siblingId/release", null, ifMatch = hashOf(sibling))
         // A draft-only sibling in the same folder: nothing to promote, so the lens never admits it.
         must(
             "POST",
@@ -330,6 +339,9 @@ class PipelineWorkspacePromoterAdmittedBrowserTest : BrowserSuite() {
         )
 
         val promoter = openPromoterSession(workspaceName)
+        val expectedToken = promoterViewToken(workspaceName, listOf("p348/promoted", "p348/alpha"))
+        val adminToken = jsonField(must("GET", "/api/v1/pipelines/tree?parent=p348", null), "view_token")
+        adminToken.isNotEmpty() shouldBe true
         val stamps = mutableListOf<String>()
         promoter.page.onResponse { response ->
             if (response.url().contains("/api/v1/pipelines/tree?")) stamps += response.text()
@@ -350,8 +362,9 @@ class PipelineWorkspacePromoterAdmittedBrowserTest : BrowserSuite() {
                 ) as List<*>
             ).map { it.toString() }
         titles.contains("p348/promoted") shouldBe true
+        titles.contains("p348/alpha") shouldBe true
         (titles.contains("p348/hidden_draft")) shouldBe false
-        promoter.page.locator("#nav-tree-pipelines [data-tree-key='folder:p348'] > .dp-tree-group > [role=treeitem]").count() shouldBe 1
+        promoter.page.locator("#nav-tree-pipelines [data-tree-key='folder:p348'] > .dp-tree-group > [role=treeitem]").count() shouldBe 2
 
         // The wire: the same level, read directly, carries no trace of the hidden row.
         val level =
@@ -363,9 +376,43 @@ class PipelineWorkspacePromoterAdmittedBrowserTest : BrowserSuite() {
         level shouldContain "p348/promoted"
         level shouldNotContain "hidden_draft"
         (stamps.isNotEmpty()) shouldBe true
-        stamps.all { it.contains("view_token") && !it.contains("hidden_draft") } shouldBe true
+        val tokens = (stamps + level).map { jsonField(it, "view_token") }.distinct()
+        tokens shouldContainExactly listOf(expectedToken)
+        tokens.single() shouldNotBe adminToken
+        stamps.forEach { it shouldNotContain "hidden_draft" }
         promoter.close()
     }
+
+    private fun jsonField(
+        text: String,
+        field: String,
+    ): String = page.evaluate("([text, field]) => JSON.parse(text).data[field]", arrayOf(text, field)) as String
+
+    /** Independent wire oracle: fixture membership plus the documented SHA-256/Base64url identity. */
+    private fun promoterViewToken(
+        workspaceName: String,
+        names: List<String>,
+    ): String =
+        java.sql.DriverManager
+            .getConnection(SharedBrowserE2e.jdbcUrl, SharedBrowserE2e.username, SharedBrowserE2e.password)
+            .use { connection ->
+                connection
+                    .prepareStatement(
+                        "SELECT w.id, m.user_id FROM workspaces w JOIN workspace_members m ON m.workspace_id = w.id " +
+                            "WHERE w.name = ? AND m.role = 'promoter'",
+                    ).use { statement ->
+                        statement.setString(1, workspaceName)
+                        statement.executeQuery().use { rows ->
+                            rows.next() shouldBe true
+                            val membership = "only\n" + (page.evaluate("names => JSON.stringify(names)", names.sorted()) as String)
+                            val input = "${rows.getString(1)}\n${rows.getString(2)}\n$membership"
+                            rows.next() shouldBe false
+                            Base64.getUrlEncoder().withoutPadding().encodeToString(
+                                MessageDigest.getInstance("SHA-256").digest(input.toByteArray(Charsets.UTF_8)),
+                            )
+                        }
+                    }
+            }
 
     private companion object {
         const val SERVER_KEY = "p348-browser-server-key"
