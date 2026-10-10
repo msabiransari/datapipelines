@@ -44,15 +44,20 @@ class DashboardParametersPaneBrowserTest : ParameterSetBrowserSuite() {
           const textXs = getComputedStyle(probe).fontSize;
           probe.style.borderColor = 'var(--border-danger)';
           const borderDanger = getComputedStyle(probe).borderTopColor;
+          // Read every var-resolved ink while the probe is STILL ATTACHED — a detached
+          // element's computed style is the empty string, not a colour.
+          const accentDanger = inkOf('var(--accent-danger)');
+          const textMuted = inkOf('var(--text-muted)');
+          const textPrimary = inkOf('var(--text-primary)');
           probe.remove();
           return {
             errColor: getComputedStyle(err).color,
             codeColor: code ? getComputedStyle(code).color : null,
             inputBorder: input ? getComputedStyle(input).borderTopColor : null,
             fontSize: getComputedStyle(err).fontSize,
-            accentDanger: inkOf('var(--accent-danger)'),
-            textMuted: inkOf('var(--text-muted)'),
-            textPrimary: inkOf('var(--text-primary)'),
+            accentDanger: accentDanger,
+            textMuted: textMuted,
+            textPrimary: textPrimary,
             textXs: textXs,
             borderDanger: borderDanger,
             role: err.getAttribute('role'),
@@ -65,7 +70,7 @@ class DashboardParametersPaneBrowserTest : ParameterSetBrowserSuite() {
 
     /** Measures both group fieldsets' geometry: pair centring, the boxes' shared left edge, the height bound. */
     private val probeOptionRows =
-        """async ([groups]) => {
+        """async (groups) => {
           const result = {};
           for (const name of groups) {
             const fs = document.querySelector('#dp-board-filters [data-dp-parameter="' + name + '"]');
@@ -109,7 +114,8 @@ class DashboardParametersPaneBrowserTest : ParameterSetBrowserSuite() {
         page.evaluate(probeOptionRows, names) as Map<String, Map<String, Any?>>
 
     /** The voice assertions the board and the parameter-set page share, per theme. */
-    private fun assertErrorVoice(measured: Map<String, Any?>) {        (measured["role"] as String) shouldBe "alert"
+    private fun assertErrorVoice(measured: Map<String, Any?>) {
+        (measured["role"] as String) shouldBe "alert"
         (measured["errColor"] as String) shouldBe (measured["accentDanger"] as String)
         (measured["errColor"] as String) shouldNotBe (measured["textPrimary"] as String)
         (measured["fontSize"] as String) shouldBe (measured["textXs"] as String)
