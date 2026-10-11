@@ -29,10 +29,10 @@ class PersistentChartNavigationBrowserTest : VisualizationBrowserSuite() {
         sameShell()
         page.locator("#rail-resize").focus()
         page.keyboard().press("End")
-        page.waitForFunction("() => document.getElementById('app-main').getBoundingClientRect().width < 1")
+        page.waitForFunction("() => document.getElementById('app-main').getBoundingClientRect().width === 320")
         page.keyboard().press("Home")
         page.waitForFunction(
-            "() => document.querySelector('[data-viz-case-index=\"0\"] .js-plotly-plot')?.getBoundingClientRect().width > 100",
+            "() => document.querySelector('[data-viz-case-index=\"0\"] .js-plotly-plot')?.getBoundingClientRect().width > 320",
         )
         page.click(".dp-versions a[href='/visualizations/$flat?version=1&tab=preview']")
         page.waitForURL("**/visualizations/$flat?version=1&tab=preview")

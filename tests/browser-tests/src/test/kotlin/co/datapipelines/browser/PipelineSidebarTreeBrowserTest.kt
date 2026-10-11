@@ -8,15 +8,15 @@ import org.junit.jupiter.api.Test
 /** Computed geometry and interactions for the global rail; user width owns layout, independent of tree content. */
 class PipelineSidebarTreeBrowserTest : RestTreeBrowserFixture() {
     @Test
-    fun `the rail resizes past 400 and consumes full available width then recovers the content`() {
+    fun `the rail resizes past 400 while reserving the main minimum then recovers the content`() {
         readyTree()
         seedPipeline("acme/deep/one")
         openTree()
         expand("acme")
         page.locator("#rail-resize").focus()
         page.keyboard().press("End")
-        width() shouldBe 1440
-        (page.evaluate("() => document.getElementById('app-main').getBoundingClientRect().width") as Number).toInt() shouldBe 0
+        width() shouldBe 1120
+        (page.evaluate("() => document.getElementById('app-main').getBoundingClientRect().width") as Number).toInt() shouldBe 320
         page.keyboard().press("Home")
         width() shouldBe 232
         (page.evaluate("() => document.getElementById('app-main').getBoundingClientRect().width") as Number).toInt() shouldBe 1208
@@ -49,7 +49,7 @@ class PipelineSidebarTreeBrowserTest : RestTreeBrowserFixture() {
         width() shouldBe 932
         page.setViewportSize(800, 900)
         settle()
-        width() shouldBe 800
+        width() shouldBe 480
         page.setViewportSize(1440, 900)
         settle()
         width() shouldBe 932
@@ -170,7 +170,7 @@ class PipelineSidebarTreeBrowserTest : RestTreeBrowserFixture() {
         width() shouldBe 232
         page.locator("#rail-resize").focus()
         page.keyboard().press("End")
-        width() shouldBe 900
+        width() shouldBe 580
         overflow() shouldBe false
         page.keyboard().press("Home")
         width() shouldBe 232

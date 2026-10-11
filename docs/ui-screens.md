@@ -1,9 +1,9 @@
 # UI Screens Inventory
 
-**Status:** v1.129
+**Status:** v1.130
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
-**Last updated:** 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
+**Last updated:** 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
 
 ---
 
@@ -214,8 +214,8 @@ The widget's source, root, context, href and activation callback are host parame
 use buttons. The common renderer owns roving focus, arrow navigation, Home/End and activation; focus is
 separate from current-page selection. Labels use text sinks and fixed vendored lucide icons.
 
-The global rail's pointer and keyboard separator adjusts from its 232px default through the full available
-app width, with no reserved main-content minimum. Collapse and Reset stay reachable at that boundary.
+The global rail's pointer and keyboard separator adjusts from its 232px default up to the viewport less
+`--app-main-min-width` (320px) where the rail is a column; the phone drawer is unchanged. Collapse and Reset stay reachable at that boundary.
 Opening a tree never changes user width. `dp-rail-width:<workspace>` stores only the preferred width; a
 smaller viewport clamps it temporarily without replacing that preference. `dp-tree-panel:<workspace>:<family>`
 stores only panel visibility. Queries, results and descendant expansions are never persisted or restored;
@@ -464,8 +464,8 @@ One breakpoint table for the whole shell — the rail, the top bar and the main 
 
 | Width | Rail | Topbar | Main gutter |
 |---|---|---|---|
-| ≥ 1100 px | as today (expanded; `rail-collapsed` on user choice, remembered); **user resizing reaches the full available width**, independent of tree content | as today | `--gap-lg` |
-| 768–1099 px | **starts collapsed** (icons only) unless the user expanded it — same class, same `localStorage` key, one more rule: the default flips at this width; an expanded rail keeps the user's preferred width, bounded by the viewport — the icon default hides the trees with every label | search text hidden (the existing 900 rule moves to this breakpoint) and the search ICON BUTTON stands in (#159: it reveals the topbar copy in place; ⌘K drives it too), crumbs truncate to the LEAF with the full path in `title` (106's pattern on `h2.tplx-detail-title`) | `--gap-lg` |
+| ≥ 1100 px | as today (expanded; `rail-collapsed` on user choice, remembered); **user resizing reaches the viewport less `--app-main-min-width` (320px)**, independent of tree content | as today | `--gap-lg` |
+| 768–1099 px | **starts collapsed** (icons only) unless the user expanded it — same class, same `localStorage` key, one more rule: the default flips at this width; an expanded rail keeps the user's preferred width, bounded by the viewport less `--app-main-min-width` (320px) — the icon default hides the trees with every label | search text hidden (the existing 900 rule moves to this breakpoint) and the search ICON BUTTON stands in (#159: it reveals the topbar copy in place; ⌘K drives it too), crumbs truncate to the LEAF with the full path in `title` (106's pattern on `h2.tplx-detail-title`) | `--gap-lg` |
 | < 768 px | **off-canvas drawer**: not in the grid (`grid-template-columns: 1fr`), `position: fixed`, `z-index: var(--z-drawer)`, translated off-screen; opened by a hamburger button that appears FIRST in the topbar; closed by Escape, backdrop tap, or any boosted navigation; the drawer keeps its full 232px with a tree open (#350: the phone breakpoint wins over the desktop minimum) and the tree scrolls sideways inside it | brand tile → hamburger, crumbs (leaf only), workspace switcher as its avatar only, user menu; **nothing wraps**; the search moves INTO the drawer's head (it is hidden today — `app.css` — it must not disappear, it must move) | `--gap-md` |
 
 Rules the table rides on, all testable:
@@ -2420,6 +2420,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-10 | v1.130 | #503 rail maximum reserves main content — renumbered at merge after #502's v1.129 | **§3.4/§3.6:** where the rail is a grid column (768px and up), its maximum is the viewport less the geometry token `--app-main-min-width` (320px), with the rail's 232px floor. End, pointer dragging and `aria-valuemax` use that maximum; saved preferences survive the temporary cap. The phone drawer and gutter are unchanged. |
 | 2026-10-10 | v1.129 | #502 undefined CSS custom properties defined or migrated | §2.3: every custom property a first-party sheet reads now exists — the fifteen undefined names are gone. `--accent-danger-bg` becomes an app token (a `color-mix` tint of `--accent-danger` on `--surface-default`; 4% is the strongest tint keeping `--accent-danger` text at 4.5:1 in light, #fef6f6; dark tops out at 3.6:1 — the accent itself is 3.67:1 on the dark surface, reported on #502); `--surface-secondary` migrates to `--surface-inset` (the read-only pane) and `--surface-default` (the context-row inputs, `.ds-input`'s fill); `--accent` → `--accent-primary`, `--accent-soft` → `--surface-selected` (which gains §2.8's accent bar, the house selected pattern), `--text` → `--text-primary`, `--border` → `--border-subtle`, `--gap-2xs` → `--space-0-5`; new app lengths at today's values: `--focus-ring-width: 2px` (mirrors the design system's ring), `--app-content-max: 1600px`, `--measure: 44rem`, `--measure-wide: 60rem`; `--te-side-w`/`--tplx-tree-w` are splitter's runtime-written defaults and keep their fallbacks — the existence audit now reads the splitter's `prop:` declarations as definitions. `CssTokenExistenceAuditTest`'s two ledgers end empty. No visible change except the danger chips (which painted no background before) and the version link's new bar; no route, permission or role changed. |
 | 2026-10-10 | v1.128 | #473 merge follow-up: the parameter-set workspace's frame log keeps attempt frames only | **§4.23:** #473 made the runtime's `onStreamEvent` witness carry the board's `scope: "dashboard"` vocabulary too, so the workspace (a parameters-only `initParameters` host, no board) logged the deduped `parameters.applied` notification after the terminal frame and `ParameterWorkspaceStreamBrowserTest` scenarios 3, 6 and 7b read it as the attempt's last frame (CI on `next`). The workspace now ignores `scope: "dashboard"` entries before its log and graph; no visible change, no route, permission or role changed. |
 | 2026-10-09 | v1.127 | #492 filters drawer by board-region width | **§4.21:** the board page is the filters presentation's CSS container; at 820 px or narrower it shows the drawer, otherwise the column. Rail resizing clears an open drawer on the return to a column. `DashboardFiltersBreakpointBrowserTest` pins the rail crossings, focus and overflow. |
