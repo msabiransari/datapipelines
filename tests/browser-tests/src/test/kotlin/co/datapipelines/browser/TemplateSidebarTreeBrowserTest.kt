@@ -112,9 +112,29 @@ class TemplateSidebarTreeBrowserTest : BrowserSuite() {
     private fun leaf(path: String) = "$panel a[href='/templates/$path']"
 
     private fun shot(name: String) {
-        val dir = Paths.get("build", "reports", "398-screenshots")
+        val dir = Paths.get("build", "reports", "478-screenshots")
         Files.createDirectories(dir)
-        page.screenshot(Page.ScreenshotOptions().setPath(dir.resolve("398-$name.png")).setFullPage(false))
+        page.screenshot(Page.ScreenshotOptions().setPath(dir.resolve("$name.png")).setFullPage(false))
+    }
+
+    /** Wait for each resize's layout write before issuing the next key. */
+    private fun screenshotRail(width: String) {
+        if (width == "phone") {
+            page.click("#rail-open")
+            return
+        }
+        page.focus("#rail-resize")
+        page.keyboard().press("Home")
+        page.waitForFunction("() => document.querySelector('.app-rail').getBoundingClientRect().width === 232")
+        if (width == "wide") {
+            repeat(4) { index ->
+                page.keyboard().press("Shift+ArrowRight")
+                page.waitForFunction(
+                    "expected => document.querySelector('.app-rail').getBoundingClientRect().width === expected",
+                    232 + (index + 1) * 50,
+                )
+            }
+        }
     }
 
     private val consoleErrors = mutableListOf<String>()
@@ -502,8 +522,6 @@ class TemplateSidebarTreeBrowserTest : BrowserSuite() {
                 }
             }
         })
-        val dir = Paths.get("build", "reports", "478-screenshots")
-        Files.createDirectories(dir)
         listOf("light", "dark").forEach { theme ->
             page.setViewportSize(1440, 900)
             page.navigate("$baseUrl/pipelines")
@@ -511,22 +529,7 @@ class TemplateSidebarTreeBrowserTest : BrowserSuite() {
             for (width in listOf("wide", "narrow", "phone")) {
                 page.setViewportSize(if (width == "phone") 390 else 1440, if (width == "phone") 844 else 900)
                 page.navigate("$baseUrl/pipelines")
-                if (width == "phone") {
-                    page.click("#rail-open")
-                } else {
-                    page.focus("#rail-resize")
-                    page.keyboard().press("Home")
-                    page.waitForFunction("() => document.querySelector('.app-rail').getBoundingClientRect().width === 232")
-                    if (width == "wide") {
-                        repeat(4) { index ->
-                            page.keyboard().press("Shift+ArrowRight")
-                            page.waitForFunction(
-                                "expected => document.querySelector('.app-rail').getBoundingClientRect().width === expected",
-                                232 + (index + 1) * 50,
-                            )
-                        }
-                    }
-                }
+                screenshotRail(width)
                 openTree()
                 railWidth() shouldBe if (width == "wide") 432.0 else 232.0
                 assertOpen("templates")
@@ -535,19 +538,19 @@ class TemplateSidebarTreeBrowserTest : BrowserSuite() {
                 page.fill("$panel input", "leaf_template")
                 page.waitForCondition { held.size == 1 }
                 page.waitForSelector("$panel .dp-tree-status[data-status^='Loading']")
-                page.screenshot(Page.ScreenshotOptions().setPath(dir.resolve("$theme-$width-loading.png")))
+                shot("$theme-$width-loading")
                 hold = false
                 held.removeAt(0).resume()
                 page.waitForSelector(leaf(deepLeaf))
                 settle()
-                page.screenshot(Page.ScreenshotOptions().setPath(dir.resolve("$theme-$width-long-name.png")))
+                shot("$theme-$width-long-name")
                 page.fill("$panel input", "no_match_478")
                 page.waitForSelector("$panel .dp-tree-status[data-status='No matches']")
-                page.screenshot(Page.ScreenshotOptions().setPath(dir.resolve("$theme-$width-empty.png")))
+                shot("$theme-$width-empty")
                 fail = true
                 page.fill("$panel input", "fault478")
                 page.waitForSelector("$panel .dp-tree-status[data-status='Could not load. ']")
-                page.screenshot(Page.ScreenshotOptions().setPath(dir.resolve("$theme-$width-error.png")))
+                shot("$theme-$width-error")
                 fail = false
                 page.evaluate("() => document.documentElement.scrollWidth > window.innerWidth") shouldBe false
             }
