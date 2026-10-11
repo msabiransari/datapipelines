@@ -1003,3 +1003,153 @@ test("composite dispose removes the mounted DOM; a host sibling stands; re-mount
     uninstallDom();
   }
 });
+
+test("#496: a host's parametersContainer keeps its head controls first — the pane appends; the layout container still prepends", async () => {
+  installDom();
+  try {
+    const runtime = require(resolveStatic("datapipelines-dashboard.js"));
+    // The board's filters aside: its Close button is the first child BEFORE the runtime mounts anything.
+    const panel = fakeElement("aside");
+    const close = fakeElement("button");
+    close.setAttribute("id", "dp-board-filters-close");
+    panel.appendChild(close);
+    const hosted = runtime.adapters(fakeElement("div"), { parametersContainer: panel });
+    await hosted.mountLayout({ columns: 12, grid: [] });
+    await hosted.renderParameters(compositeState());
+    await hosted.renderParameters(compositeState({ parameter_revision: 4 }));
+    const panelOrder = panel.children.map((c) => c.getAttribute("id") || c.className);
+    console.log("496-mount parametersContainer order=" + JSON.stringify(panelOrder));
+    assert.deepEqual(panelOrder, ["dp-board-filters-close", "dp-dashboard-parameters"], "Close heads the panel, the pane follows it");
+    // No parametersContainer: the pane is the layout container's FIRST child, before the grid (pre-#473 order).
+    const container = fakeElement("div");
+    const plain = runtime.adapters(container);
+    await plain.mountLayout({ columns: 12, grid: [] });
+    await plain.renderParameters(compositeState());
+    await plain.renderParameters(compositeState({ parameter_revision: 4 }));
+    const containerOrder = container.children.map((c) => c.className);
+    console.log("496-mount layout-container order=" + JSON.stringify(containerOrder));
+    assert.deepEqual(containerOrder, ["dp-dashboard-parameters", "dp-dashboard"], "the pane precedes the grid");
+  } finally {
+    uninstallDom();
+  }
+});
+
+// ---- #497 (a): a rejected typed value stays in its field; the read answers the last valid value ----------
+
+const LIMIT_ERROR = {
+  code: "parameter.evaluate.constraint_violation",
+  message: "value is above the declared maximum 100",
+  details: {},
+};
+
+/** The composite state with its one parameter reshaped as the INTEGER INPUT `limit` (1–100) at [value]. */
+function limitState(value, errors, revision) {
+  const state = compositeState({ values: { limit: value }, parents: ["limit"], parameter_revision: revision || 3 });
+  Object.assign(state.parameters[0], { name: "limit", label: "Limit", type: "INTEGER", kind: "INPUT", presentation: null });
+  state.parameters[0].state.value = value;
+  state.parameters[0].state.options = null;
+  state.parameters[0].state.errors = errors || [];
+  if (errors && errors.length) state.valid = false;
+  return state;
+}
+
+/** The limit row's input, its alert's text (null when none) and the adapter's read of `limit`. */
+function limitView(container, adapter) {
+  const row = container.querySelectorAll("[data-dp-parameter]")[0];
+  const input = row.children.filter((child) => child.tagName === "INPUT")[0];
+  const alert = row.children.filter((child) => child.getAttribute && child.getAttribute("role") === "alert")[0];
+  return { input, shown: input.value, alert: alert ? alert.textContent : null, read: adapter.readSelections().limit };
+}
+
+/** A composite with `limit` rendered valid at 10, then `500` typed, committed and answered with the error. */
+async function rejectedLimit(runtime) {
+  const container = fakeElement("div");
+  const adapter = runtime.adapters(container);
+  await adapter.mountLayout({ columns: 12, grid: [] });
+  await adapter.renderParameters(limitState(10, [], 3));
+  const input = limitView(container, adapter).input;
+  input.value = "500";
+  input.fire("change");
+  await adapter.renderParameters(limitState(10, [LIMIT_ERROR], 4));
+  return { container, adapter };
+}
+
+test("#497 (1): an INPUT's rejected text stays in its field beside its error; the read answers the last valid value", async () => {
+  installDom();
+  try {
+    const runtime = require(resolveStatic("datapipelines-dashboard.js"));
+    const { container, adapter } = await rejectedLimit(runtime);
+    const view = limitView(container, adapter);
+    console.log("497-node rejected shown=" + view.shown + " read=" + view.read + " alert=" + view.alert);
+    assert.equal(view.shown, "500", "the field keeps the text the person typed");
+    assert.ok(view.alert && view.alert.includes("above the declared maximum 100"), "its error stands beside it: " + view.alert);
+    assert.equal(view.read, 10, "the board keeps the last valid value, in its wire type");
+  } finally {
+    uninstallDom();
+  }
+});
+
+test("#497 (1b): another control's re-evaluation keeps the rejected text and its error until the field changes", async () => {
+  installDom();
+  try {
+    const runtime = require(resolveStatic("datapipelines-dashboard.js"));
+    const { container, adapter } = await rejectedLimit(runtime);
+    // The next response judged the last valid value (10): no error on the row, the value unmoved.
+    await adapter.renderParameters(limitState(10, [], 5));
+    const view = limitView(container, adapter);
+    console.log("497-node other-commit shown=" + view.shown + " read=" + view.read + " alert=" + view.alert);
+    assert.equal(view.shown, "500", "an unrelated re-evaluation does not take the typed text away");
+    assert.ok(view.alert && view.alert.includes("above the declared maximum 100"), "the server's error for that text stays: " + view.alert);
+    assert.equal(view.read, 10);
+  } finally {
+    uninstallDom();
+  }
+});
+
+test("#497 (2): a change after the rejection reads the field again, typed", async () => {
+  installDom();
+  try {
+    const runtime = require(resolveStatic("datapipelines-dashboard.js"));
+    const { container, adapter } = await rejectedLimit(runtime);
+    const input = limitView(container, adapter).input;
+    input.value = "50";
+    input.fire("change");
+    const read = adapter.readSelections().limit;
+    console.log("497-node changed read=" + JSON.stringify(read));
+    assert.equal(read, 50, "the corrected text travels as the wire's number");
+    // The accepted answer renders the resolved value with no alert, and a later render keeps it.
+    await adapter.renderParameters(limitState(50, [], 5));
+    const accepted = limitView(container, adapter);
+    assert.deepEqual([accepted.shown, accepted.alert, accepted.read], ["50", null, 50]);
+  } finally {
+    uninstallDom();
+  }
+});
+
+test("#497 (3): a server-side move of the value drops the rejected text and shows the resolved value", async () => {
+  installDom();
+  try {
+    const runtime = require(resolveStatic("datapipelines-dashboard.js"));
+    const { container, adapter } = await rejectedLimit(runtime);
+    await adapter.renderParameters(limitState(25, [], 5));
+    const view = limitView(container, adapter);
+    console.log("497-node server-moved shown=" + view.shown + " read=" + view.read + " alert=" + view.alert);
+    assert.deepEqual([view.shown, view.alert, view.read], ["25", null, 25], "the server's reset shows");
+  } finally {
+    uninstallDom();
+  }
+});
+
+test("#497 (4): a restore render drops the rejected text", async () => {
+  installDom();
+  try {
+    const runtime = require(resolveStatic("datapipelines-dashboard.js"));
+    const { container, adapter } = await rejectedLimit(runtime);
+    await adapter.renderParameters(limitState(10, [], 4), { restore: true });
+    const view = limitView(container, adapter);
+    console.log("497-node restore shown=" + view.shown + " read=" + view.read + " alert=" + view.alert);
+    assert.deepEqual([view.shown, view.alert, view.read], ["10", null, 10], "the restore never resurrects the rejected text");
+  } finally {
+    uninstallDom();
+  }
+});

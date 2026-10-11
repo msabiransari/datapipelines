@@ -1604,3 +1604,104 @@ test("a fixture the evaluator refused shows the error state with its code, never
     uninstallDom();
   }
 });
+
+// ---- #497 (owner ruling 2026-10-10): a rejected typed value, the retry's bound action and the restore ----
+
+/** The evaluated state with its one parameter reshaped as the INTEGER INPUT `limit` (1–100) at 10. */
+function limitEvaluated(errors, revision) {
+  const state = evaluatedState({ values: { limit: 10 }, parents: ["limit"], parameter_revision: revision });
+  Object.assign(state.parameters[0], { name: "limit", label: "Limit", type: "INTEGER", kind: "INPUT", presentation: null });
+  state.parameters[0].state.value = 10;
+  state.parameters[0].state.options = null;
+  state.parameters[0].state.errors = errors || [];
+  if (errors && errors.length) state.valid = false;
+  return state;
+}
+
+const LIMIT_TOO_LARGE = [
+  { code: "parameter.evaluate.constraint_violation", message: "value is above the declared maximum 100", details: {} },
+];
+
+test("#497: a commit made while the state is invalid fires its bound action once its retry comes back valid", async () => {
+  const fetchImpl = fakeFetch();
+  const answers = [];
+  const intents = [];
+  fetchImpl.on("/runtime/parameters", (url, init) => {
+    const intent = JSON.parse(init.body).intent;
+    intents.push(intent);
+    if (intent === "bootstrap") return fetchImpl.envelope(evaluatedState());
+    return fetchImpl.envelope(answers.shift());
+  });
+  const { instance, adapter } = await boot({
+    fetch: fetchImpl,
+    config: configPayload({
+      parameter_set: { name: "dbr/sets/reporting", version: 1 },
+      actions: [{ name: "refresh_all", type: "refresh", scope: "all", targets: [] }],
+      action_controls: [{ parameter: "year", action: "refresh_all" }],
+    }),
+  });
+  const refreshes = () => fetchImpl.calls.filter((call) => call.url.includes("/runtime/visualizations")).length;
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
+  const broken = () => {
+    const state = evaluatedState({ valid: false, parameter_revision: 4 });
+    state.parameters[0].state.errors = [{ code: "parameter.evaluate.required", message: "a value is required", details: {} }];
+    return state;
+  };
+  // The first commit's evaluation comes back invalid: the bound refresh is refused at the gate.
+  answers.push(broken());
+  adapter.commitCb({ name: "year", type: "parameter" });
+  await settle();
+  assert.equal(instance._parameters.valid, false);
+  const afterRejected = refreshes();
+  // A retry that is still invalid fires nothing — no refresh, no refused-action notice.
+  answers.push(broken());
+  const noticesBefore = adapter.log.filter((line) => line === "notify:parameters.invalid").length;
+  adapter.commitCb({ name: "year", type: "parameter" });
+  await settle();
+  assert.equal(refreshes(), afterRejected, "an invalid retry starts no refresh");
+  assert.equal(adapter.log.filter((line) => line === "notify:parameters.invalid").length, noticesBefore, "and refuses nothing aloud");
+  // A retry that comes back valid fires the control's bound action: one refresh.
+  answers.push(evaluatedState({ parameter_revision: 6 }));
+  adapter.commitCb({ name: "year", type: "parameter" });
+  await settle();
+  console.log("497-runtime intents=" + JSON.stringify(intents) + " refreshes=" + afterRejected + "->" + refreshes());
+  assert.deepEqual(intents.slice(-2), ["retry", "retry"], "the commits on the invalid state re-evaluated as retries");
+  assert.equal(instance._parameters.valid, true);
+  assert.equal(refreshes(), afterRejected + 1, "the valid retry's bound action started its refresh");
+});
+
+test("#497: reset's restore render drops a rejected INPUT text on the composite", async () => {
+  const fetchImpl = fakeFetch();
+  const answers = [];
+  fetchImpl.on("/runtime/parameters", (url, init) => {
+    const intent = JSON.parse(init.body).intent;
+    if (intent === "bootstrap") return fetchImpl.envelope(limitEvaluated([], 3));
+    return fetchImpl.envelope(answers.shift());
+  });
+  const { container, instance, adapter } = await boot({
+    fetch: fetchImpl,
+    composite: true,
+    config: configPayload({ parameter_set: { name: "dbr/sets/reporting", version: 1 } }),
+  });
+  const input = () => container.querySelectorAll("[data-dp-parameter]")[0].children.filter((c) => c.tagName === "INPUT")[0];
+  const alertText = () => {
+    const alert = container.querySelectorAll("[data-dp-parameter]")[0].children.filter((c) => c.getAttribute && c.getAttribute("role") === "alert")[0];
+    return alert ? alert.textContent : null;
+  };
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
+  // 500 typed and committed (limit is a parent, so the commit re-evaluates): the server refuses it.
+  answers.push(limitEvaluated(LIMIT_TOO_LARGE, 4));
+  input().value = "500";
+  input().fire("change");
+  await settle();
+  // Another evaluation judges the last valid value: valid again, the rejected text still shown.
+  answers.push(limitEvaluated([], 5));
+  await instance._evaluateParameters("parent_change");
+  assert.equal(input().value, "500", "the rejected text is held across the other evaluation");
+  assert.equal(adapter.readSelections().limit, 10);
+  await instance.reset();
+  console.log("497-runtime restore shown=" + input().value + " alert=" + alertText() + " read=" + adapter.readSelections().limit);
+  assert.equal(input().value, "10", "reset restores the applied value, never the rejected text");
+  assert.equal(alertText(), null);
+  assert.equal(adapter.readSelections().limit, 10);
+});

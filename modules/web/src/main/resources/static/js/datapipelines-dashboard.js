@@ -1677,7 +1677,9 @@
       return;
     }
     if (parents.indexOf(name) !== -1 || bound || invalid) {
-      this._safeEvaluate(bound && !invalid ? bound.action : null, invalid ? "retry" : "parent_change");
+      // #497 (owner ruling 2026-10-10) — a commit on an invalid state still carries its bound
+      // action: `_safeEvaluate` fires it only when the retry comes back valid.
+      this._safeEvaluate(bound ? bound.action : null, invalid ? "retry" : "parent_change");
       return;
     }
     this._markAllStale();
@@ -1710,7 +1712,9 @@
         });
         return;
       }
-      if (actionName) self._invokeAction(actionName, { via: "parameter_binding" });
+      // A retry that is still invalid fires nothing (the gate would only refuse it aloud).
+      var retryStillInvalid = intent === "retry" && self._parameters && self._parameters.valid === false;
+      if (actionName && !retryStillInvalid) self._invokeAction(actionName, { via: "parameter_binding" });
     })();
   };
 
@@ -1865,7 +1869,9 @@
     var stateAtStart = this._parameters;
     var render;
     try {
-      render = Promise.resolve(this._adapter.renderParameters(restored));
+      // `restore: true` (#497) tells the composite this is the applied state again, not a new
+      // answer: no rejected INPUT text it was holding survives the reset.
+      render = Promise.resolve(this._adapter.renderParameters(restored, { restore: true }));
     } catch (error) {
       render = Promise.reject(error);
     }
@@ -2290,6 +2296,30 @@
     // keyed by occurrence name; the cards map is the ONLY lookup renderStatus needs (no selector
     // walk), and the generation counter retires a card's pending accent timer on every new status.
     var cards = {};
+    // #497 (a), owner ruling 2026-10-10 — an INPUT's typed text the server rejected stays in its
+    // field beside the server's error for it, while the reads answer the last valid value. Keyed by
+    // parameter name: `committedTexts` holds the text each INPUT's change gesture committed (the
+    // text that travelled, recorded where it is sent rather than in `read`, which every refresh
+    // body also calls); `heldRejections` holds `{ text, errors, value }` until the field changes,
+    // the server's resolved value moves off `value`, or a restore render drops it.
+    var committedTexts = {};
+    var heldRejections = {};
+
+    /** The row's held rejection after this response, or null — see `heldRejections`. */
+    function holdRejected(name, definitionState) {
+      var errors = definitionState.errors && definitionState.errors.length ? definitionState.errors : null;
+      var hasCommitted = Object.prototype.hasOwnProperty.call(committedTexts, name);
+      var committed = committedTexts[name];
+      delete committedTexts[name];
+      if (hasCommitted) {
+        if (errors) heldRejections[name] = { text: committed, errors: errors, value: definitionState.value };
+        else delete heldRejections[name];
+      } else {
+        var prior = heldRejections[name];
+        if (prior && (errors || wireKey(prior.value) !== wireKey(definitionState.value))) delete heldRejections[name];
+      }
+      return heldRejections[name] || null;
+    }
 
     /**
      * #473 — the card's status treatment. The chip keeps its element, `role=status`, text and
@@ -2556,7 +2586,12 @@
        * a MULTI reads an array, an unresolved null stays null, and hidden and disabled values are
        * read exactly like any other (D23).
        */
-      renderParameters: function (state) {
+      renderParameters: function (state, renderOptions) {
+        // #497 — the runtime's reset restores the applied state: no rejected text survives it.
+        if (renderOptions && renderOptions.restore === true) {
+          committedTexts = {};
+          heldRejections = {};
+        }
         var root = this.parametersRoot;
         if (!root) {
           root = this.parametersRoot = document.createElement("div");
@@ -2564,11 +2599,15 @@
         }
         // #473 — the pane mounts where the HOST pointed (its own filters panel when
         // `parametersContainer` was given), else into the layout container as before.
+        // #496 — a host's panel keeps its own head controls first (the board's drawer Close),
+        // so the pane APPENDS there; in the layout container it is still the first child,
+        // before the grid.
         var parent = parametersContainer || this.container || this.defaultSlot;
         if (parent) {
           if (root.parentNode !== parent) {
             if (root.parentNode && typeof root.parentNode.removeChild === "function") root.parentNode.removeChild(root);
-            if (typeof parent.insertBefore === "function") parent.insertBefore(root, parent.firstChild);
+            if (parametersContainer) parent.appendChild(root);
+            else if (typeof parent.insertBefore === "function") parent.insertBefore(root, parent.firstChild);
           }
         }
         while (root.firstChild) root.removeChild(root.firstChild);
@@ -2608,6 +2647,7 @@
             row.appendChild(label);
           }
           let read = null;
+          let heldErrors = null;
           let interactives = [];
           if (parameter.kind === "SELECT") {
             let options = (definitionState.options || []).slice();
@@ -2735,10 +2775,24 @@
             free.className = "ds-input";
             free.id = controlId;
             let raw = definitionState.value;
-            free.value = raw === null || raw === undefined ? "" : String(raw);
+            // #497 (a) — a held rejection shows the person's text and keeps the server's error for
+            // it; the read answers the last valid value until this field's next change gesture.
+            let held = holdRejected(parameter.name, definitionState);
+            free.value = held ? held.text : raw === null || raw === undefined ? "" : String(raw);
             if (!enabled) free.disabled = true;
             interactives.push(free);
-            read = typedInputRead(parameter.type, free);
+            let parseFree = typedInputRead(parameter.type, free);
+            read = held
+              ? function () {
+                  return heldRejections[parameter.name] === held ? held.value : parseFree();
+                }
+              : parseFree;
+            if (held) heldErrors = held.errors;
+            // Registered before the row's commit listener: the commit's evaluation reads the field.
+            free.addEventListener("change", function () {
+              delete heldRejections[parameter.name];
+              committedTexts[parameter.name] = free.value;
+            });
             row.appendChild(free);
           }
           if (hidden) row.style.display = "none";
@@ -2761,7 +2815,9 @@
               row.appendChild(reset);
             }
           }
-          if (definitionState.errors && definitionState.errors.length) {
+          // #497 — a held rejection's errors are the server's verdict on the text the field shows.
+          let rowErrors = heldErrors || definitionState.errors;
+          if (rowErrors && rowErrors.length) {
             // #498 — the design system's field-error voice (dashboards.css restates
             // .ds-field-error's tokens): the sentence first, the catalogued code after it in a
             // muted <code> span (data-dp-code carries the codes for the tests). Composed with
@@ -2772,8 +2828,8 @@
             problem.className = "dp-dashboard-parameter-error";
             problem.setAttribute("role", "alert");
             let codes = [];
-            for (let e = 0; e < definitionState.errors.length; e++) {
-              let one = definitionState.errors[e] || {};
+            for (let e = 0; e < rowErrors.length; e++) {
+              let one = rowErrors[e] || {};
               let code = one.code || "parameter.error";
               codes.push(code);
               if (e > 0) problem.appendChild(document.createTextNode(" "));

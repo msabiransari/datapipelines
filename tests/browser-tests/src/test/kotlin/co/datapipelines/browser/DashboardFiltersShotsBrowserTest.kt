@@ -1,6 +1,7 @@
 package co.datapipelines.browser
 
 import com.microsoft.playwright.Page
+import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
 import java.nio.file.Path
 import java.nio.file.Paths
@@ -10,7 +11,8 @@ import java.nio.file.Paths
  * checkbox list, a dependent pair and a constrained INTEGER input): the panel at the desktop width,
  * the drawer at a phone viewport, and the VALIDATION state — `limit` typed past its maximum, the
  * row's `.dp-dashboard-parameter-error` alert rendered from the evaluate response's
- * `state.errors` (datapipelines-dashboard.js, the parameters pane). The geometry and the wire are
+ * `state.errors` (datapipelines-dashboard.js, the parameters pane), the typed `500` still in its
+ * field (#497 (a), asserted). The geometry and the wire are
  * ASSERTED by `DashboardFiltersBrowserTest`; this class waits on the validation marker before its
  * shot, so a pane that stops rendering the alert is red here too.
  *
@@ -56,6 +58,8 @@ class DashboardFiltersShotsBrowserTest : DashboardBrowserSuite() {
                 "493-shots $mode validation=" + page.textContent("$limit .dp-dashboard-parameter-error") +
                     " shown-value=" + page.inputValue("$limit input"),
             )
+            // #497 (a): the field keeps the typed value beside its error.
+            page.inputValue("$limit input") shouldBe "500"
             page.locator("$limit input").scrollIntoViewIfNeeded()
             shot("validation-$mode")
 
