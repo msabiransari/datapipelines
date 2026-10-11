@@ -216,7 +216,7 @@ class DashboardUiRenderTest {
 
         Regex("<script[^>]*plotly-\\d+d?\\.min\\.js[^>]*>").findAll(html).toList().size shouldBe 1
         html shouldContain "src=\"/vendor/plotly/plotly-3d.min.js\""
-        html shouldContain "data-chart-assets"
+        html shouldContain "data-page-assets"
         html shouldNotContain "plotly-2d.min.js"
         // The runtime and its three renderers ride the page, then the glue — and the container
         // carries the dashboard id, the only server value the glue reads. The DEFAULT
@@ -243,7 +243,7 @@ class DashboardUiRenderTest {
 
         Regex("<script[^>]*plotly-\\d+d?\\.min\\.js[^>]*>").findAll(html).toList().size shouldBe 1
         html shouldContain "src=\"/vendor/plotly/plotly-3d.min.js\""
-        html shouldContain "data-chart-assets"
+        html shouldContain "data-page-assets"
         html shouldNotContain "plotly-2d.min.js"
     }
 

@@ -1,9 +1,9 @@
 # Pipeline Editor UI Specification
 
-**Status:** v1.26 (revised — see Change Log)
+**Status:** v1.27 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Contract](pipeline-contract.md), [REST API + SSE](rest-api.md), [Type System](type-system.md), [Enums](enums.md), [Auth](auth.md), [Configuration](configuration.md), [@acme/design-tokens Design System](https://github.com/msabir/design-system-starter)
-**Last updated:** 2026-10-05
+**Last updated:** 2026-10-11
 
 ---
 
@@ -59,15 +59,25 @@ Graph **authoring** is out of scope: v1 pipelines are authored by LLMs via MCP o
 
 > `EventSource` is deliberately **not** in this stack. Every SSE consumer in the editor is `fetch` + `ReadableStream` (§7.3).
 
-`pipeline-editor/runtime.js` (since #358) is the page's ONE loader and initializer: the
-vendors and modules ride in an inert `<template id="pe-runtime-scripts">` catalog —
-loaded in order, Alpine LAST so the modules own the `alpine:init` registration — the
-`.pe-root` is served, and cached, with `x-ignore`, and the runtime removes it inside its
-single `mutateDom` activation (destroy-before-bind, the context read first). A cached
-history restore replays only this guarded bootstrap: the layout's `hx-history-elt`
-scopes the history cache to the workspace region, so no other script ever re-executes
-on a Back ([UI Screens §3.2](ui-screens.md#32-boosted-navigation-the-app-shell-076)).
-`runtime-activation.test.mjs` owns the discipline.
+The editor's scripts load through the shell's ONE page-script loader, `page-assets.mjs`
+(#494; [UI Screens §3.2](ui-screens.md#32-boosted-navigation-the-app-shell-076)): the
+vendors and modules ride in an inert `<template id="pe-runtime-scripts"
+data-page-assets="on-mount">` catalog, which the loader fetches while a navigation
+prepares and executes once the page is in place — in order, Alpine LAST so the modules own
+the `alpine:init` registration, once per document across every page that shares a source
+(dagre, Cytoscape, the tab core, the history listener). The catalog's last entry,
+`pipeline-editor/runtime.js`, is the page's ONE initializer and a `data-page-mount`: the
+loader calls it once per catalog node — the first arrival, a boosted swap and every cached
+history restore — after every entry before it loaded and after the page's own bare tags a
+swap or restore re-created have executed (a full load's order: a replayed script never acts
+on an activated root). The `.pe-root` is served, and
+cached, with `x-ignore`, and the runtime removes it inside its single `mutateDom`
+activation (destroy-before-bind, the context read first). A cached history restore
+replays no script at all: the layout's `hx-history-elt` scopes the history cache to the
+workspace region, where only the inert catalogs and the parser-blocking `splitter.js`
+live. `runtime-activation.test.mjs` owns the activation, `page-assets.test.mjs` the
+loading (order, once per document, the `/js` and `/vendor` allow-list, the Alpine
+singleton gate).
 
 ### 3.3 What we explicitly do NOT use
 
@@ -1396,8 +1406,8 @@ against (its re-init marker is only set by `Alpine.clone`). Each restore **stack
 another component** on the same root; one Execute click then fired `executePipeline()`
 once per stacked component, and N executions produced N terminal events and N toasts.
 080's fix (the rescue destroying the stale tree before re-binding) is itself superseded:
-since #358 the editor's scripts ride in the runtime's inert catalog (`runtime.js`,
-§3.2), the restored root keeps `x-ignore` until the runtime's single `mutateDom`
+since #358 the editor's scripts ride in an inert catalog (the shell's page-script loader
+executes it and mounts `runtime.js` since #494, §3.2), the restored root keeps `x-ignore` until the runtime's single `mutateDom`
 activation removes it, and init.js wires NO `afterSettle` initializer at all — one
 Alpine instance per document, one activation per root. `editor-toast-once.test.mjs`
 pins the wiring shape (the boost pair stays teardown-only, singular across a second
@@ -2026,6 +2036,7 @@ Themes shipped by the design system — `saas` (modern indigo, devtool-oriented)
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-11 | v1.27 | #494 one page-script loader | **§3.2**: the editor's catalog becomes `<template id="pe-runtime-scripts" data-page-assets="on-mount">` and loads through the shell's ONE loader, `page-assets.mjs` (fetched while a navigation prepares, executed once the page is in place, once per document across pages that share a source); `runtime.js` is no longer a loader or a bare tag but the catalog's last entry and `data-page-mount`, called once per catalog node (arrival, swap, cached restore) after the page's re-created bare tags have executed, keeping its activation, generation counter, before-save cleanup and `PEPipelineRuntime` identity. A cached restore now replays no editor script. Tests: `page-assets.test.mjs` (order, once per document, allow-list, singleton gate moved from `runtime-activation.test.mjs`), `PersistentChartNavigationBrowserTest` (per-source evaluation counts across all six pages). |
 | 2026-10-06 | v1.26 | #460 reusable REST navigation | §4.1: persistent artifact entry, closed-root initialization, rail continuity and observer ownership through cached restoration. **Supersedes the #149 full-document editor-entry rule** (ui-screens v1.85): the workspace now arrives through prepared main-content navigation, and `pipeline-editor/runtime.js` loads the editor's modules in order and activates the component after the swap (`data-pe-runtime-epoch` is the readiness signal the browser witnesses wait on). |
 | 2026-10-03 | v1.25 | #402 Back/Forward across the in-page switches | **§4.1**: in-page version/tab switches push entries and Back/Forward replays them (no longer `replaceState`). **§10.8**: the canonical URL moves with a pushed entry of the workspace's own (`workspace/history.js`, `{dpWorkspace: {family, version, tab}}`); a replay goes through the same lensed read with `{history: false}` and never pushes; an entry under another screen is handed to htmx; the workspace block and the root's tab attribute stay truthful for a cached restore. |
 | 2026-10-02 | v1.24 | #350 the sidebar tree | **§4.1**: how a reader arrives — the global sidebar's Pipelines tree leaf or a `/pipelines` catalog row, both full-document links to the canonical `/pipelines/{id}` (no version: the current-first rule); the page's `data-nav-current` hook (id + path) lets the rail mark and reveal its leaf; the explorer's detail pane and "Open" are gone (ui-screens §4.3); Back/Forward across in-page switches is #402. The workspace header's lifecycle verbs and the Versions tab's Switch/Discard/Restore redirect with a flash since #395 (ui-screens §4.3d). |

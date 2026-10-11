@@ -3,6 +3,7 @@ package co.datapipelines.web.ui
 import co.datapipelines.web.ui.site.REPORT_PROBLEM_URL
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldEndWith
 import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
 import org.springframework.mock.web.MockHttpServletRequest
@@ -201,9 +202,15 @@ class ParameterSetsRenderTest {
     }
 
     @Test
-    fun `every vendor and module script rides in the INERT catalog - the only live tag is the guarded runtime`() {
+    fun `every vendor and module script rides in the INERT catalog - the runtime is its last entry and the loader's mount`() {
         val html = workspace()
-        val catalog = Regex("<template id=\"ps-runtime-scripts\">(.*?)</template>", RegexOption.DOT_MATCHES_ALL).find(html)!!.groupValues[1]
+        // #494: the shell's page-script loader executes an "on-mount" catalog once the page is in place.
+        val match =
+            Regex(
+                "<template id=\"ps-runtime-scripts\" data-page-assets=\"on-mount\">(.*?)</template>",
+                RegexOption.DOT_MATCHES_ALL,
+            ).find(html)
+        val catalog = requireNotNull(match) { "no on-mount ps-runtime-scripts page-asset catalog" }.groupValues[1]
         listOf(
             "dagre.min.js",
             "cytoscape.min.js",
@@ -214,10 +221,11 @@ class ParameterSetsRenderTest {
             "inspector.js",
             "workspace.js",
         ).forEach { catalog shouldContain it }
+        catalog.trimEnd() shouldEndWith "<script data-page-mount src=\"/js/parameter-workspace/runtime.js\"></script>"
         val outside = html.replace(catalog, "")
         outside shouldNotContain "datapipelines-dashboard.js"
         outside shouldNotContain "cytoscape"
-        outside shouldContain "/js/parameter-workspace/runtime.js"
+        outside shouldNotContain "/js/parameter-workspace/"
     }
 
     @Test

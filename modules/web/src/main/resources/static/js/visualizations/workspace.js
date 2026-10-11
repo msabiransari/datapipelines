@@ -189,7 +189,7 @@
   if (typeof window !== "undefined" && typeof document !== "undefined") {
     window.VisualizationWorkspaceLogic = logic;
     window.VisualizationWorkspaceMount = wire;
-    if (window.DatapipelinesPageMountManaged || document.querySelector("template[data-chart-assets]")) return;
+    if (window.DatapipelinesPageMountManaged || document.querySelector("template[data-page-assets]")) return;
     if (document.readyState === "loading") {
       document.addEventListener("DOMContentLoaded", wire);
     } else {

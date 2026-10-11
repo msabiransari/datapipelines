@@ -11,13 +11,16 @@
   <span hidden data-nav-current="parameter-sets"
         th:attr="data-nav-current-id=${parameterSetId},data-nav-current-path=${navCurrentPath}"></span>
 
-  <!--/* The vendors and modules load through the runtime (parameter-workspace/runtime.js), not as bare tags: htmx
-          re-executes every <script> it restores from the history cache (#358). This catalog is INERT — <template>
-          content neither parses nor restores as executable script — and the runtime loads it in order, once per
-          document. The renderer is the SAME datapipelines-dashboard.js the board uses (one renderer, one copy of
-          the attempt logic); Plotly and the visualization adapters are not part of this page. Nothing in here may
-          carry an inline script body (InlineScriptAuditTest). */-->
-  <template id="ps-runtime-scripts">
+  <!--/* The vendors and modules load through the shell's ONE page-script loader (page-assets.mjs, #494), not as bare
+          tags: htmx re-executes every <script> it restores from the history cache (#358). This catalog is INERT —
+          <template> content neither parses nor restores as executable script — and the loader executes it in order,
+          once per document whichever page asks first ("on-mount": fetched while a navigation prepares, executed once
+          this page is in place). Its last entry, runtime.js, is the mount that activates the `.ps-root` — on a cached
+          history restore too, where nothing in the snapshot replays. The renderer is the SAME
+          datapipelines-dashboard.js the board uses (one renderer, one copy of the attempt logic); Plotly and the
+          visualization adapters are not part of this page. Nothing in here may carry an inline script body
+          (InlineScriptAuditTest). */-->
+  <template id="ps-runtime-scripts" data-page-assets="on-mount">
     <script th:src="@{/vendor/dagre/dagre.min.js}"></script>
     <script th:src="@{/vendor/cytoscape/cytoscape.min.js}"></script>
     <script th:src="@{/vendor/cytoscape/cytoscape-dagre.js}"></script>
@@ -26,6 +29,7 @@
     <script th:src="@{/js/parameter-workspace/graph.js}"></script>
     <script th:src="@{/js/parameter-workspace/inspector.js}"></script>
     <script th:src="@{/js/parameter-workspace/workspace.js}"></script>
+    <script data-page-mount th:src="@{/js/parameter-workspace/runtime.js}"></script>
   </template>
 
   <div class="ps-root" th:attr="data-parameter-set-id=${parameterSetId}, data-active-tab=${activeTab}">
@@ -134,8 +138,5 @@
     </section>
   </div>
 
-  <!-- The guarded bootstrap: the ONE executable script a history restore replays (it turns the replay into another
-       `enter()` on the restored root). -->
-  <script th:src="@{/js/parameter-workspace/runtime.js}"></script>
 </th:block>
 </html>
