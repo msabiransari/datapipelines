@@ -218,6 +218,33 @@
   --brand-soft: var(--surface-selected);
   --border-faint: var(--border-subtle);
 
+  /* #502 — the danger chip tint: the success/warning/info `--accent-*-bg` trio's missing
+     sibling. The vendored design system ships no `--accent-danger-bg` and is never edited
+     here, so the token is defined as a tint of `--accent-danger` on `--surface-default`,
+     the same shape as `--type-transform-bg` above. 4% is the strongest tint whose LIGHT
+     rendering still carries `--accent-danger` text at the 4.5:1 floor (a near-white tint,
+     4.54:1; at 6% it is 4.41:1). Dark renders a near-surface dark red at 3.60:1 — the
+     accent itself tops out at 3.67:1 on the dark `--surface-default`, so no N of this mix
+     reaches 4.5 there; the gap is reported on #502 rather than papered over with a
+     literal. */
+  --accent-danger-bg: color-mix(in srgb, var(--accent-danger) 4%, var(--surface-default));
+
+  /* #502 — the focus RING's width, the length half of the design system's focus state:
+     primitives.css builds its ring as a 2px box-shadow band around `--focus-ring`
+     (`.ds-button:focus-visible`, `0 0 0 var(--focus-ring-offset) var(--surface-default),
+     0 0 0 calc(var(--focus-ring-offset) + 2px) var(--focus-ring)`), and the app's
+     outline-based focus (the tab strip, the tree rows) mirrors that 2px. One token so the
+     two never drift. */
+  --focus-ring-width: 2px;
+
+  /* #502 — app layout lengths at today's effective values (ui-screens §2.3: a length may
+     be literal, a colour never — the derived values above carry the tints). The design
+     system's `--container-*` scale tops out at 1400px, so the workspace's page measure has
+     no vendor token to borrow. */
+  --app-content-max: 1600px;
+  --measure: 44rem;
+  --measure-wide: 60rem;
+
   /* 079 §G: the vendored faces lead every stack, whatever the theme said. The
      design system's own fallbacks follow, so a blocked/failed font download
      degrades to exactly today's rendering. */
@@ -3601,7 +3628,7 @@ pre.tf-pane-input {
 .dp-tree-group { padding-inline-start: var(--gap-md); }
 .dp-tree-line { display: flex; align-items: center; }
 .dp-tree-activate { display: flex; align-items: center; gap: var(--gap-xs); color: inherit; background: transparent; border: 0; cursor: pointer; padding: var(--gap-xs); white-space: nowrap; text-decoration: none; font: inherit; }
-.dp-tree-item:focus { outline: var(--focus-ring-width, 2px) solid var(--border-focus); outline-offset: -2px; }
+.dp-tree-item:focus { outline: var(--focus-ring-width) solid var(--border-focus); outline-offset: -2px; }
 .dp-tree-item[aria-expanded="true"] > .dp-tree-line .ds-icon { transform: rotate(90deg); }
 .dp-tree-item[aria-selected="true"] > .dp-tree-line { background: var(--surface-selected); color: var(--text-link); }
 .dp-tree-status { padding: var(--gap-xs); color: var(--text-muted); }

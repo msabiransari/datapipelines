@@ -24,25 +24,28 @@ import org.springframework.core.io.support.PathMatchingResourcePatternResolver
  * ## Scope, stated
  *
  *   - USE: every `var(--x)` in the first-party sheets (the `static/css` directory).
- *   - DEFINITION, three places the browser actually has: the first-party sheets themselves,
+ *   - DEFINITION, four places the browser actually has: the first-party sheets themselves,
  *     the vendored design system tree (`tokens.css` and the themes), and the runtime writers
- *     (`setProperty('--x', …)` calls in the `static/js` scripts — the layout tokens the tree
- *     and table scripts measure at run time).
+ *     in the `static/js` scripts, in BOTH shapes the writers take — the literal
+ *     `setProperty('--x', …)` calls, and splitter.js's `prop: "--x"` declarations, where the
+ *     name travels inside a variable and the literal regex cannot see it (the same fact
+ *     `InlineWidthAuditTest` records for the width policy: the splitter's written token IS
+ *     the sheet's one length, and its `var()` fallback is the shipped default by design —
+ *     "reset to default" means "remove the property").
  *
  * ## The two defect classes, and the two known lists
  *
  * A use of an undefined name comes in two shapes, and the sweep holds them to different bars:
  *
  *   - BARE — `var(--x)` with no fallback — resolves to the guaranteed-invalid value and
- *     silently breaks the declaration. This is the class #474 reports, and after the fix it
- *     must stay EMPTY except for two names that predate this lane (`--accent-danger-bg`,
- *     `--surface-secondary`, in app.css and template-editor.css): repairing them means
- *     choosing replacement colours for other rounds' work, which the lane's fence forbids.
- *     They are NAMED here, tracked in #502, and each entry dies automatically
- *     the moment its last use disappears, so both lists can only shrink.
+ *     silently breaks the declaration. This is the class #474 reports.
  *   - WITH FALLBACK — `var(--x, #4338ca)` — degrades to the literal: functional, but a
- *     hard-coded colour that stops following the theme. Thirteen such names predate the lane
- *     across six sheets; same ledger, same zombie rule.
+ *     hard-coded colour that stops following the theme.
+ *
+ * Both ledgers have been EMPTY since #502 defined or migrated the fifteen names that
+ * predate it. A NEW entry here is deliberate debt and must carry, in its comment: the
+ * reason the name cannot be fixed in place, and the issue that tracks its fix. Each entry
+ * dies automatically the moment its last use disappears, so both lists can only shrink.
  *
  * Non-vacuity is asserted in both directions: the sweep must see the real corpus (sheet count,
  * distinct used and defined names at their base floors), and the #474 fix itself is pinned —
@@ -80,6 +83,7 @@ class CssTokenExistenceAuditTest {
         }
         scripts.forEach { (name, js) ->
             SET_PROPERTY.findAll(js).forEach { defs.getOrPut(it.groupValues[1]) { mutableSetOf() }.add(name) }
+            PROP_DECLARED.findAll(js).forEach { defs.getOrPut(it.groupValues[1]) { mutableSetOf() }.add(name) }
         }
         defs
     }
@@ -130,6 +134,18 @@ class CssTokenExistenceAuditTest {
         definedBy.keys shouldContain "--text-base"
         definedBy.keys shouldContain "--accent-primary"
 
+        // #502 emptied both ledgers; the emptiness itself is pinned here so a regression in
+        // the sweep's inputs cannot resurrect silent debt behind an empty-looking list.
+        (bareUses.keys - definedBy.keys).shouldBeEmpty()
+        (fallbackUses.keys - definedBy.keys).shouldBeEmpty()
+        definedBy.getValue("--accent-danger-bg") shouldContain "css/app.css"
+        definedBy.getValue("--focus-ring-width") shouldContain "css/app.css"
+        definedBy.getValue("--app-content-max") shouldContain "css/app.css"
+        definedBy.getValue("--measure") shouldContain "css/app.css"
+        definedBy.getValue("--measure-wide") shouldContain "css/app.css"
+        definedBy.getValue("--te-side-w") shouldContain "js/splitter.js"
+        definedBy.getValue("--tplx-tree-w") shouldContain "js/splitter.js"
+
         val dashboards = firstParty.getValue("css/dashboards.css").withoutBlockComments()
         dashboards shouldContain "font-size: var(--text-base);"
         dashboards shouldContain "border-bottom-color: var(--accent-primary);"
@@ -148,33 +164,29 @@ class CssTokenExistenceAuditTest {
         val SET_PROPERTY = Regex("""setProperty\(\s*['"](--[A-Za-z0-9-]+)""")
 
         /**
-         * Bare undefined uses that predate this lane — silent breakage, verified definition-free
-         * across kt, js, html, css and json at the lane's base. Tracked for a fix of their own
-         * (each needs a replacement token chosen); an entry leaves this list only by that fix or
-         * by its last use disappearing.
+         * The splitter's second write shape: the token name travels in a VARIABLE
+         * (`applyProp(prop, …)` → `style.setProperty(prop, …)`), fed by `prop: "--te-side-w"`
+         * style declarations, so [SET_PROPERTY] cannot see it. A name declared here is a
+         * DEFINITION: the sheet's `var(--x, default)` fallback is the shipped default by
+         * design ("reset" is "remove the property" — `InlineWidthAuditTest` records the same
+         * fact for the width policy), not debt.
          */
-        val KNOWN_BARE_UNDEFINED = setOf("--accent-danger-bg", "--surface-secondary")
+        val PROP_DECLARED = Regex("""prop:\s*["'](--[A-Za-z0-9-]+)""")
 
         /**
-         * Fallback-pinned undefined names that predate this lane — functional, but each pins a
-         * literal where a theme token should read. Same ledger rules as the bare list.
+         * Empty since #502 (both bare names defined or migrated, all thirteen fallback names
+         * with them). A new entry is deliberate debt: its comment must carry the reason the
+         * name cannot be fixed in place and the issue that tracks the fix. An entry whose
+         * last use disappears fails the zombie test below until it is removed.
          */
-        val KNOWN_FALLBACK_UNDEFINED =
-            setOf(
-                "--accent",
-                "--accent-danger-bg",
-                "--accent-soft",
-                "--app-content-max",
-                "--border",
-                "--focus-ring-width",
-                "--focus-width",
-                "--gap-2xs",
-                "--measure",
-                "--measure-wide",
-                "--te-side-w",
-                "--text",
-                "--tplx-tree-w",
-            )
+        val KNOWN_BARE_UNDEFINED = emptySet<String>()
+
+        /**
+         * Empty since #502 (the thirteen fallback-pinned names defined or migrated; the two
+         * splitter lengths count as DEFINED via [PROP_DECLARED], their fallback being the
+         * design). Same ledger rules as the bare list.
+         */
+        val KNOWN_FALLBACK_UNDEFINED = emptySet<String>()
 
         const val FIRST_PARTY_SHEET_FLOOR = 11
         const val USED_NAME_FLOOR = 150

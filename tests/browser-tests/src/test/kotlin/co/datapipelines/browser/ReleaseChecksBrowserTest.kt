@@ -2,7 +2,9 @@ package co.datapipelines.browser
 
 import com.microsoft.playwright.Locator
 import com.microsoft.playwright.options.WaitForSelectorState
+import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
 import java.sql.DriverManager
@@ -169,6 +171,42 @@ class ReleaseChecksBrowserTest : BrowserSuite() {
         page.locator("#toast .ds-toast").first().innerText() shouldContain "Released"
 
         assertAuditedOverrideAndRuns(pipelineId)
+    }
+
+    /**
+     * #502 — the Fail chip's `background: var(--accent-danger-bg)` only paints when the name
+     * exists. An undefined custom property resolves to the guaranteed-invalid value, the
+     * declaration drops, and the chip showed the transparent `rgba(0, 0, 0, 0)` it had before
+     * the token was defined — the silent-breakage shape the existence audit guards. Asserted
+     * in BOTH themes: the token's rendering is its own mix per mode.
+     */
+    @Test
+    fun `the fail chip paints its token background in both themes`() {
+        startTrace()
+        ready()
+        page.navigate("$baseUrl/dashboard")
+
+        val suffix = generatedPassword("d").take(8).lowercase()
+        val datasource = "h2-rc502-$suffix"
+        registerH2(datasource)
+        val pipelineName = "test/rc502_$suffix"
+        val pipelineId = createCheckedDraft(pipelineName, datasource)
+
+        for (mode in listOf("light", "dark")) {
+            // The theme is set OUTSIDE the dialog: the toggle lives in the top bar a modal covers.
+            page.navigate("$baseUrl/dashboard")
+            ensureTheme(mode)
+            page.navigate("$baseUrl/pipelines/$pipelineId")
+            page.waitForSelector(".pe-root")
+            val dialog = openDialog(page.locator(".pe-topbar [data-verb='pipeline-release']"))
+            val chip = dialog.locator(".app-chip-bad", Locator.LocatorOptions().setHasText("Fail"))
+            chip.waitFor()
+            val background = chip.evaluate("el => getComputedStyle(el).backgroundColor") as String
+            withClue("mode=$mode: the fail chip's background must not be the undefined-token transparent") {
+                background shouldNotBe "rgba(0, 0, 0, 0)"
+            }
+            println("502 chip-bad background mode=$mode: $background")
+        }
     }
 
     // ------------------------------------------------------------------ shared helpers
