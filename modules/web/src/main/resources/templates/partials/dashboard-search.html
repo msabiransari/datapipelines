@@ -20,6 +20,7 @@
       <p class="ds-empty-title">No dashboards match your search</p>
       <div class="ds-empty-actions">
         <button th:unless="${nav}" type="button" class="ds-button ds-button-secondary ds-button-sm"
+                data-dp-clear-filters="#dashboard-filter-q" hx-sync="#dashboard-filter-q:replace"
                 th:attr="hx-get=@{/partials/dashboards}, hx-target='#' + ${rootId}, hx-swap='outerHTML'">Clear search</button>
       </div>
     </div>

@@ -22,6 +22,8 @@
       <p class="ds-empty-title">No templates match your search</p>
       <div class="ds-empty-actions">
         <button th:unless="${nav}" type="button" class="ds-button ds-button-secondary ds-button-sm"
+                data-dp-clear-filters="#template-filter-q" hx-sync="#template-filter-q:replace"
+                hx-include="#template-filter-dialect, #template-filter-type"
                 th:attr="hx-get=@{/partials/templates}, hx-target='#' + ${rootId}, hx-swap='outerHTML'">Clear search</button>
       </div>
     </div>

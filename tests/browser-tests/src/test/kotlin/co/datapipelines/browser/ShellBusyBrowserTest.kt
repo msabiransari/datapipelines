@@ -3,13 +3,18 @@ package co.datapipelines.browser
 import com.microsoft.playwright.APIResponse
 import com.microsoft.playwright.Page
 import com.microsoft.playwright.PlaywrightException
+import com.microsoft.playwright.Request
 import com.microsoft.playwright.Route
 import com.microsoft.playwright.options.WaitForSelectorState
+import com.microsoft.playwright.options.WaitUntilState
 import io.kotest.matchers.collections.shouldBeEmpty
+import io.kotest.matchers.collections.shouldContain
+import io.kotest.matchers.collections.shouldNotContain
 import io.kotest.matchers.ints.shouldBeGreaterThanOrEqual
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldMatch
 import org.junit.jupiter.api.Test
+import java.util.function.Consumer
 
 /**
  * 085 §D — a signal for every server trip (owner: "we need some kind of an indicator").
@@ -56,6 +61,11 @@ import org.junit.jupiter.api.Test
  * — measured in a gate run as a level request held 30s into the click timeout when a
  * release fired before the capture. Assertions otherwise synchronize on
  * `waitForRequest`/`waitForSelector` exclusively.
+ *
+ * #440: each test's first navigation waits for DOMContentLoaded, never `load`, followed by the
+ * explicit readiness selector it already waits for (ExplorerStressBrowserTest's form, the #428
+ * fix's shape). Every script these flows drive is classic or a deferred module and has run by
+ * then; `load` added only the wait for every subresource, which none of the assertions read.
  */
 class ShellBusyBrowserTest : BrowserSuite() {
     // ------------------------------------------------------------------ the throttle
@@ -203,7 +213,7 @@ class ShellBusyBrowserTest : BrowserSuite() {
 
     /** The catalog page, its sidebar Templates branch open and its root level loaded. */
     private fun openCatalogAndSidebarTree() {
-        page.navigate("$baseUrl/templates")
+        page.navigate("$baseUrl/templates", domContentLoaded())
         page.waitForSelector(catalog)
         page.click("[data-nav-branch='templates'] [data-nav-tree-toggle]")
         page.waitForSelector(folderSummary("nyc"))
@@ -219,6 +229,8 @@ class ShellBusyBrowserTest : BrowserSuite() {
         }
     }
 
+    private fun domContentLoaded() = Page.NavigateOptions().setWaitUntil(WaitUntilState.DOMCONTENTLOADED)
+
     private fun barHidden() =
         page.waitForSelector(
             "#app-progress.active",
@@ -233,6 +245,7 @@ class ShellBusyBrowserTest : BrowserSuite() {
         loginReadyUser("busyt")
         seedTemplates()
         openCatalogAndSidebarTree()
+        selectStandingDialect()
         val throttle = PartialThrottle(holdMillis = 600).apply { install() }
         try {
             // (1) A plain PARTIAL request (a sidebar tree expand, not a boosted navigation)
@@ -268,6 +281,11 @@ class ShellBusyBrowserTest : BrowserSuite() {
             val clear = "$catalog .ds-empty-actions button" // plain CSS: it is also handed to document.querySelector
             page.waitForSelector(clear)
             barHidden()
+            // #432: every list request from the click to the settle is recorded — ONE Consumer
+            // instance, since offRequest removes by identity.
+            val listRequests = mutableListOf<String>()
+            val onList = Consumer<Request> { r -> if (r.url().contains("/partials/templates")) listRequests.add(r.url()) }
+            page.onRequest(onList)
             page.click(clear)
             throttle.awaitCaptured(5)
 
@@ -296,6 +314,9 @@ class ShellBusyBrowserTest : BrowserSuite() {
             page.waitForSelector("$catalog[aria-busy='true']", Page.WaitForSelectorOptions().setState(WaitForSelectorState.HIDDEN))
             page.locator(".app-target-skeleton").count() shouldBe 0
             page.locator(".app-busy").count() shouldBe 0
+
+            page.offRequest(onList)
+            assertClearKeptTheDialect(listRequests)
         } finally {
             throttle.releaseAll()
         }
@@ -316,7 +337,7 @@ class ShellBusyBrowserTest : BrowserSuite() {
     fun `a slow boosted navigation leaves no skeleton behind - not live, not in the history snapshot`() {
         startTrace()
         loginReadyUser("orphan")
-        page.navigate("$baseUrl/dashboard")
+        page.navigate("$baseUrl/dashboard", domContentLoaded())
         page.waitForSelector("a.app-nav-link[href='/pipelines']")
         val hold = BoostHold("/pipelines").apply { install() }
         try {
@@ -343,6 +364,33 @@ class ShellBusyBrowserTest : BrowserSuite() {
             hold.release()
         }
     }
+
+    /**
+     * #432: a standing dialect filter the catalog's Clear search must keep (every seed is
+     * POSTGRES, so the filtered list still shows them).
+     */
+    private fun selectStandingDialect() {
+        page.waitForResponse({ r -> r.url().contains("/partials/templates") && r.url().contains("dialect=POSTGRES") }) {
+            page.selectOption("#template-filter-dialect", "POSTGRES")
+        }
+    }
+
+    /**
+     * #432: Clear search emptied the box and kept the dialect, and its ONE request (of
+     * [listRequests], every list request from the click to the settle) describes the controls
+     * left standing — dialect, no q.
+     */
+    private fun assertClearKeptTheDialect(listRequests: List<String>) {
+        page.inputValue("#template-filter-q") shouldBe ""
+        page.inputValue("#template-filter-dialect") shouldBe "POSTGRES"
+        listRequests.size shouldBe 1
+        val params = queryPairs(listRequests.single())
+        params shouldContain "dialect=POSTGRES"
+        params.map { it.substringBefore('=') } shouldNotContain "q"
+    }
+
+    /** A request URL's query as its `key=value` pairs, in order. */
+    private fun queryPairs(url: String): List<String> = url.substringAfter('?', "").split('&').filter { it.isNotEmpty() }
 
     /** How many pixels the DOCUMENT is taller than the viewport — 0 on a correct page. */
     private fun documentOverflow(): Long =
@@ -424,7 +472,7 @@ class ShellBusyBrowserTest : BrowserSuite() {
         startTrace()
         loginReadyUser("busya")
         seedTemplates()
-        page.navigate("$baseUrl/templates")
+        page.navigate("$baseUrl/templates", domContentLoaded())
         page.waitForSelector(catalog)
         val throttle = PartialThrottle(holdMillis = 600).apply { install() }
         try {

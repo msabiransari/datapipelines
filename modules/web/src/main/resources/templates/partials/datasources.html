@@ -18,7 +18,8 @@
       <p class="ds-empty-title" th:unless="${#strings.isEmpty(q)}">No datasources match your search</p>
       <p class="ds-empty-description" th:if="${#strings.isEmpty(q)}">Register your first datasource to get started.</p>
       <div class="ds-empty-actions" th:unless="${#strings.isEmpty(q)}">
-        <button class="ds-button ds-button-secondary ds-button-sm"
+        <button type="button" class="ds-button ds-button-secondary ds-button-sm"
+                data-dp-clear-filters="#ds-filter-q, #ds-filter-dialect" hx-sync="#ds-filter-q:replace"
                 th:attr="hx-get=@{/partials/datasources}, hx-target='#datasource-list-wrapper', hx-swap='outerHTML'">Clear filters</button>
       </div>
     </div>
