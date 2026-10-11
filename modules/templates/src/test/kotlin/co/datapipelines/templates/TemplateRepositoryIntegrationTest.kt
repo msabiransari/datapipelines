@@ -405,6 +405,52 @@ class TemplateRepositoryIntegrationTest {
         repository.list(workspaceId, q = "100% off").map { it.id } shouldContainExactly listOf("discount.sql")
     }
 
+    /**
+     * #504a: `q` once reached the LIKE binding raw, so `q=" "` matched only the rows with a
+     * space in a searched column and `q=""` bound `%%` (everything). [TemplateRepository.list]
+     * and [TemplateRepository.count] normalise the term first: trim, blank means no search,
+     * then escape. Both fixtures are built directly so the "no whitespace anywhere" side is
+     * exact — the `draft` helper's defaults carry spaces.
+     */
+    @Test
+    fun `a blank or whitespace q is no search for list and count`() {
+        repository.createReleased(
+            workspaceId,
+            TemplateDraft(
+                id = "test/tight.sql",
+                dialect = Dialect.POSTGRES,
+                displayName = "tightrows",
+                description = "tightrows-everywhere",
+                imports = emptyList(),
+                body = "SELECT 1",
+                isLibrary = false,
+            ),
+            actor,
+        )
+        repository.createReleased(
+            workspaceId,
+            TemplateDraft(
+                id = "spaced.sql",
+                dialect = Dialect.POSTGRES,
+                displayName = "Spaced Name",
+                description = "has whitespace",
+                imports = emptyList(),
+                body = "SELECT 1",
+                isLibrary = false,
+            ),
+            actor,
+        )
+
+        repository.list(workspaceId, q = "   ").map { it.id } shouldContainExactly listOf("spaced.sql", "test/tight.sql")
+        repository.list(workspaceId, q = "").map { it.id } shouldContainExactly listOf("spaced.sql", "test/tight.sql")
+        withClue("a surrounded needle searches as the bare needle") {
+            repository.list(workspaceId, q = "  TIGHT  ").map { it.id } shouldContainExactly listOf("test/tight.sql")
+            repository.list(workspaceId, q = "tight").map { it.id } shouldContainExactly listOf("test/tight.sql")
+        }
+        repository.count(workspaceId, q = "   ") shouldBe 2
+        repository.count(workspaceId, q = "") shouldBe 2
+    }
+
     @Test
     fun `list matches the rendered dialect column`() {
         // The templates table renders a dialect badge per row (partials/templates.html), so the

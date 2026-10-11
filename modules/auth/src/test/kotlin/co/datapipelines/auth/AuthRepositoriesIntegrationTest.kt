@@ -2,6 +2,7 @@ package co.datapipelines.auth
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.assertions.withClue
 import io.kotest.matchers.booleans.shouldBeFalse
 import io.kotest.matchers.booleans.shouldBeTrue
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
@@ -156,6 +157,31 @@ class AuthRepositoriesIntegrationTest {
         users.updateLastLogin(u.id)
 
         checkNotNull(users.findById(u.id)).lastLoginAt.shouldNotBeNull()
+    }
+
+    /**
+     * #504a: the search term's own LIKE metacharacters are matched LITERALLY — escaped and
+     * bound under an explicit `ESCAPE '\'`, the house form — while the trim and the case-fold
+     * stay and a blank term still lists every person. Unescaped, a `q` of `%` matched every
+     * row and a `q` of `_` matched every row with at least one character: the admin search
+     * box silently became a wildcard scan.
+     */
+    @Test
+    fun `search matches LIKE metacharacters literally and keeps trim and case-folding`() {
+        users.insert("pct@company.com", "100% off", null, "google", "sub-1", isAdmin = false)
+        users.insert("pct2@company.com", "100 percent", null, "google", "sub-2", isAdmin = false)
+        users.insert("underscore@company.com", "a_b", null, "google", "sub-3", isAdmin = false)
+        users.insert("axb@company.com", "axb", null, "google", "sub-4", isAdmin = false)
+
+        users.search("%", 0, 50).map { it.email } shouldContainExactlyInAnyOrder listOf("pct@company.com")
+        users.search("_", 0, 50).map { it.email } shouldContainExactlyInAnyOrder listOf("underscore@company.com")
+        withClue("trim and case-fold are kept") {
+            users.search("  OFF  ", 0, 50).map { it.email } shouldContainExactlyInAnyOrder listOf("pct@company.com")
+        }
+        withClue("a blank term is the list-every-human arm") {
+            users.search("", 0, 50).map { it.email } shouldContainExactlyInAnyOrder
+                listOf("axb@company.com", "pct@company.com", "pct2@company.com", "underscore@company.com")
+        }
     }
 
     /**
