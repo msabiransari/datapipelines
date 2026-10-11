@@ -471,7 +471,10 @@ class PersistentChartNavigationBrowserTest : VisualizationBrowserSuite() {
 
     /** The editor's ONE activation has bound the current root. */
     private fun editorActive() {
-        page.waitForFunction("() => !!window.__peInstance && !!document.querySelector('.pe-root') && !document.querySelector('.pe-root[x-ignore]')")
+        page.waitForFunction(
+            "() => !!window.__peInstance && !!document.querySelector('.pe-root') && " +
+                "!document.querySelector('.pe-root[x-ignore]')",
+        )
     }
 
     private fun parameterWorkspaceActive() {
@@ -557,7 +560,8 @@ class PersistentChartNavigationBrowserTest : VisualizationBrowserSuite() {
         const val COUNT_SCRIPT_EVALUATIONS =
             """(() => { const counts = {}; window.__dpScriptEvaluations = counts; const seen = new WeakSet();
               const watch = node => { if (node.tagName !== 'SCRIPT' || !node.src || seen.has(node)) return; seen.add(node);
-                node.addEventListener('load', () => { const path = new URL(node.src).pathname; counts[path] = (counts[path] || 0) + 1; }); };
+                node.addEventListener('load', () => {
+                  const path = new URL(node.src).pathname; counts[path] = (counts[path] || 0) + 1; }); };
               new MutationObserver(records => records.forEach(record => record.addedNodes.forEach(node => {
                 watch(node); if (node.querySelectorAll) node.querySelectorAll('script[src]').forEach(watch); })))
                 .observe(document, { childList: true, subtree: true });
