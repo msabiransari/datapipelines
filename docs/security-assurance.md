@@ -19,6 +19,8 @@ One row per ASVS 5.0.0 **section**, meaning a family of requirements (`V8.2` is 
 
 "Record" is the section of the [security-assurance record](superpowers/specs/2026-09-24-security-assurance-design.md) that owns the family's future work. The mutation numbers refer to [`scripts/security-mutations/`](../scripts/security-mutations/run.sh) (DEVELOPMENT.md §10.2). A guard is listed only if it exists in the tree today.
 
+Since #470 the mutation anchors themselves are guarded per push: `SecurityMutationAnchorsTest` (in `modules/auth`, so it runs in every local `build` and in CI) reads every mutation file and asserts each TARGET still exists with its FROM occurring exactly once and its TO not yet present, and that each named test class and test still exist. It proves the anchors and the names only — it runs no mutation and cannot prove that a named test still detects its defect; that verdict is the weekly `run.sh`'s to give.
+
 ## The manual assessments (P3)
 
 The boundaries with this product's real blast radius (record §8, ordered by B7) are decisions and configurations more than code paths. They need a named human assessment, and each is **outstanding** until one is recorded here, with its date and reviewer:

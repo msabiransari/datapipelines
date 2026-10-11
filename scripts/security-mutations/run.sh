@@ -133,7 +133,14 @@ for m in "${MUTATIONS[@]}"; do
   source "$m"
   id="$(basename "$m" | cut -d- -f1)"
   start=$(date +%s)
-  swap "$ROOT/$TARGET" "$FROM" "$TO" || { echo "mutation $id: could not apply" | tee -a "$SUMMARY"; failures=$((failures + 1)); continue; }
+  # A pair that cannot apply is a VERDICT, not silence (#470): named in verdict.txt — what the
+  # workflow artifact and the self-check read — and a well-formed row in summary.md, where the
+  # old bare line used to break the markdown table.
+  apply_error="$(swap "$ROOT/$TARGET" "$FROM" "$TO" 2>&1 >/dev/null)" || {
+    echo "mutation $id could not apply: $apply_error" | tee -a "$OUT/verdict.txt"
+    echo "| $id | $MUTATION_NAME | $RECORD_ROW | — | could not apply: ${apply_error//|/\\|} | — | — | — | — |" >> "$SUMMARY"
+    failures=$((failures + 1)); continue;
+  }
   APPLIED="$m"
   patch_hash="$(git diff | sha256sum | cut -c1-12)"
   [ "$(git diff --name-only | wc -l)" = 1 ] || { echo "mutation $id: touched more than one file" >&2; failures=$((failures + 1)); }
