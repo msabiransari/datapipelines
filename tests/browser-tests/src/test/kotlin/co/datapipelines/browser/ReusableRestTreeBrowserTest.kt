@@ -67,8 +67,8 @@ class ReusableRestTreeBrowserTest : BrowserSuite() {
         page.evaluate("() => window.__idleTreeMutations") shouldBe 0
         page.locator("#rail-resize").focus()
         page.keyboard().press("End")
-        page.waitForFunction("() => document.getElementById('app-main').getBoundingClientRect().width < 1")
-        (page.evaluate("() => document.getElementById('app-rail').getBoundingClientRect().width") as Number).toInt() shouldBe 1440
+        page.waitForFunction("() => document.getElementById('app-main').getBoundingClientRect().width === 320")
+        (page.evaluate("() => document.getElementById('app-rail').getBoundingClientRect().width") as Number).toInt() shouldBe 1120
         page.keyboard().press("Home")
         page.waitForFunction("() => document.getElementById('app-main').getBoundingClientRect().width > 1000")
         page.evaluate(
