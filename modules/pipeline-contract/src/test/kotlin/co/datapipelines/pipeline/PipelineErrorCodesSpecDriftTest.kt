@@ -178,6 +178,8 @@ class PipelineErrorCodesSpecDriftTest {
                 PipelineErrorCodes.Datasource.TABLE_FORBIDDEN,
                 // #279 §13.21 — the body itself is the refused thing; no entity dimension.
                 PipelineErrorCodes.Request.BODY_TOO_LARGE,
+                // #504b §13.21 — the search term itself is the refused thing; no entity dimension.
+                PipelineErrorCodes.Request.QUERY_TOO_LONG,
                 // 112 — the ROLE axis has no entity dimension: these are properties of the
                 // caller's membership, not of a thing they named (RBAC design §2).
                 PipelineErrorCodes.Auth.ROLE_REQUIRED,

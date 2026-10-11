@@ -5,6 +5,7 @@ import co.datapipelines.pipeline.CreateLifecycle
 import co.datapipelines.pipeline.DashboardPin
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.ReadLens
+import co.datapipelines.pipeline.SearchNeedle
 import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.pipeline.TemplateReleaser
 import co.datapipelines.pipeline.TemplateVersionStatuses
@@ -575,9 +576,9 @@ class ParameterSetService(
      * take — matching the SAME three columns the SQL matches, so the two arms answer one predicate.
      * Name-ordered, stable paging; the truthful total is [countSearch]'s, never the page's size.
      *
-     * A trimmed needle longer than [MAX_QUERY_LENGTH] is refused with [ParameterSetQueryTooLongException]
-     * (#490) — every surface reads this one rule: REST and MCP answer the refusal, the UI boxes truncate
-     * to the same constant before they call.
+     * A trimmed needle longer than [MAX_QUERY_LENGTH] is refused with [co.datapipelines.pipeline.SearchQueryTooLongException]
+     * (#490, the shared [SearchNeedle] rule since #504b) — every surface reads this one rule: REST and
+     * MCP answer the refusal, the UI boxes truncate to the same constant before they call.
      */
     fun search(
         workspaceId: UUID,
@@ -613,15 +614,12 @@ class ParameterSetService(
     }
 
     /**
-     * The `q` rule's input half, in one place for [search] and [countSearch]: trimmed, blank is no
-     * search (null), and a needle over [MAX_QUERY_LENGTH] is refused BEFORE any read — the length is
-     * reported, the needle itself never echoed.
+     * The `q` rule's input half, in one place for [search] and [countSearch]: the shared
+     * [SearchNeedle] rule (#504b) — trimmed, blank is no search (null), and a needle over
+     * the bound is refused BEFORE any read — the length is reported, the needle itself never
+     * echoed.
      */
-    private fun needleOf(query: String?): String? {
-        val needle = query?.trim()?.takeIf { it.isNotEmpty() } ?: return null
-        if (needle.length > MAX_QUERY_LENGTH) throw ParameterSetQueryTooLongException(MAX_QUERY_LENGTH, needle.length)
-        return needle
-    }
+    private fun needleOf(query: String?): String? = SearchNeedle.of(query)
 
     /**
      * The narrowing lens's search read — every admitted set with a current version, q-matched in
@@ -794,12 +792,13 @@ class ParameterSetService(
 
     companion object {
         /**
-         * The search needle's length bound (#490), in characters after the trim. 200 is the number the
-         * UI boxes truncated to since #415, kept so no box changes behaviour: it is above any name a
-         * person types into a search box, and it bounds the pattern the everything lens's `ILIKE` scans
-         * over every set's three columns (cost, not injection — the needle is bound and escaped).
+         * The search needle's length bound (#490, since #504b [SearchNeedle.MAX_LENGTH]'s alias —
+         * the module's published constant). 200 is the number the UI boxes truncated to since #415,
+         * kept so no box changes behaviour: it is above any name a person types into a search box,
+         * and it bounds the pattern the everything lens's `ILIKE` scans over every set's three
+         * columns (cost, not injection — the needle is bound and escaped).
          */
-        const val MAX_QUERY_LENGTH = 200
+        const val MAX_QUERY_LENGTH = SearchNeedle.MAX_LENGTH
 
         /** No transaction manager: the action runs directly — a directly constructed test's default (PipelineReleaseService's). */
         private val DIRECT: TransactionOperations =

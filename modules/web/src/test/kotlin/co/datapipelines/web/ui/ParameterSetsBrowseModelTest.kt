@@ -190,7 +190,8 @@ class ParameterSetsBrowseModelTest {
         real.fillSearch(m, ws, everything, "x".repeat(500), 0, ParameterSetsBrowseModel.SCOPE_PAGE) shouldBe
             ParameterSetsBrowseModel.SEARCH_VIEW
         m["q"] shouldBe bounded
-        ParameterSetsBrowseModel.MAX_QUERY_LENGTH shouldBe ParameterSetService.MAX_QUERY_LENGTH
+        // The box's bound IS the shared one (#504b) — the alias cannot drift from the rule.
+        ParameterSetsBrowseModel.MAX_QUERY_LENGTH shouldBe co.datapipelines.pipeline.SearchNeedle.MAX_LENGTH
     }
 
     @Test

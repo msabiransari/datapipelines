@@ -1046,6 +1046,14 @@ object PipelineErrorCodes {
          * `details.limit_bytes` names the cap in effect.
          */
         const val BODY_TOO_LARGE = "request.body_too_large"
+
+        /**
+         * §13.21 (#504b) — a search needle (`q`) longer than [co.datapipelines.pipeline.SearchNeedle.MAX_LENGTH]
+         * after trimming. HTTP 400 on every REST surface that reads a `q`, `-32602 invalid params`
+         * on both MCP list tools — one rule, one code, wherever a search term arrives.
+         * `details.limit` names the bound and `details.length` the refused length.
+         */
+        const val QUERY_TOO_LONG = "request.query_too_long"
     }
 
     /** §13.11 — rate limiting / idempotency. */
@@ -1660,8 +1668,6 @@ object PipelineErrorCodes {
         const val INPUT_SOURCE_MULTIPLE_ROWS = "parameter.validation.input_source_multiple_rows"
 
         const val SELECTOR_ORDER_BY_MISSING = "parameter.validation.selector_order_by_missing"
-
-        const val QUERY_TOO_LONG = "parameter.validation.query_too_long"
 
         const val EVALUATE_UNKNOWN_PARAMETER = "parameter.evaluate.unknown_parameter"
 

@@ -3,6 +3,7 @@ package co.datapipelines.web.ui
 import co.datapipelines.application.lens.LensedView
 import co.datapipelines.pipeline.PipelineNameGrammar
 import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.pipeline.SearchNeedle
 import co.datapipelines.visualization.ArtifactFolder
 import co.datapipelines.visualization.ArtifactVersion
 import co.datapipelines.visualization.VisualizationBody
@@ -77,7 +78,9 @@ class VisualizationBrowseModel(
         scope: VisualizationListScope,
     ): String {
         val page = maxOf(0, offset)
-        val needle = q?.trim()?.takeIf { it.isNotEmpty() }?.take(MAX_QUERY_LENGTH)
+        // The needle's bound is the shared one (#504b, `SearchNeedle.MAX_LENGTH`): the model keeps
+        // only the truncating half — a box truncates its own term, never refuses.
+        val needle = q?.trim()?.takeIf { it.isNotEmpty() }?.take(SearchNeedle.MAX_LENGTH)
         val (rows, total) =
             if (needle == null) {
                 visualizations.listAll(workspaceId, view.visualizations, page, PAGE_SIZE) to
@@ -149,9 +152,6 @@ class VisualizationBrowseModel(
     companion object {
         /** The explorers' page size — the value every tree and catalog uses. */
         const val PAGE_SIZE = 25
-
-        /** A search term longer than any legal name is truncated, never echoed back at length. */
-        const val MAX_QUERY_LENGTH = 200
 
         const val LEVEL_VIEW = "partials/visualization-tree-level"
         const val SEARCH_VIEW = "partials/visualization-search"

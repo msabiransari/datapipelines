@@ -745,8 +745,8 @@ open class WorkspaceService(
     /**
      * The email names no PERSON (#215 A.6): [addMember] raises it for the System row and a key's
      * identity, which have an email and no membership by design. An email with no row at all is
-     * not this — since 113 it becomes an INVITATION ([AddMemberOutcome.Invited]). The UI form
-     * ([co.datapipelines.web.ui.WorkspacesUiController]) answers it with the `user_not_found`
+     * not this — since 113 it becomes an INVITATION ([AddMemberOutcome.Invited]). The workspaces
+     * UI form answers it with the `user_not_found`
      * banner; REST (`WorkspacesController`) with the 404 `user_not_found` stand-in `AuthController`
      * documents for an unknown user.
      */

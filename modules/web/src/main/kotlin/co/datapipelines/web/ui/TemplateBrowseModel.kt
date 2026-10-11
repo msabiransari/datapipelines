@@ -6,6 +6,7 @@ import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.executor.ExecutionRecord
 import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.pipeline.SearchNeedle
 import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.templates.Template
 import co.datapipelines.templates.TemplateFolder
@@ -149,7 +150,19 @@ class TemplateBrowseModel(
         scope: TemplateListScope = TemplateListScope.NAV,
     ): String {
         val page = maxOf(0, offset)
-        val probe = templates.list(workspaceId, view.templates, dialect = dialect, type = type, q = q, offset = page, limit = PAGE_SIZE + 1)
+        // A box truncates its own term to the shared bound (#504b) before the call, never refuses;
+        // the service owns the refusal for REST and MCP.
+        val needle = q?.trim()?.takeIf { it.isNotEmpty() }?.take(SearchNeedle.MAX_LENGTH)
+        val probe =
+            templates.list(
+                workspaceId,
+                view.templates,
+                dialect = dialect,
+                type = type,
+                q = needle,
+                offset = page,
+                limit = PAGE_SIZE + 1,
+            )
         val items = probe.take(PAGE_SIZE)
         model.addAttribute(PipelineBrowseModel.LENS_UNAVAILABLE, view.unavailable)
         model.addAttribute("searching", true)
@@ -160,7 +173,7 @@ class TemplateBrowseModel(
         model.addAttribute(NEEDS_REVIEW_IDS, needReview(items))
         model.addAttribute("offset", page)
         model.addAttribute("hasMore", probe.size > PAGE_SIZE)
-        model.addAttribute("total", templates.count(workspaceId, view.templates, dialect = dialect, type = type, q = q))
+        model.addAttribute("total", templates.count(workspaceId, view.templates, dialect = dialect, type = type, q = needle))
         return SEARCH_VIEW
     }
 

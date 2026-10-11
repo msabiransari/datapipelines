@@ -72,7 +72,7 @@ class PipelinesListTool(
                   "properties": {
                     "owner": {"type": "string", "description": "Filter by owner user ID."},
                     "datasource": {"type": "string", "description": "Filter by datasource name."},
-                    "q": {"type": "string", "description": "Full-text search on name and description. Searches across full paths; use prefix to browse instead."},
+                    "q": {"type": "string", "description": "Case-insensitive substring search over name, display name and description (the whole path counts as the name); ignored when prefix is present — pass prefix to browse, q to search. At most 200 characters after trimming; a longer q is refused as invalid params."},
                     "prefix": {"type": "string", "description": "$PREFIX_ARG_DESC"},
                     "limit": {"type": "integer", "default": 50, "maximum": 200}
                   }

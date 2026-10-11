@@ -3,6 +3,7 @@ package co.datapipelines.web.ui
 import co.datapipelines.application.lens.LensedView
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.pipeline.PipelineNameGrammar
+import co.datapipelines.pipeline.SearchNeedle
 import co.datapipelines.visualization.ArtifactVersion
 import co.datapipelines.visualization.DashboardBody
 import co.datapipelines.visualization.DashboardService
@@ -140,7 +141,8 @@ class DashboardBrowseModel(
         scope: DashboardListScope,
     ): String {
         val page = maxOf(0, offset)
-        val needle = q?.trim()?.takeIf { it.isNotEmpty() }
+        // A box truncates its own term to the shared bound (#504b) before the call, never refuses.
+        val needle = q?.trim()?.takeIf { it.isNotEmpty() }?.take(SearchNeedle.MAX_LENGTH)
         if (needle == null && view.dashboards.isEverything) {
             // One past the page size decides `hasMore` — the honest-pager rule (034 E3).
             val rows = dashboards.listAll(workspaceId, view.dashboards, page, PAGE_SIZE + 1)

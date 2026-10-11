@@ -7,6 +7,7 @@ import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ExecutionStatus
 import co.datapipelines.pipeline.PipelineRecord
 import co.datapipelines.pipeline.PipelineService
+import co.datapipelines.pipeline.SearchNeedle
 import co.datapipelines.templates.Template
 import co.datapipelines.templates.TemplateService
 import org.springframework.ui.Model
@@ -69,7 +70,9 @@ class SearchBrowseModel(
         principal: AuthenticatedPrincipal?,
         rawQuery: String,
     ): String {
-        val q = rawQuery.trim()
+        // The palette truncates its own term to the shared bound (#504b) — a box displays, never
+        // refuses — and the trimmed needle is both what renders and what every group searches.
+        val q = rawQuery.trim().take(SearchNeedle.MAX_LENGTH)
         model.addAttribute("q", q)
         val workspace = principal?.requireWorkspace()
         if (q.isEmpty() || workspace == null) {

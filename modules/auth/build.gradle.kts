@@ -1,8 +1,12 @@
-// module-structure.md §5.7 — allowed internal deps: typesystem (shared exception base only), persistence (#266).
+// module-structure.md §5.7 — allowed internal deps: typesystem (shared exception base only),
+// pipeline-contract (#504b: the SearchNeedle rule), persistence (#266).
 plugins { id("datapipelines.common-conventions") }
 
 dependencies {
     implementation(project(":modules:typesystem"))
+    // #504b — the shared search-needle rule (SearchNeedle + its typed refusal); UserService.search
+    // applies it at the door like every other search-owning service.
+    implementation(project(":modules:pipeline-contract"))
     // #266 — the audit log's batching writer (module-structure §5.19); AuditLogger's constructor
     // takes one, so the type is part of this module's API.
     api(project(":modules:persistence"))

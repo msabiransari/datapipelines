@@ -4,6 +4,7 @@ import co.datapipelines.pipeline.NavigationFamily
 import co.datapipelines.pipeline.NavigationRequest
 import co.datapipelines.pipeline.NavigationRow
 import co.datapipelines.pipeline.ReadLens
+import co.datapipelines.pipeline.SearchNeedle
 import com.fasterxml.jackson.databind.PropertyNamingStrategies
 import com.fasterxml.jackson.databind.annotation.JsonNaming
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
@@ -67,9 +68,13 @@ class TreeProjection {
         validatePath(root)
         validatePath(parent)
         if (parent != root && !parent.startsWith(if (root.isEmpty()) "" else "$root/")) invalid()
-        val normalized = query?.trim()?.replace(Regex("\\s+"), " ")
+        // The shared search-needle rule (#504b) gates the term first: blank/absent means no
+        // search, and a trimmed term over the shared bound is refused with the catalogued
+        // request.query_too_long — not the path-shaped 400 the length check below owns.
+        val needle = SearchNeedle.of(query)
+        val normalized = needle?.replace(Regex("\\s+"), " ")
         if (normalized != null) {
-            if (normalized.isEmpty() || normalized.length > MAX_PATH) invalid()
+            if (normalized.length > MAX_PATH) invalid()
             if (normalized.any { it.isISOControl() }) invalid()
         }
         val membership =

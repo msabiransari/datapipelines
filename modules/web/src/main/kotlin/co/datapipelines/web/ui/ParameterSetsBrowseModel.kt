@@ -6,6 +6,7 @@ import co.datapipelines.parameters.ParameterSetService
 import co.datapipelines.parameters.ParameterSetVersion
 import co.datapipelines.pipeline.PipelineNameGrammar
 import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.pipeline.SearchNeedle
 import org.springframework.ui.Model
 import java.security.MessageDigest
 import java.util.UUID
@@ -96,7 +97,7 @@ class ParameterSetsBrowseModel(
         val page = maxOf(0, offset)
         // The trim is the model's, in one place: a blank `q` is no search (the dispatcher's level,
         // or the catalog's plain listing), and what renders back into the box is the trimmed term.
-        // The length is the service's bound (#490, `ParameterSetService.MAX_QUERY_LENGTH`), which
+        // The length is the shared bound (#490, `SearchNeedle.MAX_LENGTH` since #504b), which
         // refuses a longer needle on REST and MCP; a search box TRUNCATES to it before the call
         // instead, so a typed overflow never errors the box (#415's posture, unchanged).
         val needle = q?.trim()?.takeIf { it.isNotEmpty() }?.take(MAX_QUERY_LENGTH)
@@ -196,8 +197,8 @@ class ParameterSetsBrowseModel(
         /** The explorers' page size — the value the three sibling trees use. */
         const val PAGE_SIZE = 25
 
-        /** The search needle's length bound — the service's own (#490), which this box truncates to. */
-        const val MAX_QUERY_LENGTH = ParameterSetService.MAX_QUERY_LENGTH
+        /** The search needle's length bound — the shared one (#490, #504b), which this box truncates to. */
+        const val MAX_QUERY_LENGTH = SearchNeedle.MAX_LENGTH
 
         const val LEVEL_VIEW = "partials/parameter-set-tree-level"
         const val SEARCH_VIEW = "partials/parameter-set-search"

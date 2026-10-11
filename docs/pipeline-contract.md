@@ -1,9 +1,9 @@
 # Pipeline Contract Specification
 
-**Status:** v1.57 (revised — see Change Log)
+**Status:** v1.58 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
-**Last updated:** 2026-10-09
+**Last updated:** 2026-10-11
 
 ---
 
@@ -1515,7 +1515,6 @@ The parameter engine's refusals (#194; the [parameter-engine design record](supe
 | `parameter.validation.selector_value_type_mismatch` | 400 | the selector's `value` column type does not pass the record's §6.4 against the declared type (decided from metadata, never rows); `details.hint` |
 | `parameter.validation.input_source_multiple_rows` | 400 | a database-fed `INPUT`'s template returned two or more rows at save's dry run against its parents' defaults (owner ruling 2026-09-27; the record's §4 step 6 — the save-time twin of `parameter.evaluate.input_source_multiple_rows`) |
 | `parameter.validation.selector_order_by_missing` | 400 | a `SELECT`'s rendered SQL carries no `ORDER BY` (P7 — the check proves a clause is present, not that the order is total) |
-| `parameter.validation.query_too_long` | 400 | a listing search's `q` (`GET /api/v1/parameter-sets?q=`, MCP `parameter_sets_list {q}`) over 200 characters after the trim (#490) — refused before any read, `details.limit` / `details.length`; the needle is never echoed. On MCP the refusal is JSON-RPC `-32602` (an argument to fix), never a tool result; the web UI's search boxes truncate to the same bound and never meet it |
 | `parameter.evaluate.unknown_parameter` | 400 | a `selections` key names no parameter of the set — the whole request is refused (the caller's error) |
 | `parameter.evaluate.too_many_values` | — | not an error response — reported per parameter in `state.errors[]` of a 200 evaluate: a `MULTI` longer than `max-multi-bind-values` |
 | `parameter.evaluate.too_many_binds` | — | not an error response — per parameter in `state.errors[]`: a rendered statement over `max-binds-per-statement` placeholders, every expanded one counted |
@@ -1553,6 +1552,7 @@ The platform's transport-level refusals (#279; [Configuration §3.31](configurat
 | Code | HTTP | Description |
 |---|---|---|
 | `request.body_too_large` | 413 | the request body exceeds `datapipelines.web.max-request-bytes` — refused before any handler; `details.limit_bytes` names the cap in effect |
+| `request.query_too_long` | 400 | a search term `q` over 200 characters after the trim, on EVERY surface that refuses rather than truncates (#504b): the pipelines, templates, parameter-set and user listings, and the five `/tree/search` routes on REST; both MCP list tools as `-32602 invalid params`. Refused before any read by the services that own a search (`SearchNeedle.of`), `details.limit` / `details.length`; the needle is never echoed. The web UI's search boxes truncate to the same bound and never meet it (the #490 rule, shared — its `parameter.validation.query_too_long` row retired here) |
 
 
 ### 13.22 Visualizations
@@ -1875,6 +1875,7 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-11 | v1.58 | 504b (#504b) one shared search-needle rule | **§13.21 gains `request.query_too_long`** (400); **§13.20 loses `parameter.validation.query_too_long`** — the #490 refusal becomes the shared `SearchNeedle` rule applied by every search-owning service (pipelines, templates, parameter sets, users, the five `/tree/search` reads) at the same 200-after-trim bound, `details.limit`/`details.length`, the needle never echoed; MCP answers it as `-32602` (§6.2.44 v1.74) and the UI boxes still truncate, never refuse. Landed in the same commit as its constant, the `ApiErrorCatalog` rows (400 + user message), and the doc re-points (§13 row count stays 377: one row out of §13.20, one into §13.21). |
 | 2026-10-09 | v1.57 | 487 (#487) a replay-log read fault is not an expiry — renumbered at merge after #490's v1.56 | **§13.10** `result.storage_unavailable`: **500 → 503** (owner's ruling, 2026-10-09) — a transient fault of the server's own store, like `pipeline.transform.pool_exhausted`. The row also names the read surface it gains: §10.3's replay answers a log read Redis did not answer with this code (`details.reason: event_log_unavailable`) instead of `410 result.expired`. A deliberate status change on a frozen contract: the result-write path's code and behaviour are unchanged (it fails the execution; no HTTP status), and every REST or UI read whose stored result header cannot be parsed — the result cursor, `GET /executions/{id}`, a published endpoint's serve, the execution detail page — now answers this code with 503 where it answered 500. |
 | 2026-10-09 | v1.56 | 490 (#490) the search needle's bound | §13.20 gains `parameter.validation.query_too_long` (400): the parameter-set listing search refuses a `q` over 200 characters after the trim on REST, and on MCP as `-32602`, `details.limit`/`details.length`, the needle never echoed; the bound is `ParameterSetService.MAX_QUERY_LENGTH`, the number the UI boxes already truncated to. Landed in the same commit as its constants and catalog row (§13 row count 376 → 377). |
 | 2026-10-06 | v1.55 | #462 draft purge pins | §13 pinned-error row states sole-draft dashboard history scope and refusal before destructive writes. |

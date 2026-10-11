@@ -406,7 +406,7 @@ class SessionRequiredException(
 /**
  * Per-IP login rate limit ([Pipeline Contract §13.11], auth.md §9). The default user message
  * is the LOGIN damper's sentence (#232): the per-user API limiter and every other surface
- * override it — the API surfaces with the [co.datapipelines.web.api.ApiErrorCatalog] default
+ * override it — the API surfaces with the web error catalog's default
  * — so the caller is told about the limit they actually hit.
  */
 class RateLimitExceededException(
