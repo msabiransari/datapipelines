@@ -170,7 +170,7 @@ class PipelineSidebarTreeBrowserTest : RestTreeBrowserFixture() {
         width() shouldBe 232
         page.locator("#rail-resize").focus()
         page.keyboard().press("End")
-        width() shouldBe 900
+        width() shouldBe 580
         overflow() shouldBe false
         page.keyboard().press("Home")
         width() shouldBe 232
