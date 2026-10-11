@@ -125,6 +125,11 @@ class DatasourcesTemplateRenderTest {
         html shouldContain "class=\"ds-empty\""
         html shouldContain "class=\"ds-empty-title\""
         html shouldNotContain "ds-empty-state" // a class with no CSS anywhere (D4)
+        // #432: q="trip" missed — Clear filters names BOTH controls it resets (shell.js empties
+        // them; its bare re-fetch matches) and replaces a search still in flight from the box.
+        html shouldContain "Clear filters"
+        html shouldContain "data-dp-clear-filters=\"#ds-filter-q, #ds-filter-dialect\""
+        html shouldContain "hx-sync=\"#ds-filter-q:replace\""
     }
 
     @Test

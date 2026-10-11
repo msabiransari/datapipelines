@@ -145,6 +145,10 @@ class ParameterSetsRenderTest {
         val pageMiss = search("page", emptyList(), "geo")
         pageMiss shouldContain "No parameter sets match your search"
         pageMiss shouldContain "hx-get=\"/partials/parameter-sets/tree\""
+        // #432: and it names the box it empties (shell.js) and replaces a search still in flight.
+        pageMiss shouldContain "data-dp-clear-filters=\"#parameter-set-filter-q\""
+        pageMiss shouldContain "hx-sync=\"#parameter-set-filter-q:replace\""
+        miss shouldNotContain "data-dp-clear-filters"
         // The catalog with no query and no rows is the EMPTY state, not a failed search.
         val empty = search("page", emptyList(), "")
         empty shouldContain "No parameter sets yet"

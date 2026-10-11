@@ -1,10 +1,19 @@
 package co.datapipelines.browser
 
+import com.microsoft.playwright.APIResponse
+import com.microsoft.playwright.Page
+import com.microsoft.playwright.PlaywrightException
+import com.microsoft.playwright.Request
+import com.microsoft.playwright.Route
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import java.util.concurrent.ConcurrentHashMap
+import java.util.function.Consumer
+import java.util.function.Predicate
 
 /**
  * #374 - the Parameter Sets pages in a real browser (ui-screens.md section 4.23): the resolve
@@ -118,16 +127,85 @@ class ParameterSetPagesBrowserTest : ParameterSetBrowserSuite() {
         page.waitForFunction("() => document.querySelectorAll('#parameter-set-list-wrapper .tpl-result').length === 1")
         page.locator("#parameter-set-list-wrapper .tpl-path").first().innerText() shouldBe "$root/parameters/s26"
 
-        // A miss whose Clear button brings the catalog's first page back (25 rows — the page size).
-        page.fill("#parameter-set-filter-q", "no_such_parameter_set")
+        // A miss whose Clear button brings the catalog's first page back (25 rows — the page size)
+        // AND empties the box (#432): the box and the list agree, with no keystroke after.
+        page.fill(SEARCH_BOX, "no_such_parameter_set")
         page.waitForSelector("#parameter-set-list-wrapper .ds-empty")
         page.locator("#parameter-set-list-wrapper").innerText() shouldContain "No parameter sets match your search"
-        page.locator("#parameter-set-list-wrapper button:has-text('Clear search')").click()
+        armBoxEventCount()
+        val listRequests = mutableListOf<String>()
+        // ONE Consumer instance: offRequest removes by identity.
+        val onList = Consumer<Request> { r -> if (r.url().contains(LIST_ROUTE)) listRequests.add(r.url()) }
+        page.onRequest(onList)
+        page.locator(CLEAR).click()
         page.waitForFunction("() => document.querySelectorAll('#parameter-set-list-wrapper .tpl-result').length === 25")
-        // The page's own box is the control: clearing by hand agrees with the button.
-        page.fill("#parameter-set-filter-q", "")
-        page.waitForFunction("() => document.querySelectorAll('#parameter-set-list-wrapper .tpl-result').length === 25")
+        page.offRequest(onList)
+        page.inputValue(SEARCH_BOX) shouldBe ""
+        page.evaluate("() => document.activeElement && document.activeElement.id") shouldBe "parameter-set-filter-q"
+        // One click, one request — the button's own, bare — and the clear fired neither of the
+        // box's htmx triggers (input / search), so no debounced search of its own can follow it.
+        listRequests.size shouldBe 1
+        listRequests.single() shouldNotContain "q="
+        boxEventCount() shouldBe 0
     }
+
+    @Test
+    @Suppress("SwallowedException") // fulfilling an aborted route has nothing left to do; see the catch
+    fun `a search still in flight when Clear search is clicked never lands after it (#432)`() {
+        startTrace()
+        val root = ready("psclearrace")
+        (1..3).forEach { n -> createSet(setBody("$root/parameters/r$n", "[${constants("kind", listOf("a"))}]")) }
+        page.navigate("$baseUrl/parameter-sets")
+        page.waitForSelector("#parameter-set-list-wrapper .tpl-result")
+        page.fill(SEARCH_BOX, "no_such_parameter_set")
+        page.waitForSelector(CLEAR)
+
+        // The box's NEXT search is held in flight while the empty state's Clear is still on screen.
+        val held = mutableListOf<Pair<Route, APIResponse>>()
+        val failed = ConcurrentHashMap.newKeySet<String>()
+        val finished = ConcurrentHashMap.newKeySet<String>()
+        page.onRequestFailed { r -> if (r.url().contains("q=still_typing")) failed.add(r.url()) }
+        page.onRequestFinished { r -> if (r.url().contains("q=still_typing")) finished.add(r.url()) }
+        page.route(Predicate { url -> url.contains("q=still_typing") }) { route -> held.add(route to route.fetch()) }
+        page.waitForRequest({ r -> r.url().contains("q=still_typing") }) { page.fill(SEARCH_BOX, "still_typing") }
+        page.waitForCondition({ held.isNotEmpty() }, Page.WaitForConditionOptions().setTimeout(HOLD_TIMEOUT_MILLIS))
+
+        // Clear: its hx-sync replaces the box's request — the held answer is ABORTED, not queued.
+        page.locator(CLEAR).click()
+        page.waitForFunction("() => document.querySelectorAll('#parameter-set-list-wrapper .tpl-result').length === 3")
+        for ((route, response) in held) {
+            try {
+                route.fulfill(Route.FulfillOptions().setResponse(response))
+            } catch (e: PlaywrightException) {
+                // Already aborted by the page — the abort is the signal asserted below.
+            }
+        }
+        // The held request ends one way or the other; it must have ended ABORTED. Released
+        // un-aborted, it would swap "No parameter sets match" over the cleared list.
+        page.waitForCondition(
+            { failed.isNotEmpty() || finished.isNotEmpty() },
+            Page.WaitForConditionOptions().setTimeout(HOLD_TIMEOUT_MILLIS),
+        )
+        finished.shouldBeEmpty()
+        page.inputValue(SEARCH_BOX) shouldBe ""
+        page.locator("#parameter-set-list-wrapper .tpl-result").count() shouldBe 3
+    }
+
+    /** Counts the box's own htmx triggers (`input`, `search`) from now on, page-side. */
+    private fun armBoxEventCount() {
+        page.evaluate(
+            """(sel) => {
+              const box = document.querySelector(sel);
+              window.__dp432BoxEvents = 0;
+              const count = () => { window.__dp432BoxEvents += 1; };
+              box.addEventListener('input', count);
+              box.addEventListener('search', count);
+            }""",
+            SEARCH_BOX,
+        )
+    }
+
+    private fun boxEventCount(): Int = (page.evaluate("() => window.__dp432BoxEvents") as Number).toInt()
 
     @Test
     fun `the branch search expands matching paths and clearing closes the root (#415)`() {
@@ -282,5 +360,14 @@ class ParameterSetPagesBrowserTest : ParameterSetBrowserSuite() {
         // The empty-element hash is Playwright's own screenshot path; the computed-style checks
         // cannot be fooled by it (the dashboards' pages state the same set-aside).
         drainCspViolations().filter { !it.contains("'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='") }.shouldBeEmpty()
+    }
+
+    private companion object {
+        const val SEARCH_BOX = "#parameter-set-filter-q"
+        const val CLEAR = "#parameter-set-list-wrapper button:has-text('Clear search')"
+        const val LIST_ROUTE = "/partials/parameter-sets/tree"
+
+        /** A held request that never captures or never ends is a test bug, named by the timeout. */
+        const val HOLD_TIMEOUT_MILLIS = 10_000.0
     }
 }

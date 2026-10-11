@@ -722,7 +722,9 @@ own terms and the recount sees every module's results.
 **Why the recount and not the exit code.** A `--continue` build exits non-zero for a lint task
 while every test passed; a pipe reports the pipe's last stage; a backgrounded `…; echo $?` reports
 the *shell's* last command. `scripts/test-recount.sh` reads the JUnit XML both trees wrote —
-`modules/*/` **and** `tests/*/` — and prints `files/tests/failures/errors/skipped`. It is committed
+`modules/*/` **and** `tests/*/` — plus `TEST-*.xml` directly at the results root for flat CI
+artifacts — and prints `files/tests/failures/errors/skipped/unreadable`. It exits 0 regardless of
+the counts, 2 for a root that is not a directory, and 3 when no result XML is found. It is committed
 rather than retyped so two lanes' numbers are comparable; a modules-only glob under-reported the
 total for four consecutive rounds before it existed.
 
@@ -905,7 +907,11 @@ and similarly-prefixed task names such as `test` and `testExtra` stay distinct),
 lines themselves are preserved. A copy, provenance or manifest write failure refuses a PASS
 (`snap=1` in the verdict line, beside the unchanged five stage exits) even when every Gradle stage
 exited 0; it never turns a Gradle failure into success. A stage that ran but produced no XML is
-recorded (`files=0`), malformed XML is preserved and named by the recount (`unreadable=`), and a
+recorded (`files=0`): the recount searches `modules/*/build/test-results/**/*.xml`,
+`tests/*/build/test-results/**/*.xml`, and `TEST-*.xml` directly at the root, and exits 3 when
+these shapes find no XML. The capture accepts exit 3 and retains the recount's counts and
+diagnostic in the stage's `RECOUNT.log`; every other nonzero recount exit refuses a PASS.
+Malformed XML or non-integer counts are preserved and named by the recount (`unreadable=`), and a
 skipped stage is recorded as skipped rather than counted as an empty pass. `./scripts/pregate.sh
 --self-test` drives the real orchestration over isolated fixtures with a recording, refusing Gradle
 stand-in and asserts per-stage counts and paths, a failing stage's retained XML, the NO-STATUS-LINE
