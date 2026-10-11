@@ -33,8 +33,17 @@ class SecurityMutationAnchorsTest {
     fun `every security mutation anchors exactly once and names an existing test`() {
         val root = repoRoot()
         val dir = root.resolve("scripts/security-mutations")
-        val numbered = dir.listFiles { f: File -> f.isFile && NUMBERED_FILE.matches(f.name) }.orEmpty().sortedBy { it.name }
-        val selfcheck = dir.resolve("selfcheck").listFiles { f: File -> f.isFile && f.name.endsWith(".sh") }.orEmpty().sortedBy { it.name }
+        val numbered =
+            dir
+                .listFiles { f: File -> f.isFile && NUMBERED_FILE.matches(f.name) }
+                .orEmpty()
+                .sortedBy { it.name }
+        val selfcheck =
+            dir
+                .resolve("selfcheck")
+                .listFiles { f: File -> f.isFile && f.name.endsWith(".sh") }
+                .orEmpty()
+                .sortedBy { it.name }
         withClue("scripts/security-mutations must hold the ten numbered mutations and the self-check") {
             (numbered.size + selfcheck.size >= MIN_MUTATION_FILES) shouldBe true
         }
@@ -76,9 +85,10 @@ class SecurityMutationAnchorsTest {
         if (vars.from.contains(vars.to)) drifted += "$id: FROM contains TO — swap() refuses the ambiguous pair"
         val simpleName = vars.expectClass.substringAfterLast('.')
         val pkg = vars.expectClass.substringBeforeLast('.')
-        val classFile = testFiles
-            .filter { it.name == "$simpleName.kt" && it.readText().startsWith("package $pkg") }
-            .firstOrNull()
+        val classFile =
+            testFiles
+                .filter { it.name == "$simpleName.kt" && it.readText().startsWith("package $pkg") }
+                .firstOrNull()
         if (classFile == null) {
             drifted += "$id: EXPECT_CLASS resolves to no test-tree file with package $pkg: ${vars.expectClass}"
             return
@@ -121,6 +131,7 @@ class SecurityMutationAnchorsTest {
         dir.listFiles()?.forEach { entry ->
             when {
                 entry.isDirectory && entry.name !in PRUNED_DIRS -> walk(entry, root, into)
+
                 entry.isFile && entry.name.endsWith(".kt") &&
                     entry.relativeTo(root).invariantSeparatorsPath.contains("src/test/") -> into += entry
             }
@@ -160,7 +171,8 @@ class SecurityMutationAnchorsTest {
         const val READ_TIMEOUT_SECONDS = 30L
         const val READ_VARS_SCRIPT =
             "set -a; . \"\$1\"; printf '%s\\0' \"\$FROM\" \"\$TO\" \"\$TARGET\" \"\$EXPECT_CLASS\" \"\$EXPECT_TEST\""
-        // The MutationVars mapping above must mirror READ_VARS_SCRIPT's printf order: FROM, TO, TARGET, EXPECT_CLASS, EXPECT_TEST.
+
+        // The MutationVars mapping in readVars must mirror READ_VARS_SCRIPT's printf order: FROM, TO, TARGET, EXPECT_CLASS, EXPECT_TEST.
         val NUMBERED_FILE = Regex("""[0-9][0-9]-.+\.sh""")
         val FUN_DECL = Regex("""fun\s+`([^`]*)`""")
         val PRUNED_DIRS = setOf("build", ".git", ".gradle", "node_modules", ".claude", ".kotlin", "dist")
