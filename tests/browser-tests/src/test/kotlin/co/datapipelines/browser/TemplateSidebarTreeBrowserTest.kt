@@ -1,8 +1,11 @@
 package co.datapipelines.browser
 
 import com.microsoft.playwright.Page
+import com.microsoft.playwright.Route
+import com.microsoft.playwright.options.ReducedMotion
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
+import java.net.URI
 import java.nio.file.Files
 import java.nio.file.Paths
 
@@ -118,6 +121,204 @@ class TemplateSidebarTreeBrowserTest : BrowserSuite() {
 
     private fun watchConsole() {
         page.onConsoleMessage { message -> if (message.type() == "error") consoleErrors += message.text() }
+    }
+
+    /** The live host, with deterministic REST responses and a request witness. */
+    private fun answerPipelines(route: Route) {
+        val search = route.request().url().contains("/tree/search")
+        val query = if (search) "item" else null
+        val parent = if (URI(route.request().url()).query.contains("parent=root")) "root" else ""
+        val nodes =
+            if (search || parent == "root") {
+                (if (search) listOf(treeNode("root", null, folder = true)) else emptyList()) +
+                    List(80) { treeNode("root/item%02d".format(it), "folder:root", folder = false) }
+            } else {
+                listOf(treeNode("root", null, folder = true))
+            }
+        val data =
+            mapOf(
+                "family" to "pipelines",
+                "mode" to if (search) "search" else "browse",
+                "root" to "",
+                "parent" to parent,
+                "query" to query,
+                "next_cursor" to null,
+                "workspace_id" to page.locator("html").getAttribute("data-dp-workspace-id"),
+                "view_token" to "accordion-fixture",
+                "nodes" to nodes,
+            )
+        val encoded =
+            page.evaluate(
+                """value => {
+                  value.data.query ??= null; value.data.next_cursor = null;
+                  value.data.nodes.forEach(node => { node.parent_key ??= null; node.href = null; });
+                  return JSON.stringify(value);
+                }""",
+                mapOf("schema_version" to 1, "data" to data),
+            ) as String
+        route.fulfill(Route.FulfillOptions().setContentType("application/json").setBody(encoded))
+    }
+
+    private fun treeNode(
+        path: String,
+        parent: String?,
+        folder: Boolean,
+    ): Map<String, Any?> =
+        mapOf(
+            "key" to if (folder) "folder:$path" else "artifact:$path",
+            "parent_key" to parent,
+            "kind" to if (folder) "folder" else "artifact",
+            "name" to path.substringAfterLast('/'),
+            "path" to path,
+            "has_children" to folder,
+            "match" to !folder,
+            "href" to null,
+        )
+
+    private fun assertOpen(family: String?) {
+        page.locator(".app-nav-tree:not([hidden])").count() shouldBe if (family == null) 0 else 1
+        page.locator("[data-nav-tree-toggle][aria-expanded=true]").count() shouldBe if (family == null) 0 else 1
+        page.locator(".app-nav-branch.is-tree-open").count() shouldBe if (family == null) 0 else 1
+        if (family != null) page.locator("#nav-tree-$family").isVisible shouldBe true
+    }
+
+    @Test
+    @Suppress("LongMethod") // one fixture carries the query, folder, scroll and request witnesses through A → B → A
+    fun `the accordion switches exclusively retains context and excludes hidden controls from tab order`() {
+        startTrace()
+        page.setViewportSize(1440, 900)
+        loginReadyUser("accordion478")
+        val requests = mutableListOf<String>()
+        page.route(java.util.function.Predicate { it.contains("/api/v1/pipelines/tree") }, { route ->
+            requests += route.request().url()
+            answerPipelines(route)
+        })
+        page.click("[data-nav-branch=pipelines] [data-nav-tree-toggle]")
+        page.waitForSelector("#nav-tree-pipelines [data-tree-key='folder:root']")
+        assertOpen("pipelines")
+        page.locator("#nav-tree-pipelines input").getAttribute("placeholder") shouldBe "Search pipelines…"
+        page.fill("#nav-tree-pipelines input", "item")
+        page.waitForSelector("#nav-tree-pipelines [data-tree-key='artifact:root/item79']")
+        // Search opens the ancestor; explicitly close and expand it again before taking the witness.
+        val folder = "#nav-tree-pipelines [data-tree-key='folder:root']"
+        page.click("$folder > .dp-tree-line button")
+        page.click("$folder > .dp-tree-line button")
+        page.evaluate(
+            """() => {
+              const tree = window.DatapipelinesSidebarTrees.get('pipelines');
+              tree.scroll.scrollTop = 600;
+              window.__accordion = {tree, folder: document.querySelector('#nav-tree-pipelines [data-tree-key="folder:root"]'), top: tree.scroll.scrollTop};
+            }""",
+        )
+        page.evaluate("() => window.__accordion.top") shouldBe 600
+        val before = requests.size
+        page.click("[data-nav-branch=templates] [data-nav-tree-toggle]")
+        page.waitForSelector("#nav-tree-templates [role=tree]")
+        assertOpen("templates")
+        page.locator("$panel input").getAttribute("placeholder") shouldBe "Search templates…"
+        // Native Enter closes, and Space opens: both use the same click path as the pointer.
+        page.press("[data-nav-branch=templates] [data-nav-tree-toggle]", "Enter")
+        assertOpen(null)
+        page.evaluate("() => document.activeElement.checkVisibility()") shouldBe true
+        page.press("[data-nav-branch=templates] [data-nav-tree-toggle]", "Space")
+        assertOpen("templates")
+        page.click("[data-nav-branch=pipelines] [data-nav-tree-toggle]")
+        assertOpen("pipelines")
+        page.inputValue("#nav-tree-pipelines input") shouldBe "item"
+        page.locator(folder).getAttribute("aria-expanded") shouldBe "true"
+        page.evaluate(
+            """() => {
+              const saved = window.__accordion;
+              return saved.tree === window.DatapipelinesSidebarTrees.get('pipelines') &&
+                saved.folder === document.querySelector('#nav-tree-pipelines [data-tree-key="folder:root"]') &&
+                saved.tree.scroll.scrollTop === saved.top;
+            }""",
+        ) shouldBe true
+        requests.size shouldBe before
+        page.focus("#nav-tree-pipelines input")
+        repeat(16) {
+            page.keyboard().press("Tab")
+            page.evaluate("() => !!document.activeElement && !document.activeElement.closest('[hidden]')") shouldBe true
+        }
+        page.click("#rail-collapse")
+        page.waitForFunction("() => document.documentElement.classList.contains('rail-collapsed')")
+        page.locator("#nav-tree-pipelines input").isVisible shouldBe false
+        page.click("#rail-collapse")
+        page.waitForFunction("() => !document.documentElement.classList.contains('rail-collapsed')")
+        assertOpen("pipelines")
+        page.inputValue("#nav-tree-pipelines input") shouldBe "item"
+        page.evaluate("() => window.__accordion.tree.scroll.scrollTop === window.__accordion.top") shouldBe true
+        requests.size shouldBe before
+        // The catalog link keeps navigation separate from disclosure; Browse folders then switches and focuses.
+        page.click("[data-nav-branch=templates] .app-nav-link")
+        page.waitForSelector("#template-list-wrapper")
+        assertOpen("pipelines")
+        page.focus("#nav-tree-pipelines input")
+        page.evaluate("() => document.querySelector('[data-nav-tree-reveal=templates]').click()")
+        assertOpen("templates")
+        page.evaluate("() => document.activeElement.matches('#nav-tree-templates input')") shouldBe true
+        // A programmatic collapse cannot leave focus stranded in its hidden search.
+        page.evaluate("() => document.querySelector('[data-nav-branch=templates] [data-nav-tree-toggle]').click()")
+        assertOpen(null)
+        page.evaluate("() => document.activeElement.matches('[data-nav-branch=templates] [data-nav-tree-toggle]')") shouldBe true
+        page.evaluate("() => document.activeElement.checkVisibility()") shouldBe true
+        consoleErrors shouldBe emptyList()
+    }
+
+    @Test
+    fun `a late pipelines reply stays hidden and keeps focus on the open templates search`() {
+        startTrace()
+        loginReadyUser("late478")
+        val held = mutableListOf<Route>()
+        page.route(java.util.function.Predicate { it.contains("/api/v1/pipelines/tree") }, { held += it })
+        page.click("[data-nav-branch=pipelines] [data-nav-tree-toggle]")
+        page.waitForCondition { held.size == 1 }
+        page.click("[data-nav-branch=templates] [data-nav-tree-toggle]")
+        page.focus("#nav-tree-templates input")
+        assertOpen("templates")
+        answerPipelines(held.removeAt(0))
+        page.waitForFunction("() => window.DatapipelinesSidebarTrees.get('pipelines').state.levels.get(null)?.status !== 'loading'")
+        page.evaluate("() => window.DatapipelinesSidebarTrees.get('pipelines').state.levels.get(null)?.status") shouldBe "complete"
+        assertOpen("templates")
+        page.evaluate("() => document.activeElement.matches('#nav-tree-templates input')") shouldBe true
+        consoleErrors shouldBe emptyList()
+    }
+
+    @Test
+    fun `legacy restoration chooses the current page then menu order and removes old keys`() {
+        startTrace()
+        val workspace = loginReadyUser("restore478")
+        for ((path, family) in listOf("/pipelines" to "pipelines", "/templates" to "templates", "/dashboard" to "pipelines")) {
+            page.evaluate(
+                """ws => {
+                  localStorage.removeItem('dp-tree-open:' + ws);
+                  localStorage.setItem('dp-tree-panel:' + ws + ':pipelines', '1');
+                  localStorage.setItem('dp-tree-panel:' + ws + ':templates', '1');
+                }""",
+                workspace,
+            )
+            page.navigate("$baseUrl$path")
+            page.waitForSelector("#nav-tree-$family [role=tree]")
+            assertOpen(family)
+            page.evaluate(
+                """ws => ['pipelines','templates','dashboards','visualizations','parameter-sets']
+                  .every(f => localStorage.getItem('dp-tree-panel:' + ws + ':' + f) === null)""",
+                workspace,
+            ) shouldBe true
+            page.evaluate("ws => localStorage.getItem('dp-tree-open:' + ws)", workspace) shouldBe family
+        }
+        page.evaluate("ws => localStorage.setItem('dp-tree-open:' + ws, 'parameter-sets')", workspace)
+        page.reload()
+        page.waitForSelector("#nav-tree-parameter-sets input")
+        assertOpen("parameter-sets")
+        page.locator("#nav-tree-parameter-sets input").getAttribute("placeholder") shouldBe "Search parameter sets…"
+        page.locator("#nav-tree-parameter-sets input").getAttribute("aria-label") shouldBe "Search Parameter Sets"
+        page.evaluate("ws => localStorage.setItem('dp-tree-open:' + ws, '<unknown>')", workspace)
+        page.reload()
+        page.waitForFunction("() => window.DatapipelinesSidebarTrees instanceof Map")
+        assertOpen(null)
+        page.evaluate("ws => localStorage.getItem('dp-tree-open:' + ws)", workspace) shouldBe null
+        consoleErrors shouldBe emptyList()
     }
 
     // A deep, long-named path: four levels with long segments, so its leaf row is wider than
@@ -271,35 +472,87 @@ class TemplateSidebarTreeBrowserTest : BrowserSuite() {
     }
 
     @Test
+    @Suppress("LongMethod") // the six theme/rail combinations photograph four real, synchronized tree states each
     fun `the phone drawer carries the tree, and both themes photograph it`() {
+        startTrace()
         loginReadyUser("tpl398phone")
-        seedTemplate("test/drawer_probe.sql")
-        page.setViewportSize(390, 844)
-        page.navigate("$baseUrl/templates")
-        page.click("#rail-open")
-        page.waitForSelector("nav.app-nav")
-        page.click("[data-nav-branch='templates'] [data-nav-tree-toggle]")
-        page.waitForSelector("#nav-tree-templates [role=tree]")
-        settle()
+        seedTemplate(deepLeaf)
+        page.emulateMedia(Page.EmulateMediaOptions().setReducedMotion(ReducedMotion.REDUCE))
+        val held = mutableListOf<Route>()
+        var hold = false
+        var fail = false
+        page.route(java.util.function.Predicate { it.contains("/api/v1/templates/tree/search") }, { route ->
+            when {
+                fail -> {
+                    route.fulfill(
+                        Route
+                            .FulfillOptions()
+                            .setStatus(503)
+                            .setContentType("application/json")
+                            .setBody("{}"),
+                    )
+                }
 
-        // The drawer keeps its full width with the tree open (#350: the phone breakpoint wins
-        // over the desktop minimum) and the document does not grow sideways.
-        railWidth() shouldBe 232.0
-        val overflow =
-            page.evaluate("() => document.documentElement.scrollWidth > window.innerWidth") as Boolean
-        overflow shouldBe false
-        shot("phone-drawer-templates-tree")
+                hold -> {
+                    held += route
+                }
 
-        // Both themes, desktop: the tree in the widened rail.
-        page.setViewportSize(1440, 900)
-        page.navigate("$baseUrl/dashboard")
+                else -> {
+                    route.resume()
+                }
+            }
+        })
+        val dir = Paths.get("build", "reports", "478-screenshots")
+        Files.createDirectories(dir)
         listOf("light", "dark").forEach { theme ->
+            page.setViewportSize(1440, 900)
+            page.navigate("$baseUrl/pipelines")
             ensureTheme(theme)
-            openTree()
-            expand("test")
-            shot("templates-tree-$theme")
+            for (width in listOf("wide", "narrow", "phone")) {
+                page.setViewportSize(if (width == "phone") 390 else 1440, if (width == "phone") 844 else 900)
+                page.navigate("$baseUrl/pipelines")
+                if (width == "phone") {
+                    page.click("#rail-open")
+                } else {
+                    page.focus("#rail-resize")
+                    page.keyboard().press("Home")
+                    page.waitForFunction("() => document.querySelector('.app-rail').getBoundingClientRect().width === 232")
+                    if (width == "wide") {
+                        repeat(4) { index ->
+                            page.keyboard().press("Shift+ArrowRight")
+                            page.waitForFunction(
+                                "expected => document.querySelector('.app-rail').getBoundingClientRect().width === expected",
+                                232 + (index + 1) * 50,
+                            )
+                        }
+                    }
+                }
+                openTree()
+                railWidth() shouldBe if (width == "wide") 432.0 else 232.0
+                assertOpen("templates")
+                page.locator("[data-nav-branch=pipelines] .app-nav-link.active").count() shouldBe 1
+                hold = true
+                page.fill("$panel input", "leaf_template")
+                page.waitForCondition { held.size == 1 }
+                page.waitForSelector("$panel .dp-tree-status[data-status^='Loading']")
+                page.screenshot(Page.ScreenshotOptions().setPath(dir.resolve("$theme-$width-loading.png")))
+                hold = false
+                held.removeAt(0).resume()
+                page.waitForSelector(leaf(deepLeaf))
+                settle()
+                page.screenshot(Page.ScreenshotOptions().setPath(dir.resolve("$theme-$width-long-name.png")))
+                page.fill("$panel input", "no_match_478")
+                page.waitForSelector("$panel .dp-tree-status[data-status='No matches']")
+                page.screenshot(Page.ScreenshotOptions().setPath(dir.resolve("$theme-$width-empty.png")))
+                fail = true
+                page.fill("$panel input", "fault478")
+                page.waitForSelector("$panel .dp-tree-status[data-status='Could not load. ']")
+                page.screenshot(Page.ScreenshotOptions().setPath(dir.resolve("$theme-$width-error.png")))
+                fail = false
+                page.evaluate("() => document.documentElement.scrollWidth > window.innerWidth") shouldBe false
+            }
         }
-
-        consoleErrors shouldBe emptyList()
+        // The deliberate 503 fixture is the only expected console error; the CSP collector still applies.
+        consoleErrors.filterNot { it.contains("503") } shouldBe emptyList()
     }
 }
