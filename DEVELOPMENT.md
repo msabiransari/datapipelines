@@ -791,7 +791,10 @@ off every module's `check`, so the gate's `build` reaches them before any test);
 every module the diff touched — its **unfiltered** `test` (so `verifyTestsExecuted` stays
 meaningful), every other test task it carries (scripting's `breachSuite`, web's `editorJsTest`) and
 its coverage floor (`koverVerify`), each floor printed as a number beside it (2026-09-28's landing
-failed two gates on floors no pregate had run, #297); (2b) for the two `tests/*` modules the
+failed two gates on floors no pregate had run, #297); `editorJsTest` runs one `node --test` process
+per test file, each bounded by `EDITOR_JS_FILE_BOUND_SECONDS` (90 s) and captured to
+`build/editor-js-test/<file>.tap`, so a hung or short-counted file is named in the build log with
+its TAP trace beside it (#508); (2b) for the two `tests/*` modules the
 changed test classes, focused — where the changed file is not itself a runnable test class (an
 abstract base, an interface, an object, a helper), its real runnable consumers run, found through
 intermediate bases; when consumers cannot be established — an orphan helper, a deleted or renamed

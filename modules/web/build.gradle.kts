@@ -166,9 +166,21 @@ val editorJsTests =
         include("*.test.mjs")
     }
 
+// #508 — one node --test process per file, each bounded and captured. The old single run over
+// all files failed in two ways. With --test-force-exit the parent's forced exit dropped tests
+// whose stdout was still queued: shell.test.mjs reported 20-45 of its 54 defined tests across
+// the issue's five runs (re-measured 2026-10-11: 45/32/54/54/32), exit 0 every time — silently
+// green. And when the run wedged instead, the INHERITed stdout went to the Gradle daemon's
+// /dev/null, so no log carried WHICH file stalled (68 of 76 files "Interrupted", twice to the
+// 10-minute bound). Now: per file, `node --test --test-reporter=tap <file>` — no force-exit;
+// its reason died with the dashboard-proxy teardown fix 15bdbb90, re-verified 2026-10-11
+// (exits on its own, 3/3). stdout+stderr captured to build/editor-js-test/<file>.tap, one
+// lifecycle line per file into the build log, a per-file kill bound, and a static floor of
+// `test(` registrations per file, so ANY short count — a dropped pipe, a crashed child, a
+// re-added flag — is red naming the file, never a green that counted less.
 tasks.register("editorJsTest") {
     group = "verification"
-    description = "Runs the pipeline-editor JS unit tests (sse parser, coercion, paging) on node --test."
+    description = "Runs the pipeline-editor JS unit tests (sse parser, coercion, paging) on node --test, one process per file."
     doLast {
         val node =
             System.getenv("PATH")
@@ -184,44 +196,137 @@ tasks.register("editorJsTest") {
         if (testFiles.isEmpty()) throw GradleException("editorJsTest found no *.test.mjs under src/test/js — the guard ran vacuously")
         val version = nodeVersion(node)
         logger.lifecycle("editorJsTest: {} on {}", node.absolutePath, version)
-        val argv =
-            buildList {
-                add(node.absolutePath)
-                add("--test")
-                // Exit when the files are done even if a file's event loop is still alive. On
-                // gate-825ab754 (2026-10-02) the dashboard-proxy file's child finished its tests and
-                // then sat in ep_poll for an hour with the runner waiting on it; nothing was printed.
-                // The flag exists from Node 22; older runners keep today's behaviour.
-                if (nodeMajor(version) >= EDITOR_JS_FORCE_EXIT_NODE_MAJOR) add("--test-force-exit")
-                addAll(testFiles.map { it.absolutePath })
+
+        // Wipe first: accumulating would let a PREVIOUS run's TAP files read as this run's
+        // trace (the same rule websiteExportAssets applies to its export directory).
+        val tapDir = layout.buildDirectory.dir("editor-js-test").get().asFile
+        tapDir.deleteRecursively()
+        tapDir.mkdirs()
+
+        // Serial, deliberately: all 77 files measured 23.5 s end to end serially (node
+        // v24.21.0, 2026-10-11), far under a pool's payoff, and serial never forks the
+        // ~95-at-once child storm the old all-files run forked — the #508 hang's leading
+        // (unproven) hypothesis. The whole-task bound below stays as the outer fence.
+        val deadlineMs = System.currentTimeMillis() + TimeUnit.MINUTES.toMillis(EDITOR_JS_TEST_BOUND_MINUTES)
+        val fileBoundMs = TimeUnit.SECONDS.toMillis(EDITOR_JS_FILE_BOUND_SECONDS)
+        val results = mutableListOf<EditorJsFileResult>()
+        for (file in testFiles) {
+            if (System.currentTimeMillis() >= deadlineMs) {
+                results.add(EditorJsFileResult(file.name, floor = 0, notRun = true))
+                continue
             }
-        val proc =
-            ProcessBuilder(argv)
-                .redirectOutput(ProcessBuilder.Redirect.INHERIT)
-                .redirectError(ProcessBuilder.Redirect.INHERIT)
-                .start()
-        // The second fence, independent of node: a runner that neither exits nor prints is killed
-        // and reported, never waited on — a hung gate stage looks exactly like a slow one.
-        if (!proc.waitFor(EDITOR_JS_TEST_BOUND_MINUTES, TimeUnit.MINUTES)) {
-            // The runner forks one child per file: kill the tree, or the orphans keep the ports.
-            proc.descendants().forEach { it.destroyForcibly() }
-            proc.destroyForcibly()
-            throw GradleException(
-                "editorJsTest HUNG — node --test did not exit within $EDITOR_JS_TEST_BOUND_MINUTES min; killed",
+            // The static floor: every `test(` call site in the file must be REPORTED by the
+            // run. Files registering inside a loop report MORE than the floor, so it is a
+            // lower bound, never an equality — but any count under it means defined tests
+            // were never counted, whatever dropped them.
+            val floor = Regex("^\\s*test\\(", RegexOption.MULTILINE).findAll(file.readText()).count()
+            val tapFile = File(tapDir, file.name + ".tap")
+            val proc =
+                ProcessBuilder(node.absolutePath, "--test", "--test-reporter=tap", file.absolutePath)
+                    .redirectErrorStream(true)
+                    .redirectOutput(ProcessBuilder.Redirect.to(tapFile))
+                    .start()
+            // The per-file fence, independent of node: --test-timeout bounds one test, not a
+            // file stuck at load, so the wait is ours. Kill the TREE (a file may have forked,
+            // e.g. dashboard-proxy's proxy child) and keep going — a hung file is named at
+            // the end, never waited on past the bound, never the other files' loss.
+            val waitMs = minOf(fileBoundMs, deadlineMs - System.currentTimeMillis()).coerceAtLeast(0L)
+            if (!proc.waitFor(waitMs, TimeUnit.MILLISECONDS)) {
+                proc.descendants().forEach { it.destroyForcibly() }
+                proc.destroyForcibly()
+                results.add(
+                    EditorJsFileResult(file.name, floor, hungAfterSeconds = TimeUnit.MILLISECONDS.toSeconds(waitMs)),
+                )
+                continue
+            }
+            val tap = tapFile.readText()
+            results.add(
+                EditorJsFileResult(
+                    file.name,
+                    floor,
+                    exit = proc.exitValue(),
+                    tests = tapCount(tap, "tests"),
+                    pass = tapCount(tap, "pass"),
+                    fail = tapCount(tap, "fail"),
+                    cancelled = tapCount(tap, "cancelled"),
+                ),
             )
         }
-        if (proc.exitValue() != 0) throw GradleException("editorJsTest FAILED (node --test exited ${proc.exitValue()})")
+
+        // The trace the swallowed INHERIT never let into a log: one line per file, then the
+        // total, in the BUILD LOG where the gate's grep and the human both read.
+        for (result in results) logger.lifecycle("editorJsTest: {}", result.line())
+        logger.lifecycle(
+            "editorJsTest: total: tests {} pass {} fail {} cancelled {} across {} file(s), {} hung, {} not run",
+            results.sumOf { it.tests ?: 0 },
+            results.sumOf { it.pass ?: 0 },
+            results.sumOf { it.fail ?: 0 },
+            results.sumOf { it.cancelled ?: 0 },
+            results.size,
+            results.count { it.hungAfterSeconds != null },
+            results.count { it.notRun },
+        )
+        val offenders = results.mapNotNull { it.offence() }
+        if (offenders.isNotEmpty()) {
+            throw GradleException(
+                "editorJsTest FAILED — ${offenders.size} of ${results.size} file(s) offended (per-file TAP under " +
+                    "build/editor-js-test/):\n  " + offenders.joinToString("\n  "),
+            )
+        }
     }
 }
 
-/** `node --test-force-exit` is accepted from this major (Node 22.0); the task adds it only there. */
-val EDITOR_JS_FORCE_EXIT_NODE_MAJOR = 22
+/**
+ * How long editorJsTest waits for ONE file's node --test before killing its tree: the slowest
+ * file measured 6.9 s serially (toast.test.mjs, node v24.21.0, 2026-10-11; it sleeps by design),
+ * x10 is ~70 s, rounded up to 90 s for gate-load headroom. A kill is a red verdict NAMING the
+ * file — the bounded, self-naming shape #508 asked for.
+ */
+val EDITOR_JS_FILE_BOUND_SECONDS = 90L
 
-/** How long editorJsTest waits for `node --test` before killing it: the 57 files take seconds. */
+/** How long the whole editorJsTest task runs before every remaining file is reported NOT RUN. */
 val EDITOR_JS_TEST_BOUND_MINUTES = 10L
 
-/** The major of a `node --version` string (`v24.21.0` -> 24); 0 when it does not parse. */
-fun nodeMajor(version: String): Int = version.removePrefix("v").substringBefore('.').toIntOrNull() ?: 0
+/** One test file's outcome; the counts are null when the file left them unknown (hung, no summary). */
+private data class EditorJsFileResult(
+    val file: String,
+    val floor: Int,
+    val exit: Int? = null,
+    val tests: Int? = null,
+    val pass: Int? = null,
+    val fail: Int? = null,
+    val cancelled: Int? = null,
+    val hungAfterSeconds: Long? = null,
+    val notRun: Boolean = false,
+)
+
+/** The per-file lifecycle line for the build log: counts, plus which bound fired when one did. */
+private fun EditorJsFileResult.line(): String {
+    val counts = "tests ${tests ?: "?"} pass ${pass ?: "?"} fail ${fail ?: "?"} cancelled ${cancelled ?: "?"}"
+    return when {
+        notRun -> "$file: NOT RUN — the whole-task bound expired"
+        hungAfterSeconds != null -> "$file: $counts — HUNG after $hungAfterSeconds s, killed"
+        else -> "$file: $counts"
+    }
+}
+
+/** Why this file fails the task, most specific reason first; null when it ran clean and complete. */
+private fun EditorJsFileResult.offence(): String? =
+    when {
+        notRun -> "$file NOT RUN — the $EDITOR_JS_TEST_BOUND_MINUTES-minute whole-task bound expired"
+        hungAfterSeconds != null ->
+            "$file HUNG after $hungAfterSeconds s (per-file bound $EDITOR_JS_FILE_BOUND_SECONDS s) — killed"
+        (fail ?: 0) > 0 -> "$file reported $fail failing test(s)"
+        (cancelled ?: 0) > 0 -> "$file reported $cancelled cancelled test(s)"
+        tests == null -> "$file exited $exit but wrote no TAP summary — its counts cannot be verified"
+        tests < floor -> "$file reported $tests tests, below the static floor of $floor test( registrations"
+        (exit ?: 1) != 0 -> "$file exited $exit with every reported test passing"
+        else -> null
+    }
+
+/** The LAST top-level TAP summary line for a label; node indents subtest summaries, this anchors at 0. */
+private fun tapCount(tap: String, label: String): Int? =
+    Regex("^# $label (\\d+)$", RegexOption.MULTILINE).findAll(tap).lastOrNull()?.groupValues?.get(1)?.toIntOrNull()
 
 fun nodeVersion(node: File): String =
     ProcessBuilder(node.absolutePath, "--version")
