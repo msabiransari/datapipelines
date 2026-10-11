@@ -7,7 +7,10 @@
 #   → files=298 tests=3155 failures=0 errors=0 skipped=1 unreadable=0
 #
 #   ./scripts/test-recount.sh <results-root>
-#   → the same counts over that root's own modules/* and tests/* trees. #441: the
+#   → the same counts over that root's own modules/* and tests/* build/test-results
+#     trees, plus TEST-*.xml files directly at the root (flat CI artifacts).
+#     Never walk recursively from the root: sibling worktrees and saved snapshots
+#     contain duplicate results. #441: the
 #     pre-gate snapshots each stage's XML under .pregate-logs/runs/<run-id>/<stage>/, so
 #     read ONE stage at a time:
 #
@@ -42,7 +45,8 @@
 #    reprint it.
 #
 # Reads only build output; writes nothing; needs python3 and no network.
-# Exit code is 0 whatever the counts say — it REPORTS, it does not judge.
+# Exit 0 whatever the counts say, 2 for a root that is not a directory,
+# 3 for a root with no result XML at all — it REPORTS, it does not judge.
 # Read the numbers.
 #
 # A result file that does not parse (a test JVM killed mid-write, a disk-full,
@@ -65,23 +69,35 @@ if [ "$#" -ge 1 ]; then
   cd "$root" || exit 2
 else
   cd "$(dirname "$0")/.." || exit 2
+  root="$(pwd)"
 fi
 
-python3 - <<'PY'
-import glob, xml.etree.ElementTree as ET
+python3 - "$root" <<'PY'
+import glob
+import sys
+import xml.etree.ElementTree as ET
 t=f=e=s=n=0
-unreadable=[]
-for p in glob.glob("modules/*/build/test-results/**/*.xml", recursive=True) + \
-         glob.glob("tests/*/build/test-results/**/*.xml", recursive=True):
+unreadable: list[tuple[str, str]] = []
+paths = (glob.glob("modules/*/build/test-results/**/*.xml", recursive=True) +
+         glob.glob("tests/*/build/test-results/**/*.xml", recursive=True) +
+         glob.glob("TEST-*.xml"))
+for p in paths:
     try:
         r = ET.parse(p).getroot()
-    except (ET.ParseError, OSError) as err:
+        if r.tag != "testsuite": continue
+        tests = int(r.get("tests", 0))
+        failures = int(r.get("failures", 0))
+        errors = int(r.get("errors", 0))
+        skipped = int(r.get("skipped", 0))
+    except (ET.ParseError, OSError, ValueError) as err:
         unreadable.append((p, str(err)))
         continue
-    if r.tag != "testsuite": continue
-    n+=1; t+=int(r.get("tests",0)); f+=int(r.get("failures",0))
-    e+=int(r.get("errors",0)); s+=int(r.get("skipped",0))
-print(f"files={n} tests={t} failures={f} errors={e} skipped={s} unreadable={len(unreadable)}")
+    n+=1; t+=tests; f+=failures; e+=errors; s+=skipped
+print(f"files={n} tests={t} failures={f} errors={e} skipped={s} unreadable={len(unreadable)}", flush=True)
 for p, why in unreadable:
     print(f"unreadable result file: `{p}` — {why}")
+if not paths:
+    print(f"test-recount.sh: no test result XML under '{sys.argv[1]}' "
+          "(modules/*/…, tests/*/…, or TEST-*.xml at the root)", file=sys.stderr)
+    sys.exit(3)
 PY
