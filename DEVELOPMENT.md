@@ -1349,7 +1349,11 @@ When it runs: **never per PR.** The `security-mutations` workflow runs it weekly
 demand. Run it by hand when a change touches `modules/auth`, `ScopeInterceptor`, the MCP
 dispatcher or `PublicPaths`. The ten took about three minutes on the dev box
 (2026-09-24). A new guard still ships with its own falsification when it is written;
-the mutations re-prove the existing guards over time.
+the mutations re-prove the existing guards over time. Between weekly runs,
+`SecurityMutationAnchorsTest` (in `modules/auth`) guards the anchors themselves at every
+build — each mutation's FROM still matches its target exactly once and its named test
+class and test still exist; it runs no mutation, so a green guard is not a detection
+claim.
 
 The ASVS 5.0.0 Level 2 evidence index — which guard stands behind which requirement
 family, and which rows are manual or outstanding — is
