@@ -6,6 +6,7 @@ import com.microsoft.playwright.PlaywrightException
 import com.microsoft.playwright.Request
 import com.microsoft.playwright.Route
 import com.microsoft.playwright.options.WaitForSelectorState
+import com.microsoft.playwright.options.WaitUntilState
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.collections.shouldNotContain
@@ -60,6 +61,11 @@ import java.util.function.Consumer
  * — measured in a gate run as a level request held 30s into the click timeout when a
  * release fired before the capture. Assertions otherwise synchronize on
  * `waitForRequest`/`waitForSelector` exclusively.
+ *
+ * #440: each test's first navigation waits for DOMContentLoaded, never `load`, followed by the
+ * explicit readiness selector it already waits for (ExplorerStressBrowserTest's form, the #428
+ * fix's shape). Every script these flows drive is classic or a deferred module and has run by
+ * then; `load` added only the wait for every subresource, which none of the assertions read.
  */
 class ShellBusyBrowserTest : BrowserSuite() {
     // ------------------------------------------------------------------ the throttle
@@ -207,7 +213,7 @@ class ShellBusyBrowserTest : BrowserSuite() {
 
     /** The catalog page, its sidebar Templates branch open and its root level loaded. */
     private fun openCatalogAndSidebarTree() {
-        page.navigate("$baseUrl/templates")
+        page.navigate("$baseUrl/templates", domContentLoaded())
         page.waitForSelector(catalog)
         page.click("[data-nav-branch='templates'] [data-nav-tree-toggle]")
         page.waitForSelector(folderSummary("nyc"))
@@ -222,6 +228,8 @@ class ShellBusyBrowserTest : BrowserSuite() {
             page.click(folderSummary(path))
         }
     }
+
+    private fun domContentLoaded() = Page.NavigateOptions().setWaitUntil(WaitUntilState.DOMCONTENTLOADED)
 
     private fun barHidden() =
         page.waitForSelector(
@@ -340,7 +348,7 @@ class ShellBusyBrowserTest : BrowserSuite() {
     fun `a slow boosted navigation leaves no skeleton behind - not live, not in the history snapshot`() {
         startTrace()
         loginReadyUser("orphan")
-        page.navigate("$baseUrl/dashboard")
+        page.navigate("$baseUrl/dashboard", domContentLoaded())
         page.waitForSelector("a.app-nav-link[href='/pipelines']")
         val hold = BoostHold("/pipelines").apply { install() }
         try {
@@ -451,7 +459,7 @@ class ShellBusyBrowserTest : BrowserSuite() {
         startTrace()
         loginReadyUser("busya")
         seedTemplates()
-        page.navigate("$baseUrl/templates")
+        page.navigate("$baseUrl/templates", domContentLoaded())
         page.waitForSelector(catalog)
         val throttle = PartialThrottle(holdMillis = 600).apply { install() }
         try {
