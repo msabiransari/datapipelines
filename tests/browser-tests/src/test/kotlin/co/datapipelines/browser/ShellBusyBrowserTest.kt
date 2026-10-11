@@ -3,13 +3,17 @@ package co.datapipelines.browser
 import com.microsoft.playwright.APIResponse
 import com.microsoft.playwright.Page
 import com.microsoft.playwright.PlaywrightException
+import com.microsoft.playwright.Request
 import com.microsoft.playwright.Route
 import com.microsoft.playwright.options.WaitForSelectorState
 import io.kotest.matchers.collections.shouldBeEmpty
+import io.kotest.matchers.collections.shouldContain
+import io.kotest.matchers.collections.shouldNotContain
 import io.kotest.matchers.ints.shouldBeGreaterThanOrEqual
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldMatch
 import org.junit.jupiter.api.Test
+import java.util.function.Consumer
 
 /**
  * 085 §D — a signal for every server trip (owner: "we need some kind of an indicator").
@@ -233,6 +237,11 @@ class ShellBusyBrowserTest : BrowserSuite() {
         loginReadyUser("busyt")
         seedTemplates()
         openCatalogAndSidebarTree()
+        // #432: a standing dialect filter — the catalog's Clear search below must keep it (every
+        // seed is POSTGRES, so the filtered list still shows them).
+        page.waitForResponse({ r -> r.url().contains("/partials/templates") && r.url().contains("dialect=POSTGRES") }) {
+            page.selectOption("#template-filter-dialect", "POSTGRES")
+        }
         val throttle = PartialThrottle(holdMillis = 600).apply { install() }
         try {
             // (1) A plain PARTIAL request (a sidebar tree expand, not a boosted navigation)
@@ -268,6 +277,11 @@ class ShellBusyBrowserTest : BrowserSuite() {
             val clear = "$catalog .ds-empty-actions button" // plain CSS: it is also handed to document.querySelector
             page.waitForSelector(clear)
             barHidden()
+            // #432: every list request from the click to the settle is recorded — ONE Consumer
+            // instance, since offRequest removes by identity.
+            val listRequests = mutableListOf<String>()
+            val onList = Consumer<Request> { r -> if (r.url().contains("/partials/templates")) listRequests.add(r.url()) }
+            page.onRequest(onList)
             page.click(clear)
             throttle.awaitCaptured(5)
 
@@ -296,6 +310,16 @@ class ShellBusyBrowserTest : BrowserSuite() {
             page.waitForSelector("$catalog[aria-busy='true']", Page.WaitForSelectorOptions().setState(WaitForSelectorState.HIDDEN))
             page.locator(".app-target-skeleton").count() shouldBe 0
             page.locator(".app-busy").count() shouldBe 0
+
+            // #432: Clear search emptied the box and kept the dialect, and its ONE request
+            // describes the controls left standing — dialect, no q.
+            page.offRequest(onList)
+            page.inputValue("#template-filter-q") shouldBe ""
+            page.inputValue("#template-filter-dialect") shouldBe "POSTGRES"
+            listRequests.size shouldBe 1
+            val params = queryPairs(listRequests.single())
+            params shouldContain "dialect=POSTGRES"
+            params.map { it.substringBefore('=') } shouldNotContain "q"
         } finally {
             throttle.releaseAll()
         }
@@ -343,6 +367,9 @@ class ShellBusyBrowserTest : BrowserSuite() {
             hold.release()
         }
     }
+
+    /** A request URL's query as its `key=value` pairs, in order. */
+    private fun queryPairs(url: String): List<String> = url.substringAfter('?', "").split('&').filter { it.isNotEmpty() }
 
     /** How many pixels the DOCUMENT is taller than the viewport — 0 on a correct page. */
     private fun documentOverflow(): Long =

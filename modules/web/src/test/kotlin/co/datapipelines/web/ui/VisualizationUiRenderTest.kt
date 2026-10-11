@@ -112,6 +112,14 @@ class VisualizationUiRenderTest {
         val none = list(scope = "nav", rootId = VisualizationBrowseModel.NAV_ROOT_ID, q = "zzz", rows = emptyList())
         none shouldContain "No visualizations match your search"
         none shouldNotContain "data-nav-tree-clear"
+        none shouldNotContain "data-dp-clear-filters"
+
+        // #432: the CATALOG's no-match clear names the box it empties (shell.js) and replaces a
+        // search still in flight from that box.
+        val catalogMiss = list(scope = "page", rootId = VisualizationBrowseModel.PAGE_ROOT_ID, q = "zzz", rows = emptyList())
+        catalogMiss shouldContain "Clear search"
+        catalogMiss shouldContain "data-dp-clear-filters=\"#visualization-filter-q\""
+        catalogMiss shouldContain "hx-sync=\"#visualization-filter-q:replace\""
     }
 
     @Test

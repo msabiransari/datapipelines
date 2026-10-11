@@ -1484,3 +1484,104 @@ test("the guard purges and vetoes a body-shaped entry and leaves a text-literal 
     delete globalThis.document;
   }
 });
+
+// #432 — a catalog's empty-state clear empties the controls its button names in
+// data-dp-clear-filters (ID selectors), so the box and the re-fetched list agree.
+
+/** A filter control double: a value, a tag and a focus flag. */
+function mkControl(tagName, value) {
+  return {
+    tagName,
+    value,
+    focused: false,
+    focus() {
+      this.focused = true;
+    },
+  };
+}
+
+test("clearFilters empties every named control and focuses the first emptied input (#432)", () => {
+  const shell = loadShell();
+  const q = mkControl("INPUT", "no_such_source");
+  const dialect = mkControl("SELECT", "H2");
+  const doc = mkDoc({ byId: { "ds-filter-q": q, "ds-filter-dialect": dialect } });
+  const button = mkEl({ "data-dp-clear-filters": "#ds-filter-q, #ds-filter-dialect" });
+
+  const cleared = shell.clearFilters(doc, button);
+
+  assert.deepEqual(cleared, [q, dialect]);
+  assert.equal(q.value, "");
+  assert.equal(dialect.value, "", "a select resets to its value=\"\" first option");
+  assert.equal(q.focused, true, "the box takes focus — the clicked button is about to be swapped away");
+  assert.equal(dialect.focused, false);
+});
+
+test("clearFilters focuses the first emptied INPUT even when a select is named first (#432)", () => {
+  const shell = loadShell();
+  const type = mkControl("SELECT", "sql");
+  const q = mkControl("INPUT", "zzz");
+  const doc = mkDoc({ byId: { "t-type": type, "t-q": q } });
+
+  shell.clearFilters(doc, mkEl({ "data-dp-clear-filters": "#t-type,#t-q" }));
+
+  assert.equal(type.focused, false);
+  assert.equal(q.focused, true);
+});
+
+test("clearFilters skips a selector that resolves to nothing and one that is not a plain #id (#432)", () => {
+  const shell = loadShell();
+  const q = mkControl("INPUT", "zzz");
+  const decoy = mkControl("INPUT", "kept");
+  const doc = mkDoc({ byId: { "template-filter-q": q }, byQuery: { "input[name=q]": decoy } });
+  const button = mkEl({ "data-dp-clear-filters": "#gone, input[name=q], , #template-filter-q" });
+
+  const cleared = shell.clearFilters(doc, button);
+
+  assert.deepEqual(cleared, [q], "the missing id and the non-id selector are skipped");
+  assert.equal(q.value, "");
+  assert.equal(decoy.value, "kept", "only an #id names a control — never a name-based sweep");
+});
+
+test("clearFilters is a no-op without the attribute, and never throws (#432)", () => {
+  const shell = loadShell();
+  const q = mkControl("INPUT", "zzz");
+  const doc = mkDoc({ byId: { q } });
+
+  assert.deepEqual(shell.clearFilters(doc, mkEl({})), []);
+  assert.deepEqual(shell.clearFilters(doc, mkEl({ "data-dp-clear-filters": "" })), []);
+  assert.deepEqual(shell.clearFilters(doc, null), []);
+  assert.equal(q.value, "zzz");
+  assert.equal(q.focused, false);
+});
+
+// The pure function cannot see whether init() wires it: this drives the real body click
+// listener with a click inside a clear button and one outside any.
+test("init's body click listener clears through the closest [data-dp-clear-filters] (#432)", () => {
+  const clicks = [];
+  const q = mkControl("INPUT", "zzz");
+  const button = mkEl({ "data-dp-clear-filters": "#q" });
+  globalThis.sessionStorage = { getItem: () => null, setItem() {} };
+  globalThis.window = { location: { pathname: "/templates" }, localStorage: { setItem() {} }, addEventListener: () => {} };
+  globalThis.document = {
+    readyState: "complete",
+    body: { addEventListener: (t, fn) => t === "click" && clicks.push(fn) },
+    addEventListener: () => {},
+    documentElement: { classList: { toggle: () => {}, contains: () => false } },
+    getElementById: (id) => (id === "q" ? q : null),
+    querySelector: () => null,
+    querySelectorAll: () => [],
+  };
+  const target = (hit) => ({ closest: (sel) => (sel === "[data-dp-clear-filters]" && hit ? hit : null) });
+  try {
+    loadShell();
+    clicks.forEach((fn) => fn({ target: target(null) }));
+    assert.equal(q.value, "zzz", "a click outside any clear button touches nothing");
+    clicks.forEach((fn) => fn({ target: target(button) }));
+    assert.equal(q.value, "");
+    assert.equal(q.focused, true);
+  } finally {
+    delete globalThis.sessionStorage;
+    delete globalThis.window;
+    delete globalThis.document;
+  }
+});

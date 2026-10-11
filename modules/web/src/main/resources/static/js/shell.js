@@ -1077,6 +1077,41 @@
     return items[next];
   }
 
+  /* #432 — a catalog's empty-state clear (Clear search / Clear filters). The button
+     lives inside the list it re-fetches; the filter controls live outside it, on the
+     page, so nothing re-renders them and a bare re-fetch left the stale query in the
+     box. The template names the controls the button resets in
+     data-dp-clear-filters — comma-separated ID selectors (config, not code: one
+     handler serves every catalog). Each control's value becomes "" (every filter
+     select's first option is value=""); a selector that is not a plain #id or
+     resolves to nothing is skipped; the first emptied INPUT takes focus, since the
+     clicked button is about to be swapped away. Only .value is touched: a
+     programmatic value fires neither `input` nor `search`, so the button's own
+     request stays the one request per click. Returns the controls it emptied. */
+  var CLEAR_FILTER_ID = /^#[A-Za-z][\w-]*$/;
+
+  function clearFilters(doc, button) {
+    var spec = button && button.getAttribute ? button.getAttribute("data-dp-clear-filters") : null;
+    if (!spec) return [];
+    var cleared = [];
+    var parts = spec.split(",");
+    for (var i = 0; i < parts.length; i++) {
+      var sel = parts[i].trim();
+      if (!CLEAR_FILTER_ID.test(sel)) continue;
+      var control = doc.getElementById(sel.slice(1));
+      if (!control) continue;
+      control.value = "";
+      cleared.push(control);
+    }
+    for (var j = 0; j < cleared.length; j++) {
+      if (cleared[j].tagName === "INPUT") {
+        if (cleared[j].focus) cleared[j].focus();
+        break;
+      }
+    }
+    return cleared;
+  }
+
   function init() {
     if (typeof document === "undefined" || !document.body) return;
     if (window.__dpShellInit) return; // the layout loads this once; never double-wire
@@ -1291,6 +1326,17 @@
       if (evt.target.closest && evt.target.closest(".app-rail-backdrop")) {
         setRailOpen(doc, false);
       }
+    });
+
+    /* #432 — the catalog's empty-state clear. htmx's own click listener sits ON the
+       button, so it runs before this body-level one and has already read the button's
+       hx-include when the controls are emptied here. No button includes a control it
+       clears (templates' includes only the dialect and type it keeps), so the order
+       is immaterial — the request describes the controls left standing either way. */
+    doc.body.addEventListener("click", function (evt) {
+      var button = evt.target.closest && evt.target.closest("[data-dp-clear-filters]");
+      if (!button) return;
+      clearFilters(doc, button);
     });
 
     /* 161 — the search palette's fetch discipline: a blank query never reaches the
@@ -1573,6 +1619,7 @@
     menuIsOpen: menuIsOpen,
     menuSelection: menuSelection,
     MENU_SELECTION: MENU_SELECTION,
+    clearFilters: clearFilters,
     moveMenuFocus: moveMenuFocus,
     MAIN_SELECTOR: MAIN_SELECTOR,
     SWAP_SPEC: SWAP_SPEC,
