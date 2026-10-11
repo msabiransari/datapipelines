@@ -245,11 +245,7 @@ class ShellBusyBrowserTest : BrowserSuite() {
         loginReadyUser("busyt")
         seedTemplates()
         openCatalogAndSidebarTree()
-        // #432: a standing dialect filter — the catalog's Clear search below must keep it (every
-        // seed is POSTGRES, so the filtered list still shows them).
-        page.waitForResponse({ r -> r.url().contains("/partials/templates") && r.url().contains("dialect=POSTGRES") }) {
-            page.selectOption("#template-filter-dialect", "POSTGRES")
-        }
+        selectStandingDialect()
         val throttle = PartialThrottle(holdMillis = 600).apply { install() }
         try {
             // (1) A plain PARTIAL request (a sidebar tree expand, not a boosted navigation)
@@ -319,15 +315,8 @@ class ShellBusyBrowserTest : BrowserSuite() {
             page.locator(".app-target-skeleton").count() shouldBe 0
             page.locator(".app-busy").count() shouldBe 0
 
-            // #432: Clear search emptied the box and kept the dialect, and its ONE request
-            // describes the controls left standing — dialect, no q.
             page.offRequest(onList)
-            page.inputValue("#template-filter-q") shouldBe ""
-            page.inputValue("#template-filter-dialect") shouldBe "POSTGRES"
-            listRequests.size shouldBe 1
-            val params = queryPairs(listRequests.single())
-            params shouldContain "dialect=POSTGRES"
-            params.map { it.substringBefore('=') } shouldNotContain "q"
+            assertClearKeptTheDialect(listRequests)
         } finally {
             throttle.releaseAll()
         }
@@ -374,6 +363,30 @@ class ShellBusyBrowserTest : BrowserSuite() {
         } finally {
             hold.release()
         }
+    }
+
+    /**
+     * #432: a standing dialect filter the catalog's Clear search must keep (every seed is
+     * POSTGRES, so the filtered list still shows them).
+     */
+    private fun selectStandingDialect() {
+        page.waitForResponse({ r -> r.url().contains("/partials/templates") && r.url().contains("dialect=POSTGRES") }) {
+            page.selectOption("#template-filter-dialect", "POSTGRES")
+        }
+    }
+
+    /**
+     * #432: Clear search emptied the box and kept the dialect, and its ONE request (of
+     * [listRequests], every list request from the click to the settle) describes the controls
+     * left standing — dialect, no q.
+     */
+    private fun assertClearKeptTheDialect(listRequests: List<String>) {
+        page.inputValue("#template-filter-q") shouldBe ""
+        page.inputValue("#template-filter-dialect") shouldBe "POSTGRES"
+        listRequests.size shouldBe 1
+        val params = queryPairs(listRequests.single())
+        params shouldContain "dialect=POSTGRES"
+        params.map { it.substringBefore('=') } shouldNotContain "q"
     }
 
     /** A request URL's query as its `key=value` pairs, in order. */
