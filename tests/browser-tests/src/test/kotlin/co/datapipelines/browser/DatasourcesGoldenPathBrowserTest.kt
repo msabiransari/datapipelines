@@ -1,9 +1,11 @@
 package co.datapipelines.browser
 
+import com.microsoft.playwright.Request
 import com.microsoft.playwright.options.WaitForSelectorState
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
+import java.util.function.Consumer
 
 /**
  * Golden path 3 of the release checklist: the datasources screen — empty state, register
@@ -87,6 +89,41 @@ class DatasourcesGoldenPathBrowserTest : BrowserSuite() {
         page.waitForSelector("#ds-facts-modal")
         page.locator("#ds-facts").innerText() shouldContain "Nothing learned yet"
         page.locator("#ds-facts-modal h2").innerText() shouldContain name
+    }
+
+    /**
+     * #432 — the list's "nothing matched" state offers Clear filters, and the button resets
+     * BOTH controls it names (search and dialect), so the boxes and its bare re-fetch agree.
+     */
+    @Test
+    fun `Clear filters empties the search and the dialect, in one bare request (#432)`() {
+        startTrace()
+        loginReadyUser()
+        val name = registerThrough("clear-" + generatedPassword("ds").take(10).lowercase())
+        page.navigate("$baseUrl/datasources")
+        rowFor(name).waitFor()
+
+        // Both filters standing: H2 (the row's own dialect), then a search that misses.
+        page.waitForResponse({ r -> r.url().contains("/partials/datasources") && r.url().contains("dialect=H2") }) {
+            page.selectOption("#ds-filter-dialect", "H2")
+        }
+        page.fill("#ds-filter-q", "no-such-datasource")
+        val clear = "#datasource-list-wrapper button:has-text('Clear filters')"
+        page.waitForSelector(clear)
+
+        val listRequests = mutableListOf<String>()
+        // ONE Consumer instance: offRequest removes by identity.
+        val onList = Consumer<Request> { r -> if (r.url().contains("/partials/datasources")) listRequests.add(r.url()) }
+        page.onRequest(onList)
+        page.click(clear)
+        rowFor(name).waitFor()
+        page.offRequest(onList)
+
+        page.inputValue("#ds-filter-q") shouldBe ""
+        page.inputValue("#ds-filter-dialect") shouldBe ""
+        page.evaluate("() => document.activeElement && document.activeElement.id") shouldBe "ds-filter-q"
+        listRequests.size shouldBe 1
+        listRequests.single().substringAfter('?', "") shouldBe ""
     }
 
     @Test

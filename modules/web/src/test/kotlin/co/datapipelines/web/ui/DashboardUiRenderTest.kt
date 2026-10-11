@@ -153,6 +153,14 @@ class DashboardUiRenderTest {
 
         html shouldContain "No dashboards match your search"
         html shouldNotContain "data-nav-tree-clear"
+        html shouldNotContain "data-dp-clear-filters"
+
+        // #432: the CATALOG's no-match clear names the box it empties (shell.js) and replaces a
+        // search still in flight from that box.
+        val catalogMiss = searchPartial(nav = false, rows = emptyList(), q = "zzz")
+        catalogMiss shouldContain "Clear search"
+        catalogMiss shouldContain "data-dp-clear-filters=\"#dashboard-filter-q\""
+        catalogMiss shouldContain "hx-sync=\"#dashboard-filter-q:replace\""
     }
 
     @Test
@@ -184,13 +192,14 @@ class DashboardUiRenderTest {
     private fun searchPartial(
         nav: Boolean,
         rows: List<DashboardBrowseModel.DashboardLeafView>,
+        q: String = "",
     ): String =
         engine.process(
             "partials/dashboard-search",
             webContext("/dashboards").apply {
                 setVariable("scope", if (nav) "nav" else "page")
                 setVariable("rootId", if (nav) DashboardBrowseModel.NAV_ROOT_ID else DashboardListScope.PAGE.rootId)
-                setVariable("q", "")
+                setVariable("q", q)
                 setVariable("dashboards", rows)
                 setVariable("lensUnavailable", null)
                 setVariable("offset", 0)

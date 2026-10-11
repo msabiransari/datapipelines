@@ -477,6 +477,20 @@ class PipelineExplorerRenderTest {
         noMatch shouldNotContain "data-nav-tree-clear"
         // The nav instance renders no clear button of its own (the tree engine has one) — no bare hx-get either.
         noMatch shouldNotContain "hx-get=\"/partials/pipelines\""
+        noMatch shouldNotContain "data-dp-clear-filters"
+
+        // #432: the catalog's no-match clear names the box it empties (shell.js clears it) and
+        // replaces any search still in flight from that box, so a stale answer cannot land after it.
+        val catalogMiss =
+            render("partials/pipeline-search") {
+                fillCatalog()
+                setVariable("pipelines", emptyList<PipelineRecord>())
+                setVariable("q", "zzz")
+                setVariable("total", 0)
+            }
+        catalogMiss shouldContain "Clear search"
+        catalogMiss shouldContain "data-dp-clear-filters=\"#pipeline-filter-q\""
+        catalogMiss shouldContain "hx-sync=\"#pipeline-filter-q:replace\""
     }
 
     // ------------------------------------------------------------------ fixtures

@@ -350,10 +350,12 @@ pgres::capture() {
     return 1
   fi
   counts="$(bash "$root/scripts/test-recount.sh" "$sdir" 2>&1)" || rc=$?
+  printf '%s\n' "$counts" > "$sdir/RECOUNT.log" || return 1
   first="$(printf '%s\n' "$counts" | head -n 1)"
   pgres::manifest_stage "$mf" "stage-$stage" "$status" "$stage_exit" \
     "snapshot_files=$files $first provenance=$([ -f "$sdir/PROVENANCE.txt" ] && echo yes || echo no)" || return 1
-  [ "$rc" -eq 0 ] || return 1
+  # Exit 3 is an executed stage with no XML (for example, a compile failure).
+  [ "$rc" -eq 0 ] || [ "$rc" -eq 3 ] || return 1
   return 0
 }
 
@@ -720,6 +722,77 @@ pgres::self_test() {
 
   pgres::capture "$T/empty" "$T/skipped-run" 9 skipped 0 "" >/dev/null 2>&1
   ck_contains "skipped-status-recorded" "$(cat "$T/skipped-run/MANIFEST.txt" 2>/dev/null)" 'stage=stage-9 status=skipped exit=0'
+
+  # #506: the flat artifact layout and empty-root exit must agree with capture.
+  local flat="$T/flat" empty="$T/empty-results" nested="$T/worktree-only"
+  local invalid="$T/invalid-count" recount_out recount_rc capture_rc capture_run="$T/empty-capture"
+  local zero_counts='files=0 tests=0 failures=0 errors=0 skipped=0 unreadable=0'
+  mkdir -p "$flat" "$empty" "$nested/.claude/worktrees/x/modules/a/build/test-results/test" \
+           "$invalid/modules/auth/build/test-results/test"
+  printf '<testsuite tests="2" failures="1" errors="0" skipped="1"/>' > "$flat/TEST-one.xml"
+  printf '<testsuite tests="3" failures="0" errors="1" skipped="0"/>' > "$flat/TEST-two.xml"
+  recount_rc=0
+  recount_out="$(bash "$PGRES_LIB_DIR/test-recount.sh" "$flat" 2>"$T/recount.err")" || recount_rc=$?
+  ck_eq "flat-root-counts" "files=2 tests=5 failures=1 errors=1 skipped=1 unreadable=0" "$recount_out"
+  ck_eq "flat-root-exit" "0" "$recount_rc"
+
+  recount_rc=0
+  recount_out="$(bash "$PGRES_LIB_DIR/test-recount.sh" "$empty" 2>"$T/recount.err")" || recount_rc=$?
+  ck_eq "empty-root-exit" "3" "$recount_rc"
+  ck_eq "empty-root-counts" "$zero_counts" "$recount_out"
+  ck_contains "empty-root-message" "$(cat "$T/recount.err")" \
+    "test-recount.sh: no test result XML under '$empty' (modules/*/…, tests/*/…, or TEST-*.xml at the root)"
+
+  printf '<testsuite tests="99"/>' > "$nested/.claude/worktrees/x/modules/a/build/test-results/test/TEST-a.xml"
+  recount_rc=0
+  recount_out="$(bash "$PGRES_LIB_DIR/test-recount.sh" "$nested" 2>"$T/recount.err")" || recount_rc=$?
+  ck_eq "worktree-only-root-exit" "3" "$recount_rc"
+  ck_eq "worktree-only-root-counts" "$zero_counts" "$recount_out"
+
+  printf '<testsuite tests="abc"/>' > "$invalid/modules/auth/build/test-results/test/TEST-invalid.xml"
+  recount_rc=0
+  recount_out="$(bash "$PGRES_LIB_DIR/test-recount.sh" "$invalid" 2>"$T/recount.err")" || recount_rc=$?
+  ck_eq "non-integer-count-exit" "0" "$recount_rc"
+  ck_eq "non-integer-count-summary" "files=0 tests=0 failures=0 errors=0 skipped=0 unreadable=1" \
+    "$(printf '%s\n' "$recount_out" | head -n 1)"
+  ck_contains "non-integer-count-named" "$recount_out" 'TEST-invalid.xml'
+  ck_eq "non-integer-count-no-traceback" "" "$(cat "$T/recount.err")"
+
+  # A later bad attribute must not leave partial totals from that file behind.
+  local later="$T/invalid-later-count" attr
+  mkdir -p "$later"
+  for attr in failures errors skipped; do
+    printf '<testsuite tests="7" %s="abc"/>' "$attr" > "$later/TEST-$attr.xml"
+  done
+  recount_rc=0
+  recount_out="$(bash "$PGRES_LIB_DIR/test-recount.sh" "$later" 2>"$T/recount.err")" || recount_rc=$?
+  ck_eq "later-non-integer-count-exit" "0" "$recount_rc"
+  ck_eq "later-non-integer-count-no-partial-totals" "files=0 tests=0 failures=0 errors=0 skipped=0 unreadable=3" \
+    "$(printf '%s\n' "$recount_out" | head -n 1)"
+  recount_rc=0
+  recount_out="$(bash "$PGRES_LIB_DIR/test-recount.sh" "$md" 2>"$T/recount.err")" || recount_rc=$?
+  ck_eq "malformed-only-root-exit" "0" "$recount_rc"
+
+  capture_rc=0
+  pgres::capture "$F" "$capture_run" 2 executed 1 /dev/null modules/no-output >"$T/capture.out" 2>&1 || capture_rc=$?
+  ck_eq "empty-stage-capture-exit" "0" "$capture_rc"
+  ck_contains "empty-stage-capture-recorded" "$(cat "$capture_run/MANIFEST.txt")" \
+    "stage=stage-2 status=executed exit=1 snapshot_files=0 $zero_counts provenance=yes"
+  recount_out=''
+  [ ! -f "$capture_run/2/RECOUNT.log" ] || recount_out="$(cat "$capture_run/2/RECOUNT.log")"
+  ck_contains "empty-stage-capture-message-kept" "$recount_out" \
+    "test-recount.sh: no test result XML under '$capture_run/2' (modules/*/…, tests/*/…, or TEST-*.xml at the root)"
+
+  # Exit 3 is the only newly accepted status; other errors still refuse capture.
+  local refused="$T/capture-refused" refused_rc
+  mkdir -p "$refused/scripts"
+  for refused_rc in 1 2 4; do
+    printf '#!/usr/bin/env bash\nexit %s\n' "$refused_rc" > "$refused/scripts/test-recount.sh"
+    capture_rc=0
+    pgres::capture "$refused" "$T/refused-$refused_rc" 2 executed 0 /dev/null modules/no-output \
+      >"$T/capture.out" 2>&1 || capture_rc=$?
+    ck_eq "capture-refuses-recount-exit-$refused_rc" "1" "$capture_rc"
+  done
 
   # ---- 5. provenance: NO-STATUS-LINE annotations (#447) -----------------------
   local PR="$T/prov-root" PS="$T/prov-stage" PLC="$T/prov.log"
