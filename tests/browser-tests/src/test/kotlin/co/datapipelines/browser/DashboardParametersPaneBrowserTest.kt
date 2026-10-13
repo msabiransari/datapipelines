@@ -37,7 +37,10 @@ class DashboardParametersPaneBrowserTest : ParameterSetBrowserSuite() {
     private val limitRow = "#dp-board-filters [data-dp-parameter=\"limit\"]"
     private val panel = "#dp-board-filters"
 
-    /** Reads the error row's computed voice, the tokens resolved beside it, and its wrap geometry. Passes the row selector and the boundary selector whose content-box right edge the chip must stay inside. */
+    /**
+     * Reads the error row's computed voice, the tokens resolved beside it, and its wrap geometry. Passes the row
+     * selector and the boundary selector whose content-box right edge the chip must stay inside.
+     */
     private val probeErrorVoice =
         """async ([rowSel, boundarySel]) => {
           const row = document.querySelector(rowSel);
