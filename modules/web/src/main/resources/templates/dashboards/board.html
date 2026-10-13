@@ -5,7 +5,7 @@
   <!-- Signed-in chart pages share the shell's lazy 3D superset bundle. This inert catalog
        declares reusable libraries and per-page mount glue; prepared navigation and cached
        history preserve the rail and mount each live root once. Standalone embeds remain isolated. -->
-  <template data-chart-assets>
+  <template data-page-assets>
     <th:block th:if="${bundle != null}">
     <script th:src="@{/vendor/plotly/plotly-3d.min.js}"></script>
     <script th:src="@{/js/datapipelines-dashboard.js}"></script>

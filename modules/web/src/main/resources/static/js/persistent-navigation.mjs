@@ -1,4 +1,4 @@
-import { preparePage, mountCharts } from "./page-assets.mjs";
+import { preparePage, mountPage } from "./page-assets.mjs";
 
 const FAMILIES = /^\/(?:pipelines|templates|dashboards|visualizations|parameter-sets)(?:\/|$)/;
 // shell.js's busy pair (NAVIGATION_PREPARE_START/END): the bar counts a preparation like a request.
@@ -63,6 +63,6 @@ document.body.addEventListener("htmx:beforeSwap", event => {
     detail.shouldSwap = false; event.preventDefault(); notice("Session or workspace changed. Reload to continue.");
   }
 }, true);
-document.body.addEventListener("htmx:afterSettle", () => mountCharts());
-document.body.addEventListener("htmx:historyRestore", () => mountCharts());
-mountCharts();
+document.body.addEventListener("htmx:afterSettle", () => mountPage());
+document.body.addEventListener("htmx:historyRestore", () => mountPage());
+mountPage();

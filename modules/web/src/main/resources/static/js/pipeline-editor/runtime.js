@@ -17,14 +17,16 @@
    *
    *  1. The layout gives `#app-main` `hx-history-elt` — the cache holds the workspace
    *     region only, never the footer scripts. The body fragment carries its script tags
-   *     inside an inert `<template id="pe-runtime-scripts">` catalog, so a restored
-   *     snapshot has NOTHING executable except this guarded bootstrap.
-   *  2. This runtime loads the catalog IN ORDER on the first visit of the document
-   *     (dagre, cytoscape, the editor modules, Alpine LAST so the `alpine:init`
-   *     registration is in place before it boots) and then — and only then — activates
-   *     the root. A global one of the vendors already provides (planted or otherwise
-   *     pre-loaded) is not loaded twice: the loader skips it and the activation
-   *     registers the component directly if Alpine booted without the editor.
+   *     inside an inert `<template id="pe-runtime-scripts" data-page-assets="on-mount">`
+   *     catalog, so a restored snapshot holds NOTHING executable.
+   *  2. The shell's ONE page-script loader (page-assets.mjs, #494) executes that catalog IN
+   *     ORDER, once per document across every page that shares a source (dagre, cytoscape,
+   *     the editor modules, Alpine LAST so the `alpine:init` registration is in place before
+   *     it boots; a global a vendor already provides is not executed twice). This file is
+   *     the catalog's last entry, a `data-page-mount`: the loader calls
+   *     `PipelineWorkspaceMount` once per catalog node — the first arrival, a boosted swap and
+   *     every cached history restore alike — and only after every entry before it loaded.
+   *     Activation is this file's; loading is not.
    *  3. The served and cached `.pe-root` carries `x-ignore` — Alpine never initialises
    *     an ignored subtree (its own walk honours it; its MutationObserver never
    *     initialises added roots at all, verified in the vendored build). Activation is
@@ -35,87 +37,15 @@
    *     strips the `style` attributes those libraries wrote — so the snapshot is inert
    *     and style-free (Cytoscape's re-applied inline style was the CSP collector's
    *     third #358 symptom) and the next restore starts clean.
-   *
-   * On a cached restore this file is the ONE script that replays; the guard below turns
-   * the replay into another `enter()` on the restored root. On a cache MISS (and on the
-   * first boosted arrival) the server-rendered fragment runs it the ordinary way.
    */
 
-  if (window.PEPipelineRuntime) {
-    window.PEPipelineRuntime.enter();
-    return;
-  }
+  // The loader executes this file once per document; a second evaluation keeps the first
+  // runtime's identity (and its registered cleanup) rather than defining another.
+  if (window.PEPipelineRuntime) return;
 
-  var ready = null;
-  var loaded = {};
   var generation = 0;
   var EPOCH =
     "pe-rt-" + Date.now().toString(36) + "-" + Math.floor(Math.random() * 1e9).toString(36);
-
-  /** The global each vendored catalog entry provides — a pre-existing one is not re-loaded. */
-  var PROVIDED = {
-    "alpine.min.js": "Alpine",
-    "dagre.min.js": "dagre",
-    "cytoscape.min.js": "cytoscape",
-    "cytoscape-dagre.js": "cytoscape",
-    "cytoscape-node-html-label.js": "cytoscape",
-  };
-
-  function providedBy(source) {
-    var file = String(source).split("?")[0].split("/").pop();
-    return PROVIDED[file] || null;
-  }
-
-  function loadScript(source) {
-    if (loaded[source]) return Promise.resolve();
-    return new Promise(function (resolve, reject) {
-      var script = document.createElement("script");
-      script.src = source;
-      script.onload = function () {
-        loaded[source] = true;
-        resolve();
-      };
-      script.onerror = function () {
-        script.remove();
-        reject(new Error("Could not load the pipeline workspace runtime: " + source));
-      };
-      // The head is outside the history element: a cached restore must never replay these.
-      document.head.appendChild(script);
-    });
-  }
-
-  function catalogSources() {
-    var catalog = document.getElementById("pe-runtime-scripts");
-    if (!catalog) return [];
-    return Array.prototype.map.call(
-      catalog.content.querySelectorAll("script[src]"),
-      function (script) {
-        return script.getAttribute("src");
-      },
-    );
-  }
-
-  function dependencies() {
-    if (ready) return ready;
-    ready = catalogSources()
-      .reduce(function (previous, source) {
-        var provided = providedBy(source);
-        if (provided && window[provided]) {
-          // Singleton loading: the global is already there, so the catalog entry is
-          // skipped — a second copy would boot a second Alpine (a second observer).
-          loaded[source] = true;
-          return previous;
-        }
-        return previous.then(function () {
-          return loadScript(source);
-        });
-      }, Promise.resolve())
-      .catch(function (error) {
-        ready = null;
-        throw error;
-      });
-    return ready;
-  }
 
   function currentRoot() {
     var main = document.getElementById("app-main");
@@ -128,7 +58,6 @@
     root.__peActivation = true;
     var ownGeneration = generation;
     try {
-      await dependencies();
       // Let the pending added-node records see `x-ignore` BEFORE the explicit init:
       // mutateDom QUEUES the records it displaces rather than discarding them, and
       // processing them must never initialize the root (they cannot — the observer
@@ -203,8 +132,11 @@
     activations: 0,
   };
 
+  /** The loader's mount for this catalog (page-assets.mjs MOUNTS): activate the live root. */
+  window.PipelineWorkspaceMount = function () {
+    return enter();
+  };
+
   window.__dpHistoryStyleCleanups = window.__dpHistoryStyleCleanups || [];
   window.__dpHistoryStyleCleanups.push(beforeHistorySave);
-
-  enter();
 })();

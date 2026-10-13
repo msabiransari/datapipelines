@@ -541,5 +541,5 @@
   }
   window.DashboardPageMount = mount;
   var main = document.getElementById("app-main");
-  if (!window.DatapipelinesPageMountManaged && (!main || !main.querySelector("template[data-chart-assets]"))) mount(main);
+  if (!window.DatapipelinesPageMountManaged && (!main || !main.querySelector("template[data-page-assets]"))) mount(main);
 })();

@@ -320,11 +320,12 @@ class PersistentChartNavigationBrowserTest : VisualizationBrowserSuite() {
     }
 
     @Test
-    @Suppress("LongMethod") // one document across editor, dashboard, template workspace and history: the counter must stay live
-    fun `lifecycle dialogs execute once per document across editor dashboard editor template and history`() {
+    @Suppress("LongMethod") // one document across editor, dashboard, template and visualization workspaces and history
+    fun `lifecycle dialogs execute once per document across editor dashboard editor template visualization and history`() {
         val root = ready("onedialog")
         val board = seedBoard(root)
         val pipeline = api("POST", "/api/v1/pipelines", calculator("$root/flow")).at("data", "id") as String
+        val (visualization, _) = createVisualization("$root/charts/flat")
         // Counts every evaluation: the script's last act is `window.lifecycleDialog = api`.
         page.addInitScript(
             """(() => { let value; window.__lifecycleDialogEvaluations = 0;
@@ -347,7 +348,16 @@ class PersistentChartNavigationBrowserTest : VisualizationBrowserSuite() {
         // The template workspace rewrites its query (tab) with replaceState, so the restored URL carries one.
         page.waitForURL("**$template*")
         page.waitForFunction("() => !!document.getElementById('tx-dialog')")
-        page.evaluate("async () => { const assets = await import('/js/page-assets.mjs'); await assets.mountCharts(); }")
+        // #494: the fourth page whose catalog carries the dialogs, then its history entry and back again.
+        inShell("/visualizations/$visualization")
+        preview()
+        page.goBack()
+        page.waitForURL("**$template*")
+        page.waitForFunction("() => !!document.getElementById('tx-dialog')")
+        page.goForward()
+        page.waitForURL("**/visualizations/$visualization*")
+        preview()
+        page.evaluate("async () => { const assets = await import('/js/page-assets.mjs'); await assets.mountPage(); }")
         page.evaluate("() => window.__lifecycleDialogEvaluations") shouldBe 1
     }
 
@@ -378,13 +388,117 @@ class PersistentChartNavigationBrowserTest : VisualizationBrowserSuite() {
                 await settled;
               }
               // The settle listener's mount attempt (if any) has finished once this resolves.
-              const assets = await import('/js/page-assets.mjs'); await assets.mountCharts();
+              const assets = await import('/js/page-assets.mjs'); await assets.mountPage();
             }""",
         )
         println("465-failed-mount kpi-requests=${attempts.size}")
         page.locator("#app-main p.ds-error").count() shouldBe 1
         page.locator("#app-main p.ds-error").innerText() shouldContain "dependencies"
         attempts.size shouldBe 1
+    }
+
+    @Test
+    @Suppress("LongMethod") // one document across all six page kinds and history: the per-source counter must stay live
+    fun `every page script evaluates once per document across editor dashboard template visualization parameter set and history`() {
+        val root = ready("onescript")
+        val board = seedBoard(root)
+        val pipeline = api("POST", "/api/v1/pipelines", calculator("$root/flow")).at("data", "id") as String
+        val (visualization, _) = createVisualization("$root/charts/flat")
+        val parameterSet = api("POST", "/api/v1/parameter-sets", parameterSet("$root/parameters/geo")).at("data", "id") as String
+        val template = "/templates/test/${root}_chart.sql"
+        page.addInitScript(COUNT_SCRIPT_EVALUATIONS)
+        page.navigate("$baseUrl/pipelines/$pipeline")
+        editorActive()
+        inShell("/dashboards/$board")
+        page.waitForFunction("() => window.__dpPage?.ready===true")
+        inShell("/pipelines/$pipeline")
+        editorActive()
+        inShell(template)
+        page.waitForFunction("() => !!document.getElementById('tx-dialog')")
+        inShell("/visualizations/$visualization")
+        preview()
+        inShell("/parameter-sets/$parameterSet")
+        parameterWorkspaceActive()
+        page.goBack()
+        page.waitForURL("**/visualizations/$visualization*")
+        preview()
+        page.goBack()
+        page.waitForURL("**$template*")
+        page.waitForFunction("() => !!document.getElementById('tx-dialog')")
+        page.goBack()
+        page.waitForURL("**/pipelines/$pipeline")
+        editorActive()
+        page.goForward()
+        page.waitForURL("**$template*")
+        page.goForward()
+        page.waitForURL("**/visualizations/$visualization*")
+        preview()
+        page.goForward()
+        page.waitForURL("**/parameter-sets/$parameterSet*")
+        parameterWorkspaceActive()
+        assertEachScriptEvaluatedOnce("494-crossing")
+    }
+
+    @Test
+    fun `a dashboard and a parameter set workspace first in the document leave the editor its shared scripts and plugins once`() {
+        val root = ready("plugins")
+        val board = seedBoard(root)
+        val pipeline = api("POST", "/api/v1/pipelines", calculator("$root/flow")).at("data", "id") as String
+        val parameterSet = api("POST", "/api/v1/parameter-sets", parameterSet("$root/parameters/geo")).at("data", "id") as String
+        page.addInitScript(COUNT_SCRIPT_EVALUATIONS)
+        page.navigate("$baseUrl/dashboards/$board")
+        page.waitForFunction("() => window.__dpPage?.ready===true")
+        inShell("/parameter-sets/$parameterSet")
+        parameterWorkspaceActive()
+        inShell("/pipelines/$pipeline")
+        editorActive()
+        page.goBack()
+        page.waitForURL("**/parameter-sets/$parameterSet*")
+        parameterWorkspaceActive()
+        page.goForward()
+        page.waitForURL("**/pipelines/$pipeline")
+        editorActive()
+        val counts = assertEachScriptEvaluatedOnce("494-dashboard-first")
+        // The sources the editor shares with pages that loaded them first: the dashboard's tab core and history
+        // listener, the parameter workspace's vendors and one Cytoscape plugin (the editor's catalog names two).
+        listOf(
+            "/js/workspace/tabs.js",
+            "/js/workspace/history.js",
+            "/vendor/cytoscape/cytoscape-dagre.js",
+            "/vendor/cytoscape/cytoscape-node-html-label.js",
+        ).forEach { source -> counts[source] shouldBe 1 }
+    }
+
+    /** The editor's ONE activation has bound the current root. */
+    private fun editorActive() {
+        page.waitForFunction(
+            "() => !!window.__peInstance && !!document.querySelector('.pe-root') && " +
+                "!document.querySelector('.pe-root[x-ignore]')",
+        )
+    }
+
+    private fun parameterWorkspaceActive() {
+        page.waitForFunction("() => !!document.querySelector('.ps-root[data-ps-mounted=true]')")
+    }
+
+    /**
+     * Prints the per-source table and asserts every script that executed in this document did so exactly once, but the
+     * fragments' bare tags that re-run per arrival by design ([BARE_PER_ARRIVAL]). Two witnesses for the lifecycle
+     * dialog (its setter counter and the per-source counter) must agree, and the layout's htmx counts 1 — a counter
+     * that saw nothing cannot pass.
+     */
+    @Suppress("UNCHECKED_CAST")
+    private fun assertEachScriptEvaluatedOnce(label: String): Map<String, Int> {
+        page.evaluate("async () => { const assets = await import('/js/page-assets.mjs'); await assets.mountPage(); }")
+        val counts =
+            (page.evaluate("() => window.__dpScriptEvaluations") as Map<String, Any?>)
+                .mapValues { (it.value as Number).toInt() }
+                .toSortedMap()
+        counts.forEach { (source, evaluations) -> println("$label $evaluations $source") }
+        counts["/vendor/htmx/htmx.min.js"] shouldBe 1
+        page.evaluate("() => window.__lifecycleDialogEvaluations") shouldBe (counts["/js/lifecycle-dialog.js"] ?: 0)
+        counts.filterKeys { it !in BARE_PER_ARRIVAL }.filterValues { it != 1 } shouldBe emptyMap()
+        return counts
     }
 
     /** An in-shell navigation from a link inside main, as an artifact link on any page would make it. */
@@ -413,4 +527,46 @@ class PersistentChartNavigationBrowserTest : VisualizationBrowserSuite() {
     private fun calculator(name: String): String =
         """{"name":"$name","nodes":[{"id":"n1","type":"CALCULATOR","kind":"fiscal_quarter","context_key":"q", """ +
             """"inputs":{"date":"${'$'}current_date","fiscal_start":"${'$'}org_fiscal_start_date"}}]}"""
+
+    /** A one-parameter set of constants (no datasource behind it), left a draft: the workspace opens it. */
+    private fun parameterSet(name: String): String =
+        """{"name":"$name","display_name":"Geography","parameters":[{"name":"country","label":"Country","type":"STRING",""" +
+            """"kind":"SELECT","cardinality":"SINGLE","required":true,"source":{"constants":[""" +
+            """{"value":"USA","display_value":"United States","is_default":true}]},"presentation":{"control":"dropdown"}}]}"""
+
+    private companion object {
+        /**
+         * Bare `<script>` tags outside every page-asset catalog, which re-run on each arrival and cached restore of
+         * their page: the editor's parser-blocking splitter (it sizes the dock before the first paint, so it cannot
+         * wait for a loader) and the template workspace's six tags (sql-highlight.js is also an editor catalog
+         * entry). Moving the template workspace's onto the loader is #514.
+         */
+        val BARE_PER_ARRIVAL =
+            setOf(
+                "/js/splitter.js",
+                "/js/pipeline-editor/sql-highlight.js",
+                "/js/template-editor/preview.js",
+                "/js/csrf.js",
+                "/js/template-editor/lifecycle.js",
+                "/js/template-editor/workspace.js",
+                "/js/template-transform-face.js",
+            )
+
+        /**
+         * #494 — counts every script EVALUATION in the document by path: a `<script src>` element's `load` fires once
+         * per execution, whoever inserted it (the parser, htmx's restore replay, or a loader appending to the head);
+         * `<template>` content is not in the document, so a catalog entry counts only when something executes it.
+         */
+        const val COUNT_SCRIPT_EVALUATIONS =
+            """(() => { const counts = {}; window.__dpScriptEvaluations = counts; const seen = new WeakSet();
+              const watch = node => { if (node.tagName !== 'SCRIPT' || !node.src || seen.has(node)) return; seen.add(node);
+                node.addEventListener('load', () => {
+                  const path = new URL(node.src).pathname; counts[path] = (counts[path] || 0) + 1; }); };
+              new MutationObserver(records => records.forEach(record => record.addedNodes.forEach(node => {
+                watch(node); if (node.querySelectorAll) node.querySelectorAll('script[src]').forEach(watch); })))
+                .observe(document, { childList: true, subtree: true });
+              let value; window.__lifecycleDialogEvaluations = 0;
+              Object.defineProperty(window, 'lifecycleDialog', { configurable: true, get() { return value; },
+                set(next) { window.__lifecycleDialogEvaluations += 1; value = next; } }); })()"""
+    }
 }

@@ -17,20 +17,23 @@
        300×150 replaced-element default — "the icons are the size of the canvas". -->
   <link th:href="@{/vendor/design-system/icons.css}" rel="stylesheet">
 
-  <!-- #358 — the vendors and modules load through the runtime (pipeline-editor/runtime.js),
-       not as bare tags: htmx re-executes every <script> it restores from the history cache,
-       so a bare tag here would boot a SECOND Alpine on every Back (the stacked-bindings
-       defect). This catalog is INERT — <template> content neither parses nor restores as
-       executable script — and the runtime loads it in order, Alpine LAST, exactly once per
-       document. Nothing in here may carry inline script bodies (InlineScriptAuditTest). -->
+  <!-- #358/#494 — the vendors and modules load through the shell's ONE page-script loader
+       (page-assets.mjs), not as bare tags: htmx re-executes every <script> it restores from the
+       history cache, so a bare tag here would boot a SECOND Alpine on every Back (the
+       stacked-bindings defect). These catalogs are INERT — <template> content neither parses nor
+       restores as executable script — and the loader executes each entry in order, once per
+       document whichever page asks first. Nothing in here may carry inline script bodies
+       (InlineScriptAuditTest). -->
   <!-- 102/#465: the lifecycle dialogs' client half — document-level wiring that must run ONCE per
-       document. It rides the shell's page-asset catalog (page-assets.mjs), the one registry the
-       dashboard and visualization pages load it through too, so crossing between those pages and
-       this one never executes it a second time (a separate runtime registry did, #465). -->
-  <template data-chart-assets>
+       document, the same catalog entry the dashboard, visualization and template pages carry. -->
+  <template data-page-assets>
     <script th:src="@{/js/lifecycle-dialog.js}"></script>
   </template>
-  <template id="pe-runtime-scripts">
+  <!-- "on-mount": fetched while a navigation prepares, executed only once this page is in place,
+       Alpine LAST; the last entry, runtime.js, is the mount that activates the `.pe-root` exactly
+       once per root — on a cached history restore too, where the loader mounts the restored
+       catalog and nothing in the snapshot replays. -->
+  <template id="pe-runtime-scripts" data-page-assets="on-mount">
     <script th:src="@{/vendor/dagre/dagre.min.js}"></script>
     <script th:src="@{/vendor/cytoscape/cytoscape.min.js}"></script>
     <script th:src="@{/vendor/cytoscape/cytoscape-dagre.js}"></script>
@@ -69,6 +72,7 @@
     <script th:src="@{/js/pipeline-editor/a11y.js}"></script>
     <!-- Alpine boots LAST: the modules above own the alpine:init registration by then. -->
     <script th:src="@{/vendor/alpinejs/alpine.min.js}"></script>
+    <script data-page-mount th:src="@{/js/pipeline-editor/runtime.js}"></script>
   </template>
 
   <script type="application/json" id="pipeline-data" th:if="${hasSelectedBody}" th:utext="${pipelineJson}"></script>
@@ -840,13 +844,7 @@
 
 
   <!-- 102: the lifecycle dialogs' single per-screen container (§4.3d); its script loads
-       through the runtime catalog (once per document, never replayed on restore). -->
+       through the page-asset catalog above (once per document, never replayed on restore). -->
   <div id="pe-dialog"></div>
-  <!-- #358 — the workspace runtime: the ONE executable script the cached history carries.
-       It loads the catalog above in order (Alpine last), then activates the `.pe-root`
-       exactly once; a cached restore replays only this guarded bootstrap, which re-enters
-       on the restored root. It sits at the fragment's END so the root exists when it runs,
-       and its cached replay therefore finds the restored markup already in place. -->
-  <script th:src="@{/js/pipeline-editor/runtime.js}"></script>
 </th:block>
 </html>

@@ -155,7 +155,7 @@ class VisualizationUiRenderTest {
 
         Regex("<script[^>]*plotly-[23]d\\.min\\.js").findAll(body).toList().size shouldBe 1
         body shouldContain "/vendor/plotly/plotly-3d.min.js"
-        body shouldContain "data-chart-assets"
+        body shouldContain "data-page-assets"
         body shouldContain "/js/visualization-preview.js"
         body shouldContain ">acme/charts/revenue<"
         body shouldContain "v3 · released · current"
@@ -179,7 +179,7 @@ class VisualizationUiRenderTest {
         Regex("<script[^>]*plotly-[23]d\\.min\\.js").findAll(body).toList().size shouldBe 0
         body shouldNotContain "/js/visualization-preview.js"
         body shouldNotContain "/js/datapipelines-dashboard"
-        body shouldContain "data-chart-assets"
+        body shouldContain "data-page-assets"
         body shouldContain "v3 · released · current"
     }
 
