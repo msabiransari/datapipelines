@@ -2,6 +2,7 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.auth.User
 import co.datapipelines.auth.UserService
+import co.datapipelines.pipeline.SearchNeedle
 import org.springframework.ui.Model
 import java.time.Instant
 import java.util.UUID
@@ -36,7 +37,11 @@ class AdminUsersBrowseModel(
     ): String {
         val page = offset.coerceAtLeast(0)
         val size = limit.coerceIn(MIN_LIMIT, MAX_LIMIT)
-        model.addAttribute("userRows", users.search(q.orEmpty(), page, size).map(::row))
+        // The box half of the shared search-needle rule (#504b, the DatasourceBrowseModel shape):
+        // a search box TRUNCATES to the shared bound before the call and never errors; the
+        // refusal below it (UserService.search) is for API callers no box sends for.
+        val needle = q?.trim()?.take(SearchNeedle.MAX_LENGTH).orEmpty()
+        model.addAttribute("userRows", users.search(needle, page, size).map(::row))
         return ROWS_VIEW
     }
 
