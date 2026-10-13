@@ -1,6 +1,6 @@
 # UI Screens Inventory
 
-**Status:** v1.131
+**Status:** v1.132
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
 **Last updated:** 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
@@ -186,8 +186,12 @@ RENAMED Home; the route `/dashboard` and its exact-match section are unchanged),
 collapse control at the foot. The nav packs to the top; the free space below it is deliberate.
 Build's **Pipelines** (#350), **Templates** (#398) and **Dashboards** (#10 L3b, D58) items are
 **Navigating-tree branches (#460).** Pipelines, Templates, Dashboards, Visualizations and Parameter Sets
-share the reusable REST search-and-tree. The catalog link and separate disclosure button retain their
-own actions. A hidden panel initializes on first open; initialization requests only the root and leaves
+share the reusable REST search-and-tree in a single-open, collapsible accordion (#478). The disclosure
+toggles its branch, closing the previous branch; zero open is allowed. The section-name link navigates
+to its catalog. Each open panel is an inset, subtly bordered, rounded surface with a family-specific
+search/clear/refresh toolbar above a divider; expanded-section styling stays distinct from the active page.
+Closing hides the mounted tree and keeps its query, expanded folders and scroll without a toggle refetch.
+A hidden panel initializes on first open; initialization requests only the root and leaves
 all folders closed. Expanding a folder automatically pages its immediate children, including folders and
 leaves beyond 200, without fetching grandchildren, up to the **level ceiling**: ten 200-row pages per load
 (`PAGE_CEILING` in `tree/state.mjs`, #465). A level stopped at the ceiling states how many rows it holds and
@@ -217,8 +221,10 @@ separate from current-page selection. Labels use text sinks and fixed vendored l
 The global rail's pointer and keyboard separator adjusts from its 232px default up to the viewport less
 `--app-main-min-width` (320px) where the rail is a column; the phone drawer is unchanged. Collapse and Reset stay reachable at that boundary.
 Opening a tree never changes user width. `dp-rail-width:<workspace>` stores only the preferred width; a
-smaller viewport clamps it temporarily without replacing that preference. `dp-tree-panel:<workspace>:<family>`
-stores only panel visibility. Queries, results and descendant expansions are never persisted or restored;
+smaller viewport clamps it temporarily without replacing that preference. `dp-tree-open:<workspace>`
+stores the one open family or nothing. Legacy `dp-tree-panel:<workspace>:<family>` preferences migrate once,
+preferring the current page's family among saved-open flags, otherwise menu order, and are removed.
+Unknown families or unavailable storage restore nothing. Queries, results and descendant expansions are never persisted or restored;
 fresh initialization does not reveal the current selection. Workspace/account switches create a fresh document.
 
 Artifact, catalog and version navigation preserves the rail through `#app-main` swaps. The navigation host
@@ -2422,6 +2428,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-11 | v1.132 | #478 single-open sidebar accordion | §3.4: one open artifact branch per workspace across disclosure, keyboard, Browse folders and restoration; legacy visibility preferences migrate once. Hidden mounted trees retain context without toggle fetches. The inset themed panel contains a scoped search/clear/refresh toolbar and divider. |
 | 2026-10-11 | v1.131 | #432 a catalog's Clear search empties the box it names | **§5.1** Empty state: the clear control's contract — `data-dp-clear-filters` names the controls it resets, `shell.js`'s delegated handler empties them and focuses the box, its one request includes only the kept filters, and `hx-sync` on the box aborts a search still in flight. **§4.3/§4.6:** Clear search empties the box; Templates keeps dialect and type. **§4.5:** Clear filters resets search and dialect. Same six buttons (dashboards, parameter sets, pipelines, templates, visualizations, datasources), one handler. |
 | 2026-10-10 | v1.130 | #503 rail maximum reserves main content — renumbered at merge after #502's v1.129 | **§3.4/§3.6:** where the rail is a grid column (768px and up), its maximum is the viewport less the geometry token `--app-main-min-width` (320px), with the rail's 232px floor. End, pointer dragging and `aria-valuemax` use that maximum; saved preferences survive the temporary cap. The phone drawer and gutter are unchanged. |
 | 2026-10-10 | v1.129 | #502 undefined CSS custom properties defined or migrated | §2.3: every custom property a first-party sheet reads now exists — the fifteen undefined names are gone. `--accent-danger-bg` becomes an app token (a `color-mix` tint of `--accent-danger` on `--surface-default`; 4% is the strongest tint keeping `--accent-danger` text at 4.5:1 in light, #fef6f6; dark tops out at 3.6:1 — the accent itself is 3.67:1 on the dark surface, reported on #502); `--surface-secondary` migrates to `--surface-inset` (the read-only pane) and `--surface-default` (the context-row inputs, `.ds-input`'s fill); `--accent` → `--accent-primary`, `--accent-soft` → `--surface-selected` (which gains §2.8's accent bar, the house selected pattern), `--text` → `--text-primary`, `--border` → `--border-subtle`, `--gap-2xs` → `--space-0-5`; new app lengths at today's values: `--focus-ring-width: 2px` (mirrors the design system's ring), `--app-content-max: 1600px`, `--measure: 44rem`, `--measure-wide: 60rem`; `--te-side-w`/`--tplx-tree-w` are splitter's runtime-written defaults and keep their fallbacks — the existence audit now reads the splitter's `prop:` declarations as definitions. `CssTokenExistenceAuditTest`'s two ledgers end empty. No visible change except the danger chips (which painted no background before) and the version link's new bar; no route, permission or role changed. |

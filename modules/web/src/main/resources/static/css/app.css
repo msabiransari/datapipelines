@@ -995,6 +995,11 @@ button.app-busy::after {
   transform: rotate(90deg);
 }
 
+.app-nav-branch.is-tree-open > .app-nav-branch-toggle {
+  background: var(--surface-inset);
+  color: var(--text-primary);
+}
+
 .app-nav-tree {
   /* The explorers' guide geometry (template-tree.css derives the rows' guides from these;
      `.tplx-tree` declares them for the page explorer). --tpl-row-h follows the sidebar's
@@ -1007,6 +1012,10 @@ button.app-busy::after {
   gap: var(--gap-xs);
   min-width: 0;
   margin: var(--space-0-5) 0 var(--gap-xs) var(--gap-sm);
+  padding: var(--space-0-5);
+  background: var(--surface-inset);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-base);
 }
 
 .app-nav-tree[hidden] {
@@ -3630,6 +3639,7 @@ pre.tf-pane-input {
 .dp-tree-search .ds-input { min-width: 0; flex: 1; }
 .dp-tree-scroll { overflow: auto; }
 .app-nav-tree .dp-tree-scroll { max-block-size: var(--app-nav-tree-max-block); }
+.app-nav-tree > .dp-tree-search { border-block-end: 1px solid var(--border-faint); }
 .dp-tree-group { padding-inline-start: var(--gap-md); }
 .dp-tree-line { display: flex; align-items: center; }
 .dp-tree-activate { display: flex; align-items: center; gap: var(--gap-xs); color: inherit; background: transparent; border: 0; cursor: pointer; padding: var(--gap-xs); white-space: nowrap; text-decoration: none; font: inherit; }
