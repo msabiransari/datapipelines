@@ -3,6 +3,7 @@ package co.datapipelines.templates
 import co.datapipelines.pipeline.CreateLifecycle
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.pipeline.SearchNeedle
 import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.pipeline.WriteSurface
 import co.datapipelines.typesystem.Dialect
@@ -1112,12 +1113,15 @@ class TemplateRepository(
                 .replace("_", "\\_")
 
         /**
-         * The `q` of [list] and [count], normalised once for every caller (#504a): trimmed, a
-         * blank term bound as NULL (the SQL's `CAST(:pattern AS TEXT) IS NULL` arm — no search),
-         * otherwise the escaped `%needle%` the house LIKE binds. Before the trim a whitespace-only
-         * `q` matched only the rows with a space in a searched column, and `q=""` bound `%%`.
+         * The `q` of [list] and [count], normalised once for every caller (#504a, the shared
+         * [SearchNeedle] rule since #504b): trimmed, a blank term bound as NULL (the SQL's
+         * `CAST(:pattern AS TEXT) IS NULL` arm — no search), otherwise the escaped `%needle%`
+         * the house LIKE binds. A term over [SearchNeedle.MAX_LENGTH] after the trim is refused
+         * with [SearchQueryTooLongException] — the same rule, code and bound as every other
+         * surface's search. Before the trim a whitespace-only `q` matched only the rows with a
+         * space in a searched column, and `q=""` bound `%%`.
          */
-        private fun searchPattern(q: String?): String? = q?.trim()?.takeIf { it.isNotEmpty() }?.let { "%${escapeLike(it)}%" }
+        private fun searchPattern(q: String?): String? = SearchNeedle.of(q)?.let { "%${escapeLike(it)}%" }
 
         /**
          * A generated name for a create that omitted one (templates.md §3.2). A hex suffix

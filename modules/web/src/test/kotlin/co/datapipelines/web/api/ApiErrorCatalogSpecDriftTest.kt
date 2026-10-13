@@ -320,6 +320,11 @@ class ApiErrorCatalogSpecDriftTest {
          * 376 → 377 with #490: §13.20 gains `parameter.validation.query_too_long` (400 — the
          * parameter-set search needle over its bound), landed in the SAME commit as its constants
          * (pipeline-contract v1.56). Re-derived from the document's own parse.
+         *
+         * 377 stays 377 with #504b: §13.20's `parameter.validation.query_too_long` row RETIRES and
+         * §13.21 gains `request.query_too_long` (400 — the shared search-needle refusal), landed in
+         * the SAME commit as its constant, the catalog rows and the retirement. Re-derived from the
+         * document's own parse.
          */
         const val SECTION_13_ROW_COUNT = 377
 

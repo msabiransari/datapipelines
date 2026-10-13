@@ -105,7 +105,7 @@ class TemplatesListTool(
                   "properties": {
                     "dialect": {"type": "string", "enum": $DIALECT_ENUM_JSON},
                     "type": {"type": "string", "enum": $TEMPLATE_TYPE_ENUM_JSON, "description": "$TYPE_FILTER_DESC"},
-                    "q": {"type": "string"},
+                    "q": {"type": "string", "description": "Case-insensitive substring search over name and display name (the whole path counts as the name); ignored when prefix is present — pass prefix to browse, q to search. At most 200 characters after trimming; a longer q is refused as invalid params."},
                     "prefix": {"type": "string", "description": "$PREFIX_ARG_DESC"},
                     "is_library": {"type": "boolean", "description": "$IS_LIBRARY_FILTER_DESC"},
                     "implements": {"type": "string", "format": "uuid", "description": "$IMPLEMENTS_FILTER_DESC"},

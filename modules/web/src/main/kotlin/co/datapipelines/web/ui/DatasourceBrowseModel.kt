@@ -3,6 +3,7 @@ package co.datapipelines.web.ui
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DatasourceRegistry
+import co.datapipelines.pipeline.SearchNeedle
 import co.datapipelines.typesystem.Dialect
 import org.springframework.ui.Model
 
@@ -42,12 +43,15 @@ class DatasourceBrowseModel(
         offset: Int?,
     ) {
         val page = maxOf(0, offset ?: 0)
-        val query = q?.trim()?.takeIf { it.isNotEmpty() }
+        // The trim is the model's, in one place (#504b, the ParameterSetsBrowseModel shape): a
+        // blank `q` is no search, and what renders back into the box is the trimmed needle. The
+        // length is the shared bound — a search box TRUNCATES to it before the call, never errors.
+        val needle = q?.trim()?.takeIf { it.isNotEmpty() }?.take(SearchNeedle.MAX_LENGTH)
         val workspaceId = principal?.workspace?.id
         val visible = if (workspaceId == null) emptyList() else datasources.listVisible(dialectOf(dialect), workspaceId)
-        val all = filter(visible, query)
+        val all = filter(visible, needle)
         model.addAttribute("datasources", all.drop(page).take(PAGE_SIZE))
-        model.addAttribute("q", q ?: "")
+        model.addAttribute("q", needle.orEmpty())
         model.addAttribute("selectedDialect", dialect ?: "")
         model.addAttribute("offset", page)
         model.addAttribute("hasMore", all.size > page + PAGE_SIZE)

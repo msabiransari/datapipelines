@@ -100,6 +100,31 @@ class TreeProjectionTest {
         next.nodes.any { it.key == "artifact:${large[count].id}" } shouldBe true
     }
 
+    /**
+     * #504b — the shared needle rule runs FIRST in the projection: a whitespace-only query is no
+     * search (the loader sees null and answers the plain browse level), and an over-long one is
+     * the shared refusal before any loader runs.
+     */
+    @Test
+    fun `a whitespace-only query is a browse, not a search`() {
+        val loaded =
+            answer(query = "   \t ") { request ->
+                request.query shouldBe null
+                rows.take(1)
+            }
+        loaded.nodes.count { it.match } shouldBe 0
+    }
+
+    @Test
+    fun `an over-long query is the shared refusal before any load runs`() {
+        val over = "r".repeat(co.datapipelines.pipeline.SearchNeedle.MAX_LENGTH + 1)
+        shouldThrow<co.datapipelines.pipeline.SearchQueryTooLongException> {
+            answer(query = over) { _ ->
+                throw IllegalStateException("the loader must not run past the needle gate")
+            }
+        }
+    }
+
     @Suppress("LongParameterList") // explicit identity substitutions are the security cases
     private fun answer(
         family: NavigationFamily = NavigationFamily.PIPELINES,

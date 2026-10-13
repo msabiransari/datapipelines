@@ -148,8 +148,9 @@ val allowedInternalDependencies: Map<String, Set<String>> = mapOf(
     // `persistence` since #336: FailureShape for the lease's cleanup WARNs (module-structure §5.4).
     ":modules:datasources" to setOf(":modules:typesystem", ":modules:persistence"),
     ":modules:staging" to setOf(":modules:typesystem"),
-    // #266 — the audit log's batching writer (module-structure §5.19).
-    ":modules:auth" to setOf(":modules:typesystem", ":modules:persistence"),
+    // #266 — the audit log's batching writer (module-structure §5.19); #504b adds `pipeline-contract`
+    // for the shared SearchNeedle rule alone, one published object, boundary-tested like the scheduler's.
+    ":modules:auth" to setOf(":modules:typesystem", ":modules:pipeline-contract", ":modules:persistence"),
     // #9 scheduler — the durable occurrence engine (scheduler design revision §6.2). Pipeline-agnostic
     // by construction: `pipeline-contract` is allowed for the published name grammar alone (A2), and
     // the module's own SchedulerBoundaryTest refuses every other pipeline import. No `dag`, `auth`

@@ -1,9 +1,9 @@
 # MCP Server Specification
 
-**Status:** v1.73 (frozen contract — additive-only changes after this point)
+**Status:** v1.74 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [REST API spec](rest-api.md), [Auth spec](auth.md), [Templates spec](templates.md)
-**Last updated:** 2026-10-09
+**Last updated:** 2026-10-11
 
 ---
 
@@ -266,7 +266,7 @@ List pipelines the caller has access to.
     "properties": {
       "owner": {"type": "string", "description": "Filter by owner user ID."},
       "datasource": {"type": "string", "description": "Filter by datasource name."},
-      "q": {"type": "string", "description": "Full-text search on name and description. Searches across full paths; use prefix to browse instead."},
+      "q": {"type": "string", "description": "Case-insensitive substring search over name, display name and description (the whole path counts as the name); ignored when prefix is present — pass prefix to browse, q to search. At most 200 characters after trimming; a longer q is refused as invalid params."},
       "prefix": {"type": "string", "description": "Browse ONE level of the folder tree instead of listing flat: returns that prefix's direct sub-folders (with counts) and its direct children. An empty string is the root. Use this to discover which roots and folders exist; use q to search across full paths."},
       "limit": {"type": "integer", "default": 50, "maximum": 200}
     }
@@ -451,7 +451,7 @@ List templates.
     "properties": {
       "dialect": {"type": "string", "enum": ["POSTGRES", "ORACLE", "MSSQL", "MYSQL", "H2", "DUCKDB", "SQLITE", "LAKE"]},
       "type": {"type": "string", "enum": ["sql", "html", "jsonata", "javascript"], "description": "Filter by template kind: 'sql' (pipeline-referenced SQL), 'html' (rendered output), or a transform type ('jsonata', 'javascript' — a pure function over its input, never rendered)."},
-      "q": {"type": "string"},
+      "q": {"type": "string", "description": "Case-insensitive substring search over name and display name (the whole path counts as the name); ignored when prefix is present — pass prefix to browse, q to search. At most 200 characters after trimming; a longer q is refused as invalid params."},
       "prefix": {"type": "string", "description": "Browse ONE level of the folder tree instead of listing flat: returns that prefix's direct sub-folders (with counts) and its direct children. An empty string is the root. Use this to discover which roots and folders exist; use q to search across full paths."},
       "is_library": {"type": "boolean", "description": "Filter to library templates (macro collections) or executable templates."},
       "implements": {"type": "string", "format": "uuid", "description": "A learned fact id: only templates whose listed version cites it (implements) — the transforms that implement a workspace definition, exclusion or preference. A fact this workspace cannot see matches nothing. Ignored while prefix is present, like q."},
@@ -1806,7 +1806,7 @@ List the key's pinned workspace's parameter sets, or browse ONE level of the nam
 }
 ```
 
-**Permission:** `parameter_set.read` — every role (the promoter lensed). **Returns:** `{prefix, folders: [{path, segment, parameter_set_count}], parameter_sets: [{id, name, display_name, version, status, current_version}], returned}`. With `q` (no `prefix`) the search shape is `{q, parameter_sets: [the same rows], returned, total}` — no `folders` (a search is not a level), and `total` is the full match count so a truncated `limit` is visible. A `q` over 200 characters after the trim is refused `-32602 invalid params` before any read (#490; the message names the limit, the length and `parameter.validation.query_too_long`, never the term) — the same `ParameterSetService` bound REST answers with `400`.
+**Permission:** `parameter_set.read` — every role (the promoter lensed). **Returns:** `{prefix, folders: [{path, segment, parameter_set_count}], parameter_sets: [{id, name, display_name, version, status, current_version}], returned}`. With `q` (no `prefix`) the search shape is `{q, parameter_sets: [the same rows], returned, total}` — no `folders` (a search is not a level), and `total` is the full match count so a truncated `limit` is visible. A `q` over 200 characters after the trim is refused `-32602 invalid params` before any read (#490, the shared rule since #504b; the message names the limit, the length and `request.query_too_long`, never the term) — the same `SearchNeedle` bound every list tool applies, and REST answers with `400`.
 
 #### 6.2.45 `parameter_sets_get`
 
@@ -3118,6 +3118,7 @@ the audit green over the exported set.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-11 | v1.74 | 504b (#504b) one shared search-needle rule | **§6.2.2 `pipelines_list` and §6.2.6 `templates_list` say what `q` matches and its bound**: the `inputSchema`'s `q` description now states the case-insensitive substring match, the columns actually searched (name, display name and description on pipelines; name and display name on templates — #424's understatements corrected), that a present `prefix` wins, and the shared 200-after-trim bound (#490, [pipeline-contract §13.21](pipeline-contract.md) v1.58). A longer `q` on ANY list tool is refused JSON-RPC `-32602 invalid params` (§9.1) naming the limit, the length and `request.query_too_long`, before any read and without echoing the term — the mapping moved from `parameter_sets_list`'s own catch to the dispatcher, so all three tools answer identically. REST answers the same term with `400` ([REST §21.2](rest-api.md#212-routes) v2.95). No tool, argument name, count or permission changed. |
 | 2026-10-09 | v1.73 | 490 (#490) the search needle's bound | **§6.2.44 `parameter_sets_list`**: `q` is bounded at 200 characters after the trim — the `inputSchema`'s `q` description says so, and a longer `q` is refused JSON-RPC `-32602 invalid params` (§9.1, the route a non-string `q` already takes) naming the limit, the length and `parameter.validation.query_too_long`, before any read and without echoing the term. The bound is `ParameterSetService`'s, shared with REST (`400`, [REST §21.2](rest-api.md#212-routes) v2.91); no tool, argument, count or permission changed. |
 | 2026-10-08 | v1.72 | 419 (#419) the `parameter_sets_list` `q` search | **§6.2.44 `parameter_sets_list` gains the optional `q`**: with no `prefix` and a non-blank `q` it searches name, display name and description case-insensitively through the same lensed `ParameterSetService.search` the first-party pages use, answering `{q, parameter_sets, returned, total}` — no `folders` (a search is not a level), and `total` is the full match count so an agent sees a truncated `limit`. A present `prefix` (including `""`) still browses and `q` is ignored — the branch switch is `has("prefix")`, not `string`, so an absent prefix with a blank/absent `q` keeps today's root browse byte-identically. No tool, argument name, count or permission changed; the `inputSchema` gains one property ([REST §21.2](rest-api.md#212-routes) v2.89). |
 | 2026-10-05 | v1.71 | #459 draft dashboard dependencies | Dashboard list/get/create descriptions and source schemas name exact live DRAFT or RELEASED versions during authoring and explicit draft preview. Publication and imports retain released dependencies. No tool, argument, permission or role change. |

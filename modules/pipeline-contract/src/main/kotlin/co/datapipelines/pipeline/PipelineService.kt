@@ -280,11 +280,13 @@ open class PipelineService(
      * Datasource filtering is pushed down to SQL ([PipelineRepository.findAllByDatasource]);
      * `q` stays in memory because it matches across three columns.
      *
-     * ## The `q` rule (#504a)
+     * ## The `q` rule (#504a, shared since #504b)
      * The needle is normalised HERE, once, for every caller (the REST list and the MCP tool pass
-     * the query parameter raw): trimmed, a blank term means NO SEARCH (the rows come back
-     * unfiltered), then lowercased — a case-insensitive substring of name, display name or
-     * description ([matches]). A whitespace-only `q` used to keep only the records containing
+     * the query parameter raw) through [SearchNeedle.of] — trimmed, a blank term means NO SEARCH
+     * (the rows come back unfiltered) — then lowercased: a case-insensitive substring of name,
+     * display name or description ([matches]). A term over [SearchNeedle.MAX_LENGTH] after the
+     * trim is refused with [SearchQueryTooLongException] — the same rule, code and bound as every
+     * other surface's search. A whitespace-only `q` used to keep only the records containing
      * that whitespace, and `q=""` matched everything by accident of `contains("")`.
      *
      * ## The lens (178)
@@ -301,14 +303,17 @@ open class PipelineService(
         datasourceName: String? = null,
         query: String? = null,
     ): List<PipelineRecord> {
+        // The needle gate runs BEFORE the load (#504b): a refused search reads nothing — the
+        // same door order ParameterSetService.search uses, and what PipelinesSearchBoundTest
+        // pins on the wire (nothing read, nothing echoed).
+        val needle = SearchNeedle.of(query)?.lowercase()
         val records =
             if (datasourceName != null) {
                 pipelines.findAllByDatasource(workspaceId, datasourceName, ownerId)
             } else {
                 pipelines.findAll(workspaceId, ownerId)
             }.through(lens) { it.name }
-        val needle = query?.trim()?.lowercase()?.takeIf { it.isNotEmpty() } ?: return records
-        return records.filter { it.matches(needle) }
+        return if (needle == null) records else records.filter { it.matches(needle) }
     }
 
     /**

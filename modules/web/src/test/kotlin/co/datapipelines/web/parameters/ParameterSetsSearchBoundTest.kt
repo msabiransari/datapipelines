@@ -94,9 +94,9 @@ class ParameterSetsSearchBoundTest {
             mvc
                 .perform(get(ROOT).param("q", over))
                 .andExpect(status().isBadRequest)
-                .andExpect(jsonPath("$.error.code").value(ParameterErrorCodes.QUERY_TOO_LONG))
-                .andExpect(jsonPath("$.error.details.limit").value(ParameterSetService.MAX_QUERY_LENGTH))
-                .andExpect(jsonPath("$.error.details.length").value(ParameterSetService.MAX_QUERY_LENGTH + 1))
+                .andExpect(jsonPath("$.error.code").value(co.datapipelines.pipeline.PipelineErrorCodes.Request.QUERY_TOO_LONG))
+                .andExpect(jsonPath("$.error.details.limit").value(co.datapipelines.pipeline.SearchNeedle.MAX_LENGTH))
+                .andExpect(jsonPath("$.error.details.length").value(co.datapipelines.pipeline.SearchNeedle.MAX_LENGTH + 1))
                 .andReturn()
                 .response.contentAsString
 

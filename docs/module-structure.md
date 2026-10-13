@@ -115,7 +115,7 @@ layer 0 — no internal deps
 layer 1 — typesystem (auth also persistence)
 ┌──────────────┐ ┌─────────────┐ ┌──────────────┐ ┌───────────┐ ┌────────┐
 │ calculators  │ │  scripting  │ │ datasources  │ │  staging  │ │  auth  │  ← typesystem
-└──────────────┘ └─────────────┘ └──────────────┘ └───────────┘ └────────┘  auth ← typesystem, persistence
+└──────────────┘ └─────────────┘ └──────────────┘ └───────────┘ └────────┘  auth ← typesystem, pipeline-contract (the SearchNeedle rule only), persistence
 
 layer 2
 ┌───────────────────┐
@@ -186,7 +186,7 @@ There is **one** layering rule, and it is a table lookup, not a judgment call:
 | `templates` | `typesystem`, `pipeline-contract`, `scripting` |
 | `datasources` | `typesystem`, `persistence` |
 | `staging` | `typesystem` |
-| `auth` | `typesystem`, `persistence` |
+| `auth` | `typesystem`, `pipeline-contract`, `persistence` |
 | `scheduler` | `typesystem`, `pipeline-contract` |
 | `dag` | `typesystem`, `calculators`, `pipeline-contract`, `templates`, `datasources`, `staging`, `scripting`, `graph`, `persistence` |
 | `parameters` | `typesystem`, `graph`, `pipeline-contract`, `templates`, `datasources` |
@@ -203,6 +203,7 @@ Notes on the shape (explanatory, not additional rules):
 - The table is acyclic by construction, so "no cycles" needs no separate rule — Gradle enforces it anyway.
 - `calculators`' row is the shortest one in the table on purpose (072, calculators design §0.4/C12). A calculator kind is a **pure function of its inputs**; a row that admitted `datasources` or `dag` would make that a hope rather than a fact, and the executor's freedom to evaluate a kind anywhere, in any order, rests on it. Adding an entry to that row is the edit a reviewer must refuse.
 - `scheduler` lists `pipeline-contract` for exactly ONE thing, the published `PipelineNameGrammar` (a schedule is named like a pipeline — scheduler design revision §6, A2); its `SchedulerBoundaryTest` fails on any other `co.datapipelines.pipeline` import, so the edge cannot quietly become pipeline knowledge. It lists no `dag`, `auth` or `application`: the executor adapter, the capacity lease and the system principal live on `web`'s side of its port.
+- `auth` (#504b) lists `pipeline-contract` for exactly ONE thing, the shared search-needle rule — `SearchNeedle` and its typed refusal, the same rule every search-owning service applies at its door; its `AuthBoundaryTest` fails on any other `co.datapipelines.pipeline` import, so the edge cannot quietly become pipeline knowledge.
 - `parameters` (#194) declares all five of its edges — `typesystem` (the shared value validator, `LogicalType`), `graph` (`Dag<T>`), `pipeline-contract` (`TemplateRef`, the name grammars, the `TemplateDryRenderer` / `DatasourceRegistry` / `TemplateVersionStatuses` / `TemplateReleaser` ports it validates and releases through, `ReadLens`, `AuthoringGuard`), and since lane C `templates` (the selector runtime renders a pinned template through `WorkspaceTemplateEngines`) and `datasources` (it runs through the registry's pools, `ReadOnlyStatementLease` and `ResultRowReader`). Since lane D the `parameters` edges of `application`, `mcp-server` and `web` are DECLARED (the record's §2.4): the surfaces compile against the engine, the reverse-arrow composition in `application`, the six tools in `mcp-server`, the routes and the wiring in `web`.
 - `persistence` (#266) is the second empty row beside `graph`, for the same reason: it is a primitive every store-owning module can sit on. `auth` lists it for the audit log's writer and `web` for the execution-event record's and the replay log's; `dag` does NOT — its repository offers the batch statement (`ExecutionEventRepository.appendAll`) and knows nothing of the queue in front of it, which is `web`'s wiring.
 - `visualization` (#10) sits above `parameters` and below `application`: it declares `typesystem`, `pipeline-contract` (the name grammar, `ReadLens`, `AuthoringGuard`, the template ports it validates and releases through) and `parameters` (the production `ParameterSetFacts` reads a pinned set release through `ParameterSetRepository`). `templates` is allowed and NOT declared — every template fact reaches it through `pipeline-contract`'s ports. The pipeline facts a dashboard needs (released? read-only? the caller output columns) arrive through its `PipelineReleaseFacts` port, which `application` implements over `ReadOnlyPipelineRule` (L1b), so no `dag` edge exists. Since L1b the `visualization` edges of `application` (`PipelineReleaseFactsReader`, that port's implementation), `mcp-server` (the eleven `visualizations_*` / `dashboards_*` tools) and `web` (the two controllers and `VisualizationConfiguration`, the module's only Spring wiring) are DECLARED.
@@ -426,7 +427,7 @@ No repository: tempdb lives and dies with one execution and is never persisted (
 
 ### 5.7 `auth`
 
-**Dependencies (internal):** `typesystem` (shared exception base only), `persistence` (#266 — the audit log's batching writer, §5.19).
+**Dependencies (internal):** `typesystem` (shared exception base only), `pipeline-contract` (#504b — the shared `SearchNeedle` rule, §4.2; boundary-tested to that one use), `persistence` (#266 — the audit log's batching writer, §5.19).
 
 **Dependencies (external):**
 - `de.mkammerer:argon2-jvm`

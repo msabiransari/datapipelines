@@ -18,6 +18,7 @@ import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.pipeline.PipelineVersionRecord
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.ReadLens
+import co.datapipelines.pipeline.SearchNeedle
 import co.datapipelines.pipeline.through
 import co.datapipelines.web.schedules.PipelineJobExecutor
 import co.datapipelines.web.schedules.PrincipalTargetViewer
@@ -190,12 +191,16 @@ class PipelineBrowseModel(
         scope: PipelineListScope = PipelineListScope.NAV,
     ): String {
         val page = maxOf(0, offset)
-        val result = pipelines.page(workspaceId, view.pipelines, q, page, PAGE_SIZE)
+        // The trim is the model's, in one place (#504b, the ParameterSetsBrowseModel shape): a
+        // blank `q` is no search, and what renders back into the box is the trimmed needle. The
+        // service still owns the refusal — a box only truncates, so a typed overflow never errors.
+        val needle = q?.trim()?.takeIf { it.isNotEmpty() }?.take(SearchNeedle.MAX_LENGTH)
+        val result = pipelines.page(workspaceId, view.pipelines, needle, page, PAGE_SIZE)
         model.addAttribute(LENS_UNAVAILABLE, view.unavailable)
         model.addAttribute("searching", true)
         model.addAttribute("scope", scope.wire)
         model.addAttribute("rootId", scope.rootId)
-        model.addAttribute("q", q.orEmpty())
+        model.addAttribute("q", needle.orEmpty())
         model.addAttribute("pipelines", result.items)
         model.addAttribute("drafts", result.drafts)
         model.addAttribute("offset", page)

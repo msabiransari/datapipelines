@@ -1,7 +1,7 @@
 package co.datapipelines.web.api
 
-import co.datapipelines.parameters.ParameterSetService
 import co.datapipelines.pipeline.PipelineErrorCodes
+import co.datapipelines.pipeline.SearchNeedle
 import co.datapipelines.scheduler.ScheduleErrorCodes
 import org.springframework.http.HttpStatus
 
@@ -144,6 +144,10 @@ object ApiErrorCatalog {
             // #9 §13.19 — a schedule or run the caller's workspace does not hold (or the lens hides).
             co.datapipelines.scheduler.ScheduleErrorCodes.NOT_FOUND to HttpStatus.NOT_FOUND,
             co.datapipelines.scheduler.ScheduleErrorCodes.RUN_NOT_FOUND to HttpStatus.NOT_FOUND,
+            // §13.21 / #504b — the shared search-needle refusal on every REST `q`: 400, an argument
+            // to fix, before any read. (BODY_TOO_LARGE needs no row — the body-cap filter answers
+            // 413 itself, never through the catalog.)
+            PipelineErrorCodes.Request.QUERY_TOO_LONG to HttpStatus.BAD_REQUEST,
             // §12's duplicate_name row documents HTTP 409 ("mapped from the UNIQUE constraint").
             PipelineErrorCodes.Validation.DUPLICATE_NAME to HttpStatus.CONFLICT,
             PipelineErrorCodes.Import.VERSION_CONFLICT to HttpStatus.CONFLICT,
@@ -563,10 +567,12 @@ object ApiErrorCatalog {
                 "This template is still used by a pipeline, a parameter set or a visualization, so it can't be removed yet.",
             PipelineErrorCodes.Parameters.IN_USE to
                 "This parameter set is still used by a dashboard, so it can't be removed yet.",
-            // #490 — a search refusal, not a document one: the `parameter.validation.` family line
-            // ("every problem is listed with the field it concerns") would describe a set nobody sent.
-            PipelineErrorCodes.Parameters.QUERY_TOO_LONG to
-                "That search term is too long. Search with ${ParameterSetService.MAX_QUERY_LENGTH} characters or fewer.",
+            // #490 — a search refusal, not a document-family one: "every problem is listed with
+            // the field it concerns" would describe a set nobody sent. #504b — the refusal is the
+            // shared `request.query_too_long` and the bound [SearchNeedle.MAX_LENGTH]; the wording
+            // is unchanged.
+            PipelineErrorCodes.Request.QUERY_TOO_LONG to
+                "That search term is too long. Search with ${SearchNeedle.MAX_LENGTH} characters or fewer.",
             PipelineErrorCodes.Datasource.DUPLICATE_NAME to
                 "A connection with that name already exists. Pick a different name.",
             PipelineErrorCodes.Datasource.NOT_FOUND to

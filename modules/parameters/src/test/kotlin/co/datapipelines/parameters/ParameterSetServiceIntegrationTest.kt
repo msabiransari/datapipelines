@@ -4,8 +4,10 @@ import co.datapipelines.parameters.ParametersTestDb.AUTHOR
 import co.datapipelines.parameters.ParametersTestDb.OTHER_WORKSPACE
 import co.datapipelines.parameters.ParametersTestDb.WORKSPACE
 import co.datapipelines.pipeline.CreateLifecycle
+import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.ReadLens
+import co.datapipelines.pipeline.SearchQueryTooLongException
 import co.datapipelines.pipeline.WriteSurface
 import co.datapipelines.typesystem.DatapipelinesException
 import io.kotest.assertions.throwables.shouldThrow
@@ -481,10 +483,10 @@ class ParameterSetServiceIntegrationTest {
             val over = bounded + "q"
             for (view in listOf(ReadLens.Everything, lens)) {
                 listOf(
-                    shouldThrow<ParameterSetQueryTooLongException> { h.service.search(WORKSPACE, view, over, 0, 50) },
-                    shouldThrow<ParameterSetQueryTooLongException> { h.service.countSearch(WORKSPACE, view, " $over ") },
+                    shouldThrow<SearchQueryTooLongException> { h.service.search(WORKSPACE, view, over, 0, 50) },
+                    shouldThrow<SearchQueryTooLongException> { h.service.countSearch(WORKSPACE, view, " $over ") },
                 ).forEach { refused ->
-                    refused.code shouldBe ParameterErrorCodes.QUERY_TOO_LONG
+                    refused.code shouldBe PipelineErrorCodes.Request.QUERY_TOO_LONG
                     refused.details shouldBe mapOf("limit" to limit, "length" to limit + 1)
                     // The length is reported, the needle never reflected into the error.
                     (refused.message ?: "").contains(over) shouldBe false

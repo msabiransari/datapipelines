@@ -1,5 +1,6 @@
 package co.datapipelines.auth
 
+import co.datapipelines.pipeline.SearchNeedle
 import org.springframework.dao.DuplicateKeyException
 import java.util.UUID
 
@@ -390,12 +391,18 @@ class UserService(
      */
     fun administrableUser(id: UUID): User? = snapshot(id)?.takeIf { it.isHuman }
 
-    /** User-administration listing (§7.6 `USER_ADMINISTRATION`). */
+    /**
+     * User-administration listing (§7.6 `USER_ADMINISTRATION`). The shared [SearchNeedle] rule
+     * (#504b): trimmed, blank means NO SEARCH (the repository's empty-term arm lists every
+     * PERSON), and a term over [SearchNeedle.MAX_LENGTH] after the trim is refused with
+     * [co.datapipelines.pipeline.SearchQueryTooLongException] — the same code and bound as every
+     * other surface's search. The repository matches case-insensitively over email and display name.
+     */
     fun search(
         query: String,
         offset: Int,
         limit: Int,
-    ): List<User> = userRepository.search(query, offset, limit)
+    ): List<User> = userRepository.search(SearchNeedle.of(query).orEmpty(), offset, limit)
 
     /**
      * Deactivates [targetId] (§4.2, §10.1 `auth.user.deactivated`). The liveness cache

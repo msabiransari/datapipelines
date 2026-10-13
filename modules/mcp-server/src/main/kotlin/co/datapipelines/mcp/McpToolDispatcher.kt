@@ -3,6 +3,7 @@ package co.datapipelines.mcp
 import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.pipeline.PipelineErrorCodes
+import co.datapipelines.pipeline.SearchQueryTooLongException
 import co.datapipelines.typesystem.CauseChain
 import co.datapipelines.typesystem.DatapipelinesException
 import io.modelcontextprotocol.spec.McpError
@@ -71,7 +72,7 @@ class McpToolDispatcher(
         return runTool(tool, request, ctx, startedAt)
     }
 
-    @Suppress("TooGenericExceptionCaught")
+    @Suppress("TooGenericExceptionCaught", "SwallowedException")
     private fun runTool(
         tool: McpTool,
         request: McpSchema.CallToolRequest,
@@ -82,6 +83,16 @@ class McpToolDispatcher(
             val payload = tool.call(McpArguments(request.arguments() ?: emptyMap()), ctx)
             audit(tool.name, request, ctx, outcome = "success", startedAt = startedAt, invoked = true)
             McpToolResults.success(payload, ctx.correlationId)
+        } catch (e: SearchQueryTooLongException) {
+            // An over-long `q` is an argument to FIX, not content (#504b) — the same route a
+            // non-string `q` already takes (§9.1). One translation here covers every list tool;
+            // the message names the limit, the length and the shared code, never the term.
+            // SwallowedException: the exception carries nothing beyond the fields this message
+            // already quotes (code, limit, length) — there is no cause chain to preserve.
+            audit(tool.name, request, ctx, outcome = "invalid_params", code = e.code, startedAt = startedAt, invoked = true)
+            throw McpArguments.invalidParams(
+                "Argument 'q' is ${e.length} characters after trimming; at most ${e.limit} are searched (${e.code}).",
+            )
         } catch (e: DatapipelinesException) {
             // A catalogued domain failure is CONTENT, not a protocol error (§9.2).
             audit(tool.name, request, ctx, outcome = "error", code = e.code, startedAt = startedAt, invoked = true)
