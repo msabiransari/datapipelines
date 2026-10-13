@@ -12,6 +12,7 @@ import co.datapipelines.pipeline.SearchNeedle
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.visualization.ArtifactPage
 import co.datapipelines.visualization.ArtifactVersion
+import co.datapipelines.visualization.DashboardBody
 import co.datapipelines.visualization.DashboardService
 import co.datapipelines.visualization.VisualizationBody
 import co.datapipelines.visualization.VisualizationService
@@ -59,7 +60,10 @@ class UiSearchTruncationTest {
     @Test
     fun `dashboard box truncates and passes the truncated term on`() {
         val dashboards = mockk<DashboardService>()
-        every { dashboards.listAll(any(), any(), any(), any()) } returns emptyList()
+        // Strict and needle-pinned (#512): a call carrying the over-long term finds no answer and
+        // throws, and so does the old model's 200-row `listAll` read — the model must page the search.
+        every { dashboards.search(any(), any(), eq(bounded), any(), any()) } returns
+            ArtifactPage<DashboardBody>(emptyList<ArtifactVersion<DashboardBody>>(), 0)
         val model = ExtendedModelMap()
 
         DashboardBrowseModel(

@@ -126,11 +126,15 @@ class DashboardBrowseModel(
      * read), in [PipelineBrowseModel.fillSearch]'s shape: a page of the lensed flat listing,
      * the truthful total, the pager bound to the scope's stable root.
      *
-     * The two paths mirror the pipelines page's rule: with no `q` under the everything lens the
-     * page is taken in SQL (`LIMIT size+1 OFFSET offset`) and the total is a `COUNT(*)`; with a
-     * `q` (or a lensed principal whose admitted set is a per-request name set) the rows are
-     * filtered in memory — the name contains the query, case-insensitive, the only flat-search
-     * semantics the REST flat listing has — and the total is the filtered size.
+     * The page and its truthful total come from [DashboardService]'s lensed reads under every
+     * lens, never from a filter in this model: with no `q` the page is `listAll` (`LIMIT size+1
+     * OFFSET offset`, the extra row deciding `hasMore`) beside `countAll`; with a `q` it is
+     * [DashboardService.search] — name, display name or description contains the needle,
+     * case-insensitive, LIKE metacharacters literal — whose own `total` is the match count. Under
+     * the everything lens both are SQL; under a narrowing one (the promoter's) the lifecycle pages
+     * the admitted set (admitted intersected with the matches) so a lensed principal is handled
+     * there, not here (#512). The needle is trimmed and truncated to the shared bound
+     * ([SearchNeedle.MAX_LENGTH], #504b) before the call: a box truncates its own term, never refuses.
      */
     fun fillList(
         model: Model,
@@ -143,32 +147,17 @@ class DashboardBrowseModel(
         val page = maxOf(0, offset)
         // A box truncates its own term to the shared bound (#504b) before the call, never refuses.
         val needle = q?.trim()?.takeIf { it.isNotEmpty() }?.take(SearchNeedle.MAX_LENGTH)
-        if (needle == null && view.dashboards.isEverything) {
+        if (needle == null) {
             // One past the page size decides `hasMore` — the honest-pager rule (034 E3).
             val rows = dashboards.listAll(workspaceId, view.dashboards, page, PAGE_SIZE + 1)
-            val shown = rows.take(PAGE_SIZE).map(::DashboardLeafView)
             model.addAttribute("hasMore", rows.size > PAGE_SIZE)
             model.addAttribute("total", dashboards.countAll(workspaceId, view.dashboards))
-            model.addAttribute("dashboards", shown)
+            model.addAttribute("dashboards", rows.take(PAGE_SIZE).map(::DashboardLeafView))
         } else {
-            val match = needle?.lowercase()
-            val all =
-                dashboards
-                    .listAll(
-                        workspaceId,
-                        view.dashboards,
-                        0,
-                        co.datapipelines.visualization.ArtifactRepository.MAX_PAGE_LIMIT,
-                    ).filter {
-                        match == null ||
-                            it.record.name
-                                .lowercase()
-                                .contains(match)
-                    }.map(::DashboardLeafView)
-            val shown = all.drop(page).take(PAGE_SIZE)
-            model.addAttribute("hasMore", all.size > page + PAGE_SIZE)
-            model.addAttribute("total", all.size)
-            model.addAttribute("dashboards", shown)
+            val found = dashboards.search(workspaceId, view.dashboards, needle, page, PAGE_SIZE)
+            model.addAttribute("hasMore", found.total > page + PAGE_SIZE)
+            model.addAttribute("total", found.total)
+            model.addAttribute("dashboards", found.items.map(::DashboardLeafView))
         }
         model.addAttribute("lensUnavailable", view.unavailable)
         model.addAttribute("searching", true)
