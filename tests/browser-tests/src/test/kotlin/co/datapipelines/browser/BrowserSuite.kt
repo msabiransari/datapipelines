@@ -19,7 +19,9 @@ import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.web.server.LocalServerPort
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
+import java.nio.file.Files
 import java.nio.file.Paths
+import java.nio.file.StandardOpenOption
 import java.security.SecureRandom
 import java.sql.DriverManager
 import java.util.Base64
@@ -473,7 +475,7 @@ abstract class BrowserSuite {
         private fun BrowserContext.watchingCsp(): BrowserContext =
             apply {
                 val consolePath = Paths.get("build", "reports", "browser-console", "console-${System.nanoTime()}.log")
-                java.nio.file.Files.createDirectories(consolePath.parent)
+                Files.createDirectories(consolePath.parent)
                 onPage { page ->
                     page.onConsoleMessage { message ->
                         val text = message.text()
@@ -484,11 +486,11 @@ abstract class BrowserSuite {
                         // Preview URLs carry capabilities: preserve the console, never the page's query.
                         val safeLocation = sourceUrl.substringBefore('?') + location.removePrefix(sourceUrl)
                         val event = "${page.url().substringBefore('?')} — ${message.type()} location=$safeLocation — $text"
-                        java.nio.file.Files.writeString(
+                        Files.writeString(
                             consolePath,
                             "$event\n",
-                            java.nio.file.StandardOpenOption.CREATE,
-                            java.nio.file.StandardOpenOption.APPEND,
+                            StandardOpenOption.CREATE,
+                            StandardOpenOption.APPEND,
                         )
                         if (!text.contains("Content Security Policy")) return@onConsoleMessage
                         // #456: screenshot insertion has no app URL. Never exempt vendor/js emissions,
