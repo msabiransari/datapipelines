@@ -466,6 +466,12 @@ abstract class BrowserSuite {
          * (CSSOM, which no policy governs) to hide the caret, and Chromium reports the empty
          * element as a refused inline style with this hash. #456: Plotly produces the SAME
          * hash, so only harness provenance may be set aside; app scripts must still fail.
+         *
+         * The same screenshot path (Playwright 1.62) also writes `caret-color` inline on every
+         * input and textarea from its isolated world and clears it afterwards, leaving `style=""`.
+         * htmx's default settle step copied that attribute across the next swap with setAttribute,
+         * so the refusal carried htmx.min.js as its source; the layouts' htmx-config no longer
+         * settles "style" (#456 merge follow-up, guarded by HtmxConfigAuditTest).
          */
         private const val EMPTY_INLINE_STYLE_HASH = "'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='"
 
