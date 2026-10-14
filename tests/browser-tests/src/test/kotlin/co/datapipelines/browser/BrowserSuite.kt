@@ -469,6 +469,15 @@ abstract class BrowserSuite {
          */
         private const val EMPTY_INLINE_STYLE_HASH = "'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='"
 
+        /**
+         * #525, TEMPORARY — deleted by its fix. plotly-3d's colorbar code clears its fill
+         * rectangles with `.attr("style", "")`, and Chromium refuses the empty style attribute
+         * with [EMPTY_INLINE_STYLE_HASH]. Only that refusal, from exactly this bundle on the app's
+         * own origin, is set aside (owner ruling 2026-10-14, the #456 merge follow-up); every
+         * other vendor file, page script or non-empty hash still fails the test.
+         */
+        private const val ISSUE_525_PLOTLY_3D_PATH = "vendor/plotly/plotly-3d.min.js"
+
         private val harnessCspMessages = java.util.concurrent.CopyOnWriteArrayList<String>()
 
         /** Every page this context opens reports a CSP refusal into [cspViolations]. */
@@ -497,9 +506,14 @@ abstract class BrowserSuite {
                         // even with the empty hash; an app-origin document is also an application source.
                         val harnessSource =
                             !sourceUrl.startsWith(appOrigin) && !sourceUrl.contains("/vendor/") && !sourceUrl.contains("/js/")
-                        if (text.startsWith("Applying inline style") && text.contains(EMPTY_INLINE_STYLE_HASH) && harnessSource) {
+                        val emptyInlineStyle = text.startsWith("Applying inline style") && text.contains(EMPTY_INLINE_STYLE_HASH)
+                        if (emptyInlineStyle && harnessSource) {
                             harnessCspMessages += event
                             println("CSP harness-only: $event")
+                            return@onConsoleMessage
+                        }
+                        if (emptyInlineStyle && sourceUrl.substringBefore('?') == appOrigin + ISSUE_525_PLOTLY_3D_PATH) {
+                            println("CSP known #525 (plotly-3d colorbar style attribute): $event")
                             return@onConsoleMessage
                         }
                         cspViolations += event
