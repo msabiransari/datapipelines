@@ -175,6 +175,9 @@ class TemplateTreeRenderTest {
                 fillSearch(TemplateListScope.CATALOG)
                 setVariable("templates", emptyList<Template>())
                 setVariable("q", "revenue")
+                // #510: the fixture bypasses the browse model that stamps the flag; this
+                // miss is q standing, so filtered stands and #432's Clear search renders.
+                setVariable("filtered", true)
             }
         emptyCatalog shouldNotContain "data-nav-tree-clear"
         emptyCatalog shouldContain "Clear search"

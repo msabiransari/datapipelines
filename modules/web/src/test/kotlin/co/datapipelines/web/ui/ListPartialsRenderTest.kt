@@ -164,15 +164,69 @@ class ListPartialsRenderTest {
 
     @Test
     fun `templates empty state uses the ds-empty primitive`() {
+        // #510: this is the NOTHING EXISTS state — no rows and no standing filter — so it
+        // names an empty q and carries filtered=false explicitly (the fixture bypasses the
+        // browse model that stamps it).
         val html =
             engine.process(
                 "partials/template-search",
-                webContext().apply { fillTemplatesModel(emptyList()) },
+                webContext().apply {
+                    fillTemplatesModel(emptyList())
+                    setVariable("q", "")
+                    setVariable("filtered", false)
+                },
             )
 
         html shouldContain "class=\"ds-empty\""
         html shouldContain "class=\"ds-empty-title\""
+        html shouldContain "No templates yet"
         html shouldNotContain "ds-empty-state" // a class with no CSS anywhere (D4)
+    }
+
+    @Test
+    fun `a filter miss with an empty box is the no-match state with a Clear filters control (#510)`() {
+        // #510: the choice between "nothing exists" and "nothing matched" must read ANY standing
+        // filter, not q alone — a dialect/type with no rows must not answer with the create
+        // guidance while the workspace holds templates the filter is hiding.
+        val html =
+            engine.process(
+                "partials/template-search",
+                webContext().apply {
+                    fillTemplatesModel(emptyList())
+                    setVariable("q", "")
+                    setVariable("filtered", true)
+                },
+            )
+
+        html shouldContain "No templates match your search"
+        html shouldNotContain "No templates yet"
+        // The box is already empty, so the control drops EVERY standing filter — all three
+        // named for shell.js — and its own request is the unfiltered first page (no hx-include).
+        html shouldContain "Clear filters"
+        html shouldContain "data-dp-clear-filters=\"#template-filter-q, #template-filter-dialect, #template-filter-type\""
+        html shouldNotContain "hx-include"
+        html shouldNotContain "Clear search"
+    }
+
+    @Test
+    fun `a q miss keeps the #432 clear - it empties the box only and keeps dialect and type`() {
+        val html =
+            engine.process(
+                "partials/template-search",
+                webContext().apply {
+                    fillTemplatesModel(emptyList())
+                    setVariable("q", "x")
+                    setVariable("filtered", true)
+                },
+            )
+
+        html shouldContain "No templates match your search"
+        html shouldNotContain "No templates yet"
+        html shouldContain "Clear search"
+        html shouldNotContain "Clear filters"
+        html shouldContain "data-dp-clear-filters=\"#template-filter-q\""
+        html shouldContain "hx-include=\"#template-filter-dialect, #template-filter-type\""
+        html shouldContain "hx-sync=\"#template-filter-q:replace\""
     }
 
     @Test

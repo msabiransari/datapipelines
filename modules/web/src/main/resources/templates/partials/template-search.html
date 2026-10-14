@@ -4,10 +4,13 @@
   <th:block th:if="${lensUnavailable != null and #lists.isEmpty(templates)}">
     <div th:replace="~{partials/lens-unavailable :: notice(${lensUnavailable})}"></div>
   </th:block>
-  <!-- The catalog with no query and no rows is the workspace's EMPTY state, not a failed
-       search: it says how templates arrive (authored through the agent or the create form),
-       like the tree's. -->
-  <th:block th:if="${lensUnavailable == null and #lists.isEmpty(templates) and !nav and #strings.isEmpty(q)}">
+  <!-- The catalog's two empty answers (§5.1). "Nothing exists" — no rows, no standing
+       filter (#510: the choice reads the `filtered` flag, never q alone) — explains how
+       templates arrive, like the tree's. "Nothing matched" offers the control that drops
+       what stands: with q standing, #432's box-only control (it keeps dialect/type); with
+       only a select standing, the all-filters control resets all three and fetches the
+       unfiltered first page. -->
+  <th:block th:if="${lensUnavailable == null and #lists.isEmpty(templates) and !nav and !filtered}">
     <div class="ds-empty">
       <p class="ds-empty-title">No templates yet</p>
       <p class="ds-empty-description">
@@ -17,14 +20,17 @@
       </p>
     </div>
   </th:block>
-  <th:block th:if="${lensUnavailable == null and #lists.isEmpty(templates) and (nav or !#strings.isEmpty(q))}">
+  <th:block th:if="${lensUnavailable == null and #lists.isEmpty(templates) and (nav or filtered)}">
     <div class="ds-empty">
       <p class="ds-empty-title">No templates match your search</p>
       <div class="ds-empty-actions">
-        <button th:unless="${nav}" type="button" class="ds-button ds-button-secondary ds-button-sm"
+        <button th:if="${!nav and !#strings.isEmpty(q)}" type="button" class="ds-button ds-button-secondary ds-button-sm"
                 data-dp-clear-filters="#template-filter-q" hx-sync="#template-filter-q:replace"
                 hx-include="#template-filter-dialect, #template-filter-type"
                 th:attr="hx-get=@{/partials/templates}, hx-target='#' + ${rootId}, hx-swap='outerHTML'">Clear search</button>
+        <button th:unless="${nav or !#strings.isEmpty(q)}" type="button" class="ds-button ds-button-secondary ds-button-sm"
+                data-dp-clear-filters="#template-filter-q, #template-filter-dialect, #template-filter-type" hx-sync="#template-filter-q:replace"
+                th:attr="hx-get=@{/partials/templates}, hx-target='#' + ${rootId}, hx-swap='outerHTML'">Clear filters</button>
       </div>
     </div>
   </th:block>
