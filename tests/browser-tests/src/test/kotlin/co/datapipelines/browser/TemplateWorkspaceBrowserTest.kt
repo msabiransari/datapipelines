@@ -134,6 +134,84 @@ class TemplateWorkspaceBrowserTest : BrowserSuite() {
     // ------------------------------------------------------------------ the resolution states
 
     @Test
+    @Suppress("LongMethod") // one document must carry tab listeners and Render context across two templates and cached history
+    fun `tabs switch after a boosted catalog arrival and a cached history restore`() {
+        startTrace()
+        loginReadyUser("tlwmount")
+        val name = "test/ws_mount_${generatedPassword("n").take(6).lowercase()}.sql"
+        must("POST", "/api/v1/templates", templateJson(name, sqlBody("mount")))
+        val fresh = name.replace(".sql", "_fresh.sql")
+        must("POST", "/api/v1/templates", templateJson(fresh, sqlBody("fresh")))
+        openCatalog(name.substringAfterLast('/'))
+        page.evaluate(
+            """() => { window.__templateRail = document.getElementById('app-rail'); window.__templateCacheHits = 0;
+              document.body.addEventListener('htmx:historyCacheHit', () => window.__templateCacheHits++); }""",
+        )
+        // Keep the outgoing URL equal to its catalog arrival for a real cache HIT; changes
+        // to the template workspace's replaceState history contract belong to #528.
+        val result = page.locator("a.tpl-result", Page.LocatorOptions().setHasText(name)).first()
+        result.evaluate("a => { a.href += '?tab=source'; htmx.process(a); }")
+        result.click()
+        page.waitForURL("**/templates/$name**")
+        page.evaluate("async () => { const assets = await import('/js/page-assets.mjs'); await assets.mountPage(); }")
+        page.evaluate("() => window.__templateRail === document.getElementById('app-rail')") shouldBe true
+        page.locator("#tw-tab-overview").click()
+        page.locator("#tw-tab-overview").getAttribute("aria-selected") shouldBe "true"
+        page.locator("#tw-tab-source").getAttribute("aria-selected") shouldBe "false"
+        page.locator("#tw-pane-overview").isVisible shouldBe true
+        page.locator("#tw-pane-source").isVisible shouldBe false
+
+        page.locator("#tw-tab-render").click()
+        page.locator("#tab-json-btn").click()
+        page.locator("#tw-tab-source").click()
+
+        // Leave through the same in-shell door as an artifact link. Both Back legs must
+        // HIT the cache, preserving this document while a new root needs its own listener.
+        fun follow(path: String) {
+            page.evaluate(
+                """path => { const a = document.createElement('a'); a.href = path; a.id = 'template-leave';
+                  a.textContent = 'Go'; document.getElementById('app-main').append(a); htmx.process(a); }""",
+                path,
+            )
+            page.click("#template-leave")
+            page.waitForURL("**$path")
+        }
+        follow("/pipelines")
+        page.waitForSelector("#pipeline-list-wrapper")
+        follow("/templates/$fresh?tab=source")
+        page.evaluate("async () => { const assets = await import('/js/page-assets.mjs'); await assets.mountPage(); }")
+        page.locator("#tw-tab-render").click()
+        page.locator("#context-rows input").nth(0).fill("shown")
+        page.locator("#context-rows input").nth(1).fill("fresh")
+        val freshPreview = page.waitForResponse({ it.url().contains("/partials/templates/render") }) { page.click("#previewBtn") }
+        java.net.URLDecoder.decode(freshPreview.request().postData(), java.nio.charset.StandardCharsets.UTF_8) shouldContain
+            """context={"shown":"fresh"}"""
+        page.locator("#previewPane pre").waitFor()
+        page.locator("#previewPane").innerText() shouldContain "fresh"
+        page.goBack()
+        page.waitForURL("**/pipelines")
+        page.waitForSelector("#pipeline-list-wrapper")
+        page.goBack()
+        page.waitForURL("**/templates/$name?tab=source")
+        page.waitForFunction("() => window.__templateCacheHits === 2 && !!document.querySelector('.tw-root')")
+        page.evaluate("async () => { const assets = await import('/js/page-assets.mjs'); await assets.mountPage(); }")
+        page.evaluate("() => window.__templateRail === document.getElementById('app-rail')") shouldBe true
+        page.locator("#tw-tab-overview").click()
+        page.locator("#tw-tab-overview").getAttribute("aria-selected") shouldBe "true"
+        page.locator("#tw-tab-source").getAttribute("aria-selected") shouldBe "false"
+        page.locator("#tw-pane-overview").isVisible shouldBe true
+        page.locator("#tw-pane-source").isVisible shouldBe false
+        page.locator("#tw-tab-render").click()
+        page.locator("#context-json").isVisible shouldBe true
+        page.locator("#contextJsonTextarea").fill("""{"shown":"cached"}""")
+        val cachedPreview = page.waitForResponse({ it.url().contains("/partials/templates/render") }) { page.click("#previewBtn") }
+        java.net.URLDecoder.decode(cachedPreview.request().postData(), java.nio.charset.StandardCharsets.UTF_8) shouldContain
+            """context={"shown":"cached"}"""
+        page.locator("#previewPane pre").waitFor()
+        consoleErrors shouldBe emptyList()
+    }
+
+    @Test
     fun `the unqualified view is the ACTUAL current release - not the draft, not an older version`() {
         startTrace()
         loginReadyUser("tlwres")
