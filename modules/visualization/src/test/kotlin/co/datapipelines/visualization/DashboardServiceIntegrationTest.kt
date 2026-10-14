@@ -155,10 +155,10 @@ class DashboardServiceIntegrationTest {
         val term = name.substringAfterLast('/').uppercase()
         val admitting = ReadLens.Only(setOf(name))
 
-        h.dashboards.search(WORKSPACE, ReadLens.Everything, term).let { page ->
-            page.total shouldBe 1
-            page.items.single().record.name shouldBe name
-        }
+        val found = h.dashboards.search(WORKSPACE, ReadLens.Everything, term)
+        found.total shouldBe 1
+        val row = found.items.single()
+        row.record.name shouldBe name
         h.dashboards.search(WORKSPACE, ReadLens.Everything, "no_such_dashboard_term").total shouldBe 0
         h.dashboards.search(OTHER_WORKSPACE, ReadLens.Everything, term).total shouldBe 0
         withClue("a DRAFT-only dashboard is never matched or counted under a narrowing lens") {
@@ -167,7 +167,9 @@ class DashboardServiceIntegrationTest {
 
         h.dashboards.release(WORKSPACE, dashboard.record.id, dashboard.detail.bodyHash, AUTHOR, releasePinnedVisualizations = true)
 
-        h.dashboards.search(WORKSPACE, admitting, term).items.single().record.name shouldBe name
+        val admitted = h.dashboards.search(WORKSPACE, admitting, term)
+        val admittedRow = admitted.items.single()
+        admittedRow.record.name shouldBe name
         h.dashboards.search(WORKSPACE, ReadLens.NOTHING, term).total shouldBe 0
     }
 
