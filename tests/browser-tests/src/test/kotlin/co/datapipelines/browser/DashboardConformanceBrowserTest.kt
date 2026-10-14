@@ -86,13 +86,10 @@ class DashboardConformanceBrowserTest : DashboardBrowserSuite() {
             ) as String?
         (sheetText ?: "") shouldBe ""
 
-        // The console carried no CSP refusal except the EMPTY element hash — the one Playwright's
-        // own screenshot path produces and the suite's collector already sets aside. This suite's
-        // own listener does NOT exempt anything: the count below is the raw number of refusals
-        // whose message names a hash, and only the empty hash may appear.
-        val refusals = drainCspViolations()
-        val nonEmpty = refusals.filter { !it.contains("'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='") }
-        nonEmpty shouldBe emptyList()
+        // The console carried no CSP refusal at all. #456: the suite's collector sets aside only a
+        // refusal with no application source (Playwright's screenshot insert), so an empty-hash
+        // refusal from the bundle or the page's scripts is counted here like any other.
+        drainCspViolations() shouldBe emptyList()
     }
 
     @Test
@@ -795,6 +792,8 @@ class DashboardConformanceBrowserTest : DashboardBrowserSuite() {
               <link rel="stylesheet" href="/vendor/design-system/tokens.css">
               <link rel="stylesheet" href="/vendor/design-system/themes/dark.css">
               <link rel="stylesheet" href="/css/app.css">
+              <!-- #456: removing the sheet must not re-enable Plotly's inline injection. -->
+              <template id="plotly.js-style-global" class="no-inline-styles"></template>
             </head>
             <body>
               <main id="board"></main>

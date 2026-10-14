@@ -137,6 +137,8 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
               <link rel="stylesheet" href="/css/app.css">
               <link rel="stylesheet" href="/css/dashboards.css">
               <link rel="stylesheet" href="/vendor/plotly/plotly.css">
+              <!-- #456: the host must opt out before the bundle's first style lookup. -->
+              <template id="plotly.js-style-global" class="no-inline-styles"></template>
             </head>
             <body>
               <main id="board"></main>
