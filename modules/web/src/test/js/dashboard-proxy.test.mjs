@@ -11,8 +11,10 @@
  *   writing (the timing assertion is the buffering detector — a buffered proxy fails it);
  * - error envelopes pass through with their status.
  *
- * The proxy is spawned as a child process on a scratch port, exactly as a host would run it;
- * `node` here is the test runner itself, so the spawn is available wherever the suite runs.
+ * The proxy is spawned as a child process, exactly as a host would run it; `node` here is the
+ * test runner itself, so the spawn is available wherever the suite runs. Neither listener has a
+ * fixed port: the stub upstream and the proxy both bind port 0 and the OS picks, so two builds of
+ * this repo on one machine (a gate beside a lane) never race for the same number (#511).
  */
 import test from "node:test";
 import { before, after } from "node:test";
@@ -23,11 +25,12 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 const PROXY_SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), "../../../../../examples/dashboard-proxy/proxy.mjs");
-const PROXY_PORT = 18367;
-const UPSTREAM_PORT = 18368;
-const PROXY_BASE = `http://127.0.0.1:${PROXY_PORT}`;
-const UPSTREAM_BASE = `http://127.0.0.1:${UPSTREAM_PORT}`;
 const KEY = "dpk_PROXYTESTKEY01";
+const LISTENING_TIMEOUT_MS = 10_000;
+
+/** Assigned in `before()` from the listeners' own bound ports; every case reads them after it ran. */
+let UPSTREAM_BASE;
+let PROXY_BASE;
 
 /** Records one relayed request; answers from a scripted table. */
 const seen = [];
@@ -50,15 +53,43 @@ const upstream = http.createServer((req, res) => {
   });
 });
 
+/**
+ * Spawns the proxy on `PORT=0` and resolves `{ child, port }` once it prints its bound port
+ * (`dashboard-proxy listening on :<port> -> …`, the line proxy.mjs documents as the place a caller
+ * reads it). Rejects, quoting the lines seen so far, if the child exits first or stays silent.
+ */
 function startProxy() {
-  const child = spawn(process.execPath, [PROXY_SCRIPT], {
-    env: { ...process.env, DP_BASE_URL: UPSTREAM_BASE, DASHBOARD_KEY: KEY, PORT: String(PROXY_PORT) },
-    // stdout is not read (the port is fixed here, so the proxy's "listening" line is noise);
-    // an unread pipe is one more handle to keep a finished file alive.
-    stdio: ["ignore", "ignore", "pipe"],
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [PROXY_SCRIPT], {
+      env: { ...process.env, DP_BASE_URL: UPSTREAM_BASE, DASHBOARD_KEY: KEY, PORT: "0" },
+      // stdout is read here for the bound port and then DRAINED for the child's lifetime: an
+      // unread pipe is a handle that keeps a finished file alive (gate-825ab754), a drained one
+      // closes with the child.
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    child.stderr.on("data", (d) => process.stderr.write(`[proxy] ${d}`));
+    let seenOut = "";
+    let settled = false;
+    const settle = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      fn(value);
+    };
+    const timer = setTimeout(() => {
+      child.kill();
+      settle(reject, new Error(`the proxy printed no "listening on :<port>" line in ${LISTENING_TIMEOUT_MS}ms; stdout so far: ${JSON.stringify(seenOut)}`));
+    }, LISTENING_TIMEOUT_MS);
+    child.stdout.on("data", (d) => {
+      if (settled) return;
+      seenOut += d;
+      const m = /listening on :(\d+)/.exec(seenOut);
+      if (m) settle(resolve, { child, port: Number(m[1]) });
+    });
+    child.once("exit", (code, signal) =>
+      settle(reject, new Error(`the proxy exited (code ${code}, signal ${signal}) before listening; stdout so far: ${JSON.stringify(seenOut)}`)));
+    child.once("error", (e) => settle(reject, e));
   });
-  child.stderr.on("data", (d) => process.stderr.write(`[proxy] ${d}`));
-  return child;
 }
 
 async function waitReady(base, what) {
@@ -74,11 +105,21 @@ async function waitReady(base, what) {
   throw new Error(`${what} never became ready`);
 }
 
-before(async () => {
-  await new Promise((resolve) => upstream.listen(UPSTREAM_PORT, "127.0.0.1", resolve));
-  const proxy = startProxy();
+before(async (t) => {
+  await new Promise((resolve, reject) => {
+    upstream.once("error", reject);
+    upstream.listen(0, "127.0.0.1", resolve);
+  });
+  const upstreamPort = upstream.address().port;
+  UPSTREAM_BASE = `http://127.0.0.1:${upstreamPort}`;
+  const { child, port: proxyPort } = await startProxy();
+  test.dashboardProxyChild = child;
+  assert.ok(Number.isInteger(proxyPort) && proxyPort > 0, `the proxy's bound port is a positive integer, got ${proxyPort}`);
+  assert.notEqual(proxyPort, upstreamPort, "the proxy and the stub upstream hold different ports");
+  PROXY_BASE = `http://127.0.0.1:${proxyPort}`;
+  // Both ports go into the TAP so a future collision report carries them.
+  t.diagnostic(`dashboard-proxy test ports: upstream ${upstreamPort}, proxy ${proxyPort}`);
   await waitReady(PROXY_BASE, "the proxy");
-  test.dashboardProxyChild = proxy;
 });
 
 after(async () => {
