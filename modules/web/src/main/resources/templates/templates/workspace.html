@@ -16,23 +16,24 @@
           layout head — template-editor.css and template-workspace.css included — because this
           page is a boosted arrival and a link inside #app-main paints a frame late. */-->
 
-  <!--/* D4: the shared, dependency-free SQL tokenizer (032) — consumed, not modified. It
-          highlights the read-only preview output on the Render tab; the editable textarea
-          stays plain (D5). preview.js wraps the pass the preview call uses. */-->
-  <script th:src="@{/js/pipeline-editor/sql-highlight.js}"></script>
-  <script th:src="@{/js/template-editor/preview.js}"></script>
-  <!-- 097 §D: the render-context rail and the preview call live in a FILE — outside the CSP's
-       inline ban, inside the CSRF audit's sweep, inside `node --test`. csrf.js is the one
-       reader of the double-submit cookie. -->
-  <script th:src="@{/js/csrf.js}"></script>
-  <script th:src="@{/js/template-editor/lifecycle.js}"></script>
-  <!-- #398: the workspace's tab state — a pure module (node-tested) plus its DOM glue; the
-       tab strip is in-page navigation only. -->
-  <script th:src="@{/js/template-editor/workspace.js}" defer></script>
-  <!-- 7d: the transform face's two behaviours — the "unsaved changes" marker (Release
-       publishes the last SAVED draft, never what is typed) and scrolling a fresh result into
-       view. Delegated, so a face swapped in by a save is covered without re-arming. -->
-  <script th:src="@{/js/template-transform-face.js}" defer></script>
+  <!-- #514: one ordered catalog, executed once per document with the page in place.
+       The last entry mounts the tab strip on every arrival, including cached restores. -->
+  <template data-page-assets="on-mount">
+    <!-- Globals only: the shared SQL tokenizer and its read-only Render preview wrapper.
+         The editable textarea stays plain (D5). -->
+    <script th:src="@{/js/pipeline-editor/sql-highlight.js}"></script>
+    <script th:src="@{/js/template-editor/preview.js}"></script>
+    <!-- Globals only: the one double-submit cookie reader, before lifecycle's preview call. -->
+    <script th:src="@{/js/csrf.js}"></script>
+    <!-- Armed once on the document body: Render context controls and preview requests. -->
+    <script th:src="@{/js/template-editor/lifecycle.js}"></script>
+    <!-- Armed once and delegated: unsaved-change markers and fresh transform result scrolls. -->
+    <script th:src="@{/js/template-transform-face.js}"></script>
+    <!-- Delegated document wiring for the lifecycle dialogs; the loader prevents stacking. -->
+    <script th:src="@{/js/lifecycle-dialog.js}"></script>
+    <!-- The pure tab state machine plus DOM glue: mount each live or restored root once. -->
+    <script th:src="@{/js/template-editor/workspace.js}" data-page-mount></script>
+  </template>
 
   <!--/* 110 §C — the phone band. Desktop-first BY DECISION: below 768px the band renders above
           the workspace (which stays on the page, rendered and scrollable underneath) and says
@@ -382,10 +383,5 @@
        the Versions tab's per-row menus open dialogs served into it; their POSTs answer
        HX-Redirect onto this workspace (or the catalog) with a flash. -->
   <div id="tx-dialog"></div>
-  <!-- #465: its client half loads through the shell's page-asset catalog (page-assets.mjs), once per
-       document — a bare tag re-executed on every boosted arrival and stacked its document listeners. -->
-  <template data-page-assets>
-    <script th:src="@{/js/lifecycle-dialog.js}"></script>
-  </template>
 </th:block>
 </html>

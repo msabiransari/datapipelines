@@ -138,15 +138,17 @@
     paint();
   }
 
-  // 076 §D: arm on arrival — the workspace page's tag rides inside #app-main and re-executes
-  // on a boosted visit; the root's own flag makes the re-run idempotent.
+  // #514: execution defines the API once; the page-script loader mounts each arrival and
+  // cached restore with its page in place. The root's own flag keeps repeated mounts inert.
   if (typeof window !== "undefined") {
     window.TplWorkspace = { createTabs: createTabs, resolve: resolve, TABS: TABS, withTab: withTab };
-    if (document.readyState === "loading") {
-      document.addEventListener("DOMContentLoaded", arm);
-    } else {
+    window.TemplateWorkspaceMount = function (main) {
       arm();
-    }
+      // lifecycle.js now survives navigation too: its closure must follow this page's
+      // visible context mode (fresh Key/Value, or the mode serialized in a history entry).
+      var context = main.querySelector("#context-json");
+      if (context) window.TplLifecycle.switchTab(context.classList.contains("u-hidden") ? "kv" : "json");
+    };
   }
 
   var api = { createTabs: createTabs, resolve: resolve, TABS: TABS, withTab: withTab, arm: arm };
