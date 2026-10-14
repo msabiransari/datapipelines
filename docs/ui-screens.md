@@ -1,9 +1,9 @@
 # UI Screens Inventory
 
-**Status:** v1.135
+**Status:** v1.136
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
-**Last updated:** 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
+**Last updated:** 2026-10-14 (#516); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
 
 ---
 
@@ -216,7 +216,9 @@ complete answer differs from an error. See [REST §24](rest-api.md#24-first-part
 
 The widget's source, root, context, href and activation callback are host parameters. Selection-only hosts
 use buttons. The common renderer owns roving focus, arrow navigation, Home/End and activation; focus is
-separate from current-page selection. Labels use text sinks and fixed vendored lucide icons.
+separate from current-page selection, and the focus ring answers keyboard focus alone, drawn on the
+focused row's line and never around the subtree its item contains (#516) — a mouse click leaves the
+selected-row tint. Labels use text sinks and fixed vendored lucide icons.
 
 The global rail's pointer and keyboard separator adjusts from its 232px default up to the viewport less
 `--app-main-min-width` (320px) where the rail is a column; the phone drawer is unchanged. Collapse and Reset stay reachable at that boundary.
@@ -2428,6 +2430,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-13 | v1.136 | #516 the tree's focus ring sits on the focused row, keyboard only — renumbered at merge after #524's v1.135 | §3.4: a clicked tree row shows the selected-row tint alone — the outline that boxed a folder AND its whole expanded subtree is gone; the ring (`--focus-ring-width` × `--focus-ring`, the design system's band) is drawn on the focused row's line via `:focus-visible` with a negative offset, so it stays inside the row box and appears only for keyboard focus. Navigation, roving focus and selection unchanged (`PipelineSidebarTreeBrowserTest` pins the click and keyboard cases). |
 | 2026-10-14 | v1.135 | #524 (#512 merge follow-up) the dashboards catalog states no cap | **§4.21** The catalog and the sidebar branch's search render no "reads at most 200 dashboards" note: since #512 both page the lensed SQL search and `total` is the true match count, so every match is reachable through the pager ("Showing N of M"); the note described the retired in-memory first-200 read. `DashboardUiRenderTest` pins the absence at `total = 201` on both scopes. |
 | 2026-10-13 | v1.134 | #512 the dashboards catalog searches in SQL | **§4.21** The catalog: `q` pages the same lensed SQL search the visualizations catalog uses — name, display name or description, case-insensitive, LIKE metacharacters literal — so every dashboard in the lens is searchable and the pager's total is the match count; the in-memory name filter over the first 200 rows (a match past the 200th was never shown, the total was the truncated set's, display name and description were not matched) is gone, and a narrowing lens with no `q` pages and counts through the same lensed reads. Sidebar branch search is the same flat list. |
 | 2026-10-11 | v1.133 | #494 one page-script loader — renumbered at merge after #478's v1.132 | **§3.2** Scripts: every family page's scripts load through ONE loader, `page-assets.mjs` — inert `<template data-page-assets>` catalogs (a neutral name for the attribute that called them chart assets: since #465 they carry the lifecycle dialogs too), the `/js`+`/vendor` allow-list, once per document per source, one mount per catalog node; `data-page-assets="on-mount"` catalogs are fetched during preparation and executed once the page is in place. The pipeline editor's and the parameter workspace's runtimes stop loading scripts and become their catalogs' last entry and mount; neither page carries a bare bootstrap tag. **§4.21** (dashboards JS row, the catalog's name) and **§4.23** (the parameter workspace's JS row) follow. Measured: across editor → dashboard → editor → template → visualization → parameter set → Back/Forward every catalog source evaluates once (`PersistentChartNavigationBrowserTest`). |
