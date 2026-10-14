@@ -48,9 +48,10 @@ internal object PlotlyColorbarProbe {
     }
 
     /**
-     * Plotly's own resize (the call the runtime's `resize` makes) re-runs the colorbar draw over the EXISTING fill
-     * rectangles — the path the old `.attr('style', '')` reset took on every draw after the first. The attribute
-     * mutations under the colorbar group are counted as the floor: a redraw that touched nothing proves nothing.
+     * Plotly's own redraw re-runs the colorbar draw over the EXISTING fill rectangles — the path the old
+     * `.attr('style', '')` reset took on every draw after the first (a resize to an unchanged size skips the draw: it
+     * measured 0 mutations). The attribute mutations under the colorbar group are counted as the floor: a redraw
+     * that touched nothing proves nothing.
      */
     fun redraw(
         page: Page,
@@ -66,7 +67,7 @@ internal object PlotlyColorbarProbe {
                   let seen = 0;
                   const observer = new MutationObserver(list => { seen += list.length; });
                   observer.observe(bar, { subtree: true, attributes: true });
-                  await window.Plotly.Plots.resize(gd);
+                  await window.Plotly.redraw(gd);
                   await new Promise(done => setTimeout(done, $SETTLE_MS));
                   observer.disconnect();
                   return seen;
