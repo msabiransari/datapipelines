@@ -25,6 +25,75 @@ import java.security.MessageDigest
  */
 class VisualizationPreviewBrowserTest : DashboardBrowserSuite() {
     @Test
+    fun `the head marker precedes Plotly's first lookup and the linked rules apply in both themes`() {
+        startTrace()
+        val root = ready("vmarker")
+        val created = api("POST", "/api/v1/visualizations", document("$root/charts/marker"))
+        val id = created.at("data", "id") as String
+        val started = api("POST", "/api/v1/visualizations/$id/tests/sessions", "")
+        val previewUrl = started.at("data", "preview_url") as String
+        val agent = newBrowserContext()
+        // Record the marker at Plotly's FIRST opt-out lookup, before it can create one itself.
+        // Final DOM order alone cannot distinguish a parser-placed marker from Plotly's late insertion.
+        agent.addInitScript(
+            """(() => {
+              const original = document.getElementById.bind(document);
+              document.getElementById = function (id) {
+                const marker = original(id);
+                if (id === 'plotly.js-style-global' && !window.__plotlyMarkerAtLoad) {
+                  const script = document.querySelector('script');
+                  window.__plotlyMarkerAtLoad = {
+                    marked: !!marker && marker.classList.contains('no-inline-styles'),
+                    inHead: !!marker && marker.parentElement === document.head,
+                    beforeScript: !!marker && !!script && !!(marker.compareDocumentPosition(script) & Node.DOCUMENT_POSITION_FOLLOWING),
+                    tag: marker ? marker.tagName : null,
+                    children: marker ? (marker.content || marker).childNodes.length : null,
+                    hasSheet: !!marker && !!marker.sheet,
+                    rules: marker && marker.sheet ? marker.sheet.cssRules.length : 0
+                  };
+                }
+                return marker;
+              };
+            })();""",
+        )
+        try {
+            val preview = agent.newPage()
+            preview.setDefaultTimeout(FIRST_RENDER_TIMEOUT_MS)
+            for (theme in listOf("light", "dark")) {
+                preview.navigate("$baseUrl$previewUrl&theme=$theme")
+                preview.waitForSelector("section[data-dp-case-index='0'][data-dp-ready='true']")
+                val observation =
+                    preview.evaluate(
+                        """() => {
+                          const marker = document.getElementById('plotly.js-style-global');
+                          return { atLoad: window.__plotlyMarkerAtLoad,
+                            rules: marker && marker.sheet ? marker.sheet.cssRules.length : 0,
+                            cssLoaded: Array.from(document.styleSheets).some(s => s.href && s.href.endsWith('/vendor/plotly/plotly.css')),
+                            font: getComputedStyle(document.querySelector('.js-plotly-plot .plotly')).fontFamily };
+                        }""",
+                    ) as Map<*, *>
+                println("Plotly marker ($theme): $observation")
+                val atLoad = observation["atLoad"] as Map<*, *>
+                withClue("parser-placed marker at the bundle's first lookup ($theme): $observation") {
+                    atLoad["marked"] shouldBe true
+                    atLoad["inHead"] shouldBe true
+                    atLoad["beforeScript"] shouldBe true
+                    atLoad["tag"] shouldBe "TEMPLATE"
+                    atLoad["children"] shouldBe 0
+                    atLoad["hasSheet"] shouldBe false
+                    atLoad["rules"] shouldBe 0
+                }
+                observation["rules"] shouldBe 0
+                observation["cssLoaded"] shouldBe true
+                // Reuse DashboardConformanceBrowserTest's positive stylesheet probe.
+                (observation["font"] as String).contains("Open Sans") shouldBe true
+            }
+        } finally {
+            agent.close()
+        }
+    }
+
+    @Test
     fun `an agent's browser previews every case in both themes, uploads its screenshot, and the author releases`() {
         startTrace()
         val root = ready("vprev")
