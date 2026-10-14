@@ -15,7 +15,7 @@ page, the screenshot upload and the two test tools — §3.4.1 (lane L4b, #353).
 [MCP Server](mcp-server.md) (§6.2.50–§6.2.62 — the tools), [Auth](auth.md) (§7.6 — the permissions)
 **Design:** the [dashboard implementation spec](superpowers/specs/2026-09-28-dashboard-implementation-spec.md) and
 the [design record](superpowers/specs/2026-09-25-dashboard-authoring-design-draft.md) (decisions D1–D63)
-**Last updated:** 2026-10-10
+**Last updated:** 2026-10-13
 
 A dashboard presents pipeline results. Draft development admits draft dependencies; published boards require released dependencies. It is built from two versioned artifacts: **visualizations** —
 a chart, table or KPI bound to named inputs, reusable across dashboards — and **dashboards**, which pin exact pipeline versions as sources, map their results onto visualization inputs, and arrange visualizations, groups, actions and
