@@ -59,10 +59,12 @@ export function createTreeRenderer(host, state, options) {
       element.setAttribute("role", "status"); element.setAttribute("aria-live", "polite"); notices.set(parent, element);
     }
     // A failed staged refresh keeps its rows (#465); a level stopped at the page ceiling offers the next pages.
+    // #513: a refusal the source flagged as user-facing (the search bound) names the limit instead.
     const text = status.status === "loading" ? `Loading… ${status.nodes.size} loaded` :
       status.refreshError ? "Could not refresh. " :
       status.status === "more" ? `${status.nodes.size} loaded. ` :
-      ["error", "incomplete"].includes(status.status) ? (status.nodes.size ? "Incomplete. " : "Could not load. ") :
+      ["error", "incomplete"].includes(status.status) ? (status.nodes.size ? "Incomplete. " :
+        (status.error?.notice ? status.error.message : "Could not load. ")) :
       status.complete && !state.nodes(parent).length ? (state.query ? "No matches" : "No items") : "";
     if (element.dataset.status !== text) {
       element.replaceChildren(); element.append(document.createTextNode(text)); element.dataset.status = text;

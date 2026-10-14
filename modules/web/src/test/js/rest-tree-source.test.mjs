@@ -25,6 +25,29 @@ for(const family of ['pipelines','templates','dashboards','visualizations','para
     }
   });
 }
+test('a 400 search refusal carrying the shared query_too_long envelope names the limit (#513)',async()=>{
+  const tooLong=restTreeSource('pipelines',async()=>({ok:false,status:400,headers:{get:()=> 'application/json'},async json(){return {error:{code:'request.query_too_long',
+    message:'That search term is too long. Search with 200 characters or fewer.',details:{limit:200,length:201}}}}}));
+  await assert.rejects(tooLong.search('a'.repeat(201),null,options),
+    error=>error.notice===true&&error.message.includes('200')&&error.message!=='Could not load tree');
+});
+test('a 400 search refusal without a usable limit or code stays the generic error (#513)',async()=>{
+  for(const body of [undefined,{error:{code:'request.bad',details:{limit:200}}},
+    {error:{code:'request.query_too_long',details:{limit:'lots'}}},{error:{code:'request.query_too_long',details:{limit:0}}},
+    {error:{code:'request.query_too_long',details:{limit:-200}}},{error:{code:'request.query_too_long',details:{}}},{error:{code:'request.query_too_long'}}]) {
+    const refused=restTreeSource('pipelines',async()=>({ok:false,status:400,headers:{get:()=> 'application/json'},async json(){return body}}));
+    await assert.rejects(refused.search('x',null,options),error=>error.message==='Could not load tree'&&error.notice===undefined);
+  }
+  const opaque=restTreeSource('pipelines',async()=>({ok:false,status:400}));
+  await assert.rejects(opaque.search('x',null,options),error=>error.message==='Could not load tree'&&error.notice===undefined);
+});
+test('a 400 WITH a cursor never reads the body and still resets the tree (#513)',async()=>{
+  let read=false;
+  const expired=restTreeSource('pipelines',async()=>({ok:false,status:400,headers:{get:()=> 'application/json'},
+    async json(){read=true;return {error:{code:'request.query_too_long',details:{limit:200,length:201}}}}}));
+  await assert.rejects(expired.loadChildren('folder:scope/a','old-process-cursor',options),error=>error.resetTree===true);
+  assert.equal(read,false);
+});
 test('unsafe destinations and dependency paths refuse schemes, traversal and foreign routes',()=>{
   for(const href of ['https://elsewhere/pipelines/id','//elsewhere/pipelines/id','/templates/id','/pipelines/../admin','/pipelines/%2e%2e/admin','/pipelines/.%2e/admin','/pipelines/%invalid','/pipelines/%2fadmin','/pipelines/id?data=1','/pipelines/id#x'])assert.equal(safeHref(href,'pipelines'),false);
   assert.equal(safeHref('/pipelines/id','pipelines'),true);

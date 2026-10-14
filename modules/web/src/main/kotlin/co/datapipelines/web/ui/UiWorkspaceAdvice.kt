@@ -3,6 +3,7 @@ package co.datapipelines.web.ui
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.WorkspaceMembership
 import co.datapipelines.auth.WorkspaceService
+import co.datapipelines.pipeline.SearchNeedle
 import jakarta.servlet.http.HttpServletRequest
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.stereotype.Controller
@@ -56,6 +57,16 @@ class UiWorkspaceAdvice(
 
     @ModelAttribute("activeWorkspace")
     fun activeWorkspace(): String? = principal()?.workspace?.name
+
+    /**
+     * #513 — the shared search bound, rendered once into the layout's `<html>` data
+     * attributes so every sidebar search box takes its `maxLength` from the server's
+     * one constant, [SearchNeedle.MAX_LENGTH], and no script retypes a second literal.
+     * Shell chrome like [activeWorkspace]: the five boxes live on different screens, and
+     * a per-controller stamp is a rule each screen would have to remember.
+     */
+    @ModelAttribute("searchMaxLength")
+    fun searchMaxLength(): Int = SearchNeedle.MAX_LENGTH
 
     /**
      * 114 §C.4 — the role badge beside the switcher's workspace name.

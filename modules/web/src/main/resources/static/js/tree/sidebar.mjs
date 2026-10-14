@@ -43,7 +43,7 @@ function apply(family) {
     if (visible && !instances.has(source)) {
       const instance = mountSearchTree(panel, {
         source: restTreeSource(source), sourceKey: source, context: { workspace }, label,
-        searchPlaceholder: `Search ${label.toLowerCase()}…`,
+        searchPlaceholder: `Search ${label.toLowerCase()}…`, maxLength: Number(document.documentElement.dataset.dpSearchMaxLength),
         getHref: node => node.href,
         onRendered(region) { window.htmx?.process(region || panel); markCurrent(); },
       });

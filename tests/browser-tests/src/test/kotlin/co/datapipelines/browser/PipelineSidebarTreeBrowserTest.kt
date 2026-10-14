@@ -1,9 +1,13 @@
 package co.datapipelines.browser
 
+import com.microsoft.playwright.Route
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
+import org.junit.jupiter.api.Assertions.assertAll
 import org.junit.jupiter.api.Test
+import java.nio.file.Files
+import java.nio.file.Paths
 
 /** Computed geometry and interactions for the global rail; user width owns layout, independent of tree content. */
 class PipelineSidebarTreeBrowserTest : RestTreeBrowserFixture() {
@@ -190,6 +194,79 @@ class PipelineSidebarTreeBrowserTest : RestTreeBrowserFixture() {
         page.evaluate("() => document.activeElement===window.DatapipelinesSidebarTrees.get('pipelines').input") shouldBe true
         page.locator("$panel button[aria-label='Clear search'] use").getAttribute("href") shouldContain "#x"
     }
+
+    /**
+     * #513 — the sidebar search box carries the shared length bound, rendered from the
+     * server's one constant, and a too-long refusal names the limit instead of the panel's
+     * generic failed state. One case, three legs: the bound on the page and the input, the
+     * clamp under real typing (insertText goes through the browser's editing path, so
+     * maxlength clamps it — `fill` would bypass it), and the server's real refusal shape
+     * replayed at the route so the status row states the limit. `SearchNeedle.MAX_LENGTH`
+     * is runtime-only for this module (`implementation` behind `:modules:app`), so the
+     * constant is read reflectively — the test carries no second literal of the bound.
+     */
+    @Test
+    fun `the search box carries the server's length bound and a refusal names the limit`() {
+        readyTree()
+        seedPipeline("acme/one")
+        openTree()
+        val input = "$panel input[type=search]"
+        assertAll(
+            {
+                // (a) the bound arrives as the layout's data attribute and lands on the input.
+                searchMaxLength shouldBe 200
+                page.evaluate("() => document.documentElement.dataset.dpSearchMaxLength") shouldBe searchMaxLength.toString()
+                (page.evaluate("() => document.querySelector('$panel input[type=search]').maxLength") as Number)
+                    .toInt() shouldBe searchMaxLength
+            },
+            {
+                // (b) real typing past the bound is clamped, so the request never exceeds it.
+                page.focus(input)
+                val searchRequest =
+                    page.waitForRequest({ r -> r.url().contains("/api/v1/pipelines/tree/search") }) {
+                        page.keyboard().insertText("a".repeat(searchMaxLength + 1))
+                    }
+                (page.evaluate("() => document.querySelector('$panel input[type=search]').value.length") as Number)
+                    .toInt() shouldBe searchMaxLength
+                searchRequest.url().substringAfter("q=").length shouldBe searchMaxLength
+                page.waitForFunction(
+                    "value => {const s=window.DatapipelinesSidebarTrees.get('pipelines').state;" +
+                        " return s.query===value && s.search.complete}",
+                    "a".repeat(searchMaxLength),
+                )
+                page.locator("$panel .dp-tree-status").textContent() shouldNotContain "Could not load"
+            },
+            {
+                // (c) the server's own refusal, then the same shape replayed at the route.
+                val real =
+                    page.request().get("$baseUrl/api/v1/pipelines/tree/search?root=&q=" + "a".repeat(searchMaxLength + 1))
+                real.status() shouldBe 400
+                real.text() shouldContain "\"code\":\"request.query_too_long\""
+                Files.createDirectories(envelopePath.parent)
+                Files.writeString(envelopePath, real.text())
+                page.route("**/api/v1/pipelines/tree/search**") { route ->
+                    route.fulfill(
+                        Route
+                            .FulfillOptions()
+                            .setStatus(400)
+                            .setContentType("application/json")
+                            .setBody(real.text()),
+                    )
+                }
+                page.fill(input, "abc")
+                page.waitForFunction("() => window.DatapipelinesSidebarTrees.get('pipelines').state.search.status === 'error'")
+                val status = page.locator("$panel .dp-tree-status").textContent()
+                status shouldContain searchMaxLength.toString()
+                status shouldNotContain "Could not load"
+                page.locator("$panel .dp-tree-status button").textContent() shouldBe "Retry"
+            },
+        )
+    }
+
+    private val searchMaxLength: Int =
+        Class.forName("co.datapipelines.pipeline.SearchNeedle").getDeclaredField("MAX_LENGTH").get(null) as Int
+
+    private val envelopePath = Paths.get("build", "evidence", "513-query-too-long-envelope.json")
 
     private fun focused() = page.evaluate("() => document.activeElement.getAttribute('data-tree-key')")
 
