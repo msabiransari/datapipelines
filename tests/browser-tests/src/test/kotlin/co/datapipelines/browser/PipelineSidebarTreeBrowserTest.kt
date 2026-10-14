@@ -124,6 +124,45 @@ class PipelineSidebarTreeBrowserTest : RestTreeBrowserFixture() {
     }
 
     @Test
+    fun `the focus ring rides the focused row for keyboard only and never boxes a subtree`() {
+        readyTree()
+        seedPipeline("acme/keys/one")
+        seedPipeline("acme/keys/two")
+        openTree()
+        // #516: a click lands on the item the renderer focused (render.mjs item.focus()), and
+        // the selected-row tint is the only answer it may draw — the old outline on the item
+        // boxed the whole expanded subtree the item element contains.
+        page.click("${folder("acme")} > .dp-tree-line button")
+        expand("acme/keys")
+        focused() shouldBe "folder:acme/keys"
+        page.locator(folder("acme/keys")).evaluate("el => getComputedStyle(el).outlineWidth") shouldBe "0px"
+        page.evaluate(
+            "p => [...document.querySelector(p).querySelectorAll('[role=treeitem], .dp-tree-line')]" +
+                ".filter(e => parseFloat(getComputedStyle(e).outlineWidth) > 0 && getComputedStyle(e).outlineStyle !== 'none').length",
+            panel,
+        ) shouldBe 0
+        // Keyboard focus keeps the ring, on the focused row's line and inside its box: the
+        // item itself still carries none, and no group or child line lights up with it.
+        page.focus("$panel input")
+        page.keyboard().press("ArrowDown")
+        focused() shouldBe "folder:acme"
+        page.evaluate("() => getComputedStyle(document.activeElement).outlineWidth") shouldBe "0px"
+        page.evaluate("() => getComputedStyle(document.activeElement.querySelector('.dp-tree-line')).outlineWidth") shouldBe "2px"
+        page.keyboard().press("ArrowRight")
+        focused() shouldBe "folder:acme/keys"
+        page.locator("${folder("acme/keys")} > .dp-tree-line").evaluate("el => getComputedStyle(el).outlineWidth") shouldBe "2px"
+        // Chromium computes a 3px outline-width WITH style none on elements no rule outlines,
+        // so "boxed" is the painted predicate the sweep below uses, not a width alone.
+        page.evaluate(
+            "() => getComputedStyle(document.activeElement.querySelector(':scope > [role=group]')).outlineStyle",
+        ) shouldBe "none"
+        page.evaluate(
+            "() => [...document.activeElement.querySelector('[role=group]').querySelectorAll('.dp-tree-line')]" +
+                ".every(e => parseFloat(getComputedStyle(e).outlineWidth) === 0 || getComputedStyle(e).outlineStyle === 'none')",
+        ) shouldBe true
+    }
+
+    @Test
     fun `catalog q deep links and Browse folders opens only the root then a row preserves the rail`() {
         readyTree()
         val id = seedPipeline("acme/catalog/first")
