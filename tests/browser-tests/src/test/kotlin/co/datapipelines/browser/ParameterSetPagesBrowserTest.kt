@@ -223,8 +223,9 @@ class ParameterSetPagesBrowserTest : ParameterSetBrowserSuite() {
         page.waitForSelector("#nav-tree-parameter-sets a.dp-tree-activate")
         page.locator("#nav-tree-parameter-sets a.dp-tree-activate").count() shouldBe 1
         page.locator("#nav-tree-parameter-sets [data-tree-key^='artifact:']").getAttribute("role") shouldBe "treeitem"
-        // The listbox is the results list itself; its label names the presentation.
-        page.locator("#nav-tree-parameter-sets [role=tree]").getAttribute("aria-label") shouldBe "parameter sets"
+        // The listbox is the results list itself; its label names the presentation — the rail's
+        // display spelling since #478 (owner ruling 2026-10-14: accessible names match the visible text).
+        page.locator("#nav-tree-parameter-sets [role=tree]").getAttribute("aria-label") shouldBe "Parameter Sets"
 
         // The search box's ArrowDown moves focus into the first result (the explorers' NAV keyboard).
         page.focus("[data-nav-branch='parameter-sets'] input[type=search]")

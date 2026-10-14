@@ -19,6 +19,14 @@ import org.junit.jupiter.api.Test
  * one centred row, the label right of its box, all boxes on one left edge, and the fieldset's
  * height is the caption plus one line per option (the bound the old stacked layout breaks).
  *
+ * #507: the error row's WRAP is measured too - the row flows inline, so the sentence takes the
+ * row's width and wraps as prose (the first child's client rects grouped by top give the line
+ * count: at most two on the board's panel, three in the 390 px drawer), and the code chip's right
+ * edge never passes the boundary's content-box right edge. Measured at both board widths
+ * (1440x900, 1280x800) and in the drawer (390x844), light and dark; the parameter-set page's
+ * wider row carries the same chip-inside bound (green there before and after - it guards the
+ * shared class).
+ *
  * The colours are measured against the CSS variables RESOLVED IN PAGE: a hidden probe element
  * assigns the var() to a property and the engine resolves both sides, so the assertions fail when
  * a token is renamed or the rule stops applying - not when a literal drifts. On the unstyled code
@@ -29,9 +37,12 @@ class DashboardParametersPaneBrowserTest : ParameterSetBrowserSuite() {
     private val limitRow = "#dp-board-filters [data-dp-parameter=\"limit\"]"
     private val panel = "#dp-board-filters"
 
-    /** Reads the error row's computed voice and the tokens resolved beside it. Passes the row selector. */
+    /**
+     * Reads the error row's computed voice, the tokens resolved beside it, and its wrap geometry. Passes the row
+     * selector and the boundary selector whose content-box right edge the chip must stay inside.
+     */
     private val probeErrorVoice =
-        """async ([rowSel]) => {
+        """async ([rowSel, boundarySel]) => {
           const row = document.querySelector(rowSel);
           const err = row.querySelector('.dp-dashboard-parameter-error');
           const input = row.querySelector('.ds-input');
@@ -50,6 +61,19 @@ class DashboardParametersPaneBrowserTest : ParameterSetBrowserSuite() {
           const textMuted = inkOf('var(--text-muted)');
           const textPrimary = inkOf('var(--text-primary)');
           probe.remove();
+          // #507 — the wrap: the sentence's client rects (its first child) grouped by top give
+          // the line count; the chip's right edge is read against the boundary's content box.
+          const boundary = document.querySelector(boundarySel);
+          const boundaryContentRight =
+            boundary.getBoundingClientRect().right - parseFloat(getComputedStyle(boundary).paddingRight);
+          const sentenceRange = document.createRange();
+          sentenceRange.selectNodeContents(err.firstChild);
+          const lineTops = [];
+          for (const r of Array.from(sentenceRange.getClientRects())) {
+            if (!(r.width > 0) || !(r.height > 0)) continue;
+            const top = Math.round(r.top * 10) / 10;
+            if (!lineTops.includes(top)) lineTops.push(top);
+          }
           return {
             errColor: getComputedStyle(err).color,
             codeColor: code ? getComputedStyle(code).color : null,
@@ -65,6 +89,9 @@ class DashboardParametersPaneBrowserTest : ParameterSetBrowserSuite() {
             hasCodeChip: !!code,
             firstChildIsSentence: !!(err.firstChild && err.firstChild.nodeType === 3 && err.firstChild.textContent.trim().length > 0),
             text: err.textContent,
+            sentenceLines: lineTops.length,
+            chipRight: code ? code.getBoundingClientRect().right : null,
+            boundaryContentRight: boundaryContentRight,
           };
         }"""
 
@@ -106,7 +133,10 @@ class DashboardParametersPaneBrowserTest : ParameterSetBrowserSuite() {
 
     /** Playwright hands maps back untyped; the unchecked casts live in these two reads only. */
     @Suppress("UNCHECKED_CAST")
-    private fun evalVoice(selector: String): Map<String, Any?> = page.evaluate(probeErrorVoice, listOf(selector)) as Map<String, Any?>
+    private fun evalVoice(
+        selector: String,
+        boundary: String,
+    ): Map<String, Any?> = page.evaluate(probeErrorVoice, listOf(selector, boundary)) as Map<String, Any?>
 
     @Suppress("UNCHECKED_CAST")
     private fun evalGroups(names: List<String>): Map<String, Map<String, Any?>> =
@@ -128,6 +158,17 @@ class DashboardParametersPaneBrowserTest : ParameterSetBrowserSuite() {
         val codes = (measured["dataCode"] as String).split(" ").filter { it.isNotEmpty() }
         (codes.isNotEmpty()) shouldBe true
         for (c in codes) text shouldContain c
+    }
+
+    /**
+     * #507: the code chip's right edge never passes the measured boundary's content-box right
+     * edge. The sub-pixel slack absorbs float layout noise only - the base defect passed the
+     * edge by the chip's whole overflow, tens of pixels.
+     */
+    private fun assertChipInside(measured: Map<String, Any?>) {
+        val chipRight = (measured["chipRight"] as Number).toDouble()
+        val contentRight = (measured["boundaryContentRight"] as Number).toDouble()
+        (chipRight <= contentRight + CHIP_EDGE_EPSILON_PX) shouldBe true
     }
 
     private fun openBoard(board: String) {
@@ -152,7 +193,7 @@ class DashboardParametersPaneBrowserTest : ParameterSetBrowserSuite() {
             page.fill("$limitRow input", "500")
             page.keyboard().press("Tab")
             page.waitForSelector("$limitRow .dp-dashboard-parameter-error[role=alert]")
-            val measured = evalVoice(limitRow)
+            val measured = evalVoice(limitRow, panel)
             println("498-voice board/$mode measured=$measured")
             assertErrorVoice(measured)
         }
@@ -192,10 +233,66 @@ class DashboardParametersPaneBrowserTest : ParameterSetBrowserSuite() {
             page.waitForSelector("$itemRow select")
             page.selectOption("#ps-form-host [data-dp-parameter='kind'] select", SelectOption().setLabel("BOOM"))
             page.waitForSelector("$itemRow .dp-dashboard-parameter-error:not(:empty)")
-            val measured = evalVoice(itemRow)
+            val measured = evalVoice(itemRow, itemRow)
             println("498-voice ps/$mode measured=$measured")
             assertErrorVoice(measured)
+            // #507 — the shared class's chip stays inside this wider row too (green before and
+            // after the fix here; the bound guards the class the board's narrow panel shares).
+            assertChipInside(measured)
         }
+    }
+
+    /**
+     * #507 - the row wraps as prose and the chip stays inside the panel. The base defect: a
+     * non-wrapping flex row gave the unbreakable chip its max-content width and squeezed the
+     * anonymous sentence item to its longest word (six one-word lines, chip clipped at the
+     * panel's edge). Measured at both board widths and in the 390 px drawer (drawer opened
+     * through its trigger first), light and dark: the sentence occupies at most two lines on the
+     * board (three in the drawer) and the chip's right edge never passes the panel's content-box
+     * right edge.
+     */
+    @Test
+    fun `the error row wraps its sentence as prose and its code chip stays inside the panel - light and dark`() {
+        startTrace()
+        val root = ready("dpp4")
+        val board = seedAcceptanceBoard(root)
+        val widths =
+            listOf(
+                Triple(WIDE_WIDTH, WIDE_HEIGHT, false),
+                Triple(NARROW_WIDTH, NARROW_HEIGHT, false),
+                Triple(PHONE_WIDTH, PHONE_HEIGHT, true),
+            )
+        for (mode in listOf("light", "dark")) {
+            for ((width, height, drawer) in widths) {
+                page.setViewportSize(width, height)
+                openBoard(board)
+                ensureTheme(mode)
+                openBoard(board)
+                if (drawer) openFiltersDrawer()
+                page.fill("$limitRow input", "500")
+                page.keyboard().press("Tab")
+                page.waitForSelector("$limitRow .dp-dashboard-parameter-error[role=alert]")
+                val measured = evalVoice(limitRow, panel)
+                assertErrorVoice(measured)
+                val lines = (measured["sentenceLines"] as Number).toInt()
+                println(
+                    "507-wrap $mode ${width}x$height drawer=$drawer sentenceLines=$lines " +
+                        "chipRight=" + measured["chipRight"] + " contentRight=" + measured["boundaryContentRight"],
+                )
+                val maxLines = if (drawer) DRAWER_MAX_SENTENCE_LINES else BOARD_MAX_SENTENCE_LINES
+                (lines <= maxLines) shouldBe true
+                assertChipInside(measured)
+            }
+        }
+    }
+
+    /** Opens the board's filters drawer through its own trigger and waits until it is fully shown. */
+    private fun openFiltersDrawer() {
+        page.click("#dp-board-filters-trigger")
+        page.waitForFunction(
+            """() => { const panel = document.getElementById('dp-board-filters'); const style = getComputedStyle(panel);
+              return panel.classList.contains('is-open') && style.visibility === 'visible' && style.transform === 'none'; }""",
+        )
     }
 
     /**
@@ -222,5 +319,17 @@ class DashboardParametersPaneBrowserTest : ParameterSetBrowserSuite() {
             createSet(setBody("$root/parameters/boom", "[${constants("kind", listOf("a", "ok", "boom"))},$item]"))
         release(setId, hash, withTemplates = true)
         return setId
+    }
+
+    private companion object {
+        const val WIDE_WIDTH = 1440
+        const val WIDE_HEIGHT = 900
+        const val NARROW_WIDTH = 1280
+        const val NARROW_HEIGHT = 800
+        const val PHONE_WIDTH = 390
+        const val PHONE_HEIGHT = 844
+        const val BOARD_MAX_SENTENCE_LINES = 2
+        const val DRAWER_MAX_SENTENCE_LINES = 3
+        const val CHIP_EDGE_EPSILON_PX = 0.5
     }
 }

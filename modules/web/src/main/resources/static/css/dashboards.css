@@ -104,19 +104,27 @@ fieldset.dp-dashboard-parameter > .dp-dashboard-parameter-error {
 
 /* #498 — the row's error speaks the design system's field error (primitives.css
    .ds-field-error's tokens); the catalogued code after the sentence rides as a muted
-   inline-code chip. */
+   inline-code chip. #507 — the row is inline flow, not a flex row: its children are an
+   anonymous text node (the sentence) and the chip, and a flex item cannot shrink below
+   its longest word while the unbreakable chip takes its max-content width — the sentence
+   wrapped one word per line and the chip ran past the panel's edge. As normal inline
+   flow the sentence wraps as prose at the row's width; the chip is an inline-block
+   baseline-aligned with it, so it follows the sentence when it fits and drops to its own
+   line when it does not, and a code longer than the panel breaks inside the chip
+   instead of overflowing it. */
 .dp-dashboard-parameter-error {
   font-size: var(--text-xs);
   color: var(--accent-danger);
   line-height: var(--leading-normal);
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
 }
 
 .dp-dashboard-parameter-error code {
   font-family: var(--font-mono);
   color: var(--text-muted);
+  display: inline-block;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  margin-inline-start: var(--space-1);
 }
 
 /* The table renderer: text-only cells, the app's data-table voice. */

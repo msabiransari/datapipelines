@@ -164,6 +164,20 @@ class DashboardUiRenderTest {
     }
 
     @Test
+    fun `a search with 200 or more matches states no cap - the pager's total is the count (#524)`() {
+        // Since #512 the catalog and the branch page the SQL search, so `total` is the true match
+        // count and every match is reachable through the pager; the old "reads at most 200" note
+        // described an in-memory first-200 read that no longer exists.
+        listOf(false, true).forEach { nav ->
+            val html = searchPartial(nav = nav, rows = listOf(board1), q = "board", total = 201)
+
+            html shouldNotContain "at most 200"
+            html shouldNotContain "tpl-overflow"
+            html shouldContain "Showing 1 of 201"
+        }
+    }
+
+    @Test
     fun `the catalog page renders the flat list under its stable root - no tree anywhere (#400)`() {
         val html =
             engine.process(
@@ -193,6 +207,7 @@ class DashboardUiRenderTest {
         nav: Boolean,
         rows: List<DashboardBrowseModel.DashboardLeafView>,
         q: String = "",
+        total: Int = rows.size,
     ): String =
         engine.process(
             "partials/dashboard-search",
@@ -203,8 +218,8 @@ class DashboardUiRenderTest {
                 setVariable("dashboards", rows)
                 setVariable("lensUnavailable", null)
                 setVariable("offset", 0)
-                setVariable("hasMore", false)
-                setVariable("total", rows.size)
+                setVariable("hasMore", total > rows.size)
+                setVariable("total", total)
             },
         )
 

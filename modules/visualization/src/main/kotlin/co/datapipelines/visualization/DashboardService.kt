@@ -364,6 +364,18 @@ class DashboardService(
         lens: ReadLens,
     ): Int = lifecycle.countAll(workspaceId, lens)
 
+    /**
+     * The lensed search (#512, the catalog's and the sidebar branch's `q`): name, display name or description contains
+     * [query] literally and case-insensitively — [ArtifactLifecycle.search]'s two paths.
+     */
+    fun search(
+        workspaceId: UUID,
+        lens: ReadLens,
+        query: String,
+        offset: Int = 0,
+        limit: Int = ArtifactRepository.DEFAULT_PAGE_LIMIT,
+    ): ArtifactPage<DashboardBody> = lifecycle.search(workspaceId, lens, query, offset, limit)
+
     fun currentVersions(workspaceId: UUID): List<CurrentArtifactVersion> = lifecycle.currentVersions(workspaceId)
 
     // ---- rules ----------------------------------------------------------------------------------------
