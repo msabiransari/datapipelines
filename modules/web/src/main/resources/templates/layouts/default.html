@@ -86,6 +86,10 @@
        injects nothing, the sheet must be present wherever a board can mount. -->
   <link th:href="@{/css/dashboards.css}" rel="stylesheet">
   <link th:href="@{/vendor/plotly/plotly.css}" rel="stylesheet">
+  <!-- #456: Plotly's addRelatedStyleRule checks #plotly.js-style-global.no-inline-styles
+       at bundle load. The runtime's _ensureStyleElement runs too late for that;
+       pre-place the empty opt-out here, before scripts. Rules come from plotly.css. -->
+  <template id="plotly.js-style-global" class="no-inline-styles"></template>
   <!-- #374 — the Parameter Sets workspace's rules (design tokens only). Head-loaded for 090's reason:
        /parameter-sets/{id} is a boosted route. -->
   <link th:href="@{/css/parameter-sets.css}" rel="stylesheet">

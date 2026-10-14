@@ -19,7 +19,9 @@ import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.web.server.LocalServerPort
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
+import java.nio.file.Files
 import java.nio.file.Paths
+import java.nio.file.StandardOpenOption
 import java.security.SecureRandom
 import java.sql.DriverManager
 import java.util.Base64
@@ -462,28 +464,60 @@ abstract class BrowserSuite {
          * SHA-256 of the EMPTY string, as CSP prints it. Playwright's own screenshot path
          * appends an empty `<style>` element to the page and fills it through `insertRule`
          * (CSSOM, which no policy governs) to hide the caret, and Chromium reports the empty
-         * element as a refused inline style with this hash. An empty style carries no rule,
-         * so nothing the app renders was blocked — it is set aside BY THIS EXACT HASH and
-         * nothing else is; a real inline style has a real hash and still fails the test.
+         * element as a refused inline style with this hash. #456: Plotly produces the SAME
+         * hash, so only harness provenance may be set aside; app scripts must still fail.
          */
         private const val EMPTY_INLINE_STYLE_HASH = "'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='"
+
+        private val harnessCspMessages = java.util.concurrent.CopyOnWriteArrayList<String>()
 
         /** Every page this context opens reports a CSP refusal into [cspViolations]. */
         private fun BrowserContext.watchingCsp(): BrowserContext =
             apply {
+                val consolePath = Paths.get("build", "reports", "browser-console", "console-${System.nanoTime()}.log")
+                Files.createDirectories(consolePath.parent)
                 onPage { page ->
                     page.onConsoleMessage { message ->
                         val text = message.text()
+                        val location = message.location()
+                        // Java Playwright formats location as url:line:column (the URL may contain colons).
+                        val sourceUrl = location.substringBeforeLast(':').substringBeforeLast(':')
+                        val appOrigin = java.net.URI(page.url()).let { "${it.scheme}://${it.rawAuthority}/" }
+                        // Preview URLs carry capabilities: preserve the console, never the page's query.
+                        val safeLocation = sourceUrl.substringBefore('?') + location.removePrefix(sourceUrl)
+                        val event = "${page.url().substringBefore('?')} — ${message.type()} location=$safeLocation — $text"
+                        Files.writeString(
+                            consolePath,
+                            "$event\n",
+                            StandardOpenOption.CREATE,
+                            StandardOpenOption.APPEND,
+                        )
                         if (!text.contains("Content Security Policy")) return@onConsoleMessage
-                        if (text.startsWith("Applying inline style") && text.contains(EMPTY_INLINE_STYLE_HASH)) return@onConsoleMessage
-                        cspViolations += "${page.url()} — $text"
+                        // #456: screenshot insertion has no app URL. Never exempt vendor/js emissions,
+                        // even with the empty hash; an app-origin document is also an application source.
+                        val harnessSource =
+                            !sourceUrl.startsWith(appOrigin) && !sourceUrl.contains("/vendor/") && !sourceUrl.contains("/js/")
+                        if (text.startsWith("Applying inline style") && text.contains(EMPTY_INLINE_STYLE_HASH) && harnessSource) {
+                            harnessCspMessages += event
+                            println("CSP harness-only: $event")
+                            return@onConsoleMessage
+                        }
+                        cspViolations += event
                     }
                 }
             }
 
+        /** Recorded exemptions, including their source locations, for browser evidence. */
+        @JvmStatic
+        protected fun drainHarnessCspMessages(): List<String> = harnessCspMessages.toList().also { harnessCspMessages.clear() }
+
         /** Returns what was collected and clears it — the per-test read in [closePage]. */
         @JvmStatic
-        protected fun drainCspViolations(): List<String> = cspViolations.toList().also { cspViolations.clear() }
+        protected fun drainCspViolations(): List<String> =
+            cspViolations.toList().also {
+                cspViolations.clear()
+                println("CSP harness-only set aside: ${drainHarnessCspMessages().size}")
+            }
 
         private val browser: Browser
             get() {

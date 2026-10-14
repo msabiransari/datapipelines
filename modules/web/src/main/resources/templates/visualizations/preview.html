@@ -19,6 +19,10 @@
   <link th:href="@{/css/app.css}" rel="stylesheet">
   <link th:href="@{/css/dashboards.css}" rel="stylesheet">
   <link th:if="${available}" th:href="@{/vendor/plotly/plotly.css}" rel="stylesheet">
+  <!-- #456: Plotly's addRelatedStyleRule checks #plotly.js-style-global.no-inline-styles
+       at bundle load. The runtime's _ensureStyleElement runs too late for that;
+       pre-place the empty opt-out here, before scripts. Rules come from plotly.css. -->
+  <template id="plotly.js-style-global" class="no-inline-styles"></template>
 </head>
 <body class="dp-preview-body">
   <main class="dp-preview">
