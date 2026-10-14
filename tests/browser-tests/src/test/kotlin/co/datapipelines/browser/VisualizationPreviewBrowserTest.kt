@@ -1,5 +1,6 @@
 package co.datapipelines.browser
 
+import com.microsoft.playwright.BrowserContext
 import com.microsoft.playwright.Page
 import com.microsoft.playwright.options.RequestOptions
 import io.kotest.assertions.withClue
@@ -33,29 +34,7 @@ class VisualizationPreviewBrowserTest : DashboardBrowserSuite() {
         val started = api("POST", "/api/v1/visualizations/$id/tests/sessions", "")
         val previewUrl = started.at("data", "preview_url") as String
         val agent = newBrowserContext()
-        // Record the marker at Plotly's FIRST opt-out lookup, before it can create one itself.
-        // Final DOM order alone cannot distinguish a parser-placed marker from Plotly's late insertion.
-        agent.addInitScript(
-            """(() => {
-              const original = document.getElementById.bind(document);
-              document.getElementById = function (id) {
-                const marker = original(id);
-                if (id === 'plotly.js-style-global' && !window.__plotlyMarkerAtLoad) {
-                  const script = document.querySelector('script');
-                  window.__plotlyMarkerAtLoad = {
-                    marked: !!marker && marker.classList.contains('no-inline-styles'),
-                    inHead: !!marker && marker.parentElement === document.head,
-                    beforeScript: !!marker && !!script && !!(marker.compareDocumentPosition(script) & Node.DOCUMENT_POSITION_FOLLOWING),
-                    tag: marker ? marker.tagName : null,
-                    children: marker ? (marker.content || marker).childNodes.length : null,
-                    hasSheet: !!marker && !!marker.sheet,
-                    rules: marker && marker.sheet ? marker.sheet.cssRules.length : 0
-                  };
-                }
-                return marker;
-              };
-            })();""",
-        )
+        recordMarkerAtLoad(agent)
         try {
             val preview = agent.newPage()
             preview.setDefaultTimeout(FIRST_RENDER_TIMEOUT_MS)
@@ -91,6 +70,32 @@ class VisualizationPreviewBrowserTest : DashboardBrowserSuite() {
         } finally {
             agent.close()
         }
+    }
+
+    private fun recordMarkerAtLoad(agent: BrowserContext) {
+        // Record the marker at Plotly's FIRST opt-out lookup, before it can create one itself.
+        // Final DOM order alone cannot distinguish a parser-placed marker from Plotly's late insertion.
+        agent.addInitScript(
+            """(() => {
+              const original = document.getElementById.bind(document);
+              document.getElementById = function (id) {
+                const marker = original(id);
+                if (id === 'plotly.js-style-global' && !window.__plotlyMarkerAtLoad) {
+                  const script = document.querySelector('script');
+                  window.__plotlyMarkerAtLoad = {
+                    marked: !!marker && marker.classList.contains('no-inline-styles'),
+                    inHead: !!marker && marker.parentElement === document.head,
+                    beforeScript: !!marker && !!script && !!(marker.compareDocumentPosition(script) & Node.DOCUMENT_POSITION_FOLLOWING),
+                    tag: marker ? marker.tagName : null,
+                    children: marker ? (marker.content || marker).childNodes.length : null,
+                    hasSheet: !!marker && !!marker.sheet,
+                    rules: marker && marker.sheet ? marker.sheet.cssRules.length : 0
+                  };
+                }
+                return marker;
+              };
+            })();""",
+        )
     }
 
     @Test
