@@ -226,14 +226,66 @@ class VisualizationWorkspaceBrowserTest : VisualizationBrowserSuite() {
             }
         }
 
+        for (theme in listOf("light", "dark")) {
+            page.setViewportSize(DESKTOP_W, DESKTOP_H)
+            ensureTheme(theme)
+            page.navigate("$baseUrl/visualizations/$surface")
+            page.waitForSelector("script[data-dp-plotly-bundle]", Page.WaitForSelectorOptions().setState(WaitForSelectorState.ATTACHED))
+            page.locator("script[data-dp-plotly-bundle]").count() shouldBe 1
+            page.locator("script[data-dp-plotly-bundle]").getAttribute("data-dp-plotly-bundle") shouldBe "3d"
+            page.waitForSelector("#viz-pane-preview section[data-viz-case-index='0'][data-dp-ready='true']")
+            // #525: the surface's colorbar draws, its fills are painted, and neither the draw nor a redraw is refused.
+            PlotlyColorbarProbe.assertPainted(page, "the 3d surface in $theme", previewCase(0))
+            shot("workspace-preview-3d-$theme")
+            withClue("CSP on the 3d surface in $theme (the colorbar draw)") { drainCspViolations().shouldBeEmpty() }
+            PlotlyColorbarProbe.redraw(page, "the 3d surface in $theme", previewCase(0))
+            PlotlyColorbarProbe.assertPainted(page, "the 3d surface in $theme after a redraw", previewCase(0))
+            withClue("CSP on the 3d surface in $theme after a redraw") { drainCspViolations().shouldBeEmpty() }
+        }
+        ensureTheme("light")
+    }
+
+    @Test
+    @Order(8)
+    fun `#525 - a heatmap's colorbar draws under the policy in both themes, across a case swap, a redraw and a reload`() {
+        startTrace()
         page.setViewportSize(DESKTOP_W, DESKTOP_H)
-        page.navigate("$baseUrl/visualizations/$surface")
-        page.waitForSelector("script[data-dp-plotly-bundle]", Page.WaitForSelectorOptions().setState(WaitForSelectorState.ATTACHED))
-        page.locator("script[data-dp-plotly-bundle]").count() shouldBe 1
-        page.locator("script[data-dp-plotly-bundle]").getAttribute("data-dp-plotly-bundle") shouldBe "3d"
-        page.waitForSelector("#viz-pane-preview section[data-viz-case-index='0'][data-dp-ready='true']")
-        shot("workspace-preview-3d")
-        drainCspViolations().shouldBeEmpty()
+        val root = ready("vheat")
+        val (heat, _) = createVisualization("$root/charts/heat", heatmap = true)
+
+        for (theme in listOf("light", "dark")) {
+            page.setViewportSize(DESKTOP_W, DESKTOP_H)
+            ensureTheme(theme)
+            page.navigate("$baseUrl/visualizations/$heat")
+            page.waitForSelector("script[data-dp-plotly-bundle]", Page.WaitForSelectorOptions().setState(WaitForSelectorState.ATTACHED))
+            // The signed-in shell loads the 3d superset for 2d artifacts too (#460); the 2d bundle's colorbar is the
+            // session-less preview's case in VisualizationPreviewBrowserTest.
+            page.locator("script[data-dp-plotly-bundle]").getAttribute("data-dp-plotly-bundle") shouldBe "3d"
+            page.waitForSelector("#viz-pane-preview section[data-viz-case-index='0'][data-dp-ready='true']")
+            PlotlyColorbarProbe.assertPainted(page, "the heatmap in $theme", previewCase(0))
+            shot("workspace-heatmap-$theme")
+            withClue("CSP on the heatmap in $theme (the colorbar draw)") { drainCspViolations().shouldBeEmpty() }
+
+            // The second case mounts a second graph with its own colorbar over a different range.
+            page.selectOption("[data-viz-case-select]", "1")
+            page.waitForSelector("#viz-pane-preview section[data-viz-case-index='1'][data-dp-ready='true']")
+            PlotlyColorbarProbe.assertPainted(page, "the heatmap's second case in $theme", previewCase(1))
+            withClue("CSP on the heatmap's second case in $theme") { drainCspViolations().shouldBeEmpty() }
+
+            // A redraw of live graphs reuses the existing fill rectangles (the first site of the fix).
+            PlotlyColorbarProbe.redraw(page, "the heatmap's second case in $theme", previewCase(1))
+            PlotlyColorbarProbe.assertPainted(page, "the heatmap's second case in $theme after a redraw", previewCase(1))
+            page.selectOption("[data-viz-case-select]", "0")
+            PlotlyColorbarProbe.redraw(page, "the heatmap in $theme", previewCase(0))
+            PlotlyColorbarProbe.assertPainted(page, "the heatmap in $theme after a redraw", previewCase(0))
+            withClue("CSP on the heatmap in $theme after the redraws") { drainCspViolations().shouldBeEmpty() }
+
+            // A reload re-mounts the page from nothing: the same draw, the same silence.
+            page.reload()
+            page.waitForSelector("#viz-pane-preview section[data-viz-case-index='0'][data-dp-ready='true']")
+            PlotlyColorbarProbe.assertPainted(page, "the heatmap in $theme after a reload", previewCase(0))
+            withClue("CSP on the heatmap in $theme after a reload") { drainCspViolations().shouldBeEmpty() }
+        }
         ensureTheme("light")
     }
 
@@ -547,6 +599,9 @@ class VisualizationWorkspaceBrowserTest : VisualizationBrowserSuite() {
         target.waitForSelector("#viz-pane-$tab:not([hidden])")
         target.waitForFunction("t => !document.querySelector('#viz-pane-' + t + ' > p.dp-tab-note')", tab)
     }
+
+    /** The card of preview case [index], as the probes address it. */
+    private fun previewCase(index: Int): String = "#viz-pane-preview section[data-viz-case-index='$index']"
 
     private fun shot(name: String) {
         Files.createDirectories(SHOTS)

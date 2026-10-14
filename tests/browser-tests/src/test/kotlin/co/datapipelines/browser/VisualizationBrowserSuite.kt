@@ -43,12 +43,23 @@ abstract class VisualizationBrowserSuite : DashboardBrowserSuite() {
     /** A nested read of a JSON object the page parsed. */
     protected fun Map<*, *>.at(vararg keys: String): Any? = keys.fold<String, Any?>(this) { node, key -> (node as Map<*, *>)[key] }
 
-    /** Creates a visualization at [name] (version 1, a DRAFT — D55); returns its id and body hash. */
+    /**
+     * Creates a visualization at [name] (version 1, a DRAFT — D55); returns its id and body hash. [trace3d] is the surface
+     * (3d bundle) fixture and [heatmap] the 2d heatmap with a colorbar (#525); the default is bar + scatter.
+     */
     protected fun createVisualization(
         name: String,
         trace3d: Boolean = false,
+        heatmap: Boolean = false,
     ): Pair<String, String> {
-        val created = api("POST", "/api/v1/visualizations", document(name, trace3d))
+        require(!(trace3d && heatmap)) { "a fixture is one kind: surface or heatmap" }
+        val kind =
+            when {
+                trace3d -> Fixture.SURFACE
+                heatmap -> Fixture.HEATMAP
+                else -> Fixture.BARS
+            }
+        val created = api("POST", "/api/v1/visualizations", document(name, kind))
         return (created.at("data", "id") as String) to (created.at("data", "body_hash") as String)
     }
 
@@ -81,31 +92,52 @@ abstract class VisualizationBrowserSuite : DashboardBrowserSuite() {
         return session
     }
 
-    /** Two test cases over one input: a three-month two-series case and an empty one (`no_data`). */
+    /** The fixture family: bar + scatter (two cases, one empty), a surface (3d bundle), a heatmap with a colorbar (#525). */
+    private enum class Fixture { BARS, SURFACE, HEATMAP }
+
+    /** Two test cases over one input: a three-month two-series case and an empty one (`no_data`); the others carry data only. */
     private fun document(
         name: String,
-        trace3d: Boolean,
+        kind: Fixture,
     ): String {
         val config =
-            if (trace3d) {
-                """{"data": [{"type": "surface", "x": [], "y": [], "z": []}], "layout": {}}"""
-            } else {
-                """{"data": [{"type": "bar", "x": [], "y": []}, {"type": "scatter", "mode": "lines", "x": [], "y": []}],
+            when (kind) {
+                Fixture.SURFACE -> """{"data": [{"type": "surface", "x": [], "y": [], "z": []}], "layout": {}}"""
+                Fixture.HEATMAP -> """{"data": [{"type": "heatmap", "x": [], "y": [], "z": []}], "layout": {}}"""
+                Fixture.BARS ->
+                    """{"data": [{"type": "bar", "x": [], "y": []}, {"type": "scatter", "mode": "lines", "x": [], "y": []}],
                     "layout": {"title": {"text": "Units against target"}}}"""
             }
         val bindings =
-            if (trace3d) {
-                """{"data[0].x": "units", "data[0].y": "target", "data[0].z": "units"}"""
-            } else {
-                """{"data[0].x": "month", "data[0].y": "units", "data[1].x": "month", "data[1].y": "target"}"""
+            when (kind) {
+                Fixture.SURFACE -> """{"data[0].x": "units", "data[0].y": "target", "data[0].z": "units"}"""
+                Fixture.HEATMAP -> """{"data[0].x": "month", "data[0].y": "target", "data[0].z": "units"}"""
+                Fixture.BARS -> """{"data[0].x": "month", "data[0].y": "units", "data[1].x": "month", "data[1].y": "target"}"""
             }
         val cases =
-            if (trace3d) {
-                """{"name": "hill", "fixtures": {"sales": [{"month": "Jan", "units": 3, "target": 4},
+            when (kind) {
+                Fixture.SURFACE ->
+                    """{"name": "hill", "fixtures": {"sales": [{"month": "Jan", "units": 3, "target": 4},
                                                           {"month": "Feb", "units": 5, "target": 2}]},
                     "assertions": [{"kind": "rendered"}]}"""
-            } else {
-                """{"name": "two series", "fixtures": {"sales": [{"month": "Jan", "units": 3, "target": 4},
+                // A 3 x 2 grid per case, so the colorbar has a value range to fill; the second case's range differs.
+                Fixture.HEATMAP ->
+                    """{"name": "grid", "fixtures": {"sales": [{"month": "Jan", "units": 3, "target": 4},
+                                                              {"month": "Feb", "units": 5, "target": 4},
+                                                              {"month": "Mar", "units": 2, "target": 4},
+                                                              {"month": "Jan", "units": 6, "target": 2},
+                                                              {"month": "Feb", "units": 1, "target": 2},
+                                                              {"month": "Mar", "units": 4, "target": 2}]},
+                    "assertions": [{"kind": "rendered"}, {"kind": "trace_count", "equals": 1}]},
+                   {"name": "shifted", "fixtures": {"sales": [{"month": "Jan", "units": 30, "target": 4},
+                                                              {"month": "Feb", "units": 50, "target": 4},
+                                                              {"month": "Mar", "units": 20, "target": 4},
+                                                              {"month": "Jan", "units": 60, "target": 2},
+                                                              {"month": "Feb", "units": 10, "target": 2},
+                                                              {"month": "Mar", "units": 40, "target": 2}]},
+                    "assertions": [{"kind": "rendered"}]}"""
+                Fixture.BARS ->
+                    """{"name": "two series", "fixtures": {"sales": [{"month": "Jan", "units": 3, "target": 4},
                                                                 {"month": "Feb", "units": 5, "target": 4},
                                                                 {"month": "Mar", "units": 2, "target": 4}]},
                     "assertions": [{"kind": "rendered"}, {"kind": "trace_count", "equals": 2}]},
