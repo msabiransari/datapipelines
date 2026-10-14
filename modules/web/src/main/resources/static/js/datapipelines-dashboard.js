@@ -753,10 +753,16 @@
   };
 
   /**
-   * The design-around (§10.4): pre-place the empty element Plotly checks before the bundle injects, so
-   * `addRelatedStyleRule` returns early and Plotly's rules come from the vendored plotly.css under
-   * `style-src 'self'`. Idempotent — the host may have placed it already; an element without the class
-   * gains it.
+   * The design-around (§10.4): place the empty element Plotly checks, so `addRelatedStyleRule`
+   * returns early and Plotly's rules come from the vendored plotly.css under `style-src 'self'`.
+   * Idempotent — the host may have placed it already; an element without the class gains it.
+   * #526 — the fallback creates the marker as a TEMPLATE, the same shape every first-party host
+   * pre-places (#456): Chromium refuses EVERY script-created `<style>` element at insertion as an
+   * inline style under `style-src 'self'` — with a text child (the pre-#526 `createTextNode("")`),
+   * with an empty comment, or childless, each refused with the empty-text hash — while a template
+   * is never processed as a stylesheet. Plotly's check is the id and the class alone
+   * (`getElementById` + `matches(".no-inline-styles")`), never the tag or a sheet; the rules come
+   * from the linked plotly.css.
    */
   DashboardInstance.prototype._ensureStyleElement = function () {
     if (typeof document === "undefined") return;
@@ -765,11 +771,10 @@
       if (!(" " + existing.className + " ").match(/ no-inline-styles /)) existing.className += " no-inline-styles";
       return;
     }
-    var style = document.createElement("style");
-    style.setAttribute("id", STYLE_ELEMENT_ID);
-    style.className = "no-inline-styles";
-    style.appendChild(document.createTextNode(""));
-    document.head.appendChild(style);
+    var marker = document.createElement("template");
+    marker.setAttribute("id", STYLE_ELEMENT_ID);
+    marker.className = "no-inline-styles";
+    document.head.appendChild(marker);
   };
 
   // --------------------------------------------------------------------------------------- parameters
