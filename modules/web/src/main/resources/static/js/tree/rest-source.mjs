@@ -16,6 +16,17 @@ export function restTreeSource(family, fetchPage = fetch) {
       const error = new Error("Could not load tree");
       if (response.status === 401 || response.status === 403 || (response.status === 400 && cursor !== null)) {
         error.message = "Navigation context changed. Retry to reload."; error.resetTree = true;
+      } else if (response.status === 400) {
+        // #513: the search-length refusal names the limit. The sentence is BUILT here from the
+        // envelope's number — the server's message string is never shown — and a body that
+        // cannot be read or does not carry a usable limit stays the generic refusal.
+        try {
+          const body = await response.json();
+          const limit = Number(body?.error?.details?.limit);
+          if (body?.error?.code === "request.query_too_long" && Number.isInteger(limit) && limit > 0) {
+            error.message = `Search terms are limited to ${limit} characters.`; error.notice = true;
+          }
+        } catch (_) { /* unreadable body: the generic error stands */ }
       }
       throw error;
     }

@@ -6,6 +6,9 @@ export function mountSearchTree(host, options) {
   const document = host.ownerDocument;
   const controls = document.createElement("div"); controls.className = "dp-tree-search";
   const input = document.createElement("input"); input.type = "search"; input.className = "ds-input"; input.autocomplete = "off";
+  // #513: the bound arrives from the host (sidebar.mjs reads the layout's data attribute);
+  // a host that renders none leaves the box unbounded rather than unusable.
+  if (Number.isInteger(options.maxLength) && options.maxLength > 0) input.maxLength = options.maxLength;
   input.placeholder = options.searchPlaceholder || "Search names…"; input.setAttribute("aria-label", `Search ${options.label || "items"}`);
   const clear = document.createElement("button"); clear.type = "button"; clear.className = "ds-button ds-button-ghost ds-button-sm";
   clear.setAttribute("aria-label", "Clear search"); clear.append(icon(document, "x")); clear.hidden = true;

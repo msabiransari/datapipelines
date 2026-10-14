@@ -1,5 +1,6 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.pipeline.SearchNeedle
 import co.datapipelines.web.ui.site.REPORT_PROBLEM_URL
 import io.kotest.matchers.comparables.shouldBeLessThan
 import io.kotest.matchers.nulls.shouldNotBeNull
@@ -408,6 +409,8 @@ class ShellRenderTest {
         setVariable("activeTheme", "saas")
         setVariable("authenticated", true)
         setVariable("currentPath", "/pipelines")
+        // #513 — UiWorkspaceAdvice's attribute at runtime; the render tests set it by hand.
+        setVariable("searchMaxLength", SearchNeedle.MAX_LENGTH)
         // 127 — SiteOriginAdvice's attribute at runtime; the render tests set it by hand.
         setVariable("reportProblemUrl", REPORT_PROBLEM_URL)
     }
@@ -463,6 +466,9 @@ class ShellRenderTest {
         html shouldNotContain "data-nav-root-url"
         // rail.js reads the active workspace's pre-paint width key off <html>.
         html shouldContain "data-dp-workspace=\"acme\""
+        // #513 — the sidebar search boxes' client-side bound rides the same <html> attribute
+        // belt: the layout renders the server's one constant, so no JS file retypes it.
+        html shouldContain "data-dp-search-max-length=\"${SearchNeedle.MAX_LENGTH}\""
     }
 
     @Test

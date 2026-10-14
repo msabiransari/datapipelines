@@ -3,6 +3,7 @@ package co.datapipelines.web.ui
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.WorkspaceService
+import co.datapipelines.pipeline.SearchNeedle
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
@@ -151,6 +152,12 @@ class UiLayoutChromeAdviceTest {
     @Test
     fun `an anonymous screen gets no switcher at all`() {
         advice.workspaceOptions() shouldBe null
+    }
+
+    /** #513 — the sidebar search boxes' `maxLength` is the server's one constant, rendered once. */
+    @Test
+    fun `the advice exposes the shared search bound as a page attribute`() {
+        advice.searchMaxLength() shouldBe SearchNeedle.MAX_LENGTH
     }
 
     @Test
