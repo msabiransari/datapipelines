@@ -185,7 +185,11 @@ class VisualizationPreviewBrowserTest : DashboardBrowserSuite() {
                 // The page that loads the 2d bundle: a heatmap alone is no reason for the 3d superset.
                 preview.locator("script[data-dp-plotly-bundle]").getAttribute("data-dp-plotly-bundle") shouldBe "2d"
                 for (index in 0..1) {
-                    PlotlyColorbarProbe.assertPainted(preview, "the heatmap's case $index in $theme", "section[data-dp-case-index='$index']")
+                    PlotlyColorbarProbe.assertPainted(
+                        preview,
+                        "the heatmap's case $index in $theme",
+                        "section[data-dp-case-index='$index']",
+                    )
                 }
                 preview.waitForTimeout(SETTLE_MS)
                 Files.createDirectories(SHOTS)
