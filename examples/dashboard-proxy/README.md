@@ -21,5 +21,6 @@ DP_BASE_URL=https://dp.example.co DASHBOARD_KEY=dpk_… PORT=8080 node proxy.mjs
 
 Conformance: `modules/web/src/test/js/dashboard-proxy.test.mjs` (a stub upstream proving
 streaming, header stripping and the four-route fence) and
-`tests/integration-tests/.../DashboardProxyE2eTest.kt` (the script against the running app
-with a real key). This is an EXAMPLE — a host copies it behind its own authentication.
+`tests/integration-tests/src/test/kotlin/co/datapipelines/integration/DashboardKeyE2eTest.kt`
+(§C — the reference proxy as a child process on `PORT=0`, the running app, the real key
+held server-side). This is an EXAMPLE — a host copies it behind its own authentication.

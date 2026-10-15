@@ -1060,9 +1060,9 @@ Any change under `docs/` (or to this file) must pass the documentation audit:
 
 It mechanically checks cross-document links and anchors, error codes against the
 [Pipeline Contract §13 catalog](docs/pipeline-contract.md#13-error-code-catalog), configuration keys
-against [configuration.md](docs/configuration.md), and forbidden legacy spellings (superseded header
-names, removed entity fields). CI runs it alongside the Kotlin checks — **exit 0 is required before
-merging**. See [Validation Discipline](docs/enums.md#validation-discipline) in enums.md.
+against [configuration.md](docs/configuration.md), forbidden legacy spellings (superseded header
+names, removed entity fields), and every cited `<Name>Test.kt` file against the tree (#527). CI runs
+it alongside the Kotlin checks — **exit 0 is required before merging**. See [Validation Discipline](docs/enums.md#validation-discipline) in enums.md.
 
 ### 10.1a The agent manual (the served docs)
 
