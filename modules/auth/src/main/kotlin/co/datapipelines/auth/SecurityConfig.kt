@@ -38,8 +38,11 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer
  * ([CookieOAuth2AuthorizationRequestRepository]) rather than a server session.
  *
  * ## CSRF follows the credential, not the path (§8.4, v2.4)
- * [ApiKeyCredentialMatcher] is the only exemption: a request is exempt when it
- * carries `DP-API-Key`, or when it targets `/mcp` where cookies never authenticate.
+ * - [ApiKeyCredentialMatcher]: `DP-API-Key`, or Bearer `dpk_` on `/mcp`, where cookies never authenticate.
+ * - [PromotionRouteMatcher] (§10.6): a header credential a hostile browser context cannot forge;
+ *   [PromotionServerKeyFilter] refuses without a valid server key.
+ * - [UploadCapabilityRouteMatcher] (#353): the screenshot upload's single-use `DP-Upload-Token`
+ *   is its one credential; no cookie authenticates there.
  * Cookie-authenticated state-changing requests need the `dp_csrf` double-submit token
  * **everywhere**, the `/api/v1` prefix included — `SameSite=Lax` (§5.5: Strict breaks the
  * cross-site login redirect) is defence-in-depth, not the control, because it stops neither a
