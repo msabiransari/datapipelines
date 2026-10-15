@@ -575,9 +575,7 @@ class ParameterSetTransferE2eTest {
             registry.add("spring.datasource.url") { sourceDb.jdbcUrl }
             registry.add("spring.datasource.username") { sourceDb.username }
             registry.add("spring.datasource.password") { sourceDb.password }
-            registry.add("spring.data.redis.host") { SharedE2e.redisHost }
-            registry.add("spring.data.redis.port") { SharedE2e.redisPort }
-            registry.add("spring.data.redis.password") { "" }
+            registry.add("datapipelines.redis.password") { "" }
             registry.add("datapipelines.redis.host") { SharedE2e.redisHost }
             registry.add("datapipelines.redis.port") { SharedE2e.redisPort }
             registry.add("datapipelines.jwt.secret") { JWT_SECRET }
@@ -601,9 +599,7 @@ class ParameterSetTransferE2eTest {
             val common =
                 arrayOf(
                     "--management.server.port=0",
-                    "--spring.data.redis.host=${SharedE2e.redisHost}",
-                    "--spring.data.redis.port=${SharedE2e.redisPort}",
-                    "--spring.data.redis.password=",
+                    "--datapipelines.redis.password=",
                     "--datapipelines.redis.host=${SharedE2e.redisHost}",
                     "--datapipelines.redis.port=${SharedE2e.redisPort}",
                     "--datapipelines.jwt.secret=$JWT_SECRET",

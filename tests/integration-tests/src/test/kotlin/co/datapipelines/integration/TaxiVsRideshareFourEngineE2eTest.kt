@@ -769,9 +769,7 @@ class TaxiVsRideshareFourEngineE2eTest {
             registry.add("spring.datasource.username") { metadata.username }
             registry.add("spring.datasource.password") { metadata.password }
 
-            registry.add("spring.data.redis.host") { SharedE2e.redisHost }
-            registry.add("spring.data.redis.port") { SharedE2e.redisPort }
-            registry.add("spring.data.redis.password") { "" }
+            registry.add("datapipelines.redis.password") { "" }
             registry.add("datapipelines.redis.host") { SharedE2e.redisHost }
             registry.add("datapipelines.redis.port") { SharedE2e.redisPort }
 

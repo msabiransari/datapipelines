@@ -13,16 +13,15 @@ internal object RedisRules {
     private val TIMEOUT_MAX: Duration = Duration.ofSeconds(60)
 
     /**
-     * The two Redis client bounds must parse as a Duration in `(0, 60 s]`. Nothing binds the
-     * operator keys; Lettuce reads the §3.14 bridge (`spring.data.redis.timeout` /
-     * `.connect-timeout`), which carries the SAME placeholders — `TestRedisTimeoutParityTest`
-     * pins the two blocks to each other — so judging the operator key judges what Lettuce gets.
+     * The two Redis client bounds must parse as a Duration in `(0, 60 s]`. RedisClientProperties
+     * binds the operator keys and RedisClientConfiguration builds Lettuce from that one binding
+     * (#500), so these checks judge exactly the values the client reads.
      *
      * Zero is the silent case: Lettuce 6.6 waits without a bound when the command timeout is
      * `<= 0` (`Futures.awaitOrCancel`, `CommandExpiryWriter`), restoring the outage stall #482
-     * removed — `RedisZeroCommandTimeoutIntegrationTest` shows it. A blank value binds to null,
-     * which Boot does not apply, leaving Lettuce's own defaults (60 s per command, 10 s to
-     * connect). Unset = the yml default. Parsed untrimmed with Boot's own `DurationStyle`, so this
+     * removed — `RedisZeroCommandTimeoutIntegrationTest` shows it. Blank values are refused;
+     * unset uses the yml default. Lettuce's own defaults are 60 s per command and 10 s to
+     * connect. Parsed untrimmed with Boot's own `DurationStyle`, so this
      * accepts exactly what the binder does.
      */
     fun checkRedisTimeoutBounds(

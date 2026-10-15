@@ -1,8 +1,8 @@
 # Configuration Reference
 
-**Status:** v1.52 (single source of truth for every config key)
+**Status:** v1.53 (single source of truth for every config key)
 **Owner:** datapipelines.co core
-**Last updated:** 2026-10-09
+**Last updated:** 2026-10-15
 
 ---
 
@@ -54,8 +54,8 @@ The deployment defines these env var names in `application.yml` — they're not 
 |---|---|---|
 | `datapipelines.redis.port` | `6379` | Redis port |
 | `datapipelines.redis.password` | (none) | Redis password. Empty while `datapipelines.redis.host` is not loopback is a WARN under `development` and a **refusal under `hardened`** (§3.23, §7; #189) |
-| `datapipelines.redis.command-timeout` | `2s` | (#482) The Redis client's per-command READ timeout (carried to Lettuce by the §3.14 bridge as `spring.data.redis.timeout`). Lettuce's own default is 60 s, which made a Redis outage stall every rate-limited request on the order of a minute per call before the documented `429 rate_limit.unavailable` ([REST API §12.3](rest-api.md#123-when-the-limiter-itself-is-unavailable)). Sized at ≥ 10× headroom over the slowest legitimate command the suites exercise (the replay log's 7,000-entry Lua append — the #482 evidence records the measurement). **Validated at boot (§7, #488): a duration above 0 and at most `60s`** — Lettuce reads a command timeout of `0` as NO bound (and as an immediate connection-handshake deadline), so `0s` is refused rather than silently restoring the stall; a blank value is refused too (Boot binds it as unset, which leaves Lettuce's 60 s) |
-| `datapipelines.redis.connect-timeout` | `2s` | (#482) The TCP connect timeout (the bridge's `spring.data.redis.connect-timeout`) — bounds the client's (re)connect attempt against a Redis host that drops packets instead of refusing. **Validated at boot (§7, #488): a duration above 0 and at most `60s`**; a blank value is refused (Boot binds it as unset, which leaves Lettuce's own 10 s) |
+| `datapipelines.redis.command-timeout` | `2s` | (#482) The Redis client's per-command READ timeout in `RedisClientProperties`, the binding Lettuce reads. Lettuce's own default is 60 s, which made a Redis outage stall every rate-limited request on the order of a minute per call before the documented `429 rate_limit.unavailable` ([REST API §12.3](rest-api.md#123-when-the-limiter-itself-is-unavailable)). Sized at ≥ 10× headroom over the slowest legitimate command the suites exercise (the replay log's 7,000-entry Lua append — the #482 evidence records the measurement). **Validated at boot (§7, #488): a duration above 0 and at most `60s`** — Lettuce reads a command timeout of `0` as NO bound (and as an immediate connection-handshake deadline), so `0s` is refused rather than silently restoring the stall; a blank value is refused too |
+| `datapipelines.redis.connect-timeout` | `2s` | (#482) The TCP connect timeout in `RedisClientProperties`, the binding Lettuce reads — bounds the client's (re)connect attempt against a Redis host that drops packets instead of refusing. **Validated at boot (§7, #488): a duration above 0 and at most `60s`**; a blank value is refused too. Lettuce's own connect default is 10 s |
 
 > Env vars are derived per §1 (e.g. `DATAPIPELINES_REDIS_PORT`) and are omitted from the tables below for brevity.
 
@@ -213,7 +213,6 @@ These framework key paths appear in `application.yml` as internal wiring. They a
 | Path | Why it exists |
 |---|---|
 | `spring.application.name` | Log/metric attribution (`datapipelines`) |
-| `spring.data.redis.host` / `.port` / `.password` / `.timeout` / `.connect-timeout` | Bridge binding the canonical `DATAPIPELINES_REDIS_*` env vars onto Spring Boot's Redis autoconfiguration (see the binding note under §5); the timeout pair carries §3.1's command/connect bounds under the SAME placeholders (#482) |
 | `spring.flyway.enabled` / `.locations` / `.baseline-on-migrate` | Migration wiring — Flyway always runs on startup ([Deployment §8.2](deployment.md#82-database-migrations)) |
 | `management.endpoints.web.exposure.include` | `"health"` — served on the **management port** only; `prometheus` joins it when the metrics registry lands ([Observability §6.4](observability.md#64-actuator-security)). **Must not be set to `""` or `exclude: "*"`:** Spring's `@ConditionalOnAvailableEndpoint` keys bean creation off exposure, so an empty include falls back to Boot's default set (re-exposing health on whatever port serves actuator), and excluding everything deletes the `HealthEndpoint` bean the root `/health` controller injects — context startup fails outright. |
 | `management.health.diskspace.enabled` | `false` — the health contract has no disk component ([REST API §11.1](rest-api.md#111-health-check)) |
@@ -636,13 +635,6 @@ spring:
     password: ${SPRING_DATASOURCE_PASSWORD}
     hikari:
       maximum-pool-size: ${SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE:10}
-  data:
-    redis:                       # §3.14 bridge — operators set only DATAPIPELINES_REDIS_*
-      host: ${DATAPIPELINES_REDIS_HOST}
-      port: ${DATAPIPELINES_REDIS_PORT:6379}
-      password: ${DATAPIPELINES_REDIS_PASSWORD:}
-      timeout: ${DATAPIPELINES_REDIS_COMMAND_TIMEOUT:2s}        # §3.1 (#482)
-      connect-timeout: ${DATAPIPELINES_REDIS_CONNECT_TIMEOUT:2s} # §3.1 (#482)
   flyway:
     enabled: true
     locations: classpath:db/migration
@@ -669,7 +661,7 @@ management:                      # §3.14 — actuator on the management port ON
       enabled: false
 
 datapipelines:
-  redis:
+  redis:                         # §3.1 — RedisClientProperties is the one client binding (#500)
     host: ${DATAPIPELINES_REDIS_HOST}
     port: ${DATAPIPELINES_REDIS_PORT:6379}
     password: ${DATAPIPELINES_REDIS_PASSWORD:}
@@ -942,7 +934,7 @@ db-scheduler:
 
 > **Note:** OIDC provider config is in the app's own YAML namespace (`datapipelines.auth.oidc.providers`), NOT in Spring Security's native `spring.security.oauth2.client.*` namespace. Our `OidcConfig` bean reads this list and builds `ClientRegistration` objects programmatically. See [Auth spec §5.2](auth.md#52-clientregistration-bean-built-at-startup).
 
-> **Internal binding note (Redis, 2026-08-07):** Spring Boot's Redis autoconfiguration reads `spring.data.redis.*`, so `application.yml` carries an internal bridge (`spring.data.redis.host: ${DATAPIPELINES_REDIS_HOST}` etc.) mapping the canonical `datapipelines.redis.*` keys onto it. This introduces NO operator-facing keys — operators set only the `DATAPIPELINES_REDIS_*` variables defined here. The bridge is an implementation detail and may be replaced by an explicit `LettuceConnectionFactory` bound to `@ConfigurationProperties("datapipelines.redis")`.
+> **Redis binding (#500):** `dag` owns `RedisClientProperties` (`@ConfigurationProperties("datapipelines.redis")`) and `RedisClientConfiguration`, which builds the one `LettuceConnectionFactory` from that binding. Operators set the `DATAPIPELINES_REDIS_*` variables defined here. The factory retains enabled command expiry, Boot's 100 ms shutdown timeout and the shared, metrics-customized `ClientResources`; Boot still supplies `StringRedisTemplate` and Redis health. SSL bundles, client names and read-from settings have no house key and are not applied.
 
 ---
 
@@ -1028,7 +1020,7 @@ On startup, the app validates:
 - **Dashboard runtime (§3.34, #10 L2):** every `datapipelines.dashboards.*` key is an integer within its row's bounds; `default-refresh-seconds` ≤ `max-refresh-seconds`, `max-bytes-per-source` ≤ `max-bytes-per-refresh` and `max-executions-per-refresh` ≤ `max-concurrent-dashboard-executions-per-instance`; every refusal names the key(s).
 - **Request limits (§3.31, #279):** `datapipelines.web.max-request-bytes` is an integer within its row's bounds (65536..67108864) — the cap bounds every JSON request body on `/api/v1` and `/mcp`; a malformed or out-of-window value names the key and the window.
 - **Redis auth:** when `datapipelines.redis.password` is empty (after trimming) and `datapipelines.redis.host` is not loopback — under `development`, log a structured WARN `event=config.redis_no_password` (production Redis holds materialized caller results — [Deployment §9](deployment.md#9-security-hardening-checklist-deployment)); under the **`hardened` posture** it is a REFUSAL naming the key and the host, the same treatment Postgres's password gets as a §2 required key (#189). The refusal replaces the warning; a hardened boot never logs both.
-- **Redis client bounds (§3.1, #488):** `datapipelines.redis.command-timeout` and `datapipelines.redis.connect-timeout`, when present, parse as a duration above 0 and at most `60s` — every refusal names the key and the value. Zero is the case the rule exists for: Lettuce reads a command timeout of 0 as no bound at all, so `0s` would silently restore the outage stall #482 removed (`RedisZeroCommandTimeoutIntegrationTest` shows it against a stopped Redis); a blank value binds as unset and leaves Lettuce's own defaults; `60s`, Lettuce's own command default, is the ceiling. The rule reads the operator keys — the §3.14 bridge carries the SAME placeholders (pinned by `TestRedisTimeoutParityTest`), so it judges what Lettuce gets.
+- **Redis client bounds (§3.1, #488):** `datapipelines.redis.command-timeout` and `datapipelines.redis.connect-timeout`, when present, parse as a duration above 0 and at most `60s` — every refusal names the key and the value. Zero is the case the rule exists for: Lettuce reads a command timeout of 0 as no bound at all, so `0s` would silently restore the outage stall #482 removed (`RedisZeroCommandTimeoutIntegrationTest` shows it against a stopped Redis); a blank value is refused too; `60s`, Lettuce's own command default, is the ceiling. The validator judges the one `RedisClientProperties` binding from which `RedisClientConfiguration` builds Lettuce. `TestRedisDefaultsTest` pins the test factories to the shipped operator defaults.
 - `datapipelines.deployment.promotion.server-key` set ⇒ **WARN** (091): the value is deprecated in favour of a `server`-kind API key and is removed next release. Presence only — the warning never carries the secret.
 - `datapipelines.deployment.promotion.target.base-url` is not set without `datapipelines.deployment.promotion.target.server-key` (§3.19) — the violation names both keys. The target's pre-shared key is what authenticates the push, so a target without one would have every promotion refused at the far end, at the end of a UI action a human took. The reverse is not a violation: a `server-key` with no target is an ordinary receiver.
 - **Mail (§3.27, 137):** `datapipelines.mail.host` and `datapipelines.mail.from` are set together or not at all — one without the other refuses startup naming the missing one; `datapipelines.mail.ops-to` without `host` is refused (a sink nobody can reach); mail on (both set) without `datapipelines.auth.base-url` is refused (the welcome mail's login URL); `port` is a port in `1..65535`; `from` is an address (a bare address or `Display Name <address>`). Under the **`hardened` posture**, with mail on: `starttls` must be `true`, and `username` set requires `password` set — each refusal naming the variable and the posture. The SMTP password is carried as PRESENCE only; no violation ever prints it.
@@ -1044,6 +1036,7 @@ Validation runs in `@PostConstruct` of a `ConfigValidator` bean. Failures stop s
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-15 | v1.53 | 500 (#500) | Redis has one authority: `RedisClientProperties` binds §3.1 and builds the Lettuce factory in `dag`; the framework bridge is removed from §3.14 and §5. The §7 validator judges that binding. Test registrations use operator keys with explicit passwords, and the defaults guard reads the operator block. |
 | 2026-10-09 | v1.52 | 488 (#488) | **§3.1's two Redis timeout rows** and a new **§7 rule** (`RedisRules.checkRedisTimeoutBounds`, check 34): `datapipelines.redis.command-timeout` / `.connect-timeout` must parse as a duration above 0 and at most `60s` (the owner's ceiling: Lettuce's own default, never more); malformed, blank, zero, negative and over-ceiling values refuse startup naming the key and the value. Verified in Lettuce 6.6's source and by `RedisZeroCommandTimeoutIntegrationTest`: a zero command timeout is NO bound (a GET against a stopped Redis still pending at 3 s while the shipped 2 s client failed in 2,002 ms) and also a zero handshake deadline (a silent server fails the connect in one timer tick, ~100 ms). `0s` on the connect timeout and negative values were already loud (Lettuce asserts); zero on the command timeout was the silent case. |
 | 2026-10-09 | v1.51 | 482 (#482) | New **§3.1 rows**: `datapipelines.redis.command-timeout` and `.connect-timeout` (both `2s`) — no client timeout was configured anywhere, so Lettuce's 60 s per-command default made a Redis outage stall every rate-limited request on the order of a minute before the documented `429 rate_limit.unavailable` (and the stopped-Redis suite case alone took ~242 s). §3.14's bridge row extended: `spring.data.redis.timeout` / `.connect-timeout` carry the SAME `DATAPIPELINES_REDIS_COMMAND_TIMEOUT` / `DATAPIPELINES_REDIS_CONNECT_TIMEOUT` placeholders; §5's template and the deploy mirrors updated. No consumer code changed — every Redis fault path already routes a timeout (a `DataAccessException` subclass) through its existing failure handling; `TestRedis` builds its factories with the same two bounds under a placeholder-parity test. |
 | 2026-10-03 | v1.50 | 442a (#442) | Saved schedule notification settings: recipients and five event choices, validated and shown by role; omitted PUT settings preserved; mail remains off pending part b. |

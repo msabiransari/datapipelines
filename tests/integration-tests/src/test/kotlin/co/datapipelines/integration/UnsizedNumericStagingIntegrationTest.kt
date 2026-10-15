@@ -269,9 +269,7 @@ class UnsizedNumericStagingIntegrationTest {
             registry.add("spring.datasource.username") { postgres.username }
             registry.add("spring.datasource.password") { postgres.password }
 
-            registry.add("spring.data.redis.host") { redis.host }
-            registry.add("spring.data.redis.port") { SharedE2e.redisPort }
-            registry.add("spring.data.redis.password") { "" }
+            registry.add("datapipelines.redis.password") { "" }
             registry.add("datapipelines.redis.host") { redis.host }
             registry.add("datapipelines.redis.port") { SharedE2e.redisPort }
 

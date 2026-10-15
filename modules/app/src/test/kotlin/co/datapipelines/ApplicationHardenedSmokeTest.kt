@@ -161,9 +161,6 @@ class ApplicationHardenedSmokeTest {
             registry.add("spring.datasource.username") { postgres.username }
             registry.add("spring.datasource.password") { postgres.password }
 
-            registry.add("spring.data.redis.host") { host }
-            registry.add("spring.data.redis.port") { SharedRedis.port }
-            registry.add("spring.data.redis.password") { SharedRedis.PASSWORD }
             registry.add("datapipelines.redis.host") { host }
             registry.add("datapipelines.redis.port") { SharedRedis.port }
             registry.add("datapipelines.redis.password") { SharedRedis.PASSWORD }

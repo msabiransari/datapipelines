@@ -769,9 +769,7 @@ class DashboardDraftPreviewE2eTest {
             registry.add("spring.datasource.url") { postgres.jdbcUrl }
             registry.add("spring.datasource.username") { postgres.username }
             registry.add("spring.datasource.password") { postgres.password }
-            registry.add("spring.data.redis.host") { SharedE2e.redis.host }
-            registry.add("spring.data.redis.port") { SharedE2e.redisPort }
-            registry.add("spring.data.redis.password") { "" }
+            registry.add("datapipelines.redis.password") { "" }
             registry.add("datapipelines.redis.host") { SharedE2e.redis.host }
             registry.add("datapipelines.redis.port") { SharedE2e.redisPort }
             registry.add("datapipelines.jwt.secret") { JWT_SECRET }

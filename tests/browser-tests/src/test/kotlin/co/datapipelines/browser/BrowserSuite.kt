@@ -552,9 +552,7 @@ abstract class BrowserSuite {
             registry.add("spring.datasource.url") { SharedBrowserE2e.jdbcUrl }
             registry.add("spring.datasource.username") { SharedBrowserE2e.username }
             registry.add("spring.datasource.password") { SharedBrowserE2e.password }
-            registry.add("spring.data.redis.host") { SharedBrowserE2e.redisHost }
-            registry.add("spring.data.redis.port") { SharedBrowserE2e.redisPort }
-            registry.add("spring.data.redis.password") { "" }
+            registry.add("datapipelines.redis.password") { "" }
             registry.add("datapipelines.redis.host") { SharedBrowserE2e.redisHost }
             registry.add("datapipelines.redis.port") { SharedBrowserE2e.redisPort }
             registry.add("datapipelines.jwt.secret") { randomSecret() }
