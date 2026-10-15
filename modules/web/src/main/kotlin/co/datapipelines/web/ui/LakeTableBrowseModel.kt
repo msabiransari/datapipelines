@@ -103,13 +103,15 @@ class LakeTableBrowseModel {
 
         const val LEVEL_VIEW = "partials/lake-table-tree-level"
 
-        /** Hex characters of a nested level's id digest — the TemplateBrowseModel rule. */
+        /** Hex characters of a nested level's id digest. */
         private const val LEVEL_ID_HEX_LENGTH = 16
 
         /**
-         * The DOM id of the container holding one tree level — a digest, for
-         * [TemplateBrowseModel.levelId]'s reason: the placeholder the folder renders and the
-         * root of the fragment that replaces it are derived in ONE place and cannot disagree.
+         * The DOM id of the container holding one tree level — a digest, because a prefix
+         * cannot be an id directly (`/` and `.` would need escaping at every htmx selector,
+         * and a naive substitution maps `a/b` and `a-b` onto one id), and because the
+         * placeholder the folder renders and the root of the fragment that replaces it are
+         * derived in ONE place and cannot disagree.
          */
         fun levelId(prefix: String?): String {
             if (prefix.isNullOrEmpty()) return ROOT_LEVEL_ID
