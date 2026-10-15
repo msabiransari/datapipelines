@@ -337,10 +337,10 @@ details[open] > .tpl-summary > .tpl-chevron {
   }
 }
 
-/* The row-type glyphs (085 §A): folder / folder-open on folder rows, file-code on
-   leaves. Two icons in the markup, CSS picks one — a <use> href cannot be swapped by
-   a details[open] rule, and both nodes are aria-hidden decoration either way. Muted,
-   per the mock's `.tree .row svg`. */
+/* The row-type glyphs (085 §A): folder / folder-open on folder rows, the family's
+   glyph on leaves (table, calendar-clock). Two icons in the markup, CSS picks one — a
+   <use> href cannot be swapped by a details[open] rule, and both nodes are aria-hidden
+   decoration either way. Muted, per the mock's `.tree .row svg`. */
 .tpl-row-icon {
   color: var(--text-muted);
 }
