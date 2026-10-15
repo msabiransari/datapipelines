@@ -396,9 +396,7 @@ class ExecutionStreamRevocationE2eTest {
             registry.add("spring.datasource.url") { SharedE2e.postgres.jdbcUrl }
             registry.add("spring.datasource.username") { SharedE2e.postgres.username }
             registry.add("spring.datasource.password") { SharedE2e.postgres.password }
-            registry.add("spring.data.redis.host") { SharedE2e.redis.host }
-            registry.add("spring.data.redis.port") { SharedE2e.redisPort }
-            registry.add("spring.data.redis.password") { "" }
+            registry.add("datapipelines.redis.password") { "" }
             registry.add("datapipelines.redis.host") { SharedE2e.redis.host }
             registry.add("datapipelines.redis.port") { SharedE2e.redisPort }
             registry.add("datapipelines.jwt.secret") { SECRET }

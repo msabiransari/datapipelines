@@ -269,9 +269,7 @@ class LakeRegistryTwoInstanceE2eTest {
                         "--spring.datasource.url=${postgres.jdbcUrl}",
                         "--spring.datasource.username=${postgres.username}",
                         "--spring.datasource.password=${postgres.password}",
-                        "--spring.data.redis.host=${redis.host}",
-                        "--spring.data.redis.port=${redis.getMappedPort(REDIS_PORT)}",
-                        "--spring.data.redis.password=",
+                        "--datapipelines.redis.password=",
                         "--datapipelines.redis.host=${redis.host}",
                         "--datapipelines.redis.port=${redis.getMappedPort(REDIS_PORT)}",
                         "--datapipelines.jwt.secret=$SECRET",
@@ -318,9 +316,7 @@ class LakeRegistryTwoInstanceE2eTest {
             registry.add("spring.datasource.username") { postgres.username }
             registry.add("spring.datasource.password") { postgres.password }
 
-            registry.add("spring.data.redis.host") { redis.host }
-            registry.add("spring.data.redis.port") { redis.getMappedPort(REDIS_PORT) }
-            registry.add("spring.data.redis.password") { "" }
+            registry.add("datapipelines.redis.password") { "" }
             registry.add("datapipelines.redis.host") { redis.host }
             registry.add("datapipelines.redis.port") { redis.getMappedPort(REDIS_PORT) }
 

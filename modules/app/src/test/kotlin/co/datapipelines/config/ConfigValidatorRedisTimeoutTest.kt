@@ -11,11 +11,11 @@ import org.springframework.mock.env.MockEnvironment
  * §7's Redis client bounds (§3.1, #488), in their own suite like the org and mail rules.
  *
  * `DATAPIPELINES_REDIS_COMMAND_TIMEOUT` / `_CONNECT_TIMEOUT` (#482) reach Lettuce through the
- * §3.14 bridge with no range check of their own. Zero is the value that matters: Lettuce reads a
+ * single RedisClientProperties binding (#500), judged by §7. Zero matters: Lettuce reads a
  * command timeout of `0` as NO bound, so `0s` would silently restore the outage stall #482
  * removed (`RedisZeroCommandTimeoutIntegrationTest` in `web` shows it against a stopped Redis).
- * A blank value is the same trap by another road — Boot binds it to null and leaves Lettuce's
- * own 60 s — and 60 s is also the ceiling: the default an operator may deliberately restore.
+ * A blank value is refused too; 60 s is the ceiling: Lettuce's own command default, which an
+ * operator may deliberately restore.
  */
 class ConfigValidatorRedisTimeoutTest {
     private fun validSnapshot() = ConfigSnapshots.valid()

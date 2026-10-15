@@ -35,7 +35,7 @@ import java.util.concurrent.TimeUnit
  * Both clients in the first case connect BEFORE the server stops, the production shape: the outage
  * hits a live connection, Lettuce reconnects in the background and buffers the command, and only
  * the command timeout decides when the caller hears. The zero-timeout factories deliberately pass
- * their own client configuration — `TestRedisTimeoutParityTest`'s sweep requires one on every
+ * their own client configuration — `TestRedisDefaultsTest`'s sweep requires one on every
  * factory, and these are the counterexample the shipped bounds exist to rule out.
  */
 class RedisZeroCommandTimeoutIntegrationTest {

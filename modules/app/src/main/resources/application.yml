@@ -12,28 +12,6 @@ spring:
     hikari:
       maximum-pool-size: ${SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE:10}
 
-  # Spring Boot's Redis autoconfiguration reads `spring.data.redis.*`, while the
-  # operator-facing contract is `datapipelines.redis.*` (configuration.md §2/§3.1).
-  # This block is a BINDING, not a new configuration key: the only names an
-  # operator ever sets are still DATAPIPELINES_REDIS_*.
-  #
-  # TODO(dag / web modules — module-structure.md §3.1 rule 3): replace this bridge
-  #  with an explicit LettuceConnectionFactory built from a
-  #  @ConfigurationProperties("datapipelines.redis") class owned by the module that
-  #  actually talks to Redis, and drop this block.
-  data:
-    redis:
-      host: ${DATAPIPELINES_REDIS_HOST}
-      port: ${DATAPIPELINES_REDIS_PORT:6379}
-      password: ${DATAPIPELINES_REDIS_PASSWORD:}
-      # #482 — Lettuce's own defaults are 60 s per command and no connect bound: with Redis
-      # unreachable, every rate-limited request waited on the order of a minute before the
-      # documented `429 rate_limit.unavailable` (rest-api §12.3). Both bounds come from the
-      # operator keys under `datapipelines.redis` below — the SAME placeholders, so there is
-      # one env var per value and no second authority.
-      timeout: ${DATAPIPELINES_REDIS_COMMAND_TIMEOUT:2s}
-      connect-timeout: ${DATAPIPELINES_REDIS_CONNECT_TIMEOUT:2s}
-
   # Flyway runs on startup against the metadata DB. Migrations live only in this
   # module (module-structure.md §3.1 rule 2); the DDL authority is metadata-db.md §4.
   flyway:
@@ -148,13 +126,10 @@ datapipelines:
     host: ${DATAPIPELINES_REDIS_HOST}
     port: ${DATAPIPELINES_REDIS_PORT:6379}
     password: ${DATAPIPELINES_REDIS_PASSWORD:}
-    # #482 — the operator-facing names for the two client bounds; configuration.md §3.1.
-    # Nothing binds these paths (there is no @ConfigurationProperties("datapipelines.redis")
-    # yet — the TODO above): the bridge under `spring.data.redis` carries the SAME
-    # placeholders, so an operator setting DATAPIPELINES_REDIS_COMMAND_TIMEOUT /
-    # DATAPIPELINES_REDIS_CONNECT_TIMEOUT reaches Lettuce. `command-timeout` is the per-
-    # command READ timeout (Boot's `spring.data.redis.timeout`), `connect-timeout` the TCP
-    # connect bound.
+    # RedisClientProperties binds these keys and RedisClientConfiguration builds the
+    # one Lettuce factory from them (configuration.md §3.1, #500). `command-timeout`
+    # bounds each command READ; `connect-timeout` bounds TCP connect. Both deliberately
+    # replace Lettuce's own defaults of 60 s per command and 10 s to connect (#482).
     command-timeout: ${DATAPIPELINES_REDIS_COMMAND_TIMEOUT:2s}
     connect-timeout: ${DATAPIPELINES_REDIS_CONNECT_TIMEOUT:2s}
 

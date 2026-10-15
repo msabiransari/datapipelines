@@ -23,7 +23,7 @@ import java.time.Duration
  * documented way, which is why `build.gradle.kts` declares `libs.testcontainers`.
  */
 object RedisSupport {
-    // dag cannot import web test sources. TestRedisTimeoutParityTest reads these twins and
+    // dag cannot import web test sources. TestRedisDefaultsTest reads these twins and
     // pins them to application.yml, so this module exercises the shipped posture too (#486).
     private val COMMAND_TIMEOUT: Duration = Duration.ofSeconds(2)
     private val CONNECT_TIMEOUT: Duration = Duration.ofSeconds(2)

@@ -123,8 +123,8 @@ object TestRedis {
      * Lettuce's own defaults (60 s per command), which is precisely the production defect: with
      * Redis stopped, the limiter's fail-closed refusal arrived only after Lettuce gave up.
      * application.yml ships the same two defaults (`${DATAPIPELINES_REDIS_COMMAND_TIMEOUT:2s}` /
-     * `${DATAPIPELINES_REDIS_CONNECT_TIMEOUT:2s}`, fed to Lettuce through the §3.14 bridge), and
-     * [TestRedisTimeoutParityTest] goes red when either side changes alone. The stopped-Redis
+     * `${DATAPIPELINES_REDIS_CONNECT_TIMEOUT:2s}`, bound by RedisClientProperties), and
+     * [TestRedisDefaultsTest] goes red when either side changes alone. The stopped-Redis
      * cases in `WebPersistenceIntegrationTest` derive their wall-clock bounds from
      * [COMMAND_TIMEOUT], so a slower default widens the bound honestly.
      */
@@ -173,9 +173,8 @@ object TestRedis {
      * The two-argument `LettuceConnectionFactory` constructor is the ONLY way to set them — the
      * one-argument form used before #482 silently fell back to Lettuce's 60 s command default.
      * The command timeout rides the builder directly; the connect timeout has no builder method,
-     * so it goes through `SocketOptions` — the same mechanism Spring Boot's
-     * `spring.data.redis.connect-timeout` binding itself uses (`LettuceConnectionConfiguration`,
-     * Boot 3.5.16).
+     * so it goes through `SocketOptions` — the same mechanism RedisClientConfiguration uses
+     * for the production `datapipelines.redis.connect-timeout` binding.
      */
     internal fun clientConfiguration(): LettuceClientConfiguration =
         LettuceClientConfiguration

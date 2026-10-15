@@ -1,5 +1,6 @@
 package co.datapipelines.web
 
+import co.datapipelines.redis.RedisClientProperties
 import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
@@ -15,26 +16,22 @@ import java.time.Duration
  * factory to reproduce the production posture (#482, #486) — so a guard reads all three and
  * refuses the drift, the way `DbKeyProviderConfigKeysSpecDriftTest` pins the `db` block.
  *
- * Four places must agree:
+ * Three places must agree:
  *
- *  1. the §3.14 bridge (`spring.data.redis.timeout` / `.connect-timeout`) — what Lettuce
- *     actually reads — binds the operator variables;
- *  2. the operator block (`datapipelines.redis.command-timeout` / `.connect-timeout`, §3.1)
- *     carries the SAME placeholders with the SAME defaults — the two blocks are one contract,
- *     and a default changed in one but not the other is a silent second authority;
- *  3. [TestRedis] builds every factory with exactly the shipped defaults. Before #482 the test
+ *  1. the operator block (`datapipelines.redis.command-timeout` / `.connect-timeout`, §3.1)
+ *     supplies the defaults for RedisClientProperties, the one production client binding;
+ *  2. [TestRedis] builds every factory with exactly the shipped defaults. Before #482 the test
  *     factories mirrored production's MISSING timeout (Lettuce's 60 s silence) — the stopped-
  *     Redis cases took ~242 s each. When the fix landed, the factories deliberately carried it
  *     too; this class is what stops either side from drifting back.
- *  4. dag's RedisSupport repeats both bounds because it cannot import web test sources; this
+ *  3. dag's RedisSupport repeats both bounds because it cannot import web test sources; this
  *     guard reads its source and also sweeps all test factories for explicit client config.
  *
  * Red when either side changes alone: an `application.yml` default edited without [TestRedis]
  * fails `TestRedis builds its factories with the shipped defaults`; a [TestRedis] constant
- * edited without the yml fails the same test; a block re-pointed at another variable, or one
- * block's default changed without the other's, fails the placeholder test.
+ * edited without the yml fails the same test. The operator placeholder names are checked too.
  */
-class TestRedisTimeoutParityTest {
+class TestRedisDefaultsTest {
     private val app: Map<String, Any?> by lazy {
         YamlPropertySourceLoader()
             .load("application.yml", FileSystemResource(repoFile(APP_YML).absolutePath))
@@ -44,15 +41,25 @@ class TestRedisTimeoutParityTest {
     }
 
     @Test
-    fun `the bridge and the operator block carry the SAME placeholder for each bound`() {
-        defaultOf(BRIDGE_COMMAND, COMMAND_VAR) shouldBe defaultOf(OPERATOR_COMMAND, COMMAND_VAR)
-        defaultOf(BRIDGE_CONNECT, CONNECT_VAR) shouldBe defaultOf(OPERATOR_CONNECT, CONNECT_VAR)
+    fun `production binding defaults match the operator block and configuration reference`() {
+        val properties = RedisClientProperties(host = "localhost")
+        properties.commandTimeout shouldBe DurationStyle.detectAndParse(defaultOf(OPERATOR_COMMAND, COMMAND_VAR))
+        properties.connectTimeout shouldBe DurationStyle.detectAndParse(defaultOf(OPERATOR_CONNECT, CONNECT_VAR))
+        val documented =
+            repoFile("docs/configuration.md")
+                .readLines()
+                .mapNotNull { Regex("""^\| `(datapipelines\.redis\.[^`]+)` \| `([^`]+)` \|""").find(it) }
+                .associate { it.groupValues[1] to it.groupValues[2] }
+        properties.port shouldBe documented.getValue("datapipelines.redis.port").toInt()
+        properties.password shouldBe ""
+        properties.commandTimeout shouldBe DurationStyle.detectAndParse(documented.getValue(OPERATOR_COMMAND))
+        properties.connectTimeout shouldBe DurationStyle.detectAndParse(documented.getValue(OPERATOR_CONNECT))
     }
 
     @Test
     fun `TestRedis builds its factories with the shipped defaults, not Lettuce's 60 s silence`() {
-        TestRedis.COMMAND_TIMEOUT shouldBe DurationStyle.detectAndParse(defaultOf(BRIDGE_COMMAND, COMMAND_VAR))
-        TestRedis.CONNECT_TIMEOUT shouldBe DurationStyle.detectAndParse(defaultOf(BRIDGE_CONNECT, CONNECT_VAR))
+        TestRedis.COMMAND_TIMEOUT shouldBe DurationStyle.detectAndParse(defaultOf(OPERATOR_COMMAND, COMMAND_VAR))
+        TestRedis.CONNECT_TIMEOUT shouldBe DurationStyle.detectAndParse(defaultOf(OPERATOR_CONNECT, CONNECT_VAR))
         val client = TestRedis.clientConfiguration()
         client.commandTimeout shouldBe TestRedis.COMMAND_TIMEOUT
         client.clientOptions
@@ -63,12 +70,12 @@ class TestRedisTimeoutParityTest {
     @Test
     fun `dag's RedisSupport carries both shipped defaults`() {
         val source = codeOnly(repoFile(DAG_SUPPORT).readText())
-        listOf("COMMAND_TIMEOUT" to BRIDGE_COMMAND, "CONNECT_TIMEOUT" to BRIDGE_CONNECT).forEach { (constant, key) ->
+        listOf("COMMAND_TIMEOUT" to OPERATOR_COMMAND, "CONNECT_TIMEOUT" to OPERATOR_CONNECT).forEach { (constant, key) ->
             withClue("$DAG_SUPPORT $constant") {
                 val matches = Regex("""val\s+$constant\s*:\s*Duration\s*=\s*Duration\.ofSeconds\((\d+)\)""").findAll(source).toList()
                 matches.size shouldBe 1
                 Duration.ofSeconds(matches.single().groupValues[1].toLong()) shouldBe
-                    DurationStyle.detectAndParse(defaultOf(key, if (key == BRIDGE_COMMAND) COMMAND_VAR else CONNECT_VAR))
+                    DurationStyle.detectAndParse(defaultOf(key, if (key == OPERATOR_COMMAND) COMMAND_VAR else CONNECT_VAR))
             }
         }
     }
@@ -253,8 +260,6 @@ class TestRedisTimeoutParityTest {
         const val APP_YML = "modules/app/src/main/resources/application.yml"
         const val COMMAND_VAR = "DATAPIPELINES_REDIS_COMMAND_TIMEOUT"
         const val CONNECT_VAR = "DATAPIPELINES_REDIS_CONNECT_TIMEOUT"
-        const val BRIDGE_COMMAND = "spring.data.redis.timeout"
-        const val BRIDGE_CONNECT = "spring.data.redis.connect-timeout"
         const val OPERATOR_COMMAND = "datapipelines.redis.command-timeout"
         const val OPERATOR_CONNECT = "datapipelines.redis.connect-timeout"
     }
