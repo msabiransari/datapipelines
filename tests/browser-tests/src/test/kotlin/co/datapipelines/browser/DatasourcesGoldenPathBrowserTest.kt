@@ -4,7 +4,10 @@ import com.microsoft.playwright.Request
 import com.microsoft.playwright.options.WaitForSelectorState
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
+import java.nio.file.Path
+import java.nio.file.Paths
 import java.util.function.Consumer
 
 /**
@@ -168,6 +171,40 @@ class DatasourcesGoldenPathBrowserTest : BrowserSuite() {
         probe.status() shouldBe 200
         page.waitForSelector("#toast .ds-toast-success")
         page.locator("#toast").innerText() shouldContain "Connection succeeded"
+    }
+
+    /**
+     * #510 — a dialect with no rows and an EMPTY box is a filter miss, not an empty
+     * workspace: the fragment answers with the no-match state and Clear filters, never the
+     * create guidance. Light and dark shots land in build/reports/510-screenshots/ for the
+     * handback; the assertions are what fail the build.
+     */
+    @Test
+    fun `a dialect-only miss offers Clear filters, never the create guidance (#510)`() {
+        startTrace()
+        loginReadyUser()
+        page.setViewportSize(1440, 900)
+        val name = registerThrough("miss-" + generatedPassword("ds").take(10).lowercase())
+
+        // POSTGRES has no datasources here (the row is H2): the miss must be the NO-MATCH
+        // state — at base this rendered "No datasources yet" with the register guidance.
+        page.waitForResponse({ r -> r.url().contains("/partials/datasources") && r.url().contains("dialect=POSTGRES") }) {
+            page.selectOption("#ds-filter-dialect", "POSTGRES")
+        }
+        page.locator(".ds-empty-title").first().innerText() shouldContain "No datasources match your search"
+        page.locator(".ds-empty").innerText() shouldNotContain "Register your first datasource"
+        val clear = "#datasource-list-wrapper button:has-text('Clear filters')"
+        page.waitForSelector(clear)
+        ensureTheme("light")
+        shot("510-datasources-nomatch-light.png")
+        ensureTheme("dark")
+        shot("510-datasources-nomatch-dark.png")
+
+        // The clear resets both named controls and the row comes back (the #432 contract).
+        page.click(clear)
+        rowFor(name).waitFor()
+        page.inputValue("#ds-filter-dialect") shouldBe ""
+        page.inputValue("#ds-filter-q") shouldBe ""
     }
 
     // ------------------------------------------------------------------ 094 §A: the pool section
@@ -439,6 +476,16 @@ class DatasourcesGoldenPathBrowserTest : BrowserSuite() {
                     .LocatorOptions()
                     .setHasText(name),
             ).first()
+
+    private fun shot(name: String) {
+        page.screenshot(
+            com.microsoft.playwright.Page
+                .ScreenshotOptions()
+                .setPath(shotDir().resolve(name)),
+        )
+    }
+
+    private fun shotDir(): Path = Paths.get("build", "reports", "510-screenshots").also { it.toFile().mkdirs() }
 
     private fun hasText(text: String) =
         com.microsoft.playwright.Locator

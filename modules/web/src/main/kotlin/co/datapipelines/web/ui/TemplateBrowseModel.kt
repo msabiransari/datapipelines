@@ -99,6 +99,9 @@ class TemplateBrowseModel(
         model.addAttribute("searching", false)
         // #398: a tree level exists only in the sidebar.
         model.addAttribute("scope", TemplateListScope.NAV.wire)
+        // #510: the same standing-filter flag fillSearch stamps, so both presentations share
+        // one contract even though the level fragment does not read it.
+        model.addAttribute("filtered", dialect != null || type != null)
         model.addAttribute("prefix", prefix ?: "")
         model.addAttribute("levelId", levelId(prefix))
         model.addAttribute("folders", folderProbe.take(FOLDER_LIMIT).map(::TemplateFolderView))
@@ -138,6 +141,10 @@ class TemplateBrowseModel(
      * ([TemplateListScope.NAV], `q` non-empty), or the `/templates` catalog
      * ([TemplateListScope.CATALOG], where an absent `q` lists every template the caller may
      * read — the owner's ruling for the pipelines catalog, #398's own floor).
+     *
+     * Also stamps `filtered` (#510): whether ANY of `q`, `dialect` or `type` stands — the
+     * flag the fragment's empty states read to choose "nothing exists" vs "nothing
+     * matched" (§5.1), never `q` alone.
      */
     fun fillSearch(
         model: Model,
@@ -174,6 +181,9 @@ class TemplateBrowseModel(
         model.addAttribute("offset", page)
         model.addAttribute("hasMore", probe.size > PAGE_SIZE)
         model.addAttribute("total", templates.count(workspaceId, view.templates, dialect = dialect, type = type, q = needle))
+        // #510: the empty catalog's answer — "nothing exists" vs "nothing matched" (§5.1) —
+        // reads ANY standing filter, not q alone; the fragment's clear control is chosen on this.
+        model.addAttribute("filtered", needle != null || dialect != null || type != null)
         return SEARCH_VIEW
     }
 

@@ -119,6 +119,9 @@ class DatasourcesTemplateRenderTest {
                 context().apply {
                     fillListModel()
                     setVariable("datasources", emptyList<Datasource>())
+                    // #510: the fixture bypasses the browse model that stamps the flag; this
+                    // case's miss is q="trip" (fillListModel), so filtered stands.
+                    setVariable("filtered", true)
                 },
             )
 
@@ -127,6 +130,30 @@ class DatasourcesTemplateRenderTest {
         html shouldNotContain "ds-empty-state" // a class with no CSS anywhere (D4)
         // #432: q="trip" missed — Clear filters names BOTH controls it resets (shell.js empties
         // them; its bare re-fetch matches) and replaces a search still in flight from the box.
+        html shouldContain "Clear filters"
+        html shouldContain "data-dp-clear-filters=\"#ds-filter-q, #ds-filter-dialect\""
+        html shouldContain "hx-sync=\"#ds-filter-q:replace\""
+    }
+
+    @Test
+    fun `a dialect-only miss is the no-match state, never the create guidance (#510)`() {
+        // #510: an empty box with a standing dialect that matches nothing must read as "nothing
+        // matched" — the workspace may hold datasources of other dialects the filter hides.
+        val html =
+            engine().process(
+                "partials/datasources",
+                context().apply {
+                    fillListModel()
+                    setVariable("datasources", emptyList<Datasource>())
+                    setVariable("q", "")
+                    setVariable("filtered", true)
+                },
+            )
+
+        html shouldContain "No datasources match your search"
+        html shouldNotContain "No datasources yet"
+        html shouldNotContain "Register your first datasource"
+        // The same control #432 pinned: it resets q and dialect; its bare re-fetch matches.
         html shouldContain "Clear filters"
         html shouldContain "data-dp-clear-filters=\"#ds-filter-q, #ds-filter-dialect\""
         html shouldContain "hx-sync=\"#ds-filter-q:replace\""
