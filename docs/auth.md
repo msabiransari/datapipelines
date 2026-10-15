@@ -1,6 +1,6 @@
 # Auth & Security Specification
 
-**Status:** v3.45 (revised — see Change Log)
+**Status:** v3.46 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System](type-system.md)
 **Last updated:** 2026-10-08
@@ -1091,8 +1091,9 @@ class SecurityConfig(
                 // (non-XOR) request handler keeps cookie value == header value.
                 csrf.csrfTokenRepository(cookieCsrfRepository())
                 // Exemption follows the CREDENTIAL, not the path (§8.4): DP-API-Key (or
-                // Bearer dpk_ on /mcp), plus the promotion route on the same grounds (§10.6).
-                csrf.ignoringRequestMatchers(ApiKeyCredentialMatcher(), PromotionRouteMatcher())
+                // Bearer dpk_ on /mcp); promotion requires a server-key header (§10.6);
+                // screenshot upload requires a single-use DP-Upload-Token (#353). No cookie authenticates there.
+                csrf.ignoringRequestMatchers(ApiKeyCredentialMatcher(), PromotionRouteMatcher(), UploadCapabilityRouteMatcher())
                 // Double-submit needs a STABLE cookie; this chain has no server session to
                 // protect, so Spring's rotate-or-delete strategy is neutered (027).
                 csrf.sessionAuthenticationStrategy(NullAuthenticatedSessionStrategy())
@@ -1825,6 +1826,7 @@ All auth tables accessed via `JdbcTemplate` + `RowMapper`. No JPA. See [Metadata
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-15 | v3.46 | #515 | §8 sketch and the class KDoc name all three CSRF exemptions; parity test. |
 | 2026-10-09 | v3.45 | 473 merge follow-up (#495) | **§7.6: no new row, no cell change, no route change** — `dashboard.read`'s prose names the board page's load-time render of the caller's own refresh history (#473); the Surfaces lists are untouched, so `RoleWalkE2eTest` and `RoleMatrixDocE2e` read the same cells. |
 | 2026-10-08 | v3.44 | 419 merge follow-up — the issue's acceptance row the lane's fence kept out | **§7.6: no new row, no cell change** — `parameter_set.read`'s prose names the flat listing's optional `q` name search, on the REST listing and on the MCP list tool (#419): a filter on the existing read, lensed in the service (a promoter's `q` matches only the sets the promoter lens admits), with no new route, tool or permission; the Surfaces routes and tools are unchanged, so `RoleWalkE2eTest` and `ScopeMatrixSpecDriftTest` read the same cell. |
 | 2026-10-06 | v3.43 | 460 merge follow-up — the row #460 changed without one | **§7.6: no new row, no new permission** — the five `*.read` Surfaces cells (`pipeline.read`, `template.read`, `dashboard.read`, `visualization.read`, `parameter_set.read`) each gain `GET /api/v1/<family>/tree` and `GET /api/v1/<family>/tree/search`: session-only navigation metadata (a key is refused by kind; the handler also refuses any non-session principal with `auth.session.required`), the workspace from the principal, the promoter lens applied before folders and ancestors are derived; `RoleWalkE2eTest` walks all ten. |
