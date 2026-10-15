@@ -69,7 +69,6 @@ class ParameterSetsUiController(
             lens.viewFor(principal),
             q,
             offset ?: 0,
-            ParameterSetsBrowseModel.SCOPE_PAGE,
         )
         return LIST_VIEW
     }

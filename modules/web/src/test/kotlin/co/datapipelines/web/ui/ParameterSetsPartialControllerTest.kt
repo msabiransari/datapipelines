@@ -5,10 +5,8 @@ import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.web.EVERYTHING_LENS
-import io.kotest.matchers.shouldBe
 import io.mockk.mockk
 import io.mockk.verify
-import jakarta.servlet.http.HttpServletResponse
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
@@ -17,16 +15,15 @@ import org.springframework.ui.ExtendedModelMap
 import java.util.UUID
 
 /**
- * [ParameterSetsPartialController] (#415) — the tree route's dispatch, not the template: a `prefix`
- * request is a browse and ignores `q`; the nav scope with a blank `q` is the root level and with a
- * non-empty one the branch's flat search; any other scope is the catalog's flat list. The stamp
- * rides every NAV answer — a level and a search result alike — so the rail can refuse a foreign
- * workspace's or lens's rows.
+ * [ParameterSetsPartialController] (#415) — the catalog route's dispatch, not the template: every
+ * answer is the catalog's flat list, the search riding it, the pager's offset threaded through.
+ * Since #466 the route has no nav presentation (the sidebar reads `/api/v1/parameter-sets/tree`),
+ * so there is no `prefix` level, no `scope` and no stamp; a stale `scope`/`prefix` is an unbound
+ * parameter, pinned over real HTTP in `PromoterLensSweepTest`.
  */
 class ParameterSetsPartialControllerTest {
     private val browse = mockk<ParameterSetsBrowseModel>(relaxed = true)
     private val controller = ParameterSetsPartialController(browse, EVERYTHING_LENS)
-    private val response = mockk<HttpServletResponse>(relaxed = true)
     private val model = ExtendedModelMap()
 
     @AfterEach
@@ -48,46 +45,18 @@ class ParameterSetsPartialControllerTest {
     }
 
     @Test
-    fun `a prefix request is a browse - the level fills, q is never asked`() {
+    fun `the catalog without a query is the flat list from page one`() {
         authenticate()
-        controller.tree(model, response, prefix = "acme/sales", offset = 25, q = "geo", scope = null)
+        controller.catalog(model, offset = null, q = null)
 
-        verify(exactly = 1) { browse.fillLevel(model, any(), any(), "acme/sales", 25) }
-        verify(exactly = 0) { browse.fillWrapper(any(), any(), any(), any(), any(), any()) }
+        verify(exactly = 1) { browse.fillWrapper(model, any(), any(), q = null, offset = 0) }
     }
 
     @Test
-    fun `the branch's blank q is the root level and a non-empty one the flat search - both nav-scoped`() {
+    fun `the catalog's search rides the flat list and threads the pager's offset`() {
         authenticate()
-        controller.tree(model, response, prefix = null, offset = null, q = null, scope = "nav")
-        verify(exactly = 1) {
-            browse.fillWrapper(model, any(), any(), q = null, offset = 0, scope = ParameterSetsBrowseModel.SCOPE_NAV)
-        }
+        controller.catalog(model, offset = 50, q = "geo")
 
-        controller.tree(model, response, prefix = null, offset = 50, q = "geo", scope = "nav")
-        verify(exactly = 1) {
-            browse.fillWrapper(model, any(), any(), q = "geo", offset = 50, scope = ParameterSetsBrowseModel.SCOPE_NAV)
-        }
-        verify(exactly = 0) { browse.fillLevel(any(), any(), any(), any(), any()) }
-    }
-
-    @Test
-    fun `an unknown scope is the catalog's flat list - the search rides it too`() {
-        authenticate()
-        controller.tree(model, response, prefix = null, offset = null, q = "geo", scope = null)
-
-        verify(exactly = 1) {
-            browse.fillWrapper(model, any(), any(), q = "geo", offset = 0, scope = ParameterSetsBrowseModel.SCOPE_PAGE)
-        }
-    }
-
-    @Test
-    fun `every NAV answer carries the stamp - a level and a search result alike`() {
-        authenticate()
-        controller.tree(model, response, prefix = null, offset = null, q = "geo", scope = "nav")
-        verify(exactly = 1) { response.setHeader(ParameterSetsBrowseModel.NAV_STAMP_HEADER, "acme|all") }
-
-        controller.tree(model, response, prefix = null, offset = null, q = null, scope = "page")
-        verify(exactly = 1) { response.setHeader(any(), any()) }
+        verify(exactly = 1) { browse.fillWrapper(model, any(), any(), q = "geo", offset = 50) }
     }
 }

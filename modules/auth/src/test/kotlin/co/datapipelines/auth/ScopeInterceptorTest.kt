@@ -385,7 +385,7 @@ class ScopeInterceptorTest {
             "$runtime/versions" to false,
             "$runtime/release" to false,
             "/dashboards" to false,
-            "/partials/dashboards/tree" to false,
+            "/partials/dashboards" to false,
             "/mcp" to false,
             "/api/v1/promotion/inventory" to false,
             "/api/nyc/v1/revenue" to false,

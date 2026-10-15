@@ -299,7 +299,9 @@ through the shared search-and-tree component (ui-screens §3.4, rest-api §24).
   rail, loaded rows and query state. The workspace owns version selection.
 
 The catalog's `dialect`, `type` and `q` filters keep their existing flat presentation. The old
-prefix fragments remain compatible for existing consumers; they no longer transport sidebar data.
+server-rendered prefix fragments (`/partials/templates?prefix=`, `scope=nav`) were removed with #466:
+no consumer requested them once the sidebar read the REST tree (#460), and a stale `prefix` or
+`scope` is now ignored — the request answers the catalog list.
 
 ### 9.3 Create and edit forms
 

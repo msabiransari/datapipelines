@@ -2,7 +2,6 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.application.lens.LensedView
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.pipeline.PipelineNameGrammar
 import co.datapipelines.pipeline.SearchNeedle
 import co.datapipelines.visualization.ArtifactVersion
 import co.datapipelines.visualization.DashboardBody
@@ -10,7 +9,6 @@ import co.datapipelines.visualization.DashboardService
 import co.datapipelines.web.dashboards.runtime.DashboardRuntime
 import com.fasterxml.jackson.databind.node.ObjectNode
 import org.springframework.ui.Model
-import java.security.MessageDigest
 import java.time.Instant
 import java.util.UUID
 
@@ -18,22 +16,11 @@ import java.util.UUID
  * The dashboards screens' model, in one place for the page controller and the partial
  * controllers — [PipelineBrowseModel]'s shape copied for the second artifact family (the
  * implementation spec's §6.3, ui-screens.md §4.x). Since #400 the PAGE is the flat catalog
- * (the pipelines catalog's shape, owner ruling 2026-10-02): the folder tree lives only in the
- * sidebar's lazy branch, so the tree level and the sidebar render the SAME one-level-per-request
- * fragment and can never disagree about what a level holds — and the catalog and its search
- * partial render the SAME flat list.
- *
- * The tree is backed by server-side prefix queries through [DashboardService] — the family's
- * own lensed reads (`listChildFolders`/`listChildren`/`countChildren`): under the everything
- * lens the level is the repository's parameterised SQL; under a narrowing lens (the promoter's)
- * it is derived from the admitted current RELEASED set by the same rule the pipelines explorer's
- * service applies ("the SQL level cannot take a per-request name set"). Nothing here filters in
- * a template, and nothing ships an unfiltered list to the browser.
- *
- * A folder is virtual, exactly as in the pipelines explorer (§3.1 of the template-hierarchy
- * design): derived per request from the live rows beneath it, no CRUD, no empty-folder state.
- * The ROOT level renders folders only — a dashboard name needs a folder, so the root is a
- * directory of folders (the 077 rule the pipelines tree states).
+ * (the pipelines catalog's shape, owner ruling 2026-10-02), and the catalog and its search
+ * partial render the SAME flat list. The folder tree is the global sidebar's, read from
+ * `/api/v1/dashboards/tree` since #460; its server-rendered levels (`/partials/dashboards/tree`)
+ * are gone with #466. Nothing here filters in a template, and nothing ships an unfiltered list
+ * to the browser.
  *
  * Declared as an explicit `@Bean` in [UiConfig], not by a stereotype: the house rule is zero
  * DI stereotypes in production code with **no** allowlist (015 / module-structure §8.4), and
@@ -56,75 +43,10 @@ class DashboardBrowseModel(
     private val dashboardBindings: co.datapipelines.application.dashboards.DashboardKeyBindingRepository,
 ) {
     /**
-     * Fills [model] for one **tree level** of the SIDEBAR's lazy branch — [prefix] `null`/empty
-     * is the root — and returns the view name. #400: the L3b tree PAGE is retired (the catalog
-     * replaced it), so this fill is the NAV instance's alone — the scope is always
-     * [SCOPE_NAV], and a level's ids are always nav-derived.
-     */
-    fun fillLevel(
-        model: Model,
-        workspaceId: UUID,
-        view: LensedView,
-        prefix: String?,
-        offset: Int,
-    ): String {
-        // A prefix is user input that becomes a LIKE pattern: bound and escaped in the
-        // repository, but a value that is not a legal artifact name cannot name a real folder
-        // either, and an arbitrary-length string would make a level request an arbitrary-length
-        // pattern match. An illegal prefix renders an ordinary EMPTY level, never an error —
-        // the templates and pipelines browsers settled that (a level that cannot exist is not a
-        // client fault worth a 400).
-        if (!prefix.isNullOrEmpty() && !PipelineNameGrammar.matchesPrefix(prefix)) {
-            return emptyLevel(model, prefix)
-        }
-        val page = maxOf(0, offset)
-        val folders = dashboards.listChildFolders(workspaceId, view.dashboards, prefix?.takeIf { it.isNotEmpty() })
-        val children =
-            dashboards.listChildren(
-                workspaceId,
-                view.dashboards,
-                prefix?.takeIf { it.isNotEmpty() },
-                page,
-                PAGE_SIZE,
-            )
-        val total = dashboards.countChildren(workspaceId, view.dashboards, prefix?.takeIf { it.isNotEmpty() })
-        // THE ROOT HOLDS FOLDERS ONLY (077, the pipelines tree's rule): every dashboard name
-        // has a folder, so the root is a directory of folders and nothing else.
-        val leaves = if (prefix.isNullOrEmpty()) emptyList() else children
-        model.addAttribute("lensUnavailable", view.unavailable)
-        model.addAttribute("prefix", prefix ?: "")
-        model.addAttribute("scope", SCOPE_NAV)
-        model.addAttribute("levelId", levelId(SCOPE_NAV, prefix))
-        model.addAttribute("folders", folders.map { DashboardFolderView(it, SCOPE_NAV) })
-        model.addAttribute("dashboards", leaves.map(::DashboardLeafView))
-        model.addAttribute("offset", page)
-        model.addAttribute("hasMore", page + leaves.size < total)
-        model.addAttribute("total", total)
-        return LEVEL_VIEW
-    }
-
-    /** A level that cannot exist: rendered as an ordinary empty level, never as an error. */
-    private fun emptyLevel(
-        model: Model,
-        prefix: String,
-    ): String {
-        model.addAttribute("prefix", prefix)
-        model.addAttribute("scope", SCOPE_NAV)
-        model.addAttribute("levelId", levelId(SCOPE_NAV, prefix))
-        model.addAttribute("folders", emptyList<DashboardFolderView>())
-        model.addAttribute("dashboards", emptyList<DashboardLeafView>())
-        model.addAttribute("offset", 0)
-        model.addAttribute("hasMore", false)
-        model.addAttribute("total", 0)
-        return LEVEL_VIEW
-    }
-
-    /**
-     * Fills [model] for a **flat list of dashboards** — the sidebar search's results
-     * ([DashboardListScope.NAV], `q` non-empty) or the `/dashboards` catalog
-     * ([DashboardListScope.PAGE], where an absent `q` lists every dashboard the caller may
-     * read), in [PipelineBrowseModel.fillSearch]'s shape: a page of the lensed flat listing,
-     * the truthful total, the pager bound to the scope's stable root.
+     * Fills [model] for the `/dashboards` catalog's **flat list of dashboards** — every dashboard
+     * the caller may read when `q` is absent, the matches otherwise — in
+     * [PipelineBrowseModel.fillSearch]'s shape: a page of the lensed flat listing, the truthful
+     * total, the pager bound to the catalog's stable root [PAGE_ROOT_ID].
      *
      * The page and its truthful total come from [DashboardService]'s lensed reads under every
      * lens, never from a filter in this model: with no `q` the page is `listAll` (`LIMIT size+1
@@ -142,7 +64,6 @@ class DashboardBrowseModel(
         view: LensedView,
         q: String?,
         offset: Int,
-        scope: DashboardListScope,
     ): String {
         val page = maxOf(0, offset)
         // A box truncates its own term to the shared bound (#504b) before the call, never refuses.
@@ -161,20 +82,15 @@ class DashboardBrowseModel(
         }
         model.addAttribute("lensUnavailable", view.unavailable)
         model.addAttribute("searching", true)
-        model.addAttribute("scope", scope.wire)
-        model.addAttribute("rootId", scope.rootId)
+        model.addAttribute("rootId", PAGE_ROOT_ID)
         model.addAttribute("q", needle.orEmpty())
         model.addAttribute("offset", page)
         return SEARCH_VIEW
     }
 
     /**
-     * Fills [model] for whichever presentation [q] and [scope] select, and returns the
-     ** dispatcher** view whose one root element is the scope's stable swap root either way.
-     * In the sidebar ([DashboardListScope.NAV]) an empty `q` is the tree's ROOT level and a
-     * non-empty one the flat list, so clearing the box returns to the tree by construction;
-     * the catalog ([DashboardListScope.PAGE]) has no tree to return to: it is always the flat
-     * list.
+     * Fills [model] for the catalog's list ([fillList]) and returns the catalog's swap-root
+     * view, `partials/dashboards`, whose one root element is [PAGE_ROOT_ID].
      */
     fun fillWrapper(
         model: Model,
@@ -182,13 +98,8 @@ class DashboardBrowseModel(
         view: LensedView,
         q: String?,
         offset: Int,
-        scope: DashboardListScope,
     ): String {
-        if (scope == DashboardListScope.NAV && q.isNullOrEmpty()) {
-            fillLevel(model, workspaceId, view, prefix = null, offset = offset)
-        } else {
-            fillList(model, workspaceId, view, q, offset, scope)
-        }
+        fillList(model, workspaceId, view, q, offset)
         return WRAPPER_VIEW
     }
 
@@ -397,24 +308,7 @@ class DashboardBrowseModel(
         return REFRESHES_VIEW
     }
 
-    /** One tree folder, with the scope-aware id of the container that will hold its level. */
-    data class DashboardFolderView(
-        val path: String,
-        val segment: String,
-        val count: Int,
-        val levelId: String,
-        val scope: String,
-    ) {
-        constructor(folder: co.datapipelines.visualization.ArtifactFolder, scope: String) : this(
-            folder.path,
-            folder.segment,
-            folder.count,
-            levelId(scope, folder.path),
-            scope,
-        )
-    }
-
-    /** One dashboard row of the tree, at its listed (working) version — the pipelines leaf's twin. */
+    /** One dashboard row of the catalog, at its listed (working) version — the pipelines row's twin. */
     data class DashboardLeafView(
         val id: UUID,
         val name: String,
@@ -477,67 +371,22 @@ class DashboardBrowseModel(
     )
 
     companion object {
-        /** The explorers' page size — the value the pipelines and templates trees use. */
+        /** The catalogs' page size — the value the pipelines and templates lists use. */
         const val PAGE_SIZE = 25
 
         /** The events pane shows the most recent refreshes; the record holds the rest. */
         const val REFRESH_LIMIT = 10
 
-        const val LEVEL_VIEW = "partials/dashboard-tree-level"
         const val SEARCH_VIEW = "partials/dashboard-search"
         const val REFRESHES_VIEW = "partials/dashboard-refreshes"
         const val OVERVIEW_VIEW = "partials/dashboard-overview"
         const val VERSIONS_VIEW = "partials/dashboard-versions"
         const val KEYS_VIEW = "partials/dashboard-keys"
 
-        /** The dispatcher: `searching ? dashboard-search : dashboard-tree-level` (partials/pipelines' shape). */
+        /** The catalog's swap-root view: it renders `dashboard-search` (partials/pipelines' shape). */
         const val WRAPPER_VIEW = "partials/dashboards"
 
-        /** The DOM id of the NAV instance's root level — the sidebar tree's lazy container. */
-        const val NAV_ROOT_ID = "dash-tree-nav"
-
-        /** Hex characters of a nested level's id digest — 64 bits, over one screen's folders. */
-        private const val LEVEL_ID_HEX_LENGTH = 16
-
-        /**
-         * The DOM id of the container that holds one tree level. A prefix cannot be an id (`/`
-         * and `.` are legal in a name), so the id is derived from the scope AND a digest of the
-         * prefix, in one place, so the placeholder a folder renders and the root of the fragment
-         * that replaces it cannot disagree (the pipelines explorer's rule, one scope up). #400:
-         * the only instance left is the sidebar's ([SCOPE_NAV]) — the L3b page tree retired
-         * with the catalog's arrival.
-         */
-        fun levelId(
-            scope: String,
-            prefix: String?,
-        ): String {
-            if (prefix.isNullOrEmpty() && scope == SCOPE_NAV) return NAV_ROOT_ID
-            val key = prefix ?: ""
-            val digest = MessageDigest.getInstance("SHA-256").digest(key.toByteArray(Charsets.UTF_8))
-            return "dash-level-$scope-" + digest.joinToString("") { "%02x".format(it) }.take(LEVEL_ID_HEX_LENGTH)
-        }
-
-        const val SCOPE_NAV = "nav"
-    }
-}
-
-/**
- * One flat-list instance's scope — [PipelineListScope]'s twin: which stable swap root the
- * fragment renders and the pager targets. The sidebar search results swap under
- * [NAV_ROOT_ID]; the `/dashboards` catalog under its own [PAGE_ROOT_ID].
- */
-enum class DashboardListScope(
-    val wire: String,
-    val rootId: String,
-) {
-    NAV(DashboardBrowseModel.SCOPE_NAV, "dash-tree-nav"),
-    PAGE("page", "dash-list-wrapper"),
-    ;
-
-    companion object {
-        /** The DOM id of the catalog instance's stable swap root (partials/dashboard-search renders it). */
+        /** The DOM id of the catalog's stable swap root (partials/dashboard-search renders it). */
         const val PAGE_ROOT_ID = "dash-list-wrapper"
-
-        fun fromWire(value: String?): DashboardListScope = if (value == NAV.wire) NAV else PAGE
     }
 }

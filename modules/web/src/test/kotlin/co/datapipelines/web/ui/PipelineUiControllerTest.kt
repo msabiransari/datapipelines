@@ -25,8 +25,8 @@ import java.util.UUID
  *
  * Since #350 the page is the CATALOG: no `q` fills the flat list of every pipeline the caller
  * may read (newest first, the service's own page), a non-empty `q` the matches and their
- * truthful total. The folder tree lives in the sidebar (`/partials/pipelines?scope=nav`), so the
- * page never asks for a tree level.
+ * truthful total. The folder tree lives in the sidebar (`/api/v1/pipelines/tree` since #460), so
+ * the page never asks for a tree level.
  */
 class PipelineUiControllerTest {
     private val repository = mockk<PipelineRepository>()
@@ -87,7 +87,6 @@ class PipelineUiControllerTest {
         viewName shouldBe "pipelines/list"
         model["activeTheme"] shouldBe "saas"
         model["searching"] shouldBe true
-        model["scope"] shouldBe PipelineListScope.CATALOG.wire
         model["rootId"] shouldBe PipelineBrowseModel.CATALOG_ROOT_ID
         @Suppress("UNCHECKED_CAST")
         (model["pipelines"] as List<PipelineRecord>).map { it.name } shouldBe listOf("legacy_flat", "nyc/mobility/alpha")

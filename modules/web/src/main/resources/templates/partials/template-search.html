@@ -1,16 +1,16 @@
 <!-- Artifact and version links use prepared main-content navigation, preserving the sidebar. -->
 <div xmlns:th="http://www.thymeleaf.org" th:fragment="results" th:id="${rootId}"
-     th:with="nav=${scope == 'nav'}" th:attr="data-template-list=${scope}, hx-swap-oob=${oob}">
+     data-template-list="page" th:attr="hx-swap-oob=${oob}">
   <th:block th:if="${lensUnavailable != null and #lists.isEmpty(templates)}">
     <div th:replace="~{partials/lens-unavailable :: notice(${lensUnavailable})}"></div>
   </th:block>
   <!-- The catalog's two empty answers (§5.1). "Nothing exists" — no rows, no standing
        filter (#510: the choice reads the `filtered` flag, never q alone) — explains how
-       templates arrive, like the tree's. "Nothing matched" offers the control that drops
+       templates arrive. "Nothing matched" offers the control that drops
        what stands: with q standing, #432's box-only control (it keeps dialect/type); with
        only a select standing, the all-filters control resets all three and fetches the
        unfiltered first page. -->
-  <th:block th:if="${lensUnavailable == null and #lists.isEmpty(templates) and !nav and !filtered}">
+  <th:block th:if="${lensUnavailable == null and #lists.isEmpty(templates) and !filtered}">
     <div class="ds-empty">
       <p class="ds-empty-title">No templates yet</p>
       <p class="ds-empty-description">
@@ -20,31 +20,27 @@
       </p>
     </div>
   </th:block>
-  <th:block th:if="${lensUnavailable == null and #lists.isEmpty(templates) and (nav or filtered)}">
+  <th:block th:if="${lensUnavailable == null and #lists.isEmpty(templates) and filtered}">
     <div class="ds-empty">
       <p class="ds-empty-title">No templates match your search</p>
       <div class="ds-empty-actions">
-        <button th:if="${!nav and !#strings.isEmpty(q)}" type="button" class="ds-button ds-button-secondary ds-button-sm"
+        <button th:if="${!#strings.isEmpty(q)}" type="button" class="ds-button ds-button-secondary ds-button-sm"
                 data-dp-clear-filters="#template-filter-q" hx-sync="#template-filter-q:replace"
                 hx-include="#template-filter-dialect, #template-filter-type"
                 th:attr="hx-get=@{/partials/templates}, hx-target='#' + ${rootId}, hx-swap='outerHTML'">Clear search</button>
-        <button th:unless="${nav or !#strings.isEmpty(q)}" type="button" class="ds-button ds-button-secondary ds-button-sm"
+        <button th:if="${#strings.isEmpty(q)}" type="button" class="ds-button ds-button-secondary ds-button-sm"
                 data-dp-clear-filters="#template-filter-q, #template-filter-dialect, #template-filter-type" hx-sync="#template-filter-q:replace"
                 th:attr="hx-get=@{/partials/templates}, hx-target='#' + ${rootId}, hx-swap='outerHTML'">Clear filters</button>
       </div>
     </div>
   </th:block>
 
-  <ul class="tpl-results"
-      th:unless="${#lists.isEmpty(templates)}"
-      th:attr="role=${nav} ? 'listbox' : null,
-               aria-label=${nav} ? 'Template search results' : 'Templates'">
-    <li th:attr="role=${nav} ? 'none' : null" th:each="t : ${templates}">
+  <ul class="tpl-results" aria-label="Templates"
+      th:unless="${#lists.isEmpty(templates)}">
+    <li th:each="t : ${templates}">
       <a class="tpl-result" hx-boost="true"
          th:href="@{'/templates/' + ${t.id}}"
-         th:attr="role=${nav} ? 'option' : null,
-                  aria-selected=${nav} ? 'false' : null,
-                  data-leaf-id=${t.id}">
+         th:attr="data-leaf-id=${t.id}">
         <!-- The FULL path, and it rides on `title` too — a deep path in a narrow pane
              truncates, and the truncated text must never be the only copy (§9.4). -->
         <span class="tpl-path" th:text="${t.id}" th:title="${t.id}">acme/finance/monthly_revenue</span>
@@ -52,7 +48,7 @@
         <span class="ds-badge ds-badge-default" th:if="${t.dialect != null}" th:text="${t.dialect.wire}">POSTGRES</span>
         <span th:if="${drafts != null && drafts[t.id] != null}" class="ds-badge ds-badge-warning"
               th:title="'Draft v' + ${drafts[t.id].version} + ' is pending release — release it from the template workspace to publish.'">draft</span>
-        <!-- 7d (§8.2): the needs-review marker, as the tree leaf carries it. -->
+        <!-- 7d (§8.2): the needs-review marker. -->
         <span th:if="${needsReviewIds != null and #sets.contains(needsReviewIds, t.id)}" class="ds-badge ds-badge-warning" data-needs-review
               title="A fact this template cites was retired or superseded — re-verify before you lean on it.">needs review</span>
       </a>
@@ -60,8 +56,8 @@
   </ul>
 
   <th:block th:unless="${#lists.isEmpty(templates)}"
-            th:with="prevUrl=${nav} ? @{/partials/templates(q=${q}, scope='nav', offset=${offset - 25})} : @{/partials/templates(q=${q}, dialect=${selectedDialect}, type=${selectedType}, offset=${offset - 25})},
-                     nextUrl=${nav} ? @{/partials/templates(q=${q}, scope='nav', offset=${offset + 25})} : @{/partials/templates(q=${q}, dialect=${selectedDialect}, type=${selectedType}, offset=${offset + 25})}">
+            th:with="prevUrl=@{/partials/templates(q=${q}, dialect=${selectedDialect}, type=${selectedType}, offset=${offset - 25})},
+                     nextUrl=@{/partials/templates(q=${q}, dialect=${selectedDialect}, type=${selectedType}, offset=${offset + 25})}">
     <div th:replace="~{partials/pager :: pager('#' + ${rootId}, ${prevUrl}, ${nextUrl}, ${offset}, ${hasMore}, ${templates.size()}, ${total})}"></div>
   </th:block>
 </div>

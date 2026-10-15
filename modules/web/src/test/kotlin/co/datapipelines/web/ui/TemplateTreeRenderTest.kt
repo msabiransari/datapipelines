@@ -22,8 +22,9 @@ import java.time.Instant
 import java.util.UUID
 
 /**
- * Render-level guard for the templates tree and its fragments (template-hierarchy-design §9,
- * round 047, re-aimed by #398 onto the sidebar tree and the catalog/workspace fragments).
+ * Render-level guard for the templates catalog and its fragments (template-hierarchy-design §9,
+ * round 047, re-aimed by #398 onto the catalog/workspace fragments; since #466 the sidebar's
+ * tree is the REST one, rendered client-side, so no server-rendered tree level is left here).
  *
  * Controller tests pin the model; this class pins what the browser actually receives — and,
  * more importantly, what it must NEVER receive. Four of §9.1's six constraints are
@@ -32,7 +33,7 @@ import java.util.UUID
  * These assertions are the only thing standing between those constraints and that round.
  *
  *  - **Folders are virtual** (§3.1) — no create / rename / move / delete control anywhere in
- *    the tree, and no empty-folder state.
+ *    the catalog, and no empty-folder state.
  *  - **`type` is create-time and immutable** (§5.3) — a selector on the create form, a
  *    read-only VALUE on the workspace, and never a disabled control (which devtools re-enables
  *    in one click).
@@ -40,78 +41,61 @@ import java.util.UUID
  *  - **Client validation is a convenience, not an authority** (§9.5) — the create form's
  *    `pattern` must be the SERVER's regex source, not a copy of it.
  *  - **#398: a leaf NAVIGATES** — a full-document link into `/templates/{name}`, never a
- *    selection into a pane (the pane is gone); the sidebar's rows carry `data-leaf-id` for
- *    js/tree's current-leaf marking (sidebar.mjs reads it, render.mjs writes it).
+ *    selection into a pane (the pane is gone); the rows carry `data-leaf-id`.
  *
  * Engine infra mirrors [DatasourcesTemplateRenderTest] (same WebContext shape).
  */
 class TemplateTreeRenderTest {
-    // ---------------------------------------------------------------- the tree
+    // ---------------------------------------------------------------- the catalog list
 
     @Test
-    fun `a tree level renders folders and leaves, each expanding with ONE prefix request`() {
-        val html = render("partials/template-tree-level") { fillLevel() }
+    fun `a catalog row is a full-document link into the workspace, carrying the leaf id`() {
+        val html = render("partials/template-search") { fillSearch() }
 
-        html shouldContain "id=\"template-nav-root\""
-        // One level per request: the folder fetches its OWN prefix, nothing wider (§9.2).
-        html shouldContain "hx-get=\"/partials/templates?prefix=acme&amp;"
-        html shouldContain "hx-trigger=\"click once\""
-        html shouldContain "hx-target=\"next .tpl-level\""
+        html shouldContain "id=\"template-list-wrapper\""
+        html shouldContain "data-template-list=\"page\""
         // #398: a leaf is a LINK to the workspace, a full document — never a detail-pane fetch.
-        html shouldContain "href=\"/templates/legacy_flat.sql\""
+        html shouldContain "href=\"/templates/$DEEP_PATH\""
         html shouldContain "hx-boost=\"true\""
-        html shouldContain "data-leaf-id=\"legacy_flat.sql\""
+        html shouldContain "data-leaf-id=\"$DEEP_PATH\""
         html shouldNotContain "/partials/templates/versions"
-        // The full path is on `title` at every leaf, and the count comes from the subtree.
-        html shouldContain "title=\"acme\""
-        html shouldContain "ds-badge ds-badge-default"
+        html shouldNotContain "hx-target=\"#template-detail\""
+        // The full path is on `title`.
+        html shouldContain "title=\"$DEEP_PATH\""
+        // The pager keeps every active filter, including 046's `type`.
+        html shouldContain "q=revenue"
+        html shouldContain "type=sql"
+        // #466: no sidebar presentation is left — no listbox, no level request, no scope.
+        html shouldNotContain "role=\"listbox\""
+        html shouldNotContain "prefix="
+        html shouldNotContain "scope="
     }
 
     @Test
-    fun `the tree offers NO folder create, rename, move or delete control`() {
-        val html = render("partials/template-tree-level") { fillLevel() }
+    fun `the catalog offers NO folder create, rename, move or delete control`() {
+        val html = render("partials/template-search") { fillSearch() }
 
         // §3.1: a folder is a name prefix with no identity, so there is nothing to act on.
         listOf("New folder", "new-folder", "Rename", "rename", "Move", "Delete folder", "hx-delete", "hx-put", "hx-patch")
             .forEach { html shouldNotContain it }
-        // A folder never carries a mutating request of any kind.
         html shouldNotContain "hx-post"
     }
 
     @Test
-    fun `a level with nothing in it renders the screen empty state, never an empty FOLDER`() {
+    fun `an empty catalog renders the screen empty state, never an empty FOLDER`() {
         val html =
-            render("partials/template-tree-level") {
-                fillLevel()
-                setVariable("folders", emptyList<TemplateFolderView>())
+            render("partials/template-search") {
+                fillSearch()
                 setVariable("templates", emptyList<Template>())
+                setVariable("q", "")
+                setVariable("filtered", false)
             }
 
         // The one empty state is "no templates yet" — the screen's, not a folder's.
         html shouldContain "No templates yet"
         html shouldNotContain "empty folder"
         html shouldNotContain "This folder is empty"
-        // And no tree at all is rendered, so no folder chrome can imply one exists.
-        html shouldNotContain "<ul class=\"tpl-tree\">"
-    }
-
-    @Test
-    fun `085 - folder rows carry the sprite chevron and folder state icons, leaves the file glyph`() {
-        val html = render("partials/template-tree-level") { fillLevel() }
-
-        // The disclosure marker is the sprite's chevron-right, followed by the folder state
-        // pair (CSS swaps folder → folder-open on [open]).
-        html shouldContain "class=\"ds-icon ds-icon-xs tpl-chevron\""
-        html shouldContain "lucide-sprite.svg#chevron-right"
-        html shouldContain "tpl-icon-folder\""
-        html shouldContain "lucide-sprite.svg#folder\""
-        html shouldContain "tpl-icon-folder-open"
-        html shouldContain "lucide-sprite.svg#folder-open"
-        // A leaf gets file-code in the same slot, and every icon is sized and hidden.
-        html shouldContain "lucide-sprite.svg#file-code"
-        html shouldNotContain "<svg class=\"ds-icon\""
-        // The pending placeholder the guides must not touch is unchanged.
-        html shouldContain "tpl-level tpl-level-pending"
+        html shouldNotContain "<ul class=\"tpl-results\""
     }
 
     @Test
@@ -124,55 +108,10 @@ class TemplateTreeRenderTest {
     }
 
     @Test
-    fun `a nested level carries the derived id its placeholder announced`() {
-        val nested =
-            render("partials/template-tree-level") {
-                fillLevel()
-                setVariable("prefix", "acme/finance")
-                setVariable("levelId", TemplateBrowseModel.levelId("acme/finance"))
-            }
-
-        // Derived in ONE place, so the placeholder and the fragment that replaces it agree.
-        nested shouldContain "id=\"${TemplateBrowseModel.levelId("acme/finance")}\""
-        TemplateBrowseModel.levelId(null) shouldBe "template-nav-root"
-        TemplateBrowseModel.CATALOG_ROOT_ID shouldBe "template-list-wrapper"
-        (TemplateBrowseModel.levelId("acme/finance") == TemplateBrowseModel.levelId("acme/hr")) shouldBe false
-    }
-
-    @Test
-    fun `the catalog instance is plain links under the page root, the nav instance the listbox`() {
-        val catalog = render("partials/template-search") { fillSearch(scope = TemplateListScope.CATALOG) }
-        val nav = render("partials/template-search") { fillSearch(scope = TemplateListScope.NAV) }
-
-        // #398's two instances: the scope names the markup AND the stable swap root.
-        catalog shouldContain "id=\"template-list-wrapper\""
-        catalog shouldContain "data-template-list=\"page\""
-        catalog shouldNotContain "role=\"listbox\""
-        nav shouldContain "id=\"template-nav-root\""
-        nav shouldContain "data-template-list=\"nav\""
-        nav shouldContain "role=\"listbox\""
-        // Both are links into the workspace, full documents, carrying the leaf id.
-        listOf(catalog, nav).forEach {
-            it shouldContain "href=\"/templates/$DEEP_PATH\""
-            it shouldContain "hx-boost=\"true\""
-            it shouldContain "data-leaf-id=\"$DEEP_PATH\""
-            it shouldNotContain "hx-target=\"#template-detail\""
-            it shouldNotContain "prefix="
-        }
-        // The pager keeps every active filter, including 046's `type` — on the page instance.
-        catalog shouldContain "q=revenue"
-        catalog shouldContain "type=sql"
-        // The nav instance renders no clear button of its own (the tree engine has one) and the
-        // empty branch is where that would have lived; the catalog's clear is a bare re-fetch.
-        val emptyNav =
-            render("partials/template-search") {
-                fillSearch(TemplateListScope.NAV)
-                setVariable("templates", emptyList<Template>())
-            }
-        emptyNav shouldNotContain "data-nav-tree-clear"
+    fun `the catalog's no-match state offers the Clear search control that keeps dialect and type (#432)`() {
         val emptyCatalog =
             render("partials/template-search") {
-                fillSearch(TemplateListScope.CATALOG)
+                fillSearch()
                 setVariable("templates", emptyList<Template>())
                 setVariable("q", "revenue")
                 // #510: the fixture bypasses the browse model that stamps the flag; this
@@ -186,19 +125,18 @@ class TemplateTreeRenderTest {
         emptyCatalog shouldContain "data-dp-clear-filters=\"#template-filter-q\""
         emptyCatalog shouldContain "hx-include=\"#template-filter-dialect, #template-filter-type\""
         emptyCatalog shouldContain "hx-sync=\"#template-filter-q:replace\""
-        emptyNav shouldNotContain "data-dp-clear-filters"
+        TemplateBrowseModel.CATALOG_ROOT_ID shouldBe "template-list-wrapper"
     }
 
     @Test
-    fun `the level and list fragments never carry the OOB attribute unprompted`() {
-        render("partials/template-tree-level") { fillLevel() } shouldNotContain "hx-swap-oob=\"true\""
+    fun `the list fragment never carries the OOB attribute unprompted`() {
         render("partials/template-search") { fillSearch() } shouldNotContain "hx-swap-oob=\"true\""
     }
 
     @Test
     fun `the dispatcher fragment is gone - the controller returns the concrete view`() {
         // partials/templates.html retired with the two-pane page (#398): a dispatcher here
-        // would be a silent second contract beside the model's concrete LEVEL/SEARCH views.
+        // would be a silent second contract beside the model's concrete SEARCH view.
         javaClass.getResource("/templates/partials/templates.html") shouldBe null
         javaClass.getResource("/templates/partials/template-detail.html") shouldBe null
     }
@@ -371,32 +309,9 @@ class TemplateTreeRenderTest {
 
     // ------------------------------------------------------------------ fixtures
 
-    private fun WebContext.fillLevel() {
-        setVariable("searching", false)
-        setVariable("scope", TemplateListScope.NAV.wire)
-        setVariable("prefix", "")
-        setVariable("levelId", TemplateBrowseModel.ROOT_LEVEL_ID)
-        setVariable(
-            "folders",
-            listOf(
-                TemplateFolderView("acme", "acme", 12, TemplateBrowseModel.levelId("acme")),
-                TemplateFolderView("lib", "lib", 3, TemplateBrowseModel.levelId("lib")),
-            ),
-        )
-        setVariable("foldersTruncated", false)
-        setVariable("templates", listOf(template("legacy_flat.sql")))
-        setVariable("drafts", emptyMap<String, TemplateVersionDetail>())
-        setVariable("offset", 0)
-        setVariable("hasMore", false)
-        setVariable("total", 1)
-        setVariable("selectedDialect", "")
-        setVariable("selectedType", "")
-    }
-
-    private fun WebContext.fillSearch(scope: TemplateListScope = TemplateListScope.NAV) {
+    private fun WebContext.fillSearch() {
         setVariable("searching", true)
-        setVariable("scope", scope.wire)
-        setVariable("rootId", scope.rootId)
+        setVariable("rootId", TemplateBrowseModel.CATALOG_ROOT_ID)
         setVariable("templates", listOf(template(DEEP_PATH)))
         setVariable("drafts", emptyMap<String, TemplateVersionDetail>())
         setVariable("q", "revenue")
@@ -445,7 +360,7 @@ class TemplateTreeRenderTest {
     private fun WebContext.fillPage() {
         fillChrome()
         // The catalog's own fill: the flat list, always (the dispatcher is gone).
-        fillSearch(TemplateListScope.CATALOG)
+        fillSearch()
         setVariable("q", "")
         setVariable("dialects", listOf("POSTGRES", "MYSQL"))
         setVariable("types", TemplateType.WIRE_VALUES)

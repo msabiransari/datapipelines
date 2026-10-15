@@ -27,7 +27,8 @@ import java.util.UUID
  * What is pinned here, at the byte level the browser receives:
  *  - the two-pane explorer is GONE — the page carries no pane, no divider and no drawer, and
  *    its other door is the sidebar tree's reveal;
- *  - the tree's ARIA shape (a root level is `role=tree`, a nested level a `role=group`);
+ *  - the catalog row's shape (a navigating link carrying the leaf id and the full path, in a
+ *    plain list — since #466 the fragment has no sidebar presentation);
  *  - the used-by fragment (#320's three arms, the "nothing pins it" sentence) — the
  *    workspace's Used by tab is its only page now;
  *  - the create modal (Q1(b), the four types, the transform blocks);
@@ -70,56 +71,23 @@ class TemplateExplorerRenderTest {
         html shouldContain "data-action=\"template-create-open\""
     }
 
-    // ---------------------------------------------------------------- the tree's ARIA shape
+    // ---------------------------------------------------------------- the catalog row's shape
 
     @Test
-    fun `the root level is a tree and a nested level is a group under its folder`() {
-        val root = render("partials/template-tree-level") { fillLevel() }
-        val nested = render("partials/template-tree-level") { fillNestedLevel() }
+    fun `a catalog row is a navigating link carrying the leaf id and the path on title, in a plain list`() {
+        val html = render("partials/template-search") { fillSearch() }
 
-        root shouldContain "<ul class=\"tpl-tree\""
-        root shouldContain "role=\"tree\""
-        root shouldContain "aria-label=\"Templates\""
-        nested shouldNotContain "role=\"tree\""
-        nested shouldContain "role=\"group\""
-    }
-
-    @Test
-    fun `a leaf is a navigating link carrying the leaf id and the path on title`() {
-        val html = render("partials/template-tree-level") { fillNestedLevel() }
-
-        html shouldContain "<a class=\"tpl-leaf\" role=\"treeitem\" aria-selected=\"false\" hx-boost=\"true\""
-        html shouldContain "href=\"/templates/acme/finance/monthly_revenue.sql\""
-        html shouldContain "data-leaf-id=\"acme/finance/monthly_revenue.sql\""
-        html shouldContain "title=\"acme/finance/monthly_revenue.sql\""
+        html shouldContain "<a class=\"tpl-result\" hx-boost=\"true\""
+        html shouldContain "href=\"/templates/$DEEP_PATH\""
+        html shouldContain "data-leaf-id=\"$DEEP_PATH\""
+        html shouldContain "title=\"$DEEP_PATH\""
+        // #466: no sidebar presentation is left in the fragment.
+        html shouldNotContain "role=\"listbox\""
+        html shouldNotContain "role=\"option\""
+        html shouldNotContain "aria-selected"
         // The selection machinery is gone with the pane.
         html shouldNotContain "hx-get=\"/partials/templates/versions"
         html shouldNotContain "data-editor-url"
-    }
-
-    @Test
-    fun `077 - the ROOT level renders folders only, never a leaf`() {
-        // The fixture carries a leaf anyway: the model never queries the root's leaves, and
-        // the ROOT id is what proves this is the root level.
-        val root = render("partials/template-tree-level") { fillLevel() }
-
-        root shouldNotContain "tpl-leaf"
-        root shouldContain "tpl-folder"
-    }
-
-    @Test
-    fun `a search row is the same navigating link, in a listbox on the nav instance`() {
-        val nav = render("partials/template-search") { fillSearch(TemplateListScope.NAV) }
-        val catalog = render("partials/template-search") { fillSearch(TemplateListScope.CATALOG) }
-
-        nav shouldContain "role=\"option\""
-        nav shouldContain "aria-selected=\"false\""
-        catalog shouldNotContain "role=\"option\""
-        listOf(nav, catalog).forEach {
-            it shouldContain "href=\"/templates/$DEEP_PATH\""
-            it shouldContain "data-leaf-id=\"$DEEP_PATH\""
-            it shouldContain "title=\"$DEEP_PATH\""
-        }
     }
 
     // ---------------------------------------------------------------- the used-by fragment
@@ -177,31 +145,19 @@ class TemplateExplorerRenderTest {
     }
 
     @Test
-    fun `a transform leaf and search row show their language as the type badge, with no dialect`() {
-        val tree =
-            render("partials/template-tree-level") {
-                fillNestedLevel()
-                setVariable("templates", listOf(template("acme/finance/row_pick", TemplateType.JSONATA)))
-            }
+    fun `a transform catalog row shows its language as the type badge, with no dialect`() {
         val search =
             render("partials/template-search") {
                 fillSearch()
                 setVariable("templates", listOf(template(DEEP_PATH, TemplateType.JSONATA)))
             }
 
-        listOf(tree, search).forEach {
-            it shouldContain ">jsonata</span>"
-            it shouldNotContain ">POSTGRES</span>"
-        }
+        search shouldContain ">jsonata</span>"
+        search shouldNotContain ">POSTGRES</span>"
     }
 
     @Test
-    fun `the needs-review marker renders only when its flag is set - tree and search rows`() {
-        render("partials/template-tree-level") { fillNestedLevel() } shouldNotContain "data-needs-review"
-        render("partials/template-tree-level") {
-            fillNestedLevel()
-            setVariable("needsReviewIds", setOf("acme/finance/monthly_revenue.sql"))
-        } shouldContain "data-needs-review"
+    fun `the needs-review marker renders only when its flag is set - catalog rows`() {
         render("partials/template-search") { fillSearch() } shouldNotContain "data-needs-review"
         render("partials/template-search") {
             fillSearch()
@@ -226,41 +182,9 @@ class TemplateExplorerRenderTest {
 
     // ------------------------------------------------------------------ fixtures
 
-    private fun WebContext.fillLevel() {
-        setVariable("searching", false)
-        setVariable("scope", TemplateListScope.NAV.wire)
-        setVariable("prefix", "")
-        setVariable("levelId", TemplateBrowseModel.ROOT_LEVEL_ID)
-        setVariable(
-            "folders",
-            listOf(
-                TemplateFolderView("acme", "acme", 12, TemplateBrowseModel.levelId("acme")),
-            ),
-        )
-        setVariable("foldersTruncated", false)
-        setVariable("templates", emptyList<Template>())
-        setVariable("drafts", emptyMap<String, TemplateVersionDetail>())
-        setVariable("offset", 0)
-        setVariable("hasMore", false)
-        setVariable("total", 0)
-        setVariable("selectedDialect", "")
-        setVariable("selectedType", "")
-    }
-
-    /** A NESTED level — the only kind that has leaves now. */
-    private fun WebContext.fillNestedLevel() {
-        fillLevel()
-        setVariable("prefix", "acme/finance")
-        setVariable("levelId", TemplateBrowseModel.levelId("acme/finance"))
-        setVariable("folders", emptyList<TemplateFolderView>())
-        setVariable("templates", listOf(template("acme/finance/monthly_revenue.sql")))
-        setVariable("total", 1)
-    }
-
-    private fun WebContext.fillSearch(scope: TemplateListScope = TemplateListScope.NAV) {
+    private fun WebContext.fillSearch() {
         setVariable("searching", true)
-        setVariable("scope", scope.wire)
-        setVariable("rootId", scope.rootId)
+        setVariable("rootId", TemplateBrowseModel.CATALOG_ROOT_ID)
         setVariable("templates", listOf(template(DEEP_PATH)))
         setVariable("drafts", emptyMap<String, TemplateVersionDetail>())
         setVariable("q", "revenue")
@@ -285,7 +209,7 @@ class TemplateExplorerRenderTest {
 
     private fun WebContext.fillPage() {
         fillChrome()
-        fillSearch(TemplateListScope.CATALOG)
+        fillSearch()
         setVariable("q", "")
         setVariable("dialects", listOf("POSTGRES", "MYSQL"))
         setVariable("types", TemplateType.WIRE_VALUES)

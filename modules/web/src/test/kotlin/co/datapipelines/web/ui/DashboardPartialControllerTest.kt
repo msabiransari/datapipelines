@@ -184,49 +184,24 @@ class DashboardPartialControllerTest {
         model["successRate"] shouldBe 50
     }
 
-    // ------------------------------------------------------------ #10 L3b: the tree partial
+    // ------------------------------------------------------------ #10 L3b: the catalog partial
 
     @Test
-    fun `the tree partial threads the pager's offset to the level - the NAV branch's only instance (#400)`() {
+    fun `the catalog partial is the flat list, threading the pager's offset (#400)`() {
         authenticate()
-
-        controller.dashboardTree(model, prefix = "finance/dashboards", q = null, scope = "nav", offset = 25)
-
-        verify(exactly = 1) {
-            browse.fillLevel(
-                model,
-                workspaceId,
-                any(),
-                prefix = "finance/dashboards",
-                offset = 25,
-            )
-        }
-    }
-
-    @Test
-    fun `the tree partial without an offset is page one, and an unknown scope is the flat branch`() {
-        authenticate()
-
-        controller.dashboardTree(model, prefix = null, q = null, scope = "bogus", offset = null)
-
-        verify(exactly = 1) {
-            browse.fillWrapper(model, workspaceId, any(), q = null, offset = 0, scope = DashboardListScope.PAGE)
-        }
-    }
-
-    @Test
-    fun `the branch's search dispatches the flat list into the nav root, and the catalog partial is always flat (#400)`() {
-        authenticate()
-
-        controller.dashboardTree(model, prefix = null, q = "revenue", scope = "nav", offset = null)
-        verify(exactly = 1) {
-            browse.fillWrapper(model, workspaceId, any(), q = "revenue", offset = 0, scope = DashboardListScope.NAV)
-        }
 
         controller.dashboardCatalog(model, q = null, offset = 50)
-        verify(exactly = 1) {
-            browse.fillWrapper(model, workspaceId, any(), q = null, offset = 50, scope = DashboardListScope.PAGE)
-        }
+
+        verify(exactly = 1) { browse.fillWrapper(model, workspaceId, any(), q = null, offset = 50) }
+    }
+
+    @Test
+    fun `the catalog partial without an offset is page one`() {
+        authenticate()
+
+        controller.dashboardCatalog(model, q = "revenue", offset = null)
+
+        verify(exactly = 1) { browse.fillWrapper(model, workspaceId, any(), q = "revenue", offset = 0) }
     }
 
     @Test

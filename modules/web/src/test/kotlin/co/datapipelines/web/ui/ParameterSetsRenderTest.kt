@@ -16,8 +16,9 @@ import org.thymeleaf.web.servlet.JakartaServletWebApplication
 import java.util.UUID
 
 /**
- * #374 — the Parameter Sets pages pinned at the RENDER (DashboardUiRenderTest's mould): the tree level's contract
- * (root holds folders only, a leaf navigates un-boosted, the model decides what renders), the catalog's pager, and
+ * #374 — the Parameter Sets pages pinned at the RENDER (DashboardUiRenderTest's mould): the catalog's contract
+ * (a row navigates to the workspace, the model decides what renders, the pager keeps q; since #466 no sidebar
+ * presentation is left in the fragment — the tree is the REST one), and
  * the workspace page's markup contract — the inert script catalog, no inline script bodies, the role-hidden form,
  * the draft label, the choose-a-version state. The model is where the lens is applied, so "a hidden set is absent
  * from the HTML" is exactly "it is not in the model".
@@ -35,68 +36,10 @@ class ParameterSetsRenderTest {
         }
 
     private val setId = UUID.randomUUID()
-    private val folder = ParameterSetsBrowseModel.ParameterSetFolderView("acme", "acme", 2, "params-level-nav-aaaa", "nav")
     private val released = ParameterSetsBrowseModel.ParameterSetLeafView(setId, "acme/geo_filters", "geo_filters", "Geo filters", 3, true)
     private val draft = ParameterSetsBrowseModel.ParameterSetLeafView(UUID.randomUUID(), "acme/wip", "wip", "Wip", 1, false)
 
-    private fun level(
-        prefix: String,
-        folders: List<ParameterSetsBrowseModel.ParameterSetFolderView>,
-        leaves: List<ParameterSetsBrowseModel.ParameterSetLeafView>,
-        hasMore: Boolean = false,
-        offset: Int = 0,
-    ): String =
-        engine.process(
-            "partials/parameter-set-tree-level",
-            webContext("/parameter-sets").apply {
-                setVariable("prefix", prefix)
-                setVariable("scope", "nav")
-                setVariable("levelId", ParameterSetsBrowseModel.levelId("nav", prefix))
-                setVariable("folders", folders)
-                setVariable("parameterSets", leaves)
-                setVariable("offset", offset)
-                setVariable("hasMore", hasMore)
-                setVariable("total", leaves.size)
-                setVariable("lensUnavailable", null)
-            },
-        )
-
-    @Test
-    fun `the root level lists folders only - a parameter set name needs a folder`() {
-        val html = level("", listOf(folder), emptyList())
-        html shouldContain "/partials/parameter-sets/tree?prefix=acme&amp;scope=nav"
-        html shouldNotContain "tpl-leaf"
-    }
-
-    @Test
-    fun `a leaf is an un-boosted link to the workspace carrying its id, with drafts marked`() {
-        val html = level("acme", emptyList(), listOf(released, draft))
-        html shouldContain "href=\"/parameter-sets/$setId\""
-        html shouldContain "data-leaf-id=\"$setId\""
-        html shouldContain "hx-boost=\"true\""
-        html shouldContain "title=\"acme/geo_filters\""
-        html shouldContain "tpl-leaf-draft"
-        html shouldContain ">v3<"
-        html shouldContain "#sliders-horizontal"
-    }
-
-    @Test
-    fun `a set the lens hides from the model is absent from the HTML`() {
-        // Markup only: the partial's own explanatory comments (which say "not disabled") are not the page's rows.
-        val html = level("acme", emptyList(), listOf(released)).replace(Regex("<!--.*?-->", RegexOption.DOT_MATCHES_ALL), "")
-        html shouldNotContain "wip"
-        html shouldNotContain "disabled"
-    }
-
-    @Test
-    fun `an empty level says parameter sets are authored through the MCP server and offers no create control`() {
-        val html = level("", emptyList(), emptyList())
-        html shouldContain "No parameter sets yet"
-        html shouldNotContain "<button"
-    }
-
     private fun search(
-        scope: String,
         leaves: List<ParameterSetsBrowseModel.ParameterSetLeafView>,
         q: String,
     ): String =
@@ -104,8 +47,7 @@ class ParameterSetsRenderTest {
             "partials/parameter-set-search",
             webContext("/parameter-sets").apply {
                 setVariable("searching", true)
-                setVariable("scope", scope)
-                setVariable("rootId", ParameterSetsBrowseModel.rootIdOf(scope))
+                setVariable("rootId", ParameterSetsBrowseModel.CATALOG_ROOT_ID)
                 setVariable("q", q)
                 setVariable("parameterSets", leaves)
                 setVariable("offset", 0)
@@ -116,21 +58,33 @@ class ParameterSetsRenderTest {
         )
 
     @Test
-    fun `#415 - the nav search results are a listbox of full-path rows under the tree's root id, so clearing returns the tree`() {
-        val html = search("nav", listOf(released), "geo")
-        html shouldContain "id=\"params-tree-nav\""
-        html shouldContain "role=\"listbox\""
-        html shouldContain "aria-label=\"Parameter set search results\""
+    fun `a catalog row is a link to the workspace carrying its id and full path, with drafts marked`() {
+        val html = search(listOf(released, draft), "")
+        html shouldContain "id=\"parameter-set-list-wrapper\""
         html shouldContain "href=\"/parameter-sets/$setId\""
+        html shouldContain "data-leaf-id=\"$setId\""
         html shouldContain "hx-boost=\"true\""
         html shouldContain "title=\"acme/geo_filters\""
-        // The pager keeps the query AND the nav scope: a page two that lost either would lie.
-        html shouldContain "/partials/parameter-sets/tree?q=geo&amp;scope=nav&amp;offset=25"
+        html shouldContain ">v3<"
+        html shouldContain "draft v1 pending release"
+        // #466: no sidebar presentation is left in the fragment.
+        html shouldNotContain "role=\"listbox\""
+        html shouldNotContain "role=\"option\""
+        html shouldNotContain "scope="
+        html shouldNotContain "prefix="
+    }
+
+    @Test
+    fun `a set the lens hides from the model is absent from the HTML`() {
+        // Markup only: the partial's own explanatory comments are not the page's rows.
+        val html = search(listOf(released), "").replace(Regex("<!--.*?-->", RegexOption.DOT_MATCHES_ALL), "")
+        html shouldContain "acme/geo_filters"
+        html shouldNotContain "wip"
     }
 
     @Test
     fun `#415 - the catalog's search results are plain links whose pager keeps q`() {
-        val html = search("page", listOf(released), "geo")
+        val html = search(listOf(released), "geo")
         html shouldContain "id=\"parameter-set-list-wrapper\""
         html shouldNotContain "role=\"listbox\""
         html shouldContain "/partials/parameter-sets/tree?q=geo&amp;offset=25"
@@ -138,22 +92,20 @@ class ParameterSetsRenderTest {
 
     @Test
     fun `#415 - a failed search and an empty catalog say different things`() {
-        // A nav search with no hits: the match-miss state, with no nav-scope clear (the tree engine's own clears).
-        val miss = search("nav", emptyList(), "geo")
-        miss shouldContain "No parameter sets match your search"
-        miss shouldNotContain "data-nav-tree-clear"
         // The catalog's no-hit search: the clear re-fetches the route bare (the box is the page's own).
-        val pageMiss = search("page", emptyList(), "geo")
+        val pageMiss = search(emptyList(), "geo")
         pageMiss shouldContain "No parameter sets match your search"
+        pageMiss shouldNotContain "data-nav-tree-clear"
         pageMiss shouldContain "hx-get=\"/partials/parameter-sets/tree\""
         // #432: and it names the box it empties (shell.js) and replaces a search still in flight.
         pageMiss shouldContain "data-dp-clear-filters=\"#parameter-set-filter-q\""
         pageMiss shouldContain "hx-sync=\"#parameter-set-filter-q:replace\""
-        miss shouldNotContain "data-dp-clear-filters"
-        // The catalog with no query and no rows is the EMPTY state, not a failed search.
-        val empty = search("page", emptyList(), "")
+        // The catalog with no query and no rows is the EMPTY state, not a failed search; it says
+        // parameter sets are authored through the MCP server and offers no create control.
+        val empty = search(emptyList(), "")
         empty shouldContain "No parameter sets yet"
         empty shouldNotContain "match your search"
+        empty shouldNotContain "<button"
     }
 
     private fun workspace(

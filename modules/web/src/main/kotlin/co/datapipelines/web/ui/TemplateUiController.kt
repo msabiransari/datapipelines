@@ -54,7 +54,7 @@ class TemplateUiController(
         model.addAttribute("skeleton", TransformSkeleton)
         model.addAttribute("q", q ?: "")
         val principal = currentPrincipal()
-        browse.fillWrapper(
+        browse.fillSearch(
             model,
             principal.requireWorkspace().id,
             lens.viewFor(principal),
@@ -62,7 +62,6 @@ class TemplateUiController(
             dialect = TemplateFilters.dialect(dialect),
             type = TemplateFilters.type(type),
             offset = offset ?: 0,
-            scope = TemplateListScope.CATALOG,
         )
         return "templates/list"
     }

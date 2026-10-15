@@ -78,7 +78,6 @@ class ReadFloorTest {
         familyOf("/visualizations") shouldBeFamily Family.VISUALIZATIONS
         familyOf("/visualizations/{id}") shouldBeFamily Family.VISUALIZATIONS
         familyOf("/partials/visualizations") shouldBeFamily Family.VISUALIZATIONS
-        familyOf("/partials/visualizations/tree") shouldBeFamily Family.VISUALIZATIONS
         familyOf("/partials/visualizations/{id}/evidence/{runId}") shouldBeFamily Family.VISUALIZATIONS
         familyOf("/partials/visualizations/{id}/lifecycle/switch") shouldBeFamily Family.LIFECYCLE_DIALOGS
         familyOf("/api/v1/dashboards") shouldBeFamily Family.DASHBOARDS
@@ -100,7 +99,6 @@ class ReadFloorTest {
         familyOf("/dashboards/{id}") shouldBeFamily Family.DASHBOARDS
         familyOf("/dashboards/{id}/preview") shouldBeFamily Family.DASHBOARDS
         familyOf("/partials/dashboards") shouldBeFamily Family.DASHBOARDS
-        familyOf("/partials/dashboards/tree") shouldBeFamily Family.DASHBOARDS
         familyOf("/partials/dashboards/{id}/overview") shouldBeFamily Family.DASHBOARDS
         familyOf("/partials/dashboards/{id}/versions") shouldBeFamily Family.DASHBOARDS
         // #400 — the Keys tab is the ONE dashboard surface below every role: its route floors

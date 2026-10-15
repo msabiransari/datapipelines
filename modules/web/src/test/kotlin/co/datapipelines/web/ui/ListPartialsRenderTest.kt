@@ -269,8 +269,7 @@ class ListPartialsRenderTest {
         setVariable("dialects", emptyList<String>())
         // #350: the page is the CATALOG — the flat list under its own root, never a tree level.
         setVariable("searching", true)
-        setVariable("scope", PipelineListScope.CATALOG.wire)
-        setVariable("rootId", PipelineListScope.CATALOG.rootId)
+        setVariable("rootId", PipelineBrowseModel.CATALOG_ROOT_ID)
         setVariable("pipelines", listOf(pipelineRecord()))
         setVariable("drafts", emptyMap<UUID, co.datapipelines.pipeline.PipelineVersionDetail>())
         setVariable("q", "")
@@ -300,8 +299,7 @@ class ListPartialsRenderTest {
      */
     private fun WebContext.fillPipelinesModel(rows: List<PipelineRecord>) {
         setVariable("searching", true)
-        setVariable("scope", PipelineListScope.CATALOG.wire)
-        setVariable("rootId", PipelineListScope.CATALOG.rootId)
+        setVariable("rootId", PipelineBrowseModel.CATALOG_ROOT_ID)
         setVariable("pipelines", rows)
         setVariable("drafts", emptyMap<UUID, co.datapipelines.pipeline.PipelineVersionDetail>())
         setVariable("q", "")
@@ -319,8 +317,7 @@ class ListPartialsRenderTest {
     private fun WebContext.fillTemplatesModel(rows: List<Template>) {
         setVariable("searching", true)
         // #398: the fragment reads its instance's scope and root (the CATALOG by default).
-        setVariable("scope", TemplateListScope.CATALOG.wire)
-        setVariable("rootId", TemplateListScope.CATALOG.rootId)
+        setVariable("rootId", TemplateBrowseModel.CATALOG_ROOT_ID)
         setVariable("templates", rows)
         setVariable("drafts", emptyMap<String, co.datapipelines.templates.TemplateVersionDetail>())
         setVariable("q", "orders")

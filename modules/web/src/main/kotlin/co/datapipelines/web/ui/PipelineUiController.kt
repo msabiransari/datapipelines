@@ -14,8 +14,8 @@ import org.springframework.web.bind.annotation.RequestParam
 /**
  * The pipelines screen (ui-screens.md §4.3) — since #350 the **catalog**: a flat, server-paged
  * list of full paths (every pipeline the caller may read, or the matches of `q`), each row a
- * link to the canonical workspace. The folder tree moved into the global sidebar
- * (`/partials/pipelines?scope=nav`), so this page no longer carries a tree or a detail pane
+ * link to the canonical workspace. The folder tree moved into the global sidebar (read from
+ * `/api/v1/pipelines/tree` since #460), so this page no longer carries a tree or a detail pane
  * (owner ruling 2026-10-02; spec §3.2 "#350 removes the redundant tree panel").
  *
  * The page's first render goes through the same [PipelineBrowseModel] the htmx partial does,
@@ -48,7 +48,6 @@ class PipelineUiController(
             lens.viewFor(principal),
             q?.trim()?.takeIf { it.isNotEmpty() },
             maxOf(0, offset ?: 0),
-            PipelineListScope.CATALOG,
         )
         return "pipelines/list"
     }

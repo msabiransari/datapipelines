@@ -19,16 +19,16 @@ import java.time.Instant
 import java.util.UUID
 
 /**
- * Render-level guard for the pipelines screen's fragments — the sidebar tree, the search and
- * the catalog, and the Versions surface the workspace composes (the detail pane these suites
+ * Render-level guard for the pipelines screen's fragments — the catalog's flat list (since #466
+ * the sidebar's tree is the REST one, rendered client-side, so no tree level or nav search is
+ * left in the server's fragments), and the Versions surface the workspace composes (the detail pane these suites
  * once guarded beside them is REMOVED by #401; its render suite left with it).
  *
  * The properties this class exists to pin:
  *
- *  - **A tree swap never leaks into the catalog and vice versa** — each presentation renders
- *    its own stable swap root, and the fragments contain no markup that could touch the
- *    other's DOM.
- *  - **The tree ships no folder CRUD**, because a folder is a name prefix with no identity
+ *  - **The catalog is the page's own** — it renders its stable swap root and no sidebar markup
+ *    (no listbox, no nav scope), so it cannot touch the sidebar tree's DOM.
+ *  - **The catalog ships no folder CRUD**, because a folder is a name prefix with no identity
  *    (§3.1). No New folder / rename / move / delete control, and no empty-folder state.
  *  - **T108: the dead "Create Pipeline" button is gone**, replaced by an honest sentence and a
  *    link. It promised an affordance the server does not have and its tooltip named an
@@ -38,8 +38,8 @@ import java.util.UUID
  * length, and a promise in a comment is not an affordance (the discipline
  * [TemplateExplorerRenderTest] established, for exactly this reason).
  *
- * `LargeClass` is suppressed knowingly: the list fragments (sidebar tree, nav search,
- * catalog) and the workspace's versions fragment share one fixture set.
+ * `LargeClass` is suppressed knowingly: the catalog's list fragment and the workspace's
+ * versions fragment share one fixture set.
  */
 @Suppress("LargeClass")
 class PipelineExplorerRenderTest {
@@ -87,117 +87,54 @@ class PipelineExplorerRenderTest {
     }
 
     @Test
-    fun `the root level is a tree and a nested level is a group under its folder`() {
-        val root = render("partials/pipeline-tree-level") { fillLevel() }
-        // A nested level's leaves are BY CONSTRUCTION under its prefix (the query splits on the
-        // remainder), which is what lets the label be the last segment.
-        val nested = render("partials/pipeline-tree-level") { fillNestedLevel() }
-
-        root shouldContain "role=\"tree\""
-        root shouldContain "aria-label=\"Pipelines\""
-        root shouldNotContain "role=\"group\""
-        nested shouldContain "role=\"group\""
-        nested shouldNotContain "aria-label=\"Pipelines\""
-        root shouldContain "role=\"treeitem\""
-        root shouldContain "role=\"none\""
-    }
-
-    @Test
-    fun `a folder expands ONE level, labelled by its segment with the FULL prefix on title`() {
-        val html = render("partials/pipeline-tree-level") { fillLevel() }
-
-        // The selector shape the templates explorer's browser tests use, so they transfer.
-        html shouldContain "<details class=\"tpl-folder\">"
-        html shouldContain "class=\"tpl-summary\""
-        html shouldContain "hx-get=\"/partials/pipelines?prefix=nyc\""
-        html shouldContain "hx-trigger=\"click once\""
-        html shouldContain "hx-target=\"next .tpl-level\""
-        // Label = the segment; the FULL prefix rides on title (§9.4).
-        html shouldContain ">nyc</span>"
-        html shouldContain "title=\"nyc\""
-        // The placeholder the child level replaces carries the SAME derived id.
-        html shouldContain "id=\"" + PipelineBrowseModel.levelId("nyc") + "\""
-    }
-
-    @Test
-    fun `077 - the ROOT level renders folders only, never a leaf`() {
-        // §4.1 requires a folder, so nothing sits directly at the root and the fragment has no
-        // "leaf at the root" branch left to exercise. Asserted on the RENDERED level rather
-        // than on the model, because the branch that is gone lived in the markup: the label
-        // used to be `prefix.isEmpty() ? p.name : p.name.substring(...)`.
-        val root = render("partials/pipeline-tree-level") { fillLevel() }
-
-        root shouldNotContain "tpl-leaf"
-        root shouldNotContain "data-editor-url"
-        root shouldContain "tpl-folder"
-        // …and a NESTED level still renders its leaves, labelled by their last segment, so the
-        // assertion above is about the root and not about leaves having disappeared.
-        val nested = render("partials/pipeline-tree-level") { fillNestedLevel() }
-        nested shouldContain "tpl-leaf"
-        nested shouldContain ">revenue_by_borough</span>"
-    }
-
-    @Test
-    fun `the tree ships no folder CRUD and no empty-folder state`() {
-        val html = render("partials/pipeline-tree-level") { fillLevel() }
+    fun `the catalog ships no folder CRUD and no empty-folder state`() {
+        val html = render("partials/pipeline-search") { fillCatalog() }
 
         html shouldNotContain "New folder"
         html shouldNotContain "Rename"
         html shouldNotContain "Move"
         html shouldNotContain "Delete"
-        // R10: this screen is read-only. The only write affordance anywhere is the editor link.
+        // R10: this screen is read-only.
         html shouldNotContain "hx-post"
         html shouldNotContain "hx-put"
         html shouldNotContain "hx-delete"
+        html shouldNotContain "empty folder"
     }
 
     @Test
-    fun `085 - the pipeline tree carries the same icon chrome as the templates tree`() {
-        // One stylesheet dresses both explorers (067's convention), so the DOM shape is
-        // pinned on both partials: folders at the root level, a leaf in a nested one.
-        val root = render("partials/pipeline-tree-level") { fillLevel() }
-        root shouldContain "class=\"ds-icon ds-icon-xs tpl-chevron\""
-        root shouldContain "lucide-sprite.svg#chevron-right"
-        root shouldContain "lucide-sprite.svg#folder\""
-        root shouldContain "lucide-sprite.svg#folder-open"
-        root shouldContain "tpl-level tpl-level-pending"
-
-        val nested = render("partials/pipeline-tree-level") { fillNestedLevel() }
-        nested shouldContain "lucide-sprite.svg#file-code"
-
-        // Search stays a flat list — no guides, no tree icons.
+    fun `085 - the catalog stays a flat list - no guides, no tree icons`() {
         val search = render("partials/pipeline-search") { fillSearch() }
+
         search shouldNotContain "lucide-sprite"
         search shouldNotContain "tpl-chevron"
+        search shouldNotContain "tpl-folder"
     }
 
     @Test
-    fun `#350 - a leaf NAVIGATES - a full-document link to the canonical workspace, never a detail swap`() {
-        // A NESTED level: since 077 a leaf can only sit under a folder (§4.1).
-        val html = render("partials/pipeline-tree-level") { fillNestedLevel() }
+    fun `#350 - a row NAVIGATES - a full-document link to the canonical workspace, never a detail swap`() {
+        val html = render("partials/pipeline-search") { fillSearch() }
 
         // The canonical read workspace with NO version (its current-first rule resolves it,
         // spec §3.1), as a full document load (the graph entry spec §2 keeps).
-        val leaf = Regex("""<a class="tpl-leaf"[^>]*>""").find(html)?.value ?: error("no leaf link in $html")
-        leaf shouldContain "href=\"/pipelines/$LEAF_ID\""
-        leaf shouldContain "hx-boost=\"true\""
-        leaf shouldContain "role=\"treeitem\""
-        leaf shouldContain "data-leaf-id=\"$LEAF_ID\""
-        leaf shouldNotContain "version="
+        val row = Regex("""<a class="tpl-result"[^>]*>""").find(html)?.value ?: error("no row link in $html")
+        row shouldContain "href=\"/pipelines/$LEAF_ID\""
+        row shouldContain "hx-boost=\"true\""
+        row shouldContain "data-leaf-id=\"$LEAF_ID\""
+        row shouldNotContain "version="
         // The old selection contract is gone with the pane.
         html shouldNotContain "pipeline-detail"
         html shouldNotContain "data-editor-url"
         html shouldNotContain "/editor"
         html shouldNotContain "hx-swap-oob"
-        html shouldContain "aria-selected=\"false\""
+        // The flat list shows the FULL path — that is what someone searching wants to read.
+        html shouldContain ">$DEEP_PATH</span>"
     }
 
     @Test
     fun `an empty workspace says how a pipeline is created, and offers no button that does not work`() {
         val html =
-            render("partials/pipeline-tree-level") {
-                fillLevel()
-                setVariable("folders", emptyList<PipelineFolderView>())
+            render("partials/pipeline-search") {
+                fillCatalog()
                 setVariable("pipelines", emptyList<PipelineRecord>())
                 setVariable("total", 0)
             }
@@ -425,38 +362,24 @@ class PipelineExplorerRenderTest {
     }
 
     @Test
-    fun `#350 - the legacy sidebar search fragment retains its listbox and root contract`() {
+    fun `#350 - a CATALOG row is a plain link in a plain list, and its pager stays on the page`() {
         val html = render("partials/pipeline-search") { fillSearch() }
 
-        html shouldContain "id=\"pipeline-nav-root\""
-        html shouldContain "role=\"listbox\""
-        html shouldContain "aria-label=\"Pipeline search results\""
-        html shouldContain "role=\"option\""
-        html shouldContain "href=\"/pipelines/$LEAF_ID\""
-        html shouldContain "hx-boost=\"true\""
-        html shouldNotContain "pipeline-detail"
-        html shouldNotContain "data-editor-url"
-        // The pager stays in the sidebar: its requests carry the nav scope and target its root.
-        html shouldContain "scope=nav"
-        html shouldContain "hx-target=\"#pipeline-nav-root\""
-        // The flat list shows the FULL path — that is what someone searching wants to read.
-        html shouldContain ">$DEEP_PATH</span>"
-    }
-
-    @Test
-    fun `#350 - a CATALOG row is a plain link in a plain list, and its pager stays on the page`() {
-        val html = render("partials/pipeline-search") { fillCatalog() }
-
         html shouldContain "id=\"pipeline-list-wrapper\""
+        html shouldContain "aria-label=\"Pipelines\""
+        // #466: no sidebar presentation is left in the fragment.
         html shouldNotContain "role=\"listbox\""
         html shouldNotContain "role=\"option\""
+        html shouldNotContain "aria-selected"
         html shouldContain "href=\"/pipelines/$LEAF_ID\""
         html shouldContain "hx-target=\"#pipeline-list-wrapper\""
-        html shouldNotContain "scope=nav"
+        html shouldContain "q=revenue"
+        html shouldNotContain "scope="
+        html shouldNotContain "pipeline-nav-root"
     }
 
     @Test
-    fun `#350 - the catalog's empty answer says how pipelines arrive, a sidebar no-match offers its own clear`() {
+    fun `#350 - the catalog's empty answer says how pipelines arrive, a no-match offers its Clear search`() {
         val empty =
             render("partials/pipeline-search") {
                 fillCatalog()
@@ -467,18 +390,6 @@ class PipelineExplorerRenderTest {
         empty shouldContain "No pipelines yet"
         empty shouldNotContain "match your search"
 
-        val noMatch =
-            render("partials/pipeline-search") {
-                fillSearch()
-                setVariable("pipelines", emptyList<PipelineRecord>())
-                setVariable("total", 0)
-            }
-        noMatch shouldContain "No pipelines match your search"
-        noMatch shouldNotContain "data-nav-tree-clear"
-        // The nav instance renders no clear button of its own (the tree engine has one) — no bare hx-get either.
-        noMatch shouldNotContain "hx-get=\"/partials/pipelines\""
-        noMatch shouldNotContain "data-dp-clear-filters"
-
         // #432: the catalog's no-match clear names the box it empties (shell.js clears it) and
         // replaces any search still in flight from that box, so a stale answer cannot land after it.
         val catalogMiss =
@@ -488,6 +399,8 @@ class PipelineExplorerRenderTest {
                 setVariable("q", "zzz")
                 setVariable("total", 0)
             }
+        catalogMiss shouldContain "No pipelines match your search"
+        catalogMiss shouldNotContain "data-nav-tree-clear"
         catalogMiss shouldContain "Clear search"
         catalogMiss shouldContain "data-dp-clear-filters=\"#pipeline-filter-q\""
         catalogMiss shouldContain "hx-sync=\"#pipeline-filter-q:replace\""
@@ -495,43 +408,10 @@ class PipelineExplorerRenderTest {
 
     // ------------------------------------------------------------------ fixtures
 
-    /**
-     * The ROOT level: folders and nothing else (077, §4.1).
-     *
-     * It used to carry `record("legacy_flat")` — a leaf sitting at the root, which the grammar
-     * now forbids and `PipelineBrowseModel` no longer puts in the model. Every assertion about
-     * a LEAF therefore moved onto [fillNestedLevel].
-     */
-    private fun WebContext.fillLevel() {
-        setVariable("searching", false)
-        setVariable("prefix", "")
-        setVariable("levelId", PipelineBrowseModel.ROOT_LEVEL_ID)
-        setVariable("folders", listOf(PipelineFolderView("nyc", "nyc", 6, PipelineBrowseModel.levelId("nyc"))))
-        setVariable("foldersTruncated", false)
-        setVariable("pipelines", emptyList<PipelineRecord>())
-        setVariable("drafts", emptyMap<UUID, Any>())
-        setVariable("offset", 0)
-        setVariable("hasMore", false)
-        setVariable("total", 0)
-        setVariable("q", "")
-        setVariable("scopes", setOf("ADMIN"))
-    }
-
-    /** A NESTED level — the only kind that has leaves now. */
-    private fun WebContext.fillNestedLevel() {
-        fillLevel()
-        setVariable("prefix", "nyc/mobility")
-        setVariable("levelId", PipelineBrowseModel.levelId("nyc/mobility"))
-        setVariable("folders", emptyList<PipelineFolderView>())
-        setVariable("pipelines", listOf(record(DEEP_PATH)))
-        setVariable("total", 1)
-    }
-
-    /** The SIDEBAR's search (#350): `scope=nav`, rooted at the sidebar's swap root. */
+    /** The /pipelines CATALOG's search (#350): the flat list under the page's own root. */
     private fun WebContext.fillSearch() {
         setVariable("searching", true)
-        setVariable("scope", PipelineListScope.NAV.wire)
-        setVariable("rootId", PipelineListScope.NAV.rootId)
+        setVariable("rootId", PipelineBrowseModel.CATALOG_ROOT_ID)
         setVariable("pipelines", listOf(record(DEEP_PATH)))
         setVariable("drafts", emptyMap<UUID, Any>())
         setVariable("q", "revenue")
@@ -591,11 +471,9 @@ class PipelineExplorerRenderTest {
             isCurrent = false,
         )
 
-    /** The /pipelines CATALOG (#350): the flat list under the page's own root. */
+    /** The /pipelines CATALOG (#350) with no query: every pipeline. */
     private fun WebContext.fillCatalog() {
         fillSearch()
-        setVariable("scope", PipelineListScope.CATALOG.wire)
-        setVariable("rootId", PipelineListScope.CATALOG.rootId)
         setVariable("q", "")
     }
 

@@ -1,10 +1,10 @@
 <!-- Artifact and version links use prepared main-content navigation, preserving the sidebar. -->
 <div xmlns:th="http://www.thymeleaf.org" th:fragment="results" th:id="${rootId}"
-     th:with="nav=${scope == 'nav'}" th:attr="data-visualization-list=${scope}">
+     data-visualization-list="page">
   <th:block th:if="${lensUnavailable != null and #lists.isEmpty(visualizations)}">
     <div th:replace="~{partials/lens-unavailable :: notice(${lensUnavailable})}"></div>
   </th:block>
-  <th:block th:if="${lensUnavailable == null and #lists.isEmpty(visualizations) and !nav and #strings.isEmpty(q)}">
+  <th:block th:if="${lensUnavailable == null and #lists.isEmpty(visualizations) and #strings.isEmpty(q)}">
     <div class="ds-empty">
       <p class="ds-empty-title">No visualizations yet</p>
       <p class="ds-empty-description">
@@ -13,27 +13,23 @@
       </p>
     </div>
   </th:block>
-  <th:block th:if="${lensUnavailable == null and #lists.isEmpty(visualizations) and (nav or !#strings.isEmpty(q))}">
+  <th:block th:if="${lensUnavailable == null and #lists.isEmpty(visualizations) and !#strings.isEmpty(q)}">
     <div class="ds-empty">
       <p class="ds-empty-title">No visualizations match your search</p>
       <div class="ds-empty-actions">
-        <button th:unless="${nav}" type="button" class="ds-button ds-button-secondary ds-button-sm"
+        <button type="button" class="ds-button ds-button-secondary ds-button-sm"
                 data-dp-clear-filters="#visualization-filter-q" hx-sync="#visualization-filter-q:replace"
                 th:attr="hx-get=@{/partials/visualizations}, hx-target='#' + ${rootId}, hx-swap='outerHTML'">Clear search</button>
       </div>
     </div>
   </th:block>
 
-  <ul class="tpl-results"
-      th:unless="${#lists.isEmpty(visualizations)}"
-      th:attr="role=${nav} ? 'listbox' : null,
-               aria-label=${nav} ? 'Visualization search results' : 'Visualizations'">
-    <li th:attr="role=${nav} ? 'none' : null" th:each="v : ${visualizations}">
+  <ul class="tpl-results" aria-label="Visualizations"
+      th:unless="${#lists.isEmpty(visualizations)}">
+    <li th:each="v : ${visualizations}">
       <a class="tpl-result" hx-boost="true"
          th:href="@{'/visualizations/' + ${v.id}}"
-         th:attr="role=${nav} ? 'option' : null,
-                  aria-selected=${nav} ? 'false' : null,
-                  data-leaf-id=${v.id}">
+         th:attr="data-leaf-id=${v.id}">
         <span class="tpl-path" th:text="${v.name}" th:title="${v.name}">finance/charts/revenue_by_region</span>
         <span class="ds-badge ds-badge-default" th:text="${'v' + v.version}">v1</span>
         <span th:if="${!v.released}" class="ds-badge ds-badge-warning"
@@ -44,8 +40,8 @@
   </ul>
 
   <th:block th:unless="${#lists.isEmpty(visualizations)}"
-            th:with="prevUrl=${nav} ? @{/partials/visualizations/tree(q=${q}, scope='nav', offset=${offset - 25})} : @{/partials/visualizations(q=${q}, offset=${offset - 25})},
-                     nextUrl=${nav} ? @{/partials/visualizations/tree(q=${q}, scope='nav', offset=${offset + 25})} : @{/partials/visualizations(q=${q}, offset=${offset + 25})}">
+            th:with="prevUrl=@{/partials/visualizations(q=${q}, offset=${offset - 25})},
+                     nextUrl=@{/partials/visualizations(q=${q}, offset=${offset + 25})}">
     <div th:replace="~{partials/pager :: pager('#' + ${rootId}, ${prevUrl}, ${nextUrl}, ${offset}, ${hasMore}, ${visualizations.size()}, ${total})}"></div>
   </th:block>
 </div>

@@ -18,7 +18,6 @@ import co.datapipelines.templates.TemplateValidationException
 import co.datapipelines.templates.TemplateValidator
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.web.api.currentPrincipal
-import jakarta.servlet.http.HttpServletResponse
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.security.core.context.SecurityContextHolder
@@ -37,23 +36,15 @@ import org.springframework.web.servlet.ModelAndView
  * fragment endpoint joins the same authorization posture as the one it sits beside rather
  * than quietly opening a hole (§9.1).
  *
- * ## One route, two fragment shapes — chosen by `prefix` and `scope`
+ * ## The catalog's list
  *
- * - **`prefix` present** (empty string = the root) → that ONE tree level of the SIDEBAR: its
- *   direct sub-folders and its direct template children, and nothing else. This is what a
- *   folder's lazy expansion fetches, so expanding `acme/finance` never returns `acme/hr`'s
- *   rows and never returns the whole list (§9.1: the tree is backed by server-side prefix
- *   queries). A `prefix` request is always a sidebar level.
- * - **`prefix` absent** → a flat list of full paths, under the [TemplateListScope]'s root:
- *   `scope=nav` is the sidebar's search (clearing it returns the sidebar to its tree), any
- *   other value — absent included — is the `/templates` catalog's list (every template when
- *   `q` is empty, the matches otherwise). Same rows, same `TEMPLATE_READ`, same lens: the
- *   scope picks the markup, never the rows (#398). Every sidebar response carries
- *   [PipelineBrowseModel.NAV_STAMP_HEADER] so the rail can refuse a level rendered under
- *   another workspace or lens.
- *
- * `q` is ignored while `prefix` is present: browse and search are different presentations
- * (§9.2) and a folder expansion is unambiguously a browse.
+ * `GET /partials/templates` answers the `/templates` catalog's flat list of full paths (#398):
+ * every template when `q` is empty, the matches otherwise, under the dialect and type filters.
+ * The sidebar's server-rendered tree levels (`prefix`) and its nav search (`scope=nav`) are
+ * gone with #466 — the sidebar has read `/api/v1/templates/tree` since #460. A stale `scope`
+ * or `prefix` is not a bound parameter, so it is ignored like any other unknown query value
+ * and the request answers the catalog list: degrading to the page's own list costs a stale
+ * client nothing, where a 400 would add a refusal path for a parameter no client sends.
  */
 @Controller
 class TemplatePartialController(
@@ -66,43 +57,26 @@ class TemplatePartialController(
 ) {
     @GetMapping("/partials/templates")
     @RequiredScope(Permission.TEMPLATE_READ)
-    @Suppress("LongParameterList") // one request parameter per query value the route has always taken, plus #398's scope
     fun list(
         model: Model,
-        response: HttpServletResponse,
         @RequestParam(required = false) q: String?,
         @RequestParam(required = false) dialect: String?,
         @RequestParam(required = false) type: String?,
-        @RequestParam(required = false) prefix: String?,
         @RequestParam(required = false) offset: Int?,
-        @RequestParam(required = false) scope: String? = null,
     ): String {
         val principal = currentPrincipal()
-        val workspace = principal.requireWorkspace()
-        val view = lens.viewFor(principal)
-        val listScope = if (prefix != null) TemplateListScope.NAV else TemplateListScope.fromWire(scope)
-        val dialectFilter = TemplateFilters.dialect(dialect)
-        val typeFilter = TemplateFilters.type(type)
         TemplateFilters.fill(model, dialect, type)
         model.addAttribute("q", q ?: "")
         RoleModel.stamp(model)
-        if (listScope == TemplateListScope.NAV) {
-            response.setHeader(PipelineBrowseModel.NAV_STAMP_HEADER, PipelineBrowseModel.navStamp(workspace.name, view))
-        }
-        return if (prefix != null) {
-            browse.fillLevel(model, workspace.id, view, prefix, dialectFilter, typeFilter, offset ?: 0)
-        } else {
-            browse.fillWrapper(
-                model,
-                workspace.id,
-                view,
-                q = q?.trim()?.takeIf { it.isNotEmpty() },
-                dialect = dialectFilter,
-                type = typeFilter,
-                offset = offset ?: 0,
-                scope = listScope,
-            )
-        }
+        return browse.fillSearch(
+            model,
+            principal.requireWorkspace().id,
+            lens.viewFor(principal),
+            q = q?.trim()?.takeIf { it.isNotEmpty() },
+            dialect = TemplateFilters.dialect(dialect),
+            type = TemplateFilters.type(type),
+            offset = offset ?: 0,
+        )
     }
 
     /**
@@ -212,7 +186,7 @@ class TemplatePartialController(
             model.addAttribute("q", "")
             RoleModel.stamp(model)
             // An author's re-render after a create (MUTATE row): the view is theirs — Everything.
-            browse.fillWrapper(
+            browse.fillSearch(
                 model,
                 workspaceId,
                 LensedView.EVERYTHING,
@@ -220,7 +194,6 @@ class TemplatePartialController(
                 dialect = null,
                 type = null,
                 offset = 0,
-                scope = TemplateListScope.CATALOG,
             )
             model.addAttribute("createdName", trimmedName)
             model.addAttribute("oob", true)
