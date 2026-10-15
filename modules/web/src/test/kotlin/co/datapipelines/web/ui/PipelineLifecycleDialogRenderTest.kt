@@ -500,6 +500,56 @@ class PipelineLifecycleDialogRenderTest {
         html shouldNotContain "<b>x</b>"
     }
 
+    /**
+     * #471 — a pinned sole draft's dialog names the blockers and withholds the destructive
+     * form: the pinned sentence names the PIPELINE, both pinner rows render the names,
+     * versions, node and status as TEXT (a hostile name escapes), and nothing of the form —
+     * no confirm input, no verb, no submit, no run-count sentence, no exclusive offer —
+     * survives.
+     */
+    @Test
+    fun `purge entity - a pinned dialog lists escaped parent and dashboard names and offers NO form (#471)`() {
+        val html =
+            renderPurgeEntity(
+                refusal = null,
+                exclusive = listOf("test/only_here.sql"),
+                pinnerPipelines = listOf(PipelineLifecycleDialogModel.PinnerView("test/<parent>", 2, "<child>")),
+                pinnerDashboards =
+                    listOf(
+                        co.datapipelines.pipeline.DashboardPin(
+                            "test/<board>",
+                            1,
+                            co.datapipelines.pipeline.PipelineVersionStatus.DISCARDED,
+                        ),
+                    ),
+            )
+
+        html shouldContain "data-purge-pinned"
+        html shouldContain "<strong>probe</strong> cannot be purged"
+        html shouldContain "test/&lt;parent&gt;"
+        html shouldContain "v2 · node &lt;child&gt;"
+        html shouldContain "test/&lt;board&gt;"
+        html shouldContain "v1 · dashboard · DISCARDED"
+        html shouldNotContain "<form"
+        html shouldNotContain "data-typed-confirm"
+        html shouldNotContain "data-verb=\"pipeline-purge-entity-confirm\""
+        html shouldNotContain "cannot be undone"
+        html shouldNotContain "name=\"include_exclusive\""
+        html shouldNotContain "<b>parent</b>"
+    }
+
+    /** #471 — the unpinned dialog is exactly today's: empty lists render the form, never the pinned block. */
+    @Test
+    fun `purge entity - an unpinned dialog renders the form and no pinned block (#471)`() {
+        val html = renderPurgeEntity(refusal = null, exclusive = listOf("test/only_here.sql"))
+
+        html shouldNotContain "data-purge-pinned"
+        html shouldNotContain "data-purge-pinners"
+        html shouldContain "cannot be undone"
+        html shouldContain "data-typed-confirm"
+        html shouldContain "data-verb=\"pipeline-purge-entity-confirm\""
+    }
+
     @Test
     fun `switch - the rows carry the versions, the current mark, and restore-first on discarded`() {
         val html =
@@ -613,6 +663,8 @@ class PipelineLifecycleDialogRenderTest {
         refusal: PipelineLifecycleDialogModel.Refusal?,
         exclusive: List<String> = emptyList(),
         kept: List<PipelineLifecycleDialogModel.KeptTemplate> = emptyList(),
+        pinnerPipelines: List<PipelineLifecycleDialogModel.PinnerView> = emptyList(),
+        pinnerDashboards: List<co.datapipelines.pipeline.DashboardPin> = emptyList(),
     ): String =
         render("partials/pipeline-lifecycle-purge-entity") {
             setVariable(
@@ -626,6 +678,8 @@ class PipelineLifecycleDialogRenderTest {
                     keptTemplates = kept,
                     expected = "nyc/mobility/probe",
                     refusal = refusal,
+                    pinnerPipelines = pinnerPipelines,
+                    pinnerDashboards = pinnerDashboards,
                 ),
             )
             setVariable("from", "editor")

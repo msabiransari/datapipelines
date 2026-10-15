@@ -3,8 +3,10 @@ package co.datapipelines.browser
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
+import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
+import java.net.URLEncoder
 import java.sql.DriverManager
 
 /** #462: real API saves, production pin consumers, browser evidence and unchanged persisted state. */
@@ -115,6 +117,84 @@ class PipelineDraftPurgePinsBrowserTest : DashboardBrowserSuite() {
         scalar("SELECT count(*)::text FROM pipeline_executions WHERE pipeline_id = '$child'") shouldBe "0"
         scalar("SELECT count(*)::text FROM pipeline_versions WHERE pipeline_id = '$child' AND version = $version") shouldBe "0"
         scalar("SELECT count(*)::text FROM pipelines WHERE id = '$child'") shouldBe if (sole) "0" else "1"
+    }
+
+    /**
+     * #471 — the ENTITY dialog (the workspace topbar's verb) for a pinned sole draft: the
+     * parent and the dashboard are named, the destructive form is withheld, a foreign
+     * workspace's same-shaped pin is not; the POST is still the control (409, state
+     * unchanged); repointed, the same dialog offers the typed confirm and the purge lands.
+     */
+    @Test
+    fun `the entity dialog previews the inbound pins and withholds its form until repointed`() {
+        startTrace()
+        val root = ready("purge471")
+        val datasource = registerSourceDatasource()
+        val template = "test/${root}_entity.sql"
+        createTemplate(template, "SELECT 1 AS n")
+        val childName = "$root/child"
+        val childBody = pipelineBody(childName, datasource, template)
+        val child = create("pipelines", childBody)
+        seedExecution(child, 1)
+        val before = snapshot(child)
+        val parentName = "$root/parent"
+        val parentBody = parentBody(parentName, childName, 1)
+        val parent = create("pipelines", parentBody)
+        val boardName = "$root/board"
+        val board = create("dashboards", boardBody(boardName, childName, 1))
+        val replacementName = "$root/replacement"
+        create("pipelines", pipelineBody(replacementName, datasource, template))
+        seedForeignPins(root, parent, board, parentBody, boardBody(boardName, childName, 1))
+
+        fun openEntityDialog() {
+            page.navigate("$baseUrl/pipelines/$child")
+            page.locator(".pe-topbar [data-verb='pipeline-purge-entity']").click()
+            page.locator("#pe-dialog [data-lifecycle-dialog='pipeline-purge-entity']").waitFor()
+        }
+
+        openEntityDialog()
+        val entityDialog = page.locator("#pe-dialog [data-lifecycle-dialog='pipeline-purge-entity']")
+        entityDialog.locator("[data-purge-pinned]").innerText() shouldContain "cannot be purged"
+        entityDialog.locator("[data-purge-pinner-pipeline]").innerText() shouldContain parentName
+        entityDialog.locator("[data-purge-pinner-dashboard]").innerText() shouldContain boardName
+        entityDialog.locator("[data-purge-pinners]").innerText() shouldNotContain "/foreign_"
+        // The form is withheld: no confirm input, no submit.
+        entityDialog.locator("[data-typed-confirm]").count() shouldBe 0
+
+        java.nio.file.Files.createDirectories(java.nio.file.Path.of("build/browser-evidence"))
+        ensureTheme("light")
+        page.screenshot(
+            com.microsoft.playwright.Page.ScreenshotOptions().setPath(java.nio.file.Path.of("build/browser-evidence/purge471-entity-pinned-light.png")),
+        )
+        ensureTheme("dark")
+        page.screenshot(
+            com.microsoft.playwright.Page.ScreenshotOptions().setPath(java.nio.file.Path.of("build/browser-evidence/purge471-entity-pinned-dark.png")),
+        )
+
+        // The dialog is a PREVIEW; the POST's own guard is the control (state unchanged on refusal).
+        val confirm = URLEncoder.encode(childName, Charsets.UTF_8)
+        val direct = request("POST", "/partials/pipelines/$child/lifecycle/purge-entity?confirm=$confirm")
+        direct["status"] shouldBe 409
+        direct["body"].toString() shouldContain "pipeline.version.pinned"
+        snapshot(child) shouldBe before
+
+        // Repoint the parent through the same save path that created the edge; drop the dashboard's pin.
+        request(
+            "PUT",
+            "/api/v1/pipelines/$parent",
+            parentBody.replace(childName, replacementName),
+            hash(parent),
+        )["status"] shouldBe 200
+        sql("DELETE FROM dashboard_versions WHERE dashboard_id = '$board' AND version = 1")
+
+        openEntityDialog()
+        val repointedDialog = page.locator("#pe-dialog [data-lifecycle-dialog='pipeline-purge-entity']")
+        repointedDialog.locator("[data-purge-pinned]").count() shouldBe 0
+        repointedDialog.locator("[data-confirm-input]").fill(childName)
+        repointedDialog.locator("button[data-typed-confirm]").click()
+        page.waitForURL("**/pipelines?ok=entity_purged")
+        scalar("SELECT count(*)::text FROM pipelines WHERE id = '$child'") shouldBe "0"
+        scalar("SELECT count(*)::text FROM pipeline_versions WHERE pipeline_id = '$child'") shouldBe "0"
     }
 
     private fun openPurgeDialog(

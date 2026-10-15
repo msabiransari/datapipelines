@@ -416,7 +416,18 @@ class PipelineLifecycleDialogModel(
 
     // ------------------------------------------------------------------ purge entity
 
-    /** The entity purge: sole-draft-only (§3.5 `{D}`), with the exclusive-templates offer. */
+    /**
+     * The entity purge: sole-draft-only (§3.5 `{D}`), with the exclusive-templates offer.
+     *
+     * #471 — the two pinner lists preview the refusal the POST's
+     * `refuseIfPinned(entityPurge = true)` would answer (`pipeline.version.pinned`), in that
+     * guard's own scope: parents are the LIVE exact pins of the sole draft's version, the
+     * dashboards are `anyVersionPins` (every stored version of a still-live dashboard,
+     * DISCARDED history included). The SAME ports [purge]'s dialog reads, so the dialog and
+     * the POST cannot disagree (#320's rule); filled only for the sole draft — the
+     * `last_release` branch carries the shape's answer instead, and empty lists render the
+     * destructive form unchanged.
+     */
     data class PurgeEntityDialog(
         val id: UUID,
         val name: String,
@@ -432,6 +443,10 @@ class PipelineLifecycleDialogModel(
          * the verb is author-or-above, whose view is everything.
          */
         val keptTemplates: List<KeptTemplate> = emptyList(),
+        /** #471 — the live parent versions pinning the sole draft, the `pipeline.version.pinned` evidence. */
+        val pinnerPipelines: List<PinnerView> = emptyList(),
+        /** #471 — the dashboard versions pinning any stored version, the entity scope's evidence. */
+        val pinnerDashboards: List<co.datapipelines.pipeline.DashboardPin> = emptyList(),
     )
 
     /** A draft-only template the purge leaves in place, and the parameter sets and visualizations that hold it (#335). */
@@ -477,6 +492,18 @@ class PipelineLifecycleDialogModel(
                 } else {
                     emptyList()
                 },
+            // #471: the guard's own two reads, asked only for the sole draft — the shape the
+            // POST would purge. The entity scope for the dashboards (anyVersionPins), the
+            // exact sole version for the parents.
+            pinnerPipelines =
+                if (soleDraft) {
+                    repository.findLiveParentsPinningVersion(workspaceId, record.name, versions.single().version).map {
+                        PinnerView(it.pipelineName, it.pipelineVersion, it.nodeId)
+                    }
+                } else {
+                    emptyList()
+                },
+            pinnerDashboards = if (soleDraft) dashboards.anyVersionPins(workspaceId, record.name) else emptyList(),
             expected = record.name,
             refusal =
                 if (soleDraft) {

@@ -415,6 +415,8 @@ class PipelineLifecycleDialogModelTest {
         every { repository.listVersions(any(), any()) } returns
             listOf(co.datapipelines.pipeline.PipelineVersionRecord(ID, 1, DRAFT, "h1", T0, USER))
         every { runStats.totalRuns(any()) } returns 0
+        // #471: the sole draft's pin preview reads the same two ports — unpinned here, so empty.
+        every { repository.findLiveParentsPinningVersion(any(), any(), any()) } returns emptyList()
         every { exclusive.exclusiveIds(WS, ID) } returns listOf("test/only_here.sql")
         every { exclusive.keptIds(WS, ID) } returns
             listOf(
@@ -451,6 +453,122 @@ class PipelineLifecycleDialogModelTest {
 
         model.purgeEntity(WS, ID).keptTemplates shouldBe emptyList()
     }
+
+    /**
+     * #471 — a pinned sole draft's dialog carries the refusal the POST would answer, in the
+     * guard's own entity scope: the LIVE exact parent pins of the sole version and
+     * `anyVersionPins`' stored dashboard pins (DISCARDED history included), `refusal` still
+     * null (the shape IS purgable, the pins are what refuse it).
+     */
+    @Test
+    fun `purge entity - a sole draft pinned by a live parent and a dashboard's discarded-history pin names both (#471)`() {
+        every { repository.findByIdAnyStatus(WS, ID) } returns recordOf(current = null)
+        every { repository.listVersions(WS, ID) } returns
+            listOf(co.datapipelines.pipeline.PipelineVersionRecord(ID, 1, DRAFT, "h1", T0, USER))
+        every { runStats.totalRuns(ID) } returns 0
+        every { exclusive.exclusiveIds(WS, ID) } returns emptyList()
+        every { exclusive.keptIds(WS, ID) } returns emptyList()
+        every { repository.findLiveParentsPinningVersion(WS, "test/probe", 1) } returns
+            listOf(
+                co.datapipelines.pipeline.TemplatePin(UUID.randomUUID(), "test/parent", 2, DRAFT, "child", 1),
+            )
+        val scope = ScopeSpy(anyPins = listOf(co.datapipelines.pipeline.DashboardPin("test/historical", 1, DISCARDED)))
+        val pinnedModel = modelWith(scope)
+
+        val dialog = pinnedModel.purgeEntity(WS, ID)
+
+        dialog.pinnerPipelines.map { it.pipelineName } shouldBe listOf("test/parent")
+        dialog.pinnerPipelines.single().nodeId shouldBe "child"
+        dialog.pinnerDashboards shouldBe listOf(co.datapipelines.pipeline.DashboardPin("test/historical", 1, DISCARDED))
+        dialog.refusal shouldBe null
+        // The entity scope: every stored dashboard version asked at once, never the per-version read.
+        scope.anyCalls shouldBe listOf("test/probe")
+        scope.liveCalls shouldBe emptyList()
+    }
+
+    /** #471 — the non-sole shape's answer is the shape refusal; the pin ports are not asked at all (the #335 pattern). */
+    @Test
+    fun `purge entity - a non-sole shape fills no pinner lists and does not ask the pin ports (#471)`() {
+        every { repository.findByIdAnyStatus(WS, ID) } returns recordOf(current = 1)
+        every { repository.listVersions(WS, ID) } returns
+            listOf(
+                co.datapipelines.pipeline.PipelineVersionRecord(ID, 1, RELEASED, "h1", T0, USER),
+                co.datapipelines.pipeline.PipelineVersionRecord(ID, 2, DRAFT, "h2", T0, USER),
+            )
+        every { runStats.totalRuns(ID) } returns 0
+        val scope = ScopeSpy()
+
+        val dialog = modelWith(scope).purgeEntity(WS, ID)
+
+        dialog.refusal!!.code shouldBe "pipeline.version.last_release"
+        dialog.pinnerPipelines shouldBe emptyList()
+        dialog.pinnerDashboards shouldBe emptyList()
+        scope.anyCalls shouldBe emptyList()
+        scope.liveCalls shouldBe emptyList()
+    }
+
+    /**
+     * #471 — the scope is the service's own (falsified by the wrong call): for the sole draft
+     * the model asks `anyVersionPins` and NEVER `liveVersionPins`, whose narrower answer would
+     * let the dialog offer a form the POST refuses (the DISCARDED-history pin would be missed).
+     */
+    @Test
+    fun `purge entity - the sole draft asks anyVersionPins, never liveVersionPins (#471)`() {
+        every { repository.findByIdAnyStatus(WS, ID) } returns recordOf(current = null)
+        every { repository.listVersions(WS, ID) } returns
+            listOf(co.datapipelines.pipeline.PipelineVersionRecord(ID, 1, DRAFT, "h1", T0, USER))
+        every { runStats.totalRuns(ID) } returns 0
+        every { exclusive.exclusiveIds(WS, ID) } returns emptyList()
+        every { exclusive.keptIds(WS, ID) } returns emptyList()
+        every { repository.findLiveParentsPinningVersion(WS, "test/probe", 1) } returns emptyList()
+        val scope = ScopeSpy()
+        scope.failOnLive = true
+
+        modelWith(scope).purgeEntity(WS, ID)
+
+        scope.anyCalls shouldBe listOf("test/probe")
+        scope.liveCalls shouldBe emptyList()
+    }
+
+    /** #471 — records which port the model asked; [failOnLive] turns the WRONG scope read into a loud failure. */
+    private class ScopeSpy(
+        private val anyPins: List<co.datapipelines.pipeline.DashboardPin> = emptyList(),
+    ) : co.datapipelines.pipeline.PipelineVersionConsumers {
+        val anyCalls = mutableListOf<String>()
+        val liveCalls = mutableListOf<String>()
+        var failOnLive: Boolean = false
+
+        override fun liveVersionPins(
+            workspaceId: java.util.UUID,
+            pipelineName: String,
+            version: Int,
+        ): List<co.datapipelines.pipeline.DashboardPin> {
+            liveCalls += pipelineName
+            if (failOnLive) throw IllegalStateException("entity purge must ask anyVersionPins, not liveVersionPins")
+            return emptyList()
+        }
+
+        override fun anyVersionPins(
+            workspaceId: java.util.UUID,
+            pipelineName: String,
+        ): List<co.datapipelines.pipeline.DashboardPin> {
+            anyCalls += pipelineName
+            return anyPins
+        }
+    }
+
+    private fun modelWith(scope: co.datapipelines.pipeline.PipelineVersionConsumers) =
+        PipelineLifecycleDialogModel(
+            repository,
+            templates,
+            exclusive,
+            runStats,
+            anonymousActors(),
+            AuthoringGuard(true),
+            usage,
+            schedules = schedules,
+            dashboards = scope,
+        )
 
     @Test
     fun `switch - eligibility follows the posture - drafts only under development`() {
