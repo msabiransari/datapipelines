@@ -275,7 +275,7 @@ class DashboardKeyE2eTest {
             listOf(
                 "GET" to "/api/v1/dashboards",
                 "GET" to "/dashboards",
-                "GET" to "/partials/dashboards/tree",
+                "GET" to "/partials/dashboards",
                 "POST" to "/mcp",
                 "GET" to "/api/$PROBE_CATEGORY/v1/anything",
             )

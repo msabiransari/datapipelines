@@ -1,12 +1,12 @@
 <!-- Artifact and version links use prepared main-content navigation, preserving the sidebar. -->
 <div xmlns:th="http://www.thymeleaf.org" th:fragment="results" th:id="${rootId}"
-     th:with="nav=${scope == 'nav'}" th:attr="data-pipeline-list=${scope}">
+     data-pipeline-list="page">
   <th:block th:if="${lensUnavailable != null and #lists.isEmpty(pipelines)}">
     <div th:replace="~{partials/lens-unavailable :: notice(${lensUnavailable})}"></div>
   </th:block>
   <!-- The catalog with no query and no rows is the workspace's EMPTY state, not a failed
-       search: it says how pipelines arrive (R10 — authored through agents), like the tree's. -->
-  <th:block th:if="${lensUnavailable == null and #lists.isEmpty(pipelines) and !nav and #strings.isEmpty(q)}">
+       search: it says how pipelines arrive (R10 — authored through agents). -->
+  <th:block th:if="${lensUnavailable == null and #lists.isEmpty(pipelines) and #strings.isEmpty(q)}">
     <div class="ds-empty">
       <p class="ds-empty-title">No pipelines yet</p>
       <p class="ds-empty-description">
@@ -16,27 +16,23 @@
       </p>
     </div>
   </th:block>
-  <th:block th:if="${lensUnavailable == null and #lists.isEmpty(pipelines) and (nav or !#strings.isEmpty(q))}">
+  <th:block th:if="${lensUnavailable == null and #lists.isEmpty(pipelines) and !#strings.isEmpty(q)}">
     <div class="ds-empty">
       <p class="ds-empty-title">No pipelines match your search</p>
       <div class="ds-empty-actions">
-        <button th:unless="${nav}" type="button" class="ds-button ds-button-secondary ds-button-sm"
+        <button type="button" class="ds-button ds-button-secondary ds-button-sm"
                 data-dp-clear-filters="#pipeline-filter-q" hx-sync="#pipeline-filter-q:replace"
                 th:attr="hx-get=@{/partials/pipelines}, hx-target='#' + ${rootId}, hx-swap='outerHTML'">Clear search</button>
       </div>
     </div>
   </th:block>
 
-  <ul class="tpl-results"
-      th:unless="${#lists.isEmpty(pipelines)}"
-      th:attr="role=${nav} ? 'listbox' : null,
-               aria-label=${nav} ? 'Pipeline search results' : 'Pipelines'">
-    <li th:attr="role=${nav} ? 'none' : null" th:each="p : ${pipelines}">
+  <ul class="tpl-results" aria-label="Pipelines"
+      th:unless="${#lists.isEmpty(pipelines)}">
+    <li th:each="p : ${pipelines}">
       <a class="tpl-result" hx-boost="true"
          th:href="@{/pipelines/{id}(id=${p.id})}"
-         th:attr="role=${nav} ? 'option' : null,
-                  aria-selected=${nav} ? 'false' : null,
-                  data-leaf-id=${p.id}">
+         th:attr="data-leaf-id=${p.id}">
         <!-- The FULL path, and it rides on `title` too — a deep path in a narrow pane
              truncates, and the truncated text must never be the only copy (§9.4). -->
         <span class="tpl-path" th:text="${p.name}" th:title="${p.name}">nyc/mobility/revenue_by_borough</span>
@@ -52,7 +48,7 @@
         </th:block>
         <!-- versioning §7 (the 035 regression): unreleased — often agent — work must be
              VISIBLE from first paint. The flat list has room for the version number, so it
-             says the whole thing; the tree's leaf keeps the compact badge. -->
+             says the whole thing. -->
         <span th:if="${drafts != null && drafts[p.id] != null}" class="ds-badge ds-badge-warning"
               th:text="'draft v' + ${drafts[p.id].version} + ' pending release'"
               title="A draft exists; release it from the pipeline's workspace to publish."></span>
@@ -61,8 +57,8 @@
   </ul>
 
   <th:block th:unless="${#lists.isEmpty(pipelines)}"
-            th:with="prevUrl=${nav} ? @{/partials/pipelines(q=${q}, scope='nav', offset=${offset - 25})} : @{/partials/pipelines(q=${q}, offset=${offset - 25})},
-                     nextUrl=${nav} ? @{/partials/pipelines(q=${q}, scope='nav', offset=${offset + 25})} : @{/partials/pipelines(q=${q}, offset=${offset + 25})}">
+            th:with="prevUrl=@{/partials/pipelines(q=${q}, offset=${offset - 25})},
+                     nextUrl=@{/partials/pipelines(q=${q}, offset=${offset + 25})}">
     <div th:replace="~{partials/pager :: pager('#' + ${rootId}, ${prevUrl}, ${nextUrl}, ${offset}, ${hasMore}, ${pipelines.size()}, ${total})}"></div>
   </th:block>
 </div>

@@ -7,7 +7,6 @@ import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.pipeline.TemplateVersionStatuses
 import co.datapipelines.typesystem.DatapipelinesException
-import co.datapipelines.visualization.ArtifactFolder
 import co.datapipelines.visualization.ArtifactJson
 import co.datapipelines.visualization.ArtifactPage
 import co.datapipelines.visualization.ArtifactRef
@@ -38,14 +37,13 @@ import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import org.springframework.http.HttpStatus
-import org.springframework.mock.web.MockHttpServletResponse
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.ui.ExtendedModelMap
 import org.springframework.web.server.ResponseStatusException
 import java.util.UUID
 
 /**
- * #399 — the Visualizations partials: the sidebar tree and search (the nav stamp, the level/list dispatch), and
+ * #399 — the Visualizations partials: the catalog's flat list (the sidebar's tree is the REST one since #466), and
  * the workspace's five lazy tabs. Every read rides the caller's lens; a version tab needs its version NAMED (a
  * missing or malformed one is the non-echoing 400) and re-admits it (a DISCARDED or lens-hidden version is the
  * family's 404, never another body); Evidence lists only the runs of versions the caller may see, capped at
@@ -83,58 +81,38 @@ class VisualizationPartialControllerTest {
             listOf(detail(vizId, 2, PipelineVersionStatus.DRAFT), detail(vizId, 1, PipelineVersionStatus.RELEASED))
     }
 
-    // ------------------------------------------------------------------ the tree
+    // ------------------------------------------------------------------ the catalog
 
     @Test
-    fun `the tree stamps the nav header, renders a level for a prefix and the nav list for q`() {
+    fun `the catalog is the flat list under its own root - every readable row, or the matches of q`() {
         authenticate(workspaceId, WorkspaceRole.VIEWER)
-        every { visualizations.listChildFolders(workspaceId, ReadLens.Everything, null) } returns
-            listOf(ArtifactFolder("acme", "acme", 1))
+        every { visualizations.listAll(workspaceId, ReadLens.Everything, 0, VisualizationBrowseModel.PAGE_SIZE) } returns emptyList()
+        every { visualizations.countAll(workspaceId, ReadLens.Everything) } returns 0
 
-        val response = MockHttpServletResponse()
-        val root = ExtendedModelMap()
-        controller.tree(root, response, prefix = null, q = null, offset = null) shouldBe
-            VisualizationBrowseModel.WRAPPER_VIEW
-        response.getHeader(VisualizationBrowseModel.NAV_STAMP_HEADER) shouldBe "acme|all"
-        root["levelId"] shouldBe VisualizationBrowseModel.NAV_ROOT_ID
-        root["visualizations"] shouldBe emptyList<Any>()
+        val all = ExtendedModelMap()
+        controller.catalog(all, q = null, offset = null) shouldBe VisualizationBrowseModel.WRAPPER_VIEW
+        all["rootId"] shouldBe VisualizationBrowseModel.PAGE_ROOT_ID
+        all["visualizations"] shouldBe emptyList<Any>()
 
         every { visualizations.search(workspaceId, ReadLens.Everything, "rev", 0, VisualizationBrowseModel.PAGE_SIZE) } returns
             ArtifactPage(emptyList(), 0)
         val searched = ExtendedModelMap()
-        controller.tree(searched, MockHttpServletResponse(), prefix = null, q = "rev", offset = null)
-        searched["scope"] shouldBe "nav"
-        searched["rootId"] shouldBe VisualizationBrowseModel.NAV_ROOT_ID
+        controller.catalog(searched, q = "rev", offset = null)
+        searched["q"] shouldBe "rev"
+        searched["rootId"] shouldBe VisualizationBrowseModel.PAGE_ROOT_ID
     }
 
     @Test
-    fun `a lensed caller's tree is stamped lens and read through its visualization lens`() {
+    fun `a lensed caller's catalog is read through its visualization lens`() {
         authenticate(workspaceId, WorkspaceRole.PROMOTER)
         val narrowed = ReadLens.Only(setOf(VisualizationUiFixtures.NAME))
         view = LensedView(ReadLens.Everything, ReadLens.Everything, visualizations = narrowed)
-        every { visualizations.listChildFolders(workspaceId, narrowed, "acme/charts") } returns emptyList()
-        every { visualizations.listChildren(workspaceId, narrowed, "acme/charts", 0, VisualizationBrowseModel.PAGE_SIZE) } returns
-            emptyList()
-        every { visualizations.countChildren(workspaceId, narrowed, "acme/charts") } returns 0
+        every { visualizations.listAll(workspaceId, narrowed, 0, VisualizationBrowseModel.PAGE_SIZE) } returns emptyList()
+        every { visualizations.countAll(workspaceId, narrowed) } returns 0
 
-        val response = MockHttpServletResponse()
-        controller.tree(ExtendedModelMap(), response, prefix = "acme/charts", q = null, offset = null) shouldBe
-            VisualizationBrowseModel.LEVEL_VIEW
+        controller.catalog(ExtendedModelMap(), q = null, offset = null) shouldBe VisualizationBrowseModel.WRAPPER_VIEW
 
-        response.getHeader(VisualizationBrowseModel.NAV_STAMP_HEADER) shouldBe "acme|lens"
-        verify(exactly = 0) { visualizations.listChildren(any(), ReadLens.Everything, any(), any(), any()) }
-    }
-
-    @Test
-    fun `an illegal prefix is an ordinary empty level, never a pattern match`() {
-        authenticate(workspaceId, WorkspaceRole.VIEWER)
-
-        val model = ExtendedModelMap()
-        controller.tree(model, MockHttpServletResponse(), prefix = "%_/../x", q = null, offset = null)
-
-        model["folders"] shouldBe emptyList<Any>()
-        model["visualizations"] shouldBe emptyList<Any>()
-        verify(exactly = 0) { visualizations.listChildFolders(any(), any(), any()) }
+        verify(exactly = 0) { visualizations.listAll(any(), ReadLens.Everything, any(), any()) }
     }
 
     // ------------------------------------------------------------------ the version tabs

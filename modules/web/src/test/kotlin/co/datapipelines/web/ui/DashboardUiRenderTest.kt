@@ -16,9 +16,9 @@ import java.util.UUID
 
 /**
  * #10 L3b / #400 — the dashboards pages pinned at the RENDER (ShellRenderTest's mould): the
- * tree level's contract (folders first, root holds no leaves, a leaf navigates un-boosted,
- * the lens decides what renders), the catalog's contract (a FLAT list — folders are NOT the
- * catalog's axis; a draft-only dashboard's row says so), the workspace page's ONE-bundle
+ * catalog's contract (a FLAT list — folders are NOT the catalog's axis; a row navigates to
+ * the workspace with its full path; a draft-only dashboard's row says so; the lens decides
+ * what renders; since #466 no sidebar presentation is left in the fragment), the workspace page's ONE-bundle
  * contract (exactly one Plotly script tag, its declaration equal to the server's
  * `renderer.bundle`, for a 2d board and a 3d board), the viewed-version chip and the version
  * selector (every version switch a FULL navigation), the choose-a-version state (#409: the
@@ -42,95 +42,40 @@ class DashboardUiRenderTest {
             )
         }
 
-    private val folderA = DashboardBrowseModel.DashboardFolderView("acme/dashboards", "acme", 2, "dash-level-nav-aaaa", "nav")
     private val board1 =
         DashboardBrowseModel.DashboardLeafView(UUID.randomUUID(), "acme/dashboards/revenue", "revenue", "Revenue", 3, true)
     private val board2 =
         DashboardBrowseModel.DashboardLeafView(UUID.randomUUID(), "acme/dashboards/costs", "costs", "Costs", 1, false)
 
-    // ------------------------------------------------------------------ the sidebar's tree level
-
-    @Test
-    fun `the root level lists folders only - a dashboard name needs a folder`() {
-        val html =
-            engine.process(
-                "partials/dashboard-tree-level",
-                webContext("/dashboards").apply {
-                    setVariable("prefix", "")
-                    setVariable("scope", "nav")
-                    setVariable("levelId", DashboardBrowseModel.NAV_ROOT_ID)
-                    setVariable("folders", listOf(folderA))
-                    setVariable("dashboards", emptyList<DashboardBrowseModel.DashboardLeafView>())
-                    setVariable("offset", 0)
-                    setVariable("hasMore", false)
-                    setVariable("total", 0)
-                },
-            )
-
-        // One folder, its lazy one-level request riding the summary, the NAV scope on every
-        // URL (#400: the page instance is retired — the tree is the sidebar's); NO leaf at
-        // the root.
-        Regex("hx-target=\"next .tpl-level\"").findAll(html).toList().size shouldBe 1
-        html shouldContain "/partials/dashboards/tree?prefix=acme/dashboards&amp;scope=nav"
-        html shouldNotContain "scope=page"
-        html shouldNotContain "tpl-leaf"
-    }
-
-    @Test
-    fun `a level's children render as un-boosted links to the workspace`() {
-        val html = levelWith(board1, board2)
-
-        // A leaf NAVIGATES: a real href (the workspace page), full navigation —
-        // hx-boost="false", the §6.4 one-bundle rule — and the full path on `title`.
-        html shouldContain "hx-boost=\"true\""
-        html shouldContain "href=\"/dashboards/${board1.id}\""
-        html shouldContain "title=\"acme/dashboards/revenue\""
-        // versioning §7: the unreleased edits stay visible, marked.
-        html shouldContain "tpl-leaf-draft"
-        html shouldContain ">v3<"
-    }
-
-    @Test
-    fun `a dashboard the lens hides from the model is absent from the HTML`() {
-        val html = levelWith(board1)
-
-        html shouldContain "href=\"/dashboards/${board1.id}\""
-        html shouldNotContain "href=\"/dashboards/${board2.id}\""
-    }
-
-    private fun levelWith(vararg leaves: DashboardBrowseModel.DashboardLeafView): String =
-        engine.process(
-            "partials/dashboard-tree-level",
-            webContext("/dashboards").apply {
-                setVariable("prefix", "acme/dashboards")
-                setVariable("scope", "nav")
-                setVariable("levelId", "dash-level-nav-x")
-                setVariable("folders", emptyList<DashboardBrowseModel.DashboardFolderView>())
-                setVariable("dashboards", leaves.toList())
-                setVariable("offset", 0)
-                setVariable("hasMore", false)
-                setVariable("total", leaves.size)
-            },
-        )
-
     // ------------------------------------------------------------------ the catalog (#400)
 
     @Test
     fun `the catalog's rows are a FLAT list into the workspace - folders are not its axis`() {
-        val html = searchPartial(nav = false, rows = listOf(board1, board2))
+        val html = searchPartial(rows = listOf(board1, board2))
 
         html shouldContain "id=\"dash-list-wrapper\""
         html shouldContain "href=\"/dashboards/${board1.id}\""
         html shouldContain "href=\"/dashboards/${board2.id}\""
-        // Full navigations only: the workspace loads a Plotly bundle.
+        // Prepared main-content navigation, and the full path rides on `title` (§9.4).
         html shouldContain "hx-boost=\"true\""
+        html shouldContain "title=\"acme/dashboards/revenue\""
+        // D55: the working version.
+        html shouldContain ">v3<"
         html shouldNotContain "tpl-summary"
         html shouldNotContain "partials/dashboards/tree"
     }
 
     @Test
+    fun `a dashboard the lens hides from the model is absent from the HTML`() {
+        val html = searchPartial(rows = listOf(board1))
+
+        html shouldContain "href=\"/dashboards/${board1.id}\""
+        html shouldNotContain "href=\"/dashboards/${board2.id}\""
+    }
+
+    @Test
     fun `a draft-only dashboard's row says so - the list page's promise as a row state`() {
-        val html = searchPartial(nav = false, rows = listOf(board2))
+        val html = searchPartial(rows = listOf(board2))
 
         // v1 is the listing version AND the only one; the badge names the state a reader is
         // about to meet (the workspace's choose-a-version state), never a broken page.
@@ -138,26 +83,23 @@ class DashboardUiRenderTest {
     }
 
     @Test
-    fun `the sidebar's search results keep the nav listbox roles and the tree route's pager`() {
-        val html = searchPartial(nav = true, rows = listOf(board1))
+    fun `the catalog's rows are a plain list - no sidebar listbox, no nav scope, no tree route (#466)`() {
+        val html = searchPartial(rows = listOf(board1), q = "rev")
 
-        html shouldContain "id=\"dash-tree-nav\""
-        html shouldContain "role=\"listbox\""
-        html shouldContain "/partials/dashboards/tree?"
-        html shouldContain "scope=nav"
+        html shouldContain "data-dashboard-list=\"page\""
+        html shouldNotContain "role=\"listbox\""
+        html shouldNotContain "role=\"option\""
+        html shouldNotContain "scope="
+        html shouldNotContain "data-nav-tree-clear"
     }
 
     @Test
-    fun `the sidebar's EMPTY search offers no nav-scope clear button (the engine has its own)`() {
-        val html = searchPartial(nav = true, rows = emptyList())
+    fun `the catalog's EMPTY search offers the Clear search control naming its box (#432)`() {
+        // #432: the no-match clear names the box it empties (shell.js) and replaces a search
+        // still in flight from that box.
+        val catalogMiss = searchPartial(rows = emptyList(), q = "zzz")
 
-        html shouldContain "No dashboards match your search"
-        html shouldNotContain "data-nav-tree-clear"
-        html shouldNotContain "data-dp-clear-filters"
-
-        // #432: the CATALOG's no-match clear names the box it empties (shell.js) and replaces a
-        // search still in flight from that box.
-        val catalogMiss = searchPartial(nav = false, rows = emptyList(), q = "zzz")
+        catalogMiss shouldContain "No dashboards match your search"
         catalogMiss shouldContain "Clear search"
         catalogMiss shouldContain "data-dp-clear-filters=\"#dashboard-filter-q\""
         catalogMiss shouldContain "hx-sync=\"#dashboard-filter-q:replace\""
@@ -165,16 +107,14 @@ class DashboardUiRenderTest {
 
     @Test
     fun `a search with 200 or more matches states no cap - the pager's total is the count (#524)`() {
-        // Since #512 the catalog and the branch page the SQL search, so `total` is the true match
-        // count and every match is reachable through the pager; the old "reads at most 200" note
-        // described an in-memory first-200 read that no longer exists.
-        listOf(false, true).forEach { nav ->
-            val html = searchPartial(nav = nav, rows = listOf(board1), q = "board", total = 201)
+        // Since #512 the catalog pages the SQL search, so `total` is the true match count and
+        // every match is reachable through the pager; the old "reads at most 200" note described
+        // an in-memory first-200 read that no longer exists.
+        val html = searchPartial(rows = listOf(board1), q = "board", total = 201)
 
-            html shouldNotContain "at most 200"
-            html shouldNotContain "tpl-overflow"
-            html shouldContain "Showing 1 of 201"
-        }
+        html shouldNotContain "at most 200"
+        html shouldNotContain "tpl-overflow"
+        html shouldContain "Showing 1 of 201"
     }
 
     @Test
@@ -185,8 +125,7 @@ class DashboardUiRenderTest {
                 webContext("/dashboards").apply {
                     setVariable("q", "")
                     setVariable("lensUnavailable", null)
-                    setVariable("scope", "page")
-                    setVariable("rootId", DashboardListScope.PAGE.rootId)
+                    setVariable("rootId", DashboardBrowseModel.PAGE_ROOT_ID)
                     setVariable("dashboards", listOf(board1))
                     setVariable("offset", 0)
                     setVariable("hasMore", false)
@@ -204,7 +143,6 @@ class DashboardUiRenderTest {
     }
 
     private fun searchPartial(
-        nav: Boolean,
         rows: List<DashboardBrowseModel.DashboardLeafView>,
         q: String = "",
         total: Int = rows.size,
@@ -212,8 +150,7 @@ class DashboardUiRenderTest {
         engine.process(
             "partials/dashboard-search",
             webContext("/dashboards").apply {
-                setVariable("scope", if (nav) "nav" else "page")
-                setVariable("rootId", if (nav) DashboardBrowseModel.NAV_ROOT_ID else DashboardListScope.PAGE.rootId)
+                setVariable("rootId", DashboardBrowseModel.PAGE_ROOT_ID)
                 setVariable("q", q)
                 setVariable("dashboards", rows)
                 setVariable("lensUnavailable", null)

@@ -175,7 +175,7 @@ test("a fifth path is refused BY THE PROXY and never reaches the upstream", asyn
     "/api/v1/promotion/inventory",
     "/mcp",
     "/dashboards",
-    "/partials/dashboards/tree",
+    "/partials/dashboards",
   ]) {
     const res = await fetch(PROXY_BASE + p, { method: p === "/api/v1/dashboards/bindings" ? "POST" : "GET" });
     assert.equal(res.status, 404, p);

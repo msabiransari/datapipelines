@@ -1,22 +1,9 @@
-<!-- The pipelines screen's swap ROOT — a dispatcher, not an element of its own (067).
-
-     Browse and search are different presentations of the same surface
-     (template-hierarchy-design §9.2, decided for templates in 047 and inherited here):
-     browsing renders the tree one level per request; a non-empty `q` renders a FLAT list of
-     full paths. Pruning a tree to matching leaves would mean walking the ancestors of every
-     match — exactly the whole-list-in-the-browser work §9.1 forbids — and a flat list of full
-     paths is what someone searching `nyc/mob` wants to see. Clearing `q` returns to the tree,
-     by construction: the same dispatcher answers both.
-
-     #350: two instances. In the global sidebar (`scope=nav`) both branches' root element
-     carries id="pipeline-nav-root", so the sidebar's one stable swap target survives every
-     refresh in both presentations; the /pipelines CATALOG (any other scope) is always the flat
-     branch, rooted at id="pipeline-list-wrapper" (PipelineBrowseModel.fillWrapper decides).
-     This th:block contributes no element and MUST NOT carry the id — th:replace removes the
-     host, so an id written here would never reach the DOM. -->
+<!-- The /pipelines catalog's swap ROOT (067, #350): the flat list of full paths, rooted at
+     id="pipeline-list-wrapper" (PipelineBrowseModel.fillWrapper). A non-empty `q` narrows it
+     to the matches; there is no tree presentation to dispatch to — the folder tree is the
+     global sidebar's, read from the REST tree since #460, and its server-rendered levels are
+     gone with #466. This th:block contributes no element and MUST NOT carry the id —
+     th:replace removes the host, so an id written here would never reach the DOM. -->
 <th:block xmlns:th="http://www.thymeleaf.org" th:fragment="fragment"
-          th:replace="${searching} ? ~{partials/pipeline-search :: results} : ~{partials/pipeline-tree-level :: level}">
-  <!-- ONE conditional fragment expression, not two blocks each carrying th:if + th:replace:
-       th:replace has HIGHER attribute precedence than th:if, so the pair-of-blocks form
-       renders BOTH presentations and the condition never runs. -->
+          th:replace="~{partials/pipeline-search :: results}">
 </th:block>

@@ -7,7 +7,6 @@ import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.templates.Template
-import co.datapipelines.templates.TemplateFolder
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateUsageService
 import co.datapipelines.templates.TemplateValidator
@@ -16,25 +15,23 @@ import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import io.mockk.every
 import io.mockk.mockk
-import io.mockk.verify
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
-import org.springframework.mock.web.MockHttpServletResponse
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.ui.ExtendedModelMap
 import java.util.UUID
 
 /**
- * The templates catalog page's controller and the partial controller's two list instances
- * (#398), over the one [TemplateBrowseModel] they share.
+ * The templates catalog page's controller and the partial controller's list (#398), over the
+ * one [TemplateBrowseModel] they share.
  *
- * The browse model is REAL here, not a double: the thing worth pinning is that the CATALOG
+ * The browse model is REAL here, not a double: the thing worth pinning is that the catalog
  * always answers the flat list (an empty `q` is every template — the pipelines ruling, read
- * onto templates) while the SIDEBAR dispatches tree-or-search by the same rule on both
- * surfaces (a page load and an htmx refresh), and a mocked browse model would assert nothing
- * about that rule. The repository underneath is the double, so each test names the query it
- * is about.
+ * onto templates) on both surfaces (a page load and an htmx refresh), and a mocked browse model
+ * would assert nothing about that rule. Since #466 the partial has no sidebar instance (the
+ * tree is `/api/v1/templates/tree`). The repository underneath is the double, so each test
+ * names the query it is about.
  */
 class TemplateUiControllerTest {
     /** 194d — the COMPOSED reverse arrow the model takes (the record's §8.4). */
@@ -104,18 +101,6 @@ class TemplateUiControllerTest {
         every { repository.findDrafts(any(), any()) } returns emptyMap()
     }
 
-    /** Browsing the SIDEBAR's root level: folders only, never a leaf query (077). */
-    private fun stubRootLevel(
-        folders: List<TemplateFolder> = listOf(TemplateFolder("acme", "acme", 3)),
-        leaves: List<Template> = listOf(template()),
-        total: Int = 1,
-    ) {
-        every { repository.listChildFolders(any(), any(), any(), any(), any()) } returns folders
-        every { repository.listChildTemplates(any(), any(), any(), any(), any(), any()) } returns leaves
-        every { repository.countChildTemplates(any(), any(), any(), any()) } returns total
-        every { repository.findDrafts(any(), any()) } returns emptyMap()
-    }
-
     @Test
     fun `the catalog with no query lists EVERY template - the flat list, never the tree`() {
         authenticate()
@@ -130,7 +115,6 @@ class TemplateUiControllerTest {
         // #398: the page has no tree — an empty query is the workspace's whole list.
         model["searching"] shouldBe true
         model["rootId"] shouldBe TemplateBrowseModel.CATALOG_ROOT_ID
-        model["scope"] shouldBe TemplateListScope.CATALOG.wire
         (model["templates"] as List<*>) shouldHaveSize 2
         model["total"] shouldBe 42
     }
@@ -154,59 +138,6 @@ class TemplateUiControllerTest {
     }
 
     @Test
-    fun `the sidebar's nav scope with no query is the ROOT level — folders only, and no flat listing`() {
-        authenticate()
-        // 077: the repository is stubbed to answer WITH leaves, and the root level must still
-        // show none — §4.1 requires a folder, so nothing sits directly at the root and the
-        // model does not even issue the leaf query. Stubbing an empty leaf list instead would
-        // pass with the production change deleted.
-        stubRootLevel(leaves = listOf(template(), template("test/orders_v2.sql")), total = 42)
-
-        val model = ExtendedModelMap()
-        val response = MockHttpServletResponse()
-        val viewName =
-            partialController.list(
-                model,
-                response,
-                q = null,
-                dialect = null,
-                type = null,
-                prefix = null,
-                offset = 0,
-                scope = TemplateListScope.NAV.wire,
-            )
-
-        viewName shouldBe TemplateBrowseModel.LEVEL_VIEW
-        model["searching"] shouldBe false
-        model["levelId"] shouldBe TemplateBrowseModel.ROOT_LEVEL_ID
-        (model["folders"] as List<*>) shouldHaveSize 1
-        (model["templates"] as List<*>) shouldHaveSize 0
-        // The pager travels with the leaves: an empty root level reports a truthful zero, so
-        // the level and its pager cannot disagree (034 E3).
-        model["total"] shouldBe 0
-    }
-
-    @Test
-    fun `077 - the root level never queries the leaves, and a NESTED level still does`() {
-        authenticate()
-        stubRootLevel()
-
-        val root = ExtendedModelMap()
-        partialController.list(root, MockHttpServletResponse(), q = null, dialect = null, type = null, prefix = "", offset = 0)
-
-        (root["templates"] as List<*>) shouldHaveSize 0
-        verify(exactly = 0) { repository.listChildTemplates(any(), null, any(), any(), any(), any()) }
-        verify(exactly = 0) { repository.listChildTemplates(any(), "", any(), any(), any(), any()) }
-
-        // …and a nested level is untouched by the rule: it queries and it renders.
-        val nested = ExtendedModelMap()
-        partialController.list(nested, MockHttpServletResponse(), q = null, dialect = null, type = null, prefix = "acme", offset = 0)
-
-        (nested["templates"] as List<*>) shouldHaveSize 1
-        verify(exactly = 1) { repository.listChildTemplates(any(), "acme", any(), any(), any(), any()) }
-    }
-
-    @Test
     fun `the create form carries the SERVER's grammar, not a copy of it`() {
         authenticate()
         every { themeResolver.resolve(any()) } returns "saas"
@@ -221,49 +152,12 @@ class TemplateUiControllerTest {
     }
 
     @Test
-    fun `the nav scope carries the DP-Nav-Stamp, and the catalog answers without one`() {
-        authenticate()
-        stubRootLevel()
-        stubFlatList()
-
-        val nav = MockHttpServletResponse()
-        partialController
-            .list(
-                ExtendedModelMap(),
-                nav,
-                q = null,
-                dialect = null,
-                type = null,
-                prefix = null,
-                offset = 0,
-                scope = TemplateListScope.NAV.wire,
-            )
-        nav.getHeader(PipelineBrowseModel.NAV_STAMP_HEADER) shouldBe "acme|all"
-
-        val page = MockHttpServletResponse()
-        partialController
-            .list(
-                ExtendedModelMap(),
-                page,
-                q = null,
-                dialect = null,
-                type = null,
-                prefix = null,
-                offset = 0,
-                scope = TemplateListScope.CATALOG.wire,
-            )
-        page.getHeader(PipelineBrowseModel.NAV_STAMP_HEADER) shouldBe null
-    }
-
-    @Test
-    fun `an unknown scope degrades to the catalog - never an error, never the sidebar`() {
+    fun `the htmx refresh answers the same flat list under the catalog's root`() {
         authenticate()
         stubFlatList()
 
         val model = ExtendedModelMap()
-        val viewName =
-            partialController
-                .list(model, MockHttpServletResponse(), q = null, dialect = null, type = null, prefix = null, offset = 0, scope = "bogus")
+        val viewName = partialController.list(model, q = null, dialect = null, type = null, offset = 0)
 
         viewName shouldBe TemplateBrowseModel.SEARCH_VIEW
         model["rootId"] shouldBe TemplateBrowseModel.CATALOG_ROOT_ID

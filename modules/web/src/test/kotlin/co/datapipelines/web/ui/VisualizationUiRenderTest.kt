@@ -17,9 +17,9 @@ import org.thymeleaf.web.servlet.JakartaServletWebApplication
 import java.util.UUID
 
 /**
- * #399 — the Visualizations pages pinned at the RENDER (DashboardUiRenderTest's mould): the tree level
- * (folders first, the root holds no leaves, a leaf navigates un-boosted with the chart-line glyph), the
- * flat catalog and the sidebar search, the workspace page's ONE-bundle contract and its tabs, the
+ * #399 — the Visualizations pages pinned at the RENDER (DashboardUiRenderTest's mould): the flat catalog
+ * (its rows, its empty and lens-unavailable states; since #466 no sidebar presentation is left in the
+ * fragment — the tree is the REST one), the workspace page's ONE-bundle contract and its tabs, the
  * choose-a-version state, and every pane's stated contract — the Preview's fixture label and its exact
  * empty-state sentence, the Evidence cap and its screenshot-or-"no screenshot" rule, the Used-by empty
  * state, the Versions verbs per role, and the lifecycle dialogs (refusals before the button, the ONE
@@ -41,82 +41,50 @@ class VisualizationUiRenderTest {
         }
 
     private val vizId = UUID.randomUUID()
-    private val folder = VisualizationBrowseModel.FolderView("acme/charts", "charts", 2, "viz-level-aaaa")
     private val leaf =
         VisualizationBrowseModel.LeafView(vizId, "acme/charts/revenue", "revenue", "Revenue", 3, released = true)
     private val draftLeaf =
         VisualizationBrowseModel.LeafView(UUID.randomUUID(), "acme/charts/costs", "costs", "Costs", 1, released = false)
 
-    // ------------------------------------------------------------------ the sidebar's tree level
+    // ------------------------------------------------------------------ the catalog's flat list
 
     @Test
-    fun `the root level lists folders only, each a lazy one-level request in the nav scope`() {
-        val html = level(prefix = "", folders = listOf(folder), leaves = emptyList())
+    fun `the catalog instance is a flat list of un-boosted rows under its stable root, a draft row saying so`() {
+        val html = list(q = "", rows = listOf(leaf, draftLeaf))
 
-        Regex("hx-target=\"next .tpl-level\"").findAll(html).toList().size shouldBe 1
-        html shouldContain "/partials/visualizations/tree?prefix=acme/charts&amp;scope=nav"
-        html shouldContain "role=\"tree\""
-        html shouldNotContain "tpl-leaf"
-    }
-
-    @Test
-    fun `a level's leaves are un-boosted links to the workspace with the chart-line glyph and the draft badge`() {
-        val html = level(prefix = "acme/charts", folders = emptyList(), leaves = listOf(leaf, draftLeaf))
-
+        html shouldContain "id=\"viz-list-wrapper\""
+        html shouldContain "data-visualization-list=\"page\""
         html shouldContain "href=\"/visualizations/$vizId\""
         html shouldContain "data-leaf-id=\"$vizId\""
-        Regex("class=\"tpl-leaf\"[^>]*hx-boost=\"true\"").findAll(html).toList().size shouldBe 2
-        html shouldContain "lucide-sprite.svg#chart-line"
-        // Exactly one draft badge: the unreleased leaf's.
-        Regex("tpl-leaf-draft").findAll(html).toList().size shouldBe 1
-        html shouldContain "role=\"group\""
+        Regex("class=\"tpl-result\"[^>]*hx-boost=\"true\"").findAll(html).toList().size shouldBe 2
+        // Exactly one draft badge: the unreleased row's.
+        Regex("pending release").findAll(html).toList().size shouldBe 1
+        html shouldContain "draft v1 pending release"
+        // #466: no sidebar presentation is left in the fragment.
+        html shouldNotContain "role=\"listbox\""
+        html shouldNotContain "role=\"option\""
+        html shouldNotContain "scope="
     }
 
     @Test
-    fun `an empty root says how visualizations arrive, and a lens-unavailable root says the lens sentence instead`() {
-        val empty = level(prefix = "", folders = emptyList(), leaves = emptyList())
+    fun `an empty catalog says how visualizations arrive, and a lens-unavailable one says the lens sentence instead`() {
+        val empty = list(q = "", rows = emptyList())
         empty shouldContain "No visualizations yet"
         empty shouldContain "authored through the MCP server"
 
         val unavailable =
-            engine.process(
-                VisualizationBrowseModel.LEVEL_VIEW,
-                webContext("/visualizations").apply {
-                    levelVariables("", emptyList(), emptyList())
-                    setVariable("lensUnavailable", LensedView.Unavailable("https://uat.example.com", "timeout"))
-                },
-            )
+            list(q = "", rows = emptyList(), lensUnavailable = LensedView.Unavailable("https://uat.example.com", "timeout"))
         unavailable shouldNotContain "No visualizations yet"
         unavailable shouldContain "Could not read the target"
     }
 
-    // ------------------------------------------------------------------ the flat list (catalog + nav search)
-
     @Test
-    fun `the catalog instance is a flat list of un-boosted rows under its stable root, a draft row saying so`() {
-        val html = list(scope = "page", rootId = VisualizationBrowseModel.PAGE_ROOT_ID, q = "", rows = listOf(leaf, draftLeaf))
-
-        html shouldContain "id=\"viz-list-wrapper\""
-        html shouldContain "data-visualization-list=\"page\""
-        Regex("class=\"tpl-result\"[^>]*hx-boost=\"true\"").findAll(html).toList().size shouldBe 2
-        html shouldContain "draft v1 pending release"
-        html shouldNotContain "role=\"listbox\""
-    }
-
-    @Test
-    fun `the nav search is a listbox, and its no-match state offers the tree's clear`() {
-        val hits = list(scope = "nav", rootId = VisualizationBrowseModel.NAV_ROOT_ID, q = "rev", rows = listOf(leaf))
-        hits shouldContain "role=\"listbox\""
-        hits shouldContain "role=\"option\""
-
-        val none = list(scope = "nav", rootId = VisualizationBrowseModel.NAV_ROOT_ID, q = "zzz", rows = emptyList())
-        none shouldContain "No visualizations match your search"
-        none shouldNotContain "data-nav-tree-clear"
-        none shouldNotContain "data-dp-clear-filters"
-
-        // #432: the CATALOG's no-match clear names the box it empties (shell.js) and replaces a
-        // search still in flight from that box.
-        val catalogMiss = list(scope = "page", rootId = VisualizationBrowseModel.PAGE_ROOT_ID, q = "zzz", rows = emptyList())
+    fun `the catalog's no-match state offers the Clear search control naming its box (#432)`() {
+        // #432: the no-match clear names the box it empties (shell.js) and replaces a search
+        // still in flight from that box.
+        val catalogMiss = list(q = "zzz", rows = emptyList())
+        catalogMiss shouldContain "No visualizations match your search"
+        catalogMiss shouldNotContain "data-nav-tree-clear"
         catalogMiss shouldContain "Clear search"
         catalogMiss shouldContain "data-dp-clear-filters=\"#visualization-filter-q\""
         catalogMiss shouldContain "hx-sync=\"#visualization-filter-q:replace\""
@@ -130,7 +98,6 @@ class VisualizationUiRenderTest {
                 webContext("/visualizations").apply {
                     setVariable("q", "")
                     setVariable("searching", true)
-                    setVariable("scope", "page")
                     setVariable("rootId", VisualizationBrowseModel.PAGE_ROOT_ID)
                     setVariable("lensUnavailable", null)
                     setVariable("offset", 0)
@@ -511,45 +478,17 @@ class VisualizationUiRenderTest {
 
     // ------------------------------------------------------------------ helpers
 
-    private fun level(
-        prefix: String,
-        folders: List<VisualizationBrowseModel.FolderView>,
-        leaves: List<VisualizationBrowseModel.LeafView>,
-    ): String =
-        engine.process(
-            VisualizationBrowseModel.LEVEL_VIEW,
-            webContext("/visualizations").apply { levelVariables(prefix, folders, leaves) },
-        )
-
-    private fun WebContext.levelVariables(
-        prefix: String,
-        folders: List<VisualizationBrowseModel.FolderView>,
-        leaves: List<VisualizationBrowseModel.LeafView>,
-    ) {
-        setVariable("prefix", prefix)
-        setVariable("scope", VisualizationBrowseModel.SCOPE_NAV)
-        setVariable("levelId", VisualizationBrowseModel.levelId(prefix))
-        setVariable("folders", folders)
-        setVariable("visualizations", leaves)
-        setVariable("offset", 0)
-        setVariable("hasMore", false)
-        setVariable("total", leaves.size)
-        setVariable("lensUnavailable", null)
-    }
-
     private fun list(
-        scope: String,
-        rootId: String,
         q: String,
         rows: List<VisualizationBrowseModel.LeafView>,
+        lensUnavailable: LensedView.Unavailable? = null,
     ): String =
         engine.process(
             VisualizationBrowseModel.SEARCH_VIEW,
             webContext("/visualizations").apply {
-                setVariable("scope", scope)
-                setVariable("rootId", rootId)
+                setVariable("rootId", VisualizationBrowseModel.PAGE_ROOT_ID)
                 setVariable("q", q)
-                setVariable("lensUnavailable", null)
+                setVariable("lensUnavailable", lensUnavailable)
                 setVariable("offset", 0)
                 setVariable("visualizations", rows)
                 setVariable("hasMore", false)

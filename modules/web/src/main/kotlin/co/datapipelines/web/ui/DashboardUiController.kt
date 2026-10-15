@@ -57,7 +57,6 @@ class DashboardUiController(
             lens.viewFor(principal),
             q?.trim()?.takeIf { it.isNotEmpty() },
             maxOf(0, offset ?: 0),
-            DashboardListScope.PAGE,
         )
         return "dashboards/list"
     }

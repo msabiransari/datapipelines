@@ -69,7 +69,7 @@ class DashboardKeyConfinementTest {
                 // The pages and the partials.
                 "/dashboards",
                 "/dashboards/$board",
-                "/partials/dashboards/tree",
+                "/partials/dashboards",
                 "/partials/dashboards/$board/refreshes",
                 "/partials/api-keys",
                 // Every other REST family.

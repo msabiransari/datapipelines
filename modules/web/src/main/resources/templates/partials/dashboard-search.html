@@ -1,12 +1,12 @@
 <!-- Artifact and version links use prepared main-content navigation, preserving the sidebar. -->
 <div xmlns:th="http://www.thymeleaf.org" th:fragment="results" th:id="${rootId}"
-     th:with="nav=${scope == 'nav'}" th:attr="data-dashboard-list=${scope}">
+     data-dashboard-list="page">
   <th:block th:if="${lensUnavailable != null and #lists.isEmpty(dashboards)}">
     <div th:replace="~{partials/lens-unavailable :: notice(${lensUnavailable})}"></div>
   </th:block>
   <!-- The catalog with no query and no rows is the workspace's EMPTY state, not a failed
-       search: it says how dashboards arrive (R10 — authored through agents), like the tree's. -->
-  <th:block th:if="${lensUnavailable == null and #lists.isEmpty(dashboards) and !nav and #strings.isEmpty(q)}">
+       search: it says how dashboards arrive (R10 — authored through agents). -->
+  <th:block th:if="${lensUnavailable == null and #lists.isEmpty(dashboards) and #strings.isEmpty(q)}">
     <div class="ds-empty">
       <p class="ds-empty-title">No dashboards yet</p>
       <p class="ds-empty-description">
@@ -15,27 +15,23 @@
       </p>
     </div>
   </th:block>
-  <th:block th:if="${lensUnavailable == null and #lists.isEmpty(dashboards) and (nav or !#strings.isEmpty(q))}">
+  <th:block th:if="${lensUnavailable == null and #lists.isEmpty(dashboards) and !#strings.isEmpty(q)}">
     <div class="ds-empty">
       <p class="ds-empty-title">No dashboards match your search</p>
       <div class="ds-empty-actions">
-        <button th:unless="${nav}" type="button" class="ds-button ds-button-secondary ds-button-sm"
+        <button type="button" class="ds-button ds-button-secondary ds-button-sm"
                 data-dp-clear-filters="#dashboard-filter-q" hx-sync="#dashboard-filter-q:replace"
                 th:attr="hx-get=@{/partials/dashboards}, hx-target='#' + ${rootId}, hx-swap='outerHTML'">Clear search</button>
       </div>
     </div>
   </th:block>
 
-  <ul class="tpl-results"
-      th:unless="${#lists.isEmpty(dashboards)}"
-      th:attr="role=${nav} ? 'listbox' : null,
-               aria-label=${nav} ? 'Dashboard search results' : 'Dashboards'">
-    <li th:attr="role=${nav} ? 'none' : null" th:each="d : ${dashboards}">
+  <ul class="tpl-results" aria-label="Dashboards"
+      th:unless="${#lists.isEmpty(dashboards)}">
+    <li th:each="d : ${dashboards}">
       <a class="tpl-result" hx-boost="true"
          th:href="@{'/dashboards/' + ${d.id}}"
-         th:attr="role=${nav} ? 'option' : null,
-                  aria-selected=${nav} ? 'false' : null,
-                  data-leaf-id=${d.id}">
+         th:attr="data-leaf-id=${d.id}">
         <!-- The FULL path, and it rides on `title` too — a deep path in a narrow pane
              truncates, and the truncated text must never be the only copy (§9.4). -->
         <span class="tpl-path" th:text="${d.name}" th:title="${d.name}">finance/dashboards/revenue_overview</span>
@@ -55,8 +51,8 @@
   </ul>
 
   <th:block th:unless="${#lists.isEmpty(dashboards)}"
-            th:with="prevUrl=${nav} ? @{/partials/dashboards/tree(q=${q}, scope='nav', offset=${offset - 25})} : @{/partials/dashboards(q=${q}, offset=${offset - 25})},
-                     nextUrl=${nav} ? @{/partials/dashboards/tree(q=${q}, scope='nav', offset=${offset + 25})} : @{/partials/dashboards(q=${q}, offset=${offset + 25})}">
+            th:with="prevUrl=@{/partials/dashboards(q=${q}, offset=${offset - 25})},
+                     nextUrl=@{/partials/dashboards(q=${q}, offset=${offset + 25})}">
     <div th:replace="~{partials/pager :: pager('#' + ${rootId}, ${prevUrl}, ${nextUrl}, ${offset}, ${hasMore}, ${dashboards.size()}, ${total})}"></div>
   </th:block>
 </div>

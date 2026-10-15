@@ -355,8 +355,7 @@ class ShellRenderTest {
         setVariable("dialects", emptyList<String>())
         // #350: the /pipelines page is the flat catalog under its own root.
         setVariable("searching", true)
-        setVariable("scope", PipelineListScope.CATALOG.wire)
-        setVariable("rootId", PipelineListScope.CATALOG.rootId)
+        setVariable("rootId", PipelineBrowseModel.CATALOG_ROOT_ID)
         setVariable("pipelines", emptyList<Any>())
         setVariable("drafts", emptyMap<Any, Any>())
         setVariable("q", "")

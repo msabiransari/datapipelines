@@ -219,8 +219,7 @@ class TemplateHtmxRenderAuditTest {
         setVariable("dialects", emptyList<String>())
         // #350: the page is the CATALOG — the flat list under its own root, never a tree level.
         setVariable("searching", true)
-        setVariable("scope", PipelineListScope.CATALOG.wire)
-        setVariable("rootId", PipelineListScope.CATALOG.rootId)
+        setVariable("rootId", PipelineBrowseModel.CATALOG_ROOT_ID)
         setVariable("drafts", emptyMap<UUID, co.datapipelines.pipeline.PipelineVersionDetail>())
         setVariable(
             "pipelines",
@@ -244,10 +243,10 @@ class TemplateHtmxRenderAuditTest {
     }
 
     /**
-     * TemplateUiController's model — the BROWSE presentation, which is what a page load with
-     * no `q` renders since 047 (the screen is a tree). One folder and one root leaf, so the
-     * level renders its rows AND its pager and the guard is not vacuous; `levelId` is what the
-     * pager's `hx-target` is built from, so an absent one would target `#null`.
+     * TemplateUiController's model — the catalog's flat list, which is what a page load renders
+     * since #398. Rows and a pager, so the list renders both and the guard is not vacuous;
+     * `rootId` is what the pager's `hx-target` is built from, so an absent one would target
+     * `#null`.
      */
     private fun WebContext.fillTemplateList() {
         fillLayoutChrome()
@@ -261,7 +260,6 @@ class TemplateHtmxRenderAuditTest {
         setVariable("nameHint", co.datapipelines.templates.TemplateNameGrammar.DESCRIPTION)
         // #398: the catalog's own fill — the flat list, always (the dispatcher is gone).
         setVariable("searching", true)
-        setVariable("scope", TemplateListScope.CATALOG.wire)
         setVariable("rootId", TemplateBrowseModel.CATALOG_ROOT_ID)
         setVariable("drafts", emptyMap<String, co.datapipelines.templates.TemplateVersionDetail>())
         setVariable(

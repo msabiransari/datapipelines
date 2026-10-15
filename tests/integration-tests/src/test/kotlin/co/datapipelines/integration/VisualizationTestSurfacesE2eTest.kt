@@ -288,7 +288,7 @@ class VisualizationTestSurfacesE2eTest {
         val token = session.getString("data.preview_url").substringAfter("session=")
         val run = session.getString("data.run_id")
         val reads =
-            listOf("/visualizations", "/visualizations/$id", "/partials/visualizations", "/partials/visualizations/tree") +
+            listOf("/visualizations", "/visualizations/$id", "/partials/visualizations") +
                 listOf(
                     "preview",
                     "overview",

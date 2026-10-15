@@ -21,7 +21,6 @@ import io.mockk.verify
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.springframework.http.HttpStatus
-import org.springframework.mock.web.MockHttpServletResponse
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.ui.ExtendedModelMap
@@ -32,10 +31,9 @@ import java.util.UUID
  * [TemplatePartialController] — the browse/search routing and the modal's create path,
  * not the fragments (TemplateCreatePartialTest already pins the created fragment's model).
  *
- * The behaviors pinned: one route chooses its instance by `prefix` and `scope` (a folder
- * expansion never returns the whole list; the catalog's flat list answers without a prefix;
- * every sidebar answer carries the `DP-Nav-Stamp`), `q` is ignored while browsing a level,
- * and the create path's refusal ladder — unknown type, duplicate name, authoring gate,
+ * The behaviors pinned: the list route is the catalog's flat list only (#466: the sidebar's
+ * tree levels moved to `/api/v1/templates/tree`, so there is no `prefix`, `scope` or stamp),
+ * with the query trimmed and a blank one dropped; and the create path's refusal ladder — unknown type, duplicate name, authoring gate,
  * validator rejection — every one an inline 400 fragment, never an error page. The explorer's
  * detail route retired with the pane (#398); the workspace's own model has its tests.
  */
@@ -83,80 +81,17 @@ class TemplatePartialControllerTest {
     // ------------------------------------------------------------ list
 
     @Test
-    fun `no prefix - the catalog's flat list with the trimmed query`() {
-        val response = MockHttpServletResponse()
-        controller.list(model, response, q = "  rev  ", dialect = null, type = null, prefix = null, offset = 0)
+    fun `the catalog's flat list with the trimmed query`() {
+        controller.list(model, q = "  rev  ", dialect = null, type = null, offset = 0)
 
-        verify {
-            browse.fillWrapper(
-                model,
-                workspaceId,
-                any(),
-                q = "rev",
-                dialect = null,
-                type = null,
-                offset = 0,
-                scope = TemplateListScope.CATALOG,
-            )
-        }
-    }
-
-    @Test
-    fun `scope=nav without a query is the SIDEBAR's tree root, stamped with the workspace and lens`() {
-        val response = MockHttpServletResponse()
-        controller.list(model, response, q = null, dialect = null, type = null, prefix = null, offset = 0, scope = "nav")
-
-        verify {
-            browse.fillWrapper(
-                model,
-                workspaceId,
-                any(),
-                q = null,
-                dialect = null,
-                type = null,
-                offset = 0,
-                scope = TemplateListScope.NAV,
-            )
-        }
-        // #350's admission guard: a level rendered under another workspace or lens can never
-        // join this tree's rows, so every sidebar answer carries the stamp.
-        response.getHeader(PipelineBrowseModel.NAV_STAMP_HEADER) shouldBe "acme|all"
-    }
-
-    @Test
-    fun `a prefix - exactly one tree level, q is ignored while browsing, and the stamp rides along`() {
-        val response = MockHttpServletResponse()
-        controller.list(model, response, q = "rev", dialect = null, type = null, prefix = "acme/finance", offset = 0)
-
-        verify {
-            browse.fillLevel(model, workspaceId, any(), prefix = "acme/finance", dialect = null, type = null, offset = 0)
-        }
-        response.getHeader(PipelineBrowseModel.NAV_STAMP_HEADER) shouldBe "acme|all"
-    }
-
-    @Test
-    fun `an empty-string prefix is the root level - still the level fragment`() {
-        controller.list(model, MockHttpServletResponse(), q = null, dialect = null, type = null, prefix = "", offset = 0)
-
-        verify { browse.fillLevel(model, workspaceId, any(), prefix = "", dialect = null, type = null, offset = 0) }
+        verify { browse.fillSearch(model, workspaceId, any(), q = "rev", dialect = null, type = null, offset = 0) }
     }
 
     @Test
     fun `a blank query is not a query`() {
-        controller.list(model, MockHttpServletResponse(), q = "   ", dialect = null, type = null, prefix = null, offset = 0)
+        controller.list(model, q = "   ", dialect = null, type = null, offset = 0)
 
-        verify {
-            browse.fillWrapper(
-                model,
-                workspaceId,
-                any(),
-                q = null,
-                dialect = null,
-                type = null,
-                offset = 0,
-                scope = TemplateListScope.CATALOG,
-            )
-        }
+        verify { browse.fillSearch(model, workspaceId, any(), q = null, dialect = null, type = null, offset = 0) }
     }
 
     // ------------------------------------------------------------ runs

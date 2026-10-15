@@ -1,12 +1,12 @@
 <!-- Artifact and version links use prepared main-content navigation, preserving the sidebar. -->
 <div xmlns:th="http://www.thymeleaf.org" th:fragment="results" th:id="${rootId}"
-     th:with="nav=${scope == 'nav'}" th:attr="data-parameter-set-list=${scope}">
+     data-parameter-set-list="page">
   <th:block th:if="${lensUnavailable != null and #lists.isEmpty(parameterSets)}">
     <div th:replace="~{partials/lens-unavailable :: notice(${lensUnavailable})}"></div>
   </th:block>
   <!-- The catalog with no query and no rows is the workspace's EMPTY state, not a failed
-       search: it says how sets arrive (R10 — authored through agents), like the tree's. -->
-  <th:block th:if="${lensUnavailable == null and #lists.isEmpty(parameterSets) and !nav and #strings.isEmpty(q)}">
+       search: it says how sets arrive (R10 — authored through agents). -->
+  <th:block th:if="${lensUnavailable == null and #lists.isEmpty(parameterSets) and #strings.isEmpty(q)}">
     <div class="ds-empty">
       <p class="ds-empty-title">No parameter sets yet</p>
       <p class="ds-empty-description">
@@ -16,27 +16,23 @@
       </p>
     </div>
   </th:block>
-  <th:block th:if="${lensUnavailable == null and #lists.isEmpty(parameterSets) and (nav or !#strings.isEmpty(q))}">
+  <th:block th:if="${lensUnavailable == null and #lists.isEmpty(parameterSets) and !#strings.isEmpty(q)}">
     <div class="ds-empty">
       <p class="ds-empty-title">No parameter sets match your search</p>
       <div class="ds-empty-actions">
-        <button th:unless="${nav}" type="button" class="ds-button ds-button-secondary ds-button-sm"
+        <button type="button" class="ds-button ds-button-secondary ds-button-sm"
                 data-dp-clear-filters="#parameter-set-filter-q" hx-sync="#parameter-set-filter-q:replace"
                 th:attr="hx-get=@{/partials/parameter-sets/tree}, hx-target='#' + ${rootId}, hx-swap='outerHTML'">Clear search</button>
       </div>
     </div>
   </th:block>
 
-  <ul class="tpl-results"
-      th:unless="${#lists.isEmpty(parameterSets)}"
-      th:attr="role=${nav} ? 'listbox' : null,
-               aria-label=${nav} ? 'Parameter set search results' : 'Parameter sets'">
-    <li th:attr="role=${nav} ? 'none' : null" th:each="p : ${parameterSets}">
+  <ul class="tpl-results" aria-label="Parameter sets"
+      th:unless="${#lists.isEmpty(parameterSets)}">
+    <li th:each="p : ${parameterSets}">
       <a class="tpl-result" hx-boost="true"
          th:href="@{/parameter-sets/{id}(id=${p.id})}"
-         th:attr="role=${nav} ? 'option' : null,
-                  aria-selected=${nav} ? 'false' : null,
-                  data-leaf-id=${p.id}">
+         th:attr="data-leaf-id=${p.id}">
         <!-- The FULL path, and it rides on `title` too — a deep path in a narrow pane
              truncates, and the truncated text must never be the only copy (§9.4). -->
         <span class="tpl-path" th:text="${p.name}" th:title="${p.name}">finance/parameters/geo_filters</span>
@@ -50,8 +46,8 @@
   </ul>
 
   <th:block th:unless="${#lists.isEmpty(parameterSets)}"
-            th:with="prevUrl=${nav} ? @{/partials/parameter-sets/tree(q=${q}, scope='nav', offset=${offset - 25})} : @{/partials/parameter-sets/tree(q=${q}, offset=${offset - 25})},
-                     nextUrl=${nav} ? @{/partials/parameter-sets/tree(q=${q}, scope='nav', offset=${offset + 25})} : @{/partials/parameter-sets/tree(q=${q}, offset=${offset + 25})}">
+            th:with="prevUrl=@{/partials/parameter-sets/tree(q=${q}, offset=${offset - 25})},
+                     nextUrl=@{/partials/parameter-sets/tree(q=${q}, offset=${offset + 25})}">
     <div th:replace="~{partials/pager :: pager('#' + ${rootId}, ${prevUrl}, ${nextUrl}, ${offset}, ${hasMore}, ${parameterSets.size()}, ${total})}"></div>
   </th:block>
 </div>

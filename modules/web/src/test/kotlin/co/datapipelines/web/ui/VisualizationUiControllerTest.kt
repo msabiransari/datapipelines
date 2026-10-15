@@ -203,7 +203,6 @@ class VisualizationUiControllerTest {
 
         val all = ExtendedModelMap()
         controller.list(all, MockHttpServletRequest(), q = null, offset = null) shouldBe VisualizationUiController.LIST_VIEW
-        all["scope"] shouldBe "page"
         all["rootId"] shouldBe VisualizationBrowseModel.PAGE_ROOT_ID
         all["total"] shouldBe 1
 

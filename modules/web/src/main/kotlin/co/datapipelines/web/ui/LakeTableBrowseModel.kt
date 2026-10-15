@@ -120,8 +120,9 @@ class LakeTableBrowseModel {
 }
 
 /**
- * One virtual namespace folder, as the tree fragment needs it — the [TemplateFolderView]
- * precedent: the id of the container that will hold the folder's level is derived HERE, once.
+ * One virtual namespace folder, as the tree fragment needs it — the precedent of the templates
+ * tree's former folder view (removed with #466): the id of the container that will hold the
+ * folder's level is derived HERE, once.
  */
 data class LakeTableFolderView(
     val path: String,

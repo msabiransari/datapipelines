@@ -28,7 +28,7 @@ class DashboardPartialController(
     private val pipelineNames: PipelineNames,
     /** 178 — the promoter lens: the pipelines tile counts the caller's view. */
     private val lens: PromoterLens,
-    // #10 L3b — the dashboards screens' model: the tree level and the events pane.
+    // #10 L3b — the dashboards screens' model: the catalog list and the events pane.
     private val browse: DashboardBrowseModel,
     // #400 — the family's service: the Overview/Versions/Keys tabs' lensed reads.
     private val dashboards: co.datapipelines.visualization.DashboardService,
@@ -81,50 +81,10 @@ class DashboardPartialController(
     }
 
     /**
-     * #10 L3b, #400 — the SIDEBAR's tree level, or the branch's search results: the
-     * dispatcher ([DashboardBrowseModel.fillWrapper]) answers an empty `q` with the root
-     * level and a non-empty one with the flat list, so clearing the box returns to the tree
-     * by construction. #400: the L3b page instance is retired — this route serves the NAV
-     * scope alone (`scope` is still read for wire compatibility but only `nav` selects the
-     * nav root; the catalog fragment lives under `/partials/dashboards`).
-     */
-    @GetMapping("/dashboards/tree")
-    @RequiredScope(Permission.DASHBOARD_READ)
-    fun dashboardTree(
-        model: Model,
-        @RequestParam(required = false) prefix: String?,
-        @RequestParam(required = false) q: String?,
-        @RequestParam(required = false) scope: String?,
-        // The pager's offset (the level template's prev/next links); page one when absent —
-        // PipelinePartialController's shape. Dropped at delivery, so every pager link re-rendered
-        // page one (the L3b merge's security pass found it); DashboardPartialControllerTest pins it.
-        @RequestParam(required = false) offset: Int?,
-    ): String {
-        val principal = currentPrincipal()
-        return if (q.isNullOrEmpty() && scope == DashboardListScope.NAV.wire) {
-            browse.fillLevel(
-                model,
-                principal.requireWorkspace().id,
-                lens.viewFor(principal),
-                prefix,
-                offset = offset ?: 0,
-            )
-        } else {
-            browse.fillWrapper(
-                model,
-                principal.requireWorkspace().id,
-                lens.viewFor(principal),
-                q,
-                offset = offset ?: 0,
-                scope = DashboardListScope.fromWire(scope),
-            )
-        }
-    }
-
-    /**
      * #400 — the `/dashboards` CATALOG's swap root: the flat list under `#dash-list-wrapper`,
      * every dashboard the caller may read or the matches of `q`, in the pipelines catalog
-     * partial's shape. The catalog has no tree to return to: it is always the flat branch.
+     * partial's shape. The sidebar's tree levels (`/partials/dashboards/tree`) are gone with
+     * #466 — the sidebar has read `/api/v1/dashboards/tree` since #460.
      */
     @GetMapping("/dashboards")
     @RequiredScope(Permission.DASHBOARD_READ)
@@ -140,7 +100,6 @@ class DashboardPartialController(
             lens.viewFor(principal),
             q,
             offset = offset ?: 0,
-            scope = DashboardListScope.PAGE,
         )
     }
 

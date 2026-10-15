@@ -74,7 +74,7 @@ class UiSearchTruncationTest {
             mockk(),
             mockk(),
             mockk(),
-        ).fillList(model, workspaceId, everything, over, 0, DashboardListScope.NAV)
+        ).fillList(model, workspaceId, everything, over, 0)
 
         model.getAttribute("q") shouldBe bounded
     }
@@ -86,7 +86,7 @@ class UiSearchTruncationTest {
             ArtifactPage<VisualizationBody>(emptyList<ArtifactVersion<VisualizationBody>>(), 0)
         val model = ExtendedModelMap()
 
-        VisualizationBrowseModel(visualizations).fillList(model, workspaceId, everything, over, 0, VisualizationListScope.NAV)
+        VisualizationBrowseModel(visualizations).fillList(model, workspaceId, everything, over, 0)
 
         model.getAttribute("q") shouldBe bounded
     }
@@ -98,7 +98,7 @@ class UiSearchTruncationTest {
         every { repository.findDrafts(any(), any()) } returns emptyMap()
         val model = ExtendedModelMap()
 
-        pipelineBrowseModelOver(repository).fillSearch(model, workspaceId, everything, over, 0, PipelineListScope.NAV)
+        pipelineBrowseModelOver(repository).fillSearch(model, workspaceId, everything, over, 0)
 
         model.getAttribute("q") shouldBe bounded
     }
@@ -113,7 +113,7 @@ class UiSearchTruncationTest {
         every { repository.count(workspaceId, any(), any(), eq(bounded), any()) } returns 0
         val model = ExtendedModelMap()
 
-        templateBrowseModelOver(repository).fillSearch(model, workspaceId, everything, over, null, null, 0, TemplateListScope.NAV)
+        templateBrowseModelOver(repository).fillSearch(model, workspaceId, everything, over, null, null, 0)
     }
 
     @Test

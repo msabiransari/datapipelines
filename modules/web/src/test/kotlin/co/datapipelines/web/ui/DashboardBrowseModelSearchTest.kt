@@ -69,7 +69,7 @@ class DashboardBrowseModelSearchTest {
         every { dashboards.search(workspaceId, everything.dashboards, needle, 0, PAGE) } returns
             ArtifactPage(rows(count = PAGE, from = 0), total = TOTAL)
 
-        model.fillList(ui, workspaceId, everything, needle, 0, DashboardListScope.PAGE)
+        model.fillList(ui, workspaceId, everything, needle, 0)
 
         ui["total"] shouldBe TOTAL
         ui["hasMore"] shouldBe true
@@ -86,7 +86,7 @@ class DashboardBrowseModelSearchTest {
         every { dashboards.search(workspaceId, everything.dashboards, needle, LAST_OFFSET, PAGE) } returns
             ArtifactPage(rows(count = 1, from = LAST_OFFSET), total = TOTAL)
 
-        model.fillList(ui, workspaceId, everything, needle, LAST_OFFSET, DashboardListScope.PAGE)
+        model.fillList(ui, workspaceId, everything, needle, LAST_OFFSET)
 
         ui["total"] shouldBe TOTAL
         ui["hasMore"] shouldBe false
@@ -99,7 +99,7 @@ class DashboardBrowseModelSearchTest {
         every { dashboards.search(workspaceId, everything.dashboards, "revenue", 0, PAGE) } returns
             ArtifactPage(rows(count = 2, from = 0), total = 2)
 
-        model.fillList(ui, workspaceId, everything, "  revenue ", -5, DashboardListScope.NAV)
+        model.fillList(ui, workspaceId, everything, "  revenue ", -5)
 
         ui["q"] shouldBe "revenue"
         ui["total"] shouldBe 2
@@ -114,7 +114,7 @@ class DashboardBrowseModelSearchTest {
         every { dashboards.listAll(workspaceId, lens, PAGE, PAGE + 1) } returns rows(count = 2, from = 0)
         every { dashboards.countAll(workspaceId, lens) } returns 2
 
-        model.fillList(ui, workspaceId, narrowed, null, PAGE, DashboardListScope.PAGE)
+        model.fillList(ui, workspaceId, narrowed, null, PAGE)
 
         ui["total"] shouldBe 2
         ui["hasMore"] shouldBe false

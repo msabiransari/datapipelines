@@ -51,9 +51,9 @@ class TransformImplementsBrowserTest : BrowserSuite() {
 
         val successor = recordRule(user.email, datasource, "An active order names its customer and has a paid invoice.", supersedes = rule)
 
-        // 1 — the navigating surfaces: the sidebar tree's folder level and the catalog's search
-        //     row mark the transform, never the stage. (#398: the leaves are links now, `a.tpl-leaf`
-        //     and `a.tpl-result` — the buttons the explorer rendered are gone.)
+        // 1 — the navigating surface: the catalog's rows mark the transform, never the stage.
+        //     (#398: the rows are links, `a.tpl-result`; #466: the server-rendered sidebar level
+        //     this step also read is gone — the sidebar is the REST tree, whose marker is #533.)
         leafMarks(folder) shouldBe mapOf(stage to false, transform to true)
         page.navigate("$baseUrl/templates?q=$slug")
         val row = page.locator("a.tpl-result", Page.LocatorOptions().setHasText("active_orders"))
@@ -211,18 +211,18 @@ class TransformImplementsBrowserTest : BrowserSuite() {
     }
 
     /**
-     * The sidebar tree's folder level for [prefix] as the tree's own request renders it: each
-     * leaf's full name (`data-leaf-id`) → whether it carries the needs-review marker. A fetch of
-     * the partial, not a click through `test/`'s shared, paged level — the leaves here are this
-     * test's own folder.
+     * The catalog's rows for the folder [prefix] as the catalog's own search renders them: each
+     * row's full name (`data-leaf-id`) → whether it carries the needs-review marker. A fetch of
+     * the partial with `q=<prefix>/`, not a click through `test/`'s shared, paged list — the
+     * folder is this test's own, so its two templates are the whole answer.
      */
     @Suppress("UNCHECKED_CAST")
     private fun leafMarks(prefix: String): Map<String, Boolean> =
         page.evaluate(
             """async (prefix) => {
-              const r = await fetch('/partials/templates?prefix=' + encodeURIComponent(prefix), { credentials: 'same-origin' });
+              const r = await fetch('/partials/templates?q=' + encodeURIComponent(prefix + '/'), { credentials: 'same-origin' });
               const doc = new DOMParser().parseFromString(await r.text(), 'text/html');
-              return Object.fromEntries([...doc.querySelectorAll('a.tpl-leaf[data-leaf-id]')]
+              return Object.fromEntries([...doc.querySelectorAll('a.tpl-result[data-leaf-id]')]
                 .map(b => [b.dataset.leafId, b.querySelector('[data-needs-review]') !== null]));
             }""",
             prefix,

@@ -219,11 +219,11 @@ class PromoterLensSweepTest {
     }
 
     private fun screensAreTheNewerSet(auth: (RequestSpecification) -> RequestSpecification) {
-        withClue("the explorers, the search palette, the dashboard tile and the rail badges") {
-            val pipelinesLevel = call("/partials/pipelines?prefix=$P", auth).body
-            VISIBLE_PIPELINES.forEach { pipelinesLevel.contains(it) shouldBe true }
-            val templatesLevel = call("/partials/templates?prefix=$T", auth).body
-            VISIBLE_TEMPLATES.forEach { templatesLevel.contains(it) shouldBe true }
+        withClue("the catalogs, the search palette, the dashboard tile and the rail badges") {
+            val pipelinesCatalog = call("/partials/pipelines", auth).body
+            VISIBLE_PIPELINES.forEach { pipelinesCatalog.contains(it) shouldBe true }
+            val templatesCatalog = call("/partials/templates", auth).body
+            VISIBLE_TEMPLATES.forEach { templatesCatalog.contains(it) shouldBe true }
             val search = call("/partials/search?q=$P/", auth).body
             VISIBLE_PIPELINES.forEach { search.contains(it) shouldBe true }
             statNumber(call("/partials/dashboard-stats", auth).body) shouldBe VISIBLE_PIPELINES.size
@@ -231,6 +231,31 @@ class PromoterLensSweepTest {
         }
         treesAreTheNewerSet("pipelines", P, VISIBLE_PIPELINES, auth)
         treesAreTheNewerSet("templates", T, VISIBLE_TEMPLATES, auth)
+        staleSidebarParametersAreIgnored("pipelines", "pipeline-list-wrapper", VISIBLE_PIPELINES, auth)
+        staleSidebarParametersAreIgnored("templates", "template-list-wrapper", VISIBLE_TEMPLATES, auth)
+    }
+
+    /**
+     * #466 — the catalog partials lost their sidebar presentation (the tree levels, the nav search and the
+     * nav-stamp header). A stale client's `scope=nav&prefix=…` is IGNORED, never a 400: the answer is the
+     * catalog's own flat list under its own root, still through the lens, and carries no stamp header. The
+     * decision and its reason are the partial controllers' KDoc ("The catalog's list").
+     */
+    private fun staleSidebarParametersAreIgnored(
+        family: String,
+        catalogRootId: String,
+        visible: List<String>,
+        auth: (RequestSpecification) -> RequestSpecification,
+    ) {
+        withClue("#466: a stale scope/prefix on /partials/$family is ignored - the catalog answers, with no stamp") {
+            val stale = call("/partials/$family?scope=nav&prefix=", auth)
+            stale.status shouldBe HTTP_OK
+            stale.body.contains("id=\"$catalogRootId\"") shouldBe true
+            stale.body.contains("-nav-root") shouldBe false
+            stale.body.contains("role=\"listbox\"") shouldBe false
+            visible.forEach { stale.body.contains(it) shouldBe true }
+            stale.headerNames.filter { it.startsWith("dp-nav") } shouldBe emptyList()
+        }
     }
 
     /**
@@ -456,8 +481,8 @@ class PromoterLensSweepTest {
             call("/api/v1/pipelines/$PIPE_NEWER", auth).status shouldBe HTTP_NOT_FOUND
             call("/api/v1/templates?name=$T/newer.sql", auth).status shouldBe HTTP_NOT_FOUND
             withClue("the explorer says why, in the promotion page's words") {
-                call("/partials/pipelines?prefix=", auth).body.contains("Could not read the target") shouldBe true
-                call("/partials/templates?prefix=", auth).body.contains("Could not read the target") shouldBe true
+                call("/partials/pipelines", auth).body.contains("Could not read the target") shouldBe true
+                call("/partials/templates", auth).body.contains("Could not read the target") shouldBe true
             }
             railBadges(call("/pipelines", auth).body) shouldBe listOf(0, 0)
             val key = keyFor(PROMOTER)
@@ -492,6 +517,8 @@ class PromoterLensSweepTest {
         val status: Int,
         val body: String,
         val fingerprint: String,
+        /** The response's header names, lower-cased — what #466's no-stamp pin reads. */
+        val headerNames: Set<String> = emptySet(),
     )
 
     /**
@@ -614,7 +641,8 @@ class PromoterLensSweepTest {
                 .then()
                 .extract()
         val body = response.asString()
-        return Answer(response.statusCode(), body, fingerprint(body, path))
+        val headerNames = response.headers().asList().mapTo(HashSet()) { it.name.lowercase() }
+        return Answer(response.statusCode(), body, fingerprint(body, path), headerNames)
     }
 
     /**

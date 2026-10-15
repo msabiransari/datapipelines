@@ -149,12 +149,11 @@ class TemplatesListTool(
     }
 
     /**
-     * ONE level of the template tree, in the same shape `pipelines_list` returns for a prefix
-     * and the templates explorer renders from.
+     * ONE level of the template tree, in the same shape `pipelines_list` returns for a prefix.
      *
      * A prefix that is not a legal FOLDER PATH cannot name a real folder, so it answers an
-     * ordinary EMPTY level rather than an error — the rule `TemplateBrowseModel.fillLevel`
-     * settled on, restated here rather than re-decided.
+     * ordinary EMPTY level rather than an error — the rule the templates explorer's server-rendered
+     * tree level settled on (removed with #466), restated here rather than re-decided.
      */
     @Suppress("LongParameterList") // one filter per schema property; a parameter object would just re-list them
     private fun level(

@@ -9,21 +9,16 @@ import co.datapipelines.pipeline.NodeOutput
 import co.datapipelines.pipeline.NodeSource
 import co.datapipelines.pipeline.Pipeline
 import co.datapipelines.pipeline.PipelineDeserializer
-import co.datapipelines.pipeline.PipelineFolder
-import co.datapipelines.pipeline.PipelineFolderLevel
-import co.datapipelines.pipeline.PipelineNameGrammar
 import co.datapipelines.pipeline.PipelineRecord
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.pipeline.PipelineVersionRecord
 import co.datapipelines.pipeline.PipelineVersionStatus
-import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.pipeline.SearchNeedle
 import co.datapipelines.pipeline.through
 import co.datapipelines.web.schedules.PipelineJobExecutor
 import co.datapipelines.web.schedules.PrincipalTargetViewer
 import org.springframework.ui.Model
-import java.security.MessageDigest
 import java.time.Instant
 import java.time.ZoneId
 import java.util.UUID
@@ -33,32 +28,23 @@ import java.util.UUID
  * controller (067; template-hierarchy-design §9.2, which this follows deliberately rather
  * than re-deciding).
  *
- * The screen has **two presentations and one contract**. Browsing renders a tree, one level
- * per request, each level a server-side prefix query (§9.1: no client-side tree assembly, at
- * any size). A non-empty search shows a flat list of full paths — not a tree pruned to
- * matching leaves, because pruning means walking the ancestors of every match, which is
- * exactly the whole-list-in-the-browser work the tree exists to avoid (§9.2, decided for
- * templates in 047 and inherited here).
+ * `/pipelines` is the flat **catalog** (#350, owner ruling 2026-10-02): a list of full paths
+ * under `#pipeline-list-wrapper`, every pipeline when `q` is empty, the matches otherwise — not
+ * a tree pruned to matching leaves, because pruning means walking the ancestors of every match
+ * (§9.2, decided for templates in 047 and inherited here). There is no tree on the page and no
+ * detail pane: every row is a link to the canonical workspace `/pipelines/{id}`. The folder tree
+ * is the global sidebar's, read from `/api/v1/pipelines/tree` since #460; its server-rendered
+ * levels (`scope=nav`, `prefix`) are gone with #466.
  *
- * Both presentations swap one stable root with `outerHTML`, and both render the shared
- * `partials/pager` — the SPA contract this screen has had since 028 (ui-screens.md §4.3).
- *
- * **#350 — two scopes, one model.** The tree lives in the global sidebar now
- * ([PipelineListScope.NAV]: the root level / nav search under `#pipeline-nav-root`, every
- * nested level under its digest id), and `/pipelines` is the flat **catalog**
- * ([PipelineListScope.CATALOG]: the full-path list under `#pipeline-list-wrapper`, every
- * pipeline when `q` is empty, the matches otherwise — owner ruling 2026-10-02). There is no
- * second tree on the page and no detail pane: every row of both scopes is a link to the
- * canonical workspace `/pipelines/{id}`.
+ * The list swaps one stable root with `outerHTML` and renders the shared `partials/pager` —
+ * the SPA contract this screen has had since 028 (ui-screens.md §4.3).
  *
  * Nothing here creates, renames, moves or deletes a folder, and nothing can: a folder is a
  * name prefix with no identity (§3.1), derived per request from the live rows beneath it and
  * gone with them. An empty folder is unrepresentable rather than merely unrendered.
  *
- * The search half goes through [PipelineService.page] rather than a query of its own — the D2
- * rule that made one component answer the REST list, the MCP list, this screen and its
- * partial. The browse half is [PipelineRepository.listFolder], which has no service-level
- * sibling to duplicate.
+ * The list goes through [PipelineService.page] rather than a query of its own — the D2 rule
+ * that made one component answer the REST list, the MCP list, this screen and its partial.
  *
  * Declared as an explicit `@Bean` in [UiConfig], not by a stereotype: the house rule is zero
  * DI stereotypes in production code with **no** allowlist (015 / module-structure §8.4), and
@@ -81,106 +67,10 @@ class PipelineBrowseModel(
     private val deserializer = PipelineDeserializer()
 
     /**
-     * Fills [model] for one **tree level** — [prefix] `null`/empty is the root — and returns
-     * the view name to render.
-     *
-     * The level's own leaves are paged with the shared pager against the level's own id, so
-     * every level pages the same way and no level silently truncates. Its sub-folders are not
-     * paged: they are a `GROUP BY` over one path segment, capped with an honest overflow flag
-     * rather than a silent cut.
-     *
-     * **The ROOT level renders no leaves** (§4.1, 077) — see the comment on the call below for
-     * why that is a rendering rule here and a data guarantee on the templates side.
-     */
-    fun fillLevel(
-        model: Model,
-        workspaceId: UUID,
-        view: LensedView,
-        prefix: String?,
-        offset: Int,
-    ): String {
-        val page = maxOf(0, offset)
-        // A prefix is user input that becomes a LIKE pattern. It is bound and escaped in the
-        // repository, so nothing can be injected — but a value that is not a legal pipeline
-        // name cannot name a real folder either, and letting an arbitrary-length string
-        // through would turn a level request into an arbitrary-length pattern match. The
-        // grammar it is checked against is the SERVER's own, not a second copy.
-        //
-        // An illegal prefix renders an ordinary EMPTY level, never an error: the templates
-        // browser settled that (`TemplateBrowseModel.fillLevel`), a level that cannot exist is
-        // not a client fault worth a 400, and two sibling explorers answering the same input
-        // differently would be the surprise.
-        if (!prefix.isNullOrEmpty() && !PipelineNameGrammar.matchesPrefix(prefix)) {
-            return emptyLevel(model, prefix)
-        }
-        // "" and absent are the SAME level — the root — so they normalize to one repository
-        // call rather than two shapes of the same query. The model keeps the caller's `""`,
-        // because that is what the fragment renders its own prefix as.
-        // Through the service since 178, so the promoter lens (`view.pipelines`) narrows the
-        // level and its counts the way it narrows every other read; `Everything` is the same
-        // SQL level this read went to the repository for before.
-        val level = pipelines.browseLevel(workspaceId, view.pipelines, prefix?.takeIf { it.isNotEmpty() }, offset = page, limit = PAGE_SIZE)
-        // THE ROOT HOLDS FOLDERS ONLY (§4.1, 077). A pipeline name needs a folder, so the root
-        // level renders sub-folders and nothing else, and the fragment's "leaves at the root"
-        // branch is gone.
-        //
-        // Unlike templates there is no deploy gate here, deliberately (§14.2): a pipeline name
-        // is validated at SAVE only, so a pre-077 flat row still exists, still opens and still
-        // executes. Dropping it from the ROOT LEVEL is a rendering decision about a tree whose
-        // root is now a directory of folders — it is not a disappearance. That row is still
-        // returned by search (`q`, a flat list of full paths), by `pipelines_list`, and by its
-        // own UUID URL, which is how it is opened and run.
-        val rendered = if (prefix.isNullOrEmpty()) level.withoutLeaves() else level
-        fillLevelAttributes(model, workspaceId, view.pipelines, prefix, page, rendered)
-        model.addAttribute(LENS_UNAVAILABLE, view.unavailable)
-        return LEVEL_VIEW
-    }
-
-    /** A level that cannot exist: rendered as an ordinary empty level, never as an error. */
-    private fun emptyLevel(
-        model: Model,
-        prefix: String,
-    ): String {
-        fillLevelAttributes(model, workspaceId = null, lens = ReadLens.Everything, prefix = prefix, page = 0, level = EMPTY_LEVEL)
-        return LEVEL_VIEW
-    }
-
-    private fun fillLevelAttributes(
-        model: Model,
-        workspaceId: UUID?,
-        lens: ReadLens,
-        prefix: String?,
-        page: Int,
-        level: PipelineFolderLevel,
-    ) {
-        model.addAttribute("searching", false)
-        // #350: a tree level exists only in the sidebar.
-        model.addAttribute("scope", PipelineListScope.NAV.wire)
-        model.addAttribute("prefix", prefix ?: "")
-        model.addAttribute("levelId", levelId(prefix))
-        model.addAttribute("folders", level.folders.map(::PipelineFolderView))
-        model.addAttribute("foldersTruncated", level.foldersTruncated)
-        model.addAttribute("pipelines", level.pipelines)
-        // versioning §7: the "unreleased edits exist" badge, for the rows actually shown. An
-        // empty level has no rows, so it needs no query — and has no workspace to run one in.
-        val drafts =
-            if (workspaceId == null || level.pipelines.isEmpty()) {
-                emptyMap()
-            } else {
-                pipelines.findDrafts(workspaceId, lens, level.pipelines.map { it.id })
-            }
-        model.addAttribute("drafts", drafts)
-        model.addAttribute("offset", page)
-        model.addAttribute("hasMore", level.hasMore)
-        model.addAttribute("total", level.total)
-    }
-
-    /**
-     * Fills [model] for a **flat list of full paths**, paged by the shared pager against the
-     * [scope]'s root (§9.2): the sidebar's search results ([PipelineListScope.NAV], `q`
-     * non-empty), or the `/pipelines` catalog ([PipelineListScope.CATALOG], where an absent
-     * `q` lists every pipeline the caller may read — [PipelineService.page]'s own null-query
-     * page, the same lens and the same page size).
+     * Fills [model] for the catalog's **flat list of full paths**, paged by the shared pager
+     * against [CATALOG_ROOT_ID] (§9.2): the matches of `q`, or — `q` absent — every pipeline the
+     * caller may read ([PipelineService.page]'s own null-query page, the same lens and the same
+     * page size).
      */
     fun fillSearch(
         model: Model,
@@ -188,7 +78,6 @@ class PipelineBrowseModel(
         view: LensedView,
         q: String?,
         offset: Int,
-        scope: PipelineListScope = PipelineListScope.NAV,
     ): String {
         val page = maxOf(0, offset)
         // The trim is the model's, in one place (#504b, the ParameterSetsBrowseModel shape): a
@@ -198,8 +87,7 @@ class PipelineBrowseModel(
         val result = pipelines.page(workspaceId, view.pipelines, needle, page, PAGE_SIZE)
         model.addAttribute(LENS_UNAVAILABLE, view.unavailable)
         model.addAttribute("searching", true)
-        model.addAttribute("scope", scope.wire)
-        model.addAttribute("rootId", scope.rootId)
+        model.addAttribute("rootId", CATALOG_ROOT_ID)
         model.addAttribute("q", needle.orEmpty())
         model.addAttribute("pipelines", result.items)
         model.addAttribute("drafts", result.drafts)
@@ -210,13 +98,8 @@ class PipelineBrowseModel(
     }
 
     /**
-     * Fills [model] for whichever presentation [q] and [scope] select, and returns the
-     * **dispatcher** view whose one root element is the scope's stable swap root either way.
-     *
-     * In the sidebar ([PipelineListScope.NAV]) an empty `q` is the tree's ROOT level and a
-     * non-empty one the flat search, so clearing the box returns to the tree by construction
-     * (§9.2). The catalog ([PipelineListScope.CATALOG]) has no tree to return to (#350): it
-     * is always the flat list.
+     * Fills [model] for the catalog's list ([fillSearch]) and returns the catalog's swap-root
+     * view, `partials/pipelines`, whose one root element is [CATALOG_ROOT_ID].
      */
     fun fillWrapper(
         model: Model,
@@ -224,13 +107,8 @@ class PipelineBrowseModel(
         view: LensedView,
         q: String?,
         offset: Int,
-        scope: PipelineListScope = PipelineListScope.NAV,
     ): String {
-        if (scope == PipelineListScope.NAV && q.isNullOrEmpty()) {
-            fillLevel(model, workspaceId, view, prefix = null, offset = offset)
-        } else {
-            fillSearch(model, workspaceId, view, q, offset, scope)
-        }
+        fillSearch(model, workspaceId, view, q, offset)
         return WRAPPER_VIEW
     }
 
@@ -520,34 +398,10 @@ class PipelineBrowseModel(
          */
         const val LENS_UNAVAILABLE = "lensUnavailable"
 
-        /**
-         * #350 — the sidebar tree's stable swap root: the ROOT level and the nav search results
-         * both carry it, so the search box, its pager and "clear" address one id in both
-         * presentations (the old page explorer's `#pipeline-list-wrapper` contract, moved).
-         */
-        const val ROOT_LEVEL_ID = "pipeline-nav-root"
-
         /** #350 — the `/pipelines` catalog's stable swap root: its search and its pager target it. */
         const val CATALOG_ROOT_ID = "pipeline-list-wrapper"
 
-        /**
-         * #350 — the response header every sidebar fragment carries: `<workspace>|<lens>` (`all`
-         * or `lens`). Written so a client can tell which workspace and lens a tree fragment was
-         * built under; since #460 the sidebar tree client (js/tree/) isolates its cache per
-         * workspace instead of reading the stamp, so nothing reads it today (its removal is
-         * tracked on #466). Read by no one; carries nothing
-         * the page does not already show.
-         */
-        const val NAV_STAMP_HEADER = "DP-Nav-Stamp"
-
-        /** The [NAV_STAMP_HEADER] value for [workspaceName] under [view]. */
-        fun navStamp(
-            workspaceName: String,
-            view: LensedView,
-        ): String = workspaceName + "|" + if (view.pipelines.isEverything) "all" else "lens"
-
         const val WRAPPER_VIEW = "partials/pipelines"
-        const val LEVEL_VIEW = "partials/pipeline-tree-level"
         const val SEARCH_VIEW = "partials/pipeline-search"
         const val RUNS_VIEW = "partials/pipeline-runs"
         const val USAGE_VIEW = "partials/pipeline-usage"
@@ -559,72 +413,5 @@ class PipelineBrowseModel(
         private val LAST_RUN_FORMAT =
             java.time.format.DateTimeFormatter
                 .ofPattern("yyyy-MM-dd HH:mm")
-
-        /** Hex characters of a nested level's id digest — 64 bits, over one screen's folders. */
-        private const val LEVEL_ID_HEX_LENGTH = 16
-
-        private val EMPTY_LEVEL =
-            PipelineFolderLevel(emptyList(), foldersTruncated = false, pipelines = emptyList(), total = 0, hasMore = false)
-
-        /**
-         * The DOM id of the container that holds one tree level.
-         *
-         * A prefix cannot be used as an id directly: `/` and `.` are legal in a pipeline name
-         * and would need escaping at every htmx selector, and a naive substitution would map
-         * `a/b` and `a-b` onto the same id. A digest is unambiguous, bounded, and — this is
-         * the point — **derived** in one place, so the placeholder the folder renders and the
-         * root of the fragment that replaces it cannot disagree.
-         */
-        fun levelId(prefix: String?): String {
-            if (prefix.isNullOrEmpty()) return ROOT_LEVEL_ID
-            val digest = MessageDigest.getInstance("SHA-256").digest(prefix.toByteArray(Charsets.UTF_8))
-            return "pl-level-" + digest.joinToString("") { "%02x".format(it) }.take(LEVEL_ID_HEX_LENGTH)
-        }
-    }
-}
-
-/**
- * One virtual folder, as the tree fragment needs it.
- *
- * [PipelineFolder] is the repository's shape and knows nothing about the DOM; this adds the
- * one thing the markup needs and cannot derive for itself — the id of the container that will
- * hold the folder's level. Deriving it HERE, once, is what keeps the placeholder the folder
- * renders and the root of the fragment that replaces it from disagreeing.
- */
-data class PipelineFolderView(
-    val path: String,
-    val segment: String,
-    val pipelineCount: Int,
-    val levelId: String,
-) {
-    constructor(folder: PipelineFolder) : this(
-        folder.path,
-        folder.segment,
-        folder.pipelineCount,
-        PipelineBrowseModel.levelId(folder.path),
-    )
-}
-
-/**
- * #350 — which instance of the pipelines list a `/partials/pipelines` request renders.
- *
- * [NAV] is the global sidebar: the lazy tree (one level per request) and its flat search, under
- * `#pipeline-nav-root`. [CATALOG] is the `/pipelines` landing page: the flat full-path list only,
- * under `#pipeline-list-wrapper` — the page carries no tree since #350 (spec §3.2/§5). Both
- * render rows that link to the canonical workspace; neither renders a row the lens hides.
- *
- * [wire] is the `scope` query value; anything but `nav` is the catalog, so an old or hand-typed
- * URL degrades to the page's own list rather than to an error.
- */
-enum class PipelineListScope(
-    val wire: String,
-    val rootId: String,
-) {
-    NAV("nav", PipelineBrowseModel.ROOT_LEVEL_ID),
-    CATALOG("page", PipelineBrowseModel.CATALOG_ROOT_ID),
-    ;
-
-    companion object {
-        fun fromWire(value: String?): PipelineListScope = if (value == NAV.wire) NAV else CATALOG
     }
 }

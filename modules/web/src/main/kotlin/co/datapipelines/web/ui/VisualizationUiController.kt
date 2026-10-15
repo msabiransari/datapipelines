@@ -51,7 +51,7 @@ class VisualizationUiController(
         model.addAttribute("activeTheme", themeResolver.resolve(request))
         RoleModel.stamp(model)
         val principal = currentPrincipal()
-        browse.fillWrapper(model, principal.requireWorkspace().id, lens.viewFor(principal), q, offset ?: 0, VisualizationListScope.PAGE)
+        browse.fillWrapper(model, principal.requireWorkspace().id, lens.viewFor(principal), q, offset ?: 0)
         return LIST_VIEW
     }
 
