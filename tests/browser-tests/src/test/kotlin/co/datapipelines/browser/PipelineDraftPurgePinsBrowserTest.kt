@@ -152,6 +152,11 @@ class PipelineDraftPurgePinsBrowserTest : DashboardBrowserSuite() {
             page.locator("#pe-dialog [data-lifecycle-dialog='pipeline-purge-entity']").waitFor()
         }
 
+        // Screenshots light and dark. The theme toggle lives in the top bar, which the open
+        // dialog's backdrop covers — the theme is set while no dialog is open, then the
+        // dialog is reopened for the dark shot. The deployment default is dark, so the run
+        // starts by asking for light.
+        ensureTheme("light")
         openEntityDialog()
         val entityDialog = page.locator("#pe-dialog [data-lifecycle-dialog='pipeline-purge-entity']")
         entityDialog.locator("[data-purge-pinned]").innerText() shouldContain "cannot be purged"
@@ -162,11 +167,13 @@ class PipelineDraftPurgePinsBrowserTest : DashboardBrowserSuite() {
         entityDialog.locator("[data-typed-confirm]").count() shouldBe 0
 
         java.nio.file.Files.createDirectories(java.nio.file.Path.of("build/browser-evidence"))
-        ensureTheme("light")
         page.screenshot(
             com.microsoft.playwright.Page.ScreenshotOptions().setPath(java.nio.file.Path.of("build/browser-evidence/purge471-entity-pinned-light.png")),
         )
+        page.navigate("$baseUrl/pipelines/$child")
         ensureTheme("dark")
+        openEntityDialog()
+        entityDialog.locator("[data-typed-confirm]").count() shouldBe 0
         page.screenshot(
             com.microsoft.playwright.Page.ScreenshotOptions().setPath(java.nio.file.Path.of("build/browser-evidence/purge471-entity-pinned-dark.png")),
         )
