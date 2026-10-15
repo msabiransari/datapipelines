@@ -1048,7 +1048,7 @@ When a spec or code change introduces or renames an enum value:
 3. **Search the codebase** — `grep` for the value across `modules/**/*.kt`.
 4. **Bump the spec's `schema_version`** if the change is non-additive (per the spec's stability promise).
 5. **Document the change** in the spec's Change Log appendix and in [ROADMAP](ROADMAP.md) if it was previously tracked there.
-6. **Run `scripts/docs-audit.sh`** — it mechanically enforces steps 2's doc sweep (cross-references, error codes, config keys, forbidden legacy spellings) and must exit 0 before the change lands.
+6. **Run `scripts/docs-audit.sh`** — it mechanically enforces steps 2's doc sweep (cross-references, error codes, config keys, forbidden legacy spellings, cited test files) and must exit 0 before the change lands.
 
 This document itself is **additive-only** — values are never removed (only marked deprecated). The authoring spec governs its own stability promise; this doc tracks usage.
 

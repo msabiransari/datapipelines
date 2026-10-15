@@ -27,9 +27,18 @@
 #      deploy/**, app.sh, scripts/*.sh — because a stale `deploy/.env` in a compose
 #      header misleads exactly as much as one in a spec, and 081's whole job was
 #      deleting files whose names are still typed from memory.
+#   E. Cited test files (#527): every `<Name>Test.kt` token a document cites —
+#      docs/*.md, README.md, DEVELOPMENT.md, examples/**/README.md — must be the
+#      basename of a tracked Kotlin file: a test renamed (or never written)
+#      survives in prose exactly the way a deleted deploy file does in check D
+#      (the README that named a proxy E2E class nobody ever wrote). A token
+#      preceded by `*` is a naming PATTERN (`*IntegrationTest.kt` in
+#      module-structure.md), not a citation; Change Log sections and
+#      removed/renamed lines are exempt with check D's mechanism (a row that
+#      RECORDS the old name is history, not a live pointer).
 #
-# docs/SPEC-REVIEW-2026-08.md is exempt from B–D: it is the historical record
-# of the old spellings. Change Log sections are exempt from D for the same
+# docs/SPEC-REVIEW-2026-08.md is exempt from B–E: it is the historical record
+# of the old spellings. Change Log sections are exempt from D and E for the same
 # reason. DB_CLOSE_DELAY is only flagged inside a JDBC URL — prose explaining
 # why the flag is absent is deliberate and allowed.
 #
@@ -69,6 +78,10 @@ if [[ "${1:-}" == "--self-test" ]]; then
   printf -- '---\narea: core\nlayer: core\npurpose: stub.\n---\n\n# Stub export\n\nCites `pipeline.validation.nonexistent_code` when doctored.\n' \
     > "$tmp/build/skill-docs/stub.md"
   printf -- '# index\n' > "$tmp/build/skill-docs/index.md"
+  # Check E's resolution set: the tmp copy is not a git repo, so seed the manifest
+  # E falls back to from the REAL tree — the same stand-in shape as the skill-docs
+  # stubs above (without it every real citation in docs/ would be flagged).
+  git ls-files '*.kt' | sed 's|.*/||' | sort -u > "$tmp/build/known-tests.txt"
   # Introduce one defect per check class. The heading first CLOSES staging.md's Change
   # Log section (the doc's last section): checks C and D exempt Change Log lines, so
   # defects appended bare at EOF were placebo — the self-test passed on A and B alone
@@ -90,30 +103,37 @@ if [[ "${1:-}" == "--self-test" ]]; then
     echo 'a fenced JSON path cites `user.name`'
     echo '```'
     echo 'Legacy `terminal_node_id` mention.'
+    echo 'Cites NoSuchThingTest.kt here.'
+    echo
+    echo '## Change Log (self-test probe)'
+    echo '- v0.0 — mentions NoSuchThingTest.kt in a Change Log row: history, not a citation.'
   } >> "$tmp/docs/staging.md"
   # D over the NON-docs scan set, which checks A-C never reach: a header that still
   # sends a deployer to a file 081 deleted must fail exactly like a stale spec line.
   echo '# see deploy/env/posture/development.env' >> "$tmp/deploy/compose.yml"
   # The doctoring must fail EXACTLY as planted (#307's non-vacuity: the probe count,
   # the one permission probe CAUGHT, and the two negatives — the docs.css filename
-  # and the fenced JSON path — never named). 12 = A:1 B:1 C:8 (7 codes/events + the
-  # permission probe) D:2.
+  # and the fenced JSON path — never named). 13 = A:1 B:1 C:8 (7 codes/events + the
+  # permission probe) D:2 E:1 (the invented test-file citation; its Change-Log twin
+  # is exempt, so exactly ONE 'cited test file not in tree' line may appear).
   out=$( (cd "$tmp" && bash scripts/docs-audit.sh 2>&1) || true)
   if echo "$out" | grep -q "permission not in auth.md" && \
      echo "$out" | grep -q "user\.raed" && \
+     echo "$out" | grep -q "cited test file not in tree: NoSuchThingTest\.kt" && \
+     [ "$(printf '%s\n' "$out" | grep -c 'cited test file not in tree')" -eq 1 ] && \
      ! echo "$out" | grep -E "docs\.css|user\.name" | grep -q "^  " && \
-     [ "$(printf '%s\n' "$out" | grep -c '^  [A-D] ')" -eq 12 ]; then
-    echo "self-test OK: doctored docs fail with all 12 planted defects — the permission probe caught, the filename and fence negatives clean"
+     [ "$(printf '%s\n' "$out" | grep -c '^  [A-E] ')" -eq 13 ]; then
+    echo "self-test OK: doctored docs fail with all 13 planted defects — the permission probe and the invented test-file citation caught; the filename, fence and Change-Log-row negatives clean"
     exit 0
   else
-    echo "SELF-TEST FAILED: doctored docs did not fail exactly as planted (expected 12 failures, the user.raed permission caught, no docs.css/user.name line)" >&2
+    echo "SELF-TEST FAILED: doctored docs did not fail exactly as planted (expected 13 failures, the user.raed permission and the invented test-file citation caught, no docs.css/user.name line, the Change-Log row not flagged)" >&2
     printf '%s\n' "$out" | tail -25 >&2
     exit 1
   fi
 fi
 
 python3 - <<'PY'
-import re, sys, glob, os
+import re, sys, glob, os, subprocess
 
 DOCS = sorted(glob.glob("docs/*.md")) + ["DEVELOPMENT.md"]
 # 242a — the rendered manual (docsExport's output) joins the A–C scan set. A missing
@@ -445,10 +465,60 @@ for p, t in texts.items():
             if re.search(pat, line):
                 failures.append(f"D {p}:{i}: forbidden '{pat}' — {why}")
 
+# ---- E. cited test files (#527) ---------------------------------------------
+# Every `<Name>Test.kt` a document cites must resolve to a tracked Kotlin file's
+# basename — the failure mode check D polices for deploy files, with test names
+# typed from memory (the dashboard-proxy README sent hosts to a proxy E2E class
+# nobody ever wrote; the real test is the one docs/dashboards.md §6.5 names).
+# Scanned IN PLACE, not through the self-test copy set: the copy feeds checks
+# A-D's shared `texts`, and adding examples/ to it would widen A-D's universe
+# beyond this change's fence — E's file set is its own. `docs/*.md` is
+# deliberately the same NON-RECURSIVE glob checks A-C scan (docs/research/ and
+# docs/superpowers/ are outside every check's universe today). A token preceded
+# by `*` is a naming pattern (`*IntegrationTest.kt` in module-structure.md), not
+# a citation; the lookbehind implements the skip. Change Log sections and
+# removed/renamed lines are exempt with check D's line-loop mechanism, fences
+# included the way D includes them (no fence skip). Resolution source:
+# `git ls-files` when the tree is a repo — always authoritative in a real run;
+# the --self-test copy is not a repo, so the seeded build/known-tests.txt
+# manifest stands in for it. Neither present is a FAILURE, never a silent skip.
+TEST_FILE_RE = re.compile(r"(?<!\*)\b[A-Z][A-Za-z0-9]+Test\.kt\b")
+tracked_kt = set()
+git_res = subprocess.run(["git", "ls-files", "*.kt"], capture_output=True, text=True)
+if git_res.returncode == 0 and git_res.stdout.strip():
+    tracked_kt = {os.path.basename(l) for l in git_res.stdout.splitlines() if l.strip()}
+else:
+    manifest = "build/known-tests.txt"
+    if os.path.isfile(manifest):
+        with open(manifest, encoding="utf-8") as f:
+            tracked_kt = {l.strip() for l in f if l.strip()}
+if not tracked_kt:
+    failures.append("E could not enumerate the tree's Kotlin sources "
+                    "(git ls-files unavailable and build/known-tests.txt absent)")
+e_files = sorted(set(glob.glob("docs/*.md")) | {"README.md", "DEVELOPMENT.md"}
+                 | set(glob.glob("examples/**/README.md", recursive=True)))
+e_tokens = e_unresolved = 0
+for p in e_files:
+    if not os.path.isfile(p) or p in EXEMPT_HISTORY:
+        continue
+    in_changelog = False
+    for i, line in enumerate(read(p).splitlines(), 1):
+        if re.match(r"^#{1,6}\s", line):
+            in_changelog = bool(re.search(r"change\s*log", line, re.I))
+        if in_changelog or NEGATION.search(line):
+            continue
+        for tok in sorted(set(re.findall(TEST_FILE_RE, line))):
+            e_tokens += 1
+            if tok not in tracked_kt:
+                e_unresolved += 1
+                failures.append(f"E {p}:{i}: cited test file not in tree: {tok}")
+E_REPORT = f"E. cited test files: {e_tokens} tokens, {e_unresolved} unresolved"
+
 # ---- report -----------------------------------------------------------------
 for d in sorted(EXEMPT_PROPOSED):
     print(f"docs-audit: NOTICE {d} is not-yet-normative — exempt from check C "
           f"(proposed error codes must join docs/pipeline-contract.md \u00a713 when it lands)")
+print(E_REPORT)
 if failures:
     print(f"docs-audit: {len(failures)} failure(s)")
     for f in failures:
