@@ -1,0 +1,33 @@
+From 37a53733b2e89164e6dd3b429d68c9db5d17e653 Mon Sep 17 00:00:00 2001
+From: Muhammad Sabir <msabiransari@gmail.com>
+Date: Wed, 14 Oct 2026 19:15:46 -0400
+Subject: [PATCH] colorbar: reset the fill rects by removing the style
+ attribute, not writing an empty one
+
+Under a style-src policy without 'unsafe-inline' or 'unsafe-hashes', setAttribute('style', '')
+is an inline-style write and the browser refuses it (the empty-text hash); removeAttribute is
+not. d3 attr(name, null) removes the attribute, so the reset keeps its meaning (no leftover
+inline style on a reused rect) while the later .style() calls, which are CSSOM writes, are
+unaffected.
+---
+ src/components/colorbar/draw.js | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/components/colorbar/draw.js b/src/components/colorbar/draw.js
+index 356bcdd..ffa53f9 100644
+--- a/src/components/colorbar/draw.js
++++ b/src/components/colorbar/draw.js
+@@ -509,11 +509,11 @@ function drawColorBar(g, opts, gd) {
+ 
+         var fills = g.select('.' + cn.cbfills)
+             .selectAll('rect.' + cn.cbfill)
+-            .attr('style', '')
++            .attr('style', null)
+             .data(fillLevels);
+         fills.enter().append('rect')
+             .classed(cn.cbfill, true)
+-            .attr('style', '');
++            .attr('style', null);
+         fills.exit().remove();
+ 
+         var zBounds = zrange
