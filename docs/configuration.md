@@ -661,7 +661,7 @@ management:                      # §3.14 — actuator on the management port ON
       enabled: false
 
 datapipelines:
-  redis:
+  redis:                         # §3.1 — RedisClientProperties is the one client binding (#500)
     host: ${DATAPIPELINES_REDIS_HOST}
     port: ${DATAPIPELINES_REDIS_PORT:6379}
     password: ${DATAPIPELINES_REDIS_PASSWORD:}

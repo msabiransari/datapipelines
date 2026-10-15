@@ -51,7 +51,9 @@ class RedisClientAuthorityBootTest {
             .run { context ->
                 context.startupFailure shouldBe null
                 val factory = context.getBean(LettuceConnectionFactory::class.java)
-                factory.clientConfiguration.clientOptions.orElseThrow().socketOptions.connectTimeout shouldBe Duration.ofSeconds(2)
+                factory.clientConfiguration.clientOptions
+                    .orElseThrow()
+                    .socketOptions.connectTimeout shouldBe Duration.ofSeconds(2)
             }
     }
 
@@ -71,7 +73,9 @@ class RedisClientAuthorityBootTest {
                 factory.port shouldBe 6381
                 factory.password shouldBe "synthetic-bind-credential"
                 factory.clientConfiguration.commandTimeout shouldBe Duration.ofSeconds(5)
-                factory.clientConfiguration.clientOptions.orElseThrow().socketOptions.connectTimeout shouldBe Duration.ofSeconds(7)
+                factory.clientConfiguration.clientOptions
+                    .orElseThrow()
+                    .socketOptions.connectTimeout shouldBe Duration.ofSeconds(7)
             }
     }
 

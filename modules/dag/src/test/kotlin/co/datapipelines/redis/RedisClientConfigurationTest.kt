@@ -27,8 +27,12 @@ class RedisClientConfigurationTest {
             factory.password shouldBe properties.password
             val client = factory.clientConfiguration
             client.commandTimeout shouldBe properties.commandTimeout
-            client.clientOptions.orElseThrow().socketOptions.connectTimeout shouldBe properties.connectTimeout
-            client.clientOptions.orElseThrow().timeoutOptions.isTimeoutCommands shouldBe true
+            client.clientOptions
+                .orElseThrow()
+                .socketOptions.connectTimeout shouldBe properties.connectTimeout
+            client.clientOptions
+                .orElseThrow()
+                .timeoutOptions.isTimeoutCommands shouldBe true
             client.shutdownTimeout shouldBe Duration.ofMillis(100)
             client.clientResources.orElseThrow() shouldBe resources
             client.isUseSsl shouldBe false
