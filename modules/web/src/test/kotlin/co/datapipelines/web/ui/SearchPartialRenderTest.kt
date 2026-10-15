@@ -132,7 +132,7 @@ class SearchPartialRenderTest {
         val html = render(*fullModel())
 
         html shouldContain Regex("href=\"/pipelines/[0-9a-f-]{36}/editor\"")
-        html shouldContain "href=\"/templates/editor?name=acme/finance/revenue\""
+        html shouldContain "href=\"/templates/acme/finance/revenue\""
         html shouldContain Regex("href=\"/executions/[0-9a-f-]{36}\"")
     }
 

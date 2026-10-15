@@ -58,3 +58,15 @@ test("a node with no template shows an em dash, not 'undefined'", () => {
   assert.equal(editor.templateRefText(null), "—");
   assert.equal(editor.templateRefText({ template: {} }), "—");
 });
+
+// #433: the Details tab's "Open template" link targets the workspace route directly — the
+// path's segments ARE the route (§4.1 names are 2–10 segments of [a-z0-9_.-]), never one
+// %2F-encoded blob, and never the /templates/editor?name= compatibility 302. No `version=`:
+// the link opens the CURRENT resolution (pipeline-editor.md §8.2).
+test("the template link is the workspace route, segment by segment", () => {
+  editor.selectedNode = { template: { id: "acme/finance/monthly_revenue", version: 3 } };
+  assert.equal(editor.selectedTemplateHref, "/templates/acme/finance/monthly_revenue");
+  editor.selectedNode = { template: { id: "a/b?x=1#y", version: 1 } };
+  assert.equal(editor.selectedTemplateHref, "/templates/a/b%3Fx%3D1%23y", "no segment opens a query or fragment");
+  editor.selectedNode = null;
+});

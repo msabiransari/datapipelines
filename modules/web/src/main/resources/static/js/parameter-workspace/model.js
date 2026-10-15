@@ -245,7 +245,7 @@
       var links = [];
       links.push({
         text: "template " + source.template.id + "@" + source.template.version,
-        href: "/templates/editor?name=" + encodeURIComponent(source.template.id) + "&version=" + encodeURIComponent(source.template.version),
+        href: "/templates/" + String(source.template.id).split("/").map(encodeURIComponent).join("/") + "?version=" + encodeURIComponent(source.template.version),
       });
       if (source.datasource) {
         links.push({ text: "datasource " + source.datasource, href: "/datasources/" + encodeURIComponent(source.datasource) });
