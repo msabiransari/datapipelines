@@ -1,9 +1,9 @@
 # UI Screens Inventory
 
-**Status:** v1.139
+**Status:** v1.140
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
-**Last updated:** 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
+**Last updated:** 2026-10-15 (#466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
 
 ---
 
@@ -628,9 +628,11 @@ place, its workspace. Since 067 pipeline names are **folder paths**
 ([Template Hierarchy §14](template-hierarchy-design.md)); the folders are browsed in the sidebar.
 
 - **Separate catalog and tree transport.** `GET /partials/pipelines` (`pipeline.read`, the lens)
-  serves the catalog's flat list. Legacy `scope=nav` and prefix fragments remain compatible;
-  the sidebar uses the REST tree/search routes (§3.4, rest-api §24), with independent bounded
-  continuation for complete immediate levels and name-search matches.
+  serves the catalog's flat list — the only presentation it has: the server-rendered `scope=nav`
+  and prefix fragments were removed with #466, and a stale `scope` or `prefix` is ignored (the
+  request answers the catalog list). The sidebar uses the REST tree/search routes (§3.4,
+  rest-api §24), with independent bounded continuation for complete immediate levels and
+  name-search matches.
 - **Every row is a link** to the canonical workspace `/pipelines/{id}` — no version, the
   current-first rule (§4.4) — through the persistent main-content navigation host.
 - **A new pipeline appears as `v1 draft`** (D55, 099): every row's version badge names the
@@ -1020,7 +1022,7 @@ Fully specified in [Pipeline Editor spec](pipeline-editor.md). Only the rows tha
 - **SQL section (§8.3 there):** the Details tab loads `GET /partials/pipelines/{id}/nodes/{nodeId}/sql` (a `pipeline.read` read partial, htmx.ajax on selection) and highlights it client-side with the zero-dependency `sql-highlight.js`; the copy confirmation is a live-region announcement plus a 1.5s button-label swap — deliberately NOT a toast (high-frequency, self-evident). CALCULATOR and PIPELINE nodes skip the fetch (client-built evaluation / child mapping).
 - **The data blobs cannot break out of their script blocks (185):** the editor's two `<script type="application/json">` blocks (`#pipeline-data`, `#pipeline-lifecycle`) are inserted with `th:utext`, so the controller writes both through `ScriptSafeJson.forScriptBlock` — a closing-tag sequence inside any free-text field the pipeline carries (display name, description, node labels, template names) is escaped and the JSON parses back unchanged client-side; `ScriptBlockUtextAuditTest` holds the document's closed `th:utext` allowlist and `PipelineEditorJsonRenderTest` reads the render back through a real HTML parser.
 - **Result grid:** the execution result table is the data table (§3.7) — a frame FIXED by its pane (`dt-fill`): the header and the first column hold while a wide result scrolls both ways, the scrollbar starts under the header, the columns sort (this page) and resize; the bespoke `.pe-result-table` styles are gone. Paging stays client-side cursor paging (the §10.5 contract there).
-- **Template reference (§9.4 there):** a node's template is a read-only reference display — `acme/finance/monthly_revenue @ v3`, one line with the FULL reference on `title`, in the Details tab's key/value grid **and** in the server-rendered `partials/pipeline-node-sql` **and** in the `template-missing` empty state. **There is no template picker on this screen**; template selection happens through pipeline JSON authoring, import and MCP. **If a picker is ever added, it reuses §4.6's prefix fragment — it does not get its own client-side tree.**
+- **Template reference (§9.4 there):** a node's template is a read-only reference display — `acme/finance/monthly_revenue @ v3`, one line with the FULL reference on `title`, in the Details tab's key/value grid **and** in the server-rendered `partials/pipeline-node-sql` **and** in the `template-missing` empty state. **There is no template picker on this screen**; template selection happens through pipeline JSON authoring, import and MCP. **If a picker is ever added, it reuses the sidebar's REST tree component (§3.4, rest-api §24) — it does not get its own client-side tree.** (§4.6's server-rendered prefix fragment, which this sentence named before, was removed with #466.)
 - **The TRANSFORM node (7d, #7; [transform-nodes design §9.3](superpowers/specs/2026-09-09-transform-nodes-design.md)):** its card wears its own accent (`TYPE_TOKEN.TRANSFORM = "transform"` → `app.css`'s `--type-transform`, a teal derived from the theme's info and success accents — no literal colour) and the sprite's `code` glyph (the rail's template glyph: a TRANSFORM is a pinned function), and carries three fact lines: **the language and the pin** — `jsonata · …/order_lines.jsonata @ v3`; the language is the pinned template's `type`, which is not on the node JSON, so the card reads `transform · …` until `graph.js` resolves the pin the way it resolves datasource dialects (one `GET /api/v1/templates/versions` per distinct pin, `template.read`, capped at 50; a failure or a lens-hidden version leaves the honest `transform`); **what it reads and where it writes** — `2 inputs → tempdb.order_lines`, `→ caller`, or `→ $line_count` for a value-mode node's Context key; **rejects and strict** when set — `rejects → tempdb.order_rejects · strict`. The output is fact line 2, not a port row (a TRANSFORM's write is not a `node_progress` operation today). Every value passes through `buildCardHtml`'s escaper (a template name planted with `<script>` renders as text — `graph-transform-card.test.mjs`). The **Details** pane lists Template, Language and Mode (both read off the resolved pin — the mode is the CONTRACT's, never the node's; `resolving…` until the lookup lands), Inputs as bound (`orders ← stg_orders · tz ← $org_timezone`), Output, Rejects and Strict, plus the node deadline; no Query Timeout row (a TRANSFORM runs no statement — `SettingsRules`' statement types). The definition pane shows the node as a function call — the template, its language and mode, the inputs map, the output and the rejects — escaped by construction; nothing is fetched (a TRANSFORM has no SQL to render). A pinned version marked `needs_review` (lane 7e's flag, read off the resolved pin) shows the marker on the card's kind line and in the Details header and rows. The legend names **Transform**. Read-only, as every node is. (`TransformNodeCardBrowserTest` — three TRANSFORM shapes saved through 7c's validator.)
 - **Failure display (057/T85, re-homed by 065, consolidated by 080):** `node_failed`'s `error` object — the failure record — renders in the dock's **Errors tab**: one entry per failed node, newest last, `node id · code` as its summary line, then the message, correlation id, details, the rendered SQL and the exception chain **root-cause-first**, one Copy button. The 065 per-node inspector section is gone with the overlay — the tab is the record's one home beside the modal's one-line summary. `pipeline_failed`'s execution-level record joins the same list (deduped on node + code + message). `PEErrorDetails.build` remains the one view-model (`sse-node-failure.test.mjs` pins it). Under `error-detail=structured` the SQL and Exception sections are simply absent — no apology. The recovery poll's banner names the error code.
 - **Full-bleed pages (065):** `layouts/default.html` caps every page at `--app-content-max` (1600px); a page opts out by setting a `fullBleed` model attribute (`app-main-bleed`). **The pipeline editor is the only page that sets it.** `EditorLayoutRenderTest` pins both directions.
@@ -1154,9 +1156,11 @@ names are **folder paths** ([Template Hierarchy §14](template-hierarchy-design.
 folders are browsed in the sidebar.
 
 - **Separate catalog and tree transport.** `GET /partials/templates` (`template.read`, the lens)
-  serves the catalog's flat list. Legacy `scope=nav` and prefix fragments remain compatible;
-  the sidebar uses the REST tree/search routes (§3.4, rest-api §24), with independent bounded
-  continuation for complete immediate levels and name-search matches.
+  serves the catalog's flat list — the only presentation it has: the server-rendered `scope=nav`
+  and prefix fragments were removed with #466, and a stale `scope` or `prefix` is ignored (the
+  request answers the catalog list). The sidebar uses the REST tree/search routes (§3.4,
+  rest-api §24), with independent bounded continuation for complete immediate levels and
+  name-search matches.
 - **Every row is a link** to the canonical workspace `/templates/{name}` — no version: the
   release-first rule (§4.7) resolves it, and a draft is an explicit choice — through prepared
   main-content navigation, preserving the sidebar.
@@ -1307,8 +1311,8 @@ no pushed entry — the pipelines workspace's own contract (#349 deviation 3); B
 across in-page switches is #402's problem there too. A version switch is a FULL navigation
 (there is no active run to protect, so nothing justifies in-page state): every tab's facts
 re-resolve server-side, which is what keeps a stale Overview from lying about a switched
-version. The sidebar tree's foreign-row guard (the `DP-Nav-Stamp` admission, §3.4) applies to
-every workspace navigation as to any page. A promoter's lens: a hidden template, draft or
+version. The sidebar tree's foreign-response guard (the REST payload's `view_token` admission,
+§3.4, rest-api §24) applies to every workspace navigation as to any page. A promoter's lens: a hidden template, draft or
 version answers the family's 404 — never a disabled row; no route returns a row the CSS hides.
 Role-forbidden controls are absent (RoleVisibilityRenderTest); the fragments' endpoints
 enforce their own permission and lens independently of the page's markup.
@@ -1966,7 +1970,7 @@ Guards: `SchedulesUiControllerTest` (the route's row, `canAuthor` = the five wri
 | Purpose | The flat catalog landing: every dashboard the caller may read — or the matches of `q` (a dashboard whose name, display name or description contains the term, case-insensitive, `%` and `_` literal; the term trimmed and cut to 200 characters first, #504b) — one row each, a row linking the workspace. The page and the pager's total come from the lensed SQL read, so a match past the 200th dashboard is listed and counted (#512) |
 | Design primitives | §4.3's catalog shape ([Pipelines](#43-pipelines--the-catalog-page-and-the-sidebar-tree-350), #350's owner ruling — one flat, server-paged list, no tree, no detail pane): `.app-catalog-search`, `.tpl-results`, the shared pager; `dashboards.css` dresses the page's own bits |
 | JS | None of its own — the search control is the htmx SPA pattern (a debounced `hx-get` into the stable `#dash-list-wrapper` root, focus and value preserved) |
-| htmx | Yes — the search and the pager re-fetch `GET /partials/dashboards` (`scope=page`) into `#dash-list-wrapper`, `outerHTML` |
+| htmx | Yes — the search and the pager re-fetch `GET /partials/dashboards` into `#dash-list-wrapper`, `outerHTML` |
 
 Content: the flat rows at their WORKING version — a row's badge names the version and marks a
 draft (versioning §7: unreleased edits stay visible; a draft-ONLY dashboard's row says so —
@@ -2098,7 +2102,8 @@ read the sidebar's branch searches with. It is the page `/parameter-sets` always
 search control re-fetches ONLY the list fragment into the stable `#parameter-set-list-wrapper` root
 (§4.3's contract: the control is never re-rendered, so focus and value survive); `?q=` stays the deep
 link every "find this parameter set" link uses.
-`GET /partials/parameter-sets/tree` retains the catalog and legacy prefix presentations.
+`GET /partials/parameter-sets/tree` keeps its historical path and, since #466, renders the catalog list
+alone: its `scope=nav` and prefix presentations were removed, and a stale `scope` or `prefix` is ignored.
 The sidebar uses its REST tree/search routes (§3.4, rest-api §24), under the same read lens.
 
 **The workspace page.**
@@ -2159,10 +2164,10 @@ the runtime's revoked notice the same way. A refused evaluate renders the server
 
 Guards: `ParameterSetsWorkspaceModelTest` (the resolution order, never-clamp, the lens-hidden 404, the draft
 arms, the tab set), `ParameterSetsBrowseModelTest`, `ParameterSetsUiControllerTest` (the routes' scopes, the 400/404,
-the evaluate flag per role), `ParameterSetsPartialControllerTest` (the tree route's dispatch and the nav stamp,
-#415), `ParameterSetsRenderTest` (the page's markup contract: the blocks, the form only
+the evaluate flag per role), `ParameterSetsPartialControllerTest` (the catalog route's dispatch, #415; no nav
+presentation, #466), `ParameterSetsRenderTest` (the page's markup contract: the blocks, the form only
 for an evaluator, the promoter's page, the draft label, the choose-a-version state, the script-safe
-blocks; #415: the search fragment's listbox, its pager's `q`, the two empty states),
+blocks; #415: the search fragment's rows, its pager's `q`, the two empty states),
 `ParameterSetServiceIntegrationTest` (the search's columns, its literal metacharacters, its lens truth and
 its blank-`q`-is-`listAll` rule, #415), `ShellRenderTest` (the Parameter Sets branch and its search input),
 `ReadFloorTest` (the `PARAMETER_SETS` family and
@@ -2225,7 +2230,7 @@ the set's id per workspace and states the body's shape hash; the examples file c
 | Purpose | The flat catalog landing: every visualization the caller may read — or the matches of `q` over name, display name and description — one row each, a row linking the workspace |
 | Design primitives | §4.21's catalog shape exactly (`.app-catalog-search`, `.tpl-results`, the shared pager); `visualizations.css` (head-loaded, §3.0) dresses the page's own bits with design tokens only |
 | JS | None of its own — the search is the htmx SPA pattern (a debounced `hx-get` into the stable `#viz-list-wrapper` root) |
-| htmx | Yes — the search and the pager re-fetch `GET /partials/visualizations` (`scope=page`) into `#viz-list-wrapper`, `outerHTML` |
+| htmx | Yes — the search and the pager re-fetch `GET /partials/visualizations` into `#viz-list-wrapper`, `outerHTML` |
 
 Content: flat rows at their WORKING version, with draft badges and the existing paged catalog search.
 Rows and version links preserve the rail through prepared main-content navigation. The Visualizations
@@ -2436,6 +2441,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-15 | v1.140 | #466 (lane 466b) the sidebar's server-rendered tree removed | **§4.3, §4.6** (and the dashboards, visualizations and parameter-sets catalogs): each catalog partial serves its flat list alone — the `scope=nav` presentation, the `prefix` tree levels, the `DP-Nav-Stamp` header and the five `*-tree-level` fragments are gone (owner ruling 2026-10-10, option A); `GET /partials/visualizations/tree` and `GET /partials/dashboards/tree` are removed, `GET /partials/parameter-sets/tree` keeps its path for the catalog. A stale `scope` or `prefix` is ignored and answers the catalog list. The sidebar has read the REST tree/search routes since #460. **§4.7**: the workspace's foreign-response guard is the REST payload's `view_token`, not the stamp. The two catalog htmx rows stop naming a `scope=page` the pages never sent; the template picker note points at the REST tree component. |
 | 2026-10-14 | v1.139 | #510 a standing filter that matches nothing is never the "nothing exists" state — renumbered at merge after #514's v1.138 | **§5.1** Empty state: which of the two empties a list shows is chosen by a model-stamped `filtered` flag — ANY standing filter (`q`, dialect, type) — never the query alone. **§4.6** Templates: a dialect or type with no matches and an empty box shows the no-match state with **Clear filters** (it resets all three and fetches the unfiltered first page); a `q` miss keeps #432's Clear search. **§4.5** Datasources: a dialect-only miss shows the no-match state, not "No datasources yet". |
 | 2026-10-14 | v1.138 | #514 template workspace scripts use the page loader | §3.2 and §4.7: the six bare template-workspace scripts join lifecycle dialogs in one ordered `on-mount` catalog; each source executes once per document, and the last entry, `workspace.js`, exposes `TemplateWorkspaceMount` for tabs on boosted arrivals and cached restores, also synchronizing Render context mode with the arriving page. Only the parser-blocking editor splitter remains in the per-arrival exception set. |
 | 2026-10-14 | v1.137 | #516 the tree's focus ring sits on the focused row, keyboard only — renumbered at merge after #513's v1.136 | §3.4: a clicked tree row shows the selected-row tint alone — the outline that boxed a folder AND its whole expanded subtree is gone; the ring (`--focus-ring-width` × `--focus-ring`, the design system's band) is drawn on the focused row's line via `:focus-visible` with a negative offset, so it stays inside the row box and appears only for keyboard focus. Navigation, roving focus and selection unchanged (`PipelineSidebarTreeBrowserTest` pins the click and keyboard cases). |
