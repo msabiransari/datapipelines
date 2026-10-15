@@ -108,9 +108,7 @@ abstract class VisualizationBrowserSuite : DashboardBrowserSuite() {
             when (kind) {
                 Fixture.SURFACE -> """{"data": [{"type": "surface", "x": [], "y": [], "z": []}], "layout": {}}"""
                 Fixture.HEATMAP -> """{"data": [{"type": "heatmap", "zsmooth": "fast", "x": [], "y": [], "z": []}], "layout": {}}"""
-                Fixture.BARS ->
-                    """{"data": [{"type": "bar", "x": [], "y": []}, {"type": "scatter", "mode": "lines", "x": [], "y": []}],
-                    "layout": {"title": {"text": "Units against target"}}}"""
+                Fixture.BARS -> barsConfig()
             }
         val bindings =
             when (kind) {
@@ -120,32 +118,9 @@ abstract class VisualizationBrowserSuite : DashboardBrowserSuite() {
             }
         val cases =
             when (kind) {
-                Fixture.SURFACE ->
-                    """{"name": "hill", "fixtures": {"sales": [{"month": "Jan", "units": 3, "target": 4},
-                                                          {"month": "Feb", "units": 5, "target": 2}]},
-                    "assertions": [{"kind": "rendered"}]}"""
-                // A 3 x 2 grid per case, so the colorbar has a value range to fill; the second case's range differs.
-                Fixture.HEATMAP ->
-                    """{"name": "grid", "fixtures": {"sales": [{"month": "Jan", "units": 3, "target": 4},
-                                                              {"month": "Feb", "units": 5, "target": 4},
-                                                              {"month": "Mar", "units": 2, "target": 4},
-                                                              {"month": "Jan", "units": 6, "target": 2},
-                                                              {"month": "Feb", "units": 1, "target": 2},
-                                                              {"month": "Mar", "units": 4, "target": 2}]},
-                    "assertions": [{"kind": "rendered"}, {"kind": "trace_count", "equals": 1}]},
-                   {"name": "shifted", "fixtures": {"sales": [{"month": "Jan", "units": 30, "target": 4},
-                                                              {"month": "Feb", "units": 50, "target": 4},
-                                                              {"month": "Mar", "units": 20, "target": 4},
-                                                              {"month": "Jan", "units": 60, "target": 2},
-                                                              {"month": "Feb", "units": 10, "target": 2},
-                                                              {"month": "Mar", "units": 40, "target": 2}]},
-                    "assertions": [{"kind": "rendered"}]}"""
-                Fixture.BARS ->
-                    """{"name": "two series", "fixtures": {"sales": [{"month": "Jan", "units": 3, "target": 4},
-                                                                {"month": "Feb", "units": 5, "target": 4},
-                                                                {"month": "Mar", "units": 2, "target": 4}]},
-                    "assertions": [{"kind": "rendered"}, {"kind": "trace_count", "equals": 2}]},
-                   {"name": "empty", "fixtures": {"sales": []}, "assertions": [{"kind": "no_data"}]}"""
+                Fixture.SURFACE -> surfaceCases()
+                Fixture.HEATMAP -> heatmapCases()
+                Fixture.BARS -> barsCases()
             }
         return """
             {"name": "$name", "display_name": "Units against target", "description": "the #399 browser fixture",
@@ -159,6 +134,40 @@ abstract class VisualizationBrowserSuite : DashboardBrowserSuite() {
              "tests": {"cases": [$cases]}}
             """.trimIndent()
     }
+
+    /** The bar + scatter configuration: two series over one input, a titled layout. */
+    private fun barsConfig(): String =
+        """{"data": [{"type": "bar", "x": [], "y": []}, {"type": "scatter", "mode": "lines", "x": [], "y": []}],
+                    "layout": {"title": {"text": "Units against target"}}}"""
+
+    private fun surfaceCases(): String =
+        """{"name": "hill", "fixtures": {"sales": [{"month": "Jan", "units": 3, "target": 4},
+                                                          {"month": "Feb", "units": 5, "target": 2}]},
+                    "assertions": [{"kind": "rendered"}]}"""
+
+    // A 3 x 2 grid per case, so the colorbar has a value range to fill; the second case's range differs.
+    private fun heatmapCases(): String =
+        """{"name": "grid", "fixtures": {"sales": [{"month": "Jan", "units": 3, "target": 4},
+                                                              {"month": "Feb", "units": 5, "target": 4},
+                                                              {"month": "Mar", "units": 2, "target": 4},
+                                                              {"month": "Jan", "units": 6, "target": 2},
+                                                              {"month": "Feb", "units": 1, "target": 2},
+                                                              {"month": "Mar", "units": 4, "target": 2}]},
+                    "assertions": [{"kind": "rendered"}, {"kind": "trace_count", "equals": 1}]},
+                   {"name": "shifted", "fixtures": {"sales": [{"month": "Jan", "units": 30, "target": 4},
+                                                              {"month": "Feb", "units": 50, "target": 4},
+                                                              {"month": "Mar", "units": 20, "target": 4},
+                                                              {"month": "Jan", "units": 60, "target": 2},
+                                                              {"month": "Feb", "units": 10, "target": 2},
+                                                              {"month": "Mar", "units": 40, "target": 2}]},
+                    "assertions": [{"kind": "rendered"}]}"""
+
+    private fun barsCases(): String =
+        """{"name": "two series", "fixtures": {"sales": [{"month": "Jan", "units": 3, "target": 4},
+                                                                {"month": "Feb", "units": 5, "target": 4},
+                                                                {"month": "Mar", "units": 2, "target": 4}]},
+                    "assertions": [{"kind": "rendered"}, {"kind": "trace_count", "equals": 2}]},
+                   {"name": "empty", "fixtures": {"sales": []}, "assertions": [{"kind": "no_data"}]}"""
 
     protected companion object {
         const val EXCERPT = 600
