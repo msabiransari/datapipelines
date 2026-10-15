@@ -234,6 +234,61 @@ class VisualizationPreviewBrowserTest : DashboardBrowserSuite() {
         released.at("data", "status") shouldBe "RELEASED"
     }
 
+    @Test
+    fun `#525 - a heatmap's colorbar draws on the 2d bundle under the policy, painted and redrawn, in both themes`() {
+        startTrace()
+        val root = ready("vheat")
+        val created = api("POST", "/api/v1/visualizations", heatmapDocument("$root/charts/heat"))
+        val id = created.at("data", "id") as String
+        val started = api("POST", "/api/v1/visualizations/$id/tests/sessions", "")
+        val previewUrl = started.at("data", "preview_url") as String
+        val agent = newBrowserContext()
+        val requested = java.util.concurrent.CopyOnWriteArrayList<String>()
+        agent.onRequest { requested += it.url() }
+        try {
+            val preview = agent.newPage()
+            preview.setDefaultTimeout(FIRST_RENDER_TIMEOUT_MS)
+            for (theme in listOf("light", "dark")) {
+                preview.navigate("$baseUrl$previewUrl&theme=$theme")
+                preview.waitForSelector("section[data-dp-case-index='0'][data-dp-ready='true']")
+                preview.waitForSelector("section[data-dp-case-index='1'][data-dp-ready='true']")
+                // The page that loads the 2d bundle: a heatmap alone is no reason for the 3d superset.
+                preview.locator("script[data-dp-plotly-bundle]").getAttribute("data-dp-plotly-bundle") shouldBe "2d"
+                for (index in 0..1) {
+                    PlotlyColorbarProbe.assertPainted(
+                        preview,
+                        "the heatmap's case $index in $theme",
+                        "section[data-dp-case-index='$index']",
+                    )
+                }
+                preview.waitForTimeout(SETTLE_MS)
+                Files.createDirectories(SHOTS)
+                Files.write(
+                    SHOTS.resolve("visualization-preview-heatmap-$theme.png"),
+                    preview.screenshot(Page.ScreenshotOptions().setFullPage(true)),
+                )
+                withClue("CSP on the heatmap preview in $theme (the colorbar draws)") { drainCspViolations().shouldBeEmpty() }
+
+                // The redraw runs the colorbar code again over the existing fill rectangles.
+                for (index in 0..1) {
+                    PlotlyColorbarProbe.redraw(preview, "the heatmap's case $index in $theme", "section[data-dp-case-index='$index']")
+                    PlotlyColorbarProbe.assertPainted(
+                        preview,
+                        "the heatmap's case $index in $theme after a redraw",
+                        "section[data-dp-case-index='$index']",
+                    )
+                }
+                withClue("CSP on the heatmap preview in $theme after the redraws") { drainCspViolations().shouldBeEmpty() }
+            }
+        } finally {
+            agent.close()
+        }
+        withClue("the preview loaded the 2d bundle and never the 3d superset") {
+            requested.any { it.contains("/vendor/plotly/plotly-2d.min.js") } shouldBe true
+            requested.none { it.contains("/vendor/plotly/plotly-3d.min.js") } shouldBe true
+        }
+    }
+
     /**
      * One theme of the preview, as an agent checks it: both cases mounted, the data case's chip at success/ready and the
      * empty case's at no-data, the theme applied, the trace count off Plotly's graph div and in the SVG, and the shots —
@@ -331,6 +386,37 @@ class VisualizationPreviewBrowserTest : DashboardBrowserSuite() {
                                                          {"month": "Mar", "units": 2, "target": 4}]},
              "assertions": [{"kind": "rendered"}, {"kind": "trace_count", "equals": 2}]},
             {"name": "empty", "fixtures": {"sales": []}, "assertions": [{"kind": "no_data"}]}]}}
+        """.trimIndent()
+
+    /**
+     * A heatmap with its default colorbar: a 3 x 2 grid per case, the second case over a different value range.
+     * `zsmooth: "fast"` is pinned because the default (`false`) writes an `image-rendering` style attribute on the image.
+     */
+    private fun heatmapDocument(name: String): String =
+        """
+        {"name": "$name", "display_name": "Heatmap colorbar", "description": "",
+         "renderer": {"kind": "plotly", "version": "4"},
+         "inputs": {"sales": {"columns": [{"name": "month", "type": "STRING", "nullable": false},
+                                          {"name": "units", "type": "INTEGER", "nullable": false},
+                                          {"name": "target", "type": "INTEGER", "nullable": false}]}},
+         "config": {"data": [{"type": "heatmap", "zsmooth": "fast", "x": [], "y": [], "z": []}], "layout": {}},
+         "bindings": {"data[0].x": "month", "data[0].y": "target", "data[0].z": "units"},
+         "presentation": {"title": "Heatmap colorbar"},
+         "tests": {"cases": [
+            {"name": "grid", "fixtures": {"sales": [{"month": "Jan", "units": 3, "target": 4},
+                                                   {"month": "Feb", "units": 5, "target": 4},
+                                                   {"month": "Mar", "units": 2, "target": 4},
+                                                   {"month": "Jan", "units": 6, "target": 2},
+                                                   {"month": "Feb", "units": 1, "target": 2},
+                                                   {"month": "Mar", "units": 4, "target": 2}]},
+             "assertions": [{"kind": "rendered"}, {"kind": "trace_count", "equals": 1}]},
+            {"name": "shifted", "fixtures": {"sales": [{"month": "Jan", "units": 30, "target": 4},
+                                                      {"month": "Feb", "units": 50, "target": 4},
+                                                      {"month": "Mar", "units": 20, "target": 4},
+                                                      {"month": "Jan", "units": 60, "target": 2},
+                                                      {"month": "Feb", "units": 10, "target": 2},
+                                                      {"month": "Mar", "units": 40, "target": 2}]},
+             "assertions": [{"kind": "rendered"}]}]}}
         """.trimIndent()
 
     private companion object {

@@ -1,9 +1,9 @@
 # Deployment & Packaging Specification
 
-**Status:** v1.41
+**Status:** v1.42
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
-**Last updated:** 2026-10-03
+**Last updated:** 2026-10-14
 
 ---
 
@@ -334,12 +334,20 @@ its adapters (`js/datapipelines-dashboard*.js`, the same sha256 discipline — a
 manifest in the same commit).
 
 **Plotly 4.1.1** ships as two custom bundles built with the package's own procedure (its
-`CUSTOM_BUNDLE.md`), from the pinned tag. To rebuild any bundle — a trace added, a security fix
-adopted — run exactly this and commit the OUTPUTS with their new hashes:
+`CUSTOM_BUNDLE.md`), from the pinned tag, plus ONE source patch (`patches/0001-colorbar-style-reset-without-attribute.patch`:
+the colorbar's fill reset wrote `.attr('style', '')`, an inline-style attribute the enforced CSP refuses, and now removes
+the attribute — #525). To rebuild any bundle — a trace added, a security fix adopted — run exactly this and commit the
+OUTPUTS with their new hashes. The clone directory is part of the recipe: **the minified output depends on the clone's
+absolute path** (#530) — three directories gave three different hashes — so build in exactly
+`/tmp/dp-plotly-4.1.1/plotly.js`; with that path, Node 22.23.3 + `npm ci` and Node 24.21.0 + `npm i` build identical bytes.
 
 ```sh
+mkdir -p /tmp/dp-plotly-4.1.1 && cd /tmp/dp-plotly-4.1.1
 git clone --depth 1 --branch v4.1.1 https://github.com/plotly/plotly.js.git plotly.js
-cd plotly.js && npm i
+cd plotly.js
+# the vendor patch(es) — one source change; a new one is a new numbered file in the same directory
+git apply <repo>/modules/web/src/main/resources/static/vendor/plotly/patches/*.patch
+npm ci
 # the 2D bundle (the default): scatter, bar, pie, histogram, box, heatmap
 npm run custom-bundle -- --traces scatter,bar,pie,histogram,box,heatmap --strict --out 2d
 # the 3D bundle (dashboards with a 3D trace): the six above + scatter3d, surface, mesh3d
@@ -347,15 +355,18 @@ npm run custom-bundle -- --traces scatter,bar,pie,histogram,box,heatmap,scatter3
 cp dist/plotly-2d.min.js dist/plotly-3d.min.js  <repo>/modules/web/src/main/resources/static/vendor/plotly/
 ```
 
+A patch is `git format-patch -1` against the tag, so `git apply` takes it on a pristine clone; never hand-edit the
+minified text. Build twice and `cmp` the outputs before copying them in (the build is deterministic at a fixed path).
+
 `plotly.css` is the npm package's own `dist/plotly.css` — the release build's strict-CSP sheet, the
 same rules the bundle would inject at runtime. It is part of the CSP DESIGN-AROUND ([Dashboards
-§6.6](dashboards.md#66-the-states-notifications-and-the-csp)): the client runtime pre-places the empty
-`<style id="plotly.js-style-global" class="no-inline-styles">` element Plotly checks, the page loads
-this file instead, and `style-src` stays `'self'` plus Cytoscape's one hash — no policy change, no
-`'unsafe-hashes'`, no `'unsafe-eval'`. Sizes at vendoring (4.1.1): 2D 1,254,444 B (418,500 gz), 3D
-1,831,489 B (588,881 gz), plotly.css 7,467 B; the npm tarball's sha1
+§6.6](dashboards.md#66-the-states-notifications-and-the-csp)): each host pre-places the empty
+`<template id="plotly.js-style-global" class="no-inline-styles">` marker Plotly checks (the runtime's
+fallback creates the same template for a host without one), the page loads this file instead, and `style-src` stays `'self'` plus Cytoscape's one hash — no policy change, no
+`'unsafe-hashes'`, no `'unsafe-eval'`. Sizes (4.1.1 with the #525 patch): 2D 1,254,448 B (418,508 gz), 3D
+1,831,493 B (588,886 gz), plotly.css 7,467 B; the npm tarball's sha1
 `f797e8f2d54603fd9d11b08aae8eb31147200b67` verifies the source against the tag. Node 22+ per
-Plotly's own build matrix. After ANY rebuild: update the manifest's `sha256` map, the `sizes`, and the
+Plotly's own build matrix (the manifest's `build` field records the exact versions). After ANY rebuild: update the manifest's `sha256` map, the `sizes`, and the
 trace lists if they changed — `VendoredPlotlyAuditTest` fails the build otherwise.
 
 ### 6.3 Docker Compose (dev / evaluation)
@@ -1170,6 +1181,7 @@ operator.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-14 | v1.42 | #525 the Plotly recipe carries a vendor patch and a fixed build directory | **§6.2:** the Plotly rebuild gains `git apply` of `static/vendor/plotly/patches/*.patch` (the colorbar fill reset removes its `style` attribute instead of writing an empty one — two source lines, +4 bytes per bundle) and `npm ci`; the clone directory is fixed at `/tmp/dp-plotly-4.1.1/plotly.js` because the minified output depends on the clone's absolute path (#530; the 2026-09-30 build did not record its directory and is not reproducible, so both bundles were rebuilt, not patched in place). Sizes and hashes are in the vendor manifest; `VendoredPlotlyAuditTest` pins the bytes. #525 merge follow-up (2026-10-15): §6.2 names the marker each host pre-places as the empty `template` (#456) that the runtime's fallback also creates (#526), not a `style` element; the manifest's plotly `note` says the same. |
 | 2026-10-03 | v1.41 | 411 (#411) CI renders the reference chart | §6.4: the chart is rendered by CI — the `gate` job runs `scripts/helm-check.sh`, a pinned `helm` (v4.3.0; the release's checksum file SHA-256-pinned in-repo, bumped with the version in one commit) running `helm lint --strict` plus four `helm template` cases: defaults render no `env:` block, both `duckdb.*` values render exactly their two quoted entries, each `extraEnv` double mapping is refused with the template's own message, and a missing `existingSecret` is refused. Exit contract: 0 all cases green, 1 a chart check failed, 2 tooling. Also corrects this section's HPA bullet — the chart scales on CPU only (`hpa.yaml` carries one `cpu` metric; there is no memory metric). No chart change. |
 | 2026-10-02 | v1.40 | 140 (#140) the Helm chart maps the DuckDB operator keys | §6.4: the reference chart gains a `duckdb` values block — `duckdb.extensionDirectory` and `duckdb.memoryLimit` (configuration.md §3.25's two env vars) — each rendered as an env entry ONLY when non-empty: an empty default inherits the image's bundled extension directory, and a rendered `""` would override the image's `ENV` and break zero-egress LAKE under the read-only root filesystem. `extraEnv` stays the escape hatch for every other non-secret key; an `extraEnv` double mapping of either DuckDB key is refused at render time. Chart version 0.1.0 → 0.1.1. `HelmDuckDbValuesSpecDriftTest` pins doc = chart values = env entries. |
 | 2026-09-30 | v1.39 | L3a (#10) the dashboards client runtime — renumbered at merge after 337's v1.38 | **New §6.2A Vendored browser assets** — where the vendor manifest and its audit tests live, and the Plotly 4.1.1 provenance: the two custom bundles' exact rebuild recipe (clone the pinned tag, `npm run custom-bundle` per trace list, commit the outputs), the sizes and the npm tarball sha1, and the plotly.css design-around that keeps `style-src` at `'self'` plus Cytoscape's one hash. No code, route or policy change. |
