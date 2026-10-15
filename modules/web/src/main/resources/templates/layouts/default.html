@@ -12,8 +12,8 @@
        the same three rules instead. `attributesToSettle` drops htmx's default "style":
        settling copies an element's `style` attribute across a swap with setAttribute,
        and `style-src` has no 'unsafe-inline', so every such copy is a refused inline
-       style (#456 measured it: a style="" left by CSSOM writes — app scripts, or
-       Playwright's caret hiding — became 22 refusals from htmx.min.js on two pages). No
+       style (#456 measured it: an empty style attribute left by CSSOM writes — app
+       scripts, or Playwright's caret hiding — became 22 refusals from htmx.min.js). No
        template carries a style attribute, so nothing legitimate is settled through it. -->
   <meta name="htmx-config" content='{"allowEval":false,"includeIndicatorStyles":false,"attributesToSettle":["class","width","height"]}'>
 
