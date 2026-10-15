@@ -72,6 +72,76 @@ class VisualizationPreviewBrowserTest : DashboardBrowserSuite() {
         }
     }
 
+    /**
+     * #526 — a host that does NOT pre-place the marker gets it from the runtime's fallback
+     * (`_ensureStyleElement`), so the fallback's marker must be CSP-compliant too. Chromium
+     * refuses EVERY script-created `<style>` element at insertion as an inline style under
+     * `style-src 'self'` (with a text child, with an empty comment, or childless — each with the
+     * empty-text hash; measured, the #526 lane's probe), so the fallback creates the marker as a
+     * TEMPLATE — the same shape every first-party host pre-places (#456): found by id, matching
+     * the class, no children, never processed as a stylesheet (no sheet — the host marker's own
+     * shape), and ZERO `Applying inline style` refusals from the application's own scripts —
+     * the narrowed collector fails the test on any of the latter in `closePage`. Plotly's
+     * opt-out did not disable the vendored stylesheet: the positive probe of the conformance
+     * case (`getComputedStyle('.js-plotly-plot .plotly').fontFamily`) still reads Open Sans.
+     * The instance is reached through `window.DatapipelinesPreview.instances` — the preview's
+     * own registry (`visualization-preview.js`), the same path the #456 probe used.
+     */
+    @Test
+    fun `the missing-marker fallback creates a CSP-compliant marker in both themes`() {
+        startTrace()
+        val root = ready("vfallback")
+        val created = api("POST", "/api/v1/visualizations", document("$root/charts/fallback"))
+        val id = created.at("data", "id") as String
+        val started = api("POST", "/api/v1/visualizations/$id/tests/sessions", "")
+        val previewUrl = started.at("data", "preview_url") as String
+        val agent = newBrowserContext()
+        try {
+            val preview = agent.newPage()
+            preview.setDefaultTimeout(FIRST_RENDER_TIMEOUT_MS)
+            for (theme in listOf("light", "dark")) {
+                preview.navigate("$baseUrl$previewUrl&theme=$theme")
+                preview.waitForSelector("section[data-dp-case-index='0'][data-dp-ready='true']")
+                val observation =
+                    preview.evaluate(
+                        """() => {
+                          const host = document.getElementById('plotly.js-style-global');
+                          if (host) host.remove();
+                          window.DatapipelinesPreview.instances[0]._ensureStyleElement();
+                          const el = document.getElementById('plotly.js-style-global');
+                          return { exists: !!el,
+                            inHead: !!el && el.parentElement === document.head,
+                            tag: el ? el.tagName : null,
+                            className: el ? el.className : null,
+                            children: el ? el.childNodes.length : null,
+                            hasSheet: !!el && !!el.sheet,
+                            matches: !!el && el.matches('.no-inline-styles') };
+                        }""",
+                    ) as Map<*, *>
+                println("Fallback marker ($theme): $observation")
+                withClue("the fallback-created marker is CSP-compliant ($theme): $observation") {
+                    observation["exists"] shouldBe true
+                    observation["inHead"] shouldBe true
+                    observation["tag"] shouldBe "TEMPLATE"
+                    (observation["className"] as String).contains("no-inline-styles") shouldBe true
+                    observation["children"] shouldBe 0
+                    observation["matches"] shouldBe true
+                    observation["hasSheet"] shouldBe false
+                }
+                // Falsification 4: the opt-out did not disable plotly.css (the conformance case's probe).
+                val font =
+                    preview.evaluate(
+                        "() => getComputedStyle(document.querySelector('.js-plotly-plot .plotly')).fontFamily",
+                    ) as String
+                withClue("the vendored stylesheet still applies with the fallback-created marker ($theme)") {
+                    font.contains("Open Sans") shouldBe true
+                }
+            }
+        } finally {
+            agent.close()
+        }
+    }
+
     private fun recordMarkerAtLoad(agent: BrowserContext) {
         // Record the marker at Plotly's FIRST opt-out lookup, before it can create one itself.
         // Final DOM order alone cannot distinguish a parser-placed marker from Plotly's late insertion.
