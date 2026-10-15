@@ -48,11 +48,15 @@ class DatasourceBrowseModel(
         // length is the shared bound — a search box TRUNCATES to it before the call, never errors.
         val needle = q?.trim()?.takeIf { it.isNotEmpty() }?.take(SearchNeedle.MAX_LENGTH)
         val workspaceId = principal?.workspace?.id
-        val visible = if (workspaceId == null) emptyList() else datasources.listVisible(dialectOf(dialect), workspaceId)
+        val dialectFilter = dialectOf(dialect)
+        val visible = if (workspaceId == null) emptyList() else datasources.listVisible(dialectFilter, workspaceId)
         val all = filter(visible, needle)
         model.addAttribute("datasources", all.drop(page).take(PAGE_SIZE))
         model.addAttribute("q", needle.orEmpty())
         model.addAttribute("selectedDialect", dialect ?: "")
+        // #510: the empty list's answer — "nothing exists" vs "nothing matched" (§5.1) — reads
+        // ANY standing filter, not q alone; the fragment's clear control is chosen on this.
+        model.addAttribute("filtered", needle != null || dialectFilter != null)
         model.addAttribute("offset", page)
         model.addAttribute("hasMore", all.size > page + PAGE_SIZE)
         model.addAttribute("total", all.size)

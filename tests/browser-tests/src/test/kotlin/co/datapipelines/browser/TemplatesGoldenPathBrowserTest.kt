@@ -3,6 +3,8 @@ package co.datapipelines.browser
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
+import java.nio.file.Path
+import java.nio.file.Paths
 
 /**
  * Golden path 4 of the release checklist: templates — the catalog's empty state, creation
@@ -114,4 +116,70 @@ class TemplatesGoldenPathBrowserTest : BrowserSuite() {
         page.waitForSelector(".tw-root")
         page.locator(".tw-crumb-name").innerText() shouldContain leaf
     }
+
+    /**
+     * #510 — a dialect with no rows and an EMPTY box is a filter miss, not an empty
+     * workspace: the catalog answers with the no-match state and a control that drops every
+     * standing filter, never the create guidance. Light and dark shots land in
+     * build/reports/510-screenshots/ for the handback; the assertions are what fail the build.
+     */
+    @Test
+    fun `a dialect filter that matches nothing offers Clear filters, and it restores the list (#510)`() {
+        startTrace()
+        loginReadyUser()
+        page.setViewportSize(1440, 900)
+        val name = "test/browser_tpl_" + generatedPassword("t").take(6).lowercase()
+
+        // One POSTGRES template, so the workspace is NOT empty — the filter is what hides it.
+        page.navigate("$baseUrl/templates")
+        page.waitForURL("**/templates")
+        page.click("text=Create Template")
+        page.locator("#create-template-modal").isVisible shouldBe true
+        page.fill("#create-template-modal input[name=name]", name)
+        page.selectOption("#create-template-type", "sql")
+        page.selectOption("#create-template-dialect", "POSTGRES")
+        page.fill("#create-template-modal textarea[name=body]", "SELECT 1 AS v")
+        page.fill("#create-template-modal input[name=description]", "browser #510 template")
+        page.waitForResponse("**/partials/templates") {
+            page.click("#create-template-modal button[type=submit]")
+        }
+        row(name).waitFor()
+
+        // SQLITE has no templates: the miss must be the NO-MATCH state with the all-filters
+        // clear — at base this rendered "No templates yet" with the create guidance.
+        page.waitForResponse({ r -> r.url().contains("/partials/templates") && r.url().contains("dialect=SQLITE") }) {
+            page.selectOption("#template-filter-dialect", "SQLITE")
+        }
+        page.locator(".ds-empty-title").first().innerText() shouldContain "No templates match your search"
+        val clear = "#template-list-wrapper button:has-text('Clear filters')"
+        page.waitForSelector(clear)
+        ensureTheme("light")
+        shot("510-templates-nomatch-light.png")
+        ensureTheme("dark")
+        shot("510-templates-nomatch-dark.png")
+
+        // The clear resets every standing filter — box and select — and the row comes back.
+        page.click(clear)
+        row(name).waitFor()
+        page.inputValue("#template-filter-dialect") shouldBe ""
+        page.inputValue("#template-filter-q") shouldBe ""
+    }
+
+    private fun row(name: String) =
+        page.locator(
+            "#template-list-wrapper a.tpl-result",
+            com.microsoft.playwright.Page
+                .LocatorOptions()
+                .setHasText(name),
+        )
+
+    private fun shot(name: String) {
+        page.screenshot(
+            com.microsoft.playwright.Page
+                .ScreenshotOptions()
+                .setPath(shotDir().resolve(name)),
+        )
+    }
+
+    private fun shotDir(): Path = Paths.get("build", "reports", "510-screenshots").also { it.toFile().mkdirs() }
 }

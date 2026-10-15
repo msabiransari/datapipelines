@@ -12,12 +12,14 @@
 <div xmlns:th="http://www.thymeleaf.org" th:fragment="fragment" id="datasource-list-wrapper"
      th:attr="hx-swap-oob=${oob}">
   <th:block th:if="${#lists.isEmpty(datasources)}">
-    <!-- §5.1: "nothing exists" offers the create action; "nothing matched" offers Clear filters. -->
+    <!-- §5.1: "nothing exists" offers the create action; "nothing matched" offers Clear
+         filters. #510: the choice reads the `filtered` flag — ANY standing filter (q or
+         dialect), never q alone. -->
     <div class="ds-empty">
-      <p class="ds-empty-title" th:if="${#strings.isEmpty(q)}">No datasources yet</p>
-      <p class="ds-empty-title" th:unless="${#strings.isEmpty(q)}">No datasources match your search</p>
-      <p class="ds-empty-description" th:if="${#strings.isEmpty(q)}">Register your first datasource to get started.</p>
-      <div class="ds-empty-actions" th:unless="${#strings.isEmpty(q)}">
+      <p class="ds-empty-title" th:if="${!filtered}">No datasources yet</p>
+      <p class="ds-empty-title" th:unless="${!filtered}">No datasources match your search</p>
+      <p class="ds-empty-description" th:if="${!filtered}">Register your first datasource to get started.</p>
+      <div class="ds-empty-actions" th:unless="${!filtered}">
         <button type="button" class="ds-button ds-button-secondary ds-button-sm"
                 data-dp-clear-filters="#ds-filter-q, #ds-filter-dialect" hx-sync="#ds-filter-q:replace"
                 th:attr="hx-get=@{/partials/datasources}, hx-target='#datasource-list-wrapper', hx-swap='outerHTML'">Clear filters</button>
