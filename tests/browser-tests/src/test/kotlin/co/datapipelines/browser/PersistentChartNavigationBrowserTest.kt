@@ -537,19 +537,12 @@ class PersistentChartNavigationBrowserTest : VisualizationBrowserSuite() {
     private companion object {
         /**
          * Bare `<script>` tags outside every page-asset catalog, which re-run on each arrival and cached restore of
-         * their page: the editor's parser-blocking splitter (it sizes the dock before the first paint, so it cannot
-         * wait for a loader) and the template workspace's six tags (sql-highlight.js is also an editor catalog
-         * entry). Moving the template workspace's onto the loader is #514.
+         * their page: only the editor's parser-blocking splitter. It sizes the dock before the first paint,
+         * so it cannot wait for a loader.
          */
         val BARE_PER_ARRIVAL =
             setOf(
                 "/js/splitter.js",
-                "/js/pipeline-editor/sql-highlight.js",
-                "/js/template-editor/preview.js",
-                "/js/csrf.js",
-                "/js/template-editor/lifecycle.js",
-                "/js/template-editor/workspace.js",
-                "/js/template-transform-face.js",
             )
 
         /**

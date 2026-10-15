@@ -31,6 +31,7 @@ const MOUNTS = {
   "/js/dashboards-page.js": "DashboardPageMount",
   "/js/dashboards/workspace.js": "DashboardWorkspaceMount",
   "/js/visualizations/workspace.js": "VisualizationWorkspaceMount",
+  "/js/template-editor/workspace.js": "TemplateWorkspaceMount",
   "/js/pipeline-editor/runtime.js": "PipelineWorkspaceMount",
   "/js/parameter-workspace/runtime.js": "ParameterWorkspaceMount",
 };
