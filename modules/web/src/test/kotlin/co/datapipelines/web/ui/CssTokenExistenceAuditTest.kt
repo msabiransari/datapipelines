@@ -145,8 +145,11 @@ class CssTokenExistenceAuditTest {
         definedBy.getValue("--measure-wide") shouldContain "css/app.css"
         definedBy.getValue("--tplx-tree-w") shouldContain "js/splitter.js"
 
+        // The #474 crumb read `--text-base` until #555 moved the dashboards' chrome onto the
+        // compact scale's roles: the crumb is the 14px heading role now, still a DEFINED name.
+        definedBy.getValue("--app-text-heading") shouldContain "css/app.css"
         val dashboards = firstParty.getValue("css/dashboards.css").withoutBlockComments()
-        dashboards shouldContain "font-size: var(--text-base);"
+        dashboards shouldContain "font-size: var(--app-text-heading);"
         dashboards shouldContain "border-bottom-color: var(--accent-primary);"
         dashboards shouldNotContain "var(--text-md)"
         dashboards shouldNotContain "var(--accent)"
