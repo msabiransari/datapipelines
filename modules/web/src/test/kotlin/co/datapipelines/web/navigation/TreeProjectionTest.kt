@@ -4,6 +4,7 @@ import co.datapipelines.pipeline.NavigationFamily
 import co.datapipelines.pipeline.NavigationRequest
 import co.datapipelines.pipeline.NavigationRow
 import co.datapipelines.pipeline.ReadLens
+import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
@@ -101,6 +102,55 @@ class TreeProjectionTest {
     }
 
     /**
+     * #533 — the review hook is asked ONCE per page, with the page's artifacts only; every artifact
+     * then carries the flag (true for the keys it named), folders carry none, and a page without
+     * the hook — every family but templates — carries none at all.
+     */
+    @Test
+    fun `the review hook marks the named artifacts once per page and leaves folders unflagged`() {
+        val leaves = rows.take(2)
+        val calls = mutableListOf<List<String>>()
+        val page =
+            answer(family = NavigationFamily.TEMPLATES, needsReview = { artifacts ->
+                calls += artifacts.map { it.key }
+                setOf(leaves[0].key)
+            }) { listOf(NavigationRow("scope/sub", "sub", null, null, null)) + leaves }
+        calls shouldBe listOf(leaves.map { it.key })
+        page.nodes.associate { it.key to it.needsReview } shouldBe
+            mapOf("folder:scope/sub" to null, leaves[0].key to true, leaves[1].key to false)
+
+        answer { leaves }.nodes.map { it.needsReview } shouldBe listOf(null, null)
+        answer(family = NavigationFamily.TEMPLATES, needsReview = { error("a page of folders must not ask") }) {
+            listOf(NavigationRow("scope/sub", "sub", null, null, null))
+        }.nodes.single().needsReview shouldBe null
+    }
+
+    /**
+     * #533 — the byte budget costs every reviewed artifact with `needs_review: false`, the flag's
+     * longest form, so marking can only shorten what was counted. The leaf width is chosen where
+     * costing one byte shorter (`null`) would admit one more leaf, so the count tells the two apart.
+     */
+    @Test
+    fun `the byte budget counts a template leaf's needs_review at its longest form`() {
+        val mapper = jacksonObjectMapper()
+        val budget = TreeProjection.MAX_RESPONSE_BYTES - TreeProjection.ENVELOPE_RESERVE
+
+        fun leaves(width: Int) = List(201) { NavigationRow("scope/t_%03d".format(it), "d".repeat(width), UUID(0, it.toLong()), 1, null) }
+        val clean: (List<TreeNode>) -> Set<String> = { emptySet() }
+
+        fun cost(page: TreePage) = page.nodes.sumOf { mapper.writeValueAsBytes(it).size + 1 }
+        val base = 6000
+        val one = cost(answer(family = NavigationFamily.TEMPLATES, needsReview = clean) { leaves(base).take(1) })
+        val width = (base..base + 2000).first { budget / (one + it - base) < budget / (one + it - base - 1) }
+        val longest = one + width - base
+
+        val page = answer(family = NavigationFamily.TEMPLATES, needsReview = clean) { leaves(width) }
+        page.nodes.size shouldBe budget / longest
+        (cost(page) <= budget) shouldBe true
+        page.nextCursor.isNullOrEmpty() shouldBe false
+    }
+
+    /**
      * #504b — the shared needle rule runs FIRST in the projection: a whitespace-only query is no
      * search (the loader sees null and answers the plain browse level), and an over-long one is
      * the shared refusal before any loader runs.
@@ -135,6 +185,7 @@ class TreeProjectionTest {
         parent: String = root,
         query: String? = null,
         cursor: String? = null,
+        needsReview: ((List<TreeNode>) -> Set<String>)? = null,
         load: (NavigationRequest) -> List<NavigationRow>,
-    ): TreePage = projection.page(family, workspaceId, actorId, lens, root, parent, query, cursor, load)
+    ): TreePage = projection.page(family, workspaceId, actorId, lens, root, parent, query, cursor, needsReview, load)
 }

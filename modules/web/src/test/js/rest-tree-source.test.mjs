@@ -25,6 +25,15 @@ for(const family of ['pipelines','templates','dashboards','visualizations','para
     }
   });
 }
+test('a template leaf keeps the needs_review flag the payload carries (#533)',async()=>{
+  const leaf=(key,flag)=>({key,parent_key:null,kind:'artifact',name:key,path:`scope/${key}`,has_children:false,match:false,
+    resource_id:key,href:`/templates/scope/${key}`,version:1,draft_version:null,...(flag===undefined?{}:{needs_review:flag})});
+  const source=restTreeSource('templates',async()=>response({family:'templates',mode:'browse',root:'scope',parent:'scope',query:null,
+    workspace_id:'ws',view_token:'members',nodes:[leaf('drifted',true),leaf('clean',false),leaf('older',undefined),
+      {key:'folder:scope/a',parent_key:null,kind:'folder',name:'a',path:'scope/a',has_children:true,match:false,needs_review:null}],next_cursor:null}));
+  const answer=await source.loadChildren(null,null,options,new AbortController().signal);
+  assert.deepEqual(answer.nodes.map(node=>node.needsReview),[true,false,undefined,null]);
+});
 test('a 400 search refusal carrying the shared query_too_long envelope names the limit (#513)',async()=>{
   const tooLong=restTreeSource('pipelines',async()=>({ok:false,status:400,headers:{get:()=> 'application/json'},async json(){return {error:{code:'request.query_too_long',
     message:'That search term is too long. Search with 200 characters or fewer.',details:{limit:200,length:201}}}}}));

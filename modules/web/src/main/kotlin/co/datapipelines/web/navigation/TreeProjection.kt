@@ -18,7 +18,13 @@ import java.util.UUID
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 
-/** Navigation payloads contain only these fields, never stored artifact bodies. */
+/**
+ * Navigation payloads contain only these fields, never stored artifact bodies.
+ *
+ * [needsReview] is set on a TEMPLATE artifact only (#533, transform-nodes design §8.2): true when
+ * its listed [version] cites a retired or superseded fact, false when it cites none; null on
+ * folders and on every other family's nodes.
+ */
 @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy::class)
 data class TreeNode(
     val key: String,
@@ -32,6 +38,7 @@ data class TreeNode(
     val href: String? = null,
     val version: Int? = null,
     val draftVersion: Int? = null,
+    val needsReview: Boolean? = null,
 )
 
 /** Continuation exhausts logical results; repeated ancestors do not consume the match bound. */
@@ -53,6 +60,12 @@ class TreeProjection {
     private val mapper = jacksonObjectMapper()
     private val secret = ByteArray(SECRET_BYTES).also { SecureRandom().nextBytes(it) }
 
+    /**
+     * One bounded page. [needsReview], when given, is asked ONCE per page with the page's artifact
+     * nodes and answers the keys whose listed version needs review (#533); every artifact then
+     * carries the flag, true for those keys and false otherwise. It is not asked for a page
+     * without artifacts. [load] stays the last parameter, so a trailing lambda binds to it.
+     */
     @Suppress("LongParameterList") // explicit continuation identity fields plus repository-owned loader
     fun page(
         family: NavigationFamily,
@@ -63,6 +76,7 @@ class TreeProjection {
         parent: String,
         query: String?,
         cursor: String?,
+        needsReview: ((List<TreeNode>) -> Set<String>)? = null,
         load: (NavigationRequest) -> List<NavigationRow>,
     ): TreePage {
         validatePath(root)
@@ -87,7 +101,8 @@ class TreeProjection {
         val after = cursor?.let { decode(it, identity) }.orEmpty()
         val rows = load(NavigationRequest(workspace, lens, root, parent, normalized, after, NavigationRequest.PAGE_SIZE + 1))
         val delivered = rows.take(NavigationRequest.PAGE_SIZE)
-        val (nodes, accepted) = projectNodes(family, delivered, root, normalized != null)
+        val (projected, accepted) = projectNodes(family, delivered, root, normalized != null, reviewed = needsReview != null)
+        val nodes = if (needsReview == null) projected else marked(projected, needsReview)
         val next = if (rows.size > accepted) encode(identity, delivered[accepted - 1].orderKey) else null
         return TreePage(
             family.route,
@@ -108,18 +123,24 @@ class TreeProjection {
         )
     }
 
+    /**
+     * With [reviewed], every artifact is projected carrying `needs_review: false` — the flag's
+     * longest serialized form — so the byte budget already counts the bytes [marked] can only
+     * shorten.
+     */
     private fun projectNodes(
         family: NavigationFamily,
         rows: List<NavigationRow>,
         root: String,
         searching: Boolean,
+        reviewed: Boolean,
     ): Pair<List<TreeNode>, Int> {
         val nodes = linkedMapOf<String, TreeNode>()
         var bytes = ENVELOPE_RESERVE
         var accepted = 0
         for (row in rows) {
             val ancestors = if (searching) ancestors(row.path, root).map { folder(it, root) } else emptyList()
-            val node = if (row.id == null) folder(row.path, root) else artifact(family, row, root, searching)
+            val node = if (row.id == null) folder(row.path, root) else artifact(family, row, root, searching, reviewed)
             val additions = (ancestors + node).filter { it.key !in nodes }
             val cost = additions.sumOf { mapper.writeValueAsBytes(it).size + 1 }
             if (cost > MAX_RESPONSE_BYTES - bytes) {
@@ -137,6 +158,16 @@ class TreeProjection {
         return nodes.values.toList() to accepted
     }
 
+    private fun marked(
+        nodes: List<TreeNode>,
+        needsReview: (List<TreeNode>) -> Set<String>,
+    ): List<TreeNode> {
+        val artifacts = nodes.filter { it.kind == "artifact" }
+        if (artifacts.isEmpty()) return nodes
+        val flagged = needsReview(artifacts)
+        return nodes.map { if (it.key in flagged) it.copy(needsReview = true) else it }
+    }
+
     private fun folder(
         path: String,
         root: String,
@@ -148,6 +179,7 @@ class TreeProjection {
         row: NavigationRow,
         root: String,
         matched: Boolean,
+        reviewed: Boolean,
     ): TreeNode {
         val target =
             if (family ==
@@ -169,6 +201,7 @@ class TreeProjection {
             href = "/${family.route}/$target",
             version = row.version,
             draftVersion = row.draftVersion,
+            needsReview = if (reviewed) false else null,
         )
     }
 
@@ -251,7 +284,9 @@ class TreeProjection {
 
     companion object {
         const val MAX_RESPONSE_BYTES = 1048576
-        private const val ENVELOPE_RESERVE = 16384
+
+        /** Held back from [MAX_RESPONSE_BYTES] for the envelope; the nodes share the rest. */
+        internal const val ENVELOPE_RESERVE = 16384
         private const val MAX_PATH = 512
         private const val MAX_CURSOR = 4096
         private const val SECRET_BYTES = 32

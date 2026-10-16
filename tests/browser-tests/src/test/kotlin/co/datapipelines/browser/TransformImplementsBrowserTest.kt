@@ -18,7 +18,7 @@ import java.util.UUID
  * face of it against a flag that read false until this lane; here a jsonata transform cites a
  * WORKSPACE rule through the REAL API (`implements` on the create, so the §2.3 citation check
  * runs), a pipeline pins it beside a SQL stage, and the rule is SUPERSEDED. The walk then reads
- * the mark wherever a person meets the version — the sidebar tree's folder level, the
+ * the mark wherever a person meets the version — the sidebar's REST tree leaf (#533), the
  * catalog's search row, the template workspace's header chip, the pipeline editor's TRANSFORM card and
  * its Details row — and the release dialog, whose warning names the retired rule and its
  * successor above a confirm that stays enabled; the release then lands (a warning, never a
@@ -46,14 +46,19 @@ class TransformImplementsBrowserTest : BrowserSuite() {
         val rule = recordRule(user.email, datasource, "An active order is an order that names its customer.", supersedes = null)
         seedPipeline(folder, datasource, stage, transform, rule)
 
-        // Before the drift the citation is live: nothing is marked.
+        // Before the drift the citation is live: nothing is marked — in the catalog, nor on the
+        // sidebar's two leaves (#533), read from the REST tree the sidebar renders.
         leafMarks(folder) shouldBe mapOf(stage to false, transform to false)
+        sidebarLeavesUnmarked(folder, stage, transform)
 
         val successor = recordRule(user.email, datasource, "An active order names its customer and has a paid invoice.", supersedes = rule)
 
-        // 1 — the navigating surface: the catalog's rows mark the transform, never the stage.
-        //     (#398: the rows are links, `a.tpl-result`; #466: the server-rendered sidebar level
-        //     this step also read is gone — the sidebar is the REST tree, whose marker is #533.)
+        // 1 — the navigating surfaces mark the transform, never the stage. The sidebar FIRST
+        //     (#533): the tree caches every complete level and nothing about the template changed
+        //     (a fact did), so no artifact-change event refreshes it — the panel's own Refresh
+        //     re-reads the open levels, and the wait is on the transform leaf's marker itself.
+        //     Then the catalog's rows (#398: links, `a.tpl-result`).
+        sidebarMarksTransformOnly(stage, transform)
         leafMarks(folder) shouldBe mapOf(stage to false, transform to true)
         page.navigate("$baseUrl/templates?q=$slug")
         val row = page.locator("a.tpl-result", Page.LocatorOptions().setHasText("active_orders"))
@@ -228,6 +233,58 @@ class TransformImplementsBrowserTest : BrowserSuite() {
             prefix,
         ) as Map<String, Boolean>
 
+    // ------------------------------------------------------------------ the sidebar's REST tree (#533)
+
+    /** Opens the Templates panel (a toggle: clicked only when closed) and waits for its root level. */
+    private fun openTemplatesTree() {
+        if (page.locator(TREE_PANEL).isHidden) page.click("[data-nav-branch='templates'] [data-nav-tree-toggle]")
+        page.waitForFunction("() => window.DatapipelinesSidebarTrees.get('templates')?.state.levels.get(null)?.complete")
+    }
+
+    /** Expands the folder at [path] (when closed) and waits for its level to be complete. */
+    private fun expandTree(path: String) {
+        val folder = "$TREE_PANEL [data-tree-key='folder:$path']"
+        if (page.locator(folder).getAttribute("aria-expanded") != "true") page.click("$folder > .dp-tree-line button")
+        page.waitForFunction(
+            "key => window.DatapipelinesSidebarTrees.get('templates').state.levels.get(key)?.complete",
+            "folder:$path",
+        )
+    }
+
+    private fun treeLeaf(path: String) = "$TREE_PANEL a[href='/templates/$path']"
+
+    /** Opens the panel down to [folder] and reads neither leaf marked. */
+    private fun sidebarLeavesUnmarked(
+        folder: String,
+        stage: String,
+        transform: String,
+    ) {
+        openTemplatesTree()
+        expandTree("test")
+        expandTree(folder)
+        page.locator(treeLeaf(transform)).waitFor()
+        page.locator("${treeLeaf(transform)} [data-needs-review]").count() shouldBe 0
+        page.locator("${treeLeaf(stage)} [data-needs-review]").count() shouldBe 0
+    }
+
+    /**
+     * Refreshes the open levels, waits on the transform leaf's marker itself and reads the stage
+     * leaf clean. The fixture's display name is its full path, wider than the rail: the panel
+     * scrolls sideways to the marker (the version badge sits there too) before the two shots.
+     */
+    private fun sidebarMarksTransformOnly(
+        stage: String,
+        transform: String,
+    ) {
+        page.click("$TREE_PANEL button[aria-label='Refresh tree']")
+        val marker = page.locator("${treeLeaf(transform)} [data-needs-review]")
+        marker.waitFor()
+        marker.innerText() shouldBe "needs review"
+        page.locator("${treeLeaf(stage)} [data-needs-review]").count() shouldBe 0
+        marker.scrollIntoViewIfNeeded()
+        themedShots("sidebar-leaf", listOf(1440))
+    }
+
     /** #350: the catalog's search, its one row followed — the pipeline's workspace with its verbs. */
     private fun openPipelineWorkspace(slug: String) {
         page.navigate("$baseUrl/pipelines?q=$slug")
@@ -318,6 +375,8 @@ class TransformImplementsBrowserTest : BrowserSuite() {
     private fun shotDir(): Path = Paths.get("build", "reports", "7e-screenshots").also { it.toFile().mkdirs() }
 
     private companion object {
+        const val TREE_PANEL = "#nav-tree-templates"
+
         const val ORDER_ID = """{"name":"order_id","type":"INTEGER"}"""
 
         /** The `default` workspace every [seedLocalUser] membership lands in (V29's seeded row). */
