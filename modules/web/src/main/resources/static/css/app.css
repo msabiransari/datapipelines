@@ -214,11 +214,13 @@
    `fallback` (100ms block + a 3s swap window) is the alternative if that cost is
    judged too high — it restores the reflow inside a bounded window. Choosing it
    would want size-adjusted fallback faces first; the ratios are measured and
-   ready (Inter / system-ui = 102.59%, JetBrains Mono / ui-monospace = 109.48%),
+   for the faces of 090 (Inter / system-ui = 102.59%, JetBrains Mono /
+   ui-monospace = 109.48%; Noto Sans, since 551, is not measured),
    but the `--_font-sans` stack they must be inserted into lives in the vendored
    design-system themes, outside this round's fence.
 
-   `unicode-range` is left at its default (the full coverage of each file).
+   090 left `unicode-range` at its default (the full coverage of each file);
+   551's sans faces carry their subsets' ranges (below).
 
    551 — the sans face is Noto Sans, the family the owner saw in the prototype
    (record 2026-10-16 §5: the prototype declared Inter but supplied no webfont,
@@ -458,9 +460,9 @@ body {
   font-size: var(--app-text-support);
 }
 
-/* Tabs: 12px type, 12px above and below, the 2px rule — 44px. 8px of side
-   padding and an 8px gap put 24px between two labels, the record's spacing,
-   while keeping room for the hover fill. */
+/* Tabs: 12px type, 12px above and below, the 2px rule — 44px. No side
+   padding and the 24px `--app-tab-gap` put the record's spacing between two
+   labels, and the underline is exactly its label's width. */
 .ds-tab-list {
   gap: var(--app-tab-gap);
 }
@@ -3387,9 +3389,10 @@ button.app-busy::after {
 
 /* --- §D headings carry weight -------------------------------------------- */
 
-/* Inter, bold, tight — one step up the scale from 076's `--text-xl`. The owner
-   ruled Inter and no second face (2026-09-08), so weight, tracking and leading
-   are the whole instrument. It stays a property of `.ds-headline` inside
+/* One step up the scale from 076's `--text-xl` (#555 sets the title role's
+   weight, tracking and leading below). The owner ruled one sans face and no
+   second (2026-09-08; Inter then, Noto Sans since #551), so weight, tracking
+   and leading are the whole instrument. It stays a property of `.ds-headline` inside
    `.app-main`, so no screen picks its own size and TypeScaleAuditTest's ban on
    inline font-size keeps holding. */
 /* Card and section titles: 12px semibold on the UI leading (#555 — the size
