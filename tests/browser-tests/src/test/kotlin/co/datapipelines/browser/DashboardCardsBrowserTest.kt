@@ -186,7 +186,7 @@ class DashboardCardsBrowserTest : DashboardBrowserSuite() {
      */
     @Test
     @Order(3)
-    fun `the border carries every state - busy animates, success is green then rests, stale gray, abort and error red`() {
+    fun `the border carries every state - busy animates, success is green then rests, stale the warning accent, abort and error red`() {
         startTrace()
         val root = ready("dpcborder")
         // The pinned grid, so the evidence shots show cards at their real size.
@@ -238,7 +238,7 @@ class DashboardCardsBrowserTest : DashboardBrowserSuite() {
 
         page.evaluate("() => window.__dpPage.instance._markAllStale()")
         classHas("total", "dp-dashboard-card--stale")
-        borderIs("total", "var(--text-muted)", "$theme stale")
+        borderIs("total", "var(--accent-warning)", "$theme stale")
         shot("$theme-stale", "total")
     }
 

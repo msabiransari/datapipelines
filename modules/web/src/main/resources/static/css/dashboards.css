@@ -735,10 +735,11 @@ fieldset.dp-dashboard-parameter > .dp-dashboard-parameter-error {
   border-color: var(--accent-success);
 }
 
-/* Gray, and distinctly so: --border-hover sits a hair from --border-default in both themes
-   (1.06:1 light, 1.05:1 dark); the muted ink is the neutral that reads as a change (owner, #536). */
+/* The warning accent (owner, #544), which no other card state uses. #536 first ruled gray
+   --text-muted over --border-hover (1.06:1 light, 1.05:1 dark against --border-default); on the
+   running board the owner found the gray indistinguishable from the resting border. */
 .dp-dashboard-card--stale {
-  border-color: var(--text-muted);
+  border-color: var(--accent-warning);
 }
 
 .dp-dashboard-card--no-data {
