@@ -903,7 +903,7 @@ class DashboardConformanceBrowserTest : DashboardBrowserSuite() {
         const val NANOS_PER_MS = 1_000_000L
         const val LATE_CANVAS_MS = 15_000.0
         const val CLUE_CONSOLE_ENTRIES = 20
-        const val CLUE_ENTRY_CHARS = 300
+        const val CLUE_ENTRY_CHARS = 1_800
         const val CLUE_MAX_CHARS = 8_000
 
         const val CANVAS_PRESENT = "() => !!document.querySelector('#board .plotly canvas.gl-canvas, #board .plotly canvas')"
@@ -935,8 +935,15 @@ class DashboardConformanceBrowserTest : DashboardBrowserSuite() {
                   var card = (gd && gd.closest('.dp-dashboard-card')) || document.querySelector('#board .dp-dashboard-card');
                   if (!card) return null;
                   var chip = card.querySelector('.dp-dashboard-status');
-                  return { classes: card.className, state: chip ? chip.getAttribute('data-dp-state') : null, box: box(card) };
+                  return { classes: card.className, state: chip ? chip.getAttribute('data-dp-state') : null, box: box(card),
+                    message: texts('#board .dp-dashboard-card-message') };
                 }),
+                notifications: field(function () { return window.__dp.notifications.slice(-10).map(function (n) {
+                  return { code: n.code, message: n.message };
+                }); }),
+                statuses: field(function () { return window.__dp.statuses.filter(function (s) {
+                  return s.name === 'hill';
+                }).slice(-10); }),
                 plotly: field(function () {
                   var host = document.querySelector('#board .plotly');
                   return host ? { classes: host.className, box: box(host) } : null;
