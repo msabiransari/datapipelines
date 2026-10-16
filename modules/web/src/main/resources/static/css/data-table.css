@@ -61,7 +61,7 @@
 
 .app-main .ds-table td.num {
   font-family: var(--font-mono);
-  font-size: var(--text-xs);
+  font-size: var(--app-text-support);
 }
 
 /* `.ds-table td` (0,1,1) outranks a bare utility (0,1,0): a full-bleed skeleton cell and the
@@ -100,6 +100,8 @@
   --dt-surface: var(--surface-default);
   --dt-row-pad-y: var(--space-2-5);
   --dt-head-pad-y: var(--space-2);
+  --dt-font: var(--app-text-support);     /* #555: a cell's text, 12px */
+  --dt-head-font: var(--app-text-badge);  /* #555: a column label, 11px */
   --dt-col-min: 4rem;            /* a drag never makes a column narrower */
   --dt-col-max: 25rem;           /* a dense column's automatic ceiling (drag past it freely) */
   --dt-handle: var(--space-2);   /* the resize handle's hit width */
@@ -223,6 +225,7 @@
   top: 0;
   z-index: 3;
   padding: var(--dt-head-pad-y) var(--space-3);
+  font-size: var(--dt-head-font);
   background: var(--surface-inset);
   border-bottom: 0;
   /* The header's bottom line is a shadow, so it travels with the sticky cell. */
@@ -233,6 +236,7 @@
 
 .dt-viewport > .ds-table td {
   padding: var(--dt-row-pad-y) var(--space-3);
+  font-size: var(--dt-font);
   border-bottom: 1px solid var(--border-subtle);
   /* Opaque: rows pass UNDER the sticky header and the frozen column. */
   background: var(--dt-surface);

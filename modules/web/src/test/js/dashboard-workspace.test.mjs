@@ -197,7 +197,9 @@ test("a second wiring (a restored root) keeps ONE window listener, and the LIVE 
 // sheet declares, so the browser resolved `var()` to the guaranteed-invalid value — the crumb
 // fell back to the inherited size, the underline to `currentColor`, both silently. The JVM
 // sweep (CssTokenExistenceAuditTest) holds the whole first-party set to this; this case pins
-// the two rules that paid for it, in the source the browser loads.
+// the two rules that paid for it, in the source the browser loads. #555 moved the crumb from
+// `--text-base` onto the compact scale's 14px heading role, `--app-text-heading`, which app.css
+// defines.
 
 const dashboardsCssPath = path.resolve(here, "../../main/resources/static/css/dashboards.css");
 
@@ -208,7 +210,7 @@ test("the selected tab's underline and the crumb's size name tokens the design s
   assert.match(selectedRule[0], /border-bottom-color:\s*var\(--accent-primary\)/);
   const crumbRule = /\.dp-crumb-name\s*\{[^}]*\}/.exec(css);
   assert.ok(crumbRule, "the board crumb has its own rule");
-  assert.match(crumbRule[0], /font-size:\s*var\(--text-base\)/);
+  assert.match(crumbRule[0], /font-size:\s*var\(--app-text-heading\)/);
   assert.doesNotMatch(css, /var\(--text-md\)/);
   assert.doesNotMatch(css, /var\(--accent\)/);
 });

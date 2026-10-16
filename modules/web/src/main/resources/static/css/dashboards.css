@@ -64,7 +64,7 @@ fieldset.dp-dashboard-parameter > .dp-dashboard-parameter-error {
 .dp-dashboard-parameter-label,
 .dp-dashboard-parameter legend {
   font-family: var(--font-sans);
-  font-size: var(--text-xs);
+  font-size: var(--app-text-support);
   color: var(--text-muted);
   padding: 0;
 }
@@ -76,7 +76,7 @@ fieldset.dp-dashboard-parameter > .dp-dashboard-parameter-error {
 
 .dp-dashboard-parameter-option-label {
   font-family: var(--font-sans);
-  font-size: var(--text-sm);
+  font-size: var(--app-text-ui);
   color: var(--text-primary);
 }
 
@@ -91,7 +91,7 @@ fieldset.dp-dashboard-parameter > .dp-dashboard-parameter-error {
    line when it does not, and a code longer than the panel breaks inside the chip
    instead of overflowing it. */
 .dp-dashboard-parameter-error {
-  font-size: var(--text-xs);
+  font-size: var(--app-text-support);
   color: var(--accent-danger);
   line-height: var(--leading-normal);
 }
@@ -161,7 +161,7 @@ fieldset.dp-dashboard-parameter > .dp-dashboard-parameter-error {
    template.) */
 .dp-vchip {
   font-family: var(--font-sans);
-  font-size: var(--text-sm);
+  font-size: var(--app-text-badge);
 }
 
 /* ---- The first-party pages (#10 L3b) ---------------------------------------------- */
@@ -299,7 +299,7 @@ fieldset.dp-dashboard-parameter > .dp-dashboard-parameter-error {
    a word, never a colour alone. */
 .dp-refreshes-title {
   font-family: var(--font-sans);
-  font-size: var(--text-sm);
+  font-size: var(--app-text-support);
   font-weight: var(--weight-semibold);
   color: var(--text-primary);
   margin-bottom: var(--gap-sm);
@@ -326,7 +326,7 @@ fieldset.dp-dashboard-parameter > .dp-dashboard-parameter-error {
   align-items: baseline;
   gap: var(--gap-sm);
   font-family: var(--font-sans);
-  font-size: var(--text-xs);
+  font-size: var(--app-text-support);
 }
 
 .dp-refreshes-status {
@@ -350,13 +350,13 @@ fieldset.dp-dashboard-parameter > .dp-dashboard-parameter-error {
 
 .dp-refreshes-executions a {
   font-family: var(--font-sans);
-  font-size: var(--text-xs);
+  font-size: var(--app-text-support);
   color: var(--text-secondary);
 }
 
 .dp-refreshes-shared {
   color: var(--text-muted);
-  font-size: var(--text-xs);
+  font-size: var(--app-text-support);
   margin-left: var(--gap-xs);
 }
 
@@ -457,7 +457,7 @@ fieldset.dp-dashboard-parameter > .dp-dashboard-parameter-error {
   align-items: center;
   gap: var(--gap-xs);
   color: var(--text-secondary);
-  font-size: var(--text-sm);
+  font-size: var(--app-text-ui);
 }
 
 .dp-back:hover {
@@ -474,7 +474,7 @@ fieldset.dp-dashboard-parameter > .dp-dashboard-parameter-error {
 
 .dp-crumb-name {
   font-family: var(--font-sans);
-  font-size: var(--text-base);
+  font-size: var(--app-text-heading);
   font-weight: var(--weight-semibold);
   margin: 0;
   overflow-wrap: anywhere;
@@ -500,7 +500,7 @@ fieldset.dp-dashboard-parameter > .dp-dashboard-parameter-error {
 .dp-ws-tabs {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--gap-xs);
+  gap: var(--app-tab-gap);
   border-bottom: 1px solid var(--border-subtle);
 }
 
@@ -512,8 +512,10 @@ fieldset.dp-dashboard-parameter > .dp-dashboard-parameter-error {
   color: var(--text-secondary);
   cursor: pointer;
   font-family: var(--font-sans);
-  font-size: var(--text-sm);
-  padding: var(--gap-xs) var(--gap-sm);
+  font-size: var(--app-text-support);
+  line-height: var(--app-leading-ui);
+  min-height: var(--app-tab-h);
+  padding: var(--space-3) 0;
 }
 
 .dp-ws-tab:hover {
@@ -534,7 +536,7 @@ fieldset.dp-dashboard-parameter > .dp-dashboard-parameter-error {
 
 .dp-tab-note {
   color: var(--text-secondary);
-  font-size: var(--text-sm);
+  font-size: var(--app-text-support);
 }
 
 /* The Overview/Keys partials' pin rows and the Versions tab's action cell. */
@@ -633,7 +635,7 @@ fieldset.dp-dashboard-parameter > .dp-dashboard-parameter-error {
   min-height: 0;
   flex: 1 1 auto;
   border: 1px solid var(--border-default);
-  border-radius: var(--radius-md);
+  border-radius: var(--app-radius-panel);
   background: var(--surface-default);
   padding: var(--gap-sm);
   transition: border-color var(--duration-base) linear;
@@ -655,7 +657,7 @@ fieldset.dp-dashboard-parameter > .dp-dashboard-parameter-error {
   grid-column: 1;
   grid-row: 1;
   font-family: var(--font-sans);
-  font-size: var(--text-base);
+  font-size: var(--app-text-support);
   font-weight: var(--weight-semibold);
   color: var(--text-primary);
   margin: 0;
@@ -666,7 +668,7 @@ fieldset.dp-dashboard-parameter > .dp-dashboard-parameter-error {
   grid-column: 1 / -1;
   grid-row: 2;
   font-family: var(--font-sans);
-  font-size: var(--text-xs);
+  font-size: var(--app-text-support);
   color: var(--text-muted);
   margin: 0;
   overflow-wrap: anywhere;
@@ -699,7 +701,7 @@ fieldset.dp-dashboard-parameter > .dp-dashboard-parameter-error {
 
 .dp-dashboard-card-message {
   font-family: var(--font-sans);
-  font-size: var(--text-sm);
+  font-size: var(--app-text-ui);
   color: var(--text-muted);
   min-width: 0;
   background: var(--surface-default);
@@ -851,7 +853,7 @@ fieldset.dp-dashboard-parameter > .dp-dashboard-parameter-error {
   color: var(--text-secondary);
   cursor: pointer;
   font-family: var(--font-sans);
-  font-size: var(--text-sm);
+  font-size: var(--app-text-support);
   padding: var(--gap-xs) var(--gap-sm);
 }
 
@@ -869,7 +871,7 @@ fieldset.dp-dashboard-parameter > .dp-dashboard-parameter-error {
   display: inline-block;
   min-width: var(--space-5);
   text-align: center;
-  font-size: var(--text-xs);
+  font-size: var(--app-text-badge);
   color: var(--text-secondary);
   background: var(--surface-inset);
   border: 1px solid var(--border-subtle);
@@ -896,13 +898,13 @@ fieldset.dp-dashboard-parameter > .dp-dashboard-parameter-error {
 
 .dp-board-dock-tool-label {
   font-family: var(--font-sans);
-  font-size: var(--text-xs);
+  font-size: var(--app-text-support);
   color: var(--text-muted);
 }
 
 .dp-board-dock-empty {
   font-family: var(--font-sans);
-  font-size: var(--text-sm);
+  font-size: var(--app-text-ui);
   color: var(--text-muted);
   margin: 0;
   padding: var(--gap-sm) 0;
@@ -962,7 +964,7 @@ fieldset.dp-dashboard-parameter > .dp-dashboard-parameter-error {
 
 .dp-board-dock-foot {
   font-family: var(--font-sans);
-  font-size: var(--text-xs);
+  font-size: var(--app-text-support);
   color: var(--text-muted);
   margin: 0;
   padding: 0 var(--gap-md) var(--gap-xs);
