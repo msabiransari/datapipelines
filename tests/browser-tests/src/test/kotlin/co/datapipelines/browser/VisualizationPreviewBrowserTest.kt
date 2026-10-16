@@ -261,7 +261,8 @@ class VisualizationPreviewBrowserTest : DashboardBrowserSuite() {
                         "section[data-dp-case-index='$index']",
                     )
                     withClue("#531 - the default heatmap's case $index keeps crisp cells in $theme") {
-                        preview.locator("section[data-dp-case-index='$index'] .heatmaplayer image")
+                        preview
+                            .locator("section[data-dp-case-index='$index'] .heatmaplayer image")
                             .evaluate("image => getComputedStyle(image).imageRendering") shouldBe "pixelated"
                     }
                 }

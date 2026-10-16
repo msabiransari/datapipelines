@@ -264,7 +264,8 @@ class VisualizationWorkspaceBrowserTest : VisualizationBrowserSuite() {
             page.waitForSelector("#viz-pane-preview section[data-viz-case-index='0'][data-dp-ready='true']")
             PlotlyColorbarProbe.assertPainted(page, "the heatmap in $theme", previewCase(0))
             withClue("#531 - the default heatmap keeps crisp cells in $theme") {
-                page.locator("${previewCase(0)} .heatmaplayer image")
+                page
+                    .locator("${previewCase(0)} .heatmaplayer image")
                     .evaluate("image => getComputedStyle(image).imageRendering") shouldBe "pixelated"
             }
             shot("workspace-heatmap-$theme")
