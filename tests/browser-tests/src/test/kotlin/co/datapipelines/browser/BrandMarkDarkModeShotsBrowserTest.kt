@@ -82,7 +82,8 @@ class BrandMarkDarkModeShotsBrowserTest : DashboardBrowserSuite() {
     @Suppress("UNCHECKED_CAST")
     private fun measurePalette(): Map<String, Any> =
         page.evaluate(
-            """() => {
+            """
+            () => {
               const style = el => getComputedStyle(el);
               const background = el => {
                 for (let node = el; node; node = node.parentElement) {
@@ -142,7 +143,8 @@ class BrandMarkDarkModeShotsBrowserTest : DashboardBrowserSuite() {
               }
               measured.violations = violations;
               return measured;
-            }""".trimIndent(),
+            }
+            """.trimIndent(),
         ) as Map<String, Any>
 
     @Test
