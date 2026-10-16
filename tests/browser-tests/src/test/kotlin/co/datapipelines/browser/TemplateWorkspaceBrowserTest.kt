@@ -1,11 +1,15 @@
 package co.datapipelines.browser
 
 import com.microsoft.playwright.Page
+import com.microsoft.playwright.options.ScreenshotCaret
 import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
+import java.nio.file.Files
+import java.nio.file.Paths
+import java.nio.file.StandardOpenOption
 
 /**
  * #398 — the TEMPLATE WORKSPACE in a real browser (the pipelines mould of
@@ -138,6 +142,7 @@ class TemplateWorkspaceBrowserTest : BrowserSuite() {
     fun `tabs switch after a boosted catalog arrival and a cached history restore`() {
         startTrace()
         loginReadyUser("tlwmount")
+        observeHistory("cached-mount")
         val name = "test/ws_mount_${generatedPassword("n").take(6).lowercase()}.sql"
         must("POST", "/api/v1/templates", templateJson(name, sqlBody("mount")))
         val fresh = name.replace(".sql", "_fresh.sql")
@@ -147,10 +152,7 @@ class TemplateWorkspaceBrowserTest : BrowserSuite() {
             """() => { window.__templateRail = document.getElementById('app-rail'); window.__templateCacheHits = 0;
               document.body.addEventListener('htmx:historyCacheHit', () => window.__templateCacheHits++); }""",
         )
-        // Keep the outgoing URL equal to its catalog arrival for a real cache HIT; changes
-        // to the template workspace's replaceState history contract belong to #528.
         val result = page.locator("a.tpl-result", Page.LocatorOptions().setHasText(name)).first()
-        result.evaluate("a => { a.href += '?tab=source'; htmx.process(a); }")
         result.click()
         page.waitForURL("**/templates/$name**")
         page.evaluate("async () => { const assets = await import('/js/page-assets.mjs'); await assets.mountPage(); }")
@@ -167,18 +169,10 @@ class TemplateWorkspaceBrowserTest : BrowserSuite() {
 
         // Leave through the same in-shell door as an artifact link. Both Back legs must
         // HIT the cache, preserving this document while a new root needs its own listener.
-        fun follow(path: String) {
-            page.evaluate(
-                """path => { const a = document.createElement('a'); a.href = path; a.id = 'template-leave';
-                  a.textContent = 'Go'; document.getElementById('app-main').append(a); htmx.process(a); }""",
-                path,
-            )
-            page.click("#template-leave")
-            page.waitForURL("**$path")
-        }
         follow("/pipelines")
         page.waitForSelector("#pipeline-list-wrapper")
-        follow("/templates/$fresh?tab=source")
+        // Arrive on Render: selecting it below is inert, so these Back legs cross pages.
+        follow("/templates/$fresh?tab=render")
         page.evaluate("async () => { const assets = await import('/js/page-assets.mjs'); await assets.mountPage(); }")
         page.locator("#tw-tab-render").click()
         page.locator("#context-rows input").nth(0).fill("shown")
@@ -188,12 +182,16 @@ class TemplateWorkspaceBrowserTest : BrowserSuite() {
             """context={"shown":"fresh"}"""
         page.locator("#previewPane pre").waitFor()
         page.locator("#previewPane").innerText() shouldContain "fresh"
+        historyBackLeg = true
         page.goBack()
         page.waitForURL("**/pipelines")
         page.waitForSelector("#pipeline-list-wrapper")
         page.goBack()
         page.waitForURL("**/templates/$name?tab=source")
-        page.waitForFunction("() => window.__templateCacheHits === 2 && !!document.querySelector('.tw-root')")
+        page.waitForSelector(".tw-root")
+        recordHistory("cached-mount")
+        page.evaluate("() => window.__templateCacheHits") shouldBe 2
+        restoreRequests shouldBe emptyList()
         page.evaluate("async () => { const assets = await import('/js/page-assets.mjs'); await assets.mountPage(); }")
         page.evaluate("() => window.__templateRail === document.getElementById('app-rail')") shouldBe true
         page.locator("#tw-tab-overview").click()
@@ -209,6 +207,126 @@ class TemplateWorkspaceBrowserTest : BrowserSuite() {
             """context={"shown":"cached"}"""
         page.locator("#previewPane pre").waitFor()
         consoleErrors shouldBe emptyList()
+    }
+
+    @Test
+    @Suppress("LongMethod") // one document proves replay, then a real cached leave and restore
+    fun `#528 - tab switches replay in page and a boosted leave restores the selected pane from cache`() {
+        startTrace()
+        loginReadyUser("tlwhistory")
+        observeHistory("tab-history")
+        val name = "test/ws_history_${generatedPassword("n").take(6).lowercase()}.sql"
+        must("POST", "/api/v1/templates", templateJson(name, sqlBody("history")))
+        openWorkspace(name)
+        page.evaluate("async () => { const assets = await import('/js/page-assets.mjs'); await assets.mountPage(); }")
+        page.waitForSelector("#tw-pane-source:not([hidden])")
+        val length = historyLength()
+        page.click("#tw-tab-overview")
+        expectTab("overview")
+        page.click("#tw-tab-versions")
+        expectTab("versions")
+        recordHistory("tab-history")
+        historyLength() shouldBe length + 2
+        val marker = page.evaluate("() => (window.__templateDocument = Math.random().toString(36))")
+        for ((back, tab) in listOf(true to "overview", true to "source", false to "overview", false to "versions")) {
+            if (back) page.goBack() else page.goForward()
+            expectTab(tab, arrival = tab == "source")
+            historyLength() shouldBe length + 2
+            page.evaluate("() => window.__templateDocument") shouldBe marker
+        }
+        historyStat("replayed.templates") shouldBe 4
+        historyStat("listeners") shouldBe 1
+        page.evaluate(
+            """() => { window.__templateCacheHits = 0;
+              document.body.addEventListener('htmx:historyCacheHit', () => window.__templateCacheHits++); }""",
+        )
+        follow("/pipelines")
+        page.waitForSelector("#pipeline-list-wrapper")
+        historyBackLeg = true
+        page.goBack()
+        expectTab("versions")
+        page.waitForFunction("() => window.__templateCacheHits === 1")
+        page.evaluate("async () => { const assets = await import('/js/page-assets.mjs'); await assets.mountPage(); }")
+        page.evaluate("() => window.__templateDocument") shouldBe marker
+        page.locator(".tw-root").count() shouldBe 1
+        historyStat("listeners") shouldBe 1
+        recordHistory("tab-history")
+        restoreRequests shouldBe emptyList()
+        page.click("#tw-tab-overview")
+        expectTab("overview")
+        page.goBack()
+        expectTab("versions")
+        historyStat("replayed.templates") shouldBe 5
+        recordHistory("tab-history")
+        drainCspViolations() shouldBe emptyList()
+        consoleErrors shouldBe emptyList()
+    }
+
+    private fun follow(path: String) {
+        page.evaluate(
+            """path => { const a = document.createElement('a'); a.href = path; a.id = 'template-leave';
+              a.textContent = 'Go'; document.getElementById('app-main').append(a); htmx.process(a); }""",
+            path,
+        )
+        page.click("#template-leave")
+        page.waitForURL("**$path")
+    }
+
+    private fun historyLength(): Int = (page.evaluate("() => history.length") as Number).toInt()
+
+    private fun historyStat(path: String): Int =
+        (
+            page.evaluate(
+                "p => p.split('.').reduce((o, k) => o?.[k], window.WorkspaceHistory.stats()) || 0",
+                path,
+            ) as Number
+        ).toInt()
+
+    private fun expectTab(
+        tab: String,
+        arrival: Boolean = false,
+    ) {
+        page.waitForSelector("#tw-pane-$tab:not([hidden])")
+        page.locator("#tw-tab-$tab").getAttribute("aria-selected") shouldBe "true"
+        page.evaluate("() => document.querySelectorAll('[data-tw-tab][aria-selected=\"true\"]').length") shouldBe 1
+        page.evaluate("() => document.querySelectorAll('.tw-pane:not([hidden])').length") shouldBe 1
+        if (arrival) page.url() shouldNotContain "tab=" else page.url() shouldContain "tab=$tab"
+    }
+
+    private val restoreRequests = mutableListOf<String>()
+    private var historyBackLeg = false
+
+    /** Passive evidence: URLs and the history-restore flag only, never session headers. */
+    private fun observeHistory(label: String) {
+        val dir = Paths.get("build", "reports", "528-history").also { it.toFile().mkdirs() }
+        val network = dir.resolve("$label-network.log")
+        Files.writeString(network, "")
+        Files.writeString(dir.resolve("$label-console.log"), "")
+        page.onRequest { request ->
+            val restore = request.headers()["hx-history-restore-request"]
+            val line = "back=$historyBackLeg ${request.method()} ${request.url()} HX-History-Restore-Request=$restore\n"
+            Files.writeString(network, line, StandardOpenOption.APPEND)
+            if (restore == "true") restoreRequests += line.trim()
+        }
+    }
+
+    private fun recordHistory(label: String) {
+        val dir = Paths.get("build", "reports", "528-history").also { it.toFile().mkdirs() }
+        val summary =
+            page.evaluate(
+                """() => JSON.stringify({url: location.href, length: history.length,
+                  hits: window.__templateCacheHits, stats: window.WorkspaceHistory?.stats()})""",
+            )
+        val violations = drainCspViolations()
+        Files.writeString(
+            dir.resolve("$label-console.log"),
+            "$summary\nerrors=$consoleErrors\ncsp=$violations\n",
+            StandardOpenOption.CREATE,
+            StandardOpenOption.APPEND,
+        )
+        // Hiding carets leaves empty style attributes on inputs, which a cached restore rejects under CSP.
+        page.screenshot(Page.ScreenshotOptions().setCaret(ScreenshotCaret.INITIAL).setPath(dir.resolve("$label.png")))
+        violations shouldBe emptyList()
     }
 
     @Test
