@@ -61,6 +61,21 @@ class CompactScaleBrowserTest : DashboardBrowserSuite() {
         target: Page = page,
     ): Double? = (measure(selector, target)?.get(key) as Number?)?.toDouble().also { readings[label] = it }
 
+    /** Records, under [label], the gap between the first two VISIBLE [selector] tabs. */
+    private fun readTabGap(
+        label: String,
+        selector: String,
+    ): Double? =
+        (
+            page.evaluate(
+                """(sel) => {
+                  const t = [...document.querySelectorAll(sel)].filter((e) => e.getClientRects().length > 0);
+                  return t.length < 2 ? null : t[1].getBoundingClientRect().left - t[0].getBoundingClientRect().right;
+                }""",
+                selector,
+            ) as Number?
+        )?.toDouble().also { readings[label] = it }
+
     private fun printReadings(case: String) {
         readings.forEach { (label, value) -> println("555-measure|$case|$label|$value") }
     }
@@ -187,6 +202,8 @@ class CompactScaleBrowserTest : DashboardBrowserSuite() {
         read("editorRoot.fontSize", ".pe-root", "fontSize")
         read("editorTab.height", ".pe-tab", "height")
         read("editorTab.fontSize", ".pe-tab", "fontSize")
+        read("editorTab.padLeft", ".pe-tab", "padLeft")
+        readTabGap("editorTab.gap", ".pe-tab")
         shot("editor-1512")
         page.locator(".pe-topbar [data-verb='pipeline-release']").click()
         page.locator("#pe-dialog [data-lifecycle-dialog='pipeline-release'] .app-modal").waitFor()
@@ -201,6 +218,8 @@ class CompactScaleBrowserTest : DashboardBrowserSuite() {
         page.waitForSelector(".tw-root")
         read("templateTab.height", ".tw-tab", "height")
         read("templateTab.fontSize", ".tw-tab", "fontSize")
+        read("templateTab.padLeft", ".tw-tab", "padLeft")
+        readTabGap("templateTab.gap", ".tw-tab")
         shot("template-workspace-1512")
 
         printReadings("desktop")
@@ -240,12 +259,16 @@ class CompactScaleBrowserTest : DashboardBrowserSuite() {
             near("editorRoot.fontSize", UI_PX)
             near("editorTab.height", TAB_PX, TAB_TOLERANCE_PX)
             near("editorTab.fontSize", SUPPORT_PX)
+            near("editorTab.padLeft", 0.0)
+            near("editorTab.gap", TAB_GAP_PX, 0.5)
             near("lifecycleDialog.padTop", DIALOG_PAD_PX)
             atMost("lifecycleDialog.width", DIALOG_MAX_PX)
             near("lifecycleTitle.fontSize", HEADING_PX)
             atLeast("lifecycleSubmit.height", CONTROL_PX)
             near("templateTab.height", TAB_PX, TAB_TOLERANCE_PX)
             near("templateTab.fontSize", SUPPORT_PX)
+            near("templateTab.padLeft", 0.0)
+            near("templateTab.gap", TAB_GAP_PX, 0.5)
         }
     }
 
@@ -354,6 +377,9 @@ class CompactScaleBrowserTest : DashboardBrowserSuite() {
         const val CONTROL_PX = 36.0
         const val TAB_PX = 44.0
         const val TAB_TOLERANCE_PX = 2.0
+
+        // A tab has no inline padding (its underline is its label's width) and 24px between tabs.
+        const val TAB_GAP_PX = 24.0
         const val ICON_BUTTON_PX = 32.0
         const val TARGET_PX = 44.0
         const val CONTROL_RADIUS_PX = 8.0

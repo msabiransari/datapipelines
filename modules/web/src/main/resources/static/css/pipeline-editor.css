@@ -253,7 +253,7 @@
 .pe-tabs {
   display: flex;
   align-items: stretch;
-  gap: var(--space-2);
+  gap: var(--app-tab-gap);
   padding: 0 var(--pe-gap);
   border-bottom: 1px solid var(--border-faint, #e6e9ee);
   background: var(--surface-default, #fff);
@@ -270,7 +270,7 @@
   line-height: var(--app-leading-ui);
   min-height: var(--app-tab-h);
   color: var(--text-secondary, #334155);
-  padding: var(--space-3) var(--space-2);
+  padding: var(--space-3) 0;
   border-bottom: 2px solid transparent;
   white-space: nowrap;
 }

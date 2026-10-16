@@ -112,7 +112,7 @@
 .tw-tabs {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--app-tab-gap);
   /* #502 — was `--border`, never defined; the tab strip's rule is a separator, and the
      house separator floor is `--border-subtle` (dashboards.css `.dp-ws-tabs`). */
   border-bottom: 1px solid var(--border-subtle);
@@ -125,7 +125,7 @@
   border-bottom: 2px solid transparent;
   margin-bottom: -1px;
   min-height: var(--app-tab-h);
-  padding: var(--space-3) var(--space-2);
+  padding: var(--space-3) 0;
   color: var(--text-muted, #64748b);
   font-size: var(--app-text-support);
   line-height: var(--app-leading-ui);

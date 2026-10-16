@@ -120,6 +120,7 @@
   /* Control and shape roles. */
   --app-control-h: var(--space-9);     /* 36px — a button, input or select, minimum */
   --app-tab-h: 2.75rem;                /* 44px — a tab: 12px padding + 18px line + 2px rule */
+  --app-tab-gap: var(--space-6);       /* 24px between tabs; a tab has no inline padding, so its underline is its label's width */
   --app-header-h: 3.625rem;            /* 58px — the shell header (#554 reads it) */
   --app-icon-h: var(--space-8);        /* 32px — an icon-only button, square */
   --app-radius-control: var(--radius-md); /* 8px — controls */
@@ -416,12 +417,12 @@ body {
    padding and an 8px gap put 24px between two labels, the record's spacing,
    while keeping room for the hover fill. */
 .ds-tab-list {
-  gap: var(--space-2);
+  gap: var(--app-tab-gap);
 }
 
 .ds-tab {
   min-height: var(--app-tab-h);
-  padding: var(--space-3) var(--space-2);
+  padding: var(--space-3) 0;
   font-size: var(--app-text-support);
   line-height: var(--app-leading-ui);
 }

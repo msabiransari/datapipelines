@@ -500,7 +500,7 @@ fieldset.dp-dashboard-parameter > .dp-dashboard-parameter-error {
 .dp-ws-tabs {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-2);
+  gap: var(--app-tab-gap);
   border-bottom: 1px solid var(--border-subtle);
 }
 
@@ -515,7 +515,7 @@ fieldset.dp-dashboard-parameter > .dp-dashboard-parameter-error {
   font-size: var(--app-text-support);
   line-height: var(--app-leading-ui);
   min-height: var(--app-tab-h);
-  padding: var(--space-3) var(--space-2);
+  padding: var(--space-3) 0;
 }
 
 .dp-ws-tab:hover {
