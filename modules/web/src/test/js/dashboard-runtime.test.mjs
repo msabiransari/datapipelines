@@ -584,14 +584,49 @@ test("a data frame renders, shows success, then settles to ready without a new s
       fetchImpl.frame("visualization_data", { refresh_id: refreshId, name: "chart", type: "visualization", bindings: { "data[0].x": [1, 2] }, rows: 2, bytes: 16 }),
     ]);
   });
-  const { instance, adapter } = await boot({ fetch: fetchImpl });
+  const { instance, adapter, runtime } = await boot({ fetch: fetchImpl });
+  // #536 — the settle runs on an injected clock, so the case ticks the runtime's own constant
+  // (never a literal or a real wait): one tick short of SUCCESS_SETTLE_MS the card is still green.
+  const clock = manualClock();
+  instance._env.setTimeout = clock.setTimeout;
+  instance._env.clearTimeout = clock.clearTimeout;
   await instance.refresh({ scope: "targets", targets: ["chart"] });
   await new Promise((resolve) => setTimeout(resolve, 20));
   assert.ok(adapter.log.includes("renderData:chart"), adapter.log.join("|"));
   assert.ok(adapter.log.includes("status:chart:success"), adapter.log.join("|"));
-  await new Promise((resolve) => setTimeout(resolve, 1300));
+  clock.tick(runtime._internal.SUCCESS_SETTLE_MS - 1);
+  assert.ok(!adapter.log.includes("status:chart:ready"), "still success one tick early: " + adapter.log.join("|"));
+  clock.tick(1);
   assert.ok(adapter.log.includes("status:chart:ready"), "success settles to ready: " + adapter.log.join("|"));
 });
+
+/** A hand-driven setTimeout for the instance's `_env`: `tick(ms)` fires every timer due by then, in order. */
+function manualClock() {
+  let now = 0;
+  let nextId = 1;
+  const pending = new Map();
+  return {
+    setTimeout(fn, ms) {
+      const id = nextId++;
+      pending.set(id, { fn, at: now + (ms || 0) });
+      return id;
+    },
+    clearTimeout(id) {
+      pending.delete(id);
+    },
+    tick(ms) {
+      const until = now + ms;
+      for (;;) {
+        const due = [...pending.entries()].filter(([, t]) => t.at <= until).sort((a, b) => a[1].at - b[1].at)[0];
+        if (!due) break;
+        pending.delete(due[0]);
+        now = due[1].at;
+        due[1].fn();
+      }
+      now = until;
+    },
+  };
+}
 
 test("a hung renderer hits the render deadline and reports error with the render code", async () => {
   const hungAdapter = scriptedAdapter({

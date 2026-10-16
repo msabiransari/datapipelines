@@ -1,11 +1,16 @@
 package co.datapipelines.browser
 
+import com.microsoft.playwright.Page
+import com.microsoft.playwright.PlaywrightException
+import com.microsoft.playwright.TimeoutError
+import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.MethodOrderer
 import org.junit.jupiter.api.Order
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestMethodOrder
 import java.sql.DriverManager
+import java.util.Collections
 import java.util.UUID
 
 /**
@@ -461,12 +466,20 @@ class DashboardConformanceBrowserTest : DashboardBrowserSuite() {
         val root = ready("dp3d")
         installHostPage(bundle = "3d")
         val board = seedSurfaceBoard(root)
+        // #536b: passive — records what the page says and runs no page code.
+        val said = recordConsole()
         openHost(board)
+        val opened = System.nanoTime()
         page.waitForFunction("() => window.__dp.renders.length >= 1")
         // A WebGL canvas is the surface's own; the bundle loaded and rendered under the live CSP.
         page.locator("#board .plotly .main-svg").first().waitFor()
         val gl = page.evaluate("() => !!document.querySelector('#board .plotly canvas.gl-canvas, #board .plotly canvas')") as Boolean
-        gl shouldBe true
+        val readMs = (System.nanoTime() - opened) / NANOS_PER_MS
+        // #536b: only a FALSE read builds the clue, and after the read, so a green run takes the old path
+        // and the verdict is this one read's.
+        withClue(if (gl) "" else missingCanvasClue(readMs, said)) {
+            gl shouldBe true
+        }
         val refusals = drainCspViolations()
         val nonEmpty = refusals.filter { !it.contains("'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='") }
         nonEmpty shouldBe emptyList()
@@ -826,5 +839,144 @@ class DashboardConformanceBrowserTest : DashboardBrowserSuite() {
                     .setBody(hostGlueJs),
             )
         }
+    }
+
+    /**
+     * #536b — the browser's console errors and warnings and its uncaught page errors, from a listener
+     * attached before the page opens. Passive: the listener runs in the test, never in the page.
+     */
+    private fun recordConsole(): MutableList<String> {
+        val said = Collections.synchronizedList(mutableListOf<String>())
+        page.onConsoleMessage { message ->
+            if (message.type() == "error" || message.type() == "warning") {
+                said += "console.${message.type()}: ${message.text().take(CLUE_ENTRY_CHARS)}"
+            }
+        }
+        page.onPageError { error -> said += "pageerror: ${error.take(CLUE_ENTRY_CHARS)}" }
+        return said
+    }
+
+    /**
+     * #536b — what the page held when the 3d case's one canvas read came back false (CI run 38903724851
+     * went red there twice and was never reproduced locally). CI uploads only the test XML, so the
+     * evidence travels in the assertion's message. Built only after a false read: the page as it stood,
+     * then a bounded wait that tells a late canvas from a missing one, then WebGL on a scratch canvas,
+     * then the console. A probe that throws reports the throw in its own field.
+     */
+    private fun missingCanvasClue(
+        readMs: Long,
+        said: List<String>,
+    ): String {
+        val atRead = probe(PAGE_AT_READ)
+        val late = lateCanvas()
+        val webgl = probe(WEBGL_ON_A_SCRATCH_CANVAS)
+        val console = synchronized(said) { said.take(CLUE_CONSOLE_ENTRIES) to said.size }
+        return (
+            "536b diagnostic — first read false at $readMs ms after openHost returned; canvas $late; " +
+                "page at the read: $atRead; webgl: $webgl; console (${console.second}, first " +
+                "$CLUE_CONSOLE_ENTRIES): ${console.first}"
+        ).take(CLUE_MAX_CHARS)
+    }
+
+    private fun probe(script: String): String =
+        try {
+            page.evaluate(script) as String
+        } catch (thrown: PlaywrightException) {
+            "probe threw: ${thrown.message?.take(CLUE_ENTRY_CHARS)}"
+        }
+
+    /** The SAME selector as the case's read, waited for after it; the verdict is already taken. */
+    private fun lateCanvas(): String {
+        val start = System.nanoTime()
+        return try {
+            page.waitForFunction(CANVAS_PRESENT, null, Page.WaitForFunctionOptions().setTimeout(LATE_CANVAS_MS))
+            "appeared after ${(System.nanoTime() - start) / NANOS_PER_MS} ms"
+        } catch (expected: TimeoutError) {
+            // The timeout IS the finding: the canvas never came.
+            "absent after ${LATE_CANVAS_MS.toLong()} ms"
+        } catch (thrown: PlaywrightException) {
+            "late wait threw: ${thrown.message?.take(CLUE_ENTRY_CHARS)}"
+        }
+    }
+
+    private companion object {
+        const val NANOS_PER_MS = 1_000_000L
+        const val LATE_CANVAS_MS = 15_000.0
+        const val CLUE_CONSOLE_ENTRIES = 20
+        const val CLUE_ENTRY_CHARS = 300
+        const val CLUE_MAX_CHARS = 8_000
+
+        const val CANVAS_PRESENT = "() => !!document.querySelector('#board .plotly canvas.gl-canvas, #board .plotly canvas')"
+
+        /**
+         * Property paths read from the vendored plotly-3d bundle and the runtime: the graph div carries
+         * `js-plotly-plot`; each id in `_fullLayout._subplots.gl3d` names `_fullLayout[id]`, whose `_scene`
+         * is the gl-plot3d scene; the no-WebGL path appends `div.no-webgl`; notices are
+         * `.plotly-notifier .notifier-note`; a trace's `z` is its row array. The glue pushes `{ name, rows }`
+         * per renderData (its `rows` slot held a number, not an array, when this was written); the chip
+         * (`.dp-dashboard-status`) carries `data-dp-state`.
+         */
+        const val PAGE_AT_READ =
+            """() => {
+              function field(read) { try { return read(); } catch (e) { return 'threw: ' + String(e).slice(0, 200); } }
+              function box(el) { if (!el) return null; var r = el.getBoundingClientRect(); return { w: Math.round(r.width), h: Math.round(r.height) }; }
+              function texts(selector) {
+                return Array.prototype.map.call(document.querySelectorAll(selector), function (n) { return n.textContent.slice(0, 200); });
+              }
+              var gd = document.querySelector('#board .js-plotly-plot');
+              return JSON.stringify({
+                renders: field(function () {
+                  var all = window.__dp.renders;
+                  return { count: all.length, each: all.slice(0, 10).map(function (r) {
+                    return { name: r.name, rows: Array.isArray(r.rows) ? r.rows.length : typeof r.rows + ' ' + String(r.rows).slice(0, 40) };
+                  }) };
+                }),
+                card: field(function () {
+                  var card = (gd && gd.closest('.dp-dashboard-card')) || document.querySelector('#board .dp-dashboard-card');
+                  if (!card) return null;
+                  var chip = card.querySelector('.dp-dashboard-status');
+                  return { classes: card.className, state: chip ? chip.getAttribute('data-dp-state') : null, box: box(card) };
+                }),
+                plotly: field(function () {
+                  var host = document.querySelector('#board .plotly');
+                  return host ? { classes: host.className, box: box(host) } : null;
+                }),
+                graphDiv: field(function () { return gd ? { box: box(gd) } : null; }),
+                traces: field(function () {
+                  return gd && gd._fullData ? gd._fullData.map(function (t) { return { type: t.type, z: t.z ? t.z.length : null }; }) : null;
+                }),
+                gl3d: field(function () {
+                  if (!gd || !gd._fullLayout) return null;
+                  var ids = (gd._fullLayout._subplots || {}).gl3d || [];
+                  return ids.map(function (id) { var s = gd._fullLayout[id]; return { id: id, scene: !!(s && s._scene) }; });
+                }),
+                canvases: field(function () { return document.querySelectorAll('#board .plotly canvas').length; }),
+                glContainers: field(function () { return document.querySelectorAll('#board .plotly .gl-container').length; }),
+                noWebgl: field(function () { return texts('#board .no-webgl'); }),
+                notifier: field(function () { return texts('.plotly-notifier .notifier-note'); })
+              });
+            }"""
+
+        /** Each context kind on its own detached canvas, released afterwards. */
+        const val WEBGL_ON_A_SCRATCH_CANVAS =
+            """() => {
+              function one(kind) {
+                try {
+                  var g = document.createElement('canvas').getContext(kind);
+                  if (!g) return { context: null };
+                  var out = { context: 'ok' };
+                  var info = g.getExtension('WEBGL_debug_renderer_info');
+                  if (info) {
+                    out.renderer = String(g.getParameter(info.UNMASKED_RENDERER_WEBGL));
+                    out.vendor = String(g.getParameter(info.UNMASKED_VENDOR_WEBGL));
+                  }
+                  var lose = g.getExtension('WEBGL_lose_context');
+                  if (lose) lose.loseContext();
+                  out.released = !!lose;
+                  return out;
+                } catch (e) { return { threw: String(e).slice(0, 200) }; }
+              }
+              return JSON.stringify({ webgl: one('webgl'), webgl2: one('webgl2') });
+            }"""
     }
 }
