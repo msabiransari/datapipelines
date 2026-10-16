@@ -143,7 +143,6 @@ class CssTokenExistenceAuditTest {
         definedBy.getValue("--app-content-max") shouldContain "css/app.css"
         definedBy.getValue("--measure") shouldContain "css/app.css"
         definedBy.getValue("--measure-wide") shouldContain "css/app.css"
-        definedBy.getValue("--te-side-w") shouldContain "js/splitter.js"
         definedBy.getValue("--tplx-tree-w") shouldContain "js/splitter.js"
 
         val dashboards = firstParty.getValue("css/dashboards.css").withoutBlockComments()
@@ -165,7 +164,7 @@ class CssTokenExistenceAuditTest {
 
         /**
          * The splitter's second write shape: the token name travels in a VARIABLE
-         * (`applyProp(prop, …)` → `style.setProperty(prop, …)`), fed by `prop: "--te-side-w"`
+         * (`applyProp(prop, …)` → `style.setProperty(prop, …)`), fed by `prop: "--tplx-tree-w"`
          * style declarations, so [SET_PROPERTY] cannot see it. A name declared here is a
          * DEFINITION: the sheet's `var(--x, default)` fallback is the shipped default by
          * design ("reset" is "remove the property" — `InlineWidthAuditTest` records the same

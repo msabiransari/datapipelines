@@ -2,7 +2,8 @@
   "use strict";
 
   /*
-   * 104 §A — ONE splitter, two panes; 141 made it four (the two editors' side panes).
+   * 104 §A — ONE splitter, two panes; 141 made it four (the two editors' side panes). The
+   * template editor's context rail retired with its page (#398); #433 deleted its wiring.
    *
    * The owner's report was about the editor's bottom dock ("it has a fixed height … I want
    * to drag the height"), but the explorers' tree pane had already produced the same request
@@ -18,7 +19,6 @@
    *     --pe-dock-pane-h   pipeline-editor.css  .pe-dock's second grid row
    *     --tplx-tree-w      template-tree.css    .tplx-tree's width
    *     --pe-sidebar-w     pipeline-editor.css  .pe-body's first grid column
-   *     --te-side-w        template-editor.css  .te-body's first grid column
    *
    * Both are declared with the shipped default as the `var()` fallback, so an unset property
    * IS the default — nothing to seed, nothing to reset to but "remove it".
@@ -52,14 +52,13 @@
   var RESIZE_HINT = "Drag to resize · double-click to reset";
 
   /** Per-pane localStorage keys. Both explorers share ONE key: the width follows the user.
-     The two editors' side panes carry different content, so each has its OWN key — a width
-     set on the pipeline editor's settings sidebar does not follow the user to the template
-     editor's context rail the way the two explorers' trees do. */
+     The pipeline editor's settings sidebar has its OWN key (141 gave each editor's side pane
+     one: different content, so the width does not follow the user the way the two explorers'
+     trees do; the template editor's rail and its key retired, #433). */
   var KEYS = {
     editorDock: "dp.pane.editor-dock",
     explorerTree: "dp.pane.explorer-tree",
     editorSidebar: "dp.pane.editor-sidebar",
-    templateEditorSide: "dp.pane.template-editor-side",
   };
 
   /** A stored size this large is not a pane, it is corruption. */
@@ -221,8 +220,8 @@
     handle.setAttribute("tabindex", "0");
     if (opts.label) handle.setAttribute("aria-label", opts.label);
     /* 141 §C — discoverability is a fact every handle states the same way: the tooltip for
-       the pointer, the aria-description for a screen reader. Set here, once, so all four
-       handles carry it and no page's markup has to repeat it. */
+       the pointer, the aria-description for a screen reader. Set here, once, so every
+       handle carries it and no page's markup has to repeat it. */
     handle.setAttribute("title", RESIZE_HINT);
     handle.setAttribute("aria-description", RESIZE_HINT);
 
@@ -382,17 +381,17 @@
     return { publish: publish, reset: reset, commit: commit, current: current };
   }
 
-  /* ---------------------------------------------------------------- the four panes */
+  /* -------------------------------------------------------------------- the panes */
 
   /** `fraction` of the viewport's width, in px — the JS side of a `vw` ceiling. */
   function vw(fraction) {
     return (window.innerWidth || 0) * fraction;
   }
 
-  /* The four bounds, each also written in the stylesheet that draws the pane:
+  /* The bounds, each also written in the stylesheet that draws the pane:
      `--pe-dock-min-h` / `--pe-dock-canvas-floor` in pipeline-editor.css, and
      `.tplx-tree`'s `min-width` / `max-width` in template-tree.css, and the
-     `clamp(220px, …, 50vw)` first column of `.pe-body` / `.te-body`. Each pair is
+     `clamp(220px, …, 50vw)` first column of `.pe-body`. Each pair is
      measured back by the browser suites, so a change on one side that is not made on the
      other goes red rather than quiet. */
   var DOCK_MIN = 120;
@@ -467,10 +466,10 @@
     });
   }
 
-  /* 141 §B — the two editors' side panes, the same mechanism. The pipeline editor's
-     settings sidebar and the template editor's context rail were fixed tracks in their
-     grids; each gets its own key (different content — the width does not follow the user
-     between them the way it does between the two explorers' trees). */
+  /* 141 §B — the editors' side panes, the same mechanism. The pipeline editor's settings
+     sidebar was a fixed track in its grid; it gets its own key (different content — the width
+     does not follow the user the way it does between the two explorers' trees). The template
+     editor's context rail had the twin of this function until #433. */
   function wireEditorSidebar() {
     var handle = document.querySelector('[data-splitter="editor-sidebar"]');
     var sidebar = document.querySelector(".pe-sidebar");
@@ -490,25 +489,6 @@
     });
   }
 
-  function wireTemplateEditorSide() {
-    var handle = document.querySelector('[data-splitter="template-editor-side"]');
-    var rail = document.querySelector(".te-rail");
-    var body = document.querySelector(".te-body");
-    if (!handle || !rail || !body) return null;
-    return bind({
-      handle: handle,
-      pane: rail,
-      container: body,
-      axis: "x",
-      prop: "--te-side-w",
-      storageKey: KEYS.templateEditorSide,
-      label: "Resize context rail",
-      bounds: function () {
-        return { min: SIDE_MIN, max: vw(SIDE_MAX_SHARE) };
-      },
-    });
-  }
-
   /* The restore runs NOW, at parse time, above the markup — see the header. The wiring waits
      for the elements. htmx boosts swap `#app-main`, so the wiring re-runs after every swap;
      `bind` is idempotent per handle. */
@@ -516,13 +496,11 @@
     restore("--pe-dock-pane-h", KEYS.editorDock);
     restore("--tplx-tree-w", KEYS.explorerTree);
     restore("--pe-sidebar-w", KEYS.editorSidebar);
-    restore("--te-side-w", KEYS.templateEditorSide);
 
     var wire = function () {
       wireEditorDock();
       wireExplorerTree();
       wireEditorSidebar();
-      wireTemplateEditorSide();
     };
     if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", wire);
     else wire();
@@ -534,7 +512,6 @@
       [
         { prop: "--tplx-tree-w", key: KEYS.explorerTree, min: TREE_MIN, share: TREE_MAX_SHARE },
         { prop: "--pe-sidebar-w", key: KEYS.editorSidebar, min: SIDE_MIN, share: SIDE_MAX_SHARE },
-        { prop: "--te-side-w", key: KEYS.templateEditorSide, min: SIDE_MIN, share: SIDE_MAX_SHARE },
       ].forEach(function (p) {
         var stored = readStored(p.key);
         if (stored === null) return;

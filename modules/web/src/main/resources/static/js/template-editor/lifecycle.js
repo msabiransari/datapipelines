@@ -47,15 +47,15 @@
 
   /**
    * The version the preview targets — the page's VIEWED version (#398: the workspace names
-   * one resolved version in its root's data attribute; the old editor read the `<select>`).
-   * The server renders the STORED version either way; this keeps the request honest about
-   * what the author is looking at.
+   * one resolved version in its root's data attribute, and that attribute is the only source;
+   * the old editor's `<select>` fallback left with its page, #433). The server renders the
+   * STORED version either way; this keeps the request honest about what the author is
+   * looking at.
    */
   function viewedVersion() {
     var d = doc();
     var root = d && d.querySelector(".tw-root");
-    if (root) return root.getAttribute("data-viewed-version") || "1";
-    return (byId("versionSelect") && byId("versionSelect").value) || "1";
+    return (root && root.getAttribute("data-viewed-version")) || "1";
   }
 
   /* The draft lifecycle (Release / Discard) that this file carried from 097 §D is gone:

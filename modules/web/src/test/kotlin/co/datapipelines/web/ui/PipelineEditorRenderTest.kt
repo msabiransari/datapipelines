@@ -99,9 +99,9 @@ class PipelineEditorRenderTest {
         html shouldContain "id=\"pe-node-def\""
         html shouldContain "x-show=\"selectedIsSqlNode\""
         html shouldContain "x-html=\"selectedDefinitionHtml\""
-        // §8.2/§9.6: the template link targets /templates/editor?name= — since 195 the URL
-        // is built by the component's selectedTemplateHref getter (the CSP build's template
-        // bindings are paths), and the template binds it by name.
+        // §8.2: the template link targets the workspace route /templates/<name> (#433) — since
+        // 195 the URL is built by the component's selectedTemplateHref getter (the CSP build's
+        // template bindings are paths), and the template binds it by name.
         html shouldContain "x-bind:href=\"selectedTemplateHref\""
     }
 

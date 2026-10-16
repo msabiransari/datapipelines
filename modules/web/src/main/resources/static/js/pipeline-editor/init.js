@@ -1939,8 +1939,11 @@
         return !!(this.selectedNode && this.selectedNode.template && this.selectedNode.template.id);
       },
       get selectedTemplateHref() {
+        // The workspace route (#433): the name's SEGMENTS as path segments, each encoded — a
+        // valid name is unchanged, and no segment can open a query or fragment.
         var n = this.selectedNode;
-        return "/templates/editor?name=" + encodeURIComponent(n && n.template ? n.template.id : "");
+        var id = n && n.template ? n.template.id : "";
+        return "/templates/" + id.split("/").map(encodeURIComponent).join("/");
       },
       get hasSelectedChild() {
         return !!(this.selectedNode && this.selectedNode.type === "PIPELINE" && this.selectedNode.pipeline);

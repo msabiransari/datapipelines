@@ -35,7 +35,7 @@ class PipelineNodeSqlRenderTest {
 
         html shouldContain "class=\"ds-badge ds-badge-default\""
         html shouldContain "POSTGRES"
-        html shouldContain "href=\"/templates/editor?name=trips_by_day.sql\""
+        html shouldContain "href=\"/templates/trips_by_day.sql\""
         html shouldContain "trips_by_day.sql @ v1"
         // 047 / §9.4: the reference is a PATH now — one line, with the FULL reference on
         // `title` so the truncated text is never the only copy of it.

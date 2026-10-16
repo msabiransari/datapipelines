@@ -111,12 +111,14 @@ test("a template pin renders as LINKS composed from encoded parts - never inline
   const links = row(rows, "Source (template pin)");
   assert.equal(links.kind, "links");
   assert.equal(links.links[0].text, "template nyc/parameters/month_options.sql@1");
-  assert.equal(links.links[0].href, "/templates/editor?name=nyc%2Fparameters%2Fmonth_options.sql&version=1");
+  // #433: the workspace route directly — the name's segments are the path, the pin rides as ?version=.
+  assert.equal(links.links[0].href, "/templates/nyc/parameters/month_options.sql?version=1");
   assert.equal(links.links[1].href, "/datasources/sample-trips");
   const hostile = model.inspect({ name: "p", kind: "SELECT", type: "STRING", source: { template: { id: "a/b?x=1&y=<script>", version: 2 }, datasource: "d/../x" } }, SET, null);
   const hostileLinks = row(hostile, "Source (template pin)").links;
   assert.ok(!hostileLinks[0].href.includes("<"), "the id is encoded");
   assert.ok(!hostileLinks[0].href.includes("&y="), "a name's ampersand cannot open a second query parameter");
+  assert.equal(hostileLinks[0].href, "/templates/a/b%3Fx%3D1%26y%3D%3Cscript%3E?version=2", "each segment is encoded; the version is the only query");
   assert.equal(hostileLinks[1].href, "/datasources/d%2F..%2Fx");
 });
 

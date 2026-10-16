@@ -51,7 +51,7 @@
         <p class="app-search-group-label" aria-hidden="true">Templates</p>
         <a role="option" aria-selected="false" class="app-search-option"
            th:each="t : ${templateHits}"
-           th:href="@{/templates/editor(name=${t.id})}">
+           th:href="@{'/templates/' + ${t.id}}">
           <span class="app-search-option-title" th:text="${t.id}" th:title="${t.id}">acme/finance/monthly_revenue</span>
           <span class="app-search-option-meta">
             <span class="ds-badge ds-badge-default" th:text="${t.type.wire}">sql</span>

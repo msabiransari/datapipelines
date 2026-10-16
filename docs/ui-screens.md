@@ -1,9 +1,9 @@
 # UI Screens Inventory
 
-**Status:** v1.142
+**Status:** v1.143
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
-**Last updated:** 2026-10-15 (#528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
+**Last updated:** 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
 
 ---
 
@@ -539,7 +539,6 @@ The table stays a `.ds-table` (the vendored primitive's type, padding and hover)
 | `executions/detail.html` (§4.9) | the execution family | PAGE-FLOW | — |
 | `partials/execution-node-stats.html` (§4.9) | node stats | PAGE-FLOW | — |
 | `partials/execution-node-operations.html` (§4.9) | node operations | PAGE-FLOW | `dt-freeze` (nine columns) |
-| `templates/editor.html` (§4.7) | imports | PAGE-FLOW | — |
 
 Dense data is FIXED; a short list a person reads top to bottom is PAGE-FLOW. `templates/endpoints/**` is not in the sweep (lane 274's tree at the time); a table not yet framed keeps the pre-282 box (its own border, `display: block; overflow-x: auto`) from the fallback rule in `data-table.css`, and the markup audit names it.
 
@@ -2447,6 +2446,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-15 | v1.143 | #433 the templates UI's retired-markup leftovers — renumbered at merge after #528's v1.142 | **§3.7** data-table sweep: the `templates/editor.html` (§4.7) row is gone — it named a page #398 deleted. **§4.7**: every in-app link to a template — the header search's template hits, the pipeline editor's Details link and SQL reference, the Parameter Sets inspector's template pin (which keeps its `?version=`) — targets the canonical `/templates/{name}` instead of the `/templates/editor?name=` compatibility 302, which stays for old bookmarks. The editor rail's dead splitter (`.te-page`/`.te-body`/`.te-rail`/`.te-side-splitter`, `--te-side-w`, `splitter.js`'s template-editor-side branch) and `lifecycle.js`'s `versionSelect` fallback are deleted: no template rendered them; the viewed version is the workspace root's `data-viewed-version` alone. |
 | 2026-10-15 | v1.142 | #528 template tabs adopt shared history — renumbered at merge after #471's v1.141 | §3.2 and §4.7: a user tab switch pushes a tab-only `templates` entry through the shared history helper; first paint and Back/Forward replay write no URL. The helper keeps htmx's cache path current, so Back after a boosted leave restores the selected pane from cache with a working strip. Replays use the live root and one document listener; version links keep the current tab. |
 | 2026-10-15 | v1.141 | #471 the entity-purge dialog previews the inbound pins the POST would refuse | **§4.3d** "Purge entity": for a pinned sole draft the dialog names the exact parent pipeline versions pinning it and every stored dashboard version pinning any of its versions (the SAME ports `PipelineService.refuseIfPinned(entityPurge = true)` reads — the dialog is a preview, the POST is the control) and renders NO destructive form; unpinned, the exclusive-template offer, the #335 kept list and the typed confirm are unchanged. |
 | 2026-10-15 | v1.140 | #466 (lane 466b) the sidebar's server-rendered tree removed | **§4.3, §4.6** (and the dashboards, visualizations and parameter-sets catalogs): each catalog partial serves its flat list alone — the `scope=nav` presentation, the `prefix` tree levels, the `DP-Nav-Stamp` header and the five `*-tree-level` fragments are gone (owner ruling 2026-10-10, option A); `GET /partials/visualizations/tree` and `GET /partials/dashboards/tree` are removed, `GET /partials/parameter-sets/tree` keeps its path for the catalog. A stale `scope` or `prefix` is ignored and answers the catalog list. The sidebar has read the REST tree/search routes since #460. **§4.7**: the workspace's foreign-response guard is the REST payload's `view_token`, not the stamp. The two catalog htmx rows stop naming a `scope=page` the pages never sent; the template picker note points at the REST tree component. **§3.4 icons**: the `file-code` glyph's only users were the deleted pipeline and template levels, so it leaves the sprite and the manifest's subset (`IconSpriteAuditTest` keeps the subset exact). |

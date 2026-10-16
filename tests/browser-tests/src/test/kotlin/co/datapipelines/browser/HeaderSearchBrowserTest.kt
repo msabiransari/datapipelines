@@ -1,8 +1,10 @@
 package co.datapipelines.browser
 
 import com.microsoft.playwright.Page
+import io.kotest.assertions.withClue
 import io.kotest.matchers.booleans.shouldBeFalse
 import io.kotest.matchers.booleans.shouldBeTrue
+import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldMatch
@@ -66,6 +68,52 @@ class HeaderSearchBrowserTest : BrowserSuite() {
         page.waitForURL(PipelineWorkspaceUrl.PATTERN)
         page.url() shouldMatch PipelineWorkspaceUrl.DOCUMENT
         page.waitForFunction("() => document.getElementById('app-search-palette').hidden === true")
+    }
+
+    /**
+     * #433 — a template hit LANDS on the canonical workspace in one hop: the row's href is
+     * `/templates/<name>` itself (the name's segments are the path), so following it makes no
+     * request to the `/templates/editor?name=` compatibility route and sees no 302 — the
+     * workspace document answers 200 and its `.tw-root` is on screen. The network log is the
+     * evidence; the href assertion comes after it so a regression is named by the redirect.
+     */
+    @Test
+    fun `a template hit lands on its workspace without the compatibility redirect`() {
+        startTrace()
+        signedIn("srcht")
+        val fixture = "srcht" + generatedPassword("f").take(8).lowercase()
+        val name = "test/$fixture"
+        postJson(
+            "/api/v1/templates",
+            """{"id":"$name","type":"sql","dialect":"POSTGRES","display_name":"$fixture",""" +
+                """"description":"header search template fixture","body":"SELECT 1 AS one"}""",
+        )
+
+        page.navigate("$baseUrl/dashboard")
+        val input = page.locator("#app-search-input")
+        input.waitFor()
+        page.keyboard().press("Control+k")
+        page.waitForFunction("() => document.getElementById('app-search-input').getAttribute('aria-expanded') === 'true'")
+        input.fill(fixture)
+        val hit = page.locator("#app-search-results [role='group'][aria-label='Templates'] [role='option']").first()
+        hit.waitFor()
+        val href = hit.getAttribute("href")
+
+        val requests = mutableListOf<String>()
+        val responses = mutableListOf<Pair<Int, String>>()
+        page.onRequest { requests += it.url() }
+        page.onResponse { responses += it.status() to it.url() }
+        hit.click()
+        page.waitForURL("**/templates/$name")
+        page.locator(".tw-root").waitFor()
+
+        withClue("network log: $responses") {
+            requests.filter { "/templates/editor" in it }.shouldBeEmpty()
+            // A redirect, not a cache revalidation: 304 is a static asset's, never a hop.
+            responses.filter { it.first in 300..399 && it.first != 304 }.shouldBeEmpty()
+            responses.filter { it.second.substringBefore('?').endsWith("/templates/$name") }.map { it.first } shouldBe listOf(200)
+        }
+        href shouldBe "/templates/$name"
     }
 
     /**

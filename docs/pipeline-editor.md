@@ -1,6 +1,6 @@
 # Pipeline Editor UI Specification
 
-**Status:** v1.27 (revised — see Change Log)
+**Status:** v1.28 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Contract](pipeline-contract.md), [REST API + SSE](rest-api.md), [Type System](type-system.md), [Enums](enums.md), [Auth](auth.md), [Configuration](configuration.md), [@acme/design-tokens Design System](https://github.com/msabir/design-system-starter)
 **Last updated:** 2026-10-11
@@ -1134,7 +1134,7 @@ the only copy).
 
 ### 8.2 Template link
 
-The statement column's "Open template →" navigates to `/templates/editor?name={id}` — the route that exists (§9.6). The pinned version is not part of the route; the template editor always opens the current version. A PIPELINE node's head instead links "Open child →" to the explorer filtered on the child.
+The statement column's "Open template →" — and the SQL section's `name @ vN` reference (§8.3) — navigates to the template's canonical workspace `/templates/{name}` ([UI Screens §4.7](ui-screens.md#47-the-template-workspace)): the name's segments are the path, each segment encoded, never `/templates/editor?name=` (since #398 a 302 kept only for old bookmarks). The pinned version is not part of the route; the workspace opens the template's current resolution, not the version the node pins (adding the pin would change which version a reader lands on — an open decision, not this link's). A PIPELINE node's head instead links "Open child →" to the explorer filtered on the child.
 
 ### 8.3 The SQL section (rendered, resolved server-side)
 
@@ -2036,6 +2036,7 @@ Themes shipped by the design system — `saas` (modern indigo, devtool-oriented)
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-15 | v1.28 | #433 the template link names the workspace | **§8.2**: "Open template →" and the SQL section's reference link the canonical workspace `/templates/{name}` directly (segments as path, each encoded) instead of the `/templates/editor?name=` compatibility 302; the dangling "§9.6" pointer (this document has no §9.6) now points at UI Screens §4.7. No version pin — unchanged behaviour, the link opens the current resolution. The 302 stays for old bookmarks with its tests. Tests: `PipelineNodeSqlRenderTest`, `TemplateTreeRenderTest`, `template-ref-text.test.mjs` (the `selectedTemplateHref` getter). |
 | 2026-10-11 | v1.27 | #494 one page-script loader | **§3.2**: the editor's catalog becomes `<template id="pe-runtime-scripts" data-page-assets="on-mount">` and loads through the shell's ONE loader, `page-assets.mjs` (fetched while a navigation prepares, executed once the page is in place, once per document across pages that share a source); `runtime.js` is no longer a loader or a bare tag but the catalog's last entry and `data-page-mount`, called once per catalog node (arrival, swap, cached restore) after the page's re-created bare tags have executed, keeping its activation, generation counter, before-save cleanup and `PEPipelineRuntime` identity. A cached restore now replays no editor script. Tests: `page-assets.test.mjs` (order, once per document, allow-list, singleton gate moved from `runtime-activation.test.mjs`), `PersistentChartNavigationBrowserTest` (per-source evaluation counts across all six pages). |
 | 2026-10-06 | v1.26 | #460 reusable REST navigation | §4.1: persistent artifact entry, closed-root initialization, rail continuity and observer ownership through cached restoration. **Supersedes the #149 full-document editor-entry rule** (ui-screens v1.85): the workspace now arrives through prepared main-content navigation, and `pipeline-editor/runtime.js` loads the editor's modules in order and activates the component after the swap (`data-pe-runtime-epoch` is the readiness signal the browser witnesses wait on). |
 | 2026-10-03 | v1.25 | #402 Back/Forward across the in-page switches | **§4.1**: in-page version/tab switches push entries and Back/Forward replays them (no longer `replaceState`). **§10.8**: the canonical URL moves with a pushed entry of the workspace's own (`workspace/history.js`, `{dpWorkspace: {family, version, tab}}`); a replay goes through the same lensed read with `{history: false}` and never pushes; an entry under another screen is handed to htmx; the workspace block and the root's tab attribute stay truthful for a cached restore. |

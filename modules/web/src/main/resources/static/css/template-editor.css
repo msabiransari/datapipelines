@@ -1,100 +1,11 @@
-/* 041 — Template editor layout: context LEFT in a narrow detail rail, SQL source
-   RIGHT and wide, preview output BELOW the editor in the same column.
+/* 041 — Template editor layout: SQL source wide, preview output BELOW the editor in
+   the same column. (041's context rail on the left, the page grid around it and the rail's
+   resize handle retired with templates/editor.html in #398; #433 deleted their rules.)
 
    The screen's job is reading and writing SQL; before 041 the editor had half
    the width and a 280px-tall textarea while the page's lower two thirds sat
-   empty. Every dimension comes from the app's own tokens — --app-detail-width
-   for the rail (D1), --header-height for the viewport math (D2) — no invented
-   widths, no hard-coded colours. */
-
-.te-page {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  gap: var(--gap-lg);
-  /* D2 — fill the viewport below the sticky nav. layouts/default.html gives
-     <main> padding-block: var(--gap-lg), hence twice that; the nav's 1px
-     border-bottom (app.css) is chrome too, so --space-px covers it — without
-     that the page scrolls one pixel. The floor keeps short screens usable:
-     below it the page scrolls instead of crushing the editor. */
-  height: calc(100dvh - var(--header-height) - var(--space-px) - (var(--gap-lg) * 2));
-  min-height: 640px;
-}
-
-/* D1 — context rail LEFT and narrow (the app's detail-rail token), source
-   RIGHT taking the remainder. */
-.te-body {
-  display: grid;
-  /* 141 §B: the rail's width is the USER's — splitter.js writes --te-side-w onto the root
-     before first paint and remembers it under `dp.pane.template-editor-side`; unset, the
-     fallback IS the shipped --app-detail-width default, so "reset" is "remove the property".
-     The clamp is the stylesheet half of the bounds (splitter.js's SIDE_MIN/SIDE_MAX_SHARE —
-     TemplateEditorSideResizeBrowserTest measures both, so a one-sided change goes red), and
-     it is what pulls a remembered width beyond the ceiling back in even pre-paint. ONE
-     derived length feeds the column and the handle's x, so they cannot disagree. */
-  --te-side-min-w: 220px;
-  --te-side-max-w: 50vw;
-  --te-side-size: clamp(var(--te-side-min-w), var(--te-side-w, var(--app-detail-width)), var(--te-side-max-w));
-  grid-template-columns: var(--te-side-size) minmax(0, 1fr);
-  gap: var(--gap-lg);
-  min-height: 0;
-  /* 141 §B: the containing block for the resize handle, absolute so it can sit in the
-     gap ON the boundary without being a third grid column. */
-  position: relative;
-}
-
-/* #112 — a rail with nothing to show (a reader on an imports-less template: the Render
-   Context panel is author-only, the Imports table follows the template) is not rendered,
-   and the body collapses to one column so the source takes the width. The remembered
-   --te-side-w is untouched: it applies again whenever the rail returns. */
-.te-body.te-body-no-rail {
-  grid-template-columns: minmax(0, 1fr);
-}
-
-/* ---- The rail's resize handle (141 §B) ----
- * The `.tplx-splitter` shape (104 §C). Unlike the explorer there is no border here, so the
- * 12px hit area is centred in the gap between the rail and the source column. The grip is
- * a visible pill AT REST (141 §C — a resize nobody can see is a resize nobody uses);
- * `--border-default` is the 3:1 boundary token, brand stays the hover/focus/drag signal. */
-.te-side-splitter {
-  position: absolute;
-  user-select: none;
-  top: 0;
-  bottom: 0;
-  left: calc(var(--te-side-size) + (var(--gap-lg) / 2) - 6px);
-  width: 12px;
-  z-index: 2;
-  display: grid;
-  place-items: center;
-  padding: 0;
-  border: none;
-  background: none;
-  cursor: col-resize;
-  touch-action: none;
-}
-
-.te-side-splitter::after {
-  content: "";
-  width: 3px;
-  height: 40px;
-  border-radius: var(--radius-pill, 999px);
-  background: var(--border-default, #d1d5db);
-  transition: background var(--duration-fast, 150ms) ease;
-}
-
-.te-side-splitter:hover::after,
-.te-side-splitter:focus-visible::after,
-.te-body.is-dragging .te-side-splitter::after {
-  background: var(--brand);
-}
-
-.te-rail {
-  display: flex;
-  flex-direction: column;
-  gap: var(--gap-md);
-  min-height: 0;
-  /* Many context rows / imports scroll inside the rail, not the page. */
-  overflow-y: auto;
-}
+   empty. Every dimension comes from the app's own tokens — no invented widths,
+   no hard-coded colours. */
 
 .te-source {
   display: flex;

@@ -101,7 +101,13 @@ globalThis.document = {
   // 188: the delegated `data-action` listener lifecycle.js arms on the body.
   body: { addEventListener: (type, fn) => { bodyListeners[type] = fn; } },
   getElementById: (id) => (elements[id] === undefined ? null : elements[id]),
-  querySelector: (sel) => (sel === "[data-template-id]" ? el("te-page") : null),
+  // The workspace's `.tw-root` carries the template id AND the viewed version (#398); the
+  // id host answers on its own so a case can remove the root alone (#433).
+  querySelector: (sel) => {
+    if (sel === "[data-template-id]") return el("template-host");
+    if (sel === ".tw-root") return workspaceRoot;
+    return null;
+  },
   querySelectorAll: () => contextRows,
   createElement: (tag) => {
     const e = element(tag);
@@ -115,6 +121,7 @@ globalThis.document = {
   },
 };
 let contextRows = [];
+let workspaceRoot = null;
 
 require(path.resolve(staticRoot, "js/csrf.js"));
 require(path.resolve(staticRoot, "js/template-editor/lifecycle.js"));
@@ -128,7 +135,8 @@ function reset() {
   reloads.length = 0;
   ajaxCalls.length = 0;
   contextRows = [];
-  el("te-page").attributes["data-template-id"] = "acme/rev.sql";
+  workspaceRoot = null;
+  el("template-host").attributes["data-template-id"] = "acme/rev.sql";
 }
 
 // 102: the release/discard cases left with the lifecycle half — those buttons open the
@@ -206,7 +214,8 @@ test("the preview goes through htmx at the partials URL, and highlights after th
   el("previewPane");
   el("previewBtn");
   el("previewSpinner").classes.add("u-hidden");
-  el("versionSelect").value = "3";
+  workspaceRoot = el("template-host");
+  workspaceRoot.attributes["data-viewed-version"] = "3";
   el("templateBody").value = "SELECT 1";
 
   await lifecycle.renderPreview();
@@ -222,6 +231,28 @@ test("the preview goes through htmx at the partials URL, and highlights after th
   // The button and the spinner return to rest whatever happened.
   assert.equal(el("previewBtn").disabled, false);
   assert.equal(el("previewSpinner").classes.has("u-hidden"), true);
+});
+
+// #433: the viewed version comes from the workspace root ALONE. The retired editor page's
+// `<select id="versionSelect">` is not a source — a stray element of that id (no template
+// renders one) must not steer the preview's version; with no root the request says 1.
+test("with no workspace root a stray versionSelect does not steer the preview's version", async () => {
+  reset();
+  globalThis.window.TplPreviewHighlight = { highlightPreview: () => {} };
+  globalThis.htmx = {
+    ajax: (method, url, opts) => {
+      ajaxCalls.push({ method, url, opts });
+      return Promise.resolve();
+    },
+  };
+  el("previewPane");
+  el("versionSelect").value = "3";
+  el("templateBody").value = "SELECT 1";
+
+  await lifecycle.renderPreview();
+
+  assert.equal(ajaxCalls.length, 1);
+  assert.equal(ajaxCalls[0].url, "/partials/templates/render?name=acme%2Frev.sql&version=1");
 });
 
 test("a failed preview builds its card from nodes and leaves the pane's markup alone", async () => {

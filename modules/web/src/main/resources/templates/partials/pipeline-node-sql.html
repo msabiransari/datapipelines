@@ -11,7 +11,7 @@
       <!-- §9.4: the reference is a PATH now (`acme/finance/monthly_revenue @ v3`). It stays
            on ONE line in the dock's Details pane and the full reference rides on `title`, so
            the truncated text is never the only copy of it. -->
-      <a class="pe-link pe-path" th:href="@{/templates/editor(name=${templateId})}"
+      <a class="pe-link pe-path" th:href="@{${'/templates/' + templateId}}"
          th:title="${templateId} + ' @ v' + ${templateVersion}"
          th:text="${templateId} + ' @ v' + ${templateVersion}">template.sql @ v1</a>
       <button type="button" class="ds-button ds-button-ghost ds-button-sm pe-sql-copy"

@@ -267,10 +267,10 @@ class TemplateTreeRenderTest {
 
         html shouldContain "class=\"pe-link pe-path\""
         html shouldContain "title=\"$DEEP_PATH @ v3\""
-        // The link is the PIPELINE partial's own (not this lane's fence): it points at the
-        // editor route, which #398 made the 302 into the workspace — the destination is
-        // TemplateEditorControllerTest's, the §9.4 title rule is this one's.
-        html shouldContain "/templates/editor?name=$DEEP_PATH"
+        // The link is the PIPELINE partial's own: since #433 it points at the workspace route
+        // directly (the old editor route is a 302 kept for bookmarks) — the destination is
+        // PipelineNodeSqlRenderTest's, the §9.4 title rule is this one's.
+        html shouldContain "href=\"/templates/$DEEP_PATH\""
     }
 
     @Test
