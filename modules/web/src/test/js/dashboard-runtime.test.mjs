@@ -1352,6 +1352,129 @@ test("callbacks carry the identity quartet, and a commit on a parent re-evaluate
   assert.equal(instance._parameters.parameter_revision, 9, "the new state was applied");
 });
 
+// #542: wait for the event under test, rather than timing the scripted transport.
+async function untilRuntime(predicate) {
+  for (let i = 0; i < 100; i++) {
+    if (predicate()) return;
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  assert.ok(predicate(), "the scripted runtime event did not arrive");
+}
+
+async function staleBoard(options = {}) {
+  const fetchImpl = fakeFetch();
+  fetchImpl.on("/runtime/visualizations", (url, init) => {
+    const request = JSON.parse(init.body);
+    return fetchImpl.stream([...["chart", "cells"].map((name) => fetchImpl.frame("visualization_status", {
+      refresh_id: request.refresh_id, name, type: "visualization", state: "no-data",
+    })), fetchImpl.frame("refresh_completed", { refresh_id: request.refresh_id, status: "COMPLETED", targets: [] })]);
+  });
+  const result = await boot({
+    fetch: fetchImpl,
+    ...options,
+    config: configPayload({ parameter_set: { name: "dbr/sets/reporting", version: 1 }, ...options.config }),
+  });
+  await result.instance.refresh({ scope: "all" });
+  await untilRuntime(() => result.adapter.log.includes("status:cells:no-data"));
+  return result;
+}
+
+test("#542 parent commit marks every card stale only after the evaluated state applies", async () => {
+  const { instance, adapter, fetch: fetchImpl } = await staleBoard({ parameters: evaluatedState({ parents: ["year"] }) });
+  fetchImpl.on("/runtime/parameters", () => fetchImpl.envelope(evaluatedState({ parents: ["year"], parameter_revision: 9 })));
+  adapter.renderParameters = async () => { adapter.log.push("parameters-applied"); };
+  adapter.log.length = 0;
+  adapter.commitCb({ name: "year", type: "parameter" });
+  await untilRuntime(() => instance._parameters.parameter_revision === 9 && !instance._lock);
+  assert.ok(adapter.log.includes("status:chart:no-data:stale"), adapter.log.join("|"));
+  assert.ok(adapter.log.includes("status:cells:no-data:stale"), adapter.log.join("|"));
+  assert.ok(adapter.log.indexOf("parameters-applied") < adapter.log.indexOf("status:chart:no-data:stale"));
+});
+
+test("#542 a leaf committed during success stays stale after the success settle", async () => {
+  const fetchImpl = fakeFetch();
+  fetchImpl.on("/runtime/visualizations", (url, init) => fetchImpl.stream([
+    fetchImpl.frame("visualization_data", { refresh_id: JSON.parse(init.body).refresh_id, name: "chart", type: "visualization", bindings: {}, rows: 1, bytes: 1 }),
+    fetchImpl.frame("refresh_completed", { refresh_id: JSON.parse(init.body).refresh_id, status: "COMPLETED", targets: [] }),
+  ]));
+  const { instance, adapter, runtime } = await boot({ fetch: fetchImpl, config: configPayload({ parameter_set: { name: "dbr/sets/reporting", version: 1 } }) });
+  const clock = manualClock();
+  instance._env.setTimeout = clock.setTimeout;
+  instance._env.clearTimeout = clock.clearTimeout;
+  await instance.refresh({ scope: "targets", targets: ["chart"] });
+  await untilRuntime(() => adapter.log.includes("status:chart:success"));
+  adapter.commitCb({ name: "year", type: "parameter" });
+  assert.ok(adapter.log.includes("status:chart:success:stale"));
+  clock.tick(runtime._internal.SUCCESS_SETTLE_MS);
+  assert.ok(adapter.log.includes("status:chart:ready:stale"), adapter.log.join("|"));
+});
+
+test("#542 parameter_scopes marks nested occurrences and leaves other cards current", async () => {
+  const { instance, adapter } = await staleBoard({ config: {
+    groups: [{ name: "outer", members: ["inner", "year"] }, { name: "inner", members: ["chart"] }],
+    parameter_scopes: { year: ["outer"] },
+  } });
+  // Use ready here so the base's status filter cannot hide its over-marking defect.
+  instance._occurrences.chart.status = "ready";
+  instance._occurrences.cells.status = "ready";
+  adapter.log.length = 0;
+  adapter.commitCb({ name: "year", type: "parameter" });
+  assert.ok(!adapter.log.some((line) => line.startsWith("status:cells:")), "outside scope: " + adapter.log.join("|"));
+  assert.deepEqual(adapter.log, ["status:chart:ready:stale"]);
+});
+
+test("#542 an unscoped leaf still marks all previously refreshed ready cards (pin)", async () => {
+  const { instance, adapter } = await staleBoard();
+  for (const occurrence of Object.values(instance._occurrences)) occurrence.status = "ready";
+  adapter.log.length = 0;
+  adapter.commitCb({ name: "year", type: "parameter" });
+  assert.deepEqual(adapter.log, ["status:chart:ready:stale", "status:cells:ready:stale"]);
+});
+
+test("#542 parent re-resolution unions changed dependent scopes but ignores equal array values", async () => {
+  const parameter = (name, value) => ({ name, state: { value } });
+  const before = evaluatedState({ parents: ["year"], parameters: [parameter("year", 2026), parameter("city", "EU"), parameter("tags", ["same"])] });
+  const { instance, adapter, fetch: fetchImpl } = await staleBoard({ parameters: before, config: {
+    groups: [{ name: "parent_group", members: ["year"] }, { name: "city_group", members: ["chart"] }, { name: "tags_group", members: ["cells"] }],
+    parameter_scopes: { year: ["parent_group"], city: ["city_group"], tags: ["tags_group"] },
+  } });
+  fetchImpl.on("/runtime/parameters", () => fetchImpl.envelope(evaluatedState({
+    parameter_revision: 9, parents: ["year"], parameters: [parameter("year", 2025), parameter("city", "US"), parameter("tags", ["same"])],
+  })));
+  adapter.log.length = 0;
+  adapter.commitCb({ name: "year", type: "parameter" });
+  await untilRuntime(() => instance._parameters.parameter_revision === 9 && !instance._lock);
+  assert.ok(adapter.log.includes("status:chart:no-data:stale"), adapter.log.join("|"));
+  assert.ok(!adapter.log.some((line) => line.startsWith("status:cells:")), "equal array is not a changed dependent");
+});
+
+test("#542 a bound targeted refresh clears its target and leaves other changed data stale", async () => {
+  const { instance, adapter } = await staleBoard({ config: {
+    actions: [{ name: "refresh_chart", type: "refresh", scope: "targets", targets: ["chart"] }],
+    action_controls: [{ name: "year_action", parameter: "year", action: "refresh_chart" }],
+  } });
+  adapter.log.length = 0;
+  adapter.commitCb({ name: "year", type: "parameter" });
+  await untilRuntime(() => adapter.log.includes("status:chart:in-progress"));
+  assert.equal(instance._occurrences.chart.stale, false);
+  assert.equal(instance._occurrences.cells.stale, true);
+  assert.ok(adapter.log.includes("status:cells:no-data:stale"));
+});
+
+test("#542 no-data and ownerless ready cards go stale; error and abort keep their issue state", async () => {
+  const { instance, adapter } = await staleBoard();
+  instance._occurrences.cells.owner = null;
+  instance._occurrences.cells.status = "ready";
+  adapter.log.length = 0;
+  adapter.commitCb({ name: "year", type: "parameter" });
+  assert.deepEqual(adapter.log, ["status:chart:no-data:stale", "status:cells:ready:stale"]);
+  instance._occurrences.chart.status = "error";
+  instance._occurrences.cells.status = "abort";
+  adapter.log.length = 0;
+  adapter.commitCb({ name: "year", type: "parameter" });
+  assert.deepEqual(adapter.log, []);
+});
+
 test("the renderer judgement fails before execution: unknown kind, version mismatch, two bundles, 2d-declared for a 3d board", async () => {
   const cases = [
     { config: configPayload({ visualizations: [{ name: "x", renderer: { kind: "svg", version: "1" }, config: {} }] }), code: "renderer.unsupported" },
