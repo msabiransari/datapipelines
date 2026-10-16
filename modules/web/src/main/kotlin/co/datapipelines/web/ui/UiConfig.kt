@@ -75,12 +75,24 @@ class UiConfig {
     fun datasourceSchemaTreeBrowseModel(introspector: co.datapipelines.datasources.SchemaIntrospector): DatasourceSchemaTreeBrowseModel =
         DatasourceSchemaTreeBrowseModel(introspector)
 
-    /** 079 §A: the rail's Pipelines/Templates badges, behind a 60s TTL (see [NavCounts]). */
+    /** 079 §A, #554: the resource browser's per-family header counts, behind a 60s TTL (see [NavCounts]). */
     @Bean
     fun navCounts(
         pipelines: co.datapipelines.pipeline.PipelineRepository,
         templates: TemplateRepository,
-    ): NavCounts = NavCounts(pipelines, templates)
+        dashboards: co.datapipelines.visualization.DashboardRepository,
+        visualizations: co.datapipelines.visualization.VisualizationRepository,
+        parameterSets: co.datapipelines.parameters.ParameterSetRepository,
+    ): NavCounts =
+        NavCounts(
+            mapOf(
+                co.datapipelines.pipeline.NavigationFamily.PIPELINES to { pipelines.countAll(it) },
+                co.datapipelines.pipeline.NavigationFamily.TEMPLATES to { templates.count(it) },
+                co.datapipelines.pipeline.NavigationFamily.DASHBOARDS to { dashboards.countAll(it) },
+                co.datapipelines.pipeline.NavigationFamily.VISUALIZATIONS to { visualizations.countAll(it) },
+                co.datapipelines.pipeline.NavigationFamily.PARAMETER_SETS to { parameterSets.countAll(it) },
+            ),
+        )
 
     /** #553: one authorization-scoped inventory model for every family overview. */
     @Bean

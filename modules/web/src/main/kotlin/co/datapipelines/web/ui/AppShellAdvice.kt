@@ -32,10 +32,10 @@ import org.springframework.web.bind.annotation.ModelAttribute
  * - **`crumbGroup` / `crumbPage`** — the top bar's breadcrumb, derived from [AppNav] so the
  *   rail's highlighted item and the breadcrumb cannot disagree. `crumbGroup` is null for the
  *   Dashboard and for off-rail screens; the template then renders the page alone.
- * - **`navCounts`** — the rail's two badges, behind [NavCounts]'s 60s TTL, as ONE attribute
- *   so one request makes one cache lookup. Either value is null when there is no workspace
- *   or the count could not be read; the template omits that badge rather than rendering a
- *   zero it does not know to be true.
+ * - **`navCounts`** — the resource browser header's per-family counts (#554; the rail's two
+ *   badges before it), behind [NavCounts]'s 60s TTL, as ONE attribute so one request makes one
+ *   cache lookup. A value is null when there is no workspace or the count could not be read;
+ *   the template omits that count rather than rendering a zero it does not know to be true.
  *
  * One extra `users` read per render is added by `currentUser`. That is the shape the app
  * already had — `ThemeResolver.resolve` reads the same row on every request, and most
@@ -47,7 +47,7 @@ import org.springframework.web.bind.annotation.ModelAttribute
 class AppShellAdvice(
     private val userRepository: UserRepository,
     private val navCounts: NavCounts,
-    /** 178 — the promoter lens: a lensed principal's rail badges count the admitted sets. */
+    /** 178 — the promoter lens: a lensed principal's header counts are the admitted sets. */
     private val lens: PromoterLens,
 ) {
     @ModelAttribute("currentUser")
@@ -69,10 +69,10 @@ class AppShellAdvice(
     @ModelAttribute("themePalettes")
     fun themePalettes(): List<String> = UserSettingsController.listAvailableThemes().filterNot { it in MODES }
 
-    // Both badges in ONE attribute, so the template reads navCounts.pipelines /
-    // navCounts.templates and the request makes exactly one cache lookup. Two separate
+    // Every family's count in ONE attribute, so the template reads navCounts.pipelines …
+    // navCounts.parameterSets and the request makes exactly one cache lookup. Separate
     // @ModelAttribute accessors would each call the cache — harmless, but it would make the
-    // cold path look like two reads to anyone tracing it.
+    // cold path look like five reads to anyone tracing it.
     @ModelAttribute("navCounts")
     fun navCounts(): NavCounts.Counts {
         val principal = principal() ?: return navCounts.forWorkspace(null)

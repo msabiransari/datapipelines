@@ -17,8 +17,8 @@ import org.springframework.web.bind.annotation.RequestParam
  * The templates CATALOG page (#398, ui-screens.md §4.6 in §4.3's shape): `GET /templates` is
  * one flat, server-paged list of full paths — every template the caller may read when `q` is
  * empty, or the matches of `q` — with the dialect and type filters, and (an author's) the
- * create modal. Each row links into the template workspace; the folder TREE is the sidebar's
- * (`data-nav-branch="templates"`, §3.4). The old two-pane explorer body is gone with #398:
+ * create modal. Each row links into the template workspace; the folder TREE is the resource
+ * browser's (`#nav-tree-templates`, §3.4, #554). The old two-pane explorer body is gone with #398:
  * a template is read, rendered and version-managed in ONE place, its workspace.
  */
 @Controller

@@ -360,9 +360,9 @@ fieldset.dp-dashboard-parameter > .dp-dashboard-parameter-error {
   margin-left: var(--gap-xs);
 }
 
-/* The dashboards tree's link leaves and the sidebar's Dashboards branch (D58) are styled by the
-   shared tree rules since #350 — template-tree.css `a.tpl-leaf` and app.css's navigating-tree
-   pattern (`.app-nav-branch` / `.app-nav-tree`), like the Pipelines branch beside it. */
+/* The dashboards tree's link leaves in the resource browser (D58; #554) are styled by the
+   shared tree rules since #350 — template-tree.css `a.tpl-leaf` and app.css's browser panel
+   (`.app-browser-tree`), like every other family's. */
 
 /* #353 — the visualization test preview: a session-less page with no app shell (no rail, no
    top bar), one card per test case, each holding one runtime-mounted board. Tokens only. */

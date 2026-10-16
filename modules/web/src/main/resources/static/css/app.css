@@ -132,9 +132,7 @@
 
 /* Application-level semantic tokens — derive from design system, never hardcoded hex */
 :root {
-  --app-sidebar-width: 280px;
-  --app-sidebar-collapsed: 0px;
-  /* #503 — the main track's floor where the rail is a grid column. */
+  /* #503 — the main track's floor; #554: the resource browser's maximum leaves it (record §4). */
   --app-main-min-width: 320px;
   /* #473 — the dashboard board's filters panel: its column beside the board, and the left
      drawer it becomes below dashboards.css's breakpoint. */
@@ -525,7 +523,7 @@ body {
    `.app-main .ds-input`, a screen's `.pe-input`) would otherwise undo them.
    The pseudo-class lifts them over any one- or two-class rule without
    `!important`; an id rule (an editor's own canvas) still wins, as content. */
-@media (max-width: 767.98px) {
+@media (max-width: 760.98px) {
   :root :is(
     .ds-input,
     .ds-select,
@@ -665,7 +663,7 @@ body {
    --------------------------------------------------------------------------- */
 .app-progress {
   position: fixed;
-  top: calc(var(--header-height) + var(--space-px));
+  top: calc(var(--app-header-h) + var(--space-px));
   left: 0;
   right: 0;
   height: calc(var(--space-px) * 2);
@@ -861,8 +859,9 @@ button.app-busy::after {
    076 horizontal nav (design-records/mocks/2026-09-05-app-shell-v2.html, owner
    approved 2026-09-05).
 
-   Layout is ONE grid on <div class="app-shell">: the rail spans both rows, the
-   top bar is row 1 of the content column, <main> is row 2.
+   Layout is ONE grid on <div class="app-shell">: the menu and (since #554) the
+   resource browser span both rows, the top bar is row 1 of the content column,
+   <main> is row 2.
 
    THE SHELL IS THE VIEWPORT (owner, 2026-09-11: "Global page has a vertical
    scroll bar which it should not. Each pane is responsible for its contents.").
@@ -875,22 +874,63 @@ button.app-busy::after {
    because four stylesheets size their panes with `calc(100dvh -
    var(--header-height) - …)`; that arithmetic is unchanged and still correct —
    <main> still starts at the bottom of the bar and its padding is the same —
-   it only stops being a reason to let the page move.
+   it only stops being a reason to let the page move. #554: each column owns its
+   overflow — the menu's destinations, the browser's rows and <main> scroll
+   independently.
 
-   --app-rail-width is a GEOMETRY value, not a colour: the same kind of literal
-   --app-sidebar-width has carried since 076. Every colour, radius, shadow and
-   type size below resolves through a design-system token.
+   #554 (shell record §3, §4) — THREE sibling columns: the primary menu (`.app-rail`,
+   202px expanded / 64px compact), the resource browser (`.app-browser`, its own column
+   beside the menu, never a row inside it) and the content column (top bar over <main>).
+   The menu and the browser span both rows; the 58px header row is the top bar's and the
+   browser's heading's. Folder expansion in the browser can move nothing in the menu: the
+   two never share a box.
+
+   The geometry is :root custom properties, not values the shell overrides on itself, so
+   the fixed siblings outside it (the status pill, the compact menu's tooltip) read the
+   same numbers. They are GEOMETRY values, not colours (ui-screens §2.3). Every colour,
+   radius, shadow and type size below resolves through a design-system token.
    --------------------------------------------------------------------------- */
 :root {
-  /* 110: --app-rail-width keeps meaning "how wide the rail is right now" (the shell
-     overrides it to --app-rail-collapsed when the collapse class is on); the expanded
-     value is its own token so the phone drawer can always be full-size without
-     re-declaring the geometry literal. */
-  --app-rail-expanded: min(var(--app-rail-preferred, 232px), 100vw);
-  --app-rail-width: var(--app-rail-expanded);
-  --app-rail-collapsed: 60px;
-  /* The tree region's vertical bound, so the sections below it stay reachable. */
-  --app-nav-tree-max-block: min(50dvh, 32rem);
+  --app-menu-expanded: 202px;
+  --app-menu-compact: 64px;
+  /* The menu's width right now: compact under `rail-collapsed` (below) and by default
+     from 761 to 1100px (the 110 table at the foot of this file). */
+  --app-menu-width: var(--app-menu-expanded);
+  /* The browser's band default (300 here, 320 from 1600, 270 from 761 to 1100), the
+     user's range, and the at-most-360 phone drawer. */
+  --app-browser-default: 300px;
+  --app-browser-min: 240px;
+  --app-browser-max: 480px;
+  --app-drawer-max: 360px;
+  /* Record §4: the PREFERRED width (`--app-browser-preferred`, stamped by rail.js and
+     written by browser-resize.mjs) clamped to the range and to what leaves <main> its
+     320px. clamp() lets the minimum win, so a viewport too narrow for both still gets a
+     240px browser rather than a negative one. The preference itself is never rewritten
+     by the clamp: a narrow window does not overwrite a wide screen's choice. */
+  --app-browser-width: clamp(
+    var(--app-browser-min),
+    var(--app-browser-preferred, var(--app-browser-default)),
+    min(var(--app-browser-max), calc(100vw - var(--app-menu-width) - var(--app-main-min-width)))
+  );
+  /* The browser's grid column: its width, or nothing when the page is not a family's
+     (`#app-browser[hidden]`) or the user hid it (`browser-hidden`) — the width goes back
+     to the content (record §3 rule 5). */
+  --app-browser-col: var(--app-browser-width);
+}
+
+:root.rail-collapsed {
+  --app-menu-width: var(--app-menu-compact);
+}
+
+:root.browser-hidden,
+:root:has(#app-browser[hidden]) {
+  --app-browser-col: 0px;
+}
+
+@media (min-width: 1600px) {
+  :root {
+    --app-browser-default: 320px;
+  }
 }
 
 /* #237: the content track is minmax(0, 1fr), never a bare 1fr — the phone band's rule below,
@@ -899,43 +939,57 @@ button.app-busy::after {
    and its crumbs + search + chip + avatar sized the column 43px past an 1100 window on every
    screen whose crumb has a group — <main> with it, clipped by the shell. The zero minimum is
    the column's, so it holds the bar and anything later placed beside it; the bar's controls
-   then share its width (from 1100 up the search yields first — the #237 rule at the top
-   bar's breakpoint; below 1100 the crumb truncates, 110 §A). */
+   then share its width (from 1101 up the search yields first — the #237 rule at the top
+   bar's breakpoint; at 1100 and below the crumb truncates, 110 §A).
+
+   #554: named areas, so the anonymous and phone shells re-flow the same children by
+   re-declaring the areas rather than by counting tracks. `--header-height` is re-pointed
+   at the 58px shell header for everything inside the shell: the panes that size themselves
+   with `calc(100dvh - var(--header-height) - …)` (the explorers, the editors, the board)
+   then still fill exactly what <main> leaves. */
 .app-shell {
+  --header-height: var(--app-header-h);
   display: grid;
-  grid-template-columns: var(--app-rail-width) minmax(0, 1fr);
-  grid-template-rows: var(--header-height) minmax(0, 1fr);
+  grid-template-columns: var(--app-menu-width) var(--app-browser-col) minmax(0, 1fr);
+  grid-template-rows: var(--app-header-h) minmax(0, 1fr);
+  grid-template-areas:
+    "menu browser top"
+    "menu browser main";
   height: 100dvh;
   overflow: hidden;
+}
+
+.app-shell > .app-topbar {
+  grid-area: top;
 }
 
 /* <main> is the scroll container (see the shell note above). `min-height: 0`
    lets the grid row shrink below its content so the overflow is main's, not the
    shell's; without it the row grows with the content and nothing scrolls. */
 .app-shell > .app-main {
+  grid-area: main;
   min-height: 0;
   overflow-y: auto;
   overflow-x: auto;
 }
 
-/* The gutter yields to a rail that takes the width — only where the rail IS a column (#465).
-   Below 768px the rail is an off-canvas drawer, so a saved wide preference (which makes
-   --app-rail-width ~100vw) must not zero the phone gutter: there main keeps the phone band's
-   .app-container --gap-md. */
-@media (min-width: 768px) {
-  :root {
-    --app-rail-expanded: min(var(--app-rail-preferred, 232px), max(232px, calc(100vw - var(--app-main-min-width))));
-  }
+/* The desktop gutter. At 760px and below main keeps the phone band's .app-container
+   --gap-md. Since #554 the browser's maximum always leaves <main> its 320px, so the
+   gutter no longer has to yield to a rail that takes the width (#465's guard retired). */
+@media (min-width: 761px) {
   .app-shell > .app-main {
-    padding-inline: min(var(--gap-lg), max(0px, calc((100vw - var(--app-rail-width)) / 2)));
+    padding-inline: var(--gap-lg);
   }
 }
 
-/* Signed out (login, the public docs, error pages): no rail, no top bar, one
-   column. This is also what keeps `nav.app-nav` at zero occurrences for an
+/* Signed out (login, the public docs, error pages): no menu, no browser, no top bar
+   controls, one column. This is also what keeps `nav.app-nav` at zero occurrences for an
    anonymous request — NavigationGoldenPathBrowserTest asserts exactly that. */
 .app-shell-anon {
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas:
+    "top"
+    "main";
 }
 
 /* Signed out: the bar keeps the brand and drops everything that describes a
@@ -945,19 +999,12 @@ button.app-busy::after {
   padding-inline: 0;
 }
 
-/* The collapsed state is a class on <html>, set by the layout's one inline
-   script BEFORE the first paint and toggled by shell.js afterwards, so the rail
-   never renders at one width and snaps to the other in front of the reader. */
-:root.rail-collapsed .app-shell {
-  --app-rail-width: var(--app-rail-collapsed);
-}
-
+/* The collapsed state is a class on <html>, set by the pre-paint rail.js BEFORE the
+   first paint and toggled by shell.js afterwards, so the menu never renders at one
+   width and snaps to the other in front of the reader. */
 .app-rail {
-  grid-row: 1 / 3;
-  position: sticky;
-  top: 0;
-  align-self: start;
-  height: 100vh;
+  grid-area: menu;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -965,23 +1012,54 @@ button.app-busy::after {
   border-right: 1px solid var(--border-faint);
 }
 
-/* Everything that is TEXT in the rail disappears when it collapses; the icons,
-   the brand tile and the workspace avatar stay. One class does it, so a row
-   added later collapses correctly by carrying `.app-rail-label` on its label.
-   110: the collapse is a DESKTOP-and-tablet state — below 768px the rail is the
-   drawer and always shows its full content, so every visual collapse rule is
-   scoped to the widths where the drawer cannot exist. */
-@media (min-width: 768px) {
-  :root.rail-collapsed .app-rail-label {
-    display: none;
+/* Everything that is TEXT in the menu leaves the picture when it is compact; the icons,
+   the brand tile and the workspace avatar stay. #554: VISUALLY hidden, not `display:
+   none` — the label is each link's accessible name, and a compact menu of nameless links
+   is the failure the record's "named tooltips" exist to prevent (the tooltip itself is
+   shell.js's `#app-nav-tip`). The group captions become spacers the same way: the group
+   keeps its name (`aria-labelledby`) and its gap, without the uppercase label. One class
+   does it, so a row added later collapses correctly by carrying `.app-rail-label`.
+   110: compact is a DESKTOP-and-tablet state — at 760px and below the menu is the
+   drawer and always shows its full content, so every visual collapse rule is scoped to
+   the widths where the drawer cannot exist. */
+@media (min-width: 761px) {
+  :root.rail-collapsed .app-rail-label,
+  :root.rail-collapsed .app-nav-section {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
   }
+
+  :root.rail-collapsed .app-nav-group {
+    padding-block-start: var(--gap-sm);
+  }
+}
+
+/* The screen-reader-only text the browser's count carries ("9 pipelines" read, "9"
+   seen). The same declarations as the compact menu's labels above. */
+.app-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
 }
 
 .app-brand {
   display: flex;
   align-items: center;
   gap: var(--gap-sm);
-  height: var(--header-height);
+  height: var(--app-header-h);
   padding-inline: var(--gap-md);
   border-bottom: 1px solid var(--border-faint);
   white-space: nowrap;
@@ -993,7 +1071,7 @@ button.app-busy::after {
   flex: none;
 }
 
-@media (min-width: 768px) {
+@media (min-width: 761px) {
   :root.rail-collapsed .app-brand {
     justify-content: center;
     padding-inline: 0;
@@ -1045,7 +1123,7 @@ button.app-busy::after {
   border-color: var(--border-hover);
 }
 
-@media (min-width: 768px) {
+@media (min-width: 761px) {
   :root.rail-collapsed .app-ws {
     justify-content: center;
     padding-inline: 0;
@@ -1120,14 +1198,27 @@ button.app-busy::after {
 .app-nav {
   flex: 1;
   min-height: 0;
+  /* Record §3: on a short screen the destinations scroll independently of the browser
+     and of main; never sideways — a label that does not fit ellipses (#554: no tree lives
+     here any more, so nothing in the menu can grow). */
   overflow-y: auto;
-  /* #350: the rail never scrolls sideways — a sidebar tree past its maximum scrolls inside its
-     own region, and the other sections stay where they are. */
   overflow-x: hidden;
   padding: var(--gap-xs) var(--gap-sm);
   display: grid;
   gap: var(--space-0-5);
   align-content: start;
+}
+
+/* #554 — a navigation group (record §3): its caption and its links. A group whose every
+   item role filtering removed has no link left and takes no space at all, caption
+   included — the record's "empty groups disappear". */
+.app-nav-group {
+  display: grid;
+  gap: var(--space-0-5);
+}
+
+.app-nav-group:not(:has(.app-nav-link)) {
+  display: none;
 }
 
 .app-nav-section {
@@ -1184,91 +1275,205 @@ button.app-busy::after {
   color: var(--brand);
 }
 
-.app-nav-badge {
-  margin-left: auto;
-  font-size: var(--text-xs);
-  padding: 0 var(--gap-xs);
-  border-radius: var(--radius-pill);
-  background: var(--surface-inset);
-  color: var(--text-muted);
-  font-variant-numeric: tabular-nums;
-}
-
-@media (min-width: 768px) {
+@media (min-width: 761px) {
   :root.rail-collapsed .app-nav-link {
     justify-content: center;
     padding-inline: 0;
   }
 }
 
-/* ---- #350: the navigating-tree pattern (layouts/default.html `.app-nav-branch`) ----
-   One shape for every sidebar tree — Pipelines and Dashboards today, Templates next: the item
-   link and its toggle share a row; the panel spans the row below them. The tree rows are the
-   explorers' own (template-tree.css); what is here is the SIDEBAR's: a compact row height, the
-   guide geometry the rows draw against, whole labels (the region scrolls sideways instead of
-   truncating), and the bounded scroll region itself. */
-.app-nav-branch {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+/* ---- #554: the resource browser (layouts/default.html `#app-browser`, record §3, §7) ----
+   A column of its own: a 58px head (family title, admitted count, Hide), the visible
+   family's tree host — the tree engine's search row over its scroll region — and a foot
+   with View all and the width reset. Only the tree's rows scroll; the head, the search and
+   the foot stay reachable (record §3). The column's width is the grid's
+   (`--app-browser-col`): nothing inside it can widen it — a long or deep row wraps
+   inside the row (record §7), and the region never scrolls sideways. */
+.app-browser {
+  grid-area: browser;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--surface-default);
+  border-right: 1px solid var(--border-faint);
+}
+
+.app-browser[hidden] {
+  display: none;
+}
+
+/* The user's Hide — a desktop choice. At 760px and below the browser is a drawer that is
+   closed until its opener is used, so the preference has nothing to hide there. */
+@media (min-width: 761px) {
+  :root.browser-hidden .app-browser {
+    display: none;
+  }
+}
+
+.app-browser-head {
+  flex: none;
+  display: flex;
   align-items: center;
-  column-gap: var(--space-0-5);
+  gap: var(--gap-sm);
+  height: var(--app-header-h);
+  padding-inline: var(--gap-md) var(--gap-sm);
+  border-bottom: 1px solid var(--border-faint);
 }
 
-.app-nav-branch > .app-nav-tree {
-  grid-column: 1 / -1;
-}
-
-.app-nav-branch-toggle {
-  display: grid;
-  place-items: center;
-  width: var(--field-height-sm);
-  height: var(--field-height-sm);
-  padding: 0;
-  border: 0;
-  border-radius: var(--radius-base);
-  background: none;
-  color: var(--text-muted);
-  cursor: pointer;
-}
-
-.app-nav-branch-toggle:hover {
-  background: var(--surface-hover);
+.app-browser-title {
+  margin: 0;
+  min-width: 0;
+  font-size: var(--app-text-browser-title);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-tight);
   color: var(--text-primary);
+  overflow-wrap: anywhere;
 }
 
-.app-nav-branch-toggle:focus-visible {
-  outline: 2px solid var(--border-focus);
-  outline-offset: calc(-1 * var(--space-px));
-}
-
-.app-nav-branch-toggle[aria-expanded="true"] .tpl-chevron {
-  transform: rotate(90deg);
-}
-
-.app-nav-branch.is-tree-open > .app-nav-branch-toggle {
+.app-browser-count {
+  flex: none;
+  padding: 0 var(--gap-xs);
+  border-radius: var(--radius-pill);
   background: var(--surface-inset);
-  color: var(--text-primary);
+  color: var(--text-muted);
+  font-size: var(--app-text-badge);
+  font-variant-numeric: tabular-nums;
 }
 
-.app-nav-tree {
+.app-browser-hide {
+  margin-left: auto;
+}
+
+.app-browser-tree {
   /* The explorers' guide geometry (template-tree.css derives the rows' guides from these;
-     `.tplx-tree` declares them for the page explorer). --tpl-row-h follows the sidebar's
-     compact padding below, so the guides still meet the chevrons. */
+     `.tplx-tree` declares them for the page explorer). --tpl-row-h follows the compact
+     row padding, so the guides still meet the chevrons. */
   --tpl-indent: calc(var(--gap-md) + var(--gap-xs));
   --tpl-row-h: calc(var(--space-1) * 2 + var(--text-sm) * var(--leading-normal));
   --tpl-guide-x: calc(var(--gap-xs) + var(--icon-xs) / 2 - var(--tpl-indent));
 
-  display: grid;
-  gap: var(--gap-xs);
+  flex: 1;
+  min-height: 0;
   min-width: 0;
-  margin: var(--space-0-5) 0 var(--gap-xs) var(--gap-sm);
-  padding: var(--space-0-5);
-  background: var(--surface-inset);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-base);
+  display: flex;
+  flex-direction: column;
 }
 
-.app-nav-tree[hidden] {
+.app-browser-tree[hidden] {
+  display: none;
+}
+
+.app-browser-tree > .dp-tree-search {
+  flex: none;
+  padding: var(--gap-sm) var(--gap-md);
+  border-block-end: 1px solid var(--border-faint);
+}
+
+.app-browser-tree > .dp-tree-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: var(--gap-xs) var(--gap-sm);
+}
+
+/* Record §7: a resource label wraps — a long unbroken name included — and never clips or
+   line-clamps; its badges (version, draft, needs review) wrap onto their own line inside
+   the row rather than pushing the row wider. */
+.app-browser .dp-tree-line,
+.app-browser .dp-tree-activate {
+  min-width: 0;
+}
+
+.app-browser .dp-tree-activate {
+  flex-wrap: wrap;
+  white-space: normal;
+  text-align: start;
+}
+
+.app-browser .dp-tree-activate > span:not(.ds-badge) {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.app-browser-foot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--gap-xs);
+  padding: var(--gap-sm);
+  border-top: 1px solid var(--border-faint);
+}
+
+.app-browser-all {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  padding: var(--space-1-5) var(--gap-sm);
+  border-radius: var(--radius-base);
+  color: var(--text-secondary);
+  font-size: var(--app-text-ui);
+  font-weight: var(--weight-medium);
+  text-decoration: none;
+}
+
+.app-browser-all[hidden] {
+  display: none;
+}
+
+.app-browser-all:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+/* Record §4 "Browser resizing": the browser/content boundary, a separator on the
+   column's trailing edge (inside it — the column clips its overflow). */
+.app-browser-boundary {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-end: 0;
+  width: var(--gap-xs);
+  cursor: col-resize;
+  touch-action: none;
+  z-index: 1;
+}
+
+.app-browser-boundary:hover {
+  background: var(--border-default);
+}
+
+.app-browser-boundary:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: calc(-1 * var(--space-px));
+}
+
+/* The compact menu's named tooltip (shell.js positions it beside the hovered or focused
+   item through `--app-nav-tip-y`, a custom property on the element — never a style
+   attribute). Fixed and outside the menu, because the menu clips its overflow. */
+.app-nav-tip {
+  position: fixed;
+  top: var(--app-nav-tip-y, 0px);
+  left: calc(var(--app-menu-width) + var(--gap-xs));
+  transform: translateY(-50%);
+  z-index: var(--z-popover);
+  padding: var(--space-1) var(--gap-sm);
+  border-radius: var(--radius-base);
+  border: 1px solid var(--border-subtle);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-md);
+  color: var(--text-primary);
+  font-size: var(--app-text-ui);
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.app-nav-tip[hidden] {
   display: none;
 }
 
@@ -1305,7 +1510,7 @@ button.app-busy::after {
   color: var(--text-primary);
 }
 
-@media (min-width: 768px) {
+@media (min-width: 761px) {
   :root.rail-collapsed .app-rail-collapse {
     justify-content: center;
   }
@@ -1528,11 +1733,12 @@ button.app-busy::after {
 }
 
 /* 110 §A — was `max-width: 900px`; the search hides from the topbar's 1100px down,
-   because from 768 to 1099 the rail packs to icons and the bar must fit beside it.
-   (Below 768 the search is not hidden — it MOVES into the drawer's head:
-   .app-rail-search in the layout.) The crumbs take over the bar's free space and,
-   at both narrow bands, collapse to the leaf with the full path on title. */
-@media (max-width: 1099.98px) {
+   because from 761 to 1100 the menu packs to icons and the bar must fit beside it and
+   the browser (#554 re-cut 110's 768/1099 edges to the record's 761/1100). (At 760 and
+   below the search is not hidden — it MOVES into the drawer's head: .app-rail-search in
+   the layout.) The crumbs take over the bar's free space and, at both narrow bands,
+   collapse to the leaf with the full path on title. */
+@media (max-width: 1100.98px) {
   .app-topbar .app-search {
     display: none;
   }
@@ -1548,7 +1754,7 @@ button.app-busy::after {
 }
 
 /* #159 — the band's search entry point. Between the topbar copy's hide (the rule above)
-   and the drawer copy's (above 767.98px) neither palette is displayed, so the band had no
+   and the drawer copy's (above 760.98px) neither palette is displayed, so the band had no
    search at all and ⌘K had no control to drive. The button sits where the search sits
    (margin-left: auto) and is hidden at every width by its base rule — only the band's
    media rule lights it, the same "hidden by CSS, never by JS" contract as .app-rail-open.
@@ -1562,7 +1768,7 @@ button.app-busy::after {
   margin-left: auto;
 }
 
-@media (min-width: 768px) and (max-width: 1099.98px) {
+@media (min-width: 761px) and (max-width: 1100.98px) {
   .app-topbar .app-search-band-toggle {
     display: grid;
   }
@@ -1581,7 +1787,7 @@ button.app-busy::after {
    read for, and a search box can lose part of its placeholder. Without this the search held
    its full width (its content-based minimum is its width) and the crumb took the whole
    squeeze — "Build / Te…" at 1100 while the MCP-key chip is in the bar. */
-@media (min-width: 1100px) {
+@media (min-width: 1101px) {
   .app-crumbs {
     flex-shrink: 0;
   }
@@ -1609,12 +1815,13 @@ button.app-busy::after {
   color: var(--text-primary);
 }
 
-/* ---- 110 §A — the phone shell's chrome: opener, drawer close, scrim. ----
-   All three are inert at desktop widths by their BASE rules; only the <768px
-   media section at the foot of this file lights them. The opener is hidden by
-   CSS rather than JS so the drawer simply cannot exist above the breakpoint. */
+/* ---- 110 §A — the phone shell's chrome: openers, drawer close, scrim. ----
+   All are inert at desktop widths by their BASE rules; only the ≤760px media section
+   at the foot of this file lights them (and, for the browser's opener, the desktop
+   `browser-hidden` rule below). The openers are hidden by CSS rather than JS so a drawer
+   simply cannot exist above the breakpoint. */
 
-/* The topbar hamburger, first control in the bar below 768px. */
+/* The topbar hamburger, first control in the bar at 760px and below. */
 .app-rail-open {
   display: none;
   width: var(--field-height-lg);
@@ -1633,8 +1840,36 @@ button.app-busy::after {
   color: var(--text-primary);
 }
 
+/* #554 — the resource browser's opener, the folder button ("Browse <Family>"): on a
+   desktop it is lit only while the user has hidden a family page's browser (record §3
+   rule 7); at 760px and below it is the Browse resources drawer's opener (the phone
+   section). `[hidden]` on a non-family page outranks both. */
+.app-browser-open {
+  display: none;
+  width: var(--field-height-sm);
+  height: var(--field-height-sm);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--text-secondary);
+  place-items: center;
+  cursor: pointer;
+  flex: none;
+}
+
+.app-browser-open:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+@media (min-width: 761px) {
+  :root.browser-hidden .app-browser-open:not([hidden]) {
+    display: grid;
+  }
+}
+
 /* The close control inside the open drawer, over the brand row's trailing edge
-   (the rail is position: fixed below 768px, which is what this anchors to). */
+   (the menu is position: fixed at 760px and below, which is what this anchors to). */
 .app-rail-close {
   display: none;
   position: absolute;
@@ -1662,8 +1897,9 @@ button.app-busy::after {
   display: none;
 }
 
-/* The drawer's scrim. Same color-mix idiom as the modals' .u-backdrop; invisible
-   and non-interactive until `html.rail-open` lights it below 768px. */
+/* The drawers' scrim. Same color-mix idiom as the modals' .u-backdrop; invisible
+   and non-interactive until `html.rail-open` or `html.browser-open` lights it at 760px
+   and below. */
 .app-rail-backdrop {
   position: fixed;
   inset: 0;
@@ -1850,7 +2086,7 @@ button.app-busy::after {
 
 /* The toast stack's offset, moved off an inline style attribute (§D). */
 .app-toast-stack {
-  top: var(--header-height);
+  top: var(--app-header-h);
   right: var(--gap-md);
 }
 
@@ -1880,7 +2116,7 @@ button.app-busy::after {
 }
 
 /* Below the phone breakpoint the ONE title steps down to 21px (#555). */
-@media (max-width: 767.98px) {
+@media (max-width: 760.98px) {
   .app-main .ds-headline {
     font-size: var(--app-text-title-phone);
   }
@@ -2017,13 +2253,13 @@ button.app-busy::after {
 /* 179: the chip's word label leaves first — the prefix and the two buttons stay. Below the
    phone breakpoint the prefix goes too: the avatar menu still carries the entry point, and a
    top bar that wraps is the worse failure (the same rule the search follows). */
-@media (max-width: 1099.98px) {
+@media (max-width: 1100.98px) {
   .app-mcpkey-label {
     display: none;
   }
 }
 
-@media (max-width: 767.98px) {
+@media (max-width: 760.98px) {
   .app-mcpkey-prefix {
     display: none;
   }
@@ -3269,12 +3505,14 @@ button.app-busy::after {
   cursor: progress;
 }
 
-/* The status pill. Fixed under the top bar on the CONTENT side (it clears the
-   rail, collapsed or not — see the second rule below), and `hidden` when off — see the layout. */
+/* The status pill. Fixed under the top bar on the CONTENT side — #554: past the menu AND
+   the browser, both read off the :root geometry (the browser's column is 0px when it is
+   hidden), so collapse, Hide and a non-family page all move it with no rule of their own;
+   and `hidden` when off — see the layout. */
 .app-status-pill {
   position: fixed;
-  top: calc(var(--header-height) + var(--gap-md));
-  left: calc(var(--app-rail-width, 0px) + var(--gap-lg));
+  top: calc(var(--app-header-h) + var(--gap-md));
+  left: calc(var(--app-menu-width) + var(--app-browser-col) + var(--gap-lg));
   z-index: var(--z-fixed);
   display: flex;
   align-items: center;
@@ -3291,17 +3529,9 @@ button.app-busy::after {
   animation: ds-fade-in var(--duration-fast) var(--ease-out);
 }
 
-/* `--app-rail-width` is overridden on `.app-shell`, and the pill is a fixed
-   sibling OUTSIDE the shell — so it cannot inherit the collapse and is told
-   about it here, on the same `<html>` class the collapse itself lives on. */
-:root.rail-collapsed .app-status-pill {
-  left: calc(var(--app-rail-collapsed) + var(--gap-lg));
-}
-
-/* The anonymous shell (the public docs, the error pages) has no rail at all, and its
-   `#app-main` still boosts — so without this the pill would appear 232px from the left of a
-   page with nothing there. Same reason as the rule above: `--app-rail-width` is a `:root`
-   value the shell overrides on ITSELF, and the pill is a fixed sibling outside it. */
+/* The anonymous shell (the public docs, the error pages) has no menu at all, and its
+   `#app-main` still boosts — so without this the pill would appear 202px from the left of
+   a page with nothing there. */
 :root:has(.app-shell-anon) .app-status-pill {
   left: var(--gap-lg);
 }
@@ -3485,52 +3715,81 @@ button.app-busy::after {
 }
 
 /* ---------------------------------------------------------------------------
-   110 — THE SHELL FITS A PHONE. ONE breakpoint table (ui-screens.md §3), and
-   every rule below is a line of it:
+   110, #554 — THE SHELL AT EVERY WIDTH. ONE breakpoint table (ui-screens.md §3.4, the
+   shell record §4), and every rule below is a line of it:
 
-   | Width     | Rail                                            | Topbar                                          | Main gutter |
-   |-----------|-------------------------------------------------|-------------------------------------------------|-------------|
-   | ≥ 1100 px | as today (expanded; `rail-collapsed` on         | as today                                        | --gap-lg    |
-   |           | user choice, remembered)                        |                                                 |             |
-   | 768–1099  | starts collapsed (icons only) unless the user   | search hidden (the old 900px rule moved to      | --gap-lg    |
-   |           | expanded it — same class, same localStorage     | this breakpoint); crumbs truncate to the LEAF   |             |
-   |           | key — the DEFAULT flips at this width           | with the full path in title                     |             |
-   | < 768 px  | off-canvas drawer: not in the grid, position    | brand tile → hamburger, crumbs (leaf only),     | --gap-md    |
-   |           | fixed, --z-drawer, translated off-screen;       | mode toggle, user menu; nothing wraps; the      |             |
-   |           | opened by #rail-open, closed by Escape, the     | search moves INTO the drawer's head             |             |
-   |           | backdrop or any boosted navigation              |                                                 |             |
+   | Width        | Menu                               | Resource browser                    | Topbar                                  | Main gutter |
+   |--------------|------------------------------------|-------------------------------------|-----------------------------------------|-------------|
+   | ≥ 1600 px    | 202 expanded / 64 compact (the     | 320 default; the user's 240–480,    | as today                                | --gap-lg    |
+   |              | user's `dp-rail`, remembered)      | clamped to leave main 320           |                                         |             |
+   | 1101–1599    | 202 / 64, as above                 | 300 default, same range             | as today                                | --gap-lg    |
+   | 761–1100     | starts compact (64) unless the     | 270 default, same range             | search hidden; crumbs truncate to the   | --gap-lg    |
+   |              | user expanded it — same class,     |                                     | LEAF with the full path in title        |             |
+   |              | same key; the DEFAULT flips here   |                                     |                                         |             |
+   | ≤ 760 px     | the Navigation drawer: not in the  | the Browse resources drawer: not in | hamburger + folder, crumbs (leaf only), | --gap-md    |
+   |              | grid, fixed, 202 wide, translated  | the grid, fixed, ≤ 360 and never    | mode toggle, user menu; nothing wraps;  |             |
+   |              | off-screen, labels always shown    | wider than the viewport             | the search moves INTO the menu drawer   |             |
 
-   The drawer is the SAME <aside class="app-rail"> element — no second nav. Its open
-   state is the `rail-open` class on <html>, set and cleared by shell.js and NEVER
-   persisted: a drawer is closed on every load. The 768–1099 default is pure CSS (so
-   it survives a live resize), and a user's explicit choice rides the SAME class and
-   storage key as before: `rail-collapsed` = a stored "1", `rail-expanded` (110's one
-   new class, stamped pre-paint by the layout's inline script) = a stored "0". Breakpoint
-   values use .98 ceilings so a viewport reported at exactly 768 or 1100 always gets
-   the wider band's layout.
+   On every width: the browser exists only on a family page (`#app-browser[hidden]`
+   elsewhere, its column 0) and the user's Hide removes it on a desktop
+   (`browser-hidden`, per workspace); collapse and Hide are independent.
+
+   The drawers are the SAME <aside> elements — no second nav, no second tree. Their open
+   state is `rail-open` / `browser-open` on <html>, set and cleared by shell.js — one at a
+   time, never persisted: a drawer is closed on every load. The 761–1100 default is pure
+   CSS (so it survives a live resize), and a user's explicit choice rides the SAME class
+   and storage key as before: `rail-collapsed` = a stored "1", `rail-expanded` (stamped
+   pre-paint by rail.js) = a stored "0". Breakpoint values use .98 ceilings so a viewport
+   reported at exactly 761 or 1101 always gets the wider band's layout.
    --------------------------------------------------------------------------- */
 
-@media (min-width: 768px) and (max-width: 1099.98px) {
-  /* The default flips: icons-only, unless the user explicitly expanded. A stored
-     "1" reaches the same visual through the unscoped rail-collapsed rules; a
-     stored "0" carries `rail-expanded` and opts out of this default. */
-  :root:not(.rail-expanded) .app-shell {
-    --app-rail-width: var(--app-rail-collapsed);
+@media (min-width: 761px) and (max-width: 1100.98px) {
+  :root {
+    --app-browser-default: 270px;
   }
 
-  :root:not(.rail-expanded) .app-rail-label {
-    display: none;
+  /* The default flips: compact, unless the user explicitly expanded. A stored "1"
+     reaches the same visual through the unscoped rail-collapsed rules; a stored "0"
+     carries `rail-expanded` and opts out of this default. The width is a :root value, so
+     the pill, the tooltip and the browser's clamp read the compact menu too. */
+  :root:not(.rail-expanded) {
+    --app-menu-width: var(--app-menu-compact);
   }
 
-  /* The status pill is a fixed SIBLING of the shell and reads the rail width off
-     the same classes the shell does (see 103 §A); the classless default has to be
-     spelled out for it too, or it would clear a rail that is only 60px wide. */
-  :root:not(.rail-expanded) .app-status-pill {
-    left: calc(var(--app-rail-collapsed) + var(--gap-lg));
+  :root:not(.rail-expanded) .app-rail-label,
+  :root:not(.rail-expanded) .app-nav-section {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
   }
 
-  /* The collapse chevron points the way the rail will GO: in the classless
-     default the rail already sits collapsed, so the chevron rotates as it does
+  :root:not(.rail-expanded) .app-nav-group {
+    padding-block-start: var(--gap-sm);
+  }
+
+  :root:not(.rail-expanded) .app-brand,
+  :root:not(.rail-expanded) .app-nav-link {
+    justify-content: center;
+    padding-inline: 0;
+  }
+
+  :root:not(.rail-expanded) .app-ws {
+    justify-content: center;
+    padding-inline: 0;
+  }
+
+  :root:not(.rail-expanded) .app-rail-collapse {
+    justify-content: center;
+  }
+
+  /* The collapse chevron points the way the menu will GO: in the classless
+     default the menu already sits compact, so the chevron rotates as it does
      under the class. */
   :root:not(.rail-expanded) .app-rail-chevron {
     transform: rotate(180deg);
@@ -3562,22 +3821,30 @@ button.app-busy::after {
   min-width: 0;
 }
 
-/* §B — below 1100 the shell's content column is narrow enough that a nowrap
+/* §B — at 1100 and below the shell's content column is narrow enough that a nowrap
    control row IS a document-widener: /admin/users' create-user form (two inputs,
    a button and a note in one .u-row) pushed the page 374px past a 768px viewport
    with the rail packed away. The rows wrap, as .app-filters always has. */
-@media (max-width: 1099.98px) {
+@media (max-width: 1100.98px) {
   .app-main .u-row {
     flex-wrap: wrap;
   }
 }
 
-@media (max-width: 767.98px) {
-  /* One content column; the rail leaves the grid entirely. minmax(0, 1fr), never a
-     bare 1fr — a grid item's default min-width:auto is how documents get widened
-     by their content (the .app-grid-stack precedent). */
+@media (max-width: 760.98px) {
+  /* One content column; the menu and the browser leave the grid entirely. minmax(0,
+     1fr), never a bare 1fr — a grid item's default min-width:auto is how documents get
+     widened by their content (the .app-grid-stack precedent). */
   .app-shell {
     grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "top"
+      "main";
+  }
+
+  /* Neither drawer is a column, so the fixed siblings measure from the window's edge. */
+  .app-status-pill {
+    left: var(--gap-md);
   }
 
   .app-container,
@@ -3587,15 +3854,12 @@ button.app-busy::after {
 
   /* --- the drawer --- */
 
-  .app-rail {
+  .app-rail,
+  .app-browser {
     position: fixed;
     top: 0;
     bottom: 0;
     left: 0;
-    /* Always the FULL rail here: a collapse chosen on a desktop must not make a
-       60px-wide drawer on a phone, so this reads the expanded token directly
-       rather than the shell's overridable --app-rail-width. */
-    width: var(--app-rail-expanded);
     height: auto;
     z-index: var(--z-drawer);
     transform: translateX(-100%);
@@ -3605,28 +3869,50 @@ button.app-busy::after {
       visibility 0s linear var(--duration-base);
   }
 
-  :root.rail-open .app-rail {
+  /* Always the FULL menu here: a compact choice made on a desktop must not make a
+     64px-wide drawer on a phone, so this reads the expanded token directly rather
+     than --app-menu-width (and the collapse rules are scoped above 760px). */
+  .app-rail {
+    width: min(var(--app-menu-expanded), 100vw);
+  }
+
+  /* Record §4: at most 360px and never wider than the viewport. */
+  .app-browser {
+    width: min(var(--app-drawer-max), 100vw);
+  }
+
+  :root.rail-open .app-rail,
+  :root.browser-open .app-browser {
     transform: none;
     visibility: visible;
     transition: transform var(--duration-base) var(--ease-out);
   }
 
-  /* Body scroll lock, on the same class — no inline style anywhere. */
-  :root.rail-open {
+  /* Body scroll lock, on the same classes — no inline style anywhere. */
+  :root.rail-open,
+  :root.browser-open {
     overflow: hidden;
   }
 
-  :root.rail-open .app-rail-backdrop {
+  :root.rail-open .app-rail-backdrop,
+  :root.browser-open .app-rail-backdrop {
     opacity: 1;
     visibility: visible;
     pointer-events: auto;
     transition: opacity var(--duration-base) var(--ease-out);
   }
 
-  /* The chrome lights up: opener first in the bar, close in the drawer's head,
-     and the search's second seat under the brand. */
-  .app-rail-open {
+  /* The chrome lights up: the two named openers first in the bar, close in the menu
+     drawer's head, and the search's second seat under the brand. The width controls
+     have no job on a drawer. */
+  .app-rail-open,
+  .app-browser-open:not([hidden]) {
     display: grid;
+  }
+
+  .app-browser-boundary,
+  #browser-width-reset {
+    display: none;
   }
 
   .app-rail-close {
@@ -3656,7 +3942,8 @@ button.app-busy::after {
   }
 
   .app-topbar .app-icon-button,
-  .app-topbar .app-avatar {
+  .app-topbar .app-avatar,
+  .app-topbar .app-browser-open {
     width: var(--field-height-lg);
     height: var(--field-height-lg);
   }
@@ -3711,17 +3998,20 @@ button.app-busy::after {
   }
 }
 
-/* Motion only, silenced the house way — the drawer and its scrim keep their
+/* Motion only, silenced the house way — the drawers and their scrim keep their
    states (visibility is information here) and lose their transitions. The
    `!important` is forced, not stylistic: motion.css's reduced-motion block clamps
    `* { transition-duration: 0.01ms !important }`, and without matching weight a
    plain `transition: none` here would lose to the vendored sheet and compute as
    1e-05s — measurably (MobileShellBrowserTest reads the computed duration). */
-@media (prefers-reduced-motion: reduce) and (max-width: 767.98px) {
+@media (prefers-reduced-motion: reduce) and (max-width: 760.98px) {
   .app-rail,
+  .app-browser,
   :root.rail-open .app-rail,
+  :root.browser-open .app-browser,
   .app-rail-backdrop,
-  :root.rail-open .app-rail-backdrop {
+  :root.rail-open .app-rail-backdrop,
+  :root.browser-open .app-rail-backdrop {
     transition: none !important;
   }
 }
@@ -3914,12 +4204,11 @@ pre.tf-pane-input {
   text-transform: none;
 }
 
-/* Source-independent tree controls; sidebar height is a host constraint. */
+/* Source-independent tree controls; the height is the host's constraint (#554: the
+   browser column's flex, above). */
 .dp-tree-search { display: flex; align-items: center; gap: var(--gap-xs); padding: var(--gap-xs); }
 .dp-tree-search .ds-input { min-width: 0; flex: 1; }
 .dp-tree-scroll { overflow: auto; }
-.app-nav-tree .dp-tree-scroll { max-block-size: var(--app-nav-tree-max-block); }
-.app-nav-tree > .dp-tree-search { border-block-end: 1px solid var(--border-faint); }
 .dp-tree-group { padding-inline-start: var(--gap-md); }
 .dp-tree-line { display: flex; align-items: center; }
 .dp-tree-activate { display: flex; align-items: center; gap: var(--gap-xs); color: inherit; background: transparent; border: 0; cursor: pointer; padding: var(--gap-xs); white-space: nowrap; text-decoration: none; font: inherit; }
@@ -3932,10 +4221,3 @@ pre.tf-pane-input {
 .dp-tree-item[aria-expanded="true"] > .dp-tree-line .ds-icon { transform: rotate(90deg); }
 .dp-tree-item[aria-selected="true"] > .dp-tree-line { background: var(--surface-selected); color: var(--text-link); }
 .dp-tree-status { padding: var(--gap-xs); color: var(--text-muted); }
-.app-rail-boundary { position: fixed; inset-block: 0; inset-inline-start: var(--app-rail-width); transform: translateX(-100%); display: flex; flex-direction: column; z-index: var(--z-popover); pointer-events: none; }
-.app-rail-resize { flex: 1; align-self: flex-end; width: var(--gap-xs); pointer-events: auto; cursor: col-resize; touch-action: none; border-inline-end: 1px solid var(--border-default); }
-.app-rail-boundary > button { pointer-events: auto; }
-:root.rail-collapsed .app-rail-boundary > button { display: none; }
-@media (min-width: 768px) and (max-width: 1099.98px) { :root:not(.rail-expanded) .app-rail-boundary > button { display: none; } }
-.app-rail-resize:focus-visible { outline: 2px solid var(--border-focus); }
-@media (max-width: 767.98px) { .app-rail-boundary { display: none; } }
