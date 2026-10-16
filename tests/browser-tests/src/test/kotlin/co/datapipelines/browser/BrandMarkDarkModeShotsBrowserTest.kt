@@ -80,72 +80,7 @@ class BrandMarkDarkModeShotsBrowserTest : DashboardBrowserSuite() {
 
     /** Read actual painted backgrounds, including transparent elements' ancestors. */
     @Suppress("UNCHECKED_CAST")
-    private fun measurePalette(): Map<String, Any> =
-        page.evaluate(
-            """
-            () => {
-              const style = el => getComputedStyle(el);
-              const background = el => {
-                for (let node = el; node; node = node.parentElement) {
-                  const color = style(node).backgroundColor;
-                  if (color !== 'rgba(0, 0, 0, 0)' && color !== 'transparent') return color;
-                }
-                throw new Error('No painted background');
-              };
-              const luminance = color => {
-                const channels = color.match(/[\d.]+/g).map(Number);
-                if (channels.length === 4 && channels[3] !== 1) throw new Error('Translucent contrast pair: ' + color);
-                const linear = channels.slice(0, 3).map(c => {
-                  const v = c / 255;
-                  return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
-                });
-                return linear[0] * 0.2126 + linear[1] * 0.7152 + linear[2] * 0.0722;
-              };
-              const contrast = (a, b) => {
-                const first = luminance(a), second = luminance(b);
-                return (Math.max(first, second) + 0.05) / (Math.min(first, second) + 0.05);
-              };
-              const nav = document.querySelector('.app-nav-link[aria-current="page"]');
-              const frame = document.querySelector('#pipeline-filter-q');
-              const badge = nav.querySelector('.app-nav-badge');
-              const measured = {
-                page: background(document.querySelector('#app-main')),
-                rail: background(document.querySelector('.app-rail')),
-                selected: background(nav), indicator: style(nav).borderLeftColor,
-                indicatorWidth: style(nav).borderLeftWidth,
-                boundary: style(frame).borderTopColor, boundaryWidth: style(frame).borderTopWidth,
-                boundarySurface: background(frame), boundaryOutside: background(frame.parentElement),
-                bodyText: style(document.body).color, navText: style(nav).color,
-                badgeText: style(badge).color, badgeSurface: background(badge),
-              };
-              const violations = [];
-              const pairs = [
-                ['body on page', measured.bodyText, measured.page, 4.5],
-                ['body on rail', measured.bodyText, measured.rail, 4.5],
-                ['nav on selected', measured.navText, measured.selected, 4.5],
-                ['badge on its surface', measured.badgeText, measured.badgeSurface, 4.5],
-                ['boundary inside', measured.boundary, measured.boundarySurface, 3],
-                ['boundary outside', measured.boundary, measured.boundaryOutside, 3],
-                ['selected on rail', measured.selected, measured.rail, 1.5],
-                ['indicator on selected', measured.indicator, measured.selected, 3],
-              ];
-              measured.ratios = Object.fromEntries(pairs.map(([name, a, b, floor]) => {
-                const ratio = contrast(a, b);
-                if (ratio < floor) violations.push(name + ': ' + ratio + ' < ' + floor);
-                return [name, ratio];
-              }));
-              if (parseFloat(measured.boundaryWidth) <= 0) violations.push('Boundary is not drawn');
-              if (parseFloat(measured.indicatorWidth) <= 0) violations.push('Selection indicator is not drawn');
-              for (const el of [nav, ...nav.querySelectorAll('*')]) {
-                if (!el.getClientRects().length || ![...el.childNodes].some(n => n.nodeType === 3 && n.textContent.trim())) continue;
-                if (parseFloat(style(el).fontSize) < 18 && background(el) === measured.selected &&
-                    style(el).color === 'rgb(137, 147, 165)') violations.push('Muted small text on selected: ' + el.className);
-              }
-              measured.violations = violations;
-              return measured;
-            }
-            """.trimIndent(),
-        ) as Map<String, Any>
+    private fun measurePalette(): Map<String, Any> = page.evaluate(PALETTE_MEASUREMENT_SCRIPT) as Map<String, Any>
 
     @Test
     fun `the login card, the app rail in dark mode and the site header all show the outlined mark`() {
@@ -197,4 +132,76 @@ class BrandMarkDarkModeShotsBrowserTest : DashboardBrowserSuite() {
     }
 
     private fun shotDir(): Path = Paths.get("build", "reports", "163-screenshots").also { it.toFile().mkdirs() }
+
+    private companion object {
+        val PALETTE_MEASUREMENT_SCRIPT =
+            """
+            () => {
+              const style = el => getComputedStyle(el);
+              const background = el => {
+                for (let node = el; node; node = node.parentElement) {
+                  const color = style(node).backgroundColor;
+                  if (color !== 'rgba(0, 0, 0, 0)' && color !== 'transparent') return color;
+                }
+                throw new Error('No painted background');
+              };
+              const luminance = color => {
+                const channels = color.match(/[\d.]+/g).map(Number);
+                if (channels.length === 4 && channels[3] !== 1) throw new Error('Translucent contrast pair: ' + color);
+                const linear = channels.slice(0, 3).map(c => {
+                  const v = c / 255;
+                  return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+                });
+                return linear[0] * 0.2126 + linear[1] * 0.7152 + linear[2] * 0.0722;
+              };
+              const contrast = (a, b) => {
+                const first = luminance(a), second = luminance(b);
+                return (Math.max(first, second) + 0.05) / (Math.min(first, second) + 0.05);
+              };
+              const nav = document.querySelector('.app-nav-link[aria-current="page"]');
+              const frame = document.querySelector('#pipeline-filter-q');
+              const badge = nav.querySelector('.app-nav-badge');
+              const measured = {
+                page: background(document.querySelector('#app-main')),
+                rail: background(document.querySelector('.app-rail')),
+                selected: background(nav), indicator: style(nav).borderLeftColor,
+                indicatorWidth: style(nav).borderLeftWidth,
+                boundary: style(frame).borderTopColor, boundaryWidth: style(frame).borderTopWidth,
+                boundarySurface: background(frame), boundaryOutside: background(frame.parentElement),
+                bodyText: style(document.body).color, navText: style(nav).color,
+                badgeText: style(badge).color, badgeSurface: background(badge),
+              };
+              const probe = document.createElement('span');
+              probe.style.color = 'var(--text-muted)';
+              document.body.appendChild(probe);
+              const mutedText = style(probe).color;
+              probe.remove();
+              const violations = [];
+              const pairs = [
+                ['body on page', measured.bodyText, measured.page, 4.5],
+                ['body on rail', measured.bodyText, measured.rail, 4.5],
+                ['nav on selected', measured.navText, measured.selected, 4.5],
+                ['badge on its surface', measured.badgeText, measured.badgeSurface, 4.5],
+                ['boundary inside', measured.boundary, measured.boundarySurface, 3],
+                ['boundary outside', measured.boundary, measured.boundaryOutside, 3],
+                ['selected on rail', measured.selected, measured.rail, 1.5],
+                ['indicator on selected', measured.indicator, measured.selected, 3],
+              ];
+              measured.ratios = Object.fromEntries(pairs.map(([name, a, b, floor]) => {
+                const ratio = contrast(a, b);
+                if (ratio < floor) violations.push(name + ': ' + ratio + ' < ' + floor);
+                return [name, ratio];
+              }));
+              if (parseFloat(measured.boundaryWidth) <= 0) violations.push('Boundary is not drawn');
+              if (parseFloat(measured.indicatorWidth) <= 0) violations.push('Selection indicator is not drawn');
+              for (const el of [nav, ...nav.querySelectorAll('*')]) {
+                if (!el.getClientRects().length || ![...el.childNodes].some(n => n.nodeType === 3 && n.textContent.trim())) continue;
+                if (parseFloat(style(el).fontSize) < 24 && background(el) === measured.selected &&
+                    style(el).color === mutedText) violations.push('Muted small text on selected: ' + el.className);
+              }
+              measured.violations = violations;
+              return measured;
+            }
+            """.trimIndent()
+    }
 }
