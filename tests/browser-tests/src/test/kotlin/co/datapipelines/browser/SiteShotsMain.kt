@@ -237,10 +237,6 @@ object SiteShotsMain {
     /** The subfolder of the output dir the `app` set lands in. */
     private const val APP_DIR = "app"
 
-    /** Which partial URL an explorer expansion fetches — the two trees differ only in this. */
-    private const val TEMPLATES_PARTIAL = "/partials/templates"
-    private const val PIPELINES_PARTIAL = "/partials/pipelines"
-
     /** Every top-level screen, in nav order — the `app` set's pages and the video's click path. */
     private val APP_PAGES =
         listOf(
@@ -368,7 +364,14 @@ object SiteShotsMain {
             }
         }
 
-    /** Fixed viewport at scale 1, light, reduced motion — the determinism contract, in one place. */
+    /**
+     * Fixed 1440x900 viewport at scale 1, light, reduced motion — the determinism contract, in one place.
+     * `bypassCSP`: the page's `style-src` pins one stylesheet hash (#195), which refuses
+     * [settle]'s injected FREEZE_CSS — the driver's own instrument, not page content — so
+     * every shot died at the first `addStyleTag` (since d936efc14, 2026-09-21; #534). The
+     * photographer's context opts out; the CSP real users receive is unchanged and stays
+     * pinned by SecurityHeadersTest.
+     */
     private fun contextOptions(): Browser.NewContextOptions =
         Browser
             .NewContextOptions()
@@ -376,6 +379,7 @@ object SiteShotsMain {
             .setDeviceScaleFactor(1.0)
             .setColorScheme(ColorScheme.LIGHT)
             .setReducedMotion(ReducedMotion.REDUCE)
+            .setBypassCSP(true)
 
     /**
      * The `home` set's context: the same contract at [HOME_SCALE], so the figures stay sharp
@@ -1152,8 +1156,9 @@ object SiteShotsMain {
             // #350: the pipeline tree is the SIDEBAR's — open it and the showcase's folders, so
             // the dark shell shows the pipeline the other shots do.
             if (page.locator("#nav-tree-pipelines").isHidden) page.click("[data-nav-branch='pipelines'] [data-nav-tree-toggle]")
-            waitFor("#pipeline-nav-root .tpl-tree")
-            folderPrefixes(showcase).forEach { expandFolder(it, PIPELINES_PARTIAL) }
+            page.waitForFunction("() => window.DatapipelinesSidebarTrees.get('pipelines')?.state.levels.get(null)?.complete")
+            folderPrefixes(showcase).forEach { expandTreeFolder("pipelines", it) }
+            page.locator("#nav-tree-pipelines a[title='$showcase']").waitFor()
             shoot("shell-dark.png")
             setTheme("light")
         }
@@ -1489,13 +1494,15 @@ object SiteShotsMain {
          * the only attribute here that is unambiguous: the visible text is the last segment
          * only, so two `mobility` folders under different parents would both match it.
          *
-         * The pipeline explorer (067) renders the SAME markup by design — its partial states
-         * the selectors transfer unchanged — so [partial] is the only explorer-specific bit:
-         * which partial URL the expansion's one-level fetch goes to.
+         * This drives the SERVER-RENDERED tree levels only — today the lake datasource's
+         * lake-tables explorer, and [partial] names the URL the expansion's one-level fetch
+         * goes to. The sidebar's trees are the REST component (#460) and are driven by
+         * [expandTreeFolder] instead; #466 removed the sidebar's server-rendered pipelines
+         * level, so this function's selectors no longer match anything there.
          */
         private fun expandFolder(
             prefix: String,
-            partial: String = TEMPLATES_PARTIAL,
+            partial: String,
         ) {
             val summary = page.locator("summary.tpl-summary:has(.tpl-label[title='$prefix'])").first()
             summary.waitFor()
@@ -1504,6 +1511,33 @@ object SiteShotsMain {
             // no-op the caller is allowed to ask for (a leaf's path is expanded blindly).
             if (summary.getAttribute("aria-expanded") == "true") return
             page.waitForResponse({ it.url().contains(partial) }) { summary.click() }
+        }
+
+        /**
+         * One folder of the sidebar's REST tree (#460 — `/api/v1/pipelines/tree` rendered by
+         * the `static/js/tree` component): the folder is a row carrying the FULL path on
+         * `data-tree-key` as `folder:<path>`, its disclosure button sits in the row's
+         * `.dp-tree-line`, and the level is loaded when the tree component's state marks it
+         * `complete` — the exact contract [RestTreeBrowserFixture.openTree] and its `expand`
+         * drive for the browser suite. #466 removed the sidebar's server-rendered level whose
+         * disclosure markup and partial fetch `shell-dark` previously waited on;
+         * [expandFolder] remains for the server-rendered lake tables only.
+         *
+         * An already-open folder carries `aria-expanded=true` on its row — expanding is a
+         * no-op the caller is allowed to ask for (a deeper prefix needs its ancestors open).
+         */
+        private fun expandTreeFolder(
+            family: String,
+            prefix: String,
+        ) {
+            val row = page.locator("#nav-tree-$family [data-tree-key='folder:$prefix']").first()
+            row.waitFor()
+            if (row.getAttribute("aria-expanded") == "true") return
+            page.click("#nav-tree-$family [data-tree-key='folder:$prefix'] > .dp-tree-line button")
+            page.waitForFunction(
+                "key => window.DatapipelinesSidebarTrees.get('$family').state.levels.get(key)?.complete",
+                "folder:$prefix",
+            )
         }
 
         private fun dismissSecretReveal() {
