@@ -208,7 +208,7 @@
   var boardPage = scope.querySelector(".dp-board-page");
   function syncFiltersPresence() {
     if (!boardPage || !filtersPanel) return;
-    var rows = filtersPanel.querySelectorAll(".dp-dashboard-parameter");
+    var rows = filtersPanel.querySelectorAll(".dp-dashboard-parameter, .dp-dashboard-action-control");
     var visible = false;
     for (var r = 0; r < rows.length && !visible; r++) {
       visible = !rows[r].hidden && rows[r].style.display !== "none";

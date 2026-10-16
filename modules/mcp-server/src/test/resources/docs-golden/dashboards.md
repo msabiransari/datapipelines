@@ -11,6 +11,10 @@ versioned exactly like parameter sets: draft → release → (discard / restore 
 hash precondition (`body_hash` → `expected_hash`) and the same promoter lens. Every tool after a list
 takes the **id** the list returns, never the name.
 
+In `action_controls`, a control with `parameter` runs its action on that parameter's commit; without
+`parameter` it is an explicit button (for example, labelled "Apply") in the filters pane, while
+`parameter_scopes` maps parameter changes to the groups they invalidate.
+
 ## The authoring loop
 
 Build in this order — each step's refusal names the path to fix.

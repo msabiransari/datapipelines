@@ -604,6 +604,30 @@
       );
       steps.push("layout_mounted");
 
+      // #543 — optional for existing hosts; explicit controls exist even without a parameter set.
+      if (typeof self._adapter.renderActionControls === "function") {
+        var controls = [];
+        (self._config.action_controls || []).forEach(function (control) {
+          if (!control || control.parameter !== undefined) return;
+          var action = (self._config.actions || []).find(function (candidate) {
+            return candidate && candidate.name === control.action && candidate.type === "refresh";
+          });
+          if (!action) {
+            self._publishNotification({
+              scope: "actions", severity: "warning", code: "actions.unknown",
+              message: "no such action", retryable: false, recover: null,
+            });
+            return;
+          }
+          controls.push({
+            name: control.name, label: control.label, action: action.name,
+            scope: action.scope === "targets" ? "targets" : "all",
+            targets: action.scope === "targets" ? action.targets || [] : [],
+          });
+        });
+        self._adapter.renderActionControls(controls);
+      }
+
       // Step 3 — the parameter state (an explicit no-op without a parameter set), awaited.
       var parameterSet = self._config.parameter_set;
       if (parameterSet && parameterSet.name) {
@@ -2292,6 +2316,8 @@
     var implemented = {};
     var listeners = { edit: null, commit: null, action: null };
     var notifications = [];
+    var actionControls = [];
+    var actionsRoot = null;
     // Radio groups are named PER ADAPTER: two composites in one document (two boards, a preview
     // beside a board) must never share a native radio group — one instance's pick would clear the
     // other's. The token is stable for the adapter's lifetime, so re-renders regroup correctly.
@@ -2425,6 +2451,45 @@
           }
         }
       }
+    }
+
+    /** The shared pane mount: button-only boards never call renderParameters. */
+    function ensureParametersRoot(adapter) {
+      var root = adapter.parametersRoot;
+      if (!root) {
+        root = adapter.parametersRoot = document.createElement("div");
+        root.className = "dp-dashboard-parameters";
+      }
+      // The host's head controls (the drawer Close) stay first; otherwise precede the grid.
+      var parent = parametersContainer || adapter.container || adapter.defaultSlot;
+      if (parent && root.parentNode !== parent) {
+        if (root.parentNode && typeof root.parentNode.removeChild === "function") root.parentNode.removeChild(root);
+        if (parametersContainer) parent.appendChild(root);
+        else if (typeof parent.insertBefore === "function") parent.insertBefore(root, parent.firstChild);
+      }
+      return root;
+    }
+
+    /** Append after every parameter render; replacing controls never leaves a second action row. */
+    function appendActionControls(root) {
+      if (actionsRoot && actionsRoot.parentNode) actionsRoot.parentNode.removeChild(actionsRoot);
+      actionsRoot = null;
+      if (!actionControls.length) return;
+      actionsRoot = document.createElement("div");
+      actionsRoot.className = "dp-dashboard-actions";
+      actionControls.forEach(function (control) {
+        var button = document.createElement("button");
+        button.className = "ds-button ds-button-primary dp-dashboard-action-control";
+        button.setAttribute("type", "button");
+        button.setAttribute("data-dp-action-control", control.name);
+        button.setAttribute("data-dp-action", control.action);
+        button.textContent = control.label || control.name;
+        button.addEventListener("click", function () {
+          if (listeners.action) listeners.action({ action: control.action, name: control.name, type: "action_control" });
+        });
+        actionsRoot.appendChild(button);
+      });
+      root.appendChild(actionsRoot);
     }
 
     return {
@@ -2597,24 +2662,7 @@
           committedTexts = {};
           heldRejections = {};
         }
-        var root = this.parametersRoot;
-        if (!root) {
-          root = this.parametersRoot = document.createElement("div");
-          root.className = "dp-dashboard-parameters";
-        }
-        // #473 — the pane mounts where the HOST pointed (its own filters panel when
-        // `parametersContainer` was given), else into the layout container as before.
-        // #496 — a host's panel keeps its own head controls first (the board's drawer Close),
-        // so the pane APPENDS there; in the layout container it is still the first child,
-        // before the grid.
-        var parent = parametersContainer || this.container || this.defaultSlot;
-        if (parent) {
-          if (root.parentNode !== parent) {
-            if (root.parentNode && typeof root.parentNode.removeChild === "function") root.parentNode.removeChild(root);
-            if (parametersContainer) parent.appendChild(root);
-            else if (typeof parent.insertBefore === "function") parent.insertBefore(root, parent.firstChild);
-          }
-        }
+        var root = ensureParametersRoot(this);
         while (root.firstChild) root.removeChild(root.firstChild);
         this._selectionInputs = {};
         var parameters = (state && state.parameters) || [];
@@ -2866,7 +2914,13 @@
           this._selectionInputs[parameter.name] = read;
           root.appendChild(row);
         }
+        appendActionControls(root);
         return Promise.resolve(undefined);
+      },
+      /** Optional bootstrap hook: controls have already been joined to their refresh actions. */
+      renderActionControls: function (controls) {
+        actionControls = (controls || []).slice();
+        if (actionControls.length || this.parametersRoot) appendActionControls(ensureParametersRoot(this));
       },
       /** Every parameter's current value — hidden and disabled included (D23) — in its WIRE type. */
       readSelections: function () {
