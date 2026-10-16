@@ -1,9 +1,9 @@
 # Deployment & Packaging Specification
 
-**Status:** v1.43
+**Status:** v1.44
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
-**Last updated:** 2026-10-15
+**Last updated:** 2026-10-16
 
 ---
 
@@ -368,10 +368,12 @@ same rules the bundle would inject at runtime. It is part of the CSP DESIGN-AROU
 `<template id="plotly.js-style-global" class="no-inline-styles">` marker Plotly checks (the runtime's
 fallback creates the same template for a host without one), the page loads this file instead, and `style-src` stays `'self'` plus Cytoscape's one hash — no policy change, no
 `'unsafe-hashes'`, no `'unsafe-eval'`. Sizes (4.1.1 with the #525 and #531 patches): 2D 1,254,487 B (418,262 gz), 3D
-1,831,532 B (588,221 gz), plotly.css 7,467 B; the npm tarball's sha1
+1,831,532 B (588,221 gz), plotly.css 7,467 B; gzip uses zlib deflate level 9, gzip framing, mtime 0
+(no filename), as reproduced by the JDK's `GZIPOutputStream` with `Deflater.BEST_COMPRESSION`; the npm tarball's sha1
 `f797e8f2d54603fd9d11b08aae8eb31147200b67` verifies the source against the tag. Node 22+ per
 Plotly's own build matrix (the manifest's `build` field records the exact versions). After ANY rebuild: update the manifest's `sha256` map, the `sizes`, and the
-trace lists if they changed — `VendoredPlotlyAuditTest` fails the build otherwise.
+trace lists if they changed — `VendoredPlotlyAuditTest` guards all three raw byte counts, both gzip counts
+and their pinned method, as well as hashes and trace lists, and fails the build on a mismatch.
 
 ### 6.3 Docker Compose (dev / evaluation)
 
@@ -1185,6 +1187,7 @@ operator.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-16 | v1.44 | #538 audit manifest sizes | **§6.2A:** the vendored Plotly audit now compares all three raw byte lengths and both gzip counts with the manifest, and pins zlib deflate level 9 with gzip framing and mtime 0 in each bundle's size string. Size-only and method-only drift fail the build. |
 | 2026-10-15 | v1.43 | #531 the default heatmap keeps crisp cells under the CSP | **§6.2A:** a second numbered Plotly source patch sets the heatmap’s `image-rendering` fallbacks through the CSSOM instead of a style attribute; both custom bundles are rebuilt at the fixed path and their hashes and sizes move together in the manifest. The unminified comparison contains only the heatmap import and write changes; minified identifier allocation also changes. |
 | 2026-10-14 | v1.42 | #525 the Plotly recipe carries a vendor patch and a fixed build directory | **§6.2:** the Plotly rebuild gains `git apply` of `static/vendor/plotly/patches/*.patch` (the colorbar fill reset removes its `style` attribute instead of writing an empty one — two source lines, +4 bytes per bundle) and `npm ci`; the clone directory is fixed at `/tmp/dp-plotly-4.1.1/plotly.js` because the minified output depends on the clone's absolute path (#530; the 2026-09-30 build did not record its directory and is not reproducible, so both bundles were rebuilt, not patched in place). Sizes and hashes are in the vendor manifest; `VendoredPlotlyAuditTest` pins the bytes. #525 merge follow-up (2026-10-15): §6.2 names the marker each host pre-places as the empty `template` (#456) that the runtime's fallback also creates (#526), not a `style` element; the manifest's plotly `note` says the same. |
 | 2026-10-03 | v1.41 | 411 (#411) CI renders the reference chart | §6.4: the chart is rendered by CI — the `gate` job runs `scripts/helm-check.sh`, a pinned `helm` (v4.3.0; the release's checksum file SHA-256-pinned in-repo, bumped with the version in one commit) running `helm lint --strict` plus four `helm template` cases: defaults render no `env:` block, both `duckdb.*` values render exactly their two quoted entries, each `extraEnv` double mapping is refused with the template's own message, and a missing `existingSecret` is refused. Exit contract: 0 all cases green, 1 a chart check failed, 2 tooling. Also corrects this section's HPA bullet — the chart scales on CPU only (`hpa.yaml` carries one `cpu` metric; there is no memory metric). No chart change. |

@@ -9,7 +9,10 @@ import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver
+import java.io.ByteArrayOutputStream
 import java.security.MessageDigest
+import java.util.zip.Deflater
+import java.util.zip.GZIPOutputStream
 
 /**
  * #10 L3a — Plotly 4.1.1, vendored as two custom bundles and its strict-CSP stylesheet,
@@ -32,6 +35,8 @@ import java.security.MessageDigest
  *     shipped file must move the manifest in the same commit.
  *  5. **No template loads Plotly from anywhere but the vendored path** — no CDN, in any
  *     template, under any spelling.
+ *  6. **The sizes are the ones recorded** — raw byte lengths for every file, and gzip
+ *     lengths for both bundles under the pinned compression method.
  */
 class VendoredPlotlyAuditTest {
     private val resolver = PathMatchingResourcePatternResolver(javaClass.classLoader)
@@ -88,6 +93,47 @@ class VendoredPlotlyAuditTest {
     }
 
     @Test
+    fun `each vendored plotly file's byte length is the one the manifest's sizes record`() {
+        val sizes =
+            Regex("\"sizes\"\\s*:\\s*\\{([^}]*)}").find(block("plotly"))?.groupValues?.get(1)
+                ?: error("the plotly sizes map is missing from the vendor manifest")
+        FILES.forEach { file ->
+            val basename = file.substringAfterLast('/')
+            val declared =
+                Regex("\"${Regex.escape(basename)}\"\\s*:\\s*\"([^\"]*)\"").find(sizes)?.groupValues?.get(1)
+                    ?: error("the plotly sizes map has no entry for $file")
+            val parsed = SIZE_FORMAT.matchEntire(declared) ?: error("unparseable size for $file: $declared")
+            val raw = parsed.groupValues[1].toLong()
+            val bytes = classpathBytes(file)
+            withClue("$file raw byte length: actual ${bytes.size}, manifest $raw") {
+                bytes.size.toLong() shouldBe raw
+            }
+            if (file.endsWith(".js")) {
+                withClue("$file gzip compression method must be pinned") {
+                    parsed.groupValues[3] shouldBe GZIP_METHOD
+                }
+                val gzip = parsed.groupValues[2].toLong()
+                val actualGzip = gzipSize(bytes)
+                withClue("$file gzip byte length: actual $actualGzip, manifest $gzip") {
+                    actualGzip.toLong() shouldBe gzip
+                }
+            }
+        }
+    }
+
+    private fun gzipSize(bytes: ByteArray): Int {
+        val output = ByteArrayOutputStream()
+        val gzip =
+            object : GZIPOutputStream(output) {
+                init {
+                    def.setLevel(Deflater.BEST_COMPRESSION)
+                }
+            }
+        gzip.use { it.write(bytes) }
+        return output.size()
+    }
+
+    @Test
     fun `the manifest's trace lists are the spec's - the same lists the config validator holds`() {
         val traces = Regex("\"traces\"\\s*:\\s*\\{.*?\\n    \\}", RegexOption.DOT_MATCHES_ALL).find(block("plotly"))?.value
         withClue("the plotly block declares its per-bundle trace lists") { traces shouldNotBe null }
@@ -140,6 +186,8 @@ class VendoredPlotlyAuditTest {
     }
 
     private companion object {
+        const val GZIP_METHOD = "zlib deflate level 9, gzip framing, mtime 0"
+        val SIZE_FORMAT = Regex("""^(\d+) bytes(?: \((\d+) gzipped(?:, ([^)]*))?\))?$""")
         const val PLOTLY_CSS = "vendor/plotly/plotly.css"
         val FILES =
             listOf(
