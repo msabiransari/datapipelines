@@ -441,24 +441,12 @@ body {
 
 /* Cards and panels: the panel radius, a 20px body and NO raised shadow — an
    ordinary panel is drawn by its 1px boundary (ui-screens §2 principle 8),
-   not lifted. Dialogs float (`.app-modal`), and a card that is itself a link
-   or carries a primary action lifts on hover (§3.5 item 6). */
+   not lifted. Dialogs float (`.app-modal`), and only a card that is itself a
+   link lifts on hover (§3.5 item 6). */
 .ds-card {
   padding: var(--space-5);
   border-radius: var(--app-radius-panel);
   box-shadow: none;
-}
-
-/* Tables: 12px cells, 11px column labels. A framed data table states the same
-   through data-table.css's own `--dt-font`/`--dt-head-font`; this covers a
-   table not yet in a frame. Row padding and the frame's capacity are not
-   touched here. */
-.ds-table {
-  font-size: var(--app-text-support);
-}
-
-.ds-table th {
-  font-size: var(--app-text-badge);
 }
 
 /* Small uppercase captions — the 10px role, its tracking opening the word. */
