@@ -1,9 +1,9 @@
 # UI Screens Inventory
 
-**Status:** v1.149
+**Status:** v1.150
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
-**Last updated:** 2026-10-16 (#553; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
+**Last updated:** 2026-10-16 (#552; #553; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
 
 ---
 
@@ -2454,6 +2454,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-16 | v1.150 | #552: design system 0.4.0, dark palette and contrast refinements — renumbered at merge after #553's v1.149 | Dark and auto-dark: page `#13161b`, default `#171b21`, overlay `#1c2027`, raised `#232831`, hover/active `#2a303b`, selected `#303953`; primary/secondary/muted text `#e9ecf2`/`#a6afbf`/`#8993a5`, link `#b1baff`, boundary `#687386`, selection indicator `#7e90ee`. Separator `#616772` retains at least 2:1 through the selected surface; the prototype decorative line cannot serve as a required separator. Danger tokens and white primary buttons are preserved; #509 remains an owner ruling. Generated vendor files come from the upstream build through `scripts/sync-design-system.sh`. |
 | 2026-10-16 | v1.149 | #553 inventory model, consumed by #556 | `FamilyInventory` supplies one SQL snapshot of distinct objects per family under the workspace and caller's lens: draft only, released only, released with draft changes, discarded only. Unrestricted inventories include discarded-only objects although the live catalog has no drill-down for them; narrowed lenses count admitted releases only. Empty lenses make no query; lens/read failures return unavailable. No route or page is added. |
 | 2026-10-16 | v1.148 | #544 a stale dashboard card's border is the warning accent — lane 536b, after #536's v1.147 | **§4.21** Tabs row: a stale card's border is the warning accent, not gray (owner ruling 2026-10-16: #536's gray read as the resting border on the running board; dashboards.md §6.6 v0.54). |
 | 2026-10-16 | v1.147 | #536 the dashboard card's border carries every state — re-cut by lane 536b after #535's v1.146 | **§4.21** Tabs row: the Board tab's chart cards show no badge in ANY state (the status chip is visually hidden, its `role=status` text and `data-dp-state` kept); the border is the state — animated while loading, green for three seconds on success, gray when stale, red on error or abort, dashed for no data (dashboards.md §6.6 v0.53). The visualization test preview (§4.22) mounts the same cards and follows. |
