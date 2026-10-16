@@ -1,9 +1,9 @@
 # UI Screens Inventory
 
-**Status:** v1.148
+**Status:** v1.149
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
-**Last updated:** 2026-10-16 (#544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
+**Last updated:** 2026-10-16 (#555; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
 
 ---
 
@@ -399,9 +399,9 @@ leave the controls where they were.
 
 ---
 
-### 3.3 Type and density scale (076, normative)
+### 3.3 Type and density scale (076; the compact scale #555, normative)
 
-One scale, decided once — measured against the drift the owner saw: page titles at three sizes, dates monospace in one table and proportional in the next.
+One scale, decided once — measured against the drift the owner saw: page titles at three sizes, dates monospace in one table and proportional in the next. **#555** made it the compact scale of the application-shell record (#547, §5 typography and §6 spacing, shape and density): a 13px interface, 12px support copy and one 24px page title, 36px controls, 44px tabs, 8px and 12px radii — defined ONCE as role tokens in `app.css` (items 4–7).
 
 **The faces (079 §G, normative).** The app sets in **Inter** (sans) and **JetBrains Mono** (mono), both
 vendored — `static/vendor/fonts/inter/` and `static/vendor/fonts/jetbrains-mono/`, from the projects' own
@@ -438,7 +438,7 @@ but the `--_font-sans` stack they must be inserted into lives in the vendored de
 stylesheet or template starts naming a font host over the network. The marketing site (`site/**`) does not load
 `app.css` and keeps the system fallback this round.
 
-1. **Page title**: `.ds-headline` on every screen's `h1` — one size, no inline `font-size` (`TypeScaleAuditTest` fails the build on a regression). Section headings are `.ds-title`; small uppercase section labels (eyebrows) are `.ds-caption`. **Amended 079 §E:** inside `.app-main` the headline is `--text-xl` and `.ds-title` is `--text-base`, to match the denser shell. The value moved; the rule that there is exactly ONE of it, expressed as a property of the class rather than of a screen, did not. Every page header is `.app-page-h` — title, a muted `.app-page-sub` subtitle of at most 70ch, actions right.
+1. **Page title**: `.ds-headline` on every screen's `h1` — one size, no inline `font-size` (`TypeScaleAuditTest` fails the build on a regression). Section headings are `.ds-title`; small uppercase section labels (eyebrows) are `.ds-caption`. **Amended 079 §E, 103 §D and #555:** inside `.app-main` the headline is the title role of item 4 — 24px, semibold, `−0.025em`, a 1.35 leading so a wrapped title stays one block — and 21px below 768px; `.ds-title` (and a card header's bare `h2`/`h3`) is the 12px semibold card-title role, 14px inside a dialog. The value moved; the rule that there is exactly ONE of it, expressed as a property of the class rather than of a screen, did not. Every page header is `.app-page-h` — title, a muted `.app-page-sub` subtitle of at most 70ch, actions right.
 2. **Every table is the data table component (§3.7) — frame, viewport, sticky header, the cap — with `font-variant-numeric: tabular-nums`** (`data-table.css`, which folded app.css's old `.ds-table` block in 282). Dates and timestamps are ALWAYS proportional — never inside a `.num`/mono cell.
 3. **Mono is for identifiers only**: machine names, ids, template refs (`path @ vN`), SQL, keys/prefixes, `context_key → value`. Display names, usernames, badges and dates are prose. The per-table decision:
 
@@ -453,6 +453,57 @@ stylesheet or template starts naming a font host over the network. The marketing
 | §4.5 datasources | JDBC URL, username | name, dialect, workspace, last test |
 | §4.3/§4.6 detail versions | template ref / path | released_by, created, versions (`.num`) |
 
+4. **The scale is ROLES (#555).** A screen never names a size; it names a role. The roles live in one `:root` block near the top of `app.css` (`--app-text-*`, `--app-leading-*`, `--app-control-h` …), every one a length (§2 principle 3 forbids hard-coded colours, not lengths), most of them a design-system step in rem on the vendored 16px root, so a reader's browser text-size setting scales the whole scale together. The vendored `--text-sm`/`--text-xs` are **not** re-bound: a global re-bind would also resize what item 6 preserves (the dashboards' authored KPI and table renderers, the docs prose, the editor's SQL surfaces read those tokens). Chrome moved onto the roles rule by rule; content kept its tokens.
+
+| Role | Token | rem | px | Leading · weight · tracking | For |
+|---|---|---|---|---|---|
+| Base UI | `--app-text-ui` | 0.8125 | 13 | 1.5 (19.5px) | body, controls and the values in them, notices, empty states, dialog copy |
+| Support | `--app-text-support` | 0.75 | 12 | 1.5 | subtitles, secondary lines, labels, form help and errors (never smaller), tabs, table cells, card titles (semibold) |
+| Resource name | `--app-text-name` | 0.75 | 12 | `--app-leading-name` 1.55 (18.6px) | names and paths in a catalog or tree; they wrap, never clip |
+| Heading | `--app-text-heading` | 0.875 | 14 | — | a dialog's title, a workspace's name in its top bar, a detail pane's title |
+| Browser title | `--app-text-browser-title` | 0.875 | 14 | weight 600 | the resource browser's heading (#554 consumes it) |
+| Page title | `--app-text-title` | 1.5 | 24 | `--app-leading-title` 1.35 (32.4px) · `--app-weight-title` 600 · `--app-tracking-title` −0.025em (−0.6px) | the ONE `.ds-headline` |
+| Page title, phone | `--app-text-title-phone` | 1.3125 | 21 | 1.35 (28.35px) | the same title below 768px |
+| Badge | `--app-text-badge` | 0.6875 | 11 | weight 500, sentence case | status badges and chips, version chips, a table's column labels, counts on tabs |
+| Meta | `--app-text-meta` | 0.625 | 10 | `--app-tracking-caption` 0.12em when uppercase | short metadata and group captions (`.ds-caption`, `.app-eyebrow`) ONLY — never a name, a value, an error or a paragraph |
+| Phone text entry | `--app-text-entry-phone` | 1 | 16 | — | text inputs, selects and textareas below 768px, so a phone browser does not zoom the page on focus |
+
+| Shape role | Token | Value | For |
+|---|---|---|---|
+| Control height | `--app-control-h` | `--space-9`, 36px | a button, input or select — a minimum; a wrapping label grows it |
+| Tab height | `--app-tab-h` | 2.75rem, 44px | a tab: 12px padding, an 18px line, the 2px underline |
+| Header height | `--app-header-h` | 3.625rem, 58px | the shell header (#554 consumes it) |
+| Icon button | `--app-icon-h` | `--space-8`, 32px | an icon-only button, square, around a 16px glyph |
+| Control radius | `--app-radius-control` | `--radius-md`, 8px | controls |
+| Panel radius | `--app-radius-panel` | `--radius-lg`, 12px | cards, panels, dialogs, a board's card |
+| Badge radius | `--app-radius-badge` | `--radius-sm`, 4px | a status badge or chip |
+| Dialog width | `--app-dialog-max` | 560px | an ordinary dialog; it is also never wider than 90vw |
+| Coarse target | `--app-target-min` | 44px | the smallest target under `@media (pointer: coarse)` |
+
+Spacing has no role tokens: the record's 4/8/12/16/20/24/32/40/48 scale is the design system's own `--space-1` … `--space-12`.
+
+5. **The component baseline (#555).** A block right after the `body` rule applies the roles to the vendored primitives at the primitives' OWN specificity — it beats `primitives.css` and loses to every later or more specific screen rule — so no `!important` exists anywhere in it. The phone text-entry and coarse-pointer rules use `:root :is(…)` so a later single-class control rule cannot undo them.
+
+| Component | Baseline |
+|---|---|
+| Body | 13px on a 1.5 leading |
+| Button (`.ds-button`) | ≥36px high, 8px/12px padding, 13px, 8px radius |
+| Small or icon button (`.ds-button-sm`, a dialog's close) | ≥32px, 4px/8px padding, 12px; the close is 32×32 around its 16px glyph |
+| Input, select (`.ds-input`, `.ds-select`, `.app-filter-control`) | ≥36px high, 13px, 8px radius; 16px text below 768px |
+| Field label, help, error | 12px |
+| Tab (`.ds-tab` and every screen's tab: `.pe-tab`, `.tw-tab`, `.tplx-tab`, `.dp-ws-tab`) | ≥44px: 12px text on the UI leading, 12px padding above and below, the 2px underline; 24px between two labels |
+| Table (`.ds-table`; a framed one through `data-table.css`'s `--dt-font`/`--dt-head-font`) | 12px cells, 11px column labels; row padding, the cap and the measured sticky header unchanged (§3.7) |
+| Badge, chip (`.ds-badge`, `.app-chip`, `.app-method`, the version chips) | 11px at 500, 4px radius, 2px/8px padding, sentence case |
+| Card, panel (`.ds-card`) | 12px radius, 20px padding, the 1px boundary, NO shadow; a card header 16px/20px, a card body 20px |
+| Dialog (`.app-modal`) | 12px radius, 20px padding, the floating `--shadow-lg`, ≤560px and ≤90vw; title 14px |
+| Caption, eyebrow (`.ds-caption`, `.app-eyebrow`) | 10px, uppercase, 0.12em |
+| Notices and states (`.ds-toast`, `.app-alert`, `.app-inline-refusal`, `.app-empty`, `.ds-empty-description`) | 13px; an empty state's title 14px |
+| Coarse pointer | every button, input and select ≥44px high; a small or icon button ≥44×44 — the HIT REGION grows, never the type or the glyph |
+
+6. **Preserved: content keeps its own typography (#555).** What the scale does NOT touch, because it is content rather than chrome — each keeps an explicit size of its own and so never inherits the 13px body: the dashboards' authored renderers (`.dp-dashboard-kpi-value`/`-unit`/`-comparison`, `.dp-dashboard-table`) and a board card's padding (board layout); the docs prose (`docs.css` `.doc-body` and its headings, code and tables); the template editor's SQL and JSON surfaces (`#templateBody`, `.te-readonly`, `#contextJsonTextarea`, `.te-render-out`, `.te-render-error`); the pipeline editor's canvas (`.pe-card*` through its `--pe-card-fs*` variables, `.pe-port*`, `.pe-marker-*`), its SQL (`.pe-sql`), its event log (`.pe-events`, `.pe-ev-*`) and its error detail (`.pe-error-*`); code and figures in `app.css` (`.app-main code` and `pre`, `.app-code`, `.app-errblock`, `.tf-pane-input`, `.tf-diff`/`.tf-detail`, the `.app-stat-v` figure and its unit); the login page's illustrative miniature (`.app-auth-*` in its preview block, sized as a picture); `.viz-json` and `.ps-insp-code`. A glyph drawn as a character (a dismiss `×`) keeps its size: it is an icon. The shell's own chrome — rail, workspace switcher, breadcrumbs, global search, account menu, the status pill — is #554's to re-bind onto these roles.
+
+7. **Measured, not asserted (#555).** `CompactScaleBrowserTest` opens the real screens in Chromium at **1512×982** and, with a touch-capable context, **390×844**, and reads `getComputedStyle` (font size, line height, weight, radius, padding, max width) and `getBoundingClientRect` (height, width) off the rendered element — never off the stylesheet: the pipelines catalog (body, title, subtitle, a resource name, a badge, a page action, the search box), the home page's caption, the datasource form in its dialog (input, select, label, close button, dialog width, padding and radius), a board (card title; and, in a case of its own, the authored KPI value, which must read the SAME at the base and the tip), the executions data table (cell and column label), the pipeline workspace (root text, a tab, the release dialog) and the template workspace (a tab). On the phone it adds the coarse-pointer media query, the 21px title, 16px text entry and the 44px targets. Type sizes and line heights are held to ±0.05px; control heights are floors (≥36px, ≥44px under a coarse pointer), a tab's height is 44 ±2px and the icon button 32 ±0.5px square.
+
 
 ### 3.5 Feedback and atmosphere (103, normative)
 
@@ -463,8 +514,8 @@ Owner, 2026-09-08: *"algoschool.app looks so native SPA than datapipelines altho
 3. **The pending state is cleared by the union of three endings**, because no one of them is total: `htmx:afterSettle` (the normal path — `htmx:afterRequest` would clear it one frame early, while the outgoing screen is still painted), every htmx error/abort event (`afterSettle` never fires for a response error, a network error, a timeout or an abort — 085 §D's finding), and `pageshow` (a bfcache restore re-paints the DOM with `is-pending` still on it and fires no htmx event at all).
 4. **The swap arrives with motion.** After a boosted swap the new `#app-main` carries `app-enter`: a 150ms fade plus a 4px slide-up, **transform and opacity only**, so it cannot move a box and cannot spend the 0.05 cumulative-layout-shift budget `ExplorerPaneGeometryBrowserTest` holds over boosted navigation. The class comes off on `animationend` **and** on a fallback timer, because under `prefers-reduced-motion: reduce` app.css sets `animation: none` and an animation that never runs never ends. Which swaps qualify is decided by the `htmx:beforeSwap` handler that retargets the response and carried on a one-shot — htmx's own swap events carry the swap's `eventInfo`, not the response's, and have no `boosted` flag. **The class is applied on `htmx:afterSettle`, not `htmx:afterSwap`:** at afterSwap the element is still mid-ceremony (`htmx-swapping htmx-added htmx-settling`) and htmx replaces it a frame later, which starts the entrance and then CANCELS it — measured at `animationstart@771 … animationcancel@788`, with every class-level assertion still passing. `ShellFeelBrowserTest` therefore asserts the animation EVENTS (start, then end, never cancel), not the class.
 5. **The ground has depth.** A fixed, `pointer-events: none` `.app-backdrop` element sits at the base layer behind `.app-shell` (which is `position: relative; z-index: 1`): the editor's own `--grid-dot` mixed further toward `--surface-page` plus one soft brand radial at the top left — the login ceremony's idiom (§4.1) carried into the app. It is an element, not a `body` background, because it must not scroll with the content and must sit under the shell's opaque surfaces. Every value is a token expression, so all nine themes get it by construction (`AppCssTokenAuditTest`).
-6. **Cards read as raised.** `--shadow-sm` on `.app-main .ds-card`, and a `translateY(-1px)` + `--shadow-md` lift on hover for cards that are themselves links or carry a primary action — never on a static card, where a lift promises an affordance that is not there. The border stays: §2 principle 8 is normative, and a card boundary is a line, never a shadow alone.
-7. **Headings carry weight.** Page titles are `--text-2xl` at `--weight-bold` with `--tracking-tight` and `--leading-tight`, still a property of `.ds-headline` inside `.app-main` so no screen picks its own size (`TypeScaleAuditTest`). Card titles keep 076's size and gain the weight and tracking. `.app-eyebrow` generalises the login page's `.app-auth-eyebrow` — uppercase `--text-xs`, `0.08em` tracking, brand colour. **Inter only; no second face** (owner ruling, 2026-09-08).
+6. **Cards are drawn; dialogs float** (#555 amends 103's "cards read as raised"). An ordinary card or panel carries NO shadow — its 1px boundary is the whole edge (§2 principle 8 is normative: a card boundary is a line), as the application-shell record's §6 asks. The hover lift (`translateY(-1px)` + `--shadow-md`) stays only on a card that is itself a link, which promises the click it has; a card that merely carries a primary action no longer lifts — the button is the affordance. A dialog (`.app-modal`) is the one raised panel: `--shadow-lg`.
+7. **Headings carry weight.** Page titles are §3.3's title role — 24px (`--text-2xl`) at semibold with `−0.025em` and a 1.35 leading (#555 amends 103's bold and tight leading to the record's values; 21px on a phone) — still a property of `.ds-headline` inside `.app-main` so no screen picks its own size (`TypeScaleAuditTest`). Card titles are 12px semibold on the UI leading (#555: at 12px the old bold and tight tracking closed the word up). `.app-eyebrow` generalises the login page's `.app-auth-eyebrow` — uppercase, the 10px meta role with the 0.12em caption tracking (#555; was `--text-xs` at 0.08em), brand colour. **Inter only; no second face** (owner ruling, 2026-09-08).
 8. **Controls transition.** The design system already transitions `.ds-button` and `.ds-input` colour, border and shadow (`primitives.css`) — what this round adds is the missing half: a 1px `:active` press on buttons, focus transitions on the bare `<select>`/`<textarea>` controls that are not `.ds-input`, and a 100ms background transition on rail rows. All token durations and easings; all silenced by the `prefers-reduced-motion` block.
 
 **Text contrast over the backdrop** is measured, not asserted: `ShellFeelBrowserTest` computes body text against the worst composite the backdrop can paint (the brand glow over a grid dot over the page surface) on **every** vendored theme — the list derived from `VendoredThemes.names()`, so a design-system sync that adds a theme joins the sweep by itself — and holds §2 principle 8's 4.5:1 text floor.
@@ -2454,6 +2505,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-16 | v1.149 | #555 the compact type and density scale (#547 slice 1c) | **§3.3** rewritten as the compact scale: item 1's title amended (24px semibold −0.025em 1.35, 21px on a phone; `.ds-title` the 12px card title, 14px in a dialog); new items 4 (the role tokens, px and rem), 5 (the component baseline), 6 (the preserve-list of content typography) and 7 (the measurement, `CompactScaleBrowserTest`). **§3.5** item 6: cards are drawn, not raised — the hover lift stays only on link cards, a dialog floats; item 7: the title's weight and leading, 12px card titles, the eyebrow on the 10px caption role. |
 | 2026-10-16 | v1.148 | #544 a stale dashboard card's border is the warning accent — lane 536b, after #536's v1.147 | **§4.21** Tabs row: a stale card's border is the warning accent, not gray (owner ruling 2026-10-16: #536's gray read as the resting border on the running board; dashboards.md §6.6 v0.54). |
 | 2026-10-16 | v1.147 | #536 the dashboard card's border carries every state — re-cut by lane 536b after #535's v1.146 | **§4.21** Tabs row: the Board tab's chart cards show no badge in ANY state (the status chip is visually hidden, its `role=status` text and `data-dp-state` kept); the border is the state — animated while loading, green for three seconds on success, gray when stale, red on error or abort, dashed for no data (dashboards.md §6.6 v0.53). The visualization test preview (§4.22) mounts the same cards and follows. |
 | 2026-10-16 | v1.146 | #535 splitter.js stops wiring the withdrawn settings sidebar | **§4.3:** the withdrawal bullet (#349) gains the module half — `static/js/splitter.js`'s `wireEditorSidebar()` branch, its `--pe-sidebar-w` restore, its resize pull-back row and `SIDE_MIN`/`SIDE_MAX_SHARE` are deleted; the module wires the editor dock and the explorer tree only, and its comments name exactly those two panes. No template, stylesheet or visible change; `PipelineWorkspaceLayoutBrowserTest`'s absence assertions are untouched. |
