@@ -1,9 +1,9 @@
 # UI Screens Inventory
 
-**Status:** v1.146
+**Status:** v1.147
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
-**Last updated:** 2026-10-16 (#535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
+**Last updated:** 2026-10-16 (#553; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
 
 ---
 
@@ -2454,6 +2454,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-16 | v1.147 | #553 inventory model, consumed by #556 | `FamilyInventory` supplies one SQL snapshot of distinct objects per family under the workspace and caller's lens: draft only, released only, released with draft changes, discarded only. Unrestricted inventories include discarded-only objects although the live catalog has no drill-down for them; narrowed lenses count admitted releases only. Empty lenses make no query; lens/read failures return unavailable. No route or page is added. |
 | 2026-10-16 | v1.146 | #535 splitter.js stops wiring the withdrawn settings sidebar | **§4.3:** the withdrawal bullet (#349) gains the module half — `static/js/splitter.js`'s `wireEditorSidebar()` branch, its `--pe-sidebar-w` restore, its resize pull-back row and `SIDE_MIN`/`SIDE_MAX_SHARE` are deleted; the module wires the editor dock and the explorer tree only, and its comments name exactly those two panes. No template, stylesheet or visible change; `PipelineWorkspaceLayoutBrowserTest`'s absence assertions are untouched. |
 | 2026-10-16 | v1.145 | #533 the sidebar's template leaves carry the needs-review marker again | **§4.6a:** a Templates leaf whose listed version reads `needs_review` ([REST §24](rest-api.md) v2.96) carries the catalog row's **needs review** marker (`ds-badge ds-badge-warning`, `data-needs-review`, the same title) after its version and draft badges, on exactly the flagged leaves — gone since #466 removed the server-rendered level that carried it. A drift changes a fact, not the template, so the cached level shows it on the panel's Refresh. **§4.6b:** the marker row's guards re-aimed — `TemplateTreeRenderTest` and `TemplateWorkspaceControllerTest` never asserted it; the row, leaf, chip and end-to-end guards are named. No route, permission, template or CSS change. |
 | 2026-10-16 | v1.144 | #537 draft-only dashboard opens directly | **§4.21:** the default selects the served release, else the admitted draft labelled, else #409’s choose-a-version state. A default draft writes its number on the board version attribute and boots in place, keeping the URL; no served release and no admitted draft means no runtime read. Model, controller and browser guards pin selection, the attribute channel, release precedence and the narrowing lens. |

@@ -82,6 +82,16 @@ class UiConfig {
         templates: TemplateRepository,
     ): NavCounts = NavCounts(pipelines, templates)
 
+    /** #553: one authorization-scoped inventory model for every family overview. */
+    @Bean
+    fun familyInventory(
+        pipelines: co.datapipelines.pipeline.PipelineRepository,
+        templates: TemplateRepository,
+        dashboards: co.datapipelines.visualization.DashboardRepository,
+        visualizations: co.datapipelines.visualization.VisualizationRepository,
+        parameterSets: co.datapipelines.parameters.ParameterSetRepository,
+    ): FamilyInventory = FamilyInventory(pipelines, templates, dashboards, visualizations, parameterSets)
+
     /** 106: the version/execution actor lookup both explorer details render. */
     @Bean
     fun actorNames(jdbc: org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate): ActorNames = ActorNames(jdbc)

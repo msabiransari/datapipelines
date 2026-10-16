@@ -39,6 +39,21 @@ open class ArtifactRepository<B : Any>(
     val kind: ArtifactKind,
     private val codec: BodyCodec<B>,
 ) {
+    /** Distinct-object inventory for this artifact family under the caller's lens. */
+    fun inventory(
+        workspaceId: UUID,
+        lens: co.datapipelines.pipeline.ReadLens,
+    ): co.datapipelines.pipeline.Inventory =
+        co.datapipelines.pipeline.InventorySource.aggregate(
+            jdbc,
+            when (kind) {
+                ArtifactKind.VISUALIZATION -> co.datapipelines.pipeline.NavigationFamily.VISUALIZATIONS
+                ArtifactKind.DASHBOARD -> co.datapipelines.pipeline.NavigationFamily.DASHBOARDS
+            },
+            workspaceId,
+            lens,
+        )
+
     /** Complete navigation projection, shared by both artifact families. */
     fun navigation(request: co.datapipelines.pipeline.NavigationRequest): List<co.datapipelines.pipeline.NavigationRow> =
         co.datapipelines.pipeline.NavigationSource.page(
