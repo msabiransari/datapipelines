@@ -1,9 +1,9 @@
 # UI Screens Inventory
 
-**Status:** v1.151
+**Status:** v1.152
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
-**Last updated:** 2026-10-16 (#555; #552; #553; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
+**Last updated:** 2026-10-16 (#551; #555; #552; #553; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
 
 ---
 
@@ -403,13 +403,19 @@ leave the controls where they were.
 
 One scale, decided once — measured against the drift the owner saw: page titles at three sizes, dates monospace in one table and proportional in the next. **#555** made it the compact scale of the application-shell record (#547, §5 typography and §6 spacing, shape and density): a 13px interface, 12px support copy and one 24px page title, 36px controls, 44px tabs, 8px and 12px radii — defined ONCE as role tokens in `app.css` (items 4–7).
 
-**The faces (079 §G, normative).** The app sets in **Inter** (sans) and **JetBrains Mono** (mono), both
-vendored — `static/vendor/fonts/inter/` and `static/vendor/fonts/jetbrains-mono/`, from the projects' own
-GitHub release assets, hashes and versions recorded in `vendor/design-system/vendor-manifest.json` alongside
-every other vendored asset. Both are **SIL Open Font License 1.1**, which the owner confirmed compatible with
-this repository's AGPL-3.0 (2026-09-05); each directory carries its `OFL.txt` verbatim, as the licence requires
-of a redistribution. **No Google Fonts and no CDN** — a webfont from a third-party host is a runtime dependency
-on someone else's uptime and a per-visitor request to someone else's log.
+**The faces (079 §G, normative; sans family re-decided by 551).** The app sets in **Noto Sans** (sans, 551 —
+the prototype's face, the owner's bundled-family decision, record 2026-10-16 §5) and **JetBrains Mono** (mono),
+both vendored — `static/vendor/fonts/noto-sans/` and `static/vendor/fonts/jetbrains-mono/`. JetBrains Mono comes
+from the project's own GitHub release asset; Noto Sans comes from the pinned `@fontsource-variable/noto-sans`
+5.3.0 registry package (upstream v42 of google/fonts — the notofonts releases ship TTF only, not a web asset),
+variable weight 100–900, latin + latin-ext subsets in normal and italic, with the hashes and the tarball's
+sha256 recorded in `vendor/design-system/vendor-manifest.json` alongside every other vendored asset. Both are
+**SIL Open Font License 1.1**, which the owner confirmed compatible with this repository's AGPL-3.0
+(2026-09-05); each directory carries its `OFL.txt` verbatim, as the licence requires of a redistribution. Both
+normal subsets are preloaded in the authenticated layouts — under `font-display: optional` a subset that is not
+ready in time is dropped for that page load, and ext-glyph resource names would render in the system face; the
+italics are declared but not preloaded. **No Google Fonts and no CDN** — a webfont from a third-party host is a
+runtime dependency on someone else's uptime and a per-visitor request to someone else's log.
 
 This closes a gap the design system could not: it *names* both faces in `--_font-sans`/`--_font-mono` but ships
 neither, and the two themes the mode toggle switches between — `light` and `dark` — name **neither** face at all
@@ -2506,6 +2512,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-16 | v1.152 | #551 the app's sans face is bundled Noto Sans; Inter retired — renumbered at merge after #555's v1.151 | **§3.3:** `--font-sans` now leads with **Noto Sans** — the prototype's face, vendored the established way (record 2026-10-16 §5, owner decision also on #547): the pinned `@fontsource-variable/noto-sans` 5.3.0 package (upstream v42, OFL-1.1, tarball sha512-checked then sha256-recorded), latin + latin-ext subsets, normal + italic (the editors' muted/empty/stale states inherit the app sans), both normal subsets preloaded in `layouts/default` and `layouts/auth` — under `optional` an unready subset is dropped for the whole load, so ext-glyph names would render in the system face. `font-display: optional` unchanged (090 §B). The Inter files, faces, preloads, manifest entry and audit-test rows are removed; the six vendored themes' `--_font-sans` naming Inter is vendor text owned by the design-system project. No route, permission, token or template change; type sizes untouched (#555 owns the scale). |
 | 2026-10-16 | v1.151 | #555 the compact type and density scale (#547 slice 1c) — renumbered at merge after #552's v1.150 | **§3.3** rewritten as the compact scale: item 1's title amended (24px semibold −0.025em 1.35, 21px on a phone; `.ds-title` the 12px card title, 14px in a dialog); new items 4 (the role tokens, px and rem), 5 (the component baseline), 6 (the preserve-list of content typography) and 7 (the measurement, `CompactScaleBrowserTest`). **§3.5** item 6: cards are drawn, not raised — the hover lift stays only on link cards, a dialog floats; item 7: the title's weight and leading, 12px card titles, the eyebrow on the 10px caption role. |
 | 2026-10-16 | v1.150 | #552: design system 0.4.0, dark palette and contrast refinements — renumbered at merge after #553's v1.149 | Dark and auto-dark: page `#13161b`, default `#171b21`, overlay `#1c2027`, raised `#232831`, hover/active `#2a303b`, selected `#303953`; primary/secondary/muted text `#e9ecf2`/`#a6afbf`/`#8993a5`, link `#b1baff`, boundary `#687386`, selection indicator `#7e90ee`. Separator `#616772` retains at least 2:1 through the selected surface; the prototype decorative line cannot serve as a required separator. Danger tokens and white primary buttons are preserved; #509 remains an owner ruling. Generated vendor files come from the upstream build through `scripts/sync-design-system.sh`. |
 | 2026-10-16 | v1.149 | #553 inventory model, consumed by #556 | `FamilyInventory` supplies one SQL snapshot of distinct objects per family under the workspace and caller's lens: draft only, released only, released with draft changes, discarded only. Unrestricted inventories include discarded-only objects although the live catalog has no drill-down for them; narrowed lenses count admitted releases only. Empty lenses make no query; lens/read failures return unavailable. No route or page is added. |
