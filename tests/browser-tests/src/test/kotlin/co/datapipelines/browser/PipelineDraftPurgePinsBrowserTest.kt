@@ -168,14 +168,24 @@ class PipelineDraftPurgePinsBrowserTest : DashboardBrowserSuite() {
 
         java.nio.file.Files.createDirectories(java.nio.file.Path.of("build/browser-evidence"))
         page.screenshot(
-            com.microsoft.playwright.Page.ScreenshotOptions().setPath(java.nio.file.Path.of("build/browser-evidence/purge471-entity-pinned-light.png")),
+            com.microsoft.playwright.Page
+                .ScreenshotOptions()
+                .setPath(
+                    java.nio.file.Path
+                        .of("build/browser-evidence/purge471-entity-pinned-light.png"),
+                ),
         )
         page.navigate("$baseUrl/pipelines/$child")
         ensureTheme("dark")
         openEntityDialog()
         entityDialog.locator("[data-typed-confirm]").count() shouldBe 0
         page.screenshot(
-            com.microsoft.playwright.Page.ScreenshotOptions().setPath(java.nio.file.Path.of("build/browser-evidence/purge471-entity-pinned-dark.png")),
+            com.microsoft.playwright.Page
+                .ScreenshotOptions()
+                .setPath(
+                    java.nio.file.Path
+                        .of("build/browser-evidence/purge471-entity-pinned-dark.png"),
+                ),
         )
 
         // The dialog is a PREVIEW; the POST's own guard is the control (state unchanged on refusal).
