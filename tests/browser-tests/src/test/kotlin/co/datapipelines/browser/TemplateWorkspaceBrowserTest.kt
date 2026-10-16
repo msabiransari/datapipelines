@@ -7,6 +7,9 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
+import java.nio.file.Files
+import java.nio.file.Paths
+import java.nio.file.StandardOpenOption
 
 /**
  * #398 — the TEMPLATE WORKSPACE in a real browser (the pipelines mould of
@@ -295,29 +298,31 @@ class TemplateWorkspaceBrowserTest : BrowserSuite() {
 
     /** Passive evidence: URLs and the history-restore flag only, never session headers. */
     private fun observeHistory(label: String) {
-        val dir = java.nio.file.Paths.get("build", "reports", "528-history").also { it.toFile().mkdirs() }
+        val dir = Paths.get("build", "reports", "528-history").also { it.toFile().mkdirs() }
         val network = dir.resolve("$label-network.log")
-        java.nio.file.Files.writeString(network, "")
-        java.nio.file.Files.writeString(dir.resolve("$label-console.log"), "")
+        Files.writeString(network, "")
+        Files.writeString(dir.resolve("$label-console.log"), "")
         page.onRequest { request ->
             val restore = request.headers()["hx-history-restore-request"]
             val line = "back=$historyBackLeg ${request.method()} ${request.url()} HX-History-Restore-Request=$restore\n"
-            java.nio.file.Files.writeString(network, line, java.nio.file.StandardOpenOption.APPEND)
+            Files.writeString(network, line, StandardOpenOption.APPEND)
             if (restore == "true") restoreRequests += line.trim()
         }
     }
 
     private fun recordHistory(label: String) {
-        val dir = java.nio.file.Paths.get("build", "reports", "528-history").also { it.toFile().mkdirs() }
-        val summary = page.evaluate(
-            "() => JSON.stringify({url: location.href, length: history.length, hits: window.__templateCacheHits, stats: window.WorkspaceHistory?.stats()})",
-        )
+        val dir = Paths.get("build", "reports", "528-history").also { it.toFile().mkdirs() }
+        val summary =
+            page.evaluate(
+                """() => JSON.stringify({url: location.href, length: history.length,
+                  hits: window.__templateCacheHits, stats: window.WorkspaceHistory?.stats()})""",
+            )
         val violations = drainCspViolations()
-        java.nio.file.Files.writeString(
+        Files.writeString(
             dir.resolve("$label-console.log"),
             "$summary\nerrors=$consoleErrors\ncsp=$violations\n",
-            java.nio.file.StandardOpenOption.CREATE,
-            java.nio.file.StandardOpenOption.APPEND,
+            StandardOpenOption.CREATE,
+            StandardOpenOption.APPEND,
         )
         // Hiding carets leaves empty style attributes on inputs, which a cached restore rejects under CSP.
         page.screenshot(Page.ScreenshotOptions().setCaret(ScreenshotCaret.INITIAL).setPath(dir.resolve("$label.png")))
