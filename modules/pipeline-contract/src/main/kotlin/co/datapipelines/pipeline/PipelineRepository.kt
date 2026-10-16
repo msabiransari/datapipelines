@@ -133,6 +133,14 @@ data class DatasourceRef(
 class PipelineRepository(
     private val jdbc: NamedParameterJdbcTemplate,
 ) {
+    /** Distinct-object inventory under the caller's workspace and version lens. */
+    fun inventory(
+        workspaceId: UUID,
+        lens: co.datapipelines.pipeline.ReadLens,
+    ): co.datapipelines.pipeline.Inventory =
+        co.datapipelines.pipeline.InventorySource
+            .aggregate(jdbc, co.datapipelines.pipeline.NavigationFamily.PIPELINES, workspaceId, lens)
+
     /** Complete, body-free tree pages; authorization precedes folder derivation. */
     fun navigation(request: co.datapipelines.pipeline.NavigationRequest): List<co.datapipelines.pipeline.NavigationRow> =
         co.datapipelines.pipeline.NavigationSource
