@@ -14,6 +14,7 @@ import co.datapipelines.visualization.DashboardBody
 import co.datapipelines.visualization.DashboardService
 import co.datapipelines.web.api.ApiException
 import co.datapipelines.web.dashboards.runtime.DashboardRuntime
+import io.kotest.assertions.assertSoftly
 import io.kotest.matchers.shouldBe
 import io.mockk.every
 import io.mockk.mockk
@@ -31,7 +32,7 @@ import java.util.UUID
 
 /**
  * The dashboard workspace controller's states (#400): the NAME is stamped for EVERY render —
- * the choose-a-version state (#409: no served release and none named → the empty state over
+ * the choose-a-version state (#409: no served release and no admitted draft → the empty state over
  * the admitted history, the runtime config NEVER called, and no "not found" for a dashboard
  * the tree just linked) and the refusal state alike; a version that resolves fills the ONE
  * bundle the server chose; the tab set is closed (unknown → Board, Keys without the binding
@@ -164,12 +165,41 @@ class DashboardWorkspaceControllerTest {
     }
 
     @Test
-    fun `#409 - a draft-only dashboard renders the choose-a-version state with the NAME and never calls the runtime`() {
+    fun `#537 - a draft-only dashboard opens its draft and passes its version to the runtime`() {
         authenticate()
         every { dashboards.findWorking(workspaceId, ReadLens.Everything, dashboardId) } returns workingVersion()
         every { dashboards.findServed(workspaceId, ReadLens.Everything, dashboardId) } returns null
+        every { dashboards.findServedVersion(workspaceId, ReadLens.Everything, dashboardId, 2) } returns workingVersion()
         every { dashboards.listVersions(workspaceId, ReadLens.Everything, dashboardId) } returns
             listOf(detail(2, PipelineVersionStatus.DRAFT))
+        var runtimeCalls = 0
+        every { runtime.config(any(), dashboardId, 2) } answers {
+            runtimeCalls++
+            configJson()
+        }
+
+        val m = render()
+
+        assertSoftly {
+            m["boardVersion"] shouldBe 2
+            m["dashboardName"] shouldBe "finance/dashboards/board"
+            m["hasSelected"] shouldBe true
+            m["viewedIsDraft"] shouldBe true
+            m["viewedLabel"] shouldBe "v2 · draft"
+            m["bundle"] shouldBe "2d"
+            runtimeCalls shouldBe 1
+        }
+        verify(exactly = 1) { runtime.config(any(), dashboardId, 2) }
+    }
+
+    @Test
+    fun `#409 - no admitted draft renders the choose-a-version state with the NAME and never calls the runtime`() {
+        authenticate()
+        every { dashboards.findWorking(workspaceId, ReadLens.Everything, dashboardId) } returns
+            workingVersion(status = PipelineVersionStatus.DISCARDED)
+        every { dashboards.findServed(workspaceId, ReadLens.Everything, dashboardId) } returns null
+        every { dashboards.listVersions(workspaceId, ReadLens.Everything, dashboardId) } returns
+            listOf(detail(2, PipelineVersionStatus.DISCARDED))
 
         val m = render()
 
@@ -240,6 +270,8 @@ class DashboardWorkspaceControllerTest {
         every { dashboards.findServed(workspaceId, ReadLens.Everything, dashboardId) } returns null
         every { dashboards.listVersions(workspaceId, ReadLens.Everything, dashboardId) } returns
             listOf(detail(2, PipelineVersionStatus.DRAFT))
+        every { dashboards.findServedVersion(workspaceId, ReadLens.Everything, dashboardId, 2) } returns workingVersion()
+        every { runtime.config(any(), dashboardId, 2) } returns configJson()
 
         render(tab = "nonsense")["activeTab"] shouldBe "board"
         render(tab = "keys")["activeTab"] shouldBe "board"
@@ -251,6 +283,8 @@ class DashboardWorkspaceControllerTest {
         every { dashboards.findWorking(workspaceId, ReadLens.Everything, dashboardId) } returns workingVersion()
         every { dashboards.findServed(workspaceId, ReadLens.Everything, dashboardId) } returns null
         every { dashboards.listVersions(workspaceId, ReadLens.Everything, dashboardId) } returns emptyList()
+        every { dashboards.findServedVersion(workspaceId, ReadLens.Everything, dashboardId, 2) } returns workingVersion()
+        every { runtime.config(any(), dashboardId, 2) } returns configJson()
 
         val viewer = render()
         viewer["canRelease"] shouldBe false
@@ -274,6 +308,8 @@ class DashboardWorkspaceControllerTest {
         every { dashboards.findWorking(workspaceId, ReadLens.Everything, dashboardId) } returns workingVersion()
         every { dashboards.findServed(workspaceId, ReadLens.Everything, dashboardId) } returns null
         every { dashboards.listVersions(workspaceId, ReadLens.Everything, dashboardId) } returns emptyList()
+        every { dashboards.findServedVersion(workspaceId, ReadLens.Everything, dashboardId, 2) } returns workingVersion()
+        every { runtime.config(any(), dashboardId, 2) } returns configJson()
 
         render()["navCurrentPath"] shouldBe "finance/dashboards/board"
     }

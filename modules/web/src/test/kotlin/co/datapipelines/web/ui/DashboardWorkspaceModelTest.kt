@@ -20,8 +20,8 @@ import java.util.UUID
  * shape: the visibility oracle first ([DashboardService.findWorking] — absent, foreign or
  * lens-hidden is the family's 404, all three the SAME answer so none can be probed); an
  * explicit version through [DashboardService.findServedVersion] or the family's 404 NAMING
- * the version (never a clamp, never a nearby miss); the default is the served release, and
- * `null` there is NOT an error — it is the choose-a-version state (#409). The draft pointer
+ * the version (never a clamp, never a nearby miss); the default is the served release, else
+ * the admitted draft (#537), else the choose-a-version state (#409). The draft pointer
  * is lens metadata: the everything view's DRAFT working version names it; a narrowing lens's
  * admitted row does not.
  */
@@ -81,8 +81,8 @@ class DashboardWorkspaceModelTest {
     }
 
     @Test
-    fun `the default is the served release and a hidden current never resolves`() {
-        every { dashboards.findWorking(workspaceId, ReadLens.Everything, dashboardId) } returns version(PipelineVersionStatus.RELEASED, 1)
+    fun `the default prefers the served release over an admitted draft`() {
+        every { dashboards.findWorking(workspaceId, ReadLens.Everything, dashboardId) } returns version(PipelineVersionStatus.DRAFT, 2)
         every { dashboards.findServed(workspaceId, ReadLens.Everything, dashboardId) } returns version(PipelineVersionStatus.RELEASED, 1)
         every { dashboards.listVersions(workspaceId, ReadLens.Everything, dashboardId) } returns
             listOf(detail(PipelineVersionStatus.RELEASED, 1), detail(PipelineVersionStatus.DRAFT, 2))
@@ -93,21 +93,59 @@ class DashboardWorkspaceModelTest {
         resolved.served?.version shouldBe 1
         resolved.selectedIsCurrent shouldBe true
         resolved.viewedLabel shouldBe "v1 · released · current"
+        resolved.draftVersion shouldBe 2
+        verify(exactly = 0) { dashboards.findServedVersion(any(), any(), any(), any()) }
     }
 
     @Test
-    fun `#409 - no served release is the choose-a-version state, never an error`() {
+    fun `#537 - no served release and an admitted draft opens the draft, labelled`() {
         every { dashboards.findWorking(workspaceId, ReadLens.Everything, dashboardId) } returns version(PipelineVersionStatus.DRAFT, 1)
         every { dashboards.findServed(workspaceId, ReadLens.Everything, dashboardId) } returns null
+        every { dashboards.findServedVersion(workspaceId, ReadLens.Everything, dashboardId, 1) } returns
+            version(PipelineVersionStatus.DRAFT, 1)
         every { dashboards.listVersions(workspaceId, ReadLens.Everything, dashboardId) } returns
             listOf(detail(PipelineVersionStatus.DRAFT, 1))
 
         val resolved = model.resolve(workspaceId, LensedView.EVERYTHING, dashboardId, null)
 
-        resolved.hasSelected shouldBe false
-        resolved.selectedVersion shouldBe null
+        resolved.hasSelected shouldBe true
+        resolved.selectedVersion shouldBe 1
+        resolved.selectedIsDraft shouldBe true
+        resolved.selectedIsCurrent shouldBe false
+        resolved.viewedLabel shouldBe "v1 · draft"
         resolved.draftVersion shouldBe 1
         resolved.versions.size shouldBe 1
+        verify(exactly = 1) { dashboards.findServedVersion(workspaceId, ReadLens.Everything, dashboardId, 1) }
+    }
+
+    @Test
+    fun `#409 - no served release and no admitted draft is the choose-a-version state`() {
+        every { dashboards.findWorking(workspaceId, ReadLens.Everything, dashboardId) } returns version(PipelineVersionStatus.DISCARDED, 1)
+        every { dashboards.findServed(workspaceId, ReadLens.Everything, dashboardId) } returns null
+        every { dashboards.listVersions(workspaceId, ReadLens.Everything, dashboardId) } returns
+            listOf(detail(PipelineVersionStatus.DISCARDED, 1))
+
+        val resolved = model.resolve(workspaceId, LensedView.EVERYTHING, dashboardId, null)
+
+        resolved.hasSelected shouldBe false
+        resolved.draftVersion shouldBe null
+        verify(exactly = 0) { dashboards.findServedVersion(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `a promoter default cannot serve a draft refused by its narrowing lens`() {
+        val lens = ReadLens.Only(emptySet())
+        val view = LensedView(pipelines = ReadLens.Everything, templates = ReadLens.Everything, dashboards = lens)
+        every { dashboards.findWorking(workspaceId, lens, dashboardId) } returns version(PipelineVersionStatus.DRAFT, 1)
+        every { dashboards.findServed(workspaceId, lens, dashboardId) } returns null
+        every { dashboards.findServedVersion(workspaceId, lens, dashboardId, 1) } returns null
+        every { dashboards.listVersions(workspaceId, lens, dashboardId) } returns emptyList()
+
+        val resolved = model.resolve(workspaceId, view, dashboardId, null)
+
+        resolved.hasSelected shouldBe false
+        resolved.selectedVersion shouldBe null
+        verify(exactly = 0) { dashboards.findServedVersion(workspaceId, ReadLens.Everything, dashboardId, any()) }
     }
 
     @Test

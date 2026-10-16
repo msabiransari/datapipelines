@@ -32,13 +32,13 @@ import java.util.UUID
  *
  * ## The version model
  * [DashboardWorkspaceModel.resolve] decides what the page shows. The default is the current
- * RELEASED version; `?version=N` is #369's named-version rule (a DRAFT only to the
- * everything-lens, DISCARDED to nobody, else the family's 404 naming the version). No served
- * release and no named version is NOT an error — it is the choose-a-version state (#409):
- * the record exists in the caller's tree, the `h1` shows its name, and the draft (when the
- * caller's lens shows one) is offered with its preview link and the "no release yet"
- * sentence. The runtime configuration is read ONCE here for the selected version — the ONE
- * Plotly bundle the page declares (`renderer.bundle`, the implementation spec's §10.4) — and
+ * RELEASED version, else the admitted draft labelled (#537); `?version=N` is #369's named-version
+ * rule (a DRAFT only to the everything-lens, DISCARDED to nobody, else the family's 404 naming
+ * the version). No served release, no named version and no admitted draft is NOT an error —
+ * it is the choose-a-version state (#409): the `h1` keeps the name and the admitted history
+ * is offered with the "no release yet" sentence. The runtime configuration is read ONCE
+ * here for the selected version — the ONE Plotly bundle the page declares (`renderer.bundle`,
+ * the implementation spec's §10.4) — and
  * a board that cannot run is the refusal state IN PLACE, the name still in the `h1`.
  *
  * ## Full navigations, deliberately
@@ -105,10 +105,10 @@ class DashboardWorkspaceController(
         model.addAttribute("servedVersion", resolved.served?.version)
         model.addAttribute("hasDraft", resolved.draftVersion != null)
         model.addAttribute("draftVersion", resolved.draftVersion)
-        // The board's version channel: the named version rides data-dp-dashboard-version (the
-        // #369 attribute, an integer); the default resolution writes NOTHING, so the glue's
-        // init stays "released" — the first-party page's own value (dashboards.md §6.1).
-        model.addAttribute("boardVersion", if (requested != null) resolved.selectedVersion else null)
+        // The board's version channel: an explicit selection or a default draft rides
+        // data-dp-dashboard-version (#369's integer attribute), so the glue boots that version.
+        // Only a current-release default omits it and keeps the glue's "released" value (#537).
+        model.addAttribute("boardVersion", if (requested != null || !resolved.selectedIsCurrent) resolved.selectedVersion else null)
         model.addAttribute(
             "versions",
             resolved.versions.map {
