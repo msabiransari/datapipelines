@@ -1,19 +1,26 @@
-/** Toggle one accordion family; null represents an entirely closed accordion. */
-export function nextOpen(open, clicked) {
-  return clicked === open ? null : clicked;
+/**
+ * #554 — the resource browser's pure decisions, kept apart from the DOM so `node --test`
+ * drives them (src/test/js/sidebar-state.test.mjs).
+ *
+ * The browsable family a path belongs to: the menu's own prefix rule (shell.js
+ * `isActiveSection`, the layout's `#strings.startsWith`), over the families the browser
+ * hosts. Derived, never stored (record §3 rules 4–6): null on any other page.
+ */
+export function familyForPath(path, families) {
+  if (typeof path !== "string" || !path) return null;
+  return families.find(family => path.indexOf(`/${family}`) === 0) ?? null;
 }
 
-/** Restore only live families, preferring the current page among legacy open panels.
- * Lazy preference getters may throw when browser storage is unavailable.
+/**
+ * The storage keys the in-rail accordion wrote, removed on sight and never reinterpreted
+ * (record §4): the open-family key (#478) and the per-family panel flags it superseded.
  */
-export function restoreOpen(preferences) {
-  try {
-    const { stored, current, order } = preferences;
-    if (stored != null) return order.includes(stored) ? stored : null;
-    const { legacyFlags } = preferences;
-    const candidates = order.filter(family => legacyFlags[family] === "1");
-    return candidates.includes(current) ? current : candidates[0] ?? null;
-  } catch (_) {
-    return null;
-  }
+export function retiredTreeKeys(workspace, families) {
+  if (!workspace) return [];
+  return [`dp-tree-open:${workspace}`, ...families.map(family => `dp-tree-panel:${workspace}:${family}`)];
+}
+
+/** The folder button's family-specific name (record §3 rule 7). */
+export function browseLabel(label) {
+  return `Browse ${label || "resources"}`;
 }

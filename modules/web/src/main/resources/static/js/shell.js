@@ -145,7 +145,7 @@
  *
  * 110 §A added the PHONE DRAWER, the shell's third state:
  *
- * 12. THE DRAWER. Below 768px the SAME <aside class="app-rail"> becomes an
+ * 12. THE DRAWER. Below 761px (#554's re-cut of 110's 768) the SAME <aside class="app-rail"> becomes an
  *     off-canvas drawer — app.css takes it out of the grid, translates it
  *     off-screen and lights it under `rail-open`, a class on <html> like the
  *     collapse but NEVER persisted: a drawer is closed on every load. Opened by
@@ -155,10 +155,12 @@
  *     applyBoostSwap arms for the entrance, so a background partial settling
  *     while the drawer is open cannot slam it shut, and setRailOpen's no-change
  *     early return keeps desktop swaps focus-neutral. Opening moves focus to the
- *     first nav link; closing returns it to the opener. From 768 to 1099px the
+ *     first nav link; closing returns it to the opener. From 761 to 1100px the
  *     rail's default flips to collapsed by pure CSS; the user's explicit choice
  *     travels the same dp-rail key (`rail-expanded` = a stored "0", stamped
- *     pre-paint by the layout's inline script).
+ *     pre-paint by rail.js). #554 made the resource browser the SECOND drawer
+ *     under the same discipline (DRAWERS below): one open at a time, `inert`
+ *     siblings, Tab contained, focus back to its own opener.
  *
  * 161 added the SEARCH PALETTE (#155 — 079 §B's placeholder made real):
  *
@@ -169,7 +171,7 @@
  *     Enter clicks it; Esc returns), and the two-copies rule: topbar + drawer
  *     roots are told apart by data-search-* hooks, the active row's id is
  *     reserved and document-unique, and ⌘K drives whichever copy is displayed.
- *     #159: in the 768–1099 band neither is — the layout renders ONE entry
+ *     #159: in the 761–1100 band neither is — the layout renders ONE entry
  *     button there (#app-search-band); opening it reveals the topbar copy in
  *     place (one class on the bar — no third copy of the control), and the
  *     chord drives that button, so the band has search by button and by chord.
@@ -655,10 +657,11 @@
 
 
   /* ------------------------------------------------------------------ 079 §A/§B
-     The rail and the top bar are OUTSIDE #app-main, so a boosted swap never
-     re-renders them. Everything below is the client-side half of a fact the
-     server computed for the first paint: the highlighted section, the
-     breadcrumb, the active theme, and the rail's collapsed state.
+     The menu, the resource browser (#554) and the top bar are OUTSIDE #app-main,
+     so a boosted swap never re-renders them. Everything below is the client-side
+     half of a fact the server computed for the first paint: the highlighted
+     section, the breadcrumb, the active theme, the menu's collapsed state and the
+     browser's Hide.
 
      All of it is written as pure functions over a `doc`, so `node --test` can
      drive them against a shimmed DOM (src/test/js/shell.test.mjs) without a
@@ -667,15 +670,27 @@
 
   var RAIL_KEY = "dp-rail";
   var COLLAPSED_CLASS = "rail-collapsed";
-  /* 110 §A: the mirror of the opposite choice. From 768 to 1099px the rail's DEFAULT
-     is collapsed by a CSS media rule; a user who explicitly expanded it there (a
+  /* 110 §A: the mirror of the opposite choice. From 761 to 1100px (#554's re-cut of
+     110's 768/1099 edges) the menu's DEFAULT is compact by a CSS media rule; a user who explicitly expanded it there (a
      stored "0") carries this class so the default cannot re-collapse their choice.
      The layout's inline script stamps it before the first paint; this file toggles
      it only on a REAL user click (storage provided), never on the init sync. */
   var EXPANDED_CLASS = "rail-expanded";
   /* 110 §A: the phone drawer's open state — a class on <html>, like the collapse.
-     NEVER persisted: a drawer is closed on every load. */
+     NEVER persisted: a drawer is closed on every load. #554 adds the second drawer,
+     the resource browser's, under the same rule. */
   var RAIL_OPEN_CLASS = "rail-open";
+  var BROWSER_OPEN_CLASS = "browser-open";
+  /* #554 — the user's Hide of the resource browser: a class on <html>, stamped before
+     the first paint by rail.js from `dp-browser-hidden:<workspace>` = "1" (per
+     workspace, a boolean only — record §4 "scope persisted presentation choices"). It is
+     independent of the menu's collapse in both directions (record §3 rule 7). */
+  var BROWSER_HIDDEN_CLASS = "browser-hidden";
+  var BROWSER_HIDDEN_KEY = "dp-browser-hidden:";
+  /* The event the browser's lifecycle (js/tree/sidebar.mjs) listens for: the browser
+     became visible or hidden by a user action, so a family shown for the first time
+     mounts then and not before. */
+  var BROWSER_VISIBILITY_EVENT = "dp:browser-visibility";
   var THEME_HREF = /\/themes\/([a-z0-9-]+)\.css/;
 
   /* The rail's collapsed state lives on <html>, because the layout's one inline
@@ -686,7 +701,7 @@
      `storage` doubles as the "this was a real user choice" flag: the init sync
      passes null and must not stamp rail-expanded (the default has to stay free
      to collapse at drawer-adjacent widths); a click passes localStorage and the
-     expanded choice is recorded on <html> for the 768–1099 default to honour. */
+     expanded choice is recorded on <html> for the 761–1100 default to honour. */
   function setRailCollapsed(doc, collapsed, storage) {
     var root = doc.documentElement;
     if (!root) return collapsed;
@@ -708,9 +723,17 @@
 
   /* The width band where the rail's DEFAULT is collapsed without any class on
      <html> (110 §A). One string, shared by the state machine and its tests. */
-  var DEFAULT_COLLAPSED_QUERY = "(min-width: 768px) and (max-width: 1099.98px)";
+  var DEFAULT_COLLAPSED_QUERY = "(min-width: 761px) and (max-width: 1100.98px)";
+  /* The drawer band (record §4: 760px and narrower). One string, as above. */
+  var PHONE_QUERY = "(max-width: 760.98px)";
 
-  /* What the READER sees, as opposed to what the class says: below 1100px the
+  function phoneWidth(win) {
+    if (!win || !win.matchMedia) return false;
+    var mq = win.matchMedia(PHONE_QUERY);
+    return !!(mq && mq.matches);
+  }
+
+  /* What the READER sees, as opposed to what the class says: at 1100px and below the
      CSS default collapses an undecided rail, so the collapse button must offer
      EXPAND there even though `rail-collapsed` is absent — and the init sync must
      stamp aria-expanded accordingly. Pure over the injected window so `node
@@ -732,36 +755,231 @@
     var button = doc.getElementById("rail-collapse");
     if (button) {
       button.setAttribute("aria-expanded", String(!collapsed));
-      button.setAttribute("title", collapsed ? "Expand sidebar" : "Collapse sidebar");
+      button.setAttribute("title", collapsed ? "Expand menu" : "Collapse menu");
     }
   }
 
-  /* ---- 110 §A: the phone drawer ---- */
+  /* ---- 110 §A, #554: the phone drawers ----
+     Two named drawers — Navigation (the menu) and Browse resources (the browser) —
+     under ONE discipline (record §4 "Phone and constrained layouts"): only one is open
+     at a time; Escape, the scrim or a successful navigation closes it; focus moves into
+     it on open and back to ITS opener on close; while one is open the rest of the shell
+     is `inert` and Tab wraps inside the drawer. Opening one closes the other first. */
+  var DRAWERS = {
+    rail: { openClass: RAIL_OPEN_CLASS, panelId: "app-rail", openerId: "rail-open" },
+    browser: { openClass: BROWSER_OPEN_CLASS, panelId: "app-browser", openerId: "browser-open" },
+  };
 
   function railOpen(doc) {
     return !!(doc.documentElement && doc.documentElement.classList.contains(RAIL_OPEN_CLASS));
+  }
+
+  function browserOpen(doc) {
+    return !!(doc.documentElement && doc.documentElement.classList.contains(BROWSER_OPEN_CLASS));
+  }
+
+  /* The open drawer's name, or null. */
+  function openDrawer(doc) {
+    if (railOpen(doc)) return "rail";
+    if (browserOpen(doc)) return "browser";
+    return null;
   }
 
   function firstRailLink(doc) {
     return doc.querySelector ? doc.querySelector(".app-nav-link") : null;
   }
 
-  /* Opens or closes the drawer, mirrors aria-expanded onto the opener, and does
-     the focus choreography ONLY when the state actually changed: opening puts
-     focus on the first nav link, closing returns it to the opener. The no-change
-     early return is what makes this safe to call from htmx:afterSettle for every
-     boosted navigation — a desktop swap (drawer closed) must not move focus. */
-  function setRailOpen(doc, open) {
+  /* Where focus lands in an opened drawer: the menu's first destination (110's rule), or
+     the visible family's search in the browser — the record's "opens the browser and
+     focuses its search" — falling back to its Hide (which closes the drawer) before the
+     tree has mounted. */
+  function drawerFocusTarget(doc, name) {
+    if (name === "rail") return firstRailLink(doc);
+    if (!doc.querySelector) return null;
+    return doc.querySelector("#app-browser .app-browser-tree:not([hidden]) input") ||
+      doc.getElementById("browser-hide");
+  }
+
+  /* `inert` on everything in the shell but the open drawer and the scrim (the scrim is
+     the dismiss target), cleared when none is open. Attribute, not property: the node
+     tests' DOM shim and every browser read the same thing. */
+  function syncInert(doc, name) {
+    var shell = doc.querySelector ? doc.querySelector(".app-shell") : null;
+    if (!shell || !shell.children) return;
+    var keep = name ? doc.getElementById(DRAWERS[name].panelId) : null;
+    for (var i = 0; i < shell.children.length; i++) {
+      var child = shell.children[i];
+      var exempt = !name || child === keep || (child.classList && child.classList.contains("app-rail-backdrop"));
+      if (exempt) child.removeAttribute("inert");
+      else child.setAttribute("inert", "");
+    }
+  }
+
+  /* Opens or closes one drawer, mirrors aria-expanded onto its opener, and does the
+     focus choreography ONLY when the state actually changed: opening puts focus inside
+     the drawer, closing returns it to the opener. The no-change early return is what
+     makes this safe to call from htmx:afterSettle for every boosted navigation — a
+     desktop swap (no drawer open) must not move focus. */
+  function setDrawerOpen(doc, name, open) {
     var root = doc.documentElement;
-    if (!root) return open;
-    var wasOpen = railOpen(doc);
-    root.classList.toggle(RAIL_OPEN_CLASS, open);
-    var opener = doc.getElementById("rail-open");
+    var drawer = DRAWERS[name];
+    if (!root || !drawer) return open;
+    var wasOpen = root.classList.contains(drawer.openClass);
+    if (open) {
+      // One at a time: the other closes without taking focus back to its own opener.
+      for (var other in DRAWERS) {
+        if (other !== name && root.classList.contains(DRAWERS[other].openClass)) {
+          root.classList.toggle(DRAWERS[other].openClass, false);
+          var otherOpener = doc.getElementById(DRAWERS[other].openerId);
+          if (otherOpener) otherOpener.setAttribute("aria-expanded", "false");
+        }
+      }
+    }
+    root.classList.toggle(drawer.openClass, open);
+    var opener = doc.getElementById(drawer.openerId);
     if (opener) opener.setAttribute("aria-expanded", String(open));
+    syncInert(doc, openDrawer(doc));
     if (open === wasOpen) return open;
-    var target = open ? firstRailLink(doc) : opener;
+    // The browser's family mounts on its first SHOW (sidebar.mjs), so it is told before
+    // focus looks for the family's search.
+    if (name === "browser") dispatchBrowserVisibility(doc, open);
+    var target = open ? drawerFocusTarget(doc, name) : opener;
     if (target && target.focus) target.focus();
     return open;
+  }
+
+  function setRailOpen(doc, open) {
+    return setDrawerOpen(doc, "rail", open);
+  }
+
+  function setBrowserOpen(doc, open) {
+    return setDrawerOpen(doc, "browser", open);
+  }
+
+  /* Closes whichever drawer is open (Escape, the scrim, a boosted navigation). */
+  function closeDrawers(doc) {
+    var name = openDrawer(doc);
+    if (name) setDrawerOpen(doc, name, false);
+    return name;
+  }
+
+  /* Focus containment: Tab from the drawer's last focusable control wraps to its first,
+     Shift+Tab from the first to the last. The siblings are already `inert`, so this only
+     has to close the loop at the drawer's two ends. Returns true when it moved focus. */
+  var FOCUSABLE = "a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), " +
+    "textarea:not([disabled]), [tabindex]:not([tabindex='-1'])";
+
+  function containDrawerFocus(doc, evt) {
+    var name = openDrawer(doc);
+    if (!name || evt.key !== "Tab") return false;
+    var panel = doc.getElementById(DRAWERS[name].panelId);
+    if (!panel || !panel.querySelectorAll) return false;
+    var all = panel.querySelectorAll(FOCUSABLE);
+    var items = [];
+    for (var i = 0; i < all.length; i++) {
+      if (all[i].closest && all[i].closest("[hidden]")) continue;
+      if (all[i].getClientRects && all[i].getClientRects().length === 0) continue;
+      items.push(all[i]);
+    }
+    if (!items.length) return false;
+    var first = items[0];
+    var last = items[items.length - 1];
+    var active = doc.activeElement;
+    var inside = panel.contains ? panel.contains(active) : false;
+    if (evt.shiftKey && (active === first || !inside)) {
+      evt.preventDefault();
+      last.focus();
+      return true;
+    }
+    if (!evt.shiftKey && (active === last || !inside)) {
+      evt.preventDefault();
+      first.focus();
+      return true;
+    }
+    return false;
+  }
+
+  /* ---- #554: the resource browser's Hide (desktop) ---- */
+
+  function browserHidden(doc) {
+    return !!(doc.documentElement && doc.documentElement.classList.contains(BROWSER_HIDDEN_CLASS));
+  }
+
+  /* Hides or shows the browser column, records the choice per workspace when it is a
+     real user action (`storage` given, the setRailCollapsed convention), mirrors it onto
+     the folder button, and tells the browser's lifecycle. A Hide that cannot be saved
+     still hides this page. Never touches `dp-rail` or the collapse classes. */
+  function setBrowserHidden(doc, hidden, storage) {
+    var root = doc.documentElement;
+    if (!root) return hidden;
+    root.classList.toggle(BROWSER_HIDDEN_CLASS, hidden);
+    var opener = doc.getElementById("browser-open");
+    if (opener) opener.setAttribute("aria-expanded", String(!hidden));
+    var workspace = root.getAttribute("data-dp-workspace");
+    try {
+      if (storage && workspace) {
+        if (hidden) storage.setItem(BROWSER_HIDDEN_KEY + workspace, "1");
+        else storage.removeItem(BROWSER_HIDDEN_KEY + workspace);
+      }
+    } catch (e) {
+      /* Private modes throw on write; the page still hides. */
+    }
+    dispatchBrowserVisibility(doc, !hidden);
+    return hidden;
+  }
+
+  function dispatchBrowserVisibility(doc, visible) {
+    if (typeof CustomEvent === "undefined" || !doc.dispatchEvent) return;
+    doc.dispatchEvent(new CustomEvent(BROWSER_VISIBILITY_EVENT, { detail: { visible: visible } }));
+  }
+
+  /* The folder button and the catalogs' Browse folders action: SHOW the browser — on a
+     phone by opening its drawer, on a desktop by lifting the user's Hide — then focus its
+     search. One entry point, so the two callers cannot drift. */
+  function revealBrowser(doc, win, storage) {
+    if (phoneWidth(win)) return setBrowserOpen(doc, true);
+    if (browserHidden(doc)) setBrowserHidden(doc, false, storage);
+    else dispatchBrowserVisibility(doc, true);
+    var target = drawerFocusTarget(doc, "browser");
+    if (target && target.focus) target.focus();
+    return true;
+  }
+
+  /* The browser head's Hide: on a phone it closes the drawer (the drawer is not a
+     preference); on a desktop it records the Hide and hands focus to the folder button
+     that now stands in for the browser, so focus is never left on a removed control. */
+  function hideBrowser(doc, storage) {
+    if (browserOpen(doc)) return setBrowserOpen(doc, false);
+    setBrowserHidden(doc, true, storage);
+    var opener = doc.getElementById("browser-open");
+    if (opener && opener.focus) opener.focus();
+    return false;
+  }
+
+  /* ---- #554: the compact menu's named tooltip ----
+     Shown beside a menu destination that is hovered or keyboard-focused while the menu
+     is visually compact (never in the phone drawer, which shows its labels); its text is
+     the link's `data-nav-label`. Positioned through ONE custom property on the tip. */
+  function showNavTip(doc, win, link) {
+    var tip = doc.getElementById("app-nav-tip");
+    if (!tip) return false;
+    var label = link && link.getAttribute ? link.getAttribute("data-nav-label") : null;
+    if (!label || phoneWidth(win) || !railVisuallyCollapsed(doc, win)) {
+      tip.hidden = true;
+      return false;
+    }
+    var rect = link.getBoundingClientRect ? link.getBoundingClientRect() : null;
+    tip.textContent = label;
+    if (rect && tip.style && tip.style.setProperty) {
+      tip.style.setProperty("--app-nav-tip-y", Math.round(rect.top + rect.height / 2) + "px");
+    }
+    tip.hidden = false;
+    return true;
+  }
+
+  function hideNavTip(doc) {
+    var tip = doc.getElementById("app-nav-tip");
+    if (tip) tip.hidden = true;
   }
 
   /* The breadcrumb, re-derived from the rail itself: the active link carries its
@@ -791,7 +1009,7 @@
     if (sepEl) sepEl.hidden = !group;
     if (pageEl) {
       pageEl.textContent = label;
-      // 110 §A: below 1100px the group is hidden and the leaf truncates, so the
+      // 110 §A: at 1100px and below the group is hidden and the leaf truncates, so the
       // element carries the full path as its title — the same thing the server
       // rendered at first paint (ShellRenderTest keeps the two tables agreeing).
       pageEl.setAttribute("title", group ? group + " / " + label : label);
@@ -885,7 +1103,7 @@
 
   /* The control a global shortcut should drive: the copy that is actually displayed.
      offsetParent is null exactly when the element (or an ancestor) is display:none —
-     the topbar copy below 1100px, the drawer copy above 768px, and — the gap between
+     the topbar copy below 1101px, the drawer copy above 760px, and — the gap between
      those breakpoints — neither. There (#159) the shortcut drives the band's entry
      button instead, which reveals the topbar copy; the chord does nothing only where
      that button is not displayed either (phone widths, the anonymous shell). */
@@ -984,9 +1202,9 @@
     for (var i = 0; i < roots.length; i++) setSearchOpen(roots[i], false);
   }
 
-  /* ---- #159: the 768–1099 band's entry point ----
+  /* ---- #159: the 761–1100 band's entry point ----
 
-     Between the topbar copy's hide (below 1100px) and the drawer copy's (above 767.98px)
+     Between the topbar copy's hide (below 1101px) and the drawer copy's (above 760.98px)
      neither palette is displayed, so the band had no search at all and ⌘K had no control
      to drive. The layout renders ONE button there (#app-search-band); OPENING it puts the
      open class on the bar, which reveals the TOPBAR copy in place and stands the button
@@ -1145,9 +1363,10 @@
       setSearchBandOpen(doc, false);
       /* 110 §A: a BOOSTED navigation closes the drawer — the same one-shot that
          decides the entrance decides the close, so a background partial settling
-         while the drawer is open cannot slam it shut. setRailOpen's no-change
-         early return keeps this a no-op at desktop widths. */
-      setRailOpen(doc, false);
+         while the drawer is open cannot slam it shut. #554: either drawer; the
+         no-change early return keeps this a no-op at desktop widths. */
+      closeDrawers(doc);
+      hideNavTip(doc);
     });
 
     /* 085 §D — every request shows the bar; the originating button goes busy;
@@ -1310,22 +1529,49 @@
       setRailCollapsed(doc, !railVisuallyCollapsed(doc, window), window.localStorage);
     });
 
-    /* 110 §A — the phone drawer. Open on the topbar's opener, close on the close
+    /* 110 §A — the phone drawers. Open on the topbar's openers, close on the close
        button, on the scrim, on Escape, and on any boosted navigation (the
-       afterSettle wiring above). The opener is display:none above 768px by CSS,
-       so these listeners are inert at desktop widths by construction. */
+       afterSettle wiring above). #rail-open is display:none above 760px by CSS, so
+       its listener is inert at desktop widths by construction; #554's #browser-open
+       has a desktop job too (lifting the user's Hide), which revealBrowser decides by
+       the same band query the CSS uses. */
     doc.body.addEventListener("click", function (evt) {
-      if (evt.target.closest && evt.target.closest("#rail-open")) {
+      if (!evt.target.closest) return;
+      if (evt.target.closest("#rail-open")) {
         setRailOpen(doc, true);
         return;
       }
-      if (evt.target.closest && evt.target.closest("#rail-close")) {
+      if (evt.target.closest("#rail-close")) {
         setRailOpen(doc, false);
         return;
       }
-      if (evt.target.closest && evt.target.closest(".app-rail-backdrop")) {
-        setRailOpen(doc, false);
+      if (evt.target.closest(".app-rail-backdrop")) {
+        closeDrawers(doc);
+        return;
       }
+      if (evt.target.closest("#browser-open")) {
+        revealBrowser(doc, window, window.localStorage);
+        return;
+      }
+      if (evt.target.closest("#browser-hide")) {
+        hideBrowser(doc, window.localStorage);
+      }
+    });
+
+    /* #554 — the compact menu's tooltip follows the pointer and keyboard focus. */
+    var tipFor = function (evt) {
+      var link = evt.target && evt.target.closest ? evt.target.closest("#app-rail .app-nav-link") : null;
+      if (link) showNavTip(doc, window, link);
+      else hideNavTip(doc);
+    };
+    doc.body.addEventListener("pointerover", tipFor);
+    doc.body.addEventListener("focusin", function (evt) {
+      // Keyboard focus only: a click's focus already has the pointer's tip.
+      if (evt.target && evt.target.matches && evt.target.matches(":focus-visible")) tipFor(evt);
+      else hideNavTip(doc);
+    });
+    doc.body.addEventListener("focusout", function () {
+      hideNavTip(doc);
     });
 
     /* #432 — the catalog's empty-state clear. htmx's own click listener sits ON the
@@ -1467,7 +1713,7 @@
       if ((evt.metaKey || evt.ctrlKey) && (evt.key === "k" || evt.key === "K")) {
         var shortcutRoot = visibleSearchRoot(doc);
         if (!shortcutRoot) {
-          /* #159: in the 768–1099 band no palette copy is displayed; the chord drives
+          /* #159: in the 761–1100 band no palette copy is displayed; the chord drives
              the band's entry button — the same open path a click takes. Where the button
              is not displayed either (the anonymous shell, phone widths), the chord still
              does nothing, exactly as before. */
@@ -1528,11 +1774,15 @@
           }
         }
       }
-      /* 110 §A: Escape closes the drawer first — it is the top layer when open. */
-      if (evt.key === "Escape" && railOpen(doc)) {
-        setRailOpen(doc, false);
+      /* 110 §A: Escape closes the drawer first — it is the top layer when open. #554:
+         either drawer, and Tab stays inside the open one. Escape also dismisses the
+         compact menu's tooltip (WCAG 1.4.13), without consuming the key. */
+      if (evt.key === "Escape") hideNavTip(doc);
+      if (evt.key === "Escape" && openDrawer(doc)) {
+        closeDrawers(doc);
         return;
       }
+      if (containDrawerFocus(doc, evt)) return;
       if (!menuIsOpen(doc)) return;
       if (evt.key === "Escape") {
         setMenuOpen(doc, false);
@@ -1570,15 +1820,19 @@
 
     syncNavActive(doc, window.location.pathname);
     syncCrumbs(doc, window.location.pathname);
-    // The rail's class is already on <html> (the layout's pre-paint script); this
+    // The menu's class is already on <html> (the pre-paint rail.js); this
     // brings the button's aria-expanded into line with the VISUAL state on the
-    // first paint — and, deliberately, writes NO class: in the 768–1099 default
+    // first paint — and, deliberately, writes NO class: in the 761–1100 default
     // band the absence of a class IS the state, and the document must not
     // overwrite a decision the browser owns. (110 §A.)
     syncCollapseButton(doc, railVisuallyCollapsed(doc, window));
-    // Same one-line sync for the drawer: closed on every load, opener aria-expanded
-    // matching. (No state change, so setRailOpen's focus choreography cannot fire.)
+    // Same one-line sync for the drawers: closed on every load, openers' aria-expanded
+    // matching. (No state change, so the focus choreography cannot fire.)
     setRailOpen(doc, railOpen(doc));
+    setBrowserOpen(doc, browserOpen(doc));
+    // The folder button's desktop state: expanded unless the user hid the browser.
+    var browserOpener = doc.getElementById("browser-open");
+    if (browserOpener && !browserOpen(doc)) browserOpener.setAttribute("aria-expanded", String(!browserHidden(doc)));
   }
 
   var api = {
@@ -1627,8 +1881,25 @@
     COLLAPSED_CLASS: COLLAPSED_CLASS,
     EXPANDED_CLASS: EXPANDED_CLASS,
     RAIL_OPEN_CLASS: RAIL_OPEN_CLASS,
+    BROWSER_OPEN_CLASS: BROWSER_OPEN_CLASS,
+    BROWSER_HIDDEN_CLASS: BROWSER_HIDDEN_CLASS,
+    BROWSER_HIDDEN_KEY: BROWSER_HIDDEN_KEY,
+    BROWSER_VISIBILITY_EVENT: BROWSER_VISIBILITY_EVENT,
+    PHONE_QUERY: PHONE_QUERY,
     setRailOpen: setRailOpen,
     railOpen: railOpen,
+    setBrowserOpen: setBrowserOpen,
+    browserOpen: browserOpen,
+    setDrawerOpen: setDrawerOpen,
+    openDrawer: openDrawer,
+    closeDrawers: closeDrawers,
+    containDrawerFocus: containDrawerFocus,
+    browserHidden: browserHidden,
+    setBrowserHidden: setBrowserHidden,
+    revealBrowser: revealBrowser,
+    hideBrowser: hideBrowser,
+    showNavTip: showNavTip,
+    hideNavTip: hideNavTip,
     railVisuallyCollapsed: railVisuallyCollapsed,
     syncCollapseButton: syncCollapseButton,
     DEFAULT_COLLAPSED_QUERY: DEFAULT_COLLAPSED_QUERY,
