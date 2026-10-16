@@ -75,6 +75,60 @@
 [data-type="calc"] { --type: var(--type-calc); --type-bg: var(--type-calc-bg); }
 [data-type="transform"] { --type: var(--type-transform); --type-bg: var(--type-transform-bg); }
 
+/* ---------------------------------------------------------------------------
+   #555 — THE COMPACT SCALE: type, control and shape ROLES, defined once
+   (ui-screens.md §3.3, normative; the application-shell record §5/§6, #547).
+
+   A screen never names a size; it names a role. Every role below is a length
+   — ui-screens §2 principle 3 forbids hard-coded COLOURS, and this file reads
+   it as "a length may be literal, a colour never" (`--app-content-max`) — and
+   most borrow a design-system step: rem steps on the vendored 16px root, so a
+   user's browser text-size setting scales the whole scale together.
+
+   ROLES, NOT A RE-BIND. The vendored `--text-sm`/`--text-xs` stay what the
+   design system says (14px/12px). Re-binding them globally would also resize
+   what the record PRESERVES — the dashboards' authored KPI and table renderers
+   (`dashboards.css` reads `--text-xl`/`--text-sm`/`--text-xs` for content),
+   the docs prose (`docs.css .doc-body` reads `--text-sm`), the template
+   editor's SQL surfaces (`template-editor.css` `#templateBody`,
+   `.te-render-out`). So chrome moves onto these roles rule by rule, and
+   content keeps its tokens.
+
+   Spacing uses the existing `--space-*`/`--gap-*` steps (4, 8, 12, 16, 20,
+   24, 32, 40, 48 all exist); no spacing alias is added.
+   --------------------------------------------------------------------------- */
+:root {
+  /* Type roles. Base UI and support copy carry their own leading; a title's
+     leading and tracking travel with it. */
+  --app-text-ui: 0.8125rem;            /* 13px — base UI, controls, notices */
+  --app-leading-ui: 1.5;               /* 19.5px at 13 */
+  --app-text-support: 0.75rem;         /* 12px — support copy, tabs, table cells, card titles, form help/errors */
+  --app-text-name: 0.75rem;            /* 12px — resource names; wrap, never clip */
+  --app-leading-name: 1.55;            /* 18.6px at 12 */
+  --app-text-heading: 0.875rem;        /* 14px — a dialog or section heading (the prototype's dialog h3) */
+  --app-text-browser-title: var(--app-text-heading); /* 14px — the resource browser's title (#554 reads it) */
+  --app-text-title: var(--text-2xl);   /* 24px — the ONE page title */
+  --app-text-title-phone: 1.3125rem;   /* 21px — the same title below the phone breakpoint */
+  --app-leading-title: 1.35;           /* 32.4px at 24, 28.35px at 21 */
+  --app-tracking-title: -0.025em;      /* -0.6px at 24 */
+  --app-weight-title: var(--weight-semibold);
+  --app-text-badge: 0.6875rem;         /* 11px — status badges, a table's header */
+  --app-text-meta: 0.625rem;           /* 10px — short metadata and group captions ONLY */
+  --app-tracking-caption: 0.12em;      /* 1.2px at 10 — an uppercase caption's tracking */
+  --app-text-entry-phone: 1rem;        /* 16px — text entry below the phone breakpoint (no zoom-on-focus) */
+
+  /* Control and shape roles. */
+  --app-control-h: var(--space-9);     /* 36px — a button, input or select, minimum */
+  --app-tab-h: 2.75rem;                /* 44px — a tab: 12px padding + 18px line + 2px rule */
+  --app-header-h: 3.625rem;            /* 58px — the shell header (#554 reads it) */
+  --app-icon-h: var(--space-8);        /* 32px — an icon-only button, square */
+  --app-radius-control: var(--radius-md); /* 8px — controls */
+  --app-radius-panel: var(--radius-lg);   /* 12px — cards, panels, dialogs */
+  --app-radius-badge: var(--radius-sm);   /* 4px — a status badge */
+  --app-dialog-max: 560px;             /* an ordinary dialog; it also never exceeds 90vw */
+  --app-target-min: 44px;              /* a coarse pointer's smallest target */
+}
+
 /* Application-level semantic tokens — derive from design system, never hardcoded hex */
 :root {
   --app-sidebar-width: 280px;
