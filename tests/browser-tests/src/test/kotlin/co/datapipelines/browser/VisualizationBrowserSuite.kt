@@ -94,8 +94,6 @@ abstract class VisualizationBrowserSuite : DashboardBrowserSuite() {
 
     /**
      * The fixture family: bar + scatter (two cases, one empty), a surface (3d bundle), a heatmap with a colorbar (#525).
-     * The heatmap pins `zsmooth: "fast"`: Plotly 4.1.1's default (`false`) on linear axes writes a style ATTRIBUTE on the
-     * heatmap image (`heatmap/plot.js`, `image-rendering`), a second refusal this fixture must not mix into the colorbar's.
      */
     private enum class Fixture { BARS, SURFACE, HEATMAP }
 
@@ -107,7 +105,7 @@ abstract class VisualizationBrowserSuite : DashboardBrowserSuite() {
         val config =
             when (kind) {
                 Fixture.SURFACE -> """{"data": [{"type": "surface", "x": [], "y": [], "z": []}], "layout": {}}"""
-                Fixture.HEATMAP -> """{"data": [{"type": "heatmap", "zsmooth": "fast", "x": [], "y": [], "z": []}], "layout": {}}"""
+                Fixture.HEATMAP -> """{"data": [{"type": "heatmap", "x": [], "y": [], "z": []}], "layout": {}}"""
                 Fixture.BARS -> BARS_CONFIG
             }
         val bindings =
