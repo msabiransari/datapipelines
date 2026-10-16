@@ -21,6 +21,7 @@ import org.springframework.context.annotation.Configuration
 import org.springframework.web.filter.OncePerRequestFilter
 import org.springframework.web.util.ContentCachingRequestWrapper
 import java.io.BufferedReader
+import java.io.IOException
 import java.io.InputStreamReader
 
 /**
@@ -54,7 +55,8 @@ import java.io.InputStreamReader
  *
  * `server.tomcat.max-swallow-size` (configuration.md §3.13) bounds how much of a refused body
  * Tomcat drains afterwards, so an abandoned over-cap upload costs the connection, not the
- * server.
+ * server. The screenshot route reads its refused body itself up to [ScreenshotUploadRoute.DRAIN_BYTES]
+ * (#467), so a declaration of up to that size closes on a FIN after the client has written it all.
  */
 class RequestBodyCapFilter(
     private val limits: RequestLimitsProperties,
@@ -69,7 +71,12 @@ class RequestBodyCapFilter(
         val cap = if (screenshot) ScreenshotUploadRoute.CAP_BYTES else limits.maxRequestBytes
         val declared = request.contentLengthLong
         if (declared > cap) {
-            if (screenshot) refuseScreenshot(request, response) else refuse(request, response, cap)
+            if (screenshot) {
+                refuseScreenshot(request, response)
+                drainRefusedScreenshot(request, response, declared)
+            } else {
+                refuse(request, response, cap)
+            }
             return
         }
         try {
@@ -100,6 +107,33 @@ class RequestBodyCapFilter(
             userMessage = ApiErrorCatalog.userMessageFor(code),
             details = mapOf("cap_bytes" to VisualizationTestSessionService.MAX_SCREENSHOT_BYTES),
         )
+    }
+
+    /**
+     * #467: the 413 is flushed, then a declaration up to [ScreenshotUploadRoute.DRAIN_BYTES] is read to its end and
+     * discarded. Tomcat's own swallow (2 MiB) is smaller than any over-cap screenshot, so without this it closed the
+     * connection mid-body with unread bytes, and the kernel's reset reached a client still writing — one that writes
+     * before it reads (the JDK client, Python's `http.client`) then lost the 413 it had already received. Fully read,
+     * the close is a FIN after the client's last byte. A larger declaration is left to Tomcat's bounded swallow: the
+     * route never reads more than the cap plus the margin for one refused request.
+     */
+    private fun drainRefusedScreenshot(
+        request: HttpServletRequest,
+        response: HttpServletResponse,
+        declared: Long,
+    ) {
+        if (declared > ScreenshotUploadRoute.DRAIN_BYTES) return
+        try {
+            response.flushBuffer()
+            val input = request.inputStream
+            val buffer = ByteArray(DRAIN_BUFFER_BYTES)
+            // Discarded: the refusal is already on the wire; only the connection's clean close is at stake.
+            var read = 0
+            while (read >= 0) read = input.read(buffer)
+        } catch (_: IOException) {
+            // The client went away or stalled past the connector's read timeout: the response is committed and
+            // Tomcat closes the connection, which is all a refused upload is owed.
+        }
     }
 
     /** The §4.2 envelope for `request.body_too_large`, written through `auth`'s writer. */
@@ -236,6 +270,15 @@ class RequestBodyCapFilter(
     internal object ScreenshotUploadRoute {
         val CAP_BYTES: Long = VisualizationTestSessionService.MAX_SCREENSHOT_BYTES.toLong()
 
+        /**
+         * The most of a refused body the route reads (#467): the cap plus [DRAIN_MARGIN_BYTES], so a screenshot a
+         * little over the cap still gets a clean close while an unauthenticated declaration costs at most this much.
+         */
+        val DRAIN_BYTES: Long = CAP_BYTES + DRAIN_MARGIN_BYTES
+
+        /** The default `server.tomcat.max-swallow-size`, 2 MiB: what Tomcat already reads of any refused body. */
+        private const val DRAIN_MARGIN_BYTES: Long = 2L * 1024 * 1024
+
         private val PATH = Regex("^/api/v1/visualizations/[^/]+/tests/sessions/[^/]+/screenshot$")
 
         fun matches(request: HttpServletRequest): Boolean = request.method == "POST" && PATH.matches(request.appPath())
@@ -246,6 +289,7 @@ class RequestBodyCapFilter(
         const val ORDER: Int = co.datapipelines.web.CorrelationIdFilter.ORDER + 2
 
         private val BODY_LESS_METHODS = setOf("GET", "HEAD", "OPTIONS")
+        private const val DRAIN_BUFFER_BYTES = 8192
     }
 }
 

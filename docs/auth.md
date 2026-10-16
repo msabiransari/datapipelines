@@ -1,9 +1,9 @@
 # Auth & Security Specification
 
-**Status:** v3.47 (revised — see Change Log)
+**Status:** v3.48 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System](type-system.md)
-**Last updated:** 2026-10-15
+**Last updated:** 2026-10-16
 
 ---
 
@@ -1290,7 +1290,7 @@ Handler methods are not listed here: §7.6 is their reviewed table (B3 — one t
 | filter | `webMvcObservationFilter` | `ServerHttpObservationFilter` | `/* · order -2147483647` | Micrometer: the HTTP server observation (metrics) for every request. | yes | Constant per request. |
 | filter | `correlationIdFilterRegistration` | `CorrelationIdFilter` | `/* · order -2147483638` | Adopts or mints the correlation id, into the MDC and the response header ([Observability §3.3](observability.md#33-correlation-id-propagation)). | yes | Constant per request. |
 | filter | `corsFilterRegistration` | `CorsFilter` | `/* · order -2147483637` | CORS for the one configured origin, `auth.base-url` (§8.2 step 1); no origin configured, no CORS. | yes | Constant per request. |
-| filter | `requestBodyCapFilterRegistration` | `RequestBodyCapFilter` | `/api/v1/*, /mcp, /mcp/* · order -2147483636` | The platform's request-body cap (#279): a body over `datapipelines.web.max-request-bytes` refused `413 request.body_too_large` before the chain and before any parser reads it (pipeline-contract §13.21). ONE route exemption (#353): `POST /api/v1/visualizations/{id}/tests/sessions/{sessionId}/screenshot` carries a raw PNG/WebP body under its OWN 4 MiB cap (the session service's constant), refused `413 visualization.test.screenshot_too_large` by the same two paths — never the platform's cap, and no other route moves. | yes | The cap bounds the read; the counting stream never pulls past it. |
+| filter | `requestBodyCapFilterRegistration` | `RequestBodyCapFilter` | `/api/v1/*, /mcp, /mcp/* · order -2147483636` | The platform's request-body cap (#279): a body over `datapipelines.web.max-request-bytes` refused `413 request.body_too_large` before the chain and before any parser reads it (pipeline-contract §13.21). ONE route exemption (#353): `POST /api/v1/visualizations/{id}/tests/sessions/{sessionId}/screenshot` carries a raw PNG/WebP body under its OWN 4 MiB cap (the session service's constant), refused `413 visualization.test.screenshot_too_large` by the same two paths — never the platform's cap, and no other route moves. | yes | The cap bounds the read; the counting stream never pulls past it. The one bounded exception: after a declared-over-cap screenshot's 413 the filter discards up to 6 MiB of that body so its connection closes cleanly (#467). |
 | filter | `formContentFilter` | `OrderedFormContentFilter` | `/* · order -9900` | Spring Boot: form bodies on PUT, PATCH and DELETE. | yes | The body the container already bounds. |
 | filter | `requestContextFilter` | `OrderedRequestContextFilter` | `/* · order -105` | Spring Boot: binds the request to its thread for request-scoped lookups. | yes | Constant per request. |
 | filter | `springSecurityFilterChain` | `DelegatingFilterProxyRegistrationBean$1` | `/* · order -100` | Delegates to Spring Security's filter chain — the `security-chain` rows below. | yes | The chain's. |
@@ -1826,6 +1826,7 @@ All auth tables accessed via `JdbcTemplate` + `RowMapper`. No JPA. See [Metadata
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-16 | v3.48 | 467 (#467) the over-cap screenshot refusal reaches the client | **§7.6: no new row, no role or permission change.** The `requestBodyCapFilterRegistration` row's read bound names the screenshot route's bounded drain (≤ 6 MiB of a refused declaration, before authentication), the per-request cost an unauthenticated caller can impose there |
 | 2026-10-15 | v3.47 | #466 (lane 466b) the sidebar's server-rendered tree removed — renumbered at merge after #515's v3.46 | **§7.6: no new row, no role cell change — two route tokens leave the Surfaces cells with their handlers.** `visualization.read` drops `GET /partials/visualizations/tree` and `dashboard.read` drops `GET /partials/dashboards/tree` (owner ruling 2026-10-10, option A): the sidebar has read the REST tree routes (`GET /api/v1/{family}/tree`, `…/tree/search`, already on these rows) since #460, and nothing requested the partials. The prose of both rows and of `parameter_set.read` stops naming the sidebar's partial branch; `GET /partials/parameter-sets/tree` STAYS on `parameter_set.read` — the `/parameter-sets` catalog requests it — and renders the catalog list alone. `EntryInventoryE2eTest`'s placed-route check reads the two tokens' removal (red with the handlers gone and the tokens kept); `RoleWalkE2eTest` walks the same rows. |
 | 2026-10-15 | v3.46 | #515 | §8 sketch and the class KDoc name all three CSRF exemptions; parity test. |
 | 2026-10-09 | v3.45 | 473 merge follow-up (#495) | **§7.6: no new row, no cell change, no route change** — `dashboard.read`'s prose names the board page's load-time render of the caller's own refresh history (#473); the Surfaces lists are untouched, so `RoleWalkE2eTest` and `RoleMatrixDocE2e` read the same cells. |

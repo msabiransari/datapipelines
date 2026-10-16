@@ -20,13 +20,16 @@ import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.net.InetAddress
+import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
+import java.net.SocketException
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.time.Duration
+import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
@@ -67,6 +70,49 @@ class ScreenshotUploadTransportTest {
             println(
                 "event=transport.abandoned declared=$ABANDONED_BODY supplied=${SWALLOW_CAP + BUFFER_SIZE} closed=true response=$response",
             )
+        }
+    }
+
+    @Test
+    fun `467 cap plus one reaches a client whose writer meets the close before its reader takes the response`() {
+        forcedLosingSide(CAP + 1)
+    }
+
+    @Test
+    fun `467 a declaration at the drain bound closes cleanly after the whole body`() {
+        forcedLosingSide(DRAIN_BOUND)
+    }
+
+    /**
+     * #467: the losing interleaving, forced. [HeldResponseRelay] withholds the server's response from the client until
+     * the server has closed; if that close came before the whole declared body was forwarded, or was a reset, the relay
+     * resets the client with the response still withheld — the client whose writer met the reset before its reader
+     * took the 413. The server's small receive buffer bounds what the kernels can hold unread, so the relay's count
+     * decides "before the whole body" without a clock.
+     */
+    private fun forcedLosingSide(size: Int) {
+        val body = SizedBody(size)
+        withServerReceiveBuffer(FORCED_RECEIVE_BUFFER) {
+            HeldResponseRelay(port).use { relay ->
+                try {
+                    val response =
+                        ScreenshotUploadTransport.post(
+                            relay.port,
+                            PATH,
+                            HttpRequest.BodyPublishers.fromPublisher(HttpRequest.BodyPublishers.ofInputStream { body }, size.toLong()),
+                        )
+                    response.statusCode shouldBe 413
+                    response.jsonPath().getString("error.code") shouldBe "visualization.test.screenshot_too_large"
+                    response.jsonPath().getInt("error.details.cap_bytes") shouldBe CAP
+                } finally {
+                    relay.await()
+                    println("event=transport.forced declared=$size supplied=${body.readBytes} ${relay.events()}")
+                }
+                relay.declared shouldBe size.toLong()
+                relay.early shouldBe false
+                // The refusal leaves before the drain: the 413 reached the relay while the body was still being forwarded.
+                relay.forwardedAtResponse shouldBeLessThan size.toLong()
+            }
         }
     }
 
@@ -182,13 +228,170 @@ class ScreenshotUploadTransportTest {
         }
     }
 
+    /**
+     * The #467 relay: the request is forwarded through a small send buffer, each chunk counted BEFORE it is written, and
+     * the server's response is held until the server closes. A close after the whole declared body and on a FIN
+     * delivers the response and half-closes; any other close resets the client without it. Every step is logged with
+     * its offset from the accept, the exchange's capture.
+     */
+    internal class HeldResponseRelay(
+        serverPort: Int,
+    ) : AutoCloseable {
+        private val listener = ServerSocket(0, 1, InetAddress.getLoopbackAddress())
+        private val workers = Executors.newFixedThreadPool(2)
+        private val log = ConcurrentLinkedQueue<String>()
+        private val started = System.nanoTime()
+        private val forwarded = AtomicLong()
+        val port: Int = listener.localPort
+
+        @Volatile
+        var declared = -1L
+            private set
+
+        @Volatile
+        var early = true
+            private set
+
+        @Volatile
+        var forwardedAtResponse = -1L
+            private set
+
+        private val relay =
+            workers.submit {
+                listener.accept().use { client ->
+                    Socket().use { server ->
+                        client.soTimeout = SOCKET_TIMEOUT
+                        server.soTimeout = SOCKET_TIMEOUT
+                        server.sendBufferSize = BUFFER_SIZE
+                        server.connect(InetSocketAddress(InetAddress.getLoopbackAddress(), serverPort))
+                        val request = workers.submit { forwardRequest(client, server) }
+                        val held = ByteArrayOutputStream()
+                        val close = readUntilClose(server, held)
+                        early = forwarded.get() < declared || close != "FIN"
+                        event("server.close kind=$close held=${held.size()} forwarded=${forwarded.get()} early=$early")
+                        if (early) {
+                            client.setSoLinger(true, 0)
+                            event("client.reset response_withheld=true")
+                        } else {
+                            client.getOutputStream().write(held.toByteArray())
+                            client.shutdownOutput()
+                            event("client.response status=${held.toString(Charsets.UTF_8).substringBefore("\r\n")}")
+                            request.get(SOCKET_TIMEOUT.toLong(), TimeUnit.MILLISECONDS)
+                        }
+                    }
+                }
+            }
+
+        private fun readUntilClose(
+            server: Socket,
+            held: ByteArrayOutputStream,
+        ): String {
+            val buffer = ByteArray(BUFFER_SIZE)
+            val input = server.getInputStream()
+            return try {
+                var count = input.read(buffer)
+                while (count >= 0) {
+                    if (held.size() == 0) {
+                        forwardedAtResponse = forwarded.get()
+                        event("server.response first_bytes=$count forwarded=$forwardedAtResponse")
+                    }
+                    held.write(buffer, 0, count)
+                    count = input.read(buffer)
+                }
+                "FIN"
+            } catch (error: SocketException) {
+                "RST(${error.message})"
+            }
+        }
+
+        private fun forwardRequest(
+            client: Socket,
+            server: Socket,
+        ) {
+            val input = client.getInputStream()
+            val output = server.getOutputStream()
+            val headers = ByteArrayOutputStream()
+            while (!headers.toString(Charsets.US_ASCII).endsWith("\r\n\r\n")) {
+                val byte = input.read()
+                check(byte >= 0 && headers.size() < BUFFER_SIZE) { "Request headers incomplete or over the capture bound" }
+                headers.write(byte)
+            }
+            declared = Regex("(?im)^Content-Length: ([0-9]+)")
+                .find(headers.toString(Charsets.US_ASCII))
+                ?.groupValues
+                ?.get(1)
+                ?.toLong() ?: -1L
+            output.write(headers.toByteArray())
+            val buffer = ByteArray(BUFFER_SIZE)
+            try {
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    // Counted before the write: a chunk still blocked in it is not yet the server's.
+                    forwarded.addAndGet(count.toLong())
+                    output.write(buffer, 0, count)
+                }
+                event("client.eof forwarded=${forwarded.get()}")
+            } catch (error: IOException) {
+                event("request.stop forwarded=${forwarded.get()} failure=${error.javaClass.simpleName}: ${error.message}")
+            }
+        }
+
+        private fun event(text: String) {
+            log += "+%.3fms %s".format((System.nanoTime() - started) / NANOS_PER_MILLI, text)
+        }
+
+        fun events(): String = log.joinToString(" | ")
+
+        fun await() {
+            relay.get(SOCKET_TIMEOUT.toLong(), TimeUnit.MILLISECONDS)
+        }
+
+        override fun close() {
+            listener.close()
+            workers.shutdownNow()
+        }
+
+        private companion object {
+            const val NANOS_PER_MILLI = 1_000_000.0
+        }
+    }
+
+    /**
+     * Sets the connector's per-socket receive buffer (`socket.rxBufSize`, applied at each accept) for [block] and puts
+     * the previous value back, so the class's other cases keep the kernel's autotuned buffer.
+     */
+    private fun withServerReceiveBuffer(
+        bytes: Int,
+        block: () -> Unit,
+    ) {
+        val protocol = protocolHandler()
+        val getEndpoint =
+            generateSequence<Class<*>>(protocol.javaClass) { it.superclass }
+                .firstNotNullOf { type -> type.declaredMethods.firstOrNull { it.name == "getEndpoint" && it.parameterCount == 0 } }
+                .apply { isAccessible = true }
+        val socketProperties = getEndpoint.invoke(protocol).let { it.javaClass.getMethod("getSocketProperties").invoke(it) }
+        val field = socketProperties.javaClass.getDeclaredField("rxBufSize").apply { isAccessible = true }
+        val previous = field.get(socketProperties)
+        field.set(socketProperties, bytes)
+        try {
+            block()
+        } finally {
+            field.set(socketProperties, previous)
+        }
+    }
+
     /** The module exposes app alone at compile time; inspect the actual runtime connector without adding a dependency. */
     private fun swallowCap(): Int {
+        val protocol = protocolHandler()
+        return protocol.javaClass.getMethod("getMaxSwallowSize").invoke(protocol) as Int
+    }
+
+    private fun protocolHandler(): Any {
         val server = context.javaClass.getMethod("getWebServer").invoke(context)
         val tomcat = server.javaClass.getMethod("getTomcat").invoke(server)
         val connector = tomcat.javaClass.getMethod("getConnector").invoke(tomcat)
-        val protocol = connector.javaClass.getMethod("getProtocolHandler").invoke(connector)
-        return protocol.javaClass.getMethod("getMaxSwallowSize").invoke(protocol) as Int
+        return connector.javaClass.getMethod("getProtocolHandler").invoke(connector)
     }
 
     /** Generated body with fixed memory and a count of bytes pulled by the HTTP client's writer. */
@@ -223,6 +426,12 @@ class ScreenshotUploadTransportTest {
     private companion object {
         const val CAP = 4 * 1024 * 1024
         const val SWALLOW_CAP = 2 * 1024 * 1024
+
+        /** The route's refused-body drain (#467): the cap plus Tomcat's default swallow, `ScreenshotUploadRoute.DRAIN_BYTES`. */
+        const val DRAIN_BOUND = CAP + SWALLOW_CAP
+
+        /** Small enough that a server closing mid-body cannot hide the unread tail in its kernel buffer (#467). */
+        const val FORCED_RECEIVE_BUFFER = 64 * 1024
         const val LARGE_BODY = 64 * 1024 * 1024
         const val ABANDONED_BODY = 1024 * 1024 * 1024
         const val BUFFER_SIZE = 8192
