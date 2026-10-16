@@ -47,7 +47,9 @@
 (function () {
   "use strict";
 
-  var SUCCESS_SETTLE_MS = 1200;
+  // #536 — how long a card keeps its green success border before the runtime settles it to ready
+  // ("a few seconds", as long as the loud error accent below).
+  var SUCCESS_SETTLE_MS = 3000;
   // #473 — how long a card keeps its loud error/abort accent before falling back to the quiet
   // issue border. The failure MESSAGE inside the card persists; only the loud border settles.
   var ERROR_ACCENT_MS = 3000;
@@ -1453,7 +1455,7 @@
       if (occurrence.status === "success" && occurrence.owner === refreshId) {
         occurrence.status = "ready";
         try {
-          self._adapter.renderStatus({ name: name, type: "visualization" }, { state: "ready", stale: false, reason: null });
+          self._adapter.renderStatus({ name: name, type: "visualization" }, { state: "ready", stale: occurrence.stale, reason: null });
         } catch (e) {
           /* isolated */
         }
@@ -1708,10 +1710,10 @@
     if (parents.indexOf(name) !== -1 || bound || invalid) {
       // #497 (owner ruling 2026-10-10) — a commit on an invalid state still carries its bound
       // action: `_safeEvaluate` fires it only when the retry comes back valid.
-      this._safeEvaluate(bound ? bound.action : null, invalid ? "retry" : "parent_change");
+      this._safeEvaluate(bound ? bound.action : null, invalid ? "retry" : "parent_change", name);
       return;
     }
-    this._markAllStale();
+    this._markStale(name);
   };
 
   DashboardInstance.prototype._boundActionFor = function (parameterName) {
@@ -1722,8 +1724,9 @@
   };
 
   /** The parameter re-evaluation outside the caller's stack; errors reach the runtime-owned path. */
-  DashboardInstance.prototype._safeEvaluate = function (actionName, intent) {
+  DashboardInstance.prototype._safeEvaluate = function (actionName, intent, parameterName) {
     var self = this;
+    var previous = this._snapshotSelections(this._parameters);
     (async function () {
       try {
         await self._evaluateParameters(intent || "parent_change");
@@ -1740,6 +1743,17 @@
           configurationStale: !!(error && error.configurationStale),
         });
         return;
+      }
+      if (parameterName && !self._parametersOnly) {
+        // Mark only after the accepted state has been applied. Re-resolved dependents can
+        // invalidate other groups too; equal scalar/list values do not widen the scope.
+        self._markStale(parameterName);
+        var current = self._snapshotSelections(self._parameters);
+        Object.keys(current).forEach(function (name) {
+          if (name !== parameterName && JSON.stringify(previous[name]) !== JSON.stringify(current[name])) {
+            self._markStale(name);
+          }
+        });
       }
       // A retry that is still invalid fires nothing (the gate would only refuse it aloud).
       var retryStillInvalid = intent === "retry" && self._parameters && self._parameters.valid === false;
@@ -1784,10 +1798,34 @@
 
   /** A parameter change invalidates affected occurrences even without a new refresh (§5.3). */
   DashboardInstance.prototype._markAllStale = function () {
+    this._markStale();
+  };
+
+  /** D41: a declared scope covers its groups' occurrence members, including nested groups. */
+  DashboardInstance.prototype._markStale = function (parameterName) {
+    var scopes = this._config.parameter_scopes || {};
+    var scoped = parameterName && Object.prototype.hasOwnProperty.call(scopes, parameterName);
+    var affected = Object.create(null);
+    if (scoped) {
+      var groups = Object.create(null);
+      (this._config.groups || []).forEach(function (group) { groups[group.name] = group.members || []; });
+      var visited = Object.create(null);
+      var pending = scopes[parameterName].slice();
+      while (pending.length) {
+        var member = pending.pop();
+        if (visited[member]) continue;
+        visited[member] = true;
+        if (groups[member]) pending = pending.concat(groups[member]);
+        else affected[member] = true;
+      }
+    }
     var names = Object.keys(this._occurrences);
     for (var i = 0; i < names.length; i++) {
+      if (scoped && !affected[names[i]]) continue;
       var occurrence = this._occurrences[names[i]];
-      if (occurrence.owner && (occurrence.status === "in-progress" || occurrence.status === "success" || occurrence.status === "ready")) {
+      // An empty result is about the old selection too. Ready cards need no request owner;
+      // error/abort keep their issue voice rather than acquiring a parameter-change mark.
+      if (occurrence.status === "in-progress" || occurrence.status === "success" || occurrence.status === "ready" || occurrence.status === "no-data") {
         occurrence.stale = true;
         try {
           this._adapter.renderStatus({ name: names[i], type: "visualization" }, {
@@ -2357,8 +2395,11 @@
      * `data-dp-state` exactly as before (tests and assistive tech read them); what changes is the
      * PRESENTATION around it: a state class on the card (border colour/animation), a persistent
      * in-card message for failure/no-data/stale, and a LOUD accent border that settles after
-     * ERROR_ACCENT_MS while the message stays. `ready` is visually quiet (the chip is hidden by
-     * CSS), never colour-only: the message text and the chip's `data-dp-state` carry the fact.
+     * ERROR_ACCENT_MS while the message stays. The chip is never shown (#536: CSS hides it
+     * visually in every state), never colour-only: the message text and the chip's
+     * `data-dp-state` carry the fact. #536 — the class words are the wire's state words
+     * (`--abort`, `--no-data`), the ONE vocabulary dashboards.css styles, pinned by
+     * DashboardCardStateVocabularyTest.
      */
     function applyCardStatus(card, status) {
       // Any new status retires the pending accent timer of the previous one.
@@ -2371,7 +2412,7 @@
       var stale = status.stale === true;
       var classes = "dp-dashboard-card";
       var message = "";
-      var loud = null;
+      var loud = false;
       if (state === "in-progress") {
         classes += " dp-dashboard-card--busy";
         card.card.setAttribute("aria-busy", "true");
@@ -2385,20 +2426,20 @@
           // The runtime settles success → ready after SUCCESS_SETTLE_MS; the accent rides along.
         } else if (state === "error") {
           classes += " dp-dashboard-card--error";
-          loud = "dp-dashboard-card--issue";
+          loud = true;
           message = cardStatusText(status.reason, "could not load this visualization");
         } else if (state === "abort") {
-          classes += " dp-dashboard-card--aborted";
-          loud = "dp-dashboard-card--issue";
+          classes += " dp-dashboard-card--abort";
+          loud = true;
           message = "Refresh cancelled.";
         } else if (state === "no-data") {
-          classes += " dp-dashboard-card--empty";
+          // Its dashed quiet rule follows --stale in the sheet and would hide the stale border.
+          if (!stale) classes += " dp-dashboard-card--no-data";
           message = "No data for this selection.";
-        } else if (state === "ready") {
-          if (stale) {
-            classes += " dp-dashboard-card--stale";
-            message = "Showing out-of-date data.";
-          }
+        }
+        if (stale && (state === "ready" || state === "success" || state === "no-data")) {
+          classes += " dp-dashboard-card--stale";
+          message = "Showing out-of-date data.";
         }
       }
       card.card.className = classes;
@@ -3012,6 +3053,8 @@
       REQUIRED_ADAPTER_FUNCTIONS: REQUIRED_ADAPTER_FUNCTIONS,
       /** #473 — how long a card's loud error/abort accent lasts before the quiet issue border. */
       ERROR_ACCENT_MS: ERROR_ACCENT_MS,
+      /** #536 — how long `success` (the green border) holds before the runtime settles it to ready. */
+      SUCCESS_SETTLE_MS: SUCCESS_SETTLE_MS,
       resetRenderers: function () {
         var keys = Object.keys(REGISTERED_RENDERERS);
         for (var i = 0; i < keys.length; i++) delete REGISTERED_RENDERERS[keys[i]];

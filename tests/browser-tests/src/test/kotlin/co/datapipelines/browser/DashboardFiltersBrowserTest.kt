@@ -2,6 +2,7 @@ package co.datapipelines.browser
 
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
+import com.microsoft.playwright.Locator
 import com.microsoft.playwright.Page
 import com.microsoft.playwright.options.SelectOption
 import com.microsoft.playwright.options.WaitForSelectorState
@@ -12,6 +13,7 @@ import org.junit.jupiter.api.MethodOrderer
 import org.junit.jupiter.api.Order
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestMethodOrder
+import java.nio.file.Paths
 
 /**
  * #473 — the board's parameter FILTERS: their own panel BESIDE the chart container (never inside
@@ -414,15 +416,38 @@ class DashboardFiltersBrowserTest : DashboardBrowserSuite() {
         limit.get("limit").asInt shouldBe 42
 
         // The dependent pair: Europe's cities, then the parent changes and the child re-resolves.
-        val city = "#dp-board-filters [data-dp-parameter=\"city\"] select"
-        val cityOptions = "() => Array.from(document.querySelector('$city').options).map(function (o) { return o.textContent; })"
-        page.evaluate(cityOptions) shouldBe listOf("", "EU city 1", "EU city 2", "EU city 3")
-        page.selectOption("#dp-board-filters [data-dp-parameter=\"region\"] select", SelectOption().setLabel("United States"))
-        page.waitForFunction("() => (document.querySelector('$city').options[1] || {}).textContent === 'US city 1'")
-        val resolved = page.evaluate(cityOptions)
-        println("493-wire city-after-region=US options=$resolved")
-        resolved shouldBe listOf("", "US city 1", "US city 2", "US city 3")
-        page.evaluate("() => window.__dpPage.instance._adapter.readSelections().city") shouldBe "US-1"
+        assertParentChangeStale(board)
+    }
+
+    /** A committed parent change leaves the retained chart visibly stale in both themes. */
+    private fun assertParentChangeStale(board: String) {
+        try {
+            for (theme in listOf("light", "dark")) {
+                ensureTheme(theme)
+                openBoard(board)
+                page.waitForFunction("() => window.__dpPage.notifications.some(n => n.code === 'refresh.completed')")
+                val city = "#dp-board-filters [data-dp-parameter=\"city\"] select"
+                val cityOptions = "() => Array.from(document.querySelector('$city').options).map(o => o.textContent)"
+                page.evaluate(cityOptions) shouldBe listOf("", "EU city 1", "EU city 2", "EU city 3")
+                val card = "article.dp-dashboard-card[data-dp-viz='acceptancechart']"
+                page.evaluate("s => document.querySelector(s).classList.contains('dp-dashboard-card--stale')", card) shouldBe false
+                page.selectOption("#dp-board-filters [data-dp-parameter=\"region\"] select", SelectOption().setLabel("United States"))
+                page.waitForFunction(
+                    "() => !window.__dpPage.instance._lock && window.__dpPage.instance._adapter.readSelections().city === 'US-1'",
+                )
+                page.evaluate(cityOptions) shouldBe listOf("", "US city 1", "US city 2", "US city 3")
+                // #542: this is a real parent commit, after its dependent's new state applied.
+                page.evaluate("s => document.querySelector(s).classList.contains('dp-dashboard-card--stale')", card) shouldBe true
+                page.waitForFunction(STALE_BORDER, card)
+                val border = page.evaluate(STALE_BORDER, card)
+                println("542-stale-border $theme " + page.evaluate("() => window.__dp542Border"))
+                border shouldBe true
+                val dir = Paths.get("build", "reports", "542-screenshots").also { it.toFile().mkdirs() }
+                page.locator(card).screenshot(Locator.ScreenshotOptions().setPath(dir.resolve("542-$theme-parent-stale.png")))
+            }
+        } finally {
+            ensureTheme("light")
+        }
     }
 
     /** A second instance of [board] beside the host page's first, signalled at `window.__dp2`. */
@@ -569,6 +594,22 @@ class DashboardFiltersBrowserTest : DashboardBrowserSuite() {
     }
 
     private companion object {
+        // Read the stale token from the stylesheet so a token change keeps this behavioural guard valid.
+        const val STALE_BORDER =
+            """(selector) => {
+              const rule = Array.from(document.styleSheets).flatMap(s => Array.from(s.cssRules))
+                .find(r => r.selectorText === '.dp-dashboard-card--stale');
+              const probe = document.createElement('span');
+              probe.style.borderTopStyle = 'solid';
+              probe.style.borderTopColor = rule.style.borderColor;
+              document.body.appendChild(probe);
+              const token = getComputedStyle(probe).borderTopColor;
+              const actual = getComputedStyle(document.querySelector(selector)).borderTopColor;
+              probe.remove();
+              window.__dp542Border = { actual, token, declaration: rule.style.borderColor };
+              return !!token && actual === token;
+            }"""
+
         /** Tab presses allowed from the first field to the last (the acceptance form has ~30 stops). */
         const val MAX_TABS = 80
 
