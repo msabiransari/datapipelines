@@ -361,6 +361,40 @@ class PipelineLifecycleDialogControllerTest {
         verify(exactly = 0) { pipelines.purgeEntity(any(), any(), any()) }
     }
 
+    /**
+     * #471 — the dialog only PREVIEWS the pins; the control is the POST's own guard. A pin
+     * saved after the dialog opened reaches the service, which refuses
+     * `pipeline.version.pinned` as the 409 toast, and no success audit is emitted.
+     */
+    @Test
+    fun `purge entity - the service's pinned refusal surfaces as the 409 envelope and no success audit (#471)`() {
+        every { pipelines.findRecord(WORKSPACE, any(), PIPELINE) } returns record(currentVersion = null)
+        every { pipelines.purgeEntity(WORKSPACE, PIPELINE, includeExclusiveDraftTemplates = false) } throws
+            DatapipelinesException(
+                PipelineErrorCodes.Versioning.PINNED,
+                "Version 1 of 'nyc/mobility/probe' is pinned by 1 live pipeline version(s) and 1 dashboard version(s).",
+                mapOf(
+                    "pinned_by" to listOf(mapOf("pipeline" to "test/parent", "version" to 2, "node" to "child")),
+                    "referencing_dashboards" to listOf(mapOf("dashboard" to "test/board", "version" to 1, "status" to "DRAFT")),
+                ),
+            )
+
+        val body =
+            mvc
+                .perform(
+                    post("/partials/pipelines/$PIPELINE/lifecycle/purge-entity")
+                        .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                        .param("confirm", "nyc/mobility/probe")
+                        .header("HX-Request", "true"),
+                ).andExpect(status().isConflict)
+                .andReturn()
+                .response.contentAsString
+
+        body shouldContain "pipeline.version.pinned"
+        verify(exactly = 1) { pipelines.purgeEntity(WORKSPACE, PIPELINE, includeExclusiveDraftTemplates = false) }
+        audit.events shouldBe emptyList()
+    }
+
     // ------------------------------------------------------------------ #395: the workspace's legs
 
     @Test

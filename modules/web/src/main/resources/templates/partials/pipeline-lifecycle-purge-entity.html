@@ -16,7 +16,27 @@
       <p class="u-secondary u-text-sm" th:text="${dlg.refusal.message}">last_release</p>
     </th:block>
 
-    <th:block th:if="${dlg.refusal == null}">
+    <!-- #471: the refusal the POST would answer, previewed from the SAME ports the service's
+         guard asks — live parent exact pins, every stored dashboard version's pin. A pinned
+         dialog offers no form (the POST refuses; the run count would be a lie). -->
+    <th:block th:if="${!#lists.isEmpty(dlg.pinnerPipelines) or !#lists.isEmpty(dlg.pinnerDashboards)}">
+      <p class="u-secondary u-text-sm" data-purge-pinned>
+        <strong th:text="${dlg.leafName}">my_pipeline</strong> cannot be purged: it is pinned by pipeline
+        or dashboard version(s) — remove or repoint them first.
+      </p>
+      <ul class="u-text-sm u-mb-md" data-purge-pinners>
+        <li th:each="p : ${dlg.pinnerPipelines}" data-purge-pinner-pipeline>
+          <span class="u-mono" th:text="${p.pipelineName}">parent/pipeline</span>
+          <span class="u-muted u-text-xs" th:text="'v' + ${p.pipelineVersion} + ' · node ' + ${p.nodeId}">v3 · node extract</span>
+        </li>
+        <li th:each="d : ${dlg.pinnerDashboards}" data-purge-pinner-dashboard>
+          <span class="u-mono" th:text="${d.name}">acme/boards/revenue</span>
+          <span class="u-muted u-text-xs" th:text="'v' + ${d.version} + ' · dashboard · ' + ${d.status}">v4 · dashboard · DRAFT</span>
+        </li>
+      </ul>
+    </th:block>
+
+    <th:block th:if="${dlg.refusal == null and #lists.isEmpty(dlg.pinnerPipelines) and #lists.isEmpty(dlg.pinnerDashboards)}">
       <p class="u-secondary u-text-sm">
         The pipeline, its draft and its
         <strong th:text="${dlg.runCount}">0</strong> run<span th:if="${dlg.runCount != 1}">s</span>
