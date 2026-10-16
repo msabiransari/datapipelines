@@ -234,23 +234,27 @@
     "source": "https://registry.npmjs.org/@alpinejs/csp/-/csp-3.14.1.tgz (the CSP build's dist/cdn.min.js; tarball sha256 ab76984420bcc7e30d96b39338b4715bf514275de4d8b466c36bca5b178ca46a)",
     "license": "MIT"
   },
-  "inter": {
-    "package": "rsms/inter",
-    "version": "4.1",
+  "noto-sans": {
+    "package": "@fontsource-variable/noto-sans",
+    "version": "5.3.0",
     "files": [
-      "vendor/fonts/inter/InterVariable.woff2",
-      "vendor/fonts/inter/InterVariable-Italic.woff2",
-      "vendor/fonts/inter/OFL.txt"
+      "vendor/fonts/noto-sans/noto-sans-latin-wght-normal.woff2",
+      "vendor/fonts/noto-sans/noto-sans-latin-ext-wght-normal.woff2",
+      "vendor/fonts/noto-sans/noto-sans-latin-wght-italic.woff2",
+      "vendor/fonts/noto-sans/noto-sans-latin-ext-wght-italic.woff2",
+      "vendor/fonts/noto-sans/OFL.txt"
     ],
     "sha256": {
-      "vendor/fonts/inter/InterVariable.woff2": "693b77d4f32ee9b8bfc995589b5fad5e99adf2832738661f5402f9978429a8e3",
-      "vendor/fonts/inter/InterVariable-Italic.woff2": "e564f652916db6c139570fefb9524a77c4d48f30c92928de9db19b6b5c7a262a",
-      "vendor/fonts/inter/OFL.txt": "262481e844521b326f5ecd053e59b98c8b2da78c8ee1bdbb6e8174305e54935a"
+      "vendor/fonts/noto-sans/noto-sans-latin-wght-normal.woff2": "51ca196f49a33e79e7870ff88ebd2829a3f627a51e7d690986618f0e7ad2b52d",
+      "vendor/fonts/noto-sans/noto-sans-latin-ext-wght-normal.woff2": "6d5a79315528df191b9d86f97b0c4272a8b588fcb166773fe6588ac795de0613",
+      "vendor/fonts/noto-sans/noto-sans-latin-wght-italic.woff2": "b21ff49befe2af5b88a3b622b3446e83199229f15ea7571a9313b15ed706298b",
+      "vendor/fonts/noto-sans/noto-sans-latin-ext-wght-italic.woff2": "7eccdb25aca0edb020461eff7ce779debc787c08b1e7d2abbd7d1c4ee18ff816",
+      "vendor/fonts/noto-sans/OFL.txt": "54ec7b5a35310ad66f9f3091426f7028484cbf9ae1ab5da30122ee412a3009e1"
     },
-    "source": "https://github.com/rsms/inter/releases/download/v4.1/Inter-4.1.zip",
+    "source": "https://registry.npmjs.org/@fontsource-variable/noto-sans/-/noto-sans-5.3.0.tgz",
     "license": "OFL-1.1",
-    "license_file_upstream": "LICENSE.txt",
-    "note": "079 §G — the two VARIABLE web faces from the release zip's web/ folder, vendored so every machine renders the design system's declared \"Inter\" instead of a system fallback. Upstream ships the OFL text as LICENSE.txt; it is vendored verbatim as OFL.txt so one audit rule covers both font directories. No Google Fonts, no CDN."
+    "license_file_upstream": "LICENSE",
+    "note": "551 — the app's sans face is Noto Sans, the bundled family the owner chose against the prototype (record 2026-10-16 \u00a75, decision also on #547). The woff2 subsets (variable wght axis 100-900, normal + italic, latin + latin-ext) come from the pinned fontsource package, whose metadata names upstream v42 of google/fonts; the tarball was fetched once, its sha512 checked against the registry integrity before extraction, and the computed tarball sha256 is 2cd97f3573b6e8ceaaa54ddf5df3f8e64d89a5bb31954013700d36a7ec01dcd6. Upstream notofonts releases ship TTF only, so the npm package is the pinned, hash-recorded source, as for Manrope. Upstream ships the OFL text as LICENSE; it is vendored verbatim as OFL.txt. Italic faces are declared because the app has sans-italic rules (template/pipeline editors) but are not preloaded. No Google Fonts, no CDN."
   },
   "jetbrains-mono": {
     "package": "JetBrains/JetBrainsMono",

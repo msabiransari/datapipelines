@@ -5,6 +5,7 @@ import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.ints.shouldBeGreaterThan
 import io.kotest.matchers.ints.shouldBeGreaterThanOrEqual
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
 import java.nio.file.Paths
@@ -735,10 +736,46 @@ class AppShellBrowserTest : BrowserSuite() {
 
         // Both preloaded faces must be fetched AND answered 200 — a 404 here is the exact
         // silent failure the audit exists for: the page falls back and just looks slightly
-        // different, which nobody reports as a bug.
+        // different, which nobody reports as a bug. 551: the sans is Noto Sans and BOTH
+        // of its normal subsets are preloaded, so both must arrive.
         fontRequests.size shouldBeGreaterThan 0
         fontRequests.map { it.substringBefore(" ") }.toSet() shouldContain "200"
-        fontRequests.any { it.contains("InterVariable.woff2") } shouldBe true
+        fontRequests.any { it.contains("noto-sans-latin-wght-normal.woff2") } shouldBe true
+        fontRequests.any { it.contains("noto-sans-latin-ext-wght-normal.woff2") } shouldBe true
+
+        // 551 — the face must be USED, not merely declared (record §11: a computed stack
+        // naming the family proves nothing). After fonts.ready the vendored "Noto Sans"
+        // face must be loaded, and a probe string set in var(--font-sans) must measure
+        // differently from the same string in the bare system-sans stack — the first face
+        // of --font-sans is a real webfont now, and two equal widths would mean the
+        // fallback rendered. Both numbers ride the lane evidence.
+        val notoLoaded = page.evaluate("() => document.fonts.check('13px \"Noto Sans\"')") as Boolean
+        notoLoaded shouldBe true
+        val widthsRaw =
+            page.evaluate(
+                """
+                () => {
+                  const probe = (family) => {
+                    const span = document.createElement('span');
+                    span.style.fontFamily = family;
+                    span.style.fontSize = '13px';
+                    span.style.position = 'absolute';
+                    span.style.whiteSpace = 'nowrap';
+                    span.textContent = 'Pipelines Dashboard 0123456789 rendered measure';
+                    document.body.appendChild(span);
+                    const width = span.getBoundingClientRect().width;
+                    span.remove();
+                    return width;
+                  };
+                  return [probe('var(--font-sans)'), probe('ui-sans-serif, system-ui, sans-serif')].join('|');
+                }
+                """.trimIndent(),
+            ) as String
+        val widths = widthsRaw.split("|").map { it.toDouble() }
+        widths.size shouldBe 2
+        // The two observed numbers ride the XML for the lane evidence; equal = the fallback rendered.
+        println("551 width probe: var(--font-sans)=${widths[0]}px ui-sans-serif-stack=${widths[1]}px")
+        widths[0] shouldNotBe widths[1]
     }
 
     /**

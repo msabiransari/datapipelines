@@ -13,11 +13,12 @@ import java.security.MessageDigest
 /**
  * 079 §G — the vendored webfonts, audited from the CLASSPATH rather than recalled.
  *
- * The app names "Inter" and "JetBrains Mono" in every theme's font stack but shipped
+ * The app named Inter and JetBrains Mono in every theme's font stack but shipped
  * neither file, so it rendered in whatever a visitor's machine happened to have. The
- * families are now vendored under `static/vendor/fonts` (Inter and JetBrains Mono in
+ * families are vendored under `static/vendor/fonts` (Inter and JetBrains Mono in
  * 079, Manrope for the site in 093, IBM Plex Mono — the site's 133 display face — in
- * 133), from the projects' own release assets, and this audit is the guard on that
+ * 133, Noto Sans — the app's sans face since 551 — in 551), from the projects' own
+ * release assets or pinned registry packages, and this audit is the guard on that
  * arrangement. (A glob written into a KDoc opens a NESTED block comment — Kotlin nests
  * them — so the directories are spelled out here rather than learning that again.)
  * Four claims, each of which has a way of quietly becoming false:
@@ -72,7 +73,7 @@ class VendoredFontsAuditTest {
     }
 
     private val declared: Map<String, String> =
-        declaredHashes("inter") + declaredHashes("jetbrains-mono") + declaredHashes("manrope") + declaredHashes("ibm-plex-mono")
+        declaredHashes("noto-sans") + declaredHashes("jetbrains-mono") + declaredHashes("manrope") + declaredHashes("ibm-plex-mono")
 
     private fun sha256(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
 
@@ -89,9 +90,6 @@ class VendoredFontsAuditTest {
                 "vendor/fonts/ibm-plex-mono/ibm-plex-mono-latin-ext-500-normal.woff2",
                 "vendor/fonts/ibm-plex-mono/ibm-plex-mono-latin-ext-600-normal.woff2",
                 "vendor/fonts/ibm-plex-mono/ibm-plex-mono-latin-ext-700-normal.woff2",
-                "vendor/fonts/inter/InterVariable-Italic.woff2",
-                "vendor/fonts/inter/InterVariable.woff2",
-                "vendor/fonts/inter/OFL.txt",
                 "vendor/fonts/jetbrains-mono/JetBrainsMono-Medium.woff2",
                 "vendor/fonts/jetbrains-mono/JetBrainsMono-Regular.woff2",
                 "vendor/fonts/jetbrains-mono/JetBrainsMonoSite-Medium.woff2",
@@ -100,6 +98,11 @@ class VendoredFontsAuditTest {
                 "vendor/fonts/manrope/OFL.txt",
                 "vendor/fonts/manrope/manrope-latin-ext-wght-normal.woff2",
                 "vendor/fonts/manrope/manrope-latin-wght-normal.woff2",
+                "vendor/fonts/noto-sans/OFL.txt",
+                "vendor/fonts/noto-sans/noto-sans-latin-ext-wght-italic.woff2",
+                "vendor/fonts/noto-sans/noto-sans-latin-ext-wght-normal.woff2",
+                "vendor/fonts/noto-sans/noto-sans-latin-wght-italic.woff2",
+                "vendor/fonts/noto-sans/noto-sans-latin-wght-normal.woff2",
             )
         manifest shouldContain "\"license\": \"OFL-1.1\""
     }
@@ -127,7 +130,7 @@ class VendoredFontsAuditTest {
 
     @Test
     fun `each family ships the OFL text, not an empty placeholder`() {
-        listOf("inter", "jetbrains-mono", "manrope", "ibm-plex-mono").forEach { dir ->
+        listOf("noto-sans", "jetbrains-mono", "manrope", "ibm-plex-mono").forEach { dir ->
             val licence =
                 resolver
                     .getResource("classpath:static/vendor/fonts/$dir/OFL.txt")
@@ -166,7 +169,7 @@ class VendoredFontsAuditTest {
     }
 
     @Test
-    fun `app css declares the four faces against the vendored files`() {
+    fun `app css declares the six faces against the vendored files`() {
         val css =
             resolver
                 .getResource("classpath:static/css/app.css")
@@ -179,7 +182,7 @@ class VendoredFontsAuditTest {
         // the same trap partials/theme-swap.html documents for the theme stylesheet.
         // The JetBrainsMonoSite-* subsets are the SITE's files (site-fonts-mono.css) —
         // the app keeps the full faces, so they are excluded here.
-        (declaredHashes("inter") + declaredHashes("jetbrains-mono"))
+        (declaredHashes("noto-sans") + declaredHashes("jetbrains-mono"))
             .keys
             .filter { it.endsWith(".woff2") && !it.contains("JetBrainsMonoSite") }
             .forEach { path -> css shouldContain "url(\"../${path}\")" }
@@ -201,10 +204,10 @@ class VendoredFontsAuditTest {
      * family — Manrope, the approved preview's display AND body face, at `swap`: the h1 is
      * the LCP element and a fallback headline for a beat beats an invisible one (the 133
      * ruling that put the display face on `swap`, now applied to the one face there is).
-     * The IBM Plex Mono display faces 133 vendored are no longer referenced by the site
-     * (the files and their manifest rows stay until a vendoring round removes them). The
-     * JetBrains Mono code faces live in site-fonts-mono.css (late sheet; 133: the SITE-ONLY
-     * latin subsets). The app keeps Inter; the two sheets never load together.
+ * The IBM Plex Mono display faces 133 vendored are no longer referenced by the site
+ * (the files and their manifest rows stay until a vendoring round removes them). The
+ * JetBrains Mono code faces live in site-fonts-mono.css (late sheet; 133: the SITE-ONLY
+ * latin subsets). The app keeps Noto Sans (551); the two sheets never load together.
      */
     @Test
     fun `site css declares the marketing faces against the vendored files`() {
@@ -255,8 +258,8 @@ class VendoredFontsAuditTest {
                 "cdn.jsdelivr.net/npm/@fontsource",
             )
 
-        /** The app-side sheet still declares all four faces (the app keeps Inter; the two sheets never load together). */
-        const val EXPECTED_FACES = 4
+        /** The app-side sheet declares six faces: the Noto Sans pair of subsets in both styles (551) and the two mono weights. */
+        const val EXPECTED_FACES = 6
 
         /** site.css: the Manrope pair (latin, latin-ext) — the one family the site says everything in (145). */
         const val EXPECTED_SITE_FACES = 2

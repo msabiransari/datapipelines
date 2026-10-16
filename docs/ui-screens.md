@@ -1,9 +1,9 @@
 # UI Screens Inventory
 
-**Status:** v1.146
+**Status:** v1.147
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
-**Last updated:** 2026-10-16 (#535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
+**Last updated:** 2026-10-16 (#551; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
 
 ---
 
@@ -403,13 +403,19 @@ leave the controls where they were.
 
 One scale, decided once — measured against the drift the owner saw: page titles at three sizes, dates monospace in one table and proportional in the next.
 
-**The faces (079 §G, normative).** The app sets in **Inter** (sans) and **JetBrains Mono** (mono), both
-vendored — `static/vendor/fonts/inter/` and `static/vendor/fonts/jetbrains-mono/`, from the projects' own
-GitHub release assets, hashes and versions recorded in `vendor/design-system/vendor-manifest.json` alongside
-every other vendored asset. Both are **SIL Open Font License 1.1**, which the owner confirmed compatible with
-this repository's AGPL-3.0 (2026-09-05); each directory carries its `OFL.txt` verbatim, as the licence requires
-of a redistribution. **No Google Fonts and no CDN** — a webfont from a third-party host is a runtime dependency
-on someone else's uptime and a per-visitor request to someone else's log.
+**The faces (079 §G, normative; sans family re-decided by 551).** The app sets in **Noto Sans** (sans, 551 —
+the prototype's face, the owner's bundled-family decision, record 2026-10-16 §5) and **JetBrains Mono** (mono),
+both vendored — `static/vendor/fonts/noto-sans/` and `static/vendor/fonts/jetbrains-mono/`. JetBrains Mono comes
+from the project's own GitHub release asset; Noto Sans comes from the pinned `@fontsource-variable/noto-sans`
+5.3.0 registry package (upstream v42 of google/fonts — the notofonts releases ship TTF only, not a web asset),
+variable weight 100–900, latin + latin-ext subsets in normal and italic, with the hashes and the tarball's
+sha256 recorded in `vendor/design-system/vendor-manifest.json` alongside every other vendored asset. Both are
+**SIL Open Font License 1.1**, which the owner confirmed compatible with this repository's AGPL-3.0
+(2026-09-05); each directory carries its `OFL.txt` verbatim, as the licence requires of a redistribution. Both
+normal subsets are preloaded in the authenticated layouts — under `font-display: optional` a subset that is not
+ready in time is dropped for that page load, and ext-glyph resource names would render in the system face; the
+italics are declared but not preloaded. **No Google Fonts and no CDN** — a webfont from a third-party host is a
+runtime dependency on someone else's uptime and a per-visitor request to someone else's log.
 
 This closes a gap the design system could not: it *names* both faces in `--_font-sans`/`--_font-mono` but ships
 neither, and the two themes the mode toggle switches between — `light` and `dark` — name **neither** face at all
@@ -2454,6 +2460,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-16 | v1.147 | #551 the app's sans face is bundled Noto Sans; Inter retired | **§3.3:** `--font-sans` now leads with **Noto Sans** — the prototype's face, vendored the established way (record 2026-10-16 §5, owner decision also on #547): the pinned `@fontsource-variable/noto-sans` 5.3.0 package (upstream v42, OFL-1.1, tarball sha512-checked then sha256-recorded), latin + latin-ext subsets, normal + italic (the editors' muted/empty/stale states inherit the app sans), both normal subsets preloaded in `layouts/default` and `layouts/auth` — under `optional` an unready subset is dropped for the whole load, so ext-glyph names would render in the system face. `font-display: optional` unchanged (090 §B). The Inter files, faces, preloads, manifest entry and audit-test rows are removed; the six vendored themes' `--_font-sans` naming Inter is vendor text owned by the design-system project. No route, permission, token or template change; type sizes untouched (#555 owns the scale). |
 | 2026-10-16 | v1.146 | #535 splitter.js stops wiring the withdrawn settings sidebar | **§4.3:** the withdrawal bullet (#349) gains the module half — `static/js/splitter.js`'s `wireEditorSidebar()` branch, its `--pe-sidebar-w` restore, its resize pull-back row and `SIDE_MIN`/`SIDE_MAX_SHARE` are deleted; the module wires the editor dock and the explorer tree only, and its comments name exactly those two panes. No template, stylesheet or visible change; `PipelineWorkspaceLayoutBrowserTest`'s absence assertions are untouched. |
 | 2026-10-16 | v1.145 | #533 the sidebar's template leaves carry the needs-review marker again | **§4.6a:** a Templates leaf whose listed version reads `needs_review` ([REST §24](rest-api.md) v2.96) carries the catalog row's **needs review** marker (`ds-badge ds-badge-warning`, `data-needs-review`, the same title) after its version and draft badges, on exactly the flagged leaves — gone since #466 removed the server-rendered level that carried it. A drift changes a fact, not the template, so the cached level shows it on the panel's Refresh. **§4.6b:** the marker row's guards re-aimed — `TemplateTreeRenderTest` and `TemplateWorkspaceControllerTest` never asserted it; the row, leaf, chip and end-to-end guards are named. No route, permission, template or CSS change. |
 | 2026-10-16 | v1.144 | #537 draft-only dashboard opens directly | **§4.21:** the default selects the served release, else the admitted draft labelled, else #409’s choose-a-version state. A default draft writes its number on the board version attribute and boots in place, keeping the URL; no served release and no admitted draft means no runtime read. Model, controller and browser guards pin selection, the attribute channel, release precedence and the narrowing lens. |
