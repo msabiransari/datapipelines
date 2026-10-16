@@ -544,7 +544,7 @@ class PipelineLifecycleDialogModelTest {
             version: Int,
         ): List<co.datapipelines.pipeline.DashboardPin> {
             liveCalls += pipelineName
-            if (failOnLive) throw IllegalStateException("entity purge must ask anyVersionPins, not liveVersionPins")
+            if (failOnLive) error("entity purge must ask anyVersionPins, not liveVersionPins")
             return emptyList()
         }
 
