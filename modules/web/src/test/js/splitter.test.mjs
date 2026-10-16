@@ -121,6 +121,9 @@ test("a remembered size is read back as a number, and rubbish is refused", () =>
 test("the pane keys are the ones the browser suites and the docs name", () => {
   assert.equal(S.KEYS.editorDock, "dp.pane.editor-dock");
   assert.equal(S.KEYS.explorerTree, "dp.pane.explorer-tree");
+  // The key SET is pinned, not just two members: a key with no pane (the editors' retired
+  // side panes, #433/#535) must not come back quietly.
+  assert.deepEqual(Object.keys(S.KEYS).sort(), ["editorDock", "explorerTree"]);
 });
 
 test("the step sizes are the ones §A specifies", () => {
