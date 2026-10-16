@@ -358,6 +358,164 @@ body {
 }
 
 /* ---------------------------------------------------------------------------
+   #555 — THE COMPACT BASELINE: the role tokens above, applied to the vendored
+   primitives (ui-screens.md §3.3).
+
+   WHERE IT SITS IN THE CASCADE. Every selector here is a single class, the
+   primitives' own specificity, and the block sits near the TOP of this file.
+   So it beats `primitives.css` (loaded before this file) and loses to every
+   later or more specific app or screen rule: a screen that sized a control on
+   purpose keeps its size until its own rule moves onto a role. That is why
+   the size modifiers (`.ds-button-sm`, `.ds-tabs-compact`) are restated here —
+   the vendored ones are the same specificity and come earlier.
+
+   The body carries the UI role, so anything that merely inherits — a dialog
+   paragraph, a toast, a label without a class — is 13px. Content that must
+   keep its size names it (docs prose, the dashboards' renderers, the editor
+   canvas and the SQL surfaces all do; ui-screens §3.3's preserve-list).
+   --------------------------------------------------------------------------- */
+body {
+  font-size: var(--app-text-ui);
+  line-height: var(--app-leading-ui);
+}
+
+/* Controls: 36px tall at least, 8/12 padding, the control radius, 13px. A
+   label that wraps grows the control; nothing clips it. */
+.ds-button {
+  min-height: var(--app-control-h);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--app-text-ui);
+  border-radius: var(--app-radius-control);
+}
+
+/* The small button is the icon-button size: 32px, 12px text. An icon-only
+   one (the dialogs' close) is the 32×32 target with its 16px glyph. */
+.ds-button-sm {
+  min-height: var(--app-icon-h);
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--app-text-support);
+}
+
+.ds-input,
+.ds-select {
+  min-height: var(--app-control-h);
+  font-size: var(--app-text-ui);
+  border-radius: var(--app-radius-control);
+}
+
+/* Form copy: a label, its help and its error are support copy at 12px — the
+   size the hand-rolled `u-text-sm` labels carry too — and never smaller (the
+   record's floor for explanatory text); the value in the control is 13px. */
+.ds-field-label,
+.ds-field-help,
+.ds-field-error {
+  font-size: var(--app-text-support);
+}
+
+/* Tabs: 12px type, 12px above and below, the 2px rule — 44px. 8px of side
+   padding and an 8px gap put 24px between two labels, the record's spacing,
+   while keeping room for the hover fill. */
+.ds-tab-list {
+  gap: var(--space-2);
+}
+
+.ds-tab {
+  min-height: var(--app-tab-h);
+  padding: var(--space-3) var(--space-2);
+  font-size: var(--app-text-support);
+  line-height: var(--app-leading-ui);
+}
+
+.ds-tabs-compact .ds-tab {
+  min-height: 0;
+}
+
+/* Status badges: 11px at medium weight, the badge radius, sentence case (no
+   transform anywhere; the word itself carries the state, never colour alone). */
+.ds-badge {
+  font-size: var(--app-text-badge);
+  font-weight: var(--weight-medium);
+  border-radius: var(--app-radius-badge);
+}
+
+/* Cards and panels: the panel radius, a 20px body and NO raised shadow — an
+   ordinary panel is drawn by its 1px boundary (ui-screens §2 principle 8),
+   not lifted. Dialogs float (`.app-modal`), and a card that is itself a link
+   or carries a primary action lifts on hover (§3.5 item 6). */
+.ds-card {
+  padding: var(--space-5);
+  border-radius: var(--app-radius-panel);
+  box-shadow: none;
+}
+
+/* Tables: 12px cells, 11px column labels. A framed data table states the same
+   through data-table.css's own `--dt-font`/`--dt-head-font`; this covers a
+   table not yet in a frame. Row padding and the frame's capacity are not
+   touched here. */
+.ds-table {
+  font-size: var(--app-text-support);
+}
+
+.ds-table th {
+  font-size: var(--app-text-badge);
+}
+
+/* Small uppercase captions — the 10px role, its tracking opening the word. */
+.ds-caption {
+  font-size: var(--app-text-meta);
+  letter-spacing: var(--app-tracking-caption);
+}
+
+/* Notices and states. */
+.ds-toast {
+  font-size: var(--app-text-ui);
+}
+
+.ds-empty-title {
+  font-size: var(--app-text-heading);
+}
+
+.ds-empty-description {
+  font-size: var(--app-text-ui);
+}
+
+/* Phone: text entry is 16px so a mobile browser does not zoom the page on
+   focus (the record's proposal, adopted); the surrounding interface keeps the
+   scale. `input:is(…)` lists the text-entry types only: a checkbox or a radio
+   is not text entry. (The phone page title is beside `.app-main .ds-headline`.)
+
+   `:root :is(…)` is deliberate: these two blocks sit early, and a later screen
+   rule that sizes a control by its own class (`.app-filter-control`,
+   `.app-main .ds-input`, a screen's `.pe-input`) would otherwise undo them.
+   The pseudo-class lifts them over any one- or two-class rule without
+   `!important`; an id rule (an editor's own canvas) still wins, as content. */
+@media (max-width: 767.98px) {
+  :root :is(
+    .ds-input,
+    .ds-select,
+    .app-filter-control,
+    input:is([type="text"], [type="search"], [type="email"], [type="password"], [type="url"], [type="number"], [type="tel"], :not([type])),
+    textarea,
+    select
+  ) {
+    font-size: var(--app-text-entry-phone);
+  }
+}
+
+/* A coarse pointer gets 44px targets by growing the HIT REGION — the control's
+   box — never the type or the glyph. */
+@media (pointer: coarse) {
+  :root :is(.ds-button, .ds-input, .ds-select, .app-filter-control) {
+    min-height: var(--app-target-min);
+  }
+
+  :root :is(.ds-button-sm, .app-modal-close) {
+    min-width: var(--app-target-min);
+    min-height: var(--app-target-min);
+  }
+}
+
+/* ---------------------------------------------------------------------------
    App shell (layouts/default.html). The vendored design system is synced from
    design-system-starter (scripts/sync-design-system.sh) — do NOT edit vendor
    files; app-level chrome and component polish layer on top here.
@@ -411,25 +569,28 @@ body {
 }
 
 /* Hand-rolled modals (register datasource, create template, create API key):
-   the width the inline max-width used to carry, on tokens. */
+   the width the inline max-width used to carry, on tokens. #555: 20px padding,
+   the panel radius (from `.ds-card`), the dialog's floating shadow — a dialog
+   is the one panel that IS raised — and never wider than 560px or 90vw. */
 .app-modal {
   position: relative;
   width: 100%;
   max-height: 90vh;
   overflow: auto;
-  padding: var(--gap-lg);
+  padding: var(--space-5);
+  box-shadow: var(--shadow-lg);
 }
 
 .app-modal-sm {
-  max-width: 30rem;
+  max-width: min(30rem, 90vw);
 }
 
 .app-modal-md {
-  max-width: 32rem;
+  max-width: min(32rem, 90vw);
 }
 
 .app-modal-lg {
-  max-width: 35rem;
+  max-width: min(var(--app-dialog-max), 90vw);
 }
 
 /* List-page search boxes (pipelines, templates, datasources). */
@@ -657,7 +818,7 @@ button.app-busy::after {
 }
 
 .app-main small {
-  font-size: var(--text-xs);
+  font-size: var(--app-text-support);
 }
 /* ---------------------------------------------------------------------------
    079 §A/§B — THE SHELL: a collapsible left rail and a top bar, replacing the
@@ -1674,18 +1835,31 @@ button.app-busy::after {
    holding. Scoped to .app-main so the marketing site, which never loads this
    file, is untouched either way. */
 .app-main .ds-headline {
-  /* 103 §D: one step up the scale, with the weight/tracking/leading that make
-     Inter read as a title rather than as large body text. The owner ruled Inter
-     and no second face (2026-09-08), so this is the whole instrument. */
-  font-size: var(--text-2xl);
-  font-weight: var(--weight-bold);
-  letter-spacing: var(--tracking-tight);
-  line-height: var(--leading-tight);
+  /* 103 §D set the size; #555 sets the record's title role: 24px, semibold,
+     −0.6px, a 1.35 leading so a long title that wraps stays one block. */
+  font-size: var(--app-text-title);
+  font-weight: var(--app-weight-title);
+  letter-spacing: var(--app-tracking-title);
+  line-height: var(--app-leading-title);
 }
 
+/* Below the phone breakpoint the ONE title steps down to 21px (#555). */
+@media (max-width: 767.98px) {
+  .app-main .ds-headline {
+    font-size: var(--app-text-title-phone);
+  }
+}
+
+/* A card or section title: 12px semibold — it labels a panel and must not
+   compete with the page title (#555; the record's card-title role). */
 .app-main .ds-title {
-  font-size: var(--text-base);
+  font-size: var(--app-text-support);
   font-weight: var(--weight-semibold);
+}
+
+/* A dialog's title heads the whole dialog: the 14px heading role. */
+.app-main .app-modal .ds-title {
+  font-size: var(--app-text-heading);
 }
 
 .app-page-h {
@@ -1706,7 +1880,7 @@ button.app-busy::after {
 .app-page-sub {
   margin: var(--space-1) 0 0;
   color: var(--text-muted);
-  font-size: var(--text-sm);
+  font-size: var(--app-text-support);
   max-width: 70ch;
 }
 
@@ -1719,7 +1893,7 @@ button.app-busy::after {
 
 /* Cards: the mock's larger radius, on the design system's own token. */
 .app-main .ds-card {
-  border-radius: var(--radius-lg);
+  border-radius: var(--app-radius-panel);
   border-color: var(--border-subtle);
 }
 
@@ -1740,7 +1914,7 @@ button.app-busy::after {
   align-items: center;
   justify-content: space-between;
   gap: var(--gap-sm);
-  padding: var(--gap-md) var(--gap-md) 0;
+  padding: var(--space-4) var(--space-5) 0;
 }
 
 .app-card-h h2 {
@@ -1751,17 +1925,17 @@ button.app-busy::after {
    without its own bottom padding the title sat ON the column labels (owner's
    /api-console screenshot, 2026-09-08). The dashboard's table cards share the rule. */
 .app-card-table > .app-card-h {
-  padding-bottom: var(--gap-sm);
+  padding-bottom: var(--space-4);
 }
 
 .app-card-b {
-  padding: var(--gap-md);
+  padding: var(--space-5);
   min-width: 0;
 }
 
 .app-card-note {
   color: var(--text-muted);
-  font-size: var(--text-xs);
+  font-size: var(--app-text-support);
 }
 
 .app-grid {
@@ -1824,7 +1998,8 @@ button.app-busy::after {
 .app-path {
   display: block;
   font-family: var(--font-mono);
-  font-size: var(--text-xs);
+  font-size: var(--app-text-name);
+  line-height: var(--app-leading-name);
   color: var(--text-muted);
   overflow-wrap: anywhere;
 }
@@ -1845,10 +2020,10 @@ button.app-busy::after {
   display: inline-flex;
   align-items: center;
   gap: var(--gap-xs);
-  font-size: var(--text-xs);
-  font-weight: var(--weight-semibold);
+  font-size: var(--app-text-badge);
+  font-weight: var(--weight-medium);
   padding: var(--space-0-5) var(--gap-sm);
-  border-radius: var(--radius-pill);
+  border-radius: var(--app-radius-badge);
   white-space: nowrap;
   background: var(--surface-inset);
   color: var(--text-secondary);
@@ -1894,7 +2069,7 @@ button.app-busy::after {
    PublishedEndpointController refuses anything else with `Allow: GET`. */
 .app-method {
   font-family: var(--font-mono);
-  font-size: var(--text-xs);
+  font-size: var(--app-text-badge);
   font-weight: var(--weight-semibold);
   padding: 0 var(--gap-xs);
   border-radius: var(--radius-sm);
@@ -1931,7 +2106,7 @@ button.app-busy::after {
   border-radius: var(--radius-md);
   background: var(--accent-info-bg);
   color: var(--text-secondary);
-  font-size: var(--text-xs);
+  font-size: var(--app-text-support);
   margin-top: var(--gap-sm);
 }
 
@@ -1945,7 +2120,7 @@ button.app-busy::after {
   padding: var(--gap-xl);
   text-align: center;
   color: var(--text-muted);
-  font-size: var(--text-sm);
+  font-size: var(--app-text-ui);
   border: 1px dashed var(--border-subtle);
   border-radius: var(--radius-lg);
 }
@@ -2001,12 +2176,12 @@ button.app-busy::after {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  font-size: var(--text-xs);
+  font-size: var(--app-text-support);
   color: var(--text-secondary);
 }
 
 .app-kind-b b {
-  font-size: var(--text-sm);
+  font-size: var(--app-text-ui);
   color: var(--text-primary);
   font-weight: var(--weight-semibold);
 }
@@ -2027,7 +2202,7 @@ button.app-busy::after {
   gap: var(--gap-sm);
   align-items: center;
   padding: var(--space-1) var(--gap-xs);
-  font-size: var(--text-xs);
+  font-size: var(--app-text-support);
   cursor: pointer;
 }
 
@@ -2037,7 +2212,7 @@ button.app-busy::after {
 
 /* A definition list of settings rows (the detail pane's key/value pairs). */
 .app-rows {
-  font-size: var(--text-sm);
+  font-size: var(--app-text-ui);
 }
 
 .app-row {
@@ -2107,7 +2282,7 @@ button.app-busy::after {
 
 .app-identity-text span {
   color: var(--text-muted);
-  font-size: var(--text-xs);
+  font-size: var(--app-text-support);
   word-break: break-all;
 }
 
@@ -2133,10 +2308,11 @@ button.app-busy::after {
 .app-filter-control {
   padding: var(--gap-sm) var(--gap-md);
   border: 1px solid var(--border-default);
-  border-radius: var(--radius-base);
+  border-radius: var(--app-radius-control);
   background: var(--surface-raised);
   color: var(--text-primary);
-  font-size: var(--text-sm);
+  font-size: var(--app-text-ui);
+  min-height: var(--app-control-h);
 }
 
 /* A `.ds-input` select in a filter row. `.ds-input` is `width: 100%`, so a bare
@@ -2151,11 +2327,16 @@ button.app-busy::after {
 }
 
 /* The hand-rolled modals' close button, pinned to the card's top-right corner.
-   `.app-modal` is `position: relative`, which is what this anchors to. */
+   `.app-modal` is `position: relative`, which is what this anchors to. #555:
+   the 32×32 icon button around its 16px glyph (a coarse pointer grows it to
+   44 in the baseline block). */
 .app-modal-close {
   position: absolute;
   top: var(--gap-sm);
   right: var(--gap-sm);
+  min-width: var(--app-icon-h);
+  min-height: var(--app-icon-h);
+  padding: 0;
 }
 
 /* The create-template modal's body field: a mono editing surface tall enough to
@@ -2214,8 +2395,14 @@ button.app-busy::after {
    --------------------------------------------------------------------------- */
 
 /* type */
-.u-text-xs { font-size: var(--text-xs); }
-.u-text-sm { font-size: var(--text-sm); }
+/* #555: the two small steps name the scale's roles, not the design system's
+   16px-body steps. `u-text-sm` is support copy (12px: the secondary lines,
+   hand-rolled labels and lists under a 13px body — it was 14px under a 16px
+   one); `u-text-xs` is the same 12px floor, kept as its own name so a
+   metadata line can move to the 10px role on its own later. The larger steps
+   stay what they say. */
+.u-text-xs { font-size: var(--app-text-support); }
+.u-text-sm { font-size: var(--app-text-support); }
 .u-text-base { font-size: var(--text-base); }
 .u-text-lg { font-size: var(--text-lg); }
 .u-text-xl { font-size: var(--text-xl); }
@@ -2344,7 +2531,7 @@ button.app-busy::after {
 }
 
 .app-stat-d {
-  font-size: var(--text-xs);
+  font-size: var(--app-text-support);
   color: var(--text-muted);
   margin-top: var(--space-0-5);
 }
@@ -2397,7 +2584,7 @@ button.app-busy::after {
 /* A <summary> in the execution error's disclosure. */
 .app-summary {
   cursor: pointer;
-  font-size: var(--text-xs);
+  font-size: var(--app-text-support);
   font-weight: var(--weight-semibold);
   color: var(--text-secondary);
 }
@@ -2474,7 +2661,7 @@ button.app-busy::after {
   border-radius: var(--radius-base);
   padding: var(--gap-sm);
   color: var(--text-primary);
-  font-size: var(--text-sm);
+  font-size: var(--app-text-ui);
   max-width: 30rem;
 }
 
@@ -2485,7 +2672,7 @@ button.app-busy::after {
 .app-alert {
   padding: var(--gap-sm);
   border-radius: var(--radius-base);
-  font-size: var(--text-sm);
+  font-size: var(--app-text-ui);
 }
 
 .app-alert-warning {
@@ -2930,7 +3117,7 @@ button.app-busy::after {
 .app-auth-steps li {
   position: relative;
   padding-left: calc(var(--icon-md) + var(--gap-sm));
-  font-size: var(--text-sm);
+  font-size: var(--app-text-ui);
   color: var(--text-secondary);
   line-height: var(--leading-normal);
   counter-increment: app-auth-step;
@@ -2982,13 +3169,13 @@ button.app-busy::after {
 
 .app-auth-sub {
   margin: 0 0 var(--gap-lg);
-  font-size: var(--text-sm);
+  font-size: var(--app-text-ui);
   color: var(--text-secondary);
 }
 
 .app-auth-foot {
   margin: var(--gap-lg) 0 0;
-  font-size: var(--text-xs);
+  font-size: var(--app-text-support);
   color: var(--text-muted);
   line-height: var(--leading-normal);
 }
@@ -3145,26 +3332,21 @@ button.app-busy::after {
   z-index: 1;
 }
 
-/* Cards read as raised rather than drawn. `--shadow-sm` is the design system's
-   own smallest elevation; the border stays, because ui-screens.md §2 principle
-   8 is normative — a card boundary is a `border-default`-family line, never a
-   shadow alone. */
-.app-main .ds-card {
-  box-shadow: var(--shadow-sm);
-}
+/* Cards are DRAWN, not raised (#555, the record's §6: "no raised shadow" for
+   an ordinary panel): the baseline block takes `.ds-card`'s shadow away and the
+   1px boundary is the whole edge — ui-screens.md §2 principle 8 is normative.
+   A dialog keeps its floating shadow (`.app-modal`).
 
-/* The hover lift is for cards that DO something: a card that is itself a link,
-   and a card carrying a primary action. A lift on a static card is noise — it
-   promises an affordance that is not there. */
-.app-main a.ds-card,
-.app-main .ds-card:has(.ds-button-primary) {
+   The hover lift is for a card that IS a link: it promises the click it has.
+   A card that merely carries a primary action no longer lifts — the button is
+   the affordance, and a lifting panel around it is noise (§3.5 item 6). */
+.app-main a.ds-card {
   transition:
     transform var(--duration-base) var(--ease-out),
     box-shadow var(--duration-base) var(--ease-out);
 }
 
-.app-main a.ds-card:hover,
-.app-main .ds-card:has(.ds-button-primary):hover {
+.app-main a.ds-card:hover {
   transform: translateY(-1px);
   box-shadow: var(--shadow-md);
 }
@@ -3176,25 +3358,33 @@ button.app-busy::after {
    are the whole instrument. It stays a property of `.ds-headline` inside
    `.app-main`, so no screen picks its own size and TypeScaleAuditTest's ban on
    inline font-size keeps holding. */
-/* Card and section titles: the size is 076's (a card title must not compete
-   with the page title), the weight and tracking are this round's. */
+/* Card and section titles: 12px semibold on the UI leading (#555 — the size
+   is on `.app-main .ds-title`; at 12px the old bold and tight tracking closed
+   the word up, so neither survives). */
 .app-main .ds-title,
-.app-main .app-card-h h2 {
-  font-weight: var(--weight-bold);
-  letter-spacing: var(--tracking-tight);
-  line-height: var(--leading-tight);
+.app-main .app-card-h :is(h2, h3) {
+  font-weight: var(--weight-semibold);
+  line-height: var(--app-leading-ui);
+}
+
+/* A card header's bare heading (the workspaces' Overview/Versions/Runs panels
+   carry `<h3>` with no class) is the same card-title role. */
+.app-main .app-card-h h3 {
+  margin: 0;
+  font-size: var(--app-text-support);
 }
 
 /* The eyebrow, generalised out of the login ceremony's `.app-auth-eyebrow` (its
    exemplar, unchanged): a small uppercase brand line naming the section a
-   heading belongs to. 0.08em is a literal because it is a TRACKING value for
-   one size, and the design system's `--tracking-wide` (0.025em) is sized for
-   body text — at `--text-xs` uppercase it does not open the word at all. */
+   heading belongs to. #555: the 10px group-caption role with the caption
+   tracking (0.12em, the record's 1.2px at 10px) — the design system's
+   `--tracking-wide` (0.025em) is sized for body text and does not open an
+   uppercase word at this size. */
 .app-eyebrow {
   margin: 0 0 var(--space-1);
-  font-size: var(--text-xs);
+  font-size: var(--app-text-meta);
   font-weight: var(--weight-semibold);
-  letter-spacing: 0.08em;
+  letter-spacing: var(--app-tracking-caption);
   text-transform: uppercase;
   color: var(--brand);
 }
@@ -3545,7 +3735,7 @@ button.app-busy::after {
   justify-content: space-between;
   gap: var(--gap-sm);
   margin: 0;
-  font-size: var(--text-sm);
+  font-size: var(--app-text-support);
   font-weight: var(--weight-semibold);
   color: var(--text-primary);
 }
@@ -3575,7 +3765,7 @@ pre.tf-pane-input {
 
 .tf-outcome {
   margin: 0 0 var(--gap-sm);
-  font-size: var(--text-sm);
+  font-size: var(--app-text-ui);
   font-weight: var(--weight-semibold);
 }
 
@@ -3602,7 +3792,7 @@ pre.tf-pane-input {
   border-radius: var(--radius-base);
   background: var(--surface-default);
   margin-bottom: var(--gap-xs);
-  font-size: var(--text-sm);
+  font-size: var(--app-text-ui);
 }
 
 .tf-case-fail {
