@@ -1,6 +1,7 @@
 package co.datapipelines.browser
 
 import com.microsoft.playwright.Page
+import com.microsoft.playwright.options.ScreenshotCaret
 import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -318,7 +319,8 @@ class TemplateWorkspaceBrowserTest : BrowserSuite() {
             java.nio.file.StandardOpenOption.CREATE,
             java.nio.file.StandardOpenOption.APPEND,
         )
-        page.screenshot(Page.ScreenshotOptions().setPath(dir.resolve("$label.png")))
+        // Hiding carets leaves empty style attributes on inputs, which a cached restore rejects under CSP.
+        page.screenshot(Page.ScreenshotOptions().setCaret(ScreenshotCaret.INITIAL).setPath(dir.resolve("$label.png")))
         violations shouldBe emptyList()
     }
 
