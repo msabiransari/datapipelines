@@ -569,11 +569,12 @@ class ShellFeelBrowserTest : BrowserSuite() {
             page.navigate("$baseUrl$path")
             page.waitForLoadState(LoadState.NETWORKIDLE)
             // The ground is behind the content on every screen, and the page header is the
-            // one this round re-weighted.
+            // one this round re-weighted — since #555 at the compact scale's title weight,
+            // semibold (ui-screens §3.3 item 1, the application-shell record's 600).
             page.locator(".app-backdrop").count() shouldBe 1
             page.evaluate("() => getComputedStyle(document.querySelector('.app-backdrop')).pointerEvents") shouldBe "none"
             page.locator(".app-page-h h1").count() shouldBe 1
-            page.evaluate("() => getComputedStyle(document.querySelector('.app-page-h h1')).fontWeight") shouldBe "700"
+            page.evaluate("() => getComputedStyle(document.querySelector('.app-page-h h1')).fontWeight") shouldBe "600"
             page.screenshot(Page.ScreenshotOptions().setPath(shotDir().resolve("103-$slug-$mode.png")))
         }
     }
