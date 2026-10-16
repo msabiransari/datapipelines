@@ -1,0 +1,39 @@
+From 466b548f128dc6ed102ecbbe815bb5ad7daa9faf Mon Sep 17 00:00:00 2001
+From: Muhammad Sabir <msabiransari@gmail.com>
+Date: Thu, 15 Oct 2026 19:41:26 -0400
+Subject: [PATCH] heatmap: set the pixelated image hint through the CSSOM
+
+Apply the pixelated_image CSS_DECLARATIONS in their existing fallback order with d3 style(), which calls CSSStyleDeclaration.setProperty. A style attribute write is refused by style-src self; the CSSOM preserves the same pixelated rendering without widening that policy.
+
+The image trace has the same attribute writer but is absent from both vendored trace lists, so it remains unchanged.
+---
+ src/traces/heatmap/plot.js | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/src/traces/heatmap/plot.js b/src/traces/heatmap/plot.js
+index 05c30d3..98b6324 100644
+--- a/src/traces/heatmap/plot.js
++++ b/src/traces/heatmap/plot.js
+@@ -15,7 +15,7 @@ var xmlnsNamespaces = require('../../constants/xmlns_namespaces');
+ var alignmentConstants = require('../../constants/alignment');
+ var LINE_SPACING = alignmentConstants.LINE_SPACING;
+ var supportsPixelatedImage = require('../../lib/supports_pixelated_image');
+-var PIXELATED_IMAGE_STYLE = require('../../constants/pixelated_image').STYLE;
++var PIXELATED_IMAGE_DECLARATIONS = require('../../constants/pixelated_image').CSS_DECLARATIONS;
+ 
+ var labelClass = 'heatmap-label';
+ 
+@@ -370,7 +370,9 @@ module.exports = function (gd, plotinfo, cdheatmaps, heatmapLayer) {
+         });
+ 
+         if (drawingMethod === 'fast' && !zsmooth) {
+-            image3.attr('style', PIXELATED_IMAGE_STYLE);
++            PIXELATED_IMAGE_DECLARATIONS.forEach(function(declaration) {
++                image3.style(declaration[0], declaration[1]);
++            });
+         }
+ 
+         removeLabels(plotGroup);
+-- 
+2.53.0
+

@@ -260,6 +260,11 @@ class VisualizationPreviewBrowserTest : DashboardBrowserSuite() {
                         "the heatmap's case $index in $theme",
                         "section[data-dp-case-index='$index']",
                     )
+                    withClue("#531 - the default heatmap's case $index keeps crisp cells in $theme") {
+                        preview
+                            .locator("section[data-dp-case-index='$index'] .heatmaplayer image")
+                            .evaluate("image => getComputedStyle(image).imageRendering") shouldBe "pixelated"
+                    }
                 }
                 preview.waitForTimeout(SETTLE_MS)
                 Files.createDirectories(SHOTS)
@@ -390,7 +395,6 @@ class VisualizationPreviewBrowserTest : DashboardBrowserSuite() {
 
     /**
      * A heatmap with its default colorbar: a 3 x 2 grid per case, the second case over a different value range.
-     * `zsmooth: "fast"` is pinned because the default (`false`) writes an `image-rendering` style attribute on the image.
      */
     private fun heatmapDocument(name: String): String =
         """
@@ -399,7 +403,7 @@ class VisualizationPreviewBrowserTest : DashboardBrowserSuite() {
          "inputs": {"sales": {"columns": [{"name": "month", "type": "STRING", "nullable": false},
                                           {"name": "units", "type": "INTEGER", "nullable": false},
                                           {"name": "target", "type": "INTEGER", "nullable": false}]}},
-         "config": {"data": [{"type": "heatmap", "zsmooth": "fast", "x": [], "y": [], "z": []}], "layout": {}},
+         "config": {"data": [{"type": "heatmap", "x": [], "y": [], "z": []}], "layout": {}},
          "bindings": {"data[0].x": "month", "data[0].y": "target", "data[0].z": "units"},
          "presentation": {"title": "Heatmap colorbar"},
          "tests": {"cases": [
