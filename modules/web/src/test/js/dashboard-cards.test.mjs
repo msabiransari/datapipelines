@@ -344,6 +344,14 @@ test("#473: no-data, abort and ready+stale each carry word + class; stale surviv
     t.mock.timers.tick(runtime._internal.ERROR_ACCENT_MS);
     assert.equal(card.className, "dp-dashboard-card dp-dashboard-card--has-issue");
 
+    adapter.renderStatus(OCCURRENCE, { state: "success", stale: true });
+    assert.equal(card.className, "dp-dashboard-card dp-dashboard-card--success dp-dashboard-card--stale");
+    assert.equal(card.querySelector(".dp-dashboard-card-message").textContent, "Showing out-of-date data.");
+
+    adapter.renderStatus(OCCURRENCE, { state: "no-data", stale: true });
+    assert.equal(card.className, "dp-dashboard-card dp-dashboard-card--stale");
+    assert.equal(card.querySelector(".dp-dashboard-card-message").textContent, "Showing out-of-date data.");
+
     adapter.renderStatus(OCCURRENCE, { state: "ready", stale: true });
     assert.equal(card.querySelector('[role="status"]').textContent, "ready (stale)");
     assert.equal(card.className, "dp-dashboard-card dp-dashboard-card--stale");
