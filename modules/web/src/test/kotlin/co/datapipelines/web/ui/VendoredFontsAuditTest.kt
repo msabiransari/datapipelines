@@ -204,10 +204,10 @@ class VendoredFontsAuditTest {
      * family — Manrope, the approved preview's display AND body face, at `swap`: the h1 is
      * the LCP element and a fallback headline for a beat beats an invisible one (the 133
      * ruling that put the display face on `swap`, now applied to the one face there is).
- * The IBM Plex Mono display faces 133 vendored are no longer referenced by the site
- * (the files and their manifest rows stay until a vendoring round removes them). The
- * JetBrains Mono code faces live in site-fonts-mono.css (late sheet; 133: the SITE-ONLY
- * latin subsets). The app keeps Noto Sans (551); the two sheets never load together.
+     * The IBM Plex Mono display faces 133 vendored are no longer referenced by the site
+     * (the files and their manifest rows stay until a vendoring round removes them). The
+     * JetBrains Mono code faces live in site-fonts-mono.css (late sheet; 133: the SITE-ONLY
+     * latin subsets). The app keeps Noto Sans (551); the two sheets never load together.
      */
     @Test
     fun `site css declares the marketing faces against the vendored files`() {
