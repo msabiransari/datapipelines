@@ -33,7 +33,7 @@
   align-items: center;
   gap: var(--gap-xs, 4px);
   color: var(--text-muted, #64748b);
-  font-size: var(--text-sm, 13px);
+  font-size: var(--app-text-ui);
   white-space: nowrap;
 }
 
@@ -51,7 +51,7 @@
 .tw-crumb-path {
   color: var(--text-muted, #64748b);
   font-family: var(--font-mono, monospace);
-  font-size: var(--text-sm, 13px);
+  font-size: var(--app-text-support);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -65,11 +65,11 @@
 /* The viewed-version chip names the VIEWED row: green while it is the release, amber while
    it is the draft — the pipeline chip's contract, this page's classes. */
 .tw-vchip {
-  font-size: 11.5px;
-  font-weight: var(--weight-semibold, 600);
+  font-size: var(--app-text-badge);
+  font-weight: var(--weight-medium);
   letter-spacing: 0.02em;
-  padding: 2px 8px;
-  border-radius: var(--radius-pill, 999px);
+  padding: var(--space-0-5) var(--space-2);
+  border-radius: var(--app-radius-badge);
   background: var(--accent-success-bg, #dcfce7);
   color: var(--accent-success, #15803d);
   white-space: nowrap;
@@ -112,7 +112,7 @@
 .tw-tabs {
   display: flex;
   align-items: center;
-  gap: var(--space-0-5);
+  gap: var(--space-2);
   /* #502 — was `--border`, never defined; the tab strip's rule is a separator, and the
      house separator floor is `--border-subtle` (dashboards.css `.dp-ws-tabs`). */
   border-bottom: 1px solid var(--border-subtle);
@@ -124,9 +124,11 @@
   border: none;
   border-bottom: 2px solid transparent;
   margin-bottom: -1px;
-  padding: var(--gap-sm, 8px) var(--gap-md, 12px);
+  min-height: var(--app-tab-h);
+  padding: var(--space-3) var(--space-2);
   color: var(--text-muted, #64748b);
-  font-size: var(--text-sm, 13px);
+  font-size: var(--app-text-support);
+  line-height: var(--app-leading-ui);
   font-weight: var(--weight-medium, 500);
   cursor: pointer;
 }
@@ -196,12 +198,12 @@
 
 .tw-kv dt {
   color: var(--text-muted, #64748b);
-  font-size: var(--text-sm, 13px);
+  font-size: var(--app-text-support);
 }
 
 .tw-kv dd {
   margin: 0;
-  font-size: var(--text-sm, 13px);
+  font-size: var(--app-text-ui);
   overflow-wrap: anywhere;
 }
 

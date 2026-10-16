@@ -38,7 +38,7 @@
 }
 
 .te-panel-head h2 {
-  font-size: var(--text-lg);
+  font-size: var(--app-text-support);
   font-weight: var(--weight-semibold);
   margin: 0;
   /* #255: the heading may shrink inside its wrapped line rather than hold the row's
@@ -105,7 +105,7 @@
 
 .te-context-rows .context-row input {
   font-family: var(--font-mono);
-  font-size: var(--text-sm);
+  font-size: var(--app-text-ui);
   padding: var(--gap-xs) var(--gap-sm);
   border: 1px solid var(--border-default);
   border-radius: var(--radius-base);

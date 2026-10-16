@@ -56,7 +56,7 @@
      border; the floor keeps short screens usable. */
   height: calc(100dvh - var(--header-height) - var(--space-px) - (var(--gap-lg) * 2));
   min-height: 540px;
-  font-size: var(--text-sm, 0.875rem);
+  font-size: var(--app-text-ui);
 }
 
 /* ---- Top bar (080 §D — the mock's 52px bar) ---- */
@@ -73,7 +73,7 @@
 
 .pe-back {
   color: var(--text-muted, #64748b);
-  font-size: 13px;
+  font-size: var(--app-text-ui);
   text-decoration: none;
   padding: 6px 8px;
   border-radius: var(--radius-base, 6px);
@@ -94,7 +94,7 @@
 .pe-crumb-path {
   color: var(--text-muted, #64748b);
   font-family: var(--font-mono, monospace);
-  font-size: 12.5px;
+  font-size: var(--app-text-support);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -102,7 +102,7 @@
 
 .pe-crumb-name {
   font-weight: var(--weight-semibold, 600);
-  font-size: 15px;
+  font-size: var(--app-text-heading);
   color: var(--text-primary, #0f172a);
   white-space: nowrap;
   overflow: hidden;
@@ -110,11 +110,11 @@
 }
 
 .pe-vchip {
-  font-size: 11.5px;
-  font-weight: var(--weight-semibold, 600);
+  font-size: var(--app-text-badge);
+  font-weight: var(--weight-medium);
   letter-spacing: 0.02em;
-  padding: 2px 8px;
-  border-radius: var(--radius-pill, 999px);
+  padding: var(--space-0-5) var(--space-2);
+  border-radius: var(--app-radius-badge);
   background: var(--accent-success-bg, #dcfce7);
   color: var(--accent-success, #15803d);
   white-space: nowrap;
@@ -136,7 +136,7 @@
   align-items: center;
   gap: var(--gap-sm, 8px);
   color: var(--text-muted, #64748b);
-  font-size: 12.5px;
+  font-size: var(--app-text-support);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -172,11 +172,12 @@
   gap: var(--gap-sm, 8px);
   background: var(--accent-primary, #0f172a);
   color: var(--accent-primary-text, #fff);
-  padding: 8px 14px;
+  min-height: var(--app-control-h);
+  padding: var(--space-2) var(--space-3);
   border: none;
-  border-radius: var(--radius-md, 8px);
+  border-radius: var(--app-radius-control);
   font-weight: var(--weight-semibold, 600);
-  font-size: 13.5px;
+  font-size: var(--app-text-ui);
   box-shadow: var(--shadow-sm, 0 1px 2px rgb(15 23 42 / 0.06));
   cursor: pointer;
 }
@@ -206,7 +207,7 @@
 .pe-banner {
   padding: var(--gap-sm, 8px) var(--gap-md, 16px);
   text-align: center;
-  font-size: 13px;
+  font-size: var(--app-text-ui);
   flex-shrink: 0;
   display: flex;
   align-items: center;
@@ -252,7 +253,7 @@
 .pe-tabs {
   display: flex;
   align-items: stretch;
-  gap: var(--gap-xs, 4px);
+  gap: var(--space-2);
   padding: 0 var(--pe-gap);
   border-bottom: 1px solid var(--border-faint, #e6e9ee);
   background: var(--surface-default, #fff);
@@ -265,9 +266,11 @@
   background: none;
   cursor: pointer;
   font: inherit;
-  font-size: 13px;
+  font-size: var(--app-text-support);
+  line-height: var(--app-leading-ui);
+  min-height: var(--app-tab-h);
   color: var(--text-secondary, #334155);
-  padding: var(--gap-sm, 8px) var(--gap-sm, 8px) calc(var(--gap-sm, 8px) - 1px);
+  padding: var(--space-3) var(--space-2);
   border-bottom: 2px solid transparent;
   white-space: nowrap;
 }
@@ -342,7 +345,7 @@
 .pe-tab-note {
   padding: var(--pe-gap);
   color: var(--text-muted, #64748b);
-  font-size: var(--text-sm, 0.875rem);
+  font-size: var(--app-text-support);
 }
 
 .pe-tab-lazy {
@@ -360,12 +363,12 @@
   padding: var(--space-0-5) var(--pe-gap);
   border-bottom: 1px solid var(--border-faint, #e6e9ee);
   background: var(--surface-inset, #f8fafc);
-  font-size: var(--text-xs, 0.75rem);
+  font-size: var(--app-text-support);
   color: var(--text-secondary, #334155);
 }
 
 .pe-run-strip-label {
-  font-size: 11px;
+  font-size: var(--app-text-badge);
   font-weight: var(--weight-semibold, 600);
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -382,13 +385,13 @@
 
 .pe-label {
   display: block;
-  font-size: var(--text-xs, 0.75rem);
+  font-size: var(--app-text-support);
   color: var(--text-secondary, #334155);
   margin-bottom: 2px;
 }
 
 .pe-value {
-  font-size: 13px;
+  font-size: var(--app-text-ui);
   color: var(--text-primary, #0f172a);
   /* Long values (a JDBC URL, a generated table name) wrap, never widen the panel;
      the full text rides on the element's title (032). */
@@ -424,7 +427,7 @@
 .pe-input {
   width: 100%;
   padding: 4px 8px;
-  font-size: 13px;
+  font-size: var(--app-text-ui);
   border: 1px solid var(--border-default, #8e94a1);
   border-radius: var(--radius-base, 6px);
   background: var(--surface-default, #fff);
@@ -438,7 +441,7 @@
 
 .pe-type-badge {
   display: inline-block;
-  font-size: 11px;
+  font-size: var(--app-text-badge);
   padding: 1px 6px;
   border-radius: var(--radius-base, 6px);
   background: var(--surface-inset, #f1f3f6);
@@ -510,7 +513,7 @@
   position: absolute;
   left: var(--gap-md, 16px);
   top: 14px;
-  font-size: 12px;
+  font-size: var(--app-text-support);
   color: var(--text-muted, #64748b);
   background: var(--surface-raised, #fff);
   border: 1px solid var(--border-subtle, #b2b7bf);
@@ -559,7 +562,7 @@
   border-radius: var(--radius-pill, 999px);
   background: var(--surface-raised, #fff);
   border: 1px solid var(--border-subtle, #b2b7bf);
-  font-size: 11.5px;
+  font-size: var(--app-text-badge);
   color: var(--text-secondary, #334155);
   box-shadow: var(--shadow-sm, 0 1px 2px rgb(15 23 42 / 0.06));
 }
@@ -715,10 +718,10 @@
 }
 
 .pe-graph-controls button {
-  width: 30px;
-  height: 30px;
+  width: var(--app-icon-h);
+  height: var(--app-icon-h);
   border: none;
-  border-radius: var(--radius-base, 6px);
+  border-radius: var(--app-radius-control);
   display: grid;
   place-items: center;
   background: none;
@@ -1447,7 +1450,7 @@
 .pe-node-list-item {
   padding: 4px 8px;
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--app-text-ui);
   color: var(--text-primary, #0f172a);
   border-radius: var(--radius-sm, 4px);
   /* Execution-state indicator channel (031): a left accent in the same token as the
@@ -1630,7 +1633,7 @@ html.dp-splitting-y * {
   border: none;
   background: none;
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--app-text-support);
   font-weight: var(--weight-medium, 500);
   color: var(--text-muted, #64748b);
   border-radius: var(--radius-base, 6px) var(--radius-base, 6px) 0 0;
@@ -1658,7 +1661,7 @@ html.dp-splitting-y * {
 /* The tab count badges: neutral at rest, danger when errors > 0, the success wash
    for the Results row count. */
 .pe-dock-count {
-  font-size: 11px;
+  font-size: var(--app-text-badge);
   font-variant-numeric: tabular-nums;
   padding: 1px 6px;
   border-radius: var(--radius-pill, 999px);
@@ -1679,7 +1682,7 @@ html.dp-splitting-y * {
 /* "previous run": the Results tab is still showing a page from an earlier
    execution, because a new run has started and its data has not landed. */
 .pe-dock-stale {
-  font-size: 11px;
+  font-size: var(--app-text-badge);
   font-weight: var(--weight-normal, 400);
   color: var(--text-muted, #64748b);
   font-style: italic;
@@ -1761,7 +1764,7 @@ html.dp-splitting-y * {
 }
 
 .pe-details-kind {
-  font-size: 11px;
+  font-size: var(--app-text-badge);
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--type);
@@ -1776,7 +1779,7 @@ html.dp-splitting-y * {
   display: grid;
   grid-template-columns: 96px 1fr;
   gap: 4px 10px;
-  font-size: 12.5px;
+  font-size: var(--app-text-support);
   margin: 0;
 }
 
@@ -1805,7 +1808,7 @@ html.dp-splitting-y * {
   gap: var(--gap-sm, 8px);
   padding: 8px 16px;
   border-bottom: 1px solid var(--border-faint, #e6e9ee);
-  font-size: 12px;
+  font-size: var(--app-text-support);
   color: var(--text-muted, #64748b);
 }
 
@@ -1849,7 +1852,7 @@ html.dp-splitting-y * {
 }
 
 .pe-sql-meta .pe-link {
-  font-size: var(--text-xs, 0.75rem);
+  font-size: var(--app-text-support);
   word-break: break-all;
 }
 
@@ -2008,7 +2011,7 @@ html.dp-splitting-y * {
 }
 
 .pe-failure-message {
-  font-size: 13px;
+  font-size: var(--app-text-ui);
   color: var(--text-primary, #0f172a);
   word-break: break-word;
 }
@@ -2017,7 +2020,7 @@ html.dp-splitting-y * {
   display: flex;
   gap: var(--gap-md, 16px);
   flex-wrap: wrap;
-  font-size: var(--text-xs, 0.75rem);
+  font-size: var(--app-text-support);
   color: var(--text-muted, #64748b);
   word-break: break-all;
 }
@@ -2033,12 +2036,12 @@ html.dp-splitting-y * {
 
 .pe-dock-error-summary {
   padding: var(--gap-sm, 8px) var(--gap-md, 16px) 0;
-  font-size: 13px;
+  font-size: var(--app-text-ui);
 }
 
 /* ---- Results body ---- */
 .pe-result-ttl {
-  font-size: 11px;
+  font-size: var(--app-text-badge);
   color: var(--text-muted, #64748b);
   padding: 4px var(--pe-gap);
   text-align: right;
@@ -2048,7 +2051,7 @@ html.dp-splitting-y * {
   padding: var(--gap-md, 16px);
   text-align: center;
   color: var(--text-secondary, #334155);
-  font-size: 13px;
+  font-size: var(--app-text-ui);
 }
 
 .pe-result-table-container {
@@ -2095,7 +2098,7 @@ html.dp-splitting-y * {
 }
 
 .pe-result-page-info {
-  font-size: var(--text-xs, 0.75rem);
+  font-size: var(--app-text-support);
   color: var(--text-secondary, #334155);
 }
 
@@ -2215,7 +2218,7 @@ html.dp-splitting-y * {
   place-items: center;
   height: 100%;
   color: var(--text-muted, #64748b);
-  font-size: 13px;
+  font-size: var(--app-text-ui);
   padding: var(--gap-md, 16px);
   text-align: center;
 }
@@ -2248,7 +2251,7 @@ html.dp-splitting-y * {
 }
 
 .pe-modal-header h2 {
-  font-size: 15px;
+  font-size: var(--app-text-heading);
   font-weight: var(--weight-semibold, 600);
   margin: 0;
   color: var(--text-danger, #dc2626);
