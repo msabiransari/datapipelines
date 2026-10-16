@@ -31,10 +31,14 @@ export function createTreeRenderer(host, state, options) {
     const version = document.createElement("span"); version.className = "ds-badge ds-badge-default dp-tree-version";
     const draft = document.createElement("span"); draft.className = "ds-badge ds-badge-warning dp-tree-draft";
     draft.textContent = "draft"; draft.title = "pending release";
-    control.append(version, draft); line.append(control);
+    // #533: the catalog row's marker (partials/template-search.html), literal text only.
+    const review = document.createElement("span"); review.className = "ds-badge ds-badge-warning dp-tree-review";
+    review.setAttribute("data-needs-review", ""); review.textContent = "needs review";
+    review.title = "A fact this template cites was retired or superseded — re-verify before you lean on it.";
+    control.append(version, draft, review); line.append(control);
     const group = document.createElement("div"); group.className = "dp-tree-group"; group.setAttribute("role", "group"); item.append(group);
     groups.set(node.key, group);
-    const row = { item, control, label, version, draft, group, node };
+    const row = { item, control, label, version, draft, review, group, node };
     control.addEventListener("click", event => {
       const live = row.node; focusedKey = live.key; item.focus();
       if (live.kind === "folder") { event.preventDefault(); toggle(live.key); }
@@ -94,6 +98,8 @@ export function createTreeRenderer(host, state, options) {
       if (number && row.version.textContent !== `v${number}`) row.version.textContent = `v${number}`;
       row.draft.hidden = node.kind !== "artifact" || !node.draftVersion;
       if (row.draft.hidden) row.draft.remove(); else if (!row.draft.isConnected) row.control.append(row.draft);
+      row.review.hidden = node.kind !== "artifact" || node.needsReview !== true;
+      if (row.review.hidden) row.review.remove(); else if (row.control.lastChild !== row.review) row.control.append(row.review);
       if (node.kind === "artifact" && row.control.tagName === "A") {
         const href = options.getHref(node); if (row.control.getAttribute("href") !== href) row.control.setAttribute("href", href);
         if (selectedKey === node.key) row.control.setAttribute("aria-current", "page"); else row.control.removeAttribute("aria-current");

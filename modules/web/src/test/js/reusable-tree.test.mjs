@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createTreeState, PAGE_CEILING } from "../../main/resources/static/js/tree/state.mjs";
+import { createTreeRenderer } from "../../main/resources/static/js/tree/render.mjs";
 
 const folder = (path, parentKey = null) => ({ key: `folder:${path}`, parentKey, kind: "folder", path, name: path, hasChildren: true });
 const leaf = (path, parentKey = null) => ({ key: `artifact:${path}`, parentKey, kind: "artifact", path, name: path, hasChildren: false });
@@ -245,4 +246,107 @@ test("a refresh cancelled by collapsing its level does not go on to refetch the 
   const pending = state.refresh("folder:a"); state.collapse("folder:a");
   held.resolve(page([folder("a/b", "folder:a")])); await pending;
   assert.deepEqual(calls, ["folder:a"]);
+});
+
+// A minimal DOM stand-in for the renderer: elements with attributes, ordered children, the
+// `hidden` property, text nodes and the two selector shapes render.mjs uses (`[name]`, `[name="v"]`).
+function fakeDocument() {
+  const document = { activeElement: null };
+  const detach = node => {
+    if (!node.parentNode) return;
+    const siblings = node.parentNode.childNodes; siblings.splice(siblings.indexOf(node), 1); node.parentNode = null;
+  };
+  const matches = (element, selector) => {
+    const [, name, value] = selector.match(/^\[([\w-]+)(?:="([^"]*)")?\]$/) || [];
+    if (!name) throw new Error(`unsupported selector ${selector}`);
+    if (name === "hidden") return element.hidden === true;
+    return value === undefined ? element.hasAttribute(name) : element.getAttribute(name) === value;
+  };
+  function make(tagName, namespaceURI = "http://www.w3.org/1999/xhtml") {
+    const attributes = new Map();
+    const element = {
+      tagName: tagName.toUpperCase(), namespaceURI, ownerDocument: document, parentNode: null, childNodes: [],
+      className: "", title: "", hidden: false, tabIndex: 0, type: "", dataset: {}, ownText: "",
+      classList: { add(...names) { element.className = [element.className, ...names].filter(Boolean).join(" "); } },
+      get children() { return element.childNodes.filter(child => child.tagName); },
+      get lastChild() { return element.childNodes.at(-1) ?? null; },
+      get isConnected() { let node = element; while (node.parentNode) node = node.parentNode; return node === document.body; },
+      get textContent() { return element.ownText + element.childNodes.map(child => child.textContent).join(""); },
+      set textContent(value) { element.replaceChildren(); element.ownText = String(value); },
+      setAttribute(name, value) { attributes.set(name, String(value)); },
+      getAttribute(name) { return attributes.has(name) ? attributes.get(name) : null; },
+      hasAttribute(name) { return attributes.has(name); },
+      removeAttribute(name) { attributes.delete(name); },
+      append(...nodes) { nodes.forEach(node => element.insertBefore(node, null)); },
+      insertBefore(node, reference) {
+        detach(node);
+        const at = reference ? element.childNodes.indexOf(reference) : -1;
+        if (at < 0) element.childNodes.push(node); else element.childNodes.splice(at, 0, node);
+        node.parentNode = element; return node;
+      },
+      replaceChildren() { [...element.childNodes].forEach(detach); element.ownText = ""; },
+      remove() { detach(element); },
+      contains(node) { for (let at = node; at; at = at.parentNode) if (at === element) return true; return false; },
+      closest(selector) { for (let at = element; at && at.tagName; at = at.parentNode) if (matches(at, selector)) return at; return null; },
+      querySelectorAll(selector) {
+        const found = [];
+        const walk = node => node.children.forEach(child => { if (matches(child, selector)) found.push(child); walk(child); });
+        walk(element); return found;
+      },
+      addEventListener() {}, removeEventListener() {},
+      focus() { document.activeElement = element; },
+    };
+    return element;
+  }
+  document.createElement = tag => make(tag);
+  document.createElementNS = (namespace, tag) => make(tag, namespace);
+  document.createTextNode = text => ({ textContent: String(text), parentNode: null, remove() { detach(this); } });
+  document.body = make("body");
+  return document;
+}
+
+// #533 — the sidebar's leaf carries the catalog row's needs-review marker (partials/template-search.html):
+// the same classes, attribute, text and title, after the draft badge, on exactly the flagged leaves, and
+// removed/re-appended as the flag changes, the way the draft badge is.
+test("a leaf whose listed version needs review carries the catalog's marker, and only while flagged", async () => {
+  const document = fakeDocument(); const host = document.createElement("div"); document.body.append(host);
+  let drifted = true; let drafting = true;
+  const source = { async loadChildren(parent) {
+    if (parent === null) return page([folder("a")]);
+    return page([
+      { ...leaf("a/active_orders.jsonata", "folder:a"), version: 2, needsReview: drifted },
+      { ...leaf("a/orders.sql", "folder:a"), version: 1, needsReview: false },
+      { ...leaf("a/legacy.sql", "folder:a"), version: 1 },
+      { ...leaf("a/next.jsonata", "folder:a"), version: 1, draftVersion: drafting ? 2 : null, needsReview: true },
+    ]);
+  } };
+  const state = createTreeState({ source });
+  const renderer = createTreeRenderer(host, state, { label: "Templates", getHref: node => `/templates/${node.path}` });
+  const control = key => host.querySelectorAll(`[data-tree-key="${key}"]`)[0].children[0].children[0];
+  const badges = key => control(key).children.filter(child => child.className.startsWith("ds-badge")).map(child => child.className.split(" ").at(-1));
+  const markers = () => host.querySelectorAll("[data-needs-review]");
+  await state.initialize(); renderer.render(); await state.expand("folder:a"); renderer.render();
+
+  const marker = control("artifact:a/active_orders.jsonata").lastChild;
+  assert.equal(marker.className, "ds-badge ds-badge-warning dp-tree-review");
+  assert.equal(marker.getAttribute("data-needs-review"), "");
+  assert.equal(marker.textContent, "needs review");
+  assert.equal(marker.title, "A fact this template cites was retired or superseded — re-verify before you lean on it.");
+  assert.equal(marker.getAttribute("aria-hidden"), null, "the badge text is its accessible text");
+  assert.deepEqual(badges("artifact:a/active_orders.jsonata"), ["dp-tree-version", "dp-tree-review"]);
+  assert.deepEqual(badges("artifact:a/orders.sql"), ["dp-tree-version"], "false reads clean");
+  assert.deepEqual(badges("artifact:a/legacy.sql"), ["dp-tree-version"], "an absent flag reads clean");
+  assert.deepEqual(badges("artifact:a/next.jsonata"), ["dp-tree-version", "dp-tree-draft", "dp-tree-review"], "after the draft badge");
+  assert.equal(control("folder:a").children.some(child => child.className.includes("dp-tree-review")), false, "never on a folder");
+  assert.equal(markers().length, 2);
+
+  drifted = false; drafting = false; await state.refresh(); renderer.render();
+  assert.deepEqual(badges("artifact:a/active_orders.jsonata"), ["dp-tree-version"], "a cleared flag removes the marker");
+  assert.deepEqual(badges("artifact:a/next.jsonata"), ["dp-tree-version", "dp-tree-review"]);
+
+  drifted = true; drafting = true; await state.refresh(); renderer.render();
+  assert.deepEqual(badges("artifact:a/active_orders.jsonata"), ["dp-tree-version", "dp-tree-review"], "and a raised one re-appends it");
+  assert.deepEqual(badges("artifact:a/next.jsonata"), ["dp-tree-version", "dp-tree-draft", "dp-tree-review"], "the returning draft stays before it");
+  assert.equal(markers().length, 2);
+  renderer.dispose();
 });

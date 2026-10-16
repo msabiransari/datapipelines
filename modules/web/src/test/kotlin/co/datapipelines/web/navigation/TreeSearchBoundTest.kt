@@ -9,6 +9,7 @@ import co.datapipelines.parameters.ParameterSetService
 import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.pipeline.SearchNeedle
+import co.datapipelines.pipeline.TemplateReviewMarks
 import co.datapipelines.templates.TemplateService
 import co.datapipelines.visualization.DashboardService
 import co.datapipelines.visualization.VisualizationService
@@ -59,6 +60,7 @@ class TreeSearchBoundTest {
                             dashboards = ReadLens.Everything,
                         )
                     },
+                    TemplateReviewMarks.NONE,
                 ),
             ).setControllerAdvice(ApiExceptionHandler())
             .build()

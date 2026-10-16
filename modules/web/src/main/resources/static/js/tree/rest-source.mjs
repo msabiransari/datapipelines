@@ -40,7 +40,7 @@ export function restTreeSource(family, fetchPage = fetch) {
       if (node.href !== null && node.href !== undefined && !safeHref(node.href, family)) throw new Error("Invalid navigation destination");
       return { key: node.key, parentKey: node.parent_key, kind: node.kind, name: node.name, path: node.path,
         hasChildren: node.has_children, match: node.match, resourceId: node.resource_id, href: node.href,
-        version: node.version, draftVersion: node.draft_version };
+        version: node.version, draftVersion: node.draft_version, needsReview: node.needs_review };
     });
     return { nodes, nextCursor: data.next_cursor,
       identity: { root, parent, query, mode: data.mode }, context: { workspace: data.workspace_id, viewToken: data.view_token } };

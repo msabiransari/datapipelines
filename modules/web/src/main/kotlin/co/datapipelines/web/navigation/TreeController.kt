@@ -10,6 +10,8 @@ import co.datapipelines.pipeline.NavigationRequest
 import co.datapipelines.pipeline.NavigationRow
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineService
+import co.datapipelines.pipeline.TemplateRef
+import co.datapipelines.pipeline.TemplateReviewMarks
 import co.datapipelines.templates.TemplateService
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.visualization.DashboardService
@@ -23,8 +25,14 @@ import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
 import org.springframework.web.server.ResponseStatusException
+import java.util.UUID
 
-/** Literal first-party read surfaces; permission and credential admission retain the existing matrix. */
+/**
+ * Literal first-party read surfaces; permission and credential admission retain the existing matrix.
+ *
+ * [reviewMarks] is the ONE citation read every template `needs_review` comes from (transform-nodes
+ * design §8.2): a templates page asks it once for its leaves' listed versions (#533).
+ */
 @RestController
 @Suppress("LongParameterList", "TooManyFunctions") // five sources, two literal permission-bearing handlers per source
 class TreeController(
@@ -34,6 +42,7 @@ class TreeController(
     private val visualizations: VisualizationService,
     private val parameters: ParameterSetService,
     private val lens: PromoterLens,
+    private val reviewMarks: TemplateReviewMarks,
 ) {
     private val projection = TreeProjection()
 
@@ -157,7 +166,23 @@ class TreeController(
                 NavigationFamily.VISUALIZATIONS -> visualizations::navigation
                 NavigationFamily.PARAMETER_SETS -> parameters::navigation
             }
-        val page = projection.page(family, workspace, principal.userId, admitted, root, parent, query, cursor, load)
+        val needsReview: ((List<TreeNode>) -> Set<String>)? =
+            if (family == NavigationFamily.TEMPLATES) { artifacts -> retired(workspace, artifacts) } else null
+        val page = projection.page(family, workspace, principal.userId, admitted, root, parent, query, cursor, needsReview, load)
         return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(ApiResponse.of(page))
+    }
+
+    /**
+     * The keys of the template [artifacts] whose LISTED version cites a retired fact, by name and
+     * listed version — the rows the lens already admitted, so a narrowing lens is asked about the
+     * released versions it lists, the answer the catalog row gives the same caller.
+     */
+    private fun retired(
+        workspace: UUID,
+        artifacts: List<TreeNode>,
+    ): Set<String> {
+        val keys = artifacts.mapNotNull { node -> node.version?.let { TemplateRef(node.path, it) to node.key } }.toMap()
+        if (keys.isEmpty()) return emptySet()
+        return reviewMarks.retiredCitations(workspace, keys.keys).keys.mapNotNullTo(HashSet()) { keys[it] }
     }
 }

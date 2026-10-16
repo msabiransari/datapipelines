@@ -1,9 +1,9 @@
 # REST API + SSE Specification
 
-**Status:** v2.95 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
+**Status:** v2.96 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
-**Last updated:** 2026-10-11
+**Last updated:** 2026-10-16
 
 ---
 
@@ -2787,7 +2787,10 @@ The typed payload has `family`, `mode` (`browse` or `search`), `root`, `parent`,
 `query`, server-derived `workspace_id`, `view_token`, `nodes` and nullable `next_cursor`.
 Nodes have `key`, `parent_key`, `kind` (`folder` or `artifact`), `name`, canonical `path`,
 `has_children` and `match`. Artifacts also have `resource_id`, canonical relative `href`,
-listed `version` and nullable `draft_version`. A narrowing view emits released metadata only.
+listed `version` and nullable `draft_version`. A template artifact also has `needs_review` — true
+when its listed version cites a retired or superseded learned fact ([Templates §3.4](templates.md#34-implements-and-drift)),
+false otherwise — read once per page with the release warning's citation read; it is null on
+folders and on every other family's nodes. A narrowing view emits released metadata only.
 Folder and artifact keys are distinct even at the same path. Search ancestors may repeat
 across pages; deduplicate by key. No stored body, SQL, description, fixture or secret travels.
 
@@ -2804,6 +2807,7 @@ browser persistence. Clients must reject foreign/stale responses even after abor
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-16 | v2.96 | 533 (#533) the templates tree carries `needs_review` | **§24** (additive): a template artifact node carries `needs_review` — true when its LISTED version cites a retired or superseded learned fact ([Templates §3.4](templates.md#34-implements-and-drift)), false otherwise; null on folders and on the pipelines, dashboards, visualizations and parameter-sets nodes. The flag comes from ONE citation read per page over the page's own rows (name and listed version) — the read the pipeline release's `template_needs_review` warning uses — so a narrowing view is answered about the released versions it lists. The 1 MiB budget counts the flag on every template artifact. The sidebar's Templates tree renders it as the catalog row's **needs review** marker ([UI Screens §4.6a](ui-screens.md)). No route, permission or other field changed. |
 | 2026-10-11 | v2.95 | 504b (#504b) the shared search-needle refusal on every REST search | **§5.7, §8.5, §16.3, §21.2 and §24**: a `q` over 200 characters after the trim is refused `400 request.query_too_long` with `details.limit` and `details.length`, before any read and never echoed — one rule ([pipeline-contract §13.21](pipeline-contract.md) v1.58) applied by the service that owns each search, replacing §21.2's parameter-only `parameter.validation.query_too_long` (#490) and giving the pipelines, templates, user and five `/tree/search` listings the same refusal. Blank `q` still means no search everywhere; the UI boxes still truncate and never meet the refusal; the MCP list tools answer the same term as `-32602` ([MCP §6.2.44](mcp-server.md) v1.74). A narrowing of accepted input only for terms no box could send; no route, field, permission or other code changed. |
 | 2026-10-10 | v2.94 | 504a (#504) the users search escapes its LIKE term; the listings trim `q` — renumbered at lane after #505's v2.93 | **§16.3** (`GET /auth/users?q=`): the search term's own `%` and `_` are matched literally — the trimmed, lowercased term is escaped and both LIKEs carry an explicit `ESCAPE '\'` (the house form; the term stays a bound parameter, so nothing about the parameterisation changed). Unescaped, a `q` of `%` matched every user and a `q` of `_` matched every user with at least one character in email or display name. **§5.7 and §8.5** (the pipelines and templates flat listings): `q` is trimmed and a blank (whitespace-only) term means NO search — the whitespace-only behaviour change: a `q` of `" "` used to keep only the pipelines whose name, display name or description contained that space, and to match only the templates with a space in a searched column (`q=""` bound `%%`). No route, field, status code or permission changed. |
 | 2026-10-10 | v2.93 | 505 (#505) the idempotent attach reads the replay log's three answers itself | **§6.1.3** (the `503` row's last sentence becomes the attach's rule): the attach's first read of the log now answers the fault row itself — `503 result.storage_unavailable`, `details.reason: event_log_unavailable`, WITH the `execution_id` (the reservation already handed the retry caller the id), before any stream is committed, for a terminal and a running original alike; it had taken a fault for "no log", so a TERMINAL original answered `410 event_log_expired` (v2.92 left that tracked as #505). Only an ANSWERED empty read (`Absent`) still consults the execution row, which keeps the two `410`s. **§3.5** names the 503 beside its two `410`s. No route, field or permission is added. |

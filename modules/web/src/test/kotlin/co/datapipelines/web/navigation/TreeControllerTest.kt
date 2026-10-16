@@ -7,8 +7,12 @@ import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.parameters.ParameterSetService
 import co.datapipelines.pipeline.NavigationRequest
+import co.datapipelines.pipeline.NavigationRow
 import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.pipeline.ReadLens
+import co.datapipelines.pipeline.RetiredFactCitation
+import co.datapipelines.pipeline.TemplateRef
+import co.datapipelines.pipeline.TemplateReviewMarks
 import co.datapipelines.templates.TemplateService
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.visualization.DashboardService
@@ -31,6 +35,10 @@ class TreeControllerTest {
     private val dashboards = mockk<DashboardService>()
     private val visualizations = mockk<VisualizationService>()
     private val sets = mockk<ParameterSetService>()
+
+    // Strict: the pipelines and empty-page cases must never reach it, and the templates case
+    // stubs the ONE call it expects, so an extra or a missing call is red.
+    private val marks = mockk<TemplateReviewMarks>()
     private val workspace = UUID.randomUUID()
     private val actor = UUID.randomUUID()
 
@@ -46,7 +54,7 @@ class TreeControllerTest {
             visualizations = lenses.getValue("visualization"),
             dashboards = lenses.getValue("dashboard"),
         )
-    private val controller = TreeController(pipelines, templates, dashboards, visualizations, sets, PromoterLens { view })
+    private val controller = TreeController(pipelines, templates, dashboards, visualizations, sets, PromoterLens { view }, marks)
 
     @AfterEach
     fun clearContext() = SecurityContextHolder.clearContext()
@@ -99,6 +107,45 @@ class TreeControllerTest {
             sets.navigation(browse("set"))
             sets.navigation(browse("set").copy(query = "match"))
         }
+    }
+
+    /**
+     * #533 — a templates page, browse and search alike, carries each leaf's `needs_review` from ONE
+     * citation read keyed by name and LISTED version: true for the pin the port names, false for
+     * the clean leaf, null on the folder.
+     */
+    @Test
+    fun `a templates page marks exactly the leaves whose listed version cites a retired fact`() {
+        authenticate()
+        val folder = NavigationRow("scope/sub", "sub", null, null, null)
+        val drifted = NavigationRow("scope/active_orders.jsonata", "active_orders", UUID.randomUUID(), 2, null)
+        val clean = NavigationRow("scope/orders.sql", "orders", UUID.randomUUID(), 1, 3)
+        every { templates.navigation(any()) } returns listOf(folder, drifted, clean)
+        val pins = setOf(TemplateRef(drifted.path, 2), TemplateRef(clean.path, 1))
+        every { marks.retiredCitations(workspace, pins) } returns
+            mapOf(TemplateRef(drifted.path, 2) to listOf(RetiredFactCitation("f1", "superseded", "f2")))
+
+        listOf(controller.templatesTree("scope", null, null), controller.templatesSearch("scope", "o", null)).forEach { answer ->
+            val nodes = checkNotNull(answer.body).data.nodes.associateBy { it.path }
+            nodes.getValue(drifted.path).needsReview shouldBe true
+            nodes.getValue(clean.path).needsReview shouldBe false
+            checkNotNull(answer.body)
+                .data.nodes
+                .filter { it.kind == "folder" }
+                .map { it.needsReview }
+                .distinct() shouldBe listOf(null)
+        }
+        verify(exactly = 2) { marks.retiredCitations(workspace, pins) }
+    }
+
+    /** #533 — the flag is the templates family's alone: a pipelines page never asks the port and carries null. */
+    @Test
+    fun `a pipelines page never asks for review marks`() {
+        authenticate()
+        every { pipelines.navigation(any()) } returns listOf(NavigationRow("scope/daily", "daily", UUID.randomUUID(), 1, null))
+        val nodes = checkNotNull(controller.pipelinesTree("scope", null, null).body).data.nodes
+        nodes.map { it.needsReview } shouldBe listOf(null)
+        verify(exactly = 0) { marks.retiredCitations(any(), any()) }
     }
 
     @Test
