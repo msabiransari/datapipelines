@@ -129,6 +129,192 @@ function uninstallDom() {
   delete globalThis.window;
 }
 
+// #543 — fixture transport, but the real bootstrap, composite and action gate.
+async function actionBoard({ adapter, config: overrides = {} } = {}) {
+  const runtime = require(resolveStatic("datapipelines-dashboard.js"));
+  if (!runtime._internal.renderers().table) {
+    runtime.registerRenderer({ kind: "table", version: "1", create: () => ({ renderData: () => Promise.resolve("rendered") }) });
+  }
+  const container = fakeElement("div");
+  const panel = fakeElement("aside");
+  const config = Object.assign({
+    configuration_id: "actions-config", renderer: { bundle: "2d" },
+    layout: { columns: 12, grid: [] }, visualizations: [], parameter_set: null,
+    actions: [{ name: "refresh_all", type: "refresh", scope: "all", initial: false }],
+    action_controls: [{ name: "apply", label: "Apply", action: "refresh_all" }],
+  }, overrides);
+  const composite = adapter || runtime.adapters(container, { parametersContainer: panel });
+  const instance = runtime.init({
+    server: { fixtures: { config } }, dashboard: { id: "actions-board", version: "released" },
+    container, adapter: composite,
+  });
+  await instance.ready;
+  return { instance, adapter: composite, container, panel };
+}
+
+test("#543: a configured explicit control renders its authored label as text in the pane and survives every parameter render", async () => {
+  installDom();
+  let instance;
+  try {
+    const board = await actionBoard();
+    instance = board.instance;
+    await board.adapter.renderParameters(compositeState());
+    const buttons = board.panel.querySelectorAll(".dp-dashboard-action-control");
+    assert.equal(buttons.length, 1, "the explicit Apply button must render");
+    const button = buttons[0];
+    assert.equal(button.tagName, "BUTTON");
+    assert.equal(button.getAttribute("type"), "button");
+    assert.equal(button.textContent, "Apply");
+    assert.equal(button.getAttribute("data-dp-action-control"), "apply");
+    assert.equal(button.getAttribute("data-dp-action"), "refresh_all");
+    assert.ok(button.className.includes("ds-button ds-button-primary"));
+    await board.adapter.renderParameters(compositeState({ parameter_revision: 4 }));
+    assert.equal(board.panel.querySelectorAll(".dp-dashboard-action-control").length, 1);
+    const root = board.adapter.parametersRoot;
+    assert.equal(root.children.at(-1).className, "dp-dashboard-actions", "actions follow every parameter row");
+    board.adapter.renderActionControls([
+      { name: "unsafe", label: '<img src=x onerror="alert(1)">', action: "refresh_all" },
+      { name: "fallback", action: "refresh_all" },
+    ]);
+    const replaced = board.panel.querySelectorAll(".dp-dashboard-action-control");
+    assert.equal(replaced.length, 2, "replacing controls never duplicates the actions row");
+    assert.equal(replaced[0].textContent, '<img src=x onerror="alert(1)">');
+    assert.equal(replaced[0].innerHTML, null, "authored text never reaches innerHTML");
+    assert.equal(replaced[1].textContent, "fallback");
+    board.adapter.renderActionControls([]);
+    assert.equal(board.panel.querySelectorAll(".dp-dashboard-actions").length, 0);
+  } finally {
+    if (instance) instance.dispose();
+    uninstallDom();
+  }
+});
+
+test("#543: a press emits onAction and the runtime refresh receives the action scope and targets", async () => {
+  installDom();
+  let instance;
+  try {
+    const board = await actionBoard({ config: {
+      actions: [{ name: "refresh_all", type: "refresh", scope: "targets", targets: ["chart"], initial: false }],
+      visualizations: [{ name: "chart", renderer: { kind: "table", version: "1" }, config: {} }],
+    } });
+    instance = board.instance;
+    const actions = [];
+    const streamBodies = [];
+    const originalRegister = board.adapter.onAction;
+    board.adapter.onAction = function (callback) {
+      originalRegister.call(this, (payload) => { actions.push(payload); callback(payload); });
+    };
+    instance._wrapCallbacks();
+    // Capture at the transport boundary; do not replace refresh or the action gate.
+    const originalStream = instance._fixtureStream;
+    instance._fixtureStream = function (body, handlers) {
+      streamBodies.push(body);
+      return originalStream.call(this, body, handlers);
+    };
+    board.panel.querySelector(".dp-dashboard-action-control")?.fire("click");
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(actions, [{ action: "refresh_all", name: "apply", type: "action_control" }], "a press must reach onAction");
+    assert.equal(streamBodies.length, 1);
+    assert.equal(streamBodies[0].scope, "targets");
+    assert.deepEqual(streamBodies[0].targets, ["chart"]);
+  } finally {
+    if (instance) instance.dispose();
+    uninstallDom();
+  }
+});
+
+test("#543: no parameter set still mounts the parameters root with the explicit button", async () => {
+  installDom();
+  let instance;
+  try {
+    const board = await actionBoard();
+    instance = board.instance;
+    assert.equal(board.panel.querySelectorAll(".dp-dashboard-action-control").length, 1);
+    assert.equal(board.adapter.parametersRoot.parentNode, board.panel);
+    assert.equal(board.panel.querySelectorAll(".dp-dashboard-parameter").length, 0);
+  } finally {
+    if (instance) instance.dispose();
+    uninstallDom();
+  }
+});
+
+test("#543: a button press during a real pending evaluation is refused, then a valid evaluation permits it", async () => {
+  installDom();
+  let instance;
+  try {
+    const board = await actionBoard();
+    instance = board.instance;
+    const notices = [];
+    board.adapter.notify = (notice) => { notices.push(notice); };
+    let resolveEvaluation;
+    instance._call = () => new Promise((resolve) => { resolveEvaluation = resolve; });
+    const streamBodies = [];
+    const originalStream = instance._fixtureStream;
+    instance._fixtureStream = function (body, handlers) {
+      streamBodies.push(body);
+      return originalStream.call(this, body, handlers);
+    };
+    const pending = instance._evaluateParameters("parent_change");
+    board.panel.querySelector(".dp-dashboard-action-control").fire("click");
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(streamBodies.length, 0, "no refresh crosses a pending evaluation");
+    assert.ok(notices.some((notice) => notice.code === "actions.locked"));
+    resolveEvaluation(compositeState());
+    await pending;
+    board.panel.querySelector(".dp-dashboard-action-control").fire("click");
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(streamBodies.length, 1, "the accepted evaluation reopens the gate");
+    assert.equal(streamBodies[0].scope, "all");
+    const invalid = instance._evaluateParameters("parent_change");
+    resolveEvaluation(compositeState({ valid: false }));
+    await invalid;
+    board.panel.querySelector(".dp-dashboard-action-control").fire("click");
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(streamBodies.length, 1, "invalid parameters still refuse a press");
+    assert.ok(notices.some((notice) => notice.code === "parameters.invalid"));
+  } finally {
+    if (instance) instance.dispose();
+    uninstallDom();
+  }
+});
+
+for (const withHook of [true, false]) {
+  test(`#543: bootstrap ${withHook ? "dispatches resolved explicit controls after layout through the optional hook" : "still boots an adapter without the optional hook"}`, async () => {
+    installDom();
+    let instance;
+    try {
+      const runtime = require(resolveStatic("datapipelines-dashboard.js"));
+      const events = [];
+      const notices = [];
+      const adapter = Object.fromEntries(runtime._internal.REQUIRED_ADAPTER_FUNCTIONS.map((name) => [name, () => {}]));
+      adapter.mountLayout = () => { events.push("layout"); };
+      adapter.notify = (notice) => { notices.push(notice); };
+      if (withHook) adapter.renderActionControls = (controls) => { events.push(controls); };
+      ({ instance } = await actionBoard({ adapter, config: {
+        actions: [
+          { name: "refresh_all", type: "refresh", scope: "targets", targets: ["chart"] },
+          { name: "unsupported", type: "other" },
+        ],
+        action_controls: [
+          { name: "bound", parameter: "limit", action: "refresh_all" },
+          { name: "apply", label: "Apply", action: "refresh_all" },
+          { name: "bad", action: "missing" },
+          { name: "bad_type", action: "unsupported" },
+        ],
+      } }));
+      if (withHook) {
+        assert.deepEqual(events, ["layout", [{ name: "apply", label: "Apply", action: "refresh_all", scope: "targets", targets: ["chart"] }]], "the optional hook receives resolved button controls after layout");
+        assert.ok(notices.some((n) => n.code === "actions.unknown" && n.severity === "warning"));
+      } else {
+        assert.deepEqual(events, ["layout"]);
+      }
+    } finally {
+      if (instance) instance.dispose();
+      uninstallDom();
+    }
+  });
+}
+
 // --------------------------------------------------------------------------------------------------- tests
 
 test("the plotly substitution lands bound arrays at their paths and escapes every bound value", async () => {

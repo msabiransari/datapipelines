@@ -54,7 +54,8 @@
   min-width: 0;
 }
 
-.dp-dashboard-parameter {
+.dp-dashboard-parameter,
+.dp-dashboard-actions {
   display: flex;
   flex-direction: column;
   gap: var(--gap-xs);
