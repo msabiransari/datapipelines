@@ -39,6 +39,7 @@ class BrandMarkDarkModeShotsBrowserTest : DashboardBrowserSuite() {
         page.setViewportSize(1440, 900)
         page.navigate("$baseUrl/login")
         page.locator(".app-auth-card").first().waitFor()
+        page.waitForFunction("() => getComputedStyle(document.querySelector('.app-auth-card')).opacity === '1'")
         paletteShot("login")
 
         val root = ready("palette552")
