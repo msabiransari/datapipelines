@@ -25,10 +25,10 @@
    * hx-trigger="click once") and every fetch. Tab changes are NAVIGATION ONLY — no fetch is
    * cancelled and no in-flight state exists to lose (a template does not execute).
    *
-   * URL contract: the tab rides `?tab=` on the canonical URL (server-rendered). An in-page
-   * switch rewrites it with history.replaceState — NO pushed history entry, the pipelines
-   * workspace's own contract (#349 deviation 3): htmx's popstate handling does not know
-   * foreign entries, and Back/Forward across in-page switches is #402's problem there too.
+   * URL contract (#528): a USER switch pushes a tab-only `templates` entry through
+   * WorkspaceHistory, with `?tab=` always stated. First paint keeps the arrival URL;
+   * Back/Forward re-select in page without a URL write. The helper keeps htmx's cache path
+   * current, so Back after a boosted leave is a cache hit. Detached roots hand off to htmx.
    * The version selector's rows carry the CURRENT tab (`&tab=`), so a version switch — a
    * full navigation, there is no active run to protect — lands on the tab the reader was
    * reading; after every in-page switch the glue re-stamps those hrefs.
@@ -102,13 +102,14 @@
     root.__twWired = true;
     var canRender = root.getAttribute("data-can-render") === "true";
     var tabs = createTabs(canRender, readActiveTab(root));
+    var helper = window.WorkspaceHistory || null;
 
     function readActiveTab(scope) {
       var active = scope.querySelector('[data-tw-tab][aria-selected="true"]');
       return active ? active.getAttribute("data-tw-tab") : null;
     }
 
-    function paint() {
+    function paint(options, previous) {
       Array.prototype.forEach.call(root.querySelectorAll("[data-tw-tab]"), function (button) {
         var on = tabs.isActive(button.getAttribute("data-tw-tab"));
         button.setAttribute("aria-selected", on ? "true" : "false");
@@ -123,19 +124,33 @@
       Array.prototype.forEach.call(root.querySelectorAll(".tw-version-link"), function (link) {
         link.setAttribute("href", withTab(link.getAttribute("href"), tabs.wire()));
       });
-      if (typeof URL === "function" && typeof history !== "undefined" && history.replaceState) {
-        var url = withTab(window.location.pathname + window.location.search, tabs.wire());
-        history.replaceState(history.state, "", url);
+      if (!options || options.url !== false) {
+        if (helper) {
+          helper.push("templates", { version: null, tab: previous }, { version: null, tab: tabs.wire() });
+        } else if (typeof URL === "function" && typeof history !== "undefined" && history.replaceState) {
+          var url = withTab(window.location.pathname + window.location.search, tabs.wire());
+          history.replaceState(history.state, "", url);
+        }
       }
     }
 
     root.addEventListener("click", function (evt) {
       var button = evt.target.closest && evt.target.closest("[data-tw-tab]");
       if (!button || !root.contains(button)) return;
+      var previous = tabs.active;
       var next = tabs.select(button.getAttribute("data-tw-tab"));
-      if (next === button.getAttribute("data-tw-tab")) paint();
+      if (next === button.getAttribute("data-tw-tab")) paint(null, previous);
     });
-    paint();
+    if (helper) {
+      var wiredPath = window.location.pathname;
+      helper.listen("templates", function (version, tab) {
+        if (!root.isConnected || window.location.pathname !== wiredPath) return false;
+        tabs.select(typeof tab === "string" ? tab : SOURCE);
+        paint({ url: false });
+        return true;
+      });
+    }
+    paint({ url: false });
   }
 
   // #514: execution defines the API once; the page-script loader mounts each arrival and
