@@ -166,7 +166,11 @@ class PipelineDraftPurgePinsBrowserTest : DashboardBrowserSuite() {
         // The form is withheld: no confirm input, no submit.
         entityDialog.locator("[data-typed-confirm]").count() shouldBe 0
 
-        java.nio.file.Files.createDirectories(java.nio.file.Path.of("build/browser-evidence"))
+        java.nio.file.Files
+            .createDirectories(
+                java.nio.file.Path
+                    .of("build/browser-evidence"),
+            )
         page.screenshot(
             com.microsoft.playwright.Page
                 .ScreenshotOptions()
