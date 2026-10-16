@@ -55,9 +55,14 @@ class BrandMarkDarkModeShotsBrowserTest : DashboardBrowserSuite() {
         page.setViewportSize(1440, 900)
         page.navigate("$baseUrl/dashboards/$board")
         page.waitForFunction("() => window.__dpPage && window.__dpPage.ready === true")
-        page.locator("#dp-board .plotly .main-svg").first().waitFor()
+        page.locator("#dp-board [data-dp-viz='slowchart'] .plotly .main-svg").first().waitFor()
         page.waitForFunction(
-            "() => [...document.querySelectorAll('#dp-board [data-dp-state]')].every(e => e.dataset.dpState !== 'loading')",
+            """
+            () => {
+              const states = [...document.querySelectorAll('#dp-board [data-dp-state]')];
+              return states.length === 4 && states.every(e => ['success', 'ready'].includes(e.dataset.dpState));
+            }
+            """.trimIndent(),
         )
         paletteShot("dashboard")
 
