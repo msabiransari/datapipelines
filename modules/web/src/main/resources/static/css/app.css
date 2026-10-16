@@ -79,7 +79,6 @@
 :root {
   --app-sidebar-width: 280px;
   --app-sidebar-collapsed: 0px;
-  --app-detail-width: 320px;
   /* #503 — the main track's floor where the rail is a grid column. */
   --app-main-min-width: 320px;
   /* #473 — the dashboard board's filters panel: its column beside the board, and the left
