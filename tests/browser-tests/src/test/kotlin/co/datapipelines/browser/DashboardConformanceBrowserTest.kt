@@ -466,6 +466,18 @@ class DashboardConformanceBrowserTest : DashboardBrowserSuite() {
         val root = ready("dp3d")
         installHostPage(bundle = "3d")
         val board = seedSurfaceBoard(root)
+        // #536: reproduce CI's 38px heading (73x16 graph before the fix), independently of fonts.
+        // Keep the original single canvas read below as the verdict; no render wait is added.
+        page.route("**/css/dashboards.css") { route ->
+            val response = route.fetch()
+            route.fulfill(
+                com.microsoft.playwright.Route
+                    .FulfillOptions()
+                    .setResponse(response)
+                    .setBody(response.text() + "\n[data-dp-viz=hill] .dp-dashboard-card-head { height: 38px; min-height: 38px; }"),
+            )
+            response.dispose()
+        }
         // #536b: passive — records what the page says and runs no page code.
         val said = recordConsole()
         openHost(board)
