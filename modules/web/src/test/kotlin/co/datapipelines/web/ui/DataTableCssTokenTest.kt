@@ -15,7 +15,9 @@ import org.springframework.core.io.support.PathMatchingResourcePatternResolver
  *
  *  - `data-table.css` is tokens-only (CLAUDE.md rule 3), which `AppCssTokenAuditTest` does not
  *    cover (it scopes itself to app.css by name): no literal colour, every font size a step of
- *    the type scale — the rules `SchedulesCssTokenTest` holds schedules.css to;
+ *    the type scale — the rules `SchedulesCssTokenTest` holds schedules.css to. Since #555 a step
+ *    is a vendored `--text-*` token or one of the compact scale's `--app-text-*` roles (ui-screens
+ *    §3.3), read directly or through the sheet's own `--dt-*font` variable bound to one;
  *  - both files load from the layout for every page (tables are on most screens, and 090's rule
  *    — ui-screens §3.0 — says no page carries its own sheet): the sheet right AFTER app.css (it
  *    folds app.css's table layers and must win over them) and BEFORE the page sheets whose table
@@ -50,9 +52,17 @@ class DataTableCssTokenTest {
 
     @Test
     fun `every font size is a step of the type scale`() {
+        val boundToScale =
+            declarations
+                .mapNotNull { (_, line) -> FONT_VARIABLE.find(line) }
+                .filter { TYPE_SCALE.containsMatchIn(it.groupValues[2]) }
+                .map { it.groupValues[1] }
+        // Non-vacuity: the cell and the column label each read a variable bound to a role.
+        boundToScale.size shouldBeGreaterThanOrEqual 2
         val found =
             declarations
-                .filter { (_, line) -> line.startsWith("font-size:") && !line.contains("var(--text-") }
+                .filter { (_, line) -> line.startsWith("font-size:") }
+                .filterNot { (_, line) -> TYPE_SCALE.containsMatchIn(line) || boundToScale.any { "var($it)" in line } }
                 .map { (n, line) -> "data-table.css:$n $line" }
         found.shouldBeEmpty()
     }
@@ -156,5 +166,11 @@ class DataTableCssTokenTest {
 
         /** An opening `<div …>` — the frame and the viewport are divs, and nothing may sit between them and the table. */
         val OPENING_TAG = Regex("""<(?!/)[a-zA-Z][^>]*>""")
+
+        /** A step of the one type scale: a vendored `--text-*` token or a #555 `--app-text-*` role. */
+        val TYPE_SCALE = Regex("""var\(--(app-)?text-[a-z-]+\)""")
+
+        /** The sheet's own font variable and its value (`--dt-font: var(--app-text-support);`). */
+        val FONT_VARIABLE = Regex("""^(--dt-[a-z-]*font):\s*(.+);$""")
     }
 }

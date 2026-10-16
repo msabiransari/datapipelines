@@ -14,7 +14,8 @@ import org.junit.jupiter.api.Test
  *
  *  - no literal colour — no `#hex`, `rgb()/rgba()`, `hsl()/hsla()` or named colour keyword;
  *    a colour is a `var(--…)` so the six themes and both modes follow it;
- *  - no raw `px` type size — `font-size` is a `var(--text-…)` step of the one scale (076 §D).
+ *  - no raw `px` type size — `font-size` is a step of the one scale (076 §D): a `var(--text-…)`
+ *    token or, since #555, a compact-scale `var(--app-text-…)` role (ui-screens §3.3).
  *
  * And it loads from the layout HEAD (ui-screens §3.0): /schedules is a boosted route, and a
  * page-scoped sheet paints a frame without its rules.
@@ -43,7 +44,7 @@ class SchedulesCssTokenTest {
     fun `every font size is a step of the type scale`() {
         val found =
             declarations
-                .filter { (_, line) -> line.startsWith("font-size:") && !line.contains("var(--text-") }
+                .filter { (_, line) -> line.startsWith("font-size:") && !TYPE_SCALE.containsMatchIn(line) }
                 .map { (n, line) -> "schedules.css:$n $line" }
         found.shouldBeEmpty()
     }
@@ -54,5 +55,10 @@ class SchedulesCssTokenTest {
         val head = layout.substringBefore("</head>")
         head shouldContain "@{/css/schedules.css}"
         (head.indexOf("@{/css/schedules.css}") > head.indexOf("@{/css/template-tree.css}")) shouldBe true
+    }
+
+    private companion object {
+        /** A step of the one type scale: a vendored `--text-*` token or a #555 `--app-text-*` role. */
+        val TYPE_SCALE = Regex("""var\(--(app-)?text-[a-z-]+\)""")
     }
 }
