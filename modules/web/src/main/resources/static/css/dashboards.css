@@ -8,41 +8,18 @@
  * the conformance host page loads it directly.
  */
 
-/* The status chip (#473): the element, its text, `role=status` and `data-dp-state` stay in the
-   DOM for assistive technology and the tests, but a RESTING card shows no badge — the element
-   is display:none until a state worth announcing arrives. State as TEXT first, colour only as
-   reinforcement. */
+/* The status chip (#473, #536): the element, its text, `role=status` and `data-dp-state` stay in
+   the DOM for assistive technology and the tests, but NO state shows it — the card's border is the
+   state (the states block below). Visually hidden, never display:none: a role=status taken out of
+   the render tree is not announced. Positioned against the card's `position: relative`, so it
+   occupies no cell of the heading line. */
 .dp-dashboard-status {
-  display: none;
-  font-family: var(--font-sans);
-  font-size: var(--text-xs);
-  color: var(--text-muted);
-  background: var(--surface-inset);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  padding: 2px var(--space-2);
-}
-
-.dp-dashboard-status[data-dp-state="in-progress"],
-.dp-dashboard-status[data-dp-state="error"],
-.dp-dashboard-status[data-dp-state="abort"],
-.dp-dashboard-status[data-dp-state="no-data"],
-.dp-dashboard-status[data-dp-state="success"] {
-  display: inline-block;
-}
-
-.dp-dashboard-status[data-dp-state="error"],
-.dp-dashboard-status[data-dp-state="abort"] {
-  color: var(--text-danger);
-  border-color: var(--border-danger);
-}
-
-.dp-dashboard-status[data-dp-state="no-data"] {
-  color: var(--text-warning);
-}
-
-.dp-dashboard-status[data-dp-state="success"] {
-  color: var(--text-success);
+  position: absolute;
+  width: var(--space-px);
+  height: var(--space-px);
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 /* The parameters pane (#473): the board hosts it in its own LEFT panel, so the rows run as a
@@ -641,13 +618,12 @@ fieldset.dp-dashboard-parameter > .dp-dashboard-parameter-error {
 /* ---- The board's presentation cards (#473) ----------------------------------------- */
 
 /* Every visualization lives in a CARD: a bordered panel with its own heading and (optional)
-   description, whose BORDER carries the state (loading / loaded / failed) — the state lives
-   in the border and the in-card message, NOT in a resting badge (the chip only appears for
-   states worth announcing). Colours name nothing alone: each state also sets its class.
+   description, whose BORDER carries the state — the state lives in the border and the in-card
+   message, never in a badge (#536: the chip is visually hidden in every state). Colours name
+   nothing alone: each state also sets its class, and the message carries the words.
    #501 — the chrome stays COMPACT, so the body keeps the slot's height less one heading line
-   (a 2-row chart keeps #386's plot area): the chip shares the heading line, the description
-   takes a line only when it has text, and the message foot overlays the body's lower edge
-   instead of reserving a row. */
+   (a 2-row chart keeps #386's plot area): the description takes a line only when it has text,
+   and the message foot overlays the body's lower edge instead of reserving a row. */
 .dp-dashboard-card {
   position: relative;
   display: flex;
@@ -663,8 +639,8 @@ fieldset.dp-dashboard-parameter > .dp-dashboard-parameter-error {
   transition: border-color var(--duration-base) linear;
 }
 
-/* The heading line holds the chip's height whether or not the chip shows, so a state change
-   never resizes the body. */
+/* The heading line keeps its row height in every state (#501), so a state change never resizes
+   the body. */
 .dp-dashboard-card-head {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -673,11 +649,6 @@ fieldset.dp-dashboard-parameter > .dp-dashboard-parameter-error {
   column-gap: var(--gap-sm);
   row-gap: var(--space-1);
   min-width: 0;
-}
-
-.dp-dashboard-card-head > .dp-dashboard-status {
-  grid-column: 2;
-  grid-row: 1;
 }
 
 .dp-dashboard-card-title {
@@ -741,14 +712,33 @@ fieldset.dp-dashboard-parameter > .dp-dashboard-parameter-error {
   display: none;
 }
 
-/* States. A QUIET card shows the default border. */
+/* States (#536): the BORDER is every state's voice. The width never changes (#501: no state
+   resizes the card) — only the colour and, for no-data, the line style. A quiet `ready` card shows
+   the default border. Order matters at equal specificity: the issue rules follow `--stale`, so a
+   settled issue on a stale card stays red. */
 .dp-dashboard-card--busy {
-  border-color: var(--border-focus);
+  border-color: var(--accent-info);
+  animation: dp-card-busy var(--duration-slower) var(--ease-in-out) infinite alternate;
 }
 
-.dp-dashboard-card--error,
-.dp-dashboard-card--abort {
-  border-color: var(--accent-danger);
+@keyframes dp-card-busy {
+  from {
+    border-color: var(--border-default);
+  }
+  to {
+    border-color: var(--accent-info);
+  }
+}
+
+/* Green while the runtime holds `success` (SUCCESS_SETTLE_MS), then the card settles to ready. */
+.dp-dashboard-card--success {
+  border-color: var(--accent-success);
+}
+
+/* Gray, and distinctly so: --border-hover sits a hair from --border-default in both themes
+   (1.06:1 light, 1.05:1 dark); the muted ink is the neutral that reads as a change (owner, #536). */
+.dp-dashboard-card--stale {
+  border-color: var(--text-muted);
 }
 
 .dp-dashboard-card--no-data {
@@ -756,39 +746,35 @@ fieldset.dp-dashboard-parameter > .dp-dashboard-parameter-error {
   border-style: dashed;
 }
 
+/* Red in both phases: loud for ERROR_ACCENT_MS, then the quieter danger border while the
+   message persists. */
+.dp-dashboard-card--error,
+.dp-dashboard-card--abort {
+  border-color: var(--accent-danger);
+}
+
 .dp-dashboard-card--has-issue {
-  border-color: var(--accent-warning);
+  border-color: var(--border-danger);
 }
 
 .dp-dashboard-card--error .dp-dashboard-card-message,
-.dp-dashboard-card--abort .dp-dashboard-card-message {
-  color: var(--text-danger);
-}
-
+.dp-dashboard-card--abort .dp-dashboard-card-message,
 .dp-dashboard-card--has-issue .dp-dashboard-card-message {
-  color: var(--text-warning);
+  color: var(--text-danger);
 }
 
 .dp-dashboard-card--busy .dp-dashboard-card-message {
   color: var(--text-secondary);
 }
 
-/* The dock's in-card status vocabulary (data-dp-state carries the word; the colours are the
-   same accents the rest of the app uses for the same words). */
-.dp-dashboard-card--error .dp-dashboard-status,
-.dp-dashboard-card--abort .dp-dashboard-status {
-  color: var(--accent-danger-text);
-  background: var(--surface-inset);
-  border-color: var(--border-danger);
-}
-
-.dp-dashboard-card--has-issue .dp-dashboard-status {
-  color: var(--text-warning);
-}
-
+/* Reduced motion: no fade between states and no pulse — a busy card rests on its info edge. */
 @media (prefers-reduced-motion: reduce) {
   .dp-dashboard-card {
     transition: none;
+  }
+
+  .dp-dashboard-card--busy {
+    animation: none;
   }
 }
 

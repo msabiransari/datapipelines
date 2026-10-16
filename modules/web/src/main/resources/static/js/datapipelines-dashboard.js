@@ -47,7 +47,9 @@
 (function () {
   "use strict";
 
-  var SUCCESS_SETTLE_MS = 1200;
+  // #536 — how long a card keeps its green success border before the runtime settles it to ready
+  // ("a few seconds", as long as the loud error accent below).
+  var SUCCESS_SETTLE_MS = 3000;
   // #473 — how long a card keeps its loud error/abort accent before falling back to the quiet
   // issue border. The failure MESSAGE inside the card persists; only the loud border settles.
   var ERROR_ACCENT_MS = 3000;
@@ -2357,8 +2359,11 @@
      * `data-dp-state` exactly as before (tests and assistive tech read them); what changes is the
      * PRESENTATION around it: a state class on the card (border colour/animation), a persistent
      * in-card message for failure/no-data/stale, and a LOUD accent border that settles after
-     * ERROR_ACCENT_MS while the message stays. `ready` is visually quiet (the chip is hidden by
-     * CSS), never colour-only: the message text and the chip's `data-dp-state` carry the fact.
+     * ERROR_ACCENT_MS while the message stays. The chip is never shown (#536: CSS hides it
+     * visually in every state), never colour-only: the message text and the chip's
+     * `data-dp-state` carry the fact. #536 — the class words are the wire's state words
+     * (`--abort`, `--no-data`), the ONE vocabulary dashboards.css styles, pinned by
+     * DashboardCardStateVocabularyTest.
      */
     function applyCardStatus(card, status) {
       // Any new status retires the pending accent timer of the previous one.
@@ -2371,7 +2376,7 @@
       var stale = status.stale === true;
       var classes = "dp-dashboard-card";
       var message = "";
-      var loud = null;
+      var loud = false;
       if (state === "in-progress") {
         classes += " dp-dashboard-card--busy";
         card.card.setAttribute("aria-busy", "true");
@@ -2385,14 +2390,14 @@
           // The runtime settles success → ready after SUCCESS_SETTLE_MS; the accent rides along.
         } else if (state === "error") {
           classes += " dp-dashboard-card--error";
-          loud = "dp-dashboard-card--issue";
+          loud = true;
           message = cardStatusText(status.reason, "could not load this visualization");
         } else if (state === "abort") {
-          classes += " dp-dashboard-card--aborted";
-          loud = "dp-dashboard-card--issue";
+          classes += " dp-dashboard-card--abort";
+          loud = true;
           message = "Refresh cancelled.";
         } else if (state === "no-data") {
-          classes += " dp-dashboard-card--empty";
+          classes += " dp-dashboard-card--no-data";
           message = "No data for this selection.";
         } else if (state === "ready") {
           if (stale) {
@@ -3012,6 +3017,8 @@
       REQUIRED_ADAPTER_FUNCTIONS: REQUIRED_ADAPTER_FUNCTIONS,
       /** #473 — how long a card's loud error/abort accent lasts before the quiet issue border. */
       ERROR_ACCENT_MS: ERROR_ACCENT_MS,
+      /** #536 — how long `success` (the green border) holds before the runtime settles it to ready. */
+      SUCCESS_SETTLE_MS: SUCCESS_SETTLE_MS,
       resetRenderers: function () {
         var keys = Object.keys(REGISTERED_RENDERERS);
         for (var i = 0; i < keys.length; i++) delete REGISTERED_RENDERERS[keys[i]];

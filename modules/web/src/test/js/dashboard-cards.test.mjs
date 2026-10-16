@@ -256,6 +256,9 @@ test("#473: success is quiet — the accent rides the runtime's settle, nothing 
     assert.equal(card.className, "dp-dashboard-card dp-dashboard-card--success");
     assert.equal(card.getAttribute("aria-busy"), null, "loading is over");
     assert.equal(card.querySelector(".dp-dashboard-card-message").textContent, "", "no message on success");
+    // #536 — the green holds for the runtime's settle (dashboard-runtime.test.mjs ticks it on the
+    // instance's clock): exposed, and as long as the loud error accent ("a few seconds").
+    assert.equal(runtime._internal.SUCCESS_SETTLE_MS, runtime._internal.ERROR_ACCENT_MS);
     adapter.dispose();
   } finally {
     uninstallDom();
@@ -331,12 +334,12 @@ test("#473: no-data, abort and ready+stale each carry word + class; stale surviv
 
     adapter.renderStatus(OCCURRENCE, { state: "no-data" });
     assert.equal(card.querySelector('[role="status"]').getAttribute("data-dp-state"), "no-data");
-    assert.equal(card.className, "dp-dashboard-card dp-dashboard-card--empty");
+    assert.equal(card.className, "dp-dashboard-card dp-dashboard-card--no-data");
     assert.equal(card.querySelector(".dp-dashboard-card-message").textContent, "No data for this selection.");
 
     adapter.renderStatus(OCCURRENCE, { state: "abort" });
     assert.equal(card.querySelector('[role="status"]').getAttribute("data-dp-state"), "abort");
-    assert.equal(card.className, "dp-dashboard-card dp-dashboard-card--aborted");
+    assert.equal(card.className, "dp-dashboard-card dp-dashboard-card--abort");
     assert.equal(card.querySelector(".dp-dashboard-card-message").textContent, "Refresh cancelled.");
     t.mock.timers.tick(runtime._internal.ERROR_ACCENT_MS);
     assert.equal(card.className, "dp-dashboard-card dp-dashboard-card--has-issue");
@@ -345,6 +348,31 @@ test("#473: no-data, abort and ready+stale each carry word + class; stale surviv
     assert.equal(card.querySelector('[role="status"]').textContent, "ready (stale)");
     assert.equal(card.className, "dp-dashboard-card dp-dashboard-card--stale");
     assert.equal(card.querySelector(".dp-dashboard-card-message").textContent, "Showing out-of-date data.");
+    adapter.dispose();
+  } finally {
+    uninstallDom();
+  }
+});
+
+test("#536: a stale card that fails keeps the stale modifier beside the settled issue border", async (t) => {
+  installDom();
+  try {
+    const runtime = require(resolveStatic("datapipelines-dashboard.js"));
+    stubRenderer(runtime);
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const { adapter } = await mountedAdapter(runtime);
+    const card = await cardOf(adapter);
+    adapter.renderStatus(OCCURRENCE, { state: "error", stale: true, reason: { code: "source_unavailable" } });
+    assert.equal(card.querySelector('[role="status"]').getAttribute("data-dp-state"), "error");
+    assert.equal(card.className, "dp-dashboard-card dp-dashboard-card--error", "the loud phase is the error voice alone");
+    t.mock.timers.tick(runtime._internal.ERROR_ACCENT_MS - 1);
+    assert.equal(card.className, "dp-dashboard-card dp-dashboard-card--error", "still loud one tick early");
+    t.mock.timers.tick(1);
+    assert.equal(
+      card.className,
+      "dp-dashboard-card dp-dashboard-card--has-issue dp-dashboard-card--stale",
+      "settled: the issue border, and the card still says its data is old",
+    );
     adapter.dispose();
   } finally {
     uninstallDom();
