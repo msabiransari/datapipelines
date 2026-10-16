@@ -22,7 +22,7 @@ import java.util.UUID
  * contract (exactly one Plotly script tag, its declaration equal to the server's
  * `renderer.bundle`, for a 2d board and a 3d board), the viewed-version chip and the version
  * selector (every version switch a FULL navigation), the choose-a-version state (#409: the
- * NAME in the heading, the draft offered, never the old empty `h1`), and the refusal state
+ * NAME in the heading, no admitted draft, never the old empty `h1`), and the refusal state
  * that stands in for a board that cannot run.
  *
  * The lens fixture renders what the MODEL carries — the model is where the lens is applied
@@ -78,7 +78,7 @@ class DashboardUiRenderTest {
         val html = searchPartial(rows = listOf(board2))
 
         // v1 is the listing version AND the only one; the badge names the state a reader is
-        // about to meet (the workspace's choose-a-version state), never a broken page.
+        // about to meet (the workspace opens that draft directly, #537).
         html shouldContain "draft v1 pending release"
     }
 
@@ -214,7 +214,7 @@ class DashboardUiRenderTest {
     }
 
     @Test
-    fun `#409 - the choose-a-version state shows the NAME, offers the draft, and loads no bundle`() {
+    fun `#409 - the choose-a-version state with no admitted draft shows the NAME and loads no bundle`() {
         val html =
             engine.process(
                 "dashboards/board",
@@ -227,8 +227,8 @@ class DashboardUiRenderTest {
                     setVariable("viewedIsDraft", false)
                     setVariable("viewedIsCurrent", false)
                     setVariable("servedVersion", null)
-                    setVariable("hasDraft", true)
-                    setVariable("draftVersion", 2)
+                    setVariable("hasDraft", false)
+                    setVariable("draftVersion", null)
                     setVariable("boardVersion", null)
                     setVariable("activeTab", "board")
                     setVariable("canRelease", true)
@@ -239,14 +239,14 @@ class DashboardUiRenderTest {
                     setVariable("navCurrentPath", board1.name)
                     setVariable(
                         "versions",
-                        listOf(DashboardWorkspaceController.VersionRow(2, "DRAFT", isServed = false, isSelected = false)),
+                        listOf(DashboardWorkspaceController.VersionRow(2, "DISCARDED", isServed = false, isSelected = false)),
                     )
                 },
             )
 
         // The old board page rendered an empty h1 and "not found" for a dashboard the tree
-        // had just linked (#409): the workspace names it, offers the draft with its link,
-        // and says what state it is in.
+        // had just linked (#409): with no admitted draft the workspace still names it and
+        // offers its history; #537 handles the admitted-draft shape in the model.
         html shouldContain ">" + board1.name + "<"
         html shouldContain "Choose a version"
         html shouldContain "has no release yet"

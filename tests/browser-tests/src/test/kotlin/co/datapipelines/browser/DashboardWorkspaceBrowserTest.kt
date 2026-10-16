@@ -23,8 +23,8 @@ import java.util.function.Consumer
 
 /**
  * #400 — the dashboard WORKSPACE in a real browser (ui-screens.md §4.21): the tab strip over
- * today's board pane (the board re-fits when its hidden pane is revealed), the choose-a-version
- * state (#409) for a draft-only dashboard, the promoter's lens (no verb, no POST, the draft the
+ * today's board pane (the board re-fits when its hidden pane is revealed), the direct draft-only
+ * opening (#537), the promoter's lens (no verb, no POST, the draft the
  * family's 404), the Versions tab's dialogs opening into `#dp-dialog`, and the catalog's
  * draft-only row state. Every page the suite opens is proven ZERO-CSP by the after-each.
  */
@@ -123,9 +123,9 @@ class DashboardWorkspaceBrowserTest : DashboardBrowserSuite() {
 
     @Test
     @Order(2)
-    fun `#409 - a draft-only dashboard opens into the choose-a-version state, and the draft link boots the board`() {
+    fun `#537 - a draft-only dashboard opens its draft directly, labelled, and the board boots`() {
         startTrace()
-        val root = ready("dp409")
+        val root = ready("dp537")
         val board = seedDraftOnlyBoard(root)
 
         // The CATALOG row says so first (the list page's promise, kept as a row state).
@@ -133,23 +133,23 @@ class DashboardWorkspaceBrowserTest : DashboardBrowserSuite() {
         page.waitForSelector("#dash-list-wrapper a.tpl-result")
         page.locator("#dash-list-wrapper .ds-badge-warning").first().innerText() shouldContain "draft v1 pending release"
 
-        // The workspace NAMES the dashboard, offers the draft, and says there is no release —
-        // never the old empty h1 and the "not found" for a dashboard the tree just linked.
+        // Default resolution selects the admitted draft in-page, with no redirect or second click.
         page.navigate("$baseUrl/dashboards/$board")
-        // The choose-a-version state has no tab strip at all.
-        page.locator(".dp-ws-root").count() shouldBe 0
+        page.locator(".dp-ws-root").count() shouldBe 1
         page.locator("h1.dp-crumb-name").innerText() shouldContain "$root/boards/only_draft"
-        page.locator(".ds-empty-title").first().innerText() shouldBe "Choose a version"
-        page.locator(".ds-empty-description").first().innerText() shouldContain "has no release yet"
-        page.locator("#dp-board-refusal").count() shouldBe 0
-
-        // The draft link is a FULL navigation onto Board at v1 — and the draft BOOTS (its pins
-        // are released; the everything-lens serves the draft, R2).
-        page.click(".ds-empty-actions a")
-        page.waitForURL("**/dashboards/$board?version=1&tab=board")
+        // Scope to the workspace's choice block: hidden refusal and empty History have titles too.
+        page.locator(".dp-workspace > .ds-empty .ds-empty-title").count() shouldBe 0
+        page.locator("[data-dp-viewed-label]").innerText() shouldContain "v1 · draft"
+        page.locator("[data-dp-viewed-label]").getAttribute("class") shouldContain "ds-badge-warning"
+        page.locator(".dp-versions a[aria-current='true']").innerText() shouldBe "v1"
+        page.locator("#dp-board-refusal:not([hidden])").count() shouldBe 0
         page.waitForFunction("() => window.__dpPage && window.__dpPage.ready === true")
         page.locator("#dp-board .plotly .main-svg").first().waitFor()
+        page.waitForFunction(
+            "() => { const s = document.querySelector('#dp-board .plotly .main-svg'); return s && s.getBoundingClientRect().width > 100; }",
+        )
         (page.evaluate("() => document.getElementById('dp-board').getAttribute('data-dp-dashboard-version')") as String?) shouldBe "1"
+        page.url() shouldBe "$baseUrl/dashboards/$board"
     }
 
     @Test
@@ -236,10 +236,12 @@ class DashboardWorkspaceBrowserTest : DashboardBrowserSuite() {
 
         assertVersionsAtPhoneAndDesktop(board)
 
-        // The choose-a-version state (a draft-only dashboard), both themes.
+        // The draft-only workspace opens its labelled draft directly (#537).
         val draftOnly = seedDraftOnlyBoard(root + "x")
         page.navigate("$baseUrl/dashboards/$draftOnly")
-        page.waitForSelector(".ds-empty-title")
+        page.waitForSelector("[data-dp-viewed-label]")
+        page.waitForFunction("() => window.__dpPage && window.__dpPage.ready === true")
+        page.locator("#dp-board .plotly .main-svg").first().waitFor()
         ensureTheme("dark")
         page.waitForTimeout(300.0)
         page.screenshot(
@@ -247,7 +249,7 @@ class DashboardWorkspaceBrowserTest : DashboardBrowserSuite() {
                 .ScreenshotOptions()
                 .setPath(
                     java.nio.file.Paths
-                        .get("build", "reports", "dashboards-workspace-choose-version-dark.png"),
+                        .get("build", "reports", "dashboards-workspace-draft-only-dark.png"),
                 ),
         )
         ensureTheme("light")
@@ -402,8 +404,9 @@ class DashboardWorkspaceBrowserTest : DashboardBrowserSuite() {
 
     /**
      * A dashboard whose ONLY version is a DRAFT (the {D} shape), pinning the standard seed's
-     * RELEASED source and chart — the #409 choose-a-version state's fixture, and the draft
-     * that BOOTS from its own link (R2: the everything lens serves the draft).
+     * RELEASED source and chart — #537 opens this draft directly and BOOTS its board
+     * (R2: the everything lens serves the draft). Its explicit grid slot keeps the chart
+     * at a useful size for the boot assertion and the handback screenshot.
      */
     private fun seedDraftOnlyBoard(root: String): String {
         seedBoard(root)
@@ -415,7 +418,7 @@ class DashboardWorkspaceBrowserTest : DashboardBrowserSuite() {
                 """"sources":[{"name":"s1","pipeline":{"name":"$root/pipelines/chart","version":1},"parameters":{}}],""" +
                 """"visualizations":[{"name":"v1","type":"visualization",""" +
                 """"visualization":{"name":"$root/visualizations/chart","version":1},""" +
-                """"inputs":{"main":{"source":"s1"}}}],"layout":{"columns":12,"grid":[]},""" +
+                """"inputs":{"main":{"source":"s1"}}}],"layout":{"columns":12,"grid":[{"name":"v1","x":0,"y":0,"w":12,"h":4}]},""" +
                 """"actions":[{"name":"refresh_all","type":"refresh","scope":"all","initial":true}]}"""
         sql(
             "INSERT INTO dashboards (id, workspace_id, name, display_name, description, current_version, created_by) " +

@@ -14,7 +14,7 @@ import java.util.UUID
  * surface is `GET /dashboards/{id}?version=N&tab=…` (the old board route gains the query
  * contract; `/dashboards/{id}/preview` is a compatibility redirect into it, SEE_OTHER).
  *
- * The resolution rule is the family's, not a port of the pipeline draft-first default:
+ * The resolution follows the sibling families' release-first default (#537):
  *
  * 1. the visibility oracle first — [DashboardService.findWorking] through the caller's lens;
  *    an absent, foreign or lens-hidden dashboard is the family's 404 (the board handler's
@@ -23,11 +23,11 @@ import java.util.UUID
  *    (#369's rule: a DRAFT serves only to the everything-lens, DISCARDED to nobody);
  *    anything else is the family's 404 NAMING the version, never a clamp to a near miss;
  * 3. no explicit version — [DashboardService.findServed], the CURRENT RELEASED version;
- *    `null` is NOT an error: it is the choose-a-version state (#409) — the record exists
- *    in the caller's tree, the heading shows its name, and the draft is offered with its
- *    preview link and the "no release yet" sentence. This is the sentence
- *    `dashboards/list.html` promised; the old route answered an empty `h1` and a
- *    "not found" for a dashboard the tree had just linked to.
+ *    else an admitted draft, re-read through [DashboardService.findServedVersion] with
+ *    the caller's lens — that draft, labelled (#537 supersedes #409 for this shape);
+ * 4. no current release and no admitted draft — the choose-a-version state (#409), not an
+ *    error: the record exists in the caller's tree, the heading shows its name, and the
+ *    admitted history is offered with the "no release yet" sentence.
  *
  * A version that RESOLVES but cannot run (a pin that does not hold, a source no longer
  * admissible) is the board's in-place refusal, decided by the controller's runtime read —
@@ -52,13 +52,6 @@ class DashboardWorkspaceModel(
             dashboards.findWorking(workspaceId, view.dashboards, id)
                 ?: throw notFound(id)
         val served = dashboards.findServed(workspaceId, view.dashboards, id)
-        val selected =
-            requestedVersion
-                ?.let { version ->
-                    dashboards.findServedVersion(workspaceId, view.dashboards, id, version)
-                        ?: throw notFound(id, version)
-                }
-                ?: served
         // The draft pointer is lens metadata: findWorking prefers the draft under the whole
         // view, so its DRAFT row IS the working draft; under a narrowing lens findWorking
         // answers the admitted version only, and a hidden draft names nothing here.
@@ -66,6 +59,14 @@ class DashboardWorkspaceModel(
             working.detail.status
                 .takeIf { it == PipelineVersionStatus.DRAFT }
                 ?.let { working.detail.version }
+        val selected =
+            requestedVersion
+                ?.let { version ->
+                    dashboards.findServedVersion(workspaceId, view.dashboards, id, version)
+                        ?: throw notFound(id, version)
+                }
+                ?: served
+                ?: draftVersion?.let { dashboards.findServedVersion(workspaceId, view.dashboards, id, it) }
         return Resolved(
             name = working.record.name,
             selected = selected?.detail,
