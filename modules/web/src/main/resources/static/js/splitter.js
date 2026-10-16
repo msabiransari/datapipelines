@@ -2,8 +2,10 @@
   "use strict";
 
   /*
-   * 104 §A — ONE splitter, two panes; 141 made it four (the two editors' side panes). The
-   * template editor's context rail retired with its page (#398); #433 deleted its wiring.
+   * 104 §A — ONE splitter, two panes: the editor's dock by height, the explorers' tree by
+   * width. 141 made it four (the two editors' side panes); both retired with their pages
+   * (#349/#398) and their wiring is deleted — #433 the template rail, #535 the settings
+   * sidebar.
    *
    * The owner's report was about the editor's bottom dock ("it has a fixed height … I want
    * to drag the height"), but the explorers' tree pane had already produced the same request
@@ -18,9 +20,8 @@
    *
    *     --pe-dock-pane-h   pipeline-editor.css  .pe-dock's second grid row
    *     --tplx-tree-w      template-tree.css    .tplx-tree's width
-   *     --pe-sidebar-w     pipeline-editor.css  .pe-body's first grid column
    *
-   * Both are declared with the shipped default as the `var()` fallback, so an unset property
+   * Each is declared with the shipped default as the `var()` fallback, so an unset property
    * IS the default — nothing to seed, nothing to reset to but "remove it".
    *
    * The property is written on `document.documentElement`, not on the pane's own container,
@@ -52,13 +53,11 @@
   var RESIZE_HINT = "Drag to resize · double-click to reset";
 
   /** Per-pane localStorage keys. Both explorers share ONE key: the width follows the user.
-     The pipeline editor's settings sidebar has its OWN key (141 gave each editor's side pane
-     one: different content, so the width does not follow the user the way the two explorers'
-     trees do; the template editor's rail and its key retired, #433). */
+     The editors' side panes each had their own key (141 gave every editor's side pane one);
+     the panes retired with their pages (#349/#398), the keys with them (#433, #535). */
   var KEYS = {
     editorDock: "dp.pane.editor-dock",
     explorerTree: "dp.pane.explorer-tree",
-    editorSidebar: "dp.pane.editor-sidebar",
   };
 
   /** A stored size this large is not a pane, it is corruption. */
@@ -390,16 +389,13 @@
 
   /* The bounds, each also written in the stylesheet that draws the pane:
      `--pe-dock-min-h` / `--pe-dock-canvas-floor` in pipeline-editor.css, and
-     `.tplx-tree`'s `min-width` / `max-width` in template-tree.css, and the
-     `clamp(220px, …, 50vw)` first column of `.pe-body`. Each pair is
+     `.tplx-tree`'s `min-width` / `max-width` in template-tree.css. Each pair is
      measured back by the browser suites, so a change on one side that is not made on the
      other goes red rather than quiet. */
   var DOCK_MIN = 120;
   var DOCK_CANVAS_FLOOR = 160;
   var TREE_MIN = 260;
   var TREE_MAX_SHARE = 0.4;
-  var SIDE_MIN = 220;
-  var SIDE_MAX_SHARE = 0.5;
 
   function wireEditorDock() {
     var dock = document.querySelector(".pe-dock");
@@ -466,41 +462,16 @@
     });
   }
 
-  /* 141 §B — the editors' side panes, the same mechanism. The pipeline editor's settings
-     sidebar was a fixed track in its grid; it gets its own key (different content — the width
-     does not follow the user the way it does between the two explorers' trees). The template
-     editor's context rail had the twin of this function until #433. */
-  function wireEditorSidebar() {
-    var handle = document.querySelector('[data-splitter="editor-sidebar"]');
-    var sidebar = document.querySelector(".pe-sidebar");
-    var body = document.querySelector(".pe-body");
-    if (!handle || !sidebar || !body) return null;
-    return bind({
-      handle: handle,
-      pane: sidebar,
-      container: body,
-      axis: "x",
-      prop: "--pe-sidebar-w",
-      storageKey: KEYS.editorSidebar,
-      label: "Resize settings sidebar",
-      bounds: function () {
-        return { min: SIDE_MIN, max: vw(SIDE_MAX_SHARE) };
-      },
-    });
-  }
-
   /* The restore runs NOW, at parse time, above the markup — see the header. The wiring waits
      for the elements. htmx boosts swap `#app-main`, so the wiring re-runs after every swap;
      `bind` is idempotent per handle. */
   if (typeof window !== "undefined" && typeof document !== "undefined") {
     restore("--pe-dock-pane-h", KEYS.editorDock);
     restore("--tplx-tree-w", KEYS.explorerTree);
-    restore("--pe-sidebar-w", KEYS.editorSidebar);
 
     var wire = function () {
       wireEditorDock();
       wireExplorerTree();
-      wireEditorSidebar();
     };
     if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", wire);
     else wire();
@@ -511,7 +482,6 @@
          an absent pane (a page without it) skips its own pull-back, not everyone's. */
       [
         { prop: "--tplx-tree-w", key: KEYS.explorerTree, min: TREE_MIN, share: TREE_MAX_SHARE },
-        { prop: "--pe-sidebar-w", key: KEYS.editorSidebar, min: SIDE_MIN, share: SIDE_MAX_SHARE },
       ].forEach(function (p) {
         var stored = readStored(p.key);
         if (stored === null) return;
