@@ -68,7 +68,9 @@ server:
     # before closing the connection. The request-body cap (`datapipelines.web.max-request-bytes`,
     # §3.31) refuses an over-cap body without reading the rest; this bounds the swallow that
     # keeps a keep-alive connection usable when the remainder is small and closes it when it
-    # is not — an abandoned over-cap upload costs the connection, never the server.
+    # is not — an abandoned over-cap upload costs the connection, never the server. The
+    # screenshot upload route drains its own refused declaration up to its cap + 2 MiB first
+    # (#467, RequestBodyCapFilter), so that connection closes after the client's last byte.
     max-swallow-size: ${SERVER_TOMCAT_MAX_SWALLOW_SIZE:2MB}
 
 # Actuator: the HealthEndpoint bean backs the root-level /health, /ready and /info

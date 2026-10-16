@@ -1,9 +1,9 @@
 # Pipeline Contract Specification
 
-**Status:** v1.58 (revised — see Change Log)
+**Status:** v1.59 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
-**Last updated:** 2026-10-11
+**Last updated:** 2026-10-16
 
 ---
 
@@ -1589,7 +1589,7 @@ The visualization artifact's refusals (#10; the [dashboard implementation spec](
 | `visualization.authoring.disabled` | 403 | `datapipelines.deployment.authoring-enabled=false` refuses every authoring write ([Versioning §5.5](versioning.md#55-drafts-are-a-deployment-capability-039)) |
 | `visualization.test.session_not_found` | 404 | no such test session for the visualization, or its token does not match |
 | `visualization.test.session_expired` | 410 | the session outlived `datapipelines.visualization.session-ttl-minutes`, was already submitted, or its content moved on (`details.reason`) |
-| `visualization.test.screenshot_too_large` | 413 | a screenshot over 4 MiB — the upload route's own cap, independent of the platform's 2 MiB request-body cap |
+| `visualization.test.screenshot_too_large` | 413 | a screenshot over 4 MiB — the upload route's own cap, independent of the platform's 2 MiB request-body cap. A declared body of up to the cap + 2 MiB is drained after the refusal so the connection closes only after the client's last byte and the 413 is observable by any client (#467); a larger declaration is closed after Tomcat's swallow |
 | `visualization.test.screenshot_invalid` | 400 | a screenshot that is not a PNG or WebP image the server can read (media type, magic bytes, dimensions) |
 
 ### 13.23 Dashboards
@@ -1875,6 +1875,7 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-16 | v1.59 | 467 (#467) the over-cap screenshot refusal reaches the client | **§13's `visualization.test.screenshot_too_large` row** names the bounded drain: up to the cap + 2 MiB of a declared-over-cap body is read and discarded after the 413, so the close is a FIN after the client's last byte; beyond it Tomcat's swallow and close apply. No code or status change |
 | 2026-10-11 | v1.58 | 504b (#504b) one shared search-needle rule | **§13.21 gains `request.query_too_long`** (400); **§13.20 loses `parameter.validation.query_too_long`** — the #490 refusal becomes the shared `SearchNeedle` rule applied by every search-owning service (pipelines, templates, parameter sets, users, the five `/tree/search` reads) at the same 200-after-trim bound, `details.limit`/`details.length`, the needle never echoed; MCP answers it as `-32602` (§6.2.44 v1.74) and the UI boxes still truncate, never refuse. Landed in the same commit as its constant, the `ApiErrorCatalog` rows (400 + user message), and the doc re-points (§13 row count stays 377: one row out of §13.20, one into §13.21). |
 | 2026-10-09 | v1.57 | 487 (#487) a replay-log read fault is not an expiry — renumbered at merge after #490's v1.56 | **§13.10** `result.storage_unavailable`: **500 → 503** (owner's ruling, 2026-10-09) — a transient fault of the server's own store, like `pipeline.transform.pool_exhausted`. The row also names the read surface it gains: §10.3's replay answers a log read Redis did not answer with this code (`details.reason: event_log_unavailable`) instead of `410 result.expired`. A deliberate status change on a frozen contract: the result-write path's code and behaviour are unchanged (it fails the execution; no HTTP status), and every REST or UI read whose stored result header cannot be parsed — the result cursor, `GET /executions/{id}`, a published endpoint's serve, the execution detail page — now answers this code with 503 where it answered 500. |
 | 2026-10-09 | v1.56 | 490 (#490) the search needle's bound | §13.20 gains `parameter.validation.query_too_long` (400): the parameter-set listing search refuses a `q` over 200 characters after the trim on REST, and on MCP as `-32602`, `details.limit`/`details.length`, the needle never echoed; the bound is `ParameterSetService.MAX_QUERY_LENGTH`, the number the UI boxes already truncated to. Landed in the same commit as its constants and catalog row (§13 row count 376 → 377). |

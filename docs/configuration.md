@@ -1,8 +1,8 @@
 # Configuration Reference
 
-**Status:** v1.53 (single source of truth for every config key)
+**Status:** v1.54 (single source of truth for every config key)
 **Owner:** datapipelines.co core
-**Last updated:** 2026-10-15
+**Last updated:** 2026-10-16
 
 ---
 
@@ -204,7 +204,7 @@ There is deliberately **no fail-open key**. When the limiter's Redis is unreacha
 |---|---|---|---|
 | `server.port` | `SERVER_PORT` | `8080` | HTTP port |
 | `spring.datasource.hikari.maximum-pool-size` | `SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE` | `10` | Metadata DB connection pool size |
-| `server.tomcat.max-swallow-size` | `SERVER_TOMCAT_MAX_SWALLOW_SIZE` | `2MB` | How much of a REFUSED request body Tomcat may drain before closing the connection (#279) — the counterpart of the request-body cap ([§3.31](#331-web-request-limits)); an abandoned over-cap upload costs the connection, never the server |
+| `server.tomcat.max-swallow-size` | `SERVER_TOMCAT_MAX_SWALLOW_SIZE` | `2MB` | How much of a REFUSED request body Tomcat may drain before closing the connection (#279) — the counterpart of the request-body cap ([§3.31](#331-web-request-limits)); an abandoned over-cap upload costs the connection, never the server. The screenshot upload route reads its own refused declaration of up to its cap + 2 MiB (6 MiB, a fixed bound beside the route's cap — this key does not move it) before the close, so that connection ends on a FIN after the client's last byte; Tomcat's swallow applies beyond it (#467) |
 
 ### 3.14 Framework wiring keys
 
@@ -1036,6 +1036,7 @@ Validation runs in `@PostConstruct` of a `ConfigValidator` bean. Failures stop s
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-16 | v1.54 | 467 (#467) the over-cap screenshot refusal reaches the client | **§3.13's `server.tomcat.max-swallow-size` row** names the screenshot route's own bounded drain (its cap + 2 MiB, fixed; the key is unchanged and does not move it) and the `application.yml` comment says the same. No key, default or validation change |
 | 2026-10-15 | v1.53 | 500 (#500) | Redis has one authority: `RedisClientProperties` binds §3.1 and builds the Lettuce factory in `dag`; the framework bridge is removed from §3.14 and §5. The §7 validator judges that binding. Test registrations use operator keys with explicit passwords, and the defaults guard reads the operator block. Merge follow-up: the binding note states that operators change nothing and that a hand-set `SPRING_DATA_REDIS_*` variable is now ignored. |
 | 2026-10-09 | v1.52 | 488 (#488) | **§3.1's two Redis timeout rows** and a new **§7 rule** (`RedisRules.checkRedisTimeoutBounds`, check 34): `datapipelines.redis.command-timeout` / `.connect-timeout` must parse as a duration above 0 and at most `60s` (the owner's ceiling: Lettuce's own default, never more); malformed, blank, zero, negative and over-ceiling values refuse startup naming the key and the value. Verified in Lettuce 6.6's source and by `RedisZeroCommandTimeoutIntegrationTest`: a zero command timeout is NO bound (a GET against a stopped Redis still pending at 3 s while the shipped 2 s client failed in 2,002 ms) and also a zero handshake deadline (a silent server fails the connect in one timer tick, ~100 ms). `0s` on the connect timeout and negative values were already loud (Lettuce asserts); zero on the command timeout was the silent case. |
 | 2026-10-09 | v1.51 | 482 (#482) | New **§3.1 rows**: `datapipelines.redis.command-timeout` and `.connect-timeout` (both `2s`) — no client timeout was configured anywhere, so Lettuce's 60 s per-command default made a Redis outage stall every rate-limited request on the order of a minute before the documented `429 rate_limit.unavailable` (and the stopped-Redis suite case alone took ~242 s). §3.14's bridge row extended: `spring.data.redis.timeout` / `.connect-timeout` carry the SAME `DATAPIPELINES_REDIS_COMMAND_TIMEOUT` / `DATAPIPELINES_REDIS_CONNECT_TIMEOUT` placeholders; §5's template and the deploy mirrors updated. No consumer code changed — every Redis fault path already routes a timeout (a `DataAccessException` subclass) through its existing failure handling; `TestRedis` builds its factories with the same two bounds under a placeholder-parity test. |
