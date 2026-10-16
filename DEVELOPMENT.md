@@ -822,6 +822,29 @@ every Gradle invocation (#438), so the browser classes inside a pre-gate wait CI
 while a plain `./gradlew :tests:browser-tests:test` keeps 30 s (`scripts/gate.sh` passed it too
 until the browser suite left the gate, owner ruling 2026-10-09).
 
+**The pre-gate reads and writes Gradle's local build cache; Gate A and CI never do (#480).**
+Every pregate Gradle invocation passes `--build-cache` (`PG_COMMON` in
+`scripts/pregate-plan-lib.sh`), so a fresh lane worktree's first pregate takes compile and lint
+outputs from any earlier build on this box with identical inputs instead of recompiling the whole
+tree and re-running detekt on every module. What may come `FROM-CACHE`: Kotlin/Java compilation,
+`detekt` and the `ktlint*` source-set checks. What never does: every `Test` task (the touched
+modules' `test`, `breachSuite`, the stage-3 guards, the focused `tests/*` classes), every Kover
+task (the XML/HTML/binary reports and the floor verdict behind `koverVerify`) and
+`verifyTestsExecuted` — `CommonConventionsPlugin` sets `cacheIf { false }` on each — and the
+ad-hoc and `Exec` tasks (`editorJsTest`, the four root audits, `processResources`), which Gradle
+never caches in the first place. `CommonConventionsPluginTest` proves the guard with a probe built
+twice around a `clean` (the compile task `FROM_CACHE`, the test and Kover tasks executed both
+times). Why tests stay out, for two independent reasons: a test verdict must come from this run, and a cached `:test` line is not fresh evidence,
+so stage 3 would keep every guard (`pgres::guards_covered`). The cache is the pre-gate's alone:
+`scripts/gate.sh` runs `clean` and then `build`, and with the cache on that build would be
+served from the cache and stop proving the tree compiles, so neither `gate.sh`, CI's workflows
+nor `gradle.properties` may enable it — `pregate.sh --self-test` fails if any of them carries
+`--build-cache` or `org.gradle.caching`. Do not pass `--build-cache` through `GATE_GRADLE_ARGS`,
+and do not set `org.gradle.caching` in `~/.gradle/gradle.properties`: the self-test cannot see
+either, and both would make Gate A warm. Any change under `buildSrc/` changes every task's
+implementation hash, so the first pregate after such a change misses the cache once. Location,
+cleanup and clearing: §9.5.
+
 **Preview and failure handling (#479).** `./scripts/pregate.sh --plan [base]` shows the
 resolved base, merge-base and HEAD, selected files (including staged, unstaged and untracked
 edits), touched modules, exact test classes, deferred coverage, guard candidates, stage order
@@ -1013,6 +1036,18 @@ By the budget above that is roughly 45 GB at peak — one such gate, not two, on
 works for the fork knobs: a `-D` system property or an `ORG_GRADLE_PROJECT_*` variable loses to the
 repo's `gradle.properties` (measured 2026-09-19 with an init-script probe), so the profile is
 arguments, not environment.
+
+**The pre-gate's build cache (#480).** Only `scripts/pregate.sh` uses it (§9.4). It is Gradle's
+local directory cache, `~/.gradle/caches/build-cache-1` (under `GRADLE_USER_HOME` when that is set),
+shared by every worktree and every build of this user on the machine; there is no remote cache and
+nothing leaves the box. Gradle bounds its size itself: an entry unused for 7 days is deleted by
+the background cleanup that runs at most once every 24 hours (Gradle 9.7.0 defaults; they can only
+be changed by an init script in `~/.gradle/init.d`, and this repo ships none). To start from cold,
+or after a suspected bad entry: `rm -rf ~/.gradle/caches/build-cache-1` while no build is running;
+the next pregate repopulates it. A single pregate can also skip it with `--no-build-cache` on its
+stage commands (copy them from the run's `PLAN.txt`). A fresh worktree's first pregate is now mostly
+cache hits for compile, detekt and ktlint, as long as some build on the box has compiled the same
+inputs since the last `buildSrc` change.
 
 **Three more things worth a minute on a dedicated Linux box.**
 
