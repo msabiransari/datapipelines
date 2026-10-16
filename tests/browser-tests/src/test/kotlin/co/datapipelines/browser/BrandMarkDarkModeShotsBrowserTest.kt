@@ -1,6 +1,8 @@
 package co.datapipelines.browser
 
 import com.microsoft.playwright.Locator
+import com.microsoft.playwright.Page
+import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
@@ -30,7 +32,119 @@ import java.nio.file.Paths
  * Files land in `build/reports/163-screenshots/` as `163-<state>.png` (`161-login-card.png`
  * for the login leg).
  */
-class BrandMarkDarkModeShotsBrowserTest : BrowserSuite() {
+class BrandMarkDarkModeShotsBrowserTest : DashboardBrowserSuite() {
+    @Test
+    fun `the approved dark palette paints accessible shell surfaces`() {
+        startTrace()
+        page.setViewportSize(1440, 900)
+        page.navigate("$baseUrl/login")
+        page.locator(".app-auth-card").first().waitFor()
+        paletteShot("login")
+
+        val root = ready("palette552")
+        ensureTheme("dark")
+        val board = seedBoardWithGrid(root)
+        page.navigate("$baseUrl/pipelines")
+        page.locator("#pipeline-filter-q").waitFor()
+        page.locator(".app-nav-link[aria-current='page'] .app-nav-badge").waitFor()
+        paletteShot("pipelines")
+        val measurements = measurePalette()
+
+        page.setViewportSize(768, 900)
+        paletteShot("compact")
+        page.setViewportSize(1440, 900)
+        page.navigate("$baseUrl/dashboards/$board")
+        page.waitForFunction("() => window.__dpPage && window.__dpPage.ready === true")
+        page.locator("#dp-board .plotly .main-svg").first().waitFor()
+        page.waitForFunction(
+            "() => [...document.querySelectorAll('#dp-board [data-dp-state]')].every(e => e.dataset.dpState !== 'loading')",
+        )
+        paletteShot("dashboard")
+
+        // Capture all four baseline screens before the deliberate old-palette failure.
+        println("552 dark palette: $measurements")
+        measurements["page"] shouldBe "rgb(19, 22, 27)"
+        measurements["rail"] shouldBe "rgb(23, 27, 33)"
+        measurements["selected"] shouldBe "rgb(48, 57, 83)"
+        measurements["bodyText"] shouldBe "rgb(233, 236, 242)"
+        measurements["indicator"] shouldBe "rgb(126, 144, 238)"
+        measurements["boundary"] shouldBe "rgb(104, 115, 134)"
+        measurements["violations"] shouldBe emptyList<String>()
+    }
+
+    private fun paletteShot(name: String) {
+        page.evaluate("() => document.fonts.ready")
+        val directory = Paths.get("build", "reports", "552-dark-palette").also { it.toFile().mkdirs() }
+        page.screenshot(Page.ScreenshotOptions().setPath(directory.resolve("$name.png")))
+    }
+
+    /** Read actual painted backgrounds, including transparent elements' ancestors. */
+    @Suppress("UNCHECKED_CAST")
+    private fun measurePalette(): Map<String, Any> =
+        page.evaluate(
+            """() => {
+              const style = el => getComputedStyle(el);
+              const background = el => {
+                for (let node = el; node; node = node.parentElement) {
+                  const color = style(node).backgroundColor;
+                  if (color !== 'rgba(0, 0, 0, 0)' && color !== 'transparent') return color;
+                }
+                throw new Error('No painted background');
+              };
+              const luminance = color => {
+                const channels = color.match(/[\d.]+/g).map(Number);
+                if (channels.length === 4 && channels[3] !== 1) throw new Error('Translucent contrast pair: ' + color);
+                const linear = channels.slice(0, 3).map(c => {
+                  const v = c / 255;
+                  return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+                });
+                return linear[0] * 0.2126 + linear[1] * 0.7152 + linear[2] * 0.0722;
+              };
+              const contrast = (a, b) => {
+                const first = luminance(a), second = luminance(b);
+                return (Math.max(first, second) + 0.05) / (Math.min(first, second) + 0.05);
+              };
+              const nav = document.querySelector('.app-nav-link[aria-current="page"]');
+              const frame = document.querySelector('#pipeline-filter-q');
+              const badge = nav.querySelector('.app-nav-badge');
+              const measured = {
+                page: background(document.querySelector('#app-main')),
+                rail: background(document.querySelector('.app-rail')),
+                selected: background(nav), indicator: style(nav).borderLeftColor,
+                indicatorWidth: style(nav).borderLeftWidth,
+                boundary: style(frame).borderTopColor, boundaryWidth: style(frame).borderTopWidth,
+                boundarySurface: background(frame), boundaryOutside: background(frame.parentElement),
+                bodyText: style(document.body).color, navText: style(nav).color,
+                badgeText: style(badge).color, badgeSurface: background(badge),
+              };
+              const violations = [];
+              const pairs = [
+                ['body on page', measured.bodyText, measured.page, 4.5],
+                ['body on rail', measured.bodyText, measured.rail, 4.5],
+                ['nav on selected', measured.navText, measured.selected, 4.5],
+                ['badge on its surface', measured.badgeText, measured.badgeSurface, 4.5],
+                ['boundary inside', measured.boundary, measured.boundarySurface, 3],
+                ['boundary outside', measured.boundary, measured.boundaryOutside, 3],
+                ['selected on rail', measured.selected, measured.rail, 1.5],
+                ['indicator on selected', measured.indicator, measured.selected, 3],
+              ];
+              measured.ratios = Object.fromEntries(pairs.map(([name, a, b, floor]) => {
+                const ratio = contrast(a, b);
+                if (ratio < floor) violations.push(name + ': ' + ratio + ' < ' + floor);
+                return [name, ratio];
+              }));
+              if (parseFloat(measured.boundaryWidth) <= 0) violations.push('Boundary is not drawn');
+              if (parseFloat(measured.indicatorWidth) <= 0) violations.push('Selection indicator is not drawn');
+              for (const el of [nav, ...nav.querySelectorAll('*')]) {
+                if (!el.getClientRects().length || ![...el.childNodes].some(n => n.nodeType === 3 && n.textContent.trim())) continue;
+                if (parseFloat(style(el).fontSize) < 18 && background(el) === measured.selected &&
+                    style(el).color === 'rgb(137, 147, 165)') violations.push('Muted small text on selected: ' + el.className);
+              }
+              measured.violations = violations;
+              return measured;
+            }""".trimIndent(),
+        ) as Map<String, Any>
+
     @Test
     fun `the login card, the app rail in dark mode and the site header all show the outlined mark`() {
         startTrace()
