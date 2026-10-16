@@ -29,10 +29,14 @@ pgplan::build() {
   PG_MODULES=(); PG_TEST_MODULES=(); PG_DEFERRED=(); PG_ROOTS2=(); PG_ROOTS2B=()
   PG_1=(ktlintCheck detekt composeEnvAudit composeArgvSecretsAudit verifyModuleDependencies verifyVerificationMetadataDocs --continue)
   PG_2=(); PG_2B=(); PG_4=(compileTestKotlin --continue)
-  # The trailing knob bounds VersionLifecycleModelTest's random sweep in the pregate
+  # The sequences knob bounds VersionLifecycleModelTest's random sweep in the pregate
   # only (#483, DEVELOPMENT.md §9.5); Gate A and CI keep the 2000 default and stay the bank.
-  # Appended AFTER the serial quartet: pregate-safety-test.sh pins that substring contiguous.
-  PG_COMMON=(-Pdp.browser.ciPatience=true --no-parallel --max-workers=1 -Pdp.test.forks=1 -Pdp.test.forks.e2e=1 -PversionLifecycle.sequences=200)
+  # --build-cache (#480, DEVELOPMENT.md §9.4): compile and lint outputs another worktree
+  # built from identical inputs come FROM-CACHE; test, Kover and verifyTestsExecuted never
+  # do (buildSrc CommonConventionsPlugin). The pregate only: gate.sh and CI stay cold, and
+  # pregate-safety-test.sh asserts every stage carries it and gate.sh/gradle.properties do not.
+  # Both appended AFTER the serial quartet: pregate-safety-test.sh pins that substring contiguous.
+  PG_COMMON=(-Pdp.browser.ciPatience=true --no-parallel --max-workers=1 -Pdp.test.forks=1 -Pdp.test.forks.e2e=1 -PversionLifecycle.sequences=200 --build-cache)
   declare -gA PG_SELECTIONS=()
   mapfile -t PG_MODULES < <(printf '%s\n' "$PG_FILES" | sed -nE 's|^modules/([a-z-]+)/.*|:modules:\1|p' | LC_ALL=C sort -u)
   mapfile -t PG_TEST_MODULES < <(printf '%s\n' "$PG_FILES" | sed -nE 's|^tests/([a-z-]+)/.*|\1|p' | LC_ALL=C sort -u)

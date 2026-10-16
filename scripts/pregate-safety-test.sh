@@ -57,8 +57,22 @@ grep -q 'deferred=tests/browser-tests' "$F/.pregate-logs/0-verdict.log" || fail 
 grep -q 'status=deferred' "$F"/.pregate-logs/runs/*/MANIFEST.txt || fail 'deferred manifest missing'
 while IFS= read -r args; do
   [[ "$args" == *'--no-parallel --max-workers=1 -Pdp.test.forks=1 -Pdp.test.forks.e2e=1'* ]] || fail 'unbounded Gradle invocation'
+  [[ " $args " == *' --build-cache '* ]] || fail "pregate invocation without --build-cache (#480): $args"
 done < "$F/pregate-argv.log"
+[ "$(wc -l < "$F/pregate-argv.log")" -ge 4 ] || fail 'too few recorded Gradle invocations to check'
 ok 'real pregate defers browser coverage and limits every Gradle invocation'
+ok 'every pregate Gradle invocation passes --build-cache (#480)'
+
+# #480: the cache is the pregate's alone. gate.sh's clean build and CI must compile from cold,
+# so neither may pass the flag, and no project file may turn caching on for every build.
+for cold in "$ROOT/scripts/gate.sh" "$ROOT"/.github/workflows/*.yml; do
+  [ -f "$cold" ] || fail "cold-build file missing: $cold"
+  [ "$(grep -cF -e '--build-cache' "$cold" || true)" -eq 0 ] || fail "--build-cache in a cold build: $cold"
+done
+for global in "$ROOT/gradle.properties" "$ROOT/scripts/gate.sh" "$ROOT"/.github/workflows/*.yml; do
+  [ "$(grep -cF 'org.gradle.caching' "$global" || true)" -eq 0 ] || fail "org.gradle.caching set globally: $global"
+done
+ok 'gate.sh, CI workflows and gradle.properties never enable the build cache (#480)'
 
 # #485: two pregate-class slots across checkouts, the gate exclusive, one holder per
 # checkout, older copies respected, a memory floor. Every holder lives in a subshell;
