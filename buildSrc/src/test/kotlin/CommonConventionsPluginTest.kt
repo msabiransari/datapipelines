@@ -1,5 +1,7 @@
 import org.gradle.testkit.runner.GradleRunner
+import org.gradle.testkit.runner.TaskOutcome
 import org.gradle.testkit.runner.UnexpectedBuildFailure
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
@@ -29,6 +31,11 @@ import java.io.File
  * test-JVM forwarding list actually forwards a named key
  * (versionLifecycle.sequences) — the knob VersionLifecycleModelTest documents,
  * unreachable from the CLI until it traveled here (#483).
+ *
+ * Case (e) proves the build-cache guard (#480): with `--build-cache` and a
+ * `clean` between two builds, the probe's compile task is served FROM_CACHE
+ * the second time (the cache was really on), while its test task and every
+ * Kover report/verify task execute both times and are never FROM_CACHE.
  *
  * The probe projects reuse the repo's real version catalog — the plugin
  * resolves catalog aliases at apply time. Tests (a) and (b) stop at
@@ -209,5 +216,56 @@ class CommonConventionsPluginTest {
             forwardedValue() == "null",
             "without the property the test JVM must see null — the documented default applies",
         )
+    }
+
+    @Test
+    fun `with the build cache on, compile is served from the cache while test and coverage tasks always execute`() {
+        writeSettings(":modules:web")
+        // The probe's own cache directory: TestKit's shared Gradle home may hold entries from
+        // earlier runs, and the first build below must start empty for its outcomes to mean
+        // anything.
+        probeDir.resolve("settings.gradle.kts").appendText(
+            "\nbuildCache { local { directory = file(\"build-cache\") } }\n",
+        )
+        writeBuild("modules/web/build.gradle.kts")
+        // A test that covers the one main class completely, so koverVerify's floor (72 for
+        // :modules:web) passes and the verify chain runs to the end in both builds. The package
+        // matters: the convention instruments co.datapipelines.* only.
+        probeDir.resolve("modules/web/src/main/kotlin/Probe.kt").apply { parentFile.mkdirs() }.writeText(
+            """
+            package co.datapipelines.probe
+            class Probe {
+                fun covered(): Int = 42
+            }
+            """.trimIndent(),
+        )
+        probeDir.resolve("modules/web/src/test/kotlin/ProbeTest.kt").apply { parentFile.mkdirs() }.writeText(
+            """
+            package co.datapipelines.probe
+            import org.junit.jupiter.api.Test
+            class ProbeTest {
+                @Test fun covers() { check(Probe().covered() == 42) }
+            }
+            """.trimIndent(),
+        )
+        val tasks = arrayOf(":modules:web:test", ":modules:web:koverXmlReport", ":modules:web:koverVerify", "--build-cache")
+
+        val first = runner(*tasks).build()
+        runner(":modules:web:clean").build()
+        val second = runner(*tasks).build()
+
+        assertEquals(
+            TaskOutcome.FROM_CACHE,
+            second.task(":modules:web:compileKotlin")?.outcome,
+            "the cache was not on: compileKotlin should be FROM_CACHE after clean\n${second.output}",
+        )
+        for (build in listOf(first, second)) {
+            assertEquals(TaskOutcome.SUCCESS, build.task(":modules:web:test")?.outcome, build.output)
+            val kover = build.tasks.filter { it.path.startsWith(":modules:web:kover") }
+            // Non-vacuity: the XML report and the verify chain really ran in this build.
+            assertTrue(kover.size >= 2, "expected the Kover report and verify tasks, got $kover")
+            val cached = kover.filter { it.outcome == TaskOutcome.FROM_CACHE }
+            assertTrue(cached.isEmpty(), "Kover tasks served from the build cache: $cached\n${build.output}")
+        }
     }
 }

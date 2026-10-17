@@ -695,6 +695,18 @@ fieldset.dp-dashboard-parameter > .dp-dashboard-parameter-error {
   overflow: hidden;
 }
 
+/* #536 — a wrapped heading in a one-row slot can leave only 16px for Plotly: its compact
+   margins consume that height and axis scaling rejects before a WebGL scene exists. Keep a
+   drawable body and let the existing slot scroll the whole card, with its border intact.
+   Plotly adds js-plotly-plot before measuring; tables and KPIs keep their existing sizing. */
+.dp-dashboard-viz.js-plotly-plot {
+  min-height: var(--space-16);
+}
+
+.dp-dashboard-card:has(> .dp-dashboard-viz.js-plotly-plot) {
+  min-height: min-content;
+}
+
 .dp-dashboard-viz:has(.dp-dashboard-table) {
   overflow: auto;
 }
