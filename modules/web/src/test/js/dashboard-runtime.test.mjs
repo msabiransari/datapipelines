@@ -628,6 +628,32 @@ function manualClock() {
   };
 }
 
+test("a rejecting renderer logs one bounded diagnostic with its occurrence, code, message and stack", async (t) => {
+  const calls = t.mock.method(console, "error", () => {});
+  const failure = new Error("renderer could not draw");
+  const adapter = scriptedAdapter({
+    mountVisualization: () => Promise.resolve({ renderData: () => Promise.reject(failure) }),
+  });
+  const fetchImpl = fakeFetch();
+  fetchImpl.on("/runtime/visualizations", (url, init) => {
+    const refreshId = JSON.parse(init.body).refresh_id;
+    return fetchImpl.stream([fetchImpl.frame("visualization_data", { refresh_id: refreshId, name: "chart", rows: 1, bindings: {} })]);
+  });
+  const { instance } = await boot({ adapter, fetch: fetchImpl });
+  await instance.refresh({ scope: "targets", targets: ["chart"] });
+  await untilRuntime(() => adapter.log.includes("status:chart:error"));
+  assert.equal(calls.mock.callCount(), 1);
+  const [prefix, name, code, message, stack] = calls.mock.calls[0].arguments;
+  assert.equal(prefix, "[Datapipelines dashboard] renderer failure");
+  assert.equal(name, "chart");
+  assert.equal(code, "render.failed");
+  assert.equal(message, failure.message);
+  assert.ok(stack.includes("dashboard-runtime.test.mjs"));
+  assert.ok(stack.split("\n").length <= 4);
+  assert.ok(adapter.log.includes("notify:render.failed"));
+  instance.dispose();
+});
+
 test("a hung renderer hits the render deadline and reports error with the render code", async () => {
   const hungAdapter = scriptedAdapter({
     mountVisualization: (occurrence) =>

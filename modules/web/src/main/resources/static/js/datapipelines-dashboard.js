@@ -1427,10 +1427,26 @@
       },
       function (error) {
         if (self._disposed || !self._owns(name, refreshId)) return;
+        var code = isDashboardError(error) ? error.code : "render.failed";
+        if (code === "render.failed" && typeof console !== "undefined" && typeof console.error === "function") {
+          // Renderer messages can quote bound values. Bound the text and stack, and never log the
+          // error object (which can retain a figure, bindings or row data).
+          console.error(
+            "[Datapipelines dashboard] renderer failure",
+            name,
+            code,
+            String(error && error.message ? error.message : "renderer rejected without a message").slice(0, 300),
+            String(error && error.stack ? error.stack : "")
+              .split("\n")
+              .slice(0, 4)
+              .map(function (line) { return line.slice(0, 300); })
+              .join("\n"),
+          );
+        }
         self._renderOccurrenceStatus(name, {
           state: "error",
           stale: false,
-          reason: { code: isDashboardError(error) ? error.code : "render.failed" },
+          reason: { code: code },
           refreshId: refreshId,
         });
         self._publishNotification({
