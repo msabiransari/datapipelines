@@ -1,8 +1,15 @@
 <!DOCTYPE html>
 <html lang="en" xmlns:th="http://www.thymeleaf.org"
+      th:with="csrfToken=${_csrf?.token}"
       th:attr="data-theme=${activeTheme},data-dp-workspace=${activeWorkspace},data-dp-workspace-id=${activeWorkspaceId},data-dp-search-max-length=${searchMaxLength}"
       th:fragment="page(content)">
 <head>
+  <!--/* The CSRF token is DEFERRED: Spring Security writes the dp_csrf cookie the first time
+       a render reads it, and a cookie can only be set before the response commits. Read it
+       here, on <html>, before any byte of the head is written: read on <body> (as before),
+       a head past Tomcat's 8 KB response buffer committed the response first and the page
+       went out with no cookie (Gate A red on the #554 merge: /settings 200 without dp_csrf,
+       logout 403). LayoutCsrfReadOrderTest pins the order. */-->
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- 188 (#188): htmx under the enforced CSP. `allowEval:false` — nothing here uses
@@ -152,7 +159,7 @@
   <link rel="apple-touch-icon" sizes="180x180" th:href="@{/site/brand/apple-touch-icon-180.png}">
 </head>
 <body
-    th:attr="hx-headers='{&quot;DP-CSRF-Token&quot;:&quot;' + ${_csrf?.token} + '&quot;' + ${workspaceHeaderFragment} + '}'">
+    th:attr="hx-headers='{&quot;DP-CSRF-Token&quot;:&quot;' + ${csrfToken} + '&quot;' + ${workspaceHeaderFragment} + '}'">
   <!-- No hx-target-error here: the response-targets extension is NOT loaded, so the
        attribute was dead config. Refusals that should toast use Shape C (§5.1) —
        HX-Retarget/HX-Reswap response headers admitted by toast.js's bridgeErrors. -->

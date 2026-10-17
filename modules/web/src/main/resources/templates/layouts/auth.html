@@ -1,8 +1,12 @@
 <!DOCTYPE html>
 <html lang="en" xmlns:th="http://www.thymeleaf.org"
+      th:with="csrfToken=${_csrf?.token}"
       th:attr="data-theme=${activeTheme}"
       th:fragment="page(content)">
 <head>
+  <!--/* The CSRF token is read here, before any head byte is written, for default.html's
+       reason (see the note there): the deferred dp_csrf cookie is set only before the
+       response commits. LayoutCsrfReadOrderTest pins the order. */-->
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- 188 (#188): the same htmx-config as layouts/default.html — see the note there. -->
@@ -61,7 +65,7 @@
   <link rel="apple-touch-icon" sizes="180x180" th:href="@{/site/brand/apple-touch-icon-180.png}">
 </head>
 <body class="app-auth-body"
-      th:attr="hx-headers='{&quot;DP-CSRF-Token&quot;:&quot;' + ${_csrf?.token} + '&quot;}'">
+      th:attr="hx-headers='{&quot;DP-CSRF-Token&quot;:&quot;' + ${csrfToken} + '&quot;}'">
 
   <!--/* The progress bar and the toast stack are the two pieces of shell chrome a ceremony
        screen still uses: the password change is an htmx request like any other. Both are
