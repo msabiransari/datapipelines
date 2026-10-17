@@ -229,6 +229,11 @@ class CommonConventionsPlugin : Plugin<Project> {
             // If the platform discovers no tests at all, that is a broken test setup,
             // not a pass. Guards the "engine found nothing" half of the false-green.
             failOnNoDiscoveredTests.set(true)
+            // The pregate runs with --build-cache (#480, DEVELOPMENT.md §9.4): compile and lint
+            // outputs may come from the cache, a test verdict never does. A cached test task
+            // would also leave the pregate without the fresh stage-2 evidence its guard
+            // coverage requires (scripts/pregate-results-lib.sh pgres::guards_covered).
+            outputs.cacheIf(UNCACHEABLE_VERDICT) { false }
             // The ONE-TestEngine rule (see this class's KDoc) enforced instead of merely
             // written down. `classpath` is this task's own input, so reading it here is
             // configuration-cache safe.
@@ -270,6 +275,15 @@ class CommonConventionsPlugin : Plugin<Project> {
         // check→koverVerify ITSELF, so the task still appears in check's
         // graph under the flag — what the flag removes is the floor RULE,
         // which is what would fail. Proven in buildSrc/src/test.
+        // Coverage reports and the floor verdict are derived from THIS build's test run, so
+        // they are never served from the build cache either (#480). Matched by package, not
+        // by task name: koverVerify is a plain task that reads the result of a hidden,
+        // @CacheableTask verify task (KoverDoVerifyTask), and the XML, HTML, binary and log
+        // reports are cacheable too (Kover 0.9.9). configureEach keeps it lazy.
+        project.tasks.configureEach {
+            if (javaClass.name.startsWith(KOVER_TASK_PACKAGE)) outputs.cacheIf(UNCACHEABLE_VERDICT) { false }
+        }
+
         val koverOff = project.hasProperty("kover.off")
         if (koverOff) {
             project.extensions.configure<KoverProjectExtension> {
@@ -362,6 +376,9 @@ class CommonConventionsPlugin : Plugin<Project> {
             group = "verification"
             description = "Fails if this module produced fewer test result files than it has test sources."
             dependsOn(project.tasks.named("test"))
+            // No declared outputs, so Gradle would not cache it today; explicit so that a
+            // future output declaration cannot turn this run's count into a cached one (#480).
+            outputs.cacheIf(UNCACHEABLE_VERDICT) { false }
             doLast {
                 val sourceCount = testSourceDir.walkTopDown()
                     .count { it.isFile && it.name.endsWith("Test.kt") }
@@ -402,6 +419,13 @@ class CommonConventionsPlugin : Plugin<Project> {
     private companion object {
         const val JDK_VERSION = 21
         const val KTLINT_VERSION = "1.8.0"
+
+        /** The reason Gradle logs (--info) for every task kept out of the build cache (#480). */
+        const val UNCACHEABLE_VERDICT =
+            "test, coverage and guard verdicts run fresh in every build; the pregate refuses cached test evidence (#480)"
+
+        /** Every Kover 0.9.x task class lives under this package (reports, verify, agent, artifact). */
+        const val KOVER_TASK_PACKAGE = "kotlinx.kover.gradle.plugin.tasks."
 
         /**
          * Per-module minimum line-coverage floors (percent), wired into `koverVerify`
