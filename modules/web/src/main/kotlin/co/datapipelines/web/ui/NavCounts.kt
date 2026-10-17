@@ -81,8 +81,8 @@ class NavCounts(
         val lenses = NavigationFamily.entries.associateWith { view.arm(it) }
         val narrowed = lenses.mapNotNull { (family, lens) -> (lens as? ReadLens.Only)?.let { family to it.names.size } }.toMap()
         if (narrowed.size == NavigationFamily.entries.size) return Counts.of(narrowed)
-        val live = live(workspaceId) ?: return Counts.of(narrowed)
-        return Counts.of(live + narrowed)
+        // A failed live read leaves only the narrowed arms: the rest are unknown, never zero.
+        return Counts.of((live(workspaceId) ?: emptyMap()) + narrowed)
     }
 
     /** The cached (or freshly read) live counts, or null when the read failed (never cached). */
