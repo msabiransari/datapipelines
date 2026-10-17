@@ -118,7 +118,7 @@ internal class ArtifactSql(
 
     val currentVersions =
         """
-        SELECT s.id, s.name, s.display_name, v.version, v.body_hash
+        SELECT s.id, s.name, s.display_name, v.version, v.body_hash, v.status
           FROM $index s
           JOIN $versions v ON v.$fk = s.id AND v.version = s.current_version
          WHERE s.workspace_id = :workspaceId AND $liveS AND v.status = 'RELEASED'

@@ -69,8 +69,9 @@ data class PipelineVersionRecord(
  * One live pipeline and the version its sticky pointer names — the input of versioning §10.2's
  * "what is promotable" rule and, since 178, of the promoter lens that applies that rule on
  * every read. One row per pipeline WITH a current version: a never-released pipeline has no
- * row here, which is exactly "not a candidate" (D55). The version is RELEASED by the §3.4
- * invariant (the pointer only ever names a released row), so no status travels.
+ * row here, which is exactly "not a candidate" (D55). The version's status travels (#563):
+ * D60 lets a development-posture pointer name the DRAFT (the discard/purge fallback or a
+ * manual switch), so "has a pointer" no longer implies RELEASED — the consumer filters.
  */
 data class CurrentPipelineVersion(
     val id: UUID,
@@ -78,6 +79,7 @@ data class CurrentPipelineVersion(
     val displayName: String,
     val version: Int,
     val bodyHash: String,
+    val status: PipelineVersionStatus,
 )
 
 /**

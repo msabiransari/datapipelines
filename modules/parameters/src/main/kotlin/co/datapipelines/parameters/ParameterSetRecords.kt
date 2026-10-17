@@ -62,11 +62,16 @@ data class ParameterSetFolder(
     val setCount: Int,
 )
 
-/** A live set and the version its pointer names — the promoter lens's input (versioning §10.2's rule). */
+/**
+ * A live set and the version its pointer names — the promoter lens's input (versioning
+ * §10.2's rule). The version's status travels (#563) so every family's lens input carries
+ * the same fact; the reader admits only RELEASED rows, which this restates.
+ */
 data class CurrentParameterSetVersion(
     val id: UUID,
     val name: String,
     val displayName: String,
     val version: Int,
     val bodyHash: String,
+    val status: PipelineVersionStatus,
 )

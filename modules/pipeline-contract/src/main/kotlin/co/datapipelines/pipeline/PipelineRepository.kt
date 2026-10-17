@@ -430,18 +430,19 @@ class PipelineRepository(
 
     /**
      * Every live pipeline of the workspace that HAS a current version, with that version's
-     * number and hash — versioning §10.2's whole input in ONE join, ordered by name.
+     * number, hash and STATUS — versioning §10.2's whole input in ONE join, ordered by name.
      *
      * 178: the promoter lens evaluates §10.2 on every read a lensed principal makes, so the
      * per-pipeline [findCurrentVersionDetail] loop `PromotionService.plan` used to run (N + 1
      * queries per screen) became a cost paid per request. This is the same predicate — a
-     * pipeline with a NULL pointer is absent, and the joined row is RELEASED by the §3.4
-     * invariant — as one statement.
+     * pipeline with a NULL pointer is absent — as one statement. No status filter HERE
+     * (#563): D60 lets a development-posture pointer name the DRAFT, and the row's status
+     * travels so the consumer (the promoter lens) applies the RELEASED rule itself.
      */
     fun findCurrentVersions(workspaceId: UUID): List<CurrentPipelineVersion> =
         jdbc.query(
             """
-            SELECT p.id, p.name, p.display_name, v.version, v.body_hash
+            SELECT p.id, p.name, p.display_name, v.version, v.body_hash, v.status
               FROM pipelines p
               JOIN pipeline_versions v ON v.pipeline_id = p.id AND v.version = p.current_version
              WHERE p.workspace_id = :workspaceId AND $ENTITY_LIVE_P
@@ -455,6 +456,7 @@ class PipelineRepository(
                 displayName = rs.getString("display_name"),
                 version = rs.getInt("version"),
                 bodyHash = rs.getString("body_hash"),
+                status = PipelineVersionStatus.fromWire(rs.getString("status")),
             )
         }
 

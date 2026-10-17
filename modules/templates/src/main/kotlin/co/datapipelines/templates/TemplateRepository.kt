@@ -32,14 +32,17 @@ data class TemplateFolder(
 
 /**
  * One live template and the version its `current_version` pointer names — the promoter
- * lens's template input (178; versioning §10.2's rule, its template arm). RELEASED by the
- * pointer invariant, so no status travels. [id] is the human id (the `name` column).
+ * lens's template input (178; versioning §10.2's rule, its template arm). The version's
+ * status travels (#563): D60 lets a development-posture pointer name the DRAFT (the
+ * discard/purge fallback or a manual switch), so "has a pointer" no longer implies
+ * RELEASED — the consumer filters. [id] is the human id (the `name` column).
  */
 data class CurrentTemplateVersion(
     val id: String,
     val displayName: String,
     val version: Int,
     val bodyHash: String,
+    val status: PipelineVersionStatus,
 )
 
 /** Version metadata, without the body — the `GET /templates/{id}/versions` projection (§9). */
@@ -469,15 +472,17 @@ class TemplateRepository(
 
     /**
      * Every live template of the workspace that HAS a current version, with that version's
-     * number and hash — versioning §10.2's template input in one read (178, the promoter
-     * lens). A never-released template (NULL pointer, D55) is absent, which is "not a
-     * candidate"; the row is RELEASED by the same invariant [findCurrentVersions] relies on.
-     * Unlike [list] this does NOT fall back to a draft: a draft is never promotable.
+     * number, hash and STATUS — versioning §10.2's template input in one read (178, the
+     * promoter lens). A never-released template (NULL pointer, D55) is absent, which is "not
+     * a candidate"; the same rule [findCurrentVersions] relies on. Unlike [list] this does
+     * NOT fall back to a draft: a draft is never promotable. No status filter HERE (#563):
+     * D60 lets a development-posture pointer name the DRAFT, and the row's status travels so
+     * the consumer (the promoter lens) applies the RELEASED rule itself.
      */
     fun findCurrentVersions(workspaceId: UUID): List<CurrentTemplateVersion> =
         jdbc.query(
             """
-            SELECT t.name, t.display_name, v.version, v.body_hash
+            SELECT t.name, t.display_name, v.version, v.body_hash, v.status
               FROM templates t
               JOIN template_versions v ON v.template_id = t.id AND v.version = t.current_version
              WHERE t.workspace_id = :workspaceId AND $TEMPLATE_LIVE_T
@@ -490,6 +495,7 @@ class TemplateRepository(
                 displayName = rs.getString("display_name"),
                 version = rs.getInt("version"),
                 bodyHash = rs.getString("body_hash"),
+                status = PipelineVersionStatus.fromWire(rs.getString("status")),
             )
         }
 

@@ -152,13 +152,18 @@ data class ArtifactFolder(
     val count: Int,
 )
 
-/** A live artifact and the RELEASED version its pointer names — the promoter lens's input (versioning §10.2). */
+/**
+ * A live artifact and the RELEASED version its pointer names — the promoter lens's input
+ * (versioning §10.2). The reader admits only RELEASED rows, which the status restates (#563,
+ * the same shape every family's lens input carries; the filter lives in [ArtifactSql.currentVersions]).
+ */
 data class CurrentArtifactVersion(
     val id: UUID,
     val name: String,
     val displayName: String,
     val version: Int,
     val bodyHash: String,
+    val status: PipelineVersionStatus,
 )
 
 /** How a family's body is stored and indexed — the one thing the generic repository cannot know. */
