@@ -14,6 +14,7 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
 import org.apache.catalina.connector.ClientAbortException
+import org.junit.jupiter.api.Assertions.assertTimeoutPreemptively
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertAll
 import org.junit.jupiter.params.ParameterizedTest
@@ -21,6 +22,7 @@ import org.junit.jupiter.params.provider.EnumSource
 import org.slf4j.LoggerFactory
 import org.springframework.http.MediaType
 import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter
+import org.springframework.mock.web.MockHttpServletRequest
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
@@ -35,6 +37,7 @@ import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
 import org.springframework.web.context.request.async.AsyncRequestNotUsableException
 import java.net.URI
+import java.time.Duration
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -178,6 +181,12 @@ class ApiExceptionHandlerTest {
         @PostMapping("/probe/gone/{kind}")
         fun gone(
             @PathVariable kind: ClientGone,
+        ): Nothing = throw kind.error()
+
+        /** #562 amendment 1 — an I/O failure that LOOKS like a disconnect; [kind] names which of [NotGone]'s shapes. */
+        @GetMapping("/probe/not-gone/{kind}")
+        fun notGone(
+            @PathVariable kind: NotGone,
         ): Nothing = throw kind.error()
 
         /** #298 — the binder's mixed refusal: the caller's bad value first, the stored declaration second. */
@@ -400,7 +409,7 @@ class ApiExceptionHandlerTest {
         }
     }
 
-    /** #562's three disconnect shapes, as production raises them. */
+    /** #562's two disconnect shapes, as production raises them — the only two [clientDisconnected] recognises (amendment 1). */
     enum class ClientGone(
         val className: String,
         val error: () -> Throwable,
@@ -413,9 +422,65 @@ class ApiExceptionHandlerTest {
 
         /** An aborted static fetch: Tomcat's wrapper around the socket's broken pipe. */
         CLIENT_ABORT(ClientAbortException::class.java.name, { ClientAbortException(java.io.IOException("Broken pipe")) }),
+    }
 
-        /** The bare socket failure the two wrap, recognised by its message. */
+    /**
+     * #562 amendment 1 — the precision side: an I/O failure with no client-write exception in its cause chain is
+     * ours (a reset on the Postgres pool, a datasource, S3, an HTTP client), so it keeps the ERROR line, its stack
+     * and the 500 envelope. Spring's `DisconnectedClientHelper` matched every one of these by name or phrase.
+     */
+    @ParameterizedTest
+    @EnumSource(NotGone::class)
+    fun `an IO failure that is not a client write is still the 500 envelope with its ERROR line and stack`(kind: NotGone) {
+        lateinit var result: org.springframework.test.web.servlet.MvcResult
+        val events = loggedAtDebug { result = mvc.perform(get("/probe/not-gone/{kind}", kind)).andReturn() }
+        events.shouldBeOneErrorLineWithItsStack("500 GET /probe/not-gone/$kind: unhandled ${kind.className}")
+        result.response.status shouldBe 500
+        result.response.contentAsString shouldContain "\"reason\":\"internal_error\""
+    }
+
+    /** I/O failures that share a disconnect's name or wording but arise on a connection of OURS (#562 amendment 1). */
+    enum class NotGone(
+        val className: String,
+        val error: () -> Throwable,
+    ) {
+        /** A truncated read: Spring's helper matched `EOFException` by simple name anywhere in the chain. */
+        EOF(java.io.EOFException::class.java.name, { java.io.EOFException("Unexpected end of stream") }),
+
+        /** A peer reset on an outbound socket: Spring's helper matched the phrase in the most specific cause. */
+        CONNECTION_RESET(java.net.SocketException::class.java.name, { java.net.SocketException("Connection reset by peer") }),
+
+        /** The same reset wrapped by a client library, as a driver or SDK surfaces it. */
+        WRAPPED_RESET(
+            IllegalStateException::class.java.name,
+            { IllegalStateException("object store read failed", java.net.SocketException("Connection reset by peer")) },
+        ),
+
+        /** A broken pipe that no client-write exception wraps: a write to one of our own connections. */
         BROKEN_PIPE(java.io.IOException::class.java.name, { java.io.IOException("Broken pipe") }),
+    }
+
+    /**
+     * The walk is bounded and so terminates on a cyclic cause chain (`initCause` permits A → B → A): a cycle with
+     * no client-write exception is not a disconnect, and one that holds a `ClientAbortException` still is.
+     */
+    @Test
+    fun `the disconnect walk terminates on a cyclic cause chain (#562)`() {
+        val request = MockHttpServletRequest("GET", "/probe/cycle")
+        val log = LoggerFactory.getLogger(ApiExceptionHandler::class.java)
+
+        val inner = java.io.IOException("Broken pipe")
+        val outer = IllegalStateException("outer", inner)
+        inner.initCause(outer)
+        val abort = ClientAbortException()
+        val wrapper = IllegalStateException("wrapper", abort)
+        abort.initCause(wrapper)
+
+        // Preemptive, so an unbounded walk (Spring's helper spins forever on this chain) fails here instead of hanging the run.
+        assertTimeoutPreemptively(Duration.ofSeconds(5)) {
+            clientDisconnected(outer, request, log) shouldBe false
+            clientDisconnected(wrapper, request, log) shouldBe true
+        }
     }
 
     /** Runs [block] with this advice's logger forced to DEBUG, so "no ERROR" cannot pass because nothing logged. */

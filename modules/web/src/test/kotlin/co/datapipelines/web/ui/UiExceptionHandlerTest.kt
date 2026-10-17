@@ -293,6 +293,30 @@ class UiExceptionHandlerTest {
         }
     }
 
+    /**
+     * #562 amendment 1 — an I/O failure with no client-write exception in its chain is ours: the page request
+     * still gets the `error/500` page and the htmx request the toast, each after ONE ERROR line with its stack.
+     */
+    @ParameterizedTest(name = "{0} htmx={1}")
+    @MethodSource("notDisconnects")
+    fun `an IO failure that is not a client write is still the 500 page or toast with its ERROR line`(
+        kind: ApiExceptionHandlerTest.NotGone,
+        htmx: Boolean,
+    ) {
+        val (answer, events) = logged { handler.onUnexpected(kind.error(), mockRequest(htmx = htmx)) }
+
+        events.shouldBeOneUnexpectedErrorLine(kind.className)
+        if (htmx) {
+            val toast = answer.shouldBeInstanceOf<ResponseEntity<*>>()
+            toast.statusCode shouldBe HttpStatus.INTERNAL_SERVER_ERROR
+            toast.headers.getFirst("HX-Retarget") shouldBe "#toast"
+        } else {
+            val page = answer.shouldBeInstanceOf<ModelAndView>()
+            page.viewName shouldBe "error/500"
+            page.status shouldBe HttpStatus.INTERNAL_SERVER_ERROR
+        }
+    }
+
     @Test
     fun `an Accept a web ui route cannot satisfy is 406 not_acceptable on both paths, echoing nothing - never the 500`() {
         val probe = UiProbeController()
@@ -460,10 +484,10 @@ class UiExceptionHandlerTest {
     }
 
     /** The backstop's log shape for a genuine failure: ONE ERROR line naming the class, with its stack. */
-    private fun List<ILoggingEvent>.shouldBeOneUnexpectedErrorLine() {
+    private fun List<ILoggingEvent>.shouldBeOneUnexpectedErrorLine(className: String = "java.lang.RuntimeException") {
         withClue("log events ${map { "${it.level} ${it.formattedMessage}" }}") {
             map { it.level } shouldBe listOf(Level.ERROR)
-            single().formattedMessage shouldContain "unhandled java.lang.RuntimeException"
+            single().formattedMessage shouldContain "unhandled $className"
             single().throwableProxy.shouldNotBeNull()
         }
     }
@@ -762,6 +786,11 @@ class UiExceptionHandlerTest {
         @JvmStatic
         fun disconnects(): List<Arguments> =
             ApiExceptionHandlerTest.ClientGone.entries.flatMap { kind -> listOf(false, true).map { Arguments.of(kind, it) } }
+
+        /** Every #562 amendment-1 shape that is NOT a disconnect, as a page request and as an htmx request. */
+        @JvmStatic
+        fun notDisconnects(): List<Arguments> =
+            ApiExceptionHandlerTest.NotGone.entries.flatMap { kind -> listOf(false, true).map { Arguments.of(kind, it) } }
 
         /** A value no real client sends; a 406 body carrying it would be echoing the Accept header. */
         const val ACCEPT_CANARY = "application/x-accept-canary-222"
