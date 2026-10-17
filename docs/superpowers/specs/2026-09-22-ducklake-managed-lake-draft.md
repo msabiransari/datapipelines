@@ -1,17 +1,26 @@
 # Draft: A lightweight writable lake for Datapipelines
 
 **Status:** design (not yet normative); conversation and research checkpoint, not an implementation plan.
-**Date:** 2026-09-22; discussion update 2026-09-24.
-**Next step:** validate a small, reliable workflow and settle the open write/recovery contracts before implementation.
+**Date:** 2026-09-22; discussion updates 2026-09-24 and 2026-10-17 UTC.
+**Next step:** review the catalog and semantic schema audit, specify and repair that foundation, then implement the DP Lake journeys in §13 with validated write/recovery contracts.
 **Evidence:** official documentation consulted during the discussions; initial repository contracts inspected at `09b0e715`, skill update based on `1aac294e`. No lake prototype, benchmarks or recovery tests were run.
 **Related work:** [#219](https://github.com/msabiransari/datapipelines/issues/219) tracks the current skill correction and this draft update, not implementation of writable dp-lake.
 **Distribution:** contributor design material under `docs/superpowers/specs/`; not part of the product documentation packaging allowlist.
 **Companion discussion:** [Ingestion and generic validation engine](2026-09-24-ingestion-validation-design-draft.md) — the full ingestion design agenda, validation contract questions and proposed acceptance scenarios to revisit before implementation.
+**Catalog prerequisite:** [Catalog schema audit and DP Lake foundation](2026-10-17-catalog-schema-audit.md) — current implementation, missing entities and contracts, semantic integration, and the migration order requested before writable DP Lake.
 
 This document preserves the substantive discussion, including corrections and unresolved
 choices. Owner direction, externally documented facts and assistant recommendations are
 separated below. A recommendation is not an approved decision. This draft does not amend
 the current pipeline, datasource, staging or authorization contracts.
+
+**Current direction:** [§13 Execution approach](#13-execution-approach) records the owner's
+endorsement of the proposed user-experience approach and return to **Iceberg + DuckDB + S3**
+as the working baseline. It supersedes the September recommendation to start with writable
+DuckLake and defer writable Iceberg (§6 and §11). The earlier DuckLake investigation remains
+here as research history; its backend-specific details are not an Iceberg implementation
+contract. No catalog product, maintenance engine, performance guarantee or delivery schedule
+has been selected. The filename is retained to preserve existing links.
 
 ## 1. Owner direction and motivation
 
@@ -295,6 +304,8 @@ Sources: [Parquet tips](https://duckdb.org/docs/current/data/parquet/tips),
 
 ## 6. DuckLake versus Iceberg
 
+**Historical recommendation (September):** superseded as the execution baseline by §13.1.
+
 Recommendation: support DuckLake as the first writable managed-table format. The target
 organization is starting a lake, so it need not choose between multiple table formats.
 Keep existing Iceberg reads for compatibility; do not expand Iceberg writes in this first
@@ -501,6 +512,9 @@ widen existing read-only access.
 
 ## 11. Proposed first scope and explicit deferrals
 
+**Historical scope proposal (September):** §13 now supplies the execution approach; writable
+Iceberg is the working baseline rather than a deferred feature.
+
 Assistant recommendation, not an approved release plan:
 
 1. Connect/provision a DuckLake catalog and its storage root.
@@ -515,6 +529,10 @@ automatic arbitrary schema evolution and source deletion. Dashboards/scheduling/
 remain shared Datapipelines features rather than parallel lake-specific subsystems.
 
 ## 12. Resume checklist and learning path
+
+**Historical learning checklist (September):** retain the failure/recovery and measurement
+questions, but use §13.8 for the current sequence and selected-backend proof. DuckLake-specific
+experiments below are optional comparison work, not prerequisites for the Iceberg baseline.
 
 Revisit the [ingestion and validation companion](2026-09-24-ingestion-validation-design-draft.md)
 alongside this checklist. Validation is a major design workstream and must be developed
@@ -542,3 +560,244 @@ and acceptance criteria to its issue/project; early public discussion belongs in
 
 No code was changed for the lake proposal, no production resources were touched, and no
 benchmark or compatibility result should be inferred from this draft.
+
+## 13. Execution approach
+
+Recorded 2026-10-17 UTC from the continued product discussion. The owner endorsed preserving
+this approach in the design. It establishes the direction for further design and validation;
+the detailed behavior, implementation choices, acceptance thresholds and release scope below
+remain proposals unless explicitly identified otherwise. This is not an implementation
+dispatch or a competing roadmap; GitHub remains the delivery tracker.
+
+### 13.1 Product thesis and architecture baseline
+
+The owner's thesis is: **“We don't need warehouse subscriptions to query multiple
+datasources.”** Build for small and medium organizations that want to connect existing data,
+make it useful, keep it trustworthy and serve it through Datapipelines. DP Lake adds a durable
+home for analytical tables where retaining or materializing data is useful. Querying existing
+sources should not require copying everything into the lake first.
+
+The working baseline is **S3 + Iceberg + DuckDB**, with a full catalog experience, UI and MCP.
+The ambition includes fast interactive analytics and fresh data. Neither a universal
+real-time guarantee nor a workload capacity has been demonstrated. Avoiding a warehouse
+subscription still leaves compute, storage, network and operational costs to measure.
+
+One factual correction from this discussion must travel with the decision: **DuckLake does
+support compaction**, snapshot expiration and file cleanup. Absence of compaction is not a
+valid reason to reject it. The owner's preference for Iceberg supplies the baseline; backend
+capability and integration quality still need evidence from the exact selected versions.
+[DuckLake maintenance](https://ducklake.select/docs/stable/duckdb/maintenance/recommended_maintenance).
+
+### 13.2 User journeys define the product
+
+Start with complete outcomes, including what happens when a workflow fails:
+
+| User intent | Proposed experience |
+|---|---|
+| Query across existing databases | Connect sources, discover their schemas, build a query or pipeline, and make computation location and data movement inspectable. |
+| Turn files into a useful table | Select files or a storage location, preview types and records, choose or create a destination, validate and import. |
+| Keep a table updated | Turn the import into recurring ingestion with explicit append, replacement or supported merge semantics. |
+| Organize sales or other business data | Create a namespace directly from table creation; provide a sensible default so a small installation need not design a hierarchy first. |
+| Make a dashboard or API fast | Measure its workload, then recommend layout changes, maintained summaries or caching, showing the freshness implications. |
+| Understand and repair a problem | Identify affected data, show rejected records or incomplete batches, and offer a safe repair or replay action. |
+| Keep the lake healthy | Apply maintenance policies and expose their run history, resource use and exceptions. |
+
+Learn from existing product workflows. Databricks Catalog Explorer combines discovery,
+previews, relationships and governance. Snowflake's file-loading workflow combines destination
+selection, inferred-schema review and loading. These are references for interaction design,
+not evidence that DP already offers an easier experience. Evaluate whether our complete
+workflow is shorter and more understandable for the intended users.
+[Catalog Explorer](https://docs.databricks.com/gcp/en/catalog-explorer/),
+[Snowsight loading](https://docs.snowflake.com/en/user-guide/data-load-web-ui).
+
+An illustrative request:
+
+> Import the daily order exports from this folder into sales.orders, keep them updated,
+> and join them with customers in PostgreSQL.
+
+DP should produce an inspectable proposal covering source selection, destination schema,
+record identity, transformations, validation, update behavior and schedule. Show actual
+before/after examples and ask only about consequential ambiguities not answered by established
+rules. Once released, deterministic execution handles subsequent runs. An agent does not
+reinterpret every row or redefine the import on each schedule occurrence.
+
+### 13.3 The table page is the center of the lake experience
+
+Give each table one place to understand, use and operate it:
+
+- Purpose, owner, columns, sample data and resolved storage location.
+- Data freshness and completeness, distinguished from the last successful job.
+- Source provenance and dependent pipelines, dashboards and APIs.
+- Import history, quality results and records needing attention.
+- Snapshot history and available recovery actions.
+- Maintenance status and measured query performance.
+
+Expose technical details progressively. Engineers can inspect the underlying definitions,
+layout, files and execution evidence. The ordinary creation flow should ask how new files
+update the table before asking about partition transforms or file-size settings. Namespace
+names organize logical tables; they must not imply a bucket mapping or permission boundary
+that the implementation does not provide.
+
+The catalog experience must distinguish **externally managed data** from **DP-managed
+tables**. Registration alone must not authorize DP to rewrite or delete external files.
+Creation, import, query and maintenance actions should make their ownership and effects clear.
+Import initially copies data; deleting the original source remains a separate operation.
+
+### 13.4 UI and MCP share the same product operations
+
+Make core workflows available through either surface: discover, create a namespace, propose
+a table, preview an import, validate, run, inspect, schedule and repair. These are proposed
+capabilities, not names of existing MCP tools or a claim of current surface parity.
+
+Both surfaces must use the same authorization, validation, operation identities and durable
+job state. An agent can initiate work, disconnect and later inspect the same operation in the
+UI. Execution must not depend on an open browser or chat session. Reuse shared scheduling,
+pipelines, parameters, templates and consumption surfaces wherever their contracts fit.
+
+AI reduces configuration and diagnosis effort: discover capabilities, generate versioned
+definitions, explain evidence and propose changes. Established rules or explicit decisions
+must supply business meaning, such as whether a file replaces prior data or adds new records.
+The runtime enforces the released rules, resource limits and permissions. Pin the definitions
+and relevant semantic facts used by a run so later edits do not change its explanation.
+
+Before implementation, allocate each new action to the existing roles and define its guard,
+including who may inspect rejected records, approve schema changes, replay data and change
+maintenance policy. UI/MCP parity must not create a permission bypass. Exact tool contracts,
+role assignments and approval requirements remain to be designed.
+
+### 13.5 Reuse table machinery; define DP's ownership precisely
+
+Iceberg provides table-format and commit machinery. Selecting it does not supply a complete
+DP integration. DuckDB's current documentation describes Iceberg writes through an attached
+REST catalog; path-based scanning is read-only. Validate those operations against the pinned
+JDBC driver, extension, catalog and Iceberg format versions before claiming support.
+[DuckDB Iceberg writes](https://duckdb.org/docs/current/core_extensions/iceberg/writing).
+
+Recommendation: reuse an existing compatible catalog implementation. Iceberg's authoritative
+schemas, snapshots and file membership belong to that table/catalog machinery. DP's catalog
+experience adds descriptions, application permissions, business meaning, ingestion history,
+lineage and operations without creating another authority for committed table state.
+
+Choose and prove the maintenance execution path explicitly. A REST catalog coordinates table
+metadata; it does not by itself provide the compute that rewrites data files. Support in
+Iceberg generally must not be mistaken for support in our chosen DuckDB integration. Catalog
+selection and the execution engine for each maintenance operation are unresolved decisions.
+
+### 13.6 Engineering challenges and operational acceptance
+
+| Challenge | Required evidence |
+|---|---|
+| Retry correctness | A crash after a successful commit cannot cause a retry to duplicate the logical batch; ambiguous outcomes can be reconciled. |
+| Schema and data quality | Unexpected columns, precision boundaries, invalid records and late changes produce explicit, explainable outcomes. |
+| Concurrent operations | Ingestion, maintenance and queries can overlap without corrupting state or exhausting the host. |
+| Federation | Cross-source joins move bounded data, protect operational sources and disclose consistency limits. |
+| Recovery | Catalog, objects and ingestion progress can be restored coherently and verified by reading the result. |
+| Simple operation | Installation, upgrades, credential management, maintenance and diagnosis are manageable for a small organization. |
+
+The [scheduler contract](../../scheduler.md) already separates scheduling from its executor;
+its currently documented job is a pipeline run. Reuse that infrastructure, while designing
+maintenance-specific eligibility checks, resource limits, conflict handling and retention
+policy. Existing per-schedule overlap control does not establish exclusion between different
+schedules or manual operations on the same table. Whether maintenance uses a pipeline or a
+dedicated executor remains open.
+
+Iceberg documents compaction, snapshot expiration, manifest rewriting and orphan cleanup as
+distinct operations. Scheduling them is only part of operating them safely. Cleanup must
+respect retained snapshots and in-flight work; maintenance must have observable outcomes and
+must not starve interactive queries. Define policy defaults and resource budgets using
+measurements, not an arbitrary recurring full-table rewrite.
+[Iceberg maintenance](https://iceberg.apache.org/docs/latest/maintenance/).
+
+Validation, publication and retry behavior must be designed together. Preserve the companion
+draft's distinctions between malformed files, rejected records, dataset-wide failures and
+checks that could not run. A green job status alone is not proof of complete or correct data.
+Use the [ingestion and validation design](2026-09-24-ingestion-validation-design-draft.md)
+for the detailed rule, quarantine, checkpoint and replay questions.
+
+### 13.7 Real-time ambitions become measurable workload targets
+
+Define three requirements separately:
+
+| Dimension | Meaning |
+|---|---|
+| Freshness | Time from a source change or completed source delivery to queryable data. |
+| Query latency | Time until the caller receives a result for a specified query and data shape. |
+| Concurrency | Simultaneous demand under which the freshness and latency objectives still hold. |
+
+Fast dashboards over recently updated data are a target to investigate. Compaction alone
+cannot establish all three requirements. DuckDB's workload guidance states that many small
+concurrent queries are not its primary design goal; test the intended API/dashboard load,
+including simultaneous ingestion and maintenance, before making performance promises.
+[DuckDB workload guidance](https://duckdb.org/docs/preview/guides/performance/how_to_tune_workloads).
+
+Proposed optimization order: selective reads and source-side reduction; measured partitioning
+and sorting; maintained summary tables; caching; workload isolation and admission control.
+Use measured bottlenecks to choose the next step. Preserve correct aggregation and join
+semantics when reducing source data. Cache validity must account for data versions, parameters
+and permissions, and the user must be able to see the freshness of the served result.
+
+**Illustrative experiment only:** a dashboard under two seconds p95 latency, data queryable
+within five minutes of arrival, and twenty concurrent users. These are candidate acceptance
+targets, not measured capabilities, committed SLAs or approved product defaults. Define the
+queries, dataset size and shape, arrival semantics, request rate, hardware, storage placement
+and background load before using them as acceptance criteria. Report cold and warm results,
+correctness, memory/scratch use and operating cost alongside latency.
+
+### 13.8 Delivery sequence and evidence at each step
+
+**Owner follow-up:** repair the catalog schema, including the semantic layer, before DP Lake
+implementation. The [catalog audit](2026-10-17-catalog-schema-audit.md) defines the recommended
+foundation and acceptance gates. Journey/prototype design below informs that schema; the
+catalog migration precedes implementing managed lake writes.
+
+The [environment and workspace direction](2026-10-17-catalog-schema-audit.md#environment-isolation-and-workspace-ownership)
+sets a separate logical catalog per environment, one owning workspace per managed object,
+and explicit read sharing for cross-workspace queries. UI, MCP and execution must enforce the
+same boundary; semantic sharing preserves ownership and never grants implicit data access.
+
+1. **Specify three complete journeys.** First file-to-table import; recurring ingestion
+   with a failed batch and recovery; cross-source analysis published as a dashboard or API.
+   Describe both UI and MCP interactions, consequential choices, visible outcomes and failure
+   states. Exit when the journeys expose the required operations and unresolved contracts.
+2. **Prototype the experience.** Lake setup, table creation/import, table details and repair.
+   Observe whether intended users can complete and explain the workflow without coaching in
+   lake terminology. Record confusing choices and revise the flow before implementation.
+3. **Prove the selected backend combination.** Use exact catalog, Iceberg and DuckDB versions
+   to create, append, replace, query, compact, interrupt, retry and restore. Select the
+   maintenance execution engine here. Include lost commit acknowledgments, concurrent readers
+   and writers, and type fidelity. Exit on observed invariants, not successful happy-path SQL.
+4. **Deliver one complete workflow.** Files become a usable table and a cross-source result,
+   with scheduling, quality evidence, recovery, maintenance and equivalent UI/MCP operations.
+   Verify the user-visible journey and its failure/recovery cases end to end.
+5. **Expand against measured demand.** Database ingestion, merges, lower freshness targets,
+   broader connectors and higher concurrency follow concrete workloads and evidence. Do not
+   infer their readiness from the initial workflow's success.
+
+Prototype the experience early, but allow backend findings to revise its promises before
+shipping. Each implementation increment must connect to a searched/reused or newly created
+GitHub issue with acceptance criteria and project status. This section sets no delivery dates
+and does not authorize deployment or establish that any proposed capability already exists.
+
+### 13.9 Initial deferrals and unresolved choices
+
+Defer a custom distributed query engine, broad CDC coverage and automatic optimization that
+changes behavior without evidence. Keep room for future extensions without implementing each
+possible backend or execution mode. General source deletion and arbitrary automatic schema
+evolution remain deferred as in the earlier reliability discussion.
+
+Resolve before the relevant implementation: catalog product and provisioning, maintenance
+engine, namespace/table ownership, role assignments, supported source formats and write modes,
+publication boundaries, retry identity, schema-change and rejection policies, recovery and
+retention, deployment budgets, and workload-specific performance targets. An Iceberg baseline
+does not answer these choices by itself.
+
+### 13.10 Next design conversation
+
+Walk through **“a new organization imports its first recurring dataset and publishes a useful
+result.”** Follow setup, the first preview, table creation, initial import, recurrence, query
+and publication; then introduce the first failed batch and recover it. The order-export
+example in §13.2 is a candidate, not a fixed customer requirement.
+
+Use that journey to give the catalog, ingestion, scheduler, UI and MCP one shared purpose.
+Record what the user sees, what the agent can do, what the runtime guarantees and what evidence
+establishes success at each step. Revisit the prototype and acceptance scenarios together.
