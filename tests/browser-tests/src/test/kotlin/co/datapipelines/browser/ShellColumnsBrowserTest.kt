@@ -142,6 +142,13 @@ class ShellColumnsBrowserTest : RestTreeBrowserFixture() {
         page.evaluate("() => document.getElementById('app-rail').contains(document.activeElement)") shouldBe true
         // The compact desktop preference never strips the drawer's labels.
         page.locator(".app-nav-link[data-nav-section='/pipelines']").innerText() shouldContain "Pipelines"
+        // The close control sits in the brand row and never covers the wordmark (a 202px drawer put
+        // it over the label). Both are inside the drawer, so a mid-slide read compares the same way.
+        page.evaluate(
+            """() => { const close = document.getElementById('rail-close').getBoundingClientRect();
+              const label = document.querySelector('#app-rail .app-brand .app-rail-label').getBoundingClientRect();
+              return label.right <= close.left; }""",
+        ) shouldBe true
         page.keyboard().press("Escape")
         open() shouldBe emptyList<String>()
         page.evaluate("() => document.activeElement?.id") shouldBe "rail-open"

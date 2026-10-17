@@ -893,6 +893,10 @@ button.app-busy::after {
 :root {
   --app-menu-expanded: 202px;
   --app-menu-compact: 64px;
+  /* The phone menu drawer (760px and below): the drawer width the shell had before #554.
+     The drawer's brand row also seats the 48px close control, and 202 put it over the
+     wordmark (#554 screenshots); 232 clears it. */
+  --app-menu-drawer: 232px;
   /* The menu's width right now: compact under `rail-collapsed` (below) and by default
      from 761 to 1100px (the 110 table at the foot of this file). */
   --app-menu-width: var(--app-menu-expanded);
@@ -3870,10 +3874,10 @@ button.app-busy::after {
   }
 
   /* Always the FULL menu here: a compact choice made on a desktop must not make a
-     64px-wide drawer on a phone, so this reads the expanded token directly rather
+     64px-wide drawer on a phone, so this reads the drawer token directly rather
      than --app-menu-width (and the collapse rules are scoped above 760px). */
   .app-rail {
-    width: min(var(--app-menu-expanded), 100vw);
+    width: min(var(--app-menu-drawer), 100vw);
   }
 
   /* Record §4: at most 360px and never wider than the viewport. */
