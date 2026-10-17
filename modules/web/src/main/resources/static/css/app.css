@@ -3797,7 +3797,7 @@ button.app-busy::after {
 }
 
 /* §C — the editors' phone band (pipelines/editor.html, templates/workspace.html):
-   desktop-first by decision, not omission. Hidden everywhere, shown below 768. */
+   desktop-first by decision, not omission. Hidden everywhere, shown at 760px and below (#554). */
 .app-wide-screen-note {
   display: none;
 }
