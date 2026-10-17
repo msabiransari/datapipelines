@@ -77,6 +77,7 @@ class AuthLayoutRenderTest {
         val html = engine.process("login", webContext().apply { fillLogin(authenticated = true) })
 
         html shouldNotContain "app-rail"
+        html shouldNotContain "app-browser"
         html shouldNotContain "app-topbar"
         html shouldNotContain "app-ws-switch"
         html.indexOf("id=\"login-email\"") shouldBeGreaterThan -1

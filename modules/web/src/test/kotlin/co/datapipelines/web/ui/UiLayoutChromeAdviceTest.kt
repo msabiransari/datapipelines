@@ -211,6 +211,8 @@ class UiLayoutChromeAdviceTest {
         // top bar — the login page has to say whose login it is.
         html shouldNotContain "app-nav-link"
         html shouldNotContain "app-rail\""
+        // #554: the resource browser is the rail's sibling under the same `authenticated` gate.
+        html shouldNotContain "id=\"app-browser\""
         html shouldNotContain "Log out"
         html shouldContain "app-brand"
         html shouldContain "app-topbar-anon"

@@ -208,33 +208,32 @@ class ParameterSetPagesBrowserTest : ParameterSetBrowserSuite() {
     private fun boxEventCount(): Int = (page.evaluate("() => window.__dp432BoxEvents") as Number).toInt()
 
     @Test
-    fun `the branch search expands matching paths and clearing closes the root (#415)`() {
+    fun `the browser panel's search expands matching paths and clearing closes the root (#415)`() {
         startTrace()
         val root = ready("psnavsearch")
         val (id, _) = createSet(setBody("$root/parameters/nav_search_me", "[${constants("kind", listOf("a"))}]"))
         page.navigate("$baseUrl/dashboard")
-        page.waitForSelector("[data-nav-branch='parameter-sets']")
-        page.click("[data-nav-branch='parameter-sets'] [data-nav-tree-toggle]")
+        openBrowserTree("parameter-sets")
         page.waitForSelector("#nav-tree-parameter-sets [aria-expanded] > .dp-tree-line button")
 
         // A non-empty query swaps the FLAT results into the SAME nav root (role=listbox), the
         // shared engine serving it with no JS change.
-        page.fill("[data-nav-branch='parameter-sets'] input[type=search]", "nav_search_me")
+        page.fill("#nav-tree-parameter-sets input[type=search]", "nav_search_me")
         page.waitForSelector("#nav-tree-parameter-sets a.dp-tree-activate")
         page.locator("#nav-tree-parameter-sets a.dp-tree-activate").count() shouldBe 1
         page.locator("#nav-tree-parameter-sets [data-tree-key^='artifact:']").getAttribute("role") shouldBe "treeitem"
-        // The listbox is the results list itself; its label names the presentation — the rail's
+        // The listbox is the results list itself; its label names the presentation — the menu's
         // display spelling since #478 (owner ruling 2026-10-14: accessible names match the visible text).
         page.locator("#nav-tree-parameter-sets [role=tree]").getAttribute("aria-label") shouldBe "Parameter Sets"
 
         // The search box's ArrowDown moves focus into the first result (the explorers' NAV keyboard).
-        page.focus("[data-nav-branch='parameter-sets'] input[type=search]")
+        page.focus("#nav-tree-parameter-sets input[type=search]")
         page.keyboard().press("ArrowDown")
         page.evaluate("() => document.activeElement && document.activeElement.getAttribute('role')") shouldBe "treeitem"
 
         // Clearing the box returns the tree by construction: the dispatcher answers the empty
         // query with the root level again, and the set hides behind its folders as before.
-        page.fill("[data-nav-branch='parameter-sets'] input[type=search]", "")
+        page.fill("#nav-tree-parameter-sets input[type=search]", "")
         page.waitForSelector("#nav-tree-parameter-sets [aria-expanded] > .dp-tree-line button")
         page.locator("#nav-tree-parameter-sets a.dp-tree-activate").count() shouldBe 0
         page.click("#nav-tree-parameter-sets [data-tree-key='folder:$root'] > .dp-tree-line button")
@@ -256,13 +255,12 @@ class ParameterSetPagesBrowserTest : ParameterSetBrowserSuite() {
 
         val promoter = openPromoterSession(workspaceName)
         promoter.page.navigate("$baseUrl/dashboard")
-        promoter.page.waitForSelector("[data-nav-branch='parameter-sets']")
-        promoter.page.click("[data-nav-branch='parameter-sets'] [data-nav-tree-toggle]")
+        openBrowserTree("parameter-sets", promoter.page)
         promoter.page.waitForSelector("#nav-tree-parameter-sets [aria-expanded] > .dp-tree-line button")
 
         // One term that matches BOTH names; her search returns the released one only — the
         // draft-only set is filtered in the service, never hidden by CSS in the panel.
-        promoter.page.fill("[data-nav-branch='parameter-sets'] input[type=search]", "_")
+        promoter.page.fill("#nav-tree-parameter-sets input[type=search]", "_")
         promoter.page.waitForSelector("#nav-tree-parameter-sets a.dp-tree-activate")
         promoter.page.locator("#nav-tree-parameter-sets a.dp-tree-activate").count() shouldBe 1
         val branchPanel = promoter.page.locator("#nav-tree-parameter-sets").innerText()
@@ -280,17 +278,16 @@ class ParameterSetPagesBrowserTest : ParameterSetBrowserSuite() {
     }
 
     @Test
-    fun `the sidebar branch expands lazily to a leaf that opens the workspace, and a workspace switch shows the other workspace's sets`() {
+    fun `the browser panel expands lazily to a leaf that opens the workspace, and a workspace switch shows the other workspace's sets`() {
         startTrace()
         val root = ready("pssb")
         val (id, _) = createSet(setBody("$root/parameters/nav_set", "[${constants("kind", listOf("a"))}]"))
         page.navigate("$baseUrl/dashboard")
-        page.waitForSelector("[data-nav-branch='parameter-sets']")
-        // The rail item carries the lucide sliders-horizontal glyph, vendored (never a custom SVG).
+        // The menu item carries the lucide sliders-horizontal glyph, vendored (never a custom SVG).
         page
-            .locator("[data-nav-branch='parameter-sets'] a.app-nav-link use")
+            .locator("a.app-nav-link[data-nav-section='/parameter-sets'] use")
             .getAttribute("href") shouldContain "#sliders-horizontal"
-        page.click("[data-nav-branch='parameter-sets'] [data-nav-tree-toggle]")
+        openBrowserTree("parameter-sets")
         page.waitForSelector("#nav-tree-parameter-sets [aria-expanded] > .dp-tree-line button")
         page.click("#nav-tree-parameter-sets [data-tree-key='folder:$root'] > .dp-tree-line button")
         page.click("#nav-tree-parameter-sets [data-tree-key='folder:$root/parameters'] > .dp-tree-line button")
@@ -298,10 +295,10 @@ class ParameterSetPagesBrowserTest : ParameterSetBrowserSuite() {
         page.waitForURL("**/parameter-sets/$id")
         page.waitForSelector("[data-ps-viewed-label]")
 
-        // A second workspace: the branch is the NEW workspace's - never the first one's cached level.
+        // A second workspace: the panel is the NEW workspace's - never the first one's cached level.
         createWorkspace("psother" + suffix())
         page.navigate("$baseUrl/dashboard")
-        page.click("[data-nav-branch='parameter-sets'] [data-nav-tree-toggle]")
+        openBrowserTree("parameter-sets")
         page.waitForSelector("#nav-tree-parameter-sets .dp-tree-status")
         page.locator("#nav-tree-parameter-sets [aria-expanded] > .dp-tree-line button").count() shouldBe 0
     }

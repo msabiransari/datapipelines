@@ -650,11 +650,6 @@ class PipelineWorkspaceHistoryBrowserTest : BrowserSuite() {
 
     private fun historyLength(): Int = (page.evaluate("() => history.length") as Number).toInt()
 
-    private fun openTree() {
-        page.click("[data-nav-branch='pipelines'] [data-nav-tree-toggle]")
-        page.waitForSelector("#nav-tree-pipelines [role=tree]")
-    }
-
     /** The sidebar tree's current leaf — #350's own history proof, read, never driven here. */
     private fun currentLeaves(): Int =
         (page.evaluate("() => document.querySelectorAll(\"#nav-tree-pipelines a.dp-tree-activate[aria-current='page']\").length") as Number)
@@ -711,7 +706,7 @@ class PipelineWorkspaceHistoryBrowserTest : BrowserSuite() {
     fun `#402 - Back and Forward replay in-page version and tab switches on the live instance`() {
         val id = seedSqlVersions("pwhb" + generatedPassword("s").take(6).lowercase())
         ensureTheme("light")
-        openTree()
+        // #554: a Pipelines page shows the resource browser's Pipelines panel at load.
         page.navigate("$baseUrl/pipelines/$id?version=1")
         page.waitForSelector(".pe-root")
         waitActivated()

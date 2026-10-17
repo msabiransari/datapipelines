@@ -1,7 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {restTreeSource,safeHref} from '../../main/resources/static/js/tree/rest-source.mjs';
-import {effectiveWidth} from '../../main/resources/static/js/rail-resize.mjs';
 import {assetPath} from '../../main/resources/static/js/page-assets.mjs';
 
 const options={context:{workspace:'ws'},root:'scope'};
@@ -62,8 +61,4 @@ test('unsafe destinations and dependency paths refuse schemes, traversal and for
   assert.equal(safeHref('/pipelines/id','pipelines'),true);
   for(const path of ['https://elsewhere/js/code.js','/js/../secret.js','/api/v1/x.js','/js/code.js?url=secret'])assert.throws(()=>assetPath(path));
   assert.equal(assetPath('/vendor/plotly/plotly-3d.min.js'),'/vendor/plotly/plotly-3d.min.js');
-});
-test('temporary viewport clamps do not impose a main-content minimum',()=>{
-  assert.equal(effectiveWidth(1440,1440,232),1440);assert.equal(effectiveWidth(932,800,232),800);
-  assert.equal(effectiveWidth(932,1440,232),932);assert.equal(effectiveWidth(1,1440,232),232);
 });

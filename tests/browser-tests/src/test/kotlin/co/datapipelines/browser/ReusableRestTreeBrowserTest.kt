@@ -21,13 +21,15 @@ class ReusableRestTreeBrowserTest : BrowserSuite() {
 
     @Test
     @Suppress("LongMethod") // sequential browser workflow: identity, history, resize and reload share one fixture
-    fun `real REST browsing preserves rows across artifact catalog and cached history and the rail can consume the app`() {
+    fun `real REST browsing preserves rows across artifact catalog and cached history and the browser resizes to its range`() {
         ready()
         val id = seedPipeline("scope/deep/first")
         seedPipeline("scope/deep/second")
         val requests = mutableListOf<String>()
         page.onRequest { if (it.url().contains("/api/v1/pipelines/tree")) requests += it.url() }
-        page.click("[data-nav-branch=pipelines] [data-nav-tree-toggle]")
+        // #554: the Pipelines page shows the browser, which mounts the family's tree (one root read).
+        page.click(".app-nav-link[data-nav-section='/pipelines']")
+        page.waitForURL("**/pipelines")
         page.waitForSelector("#nav-tree-pipelines [data-tree-key='folder:scope']")
         requests.size shouldBe 1
         page.locator("#nav-tree-pipelines [aria-expanded=true]").count() shouldBe 0
@@ -38,6 +40,7 @@ class ReusableRestTreeBrowserTest : BrowserSuite() {
         page.evaluate(
             """() => {
             window.__railWitness = document.getElementById('app-rail');
+            window.__browserWitness = document.getElementById('app-browser');
             window.__rowWitness = document.querySelector('#nav-tree-pipelines [data-tree-key="folder:scope"]');
             window.__documentWitness = document;
         }""",
@@ -47,7 +50,7 @@ class ReusableRestTreeBrowserTest : BrowserSuite() {
         page.waitForFunction("() => !!window.__peInstance")
         sameRail()
         requests.size shouldBe 3
-        page.click("[data-nav-branch=pipelines] .app-nav-link")
+        page.click(".app-nav-link[data-nav-section='/pipelines']")
         page.waitForURL("**/pipelines")
         sameRail()
         page.goBack()
@@ -65,31 +68,37 @@ class ReusableRestTreeBrowserTest : BrowserSuite() {
             }""",
         )
         page.evaluate("() => window.__idleTreeMutations") shouldBe 0
-        page.locator("#rail-resize").focus()
+        // #554 at 1440 (band 1101–1599): menu 202, browser 300 by default; End takes the browser to
+        // its 480 ceiling (1440 - 202 - 480 = 758 of content), Home to its 240 floor (998).
+        width("app-rail") shouldBe 202
+        width("app-browser") shouldBe 300
+        page.locator("#browser-boundary").focus()
         page.keyboard().press("End")
-        page.waitForFunction("() => document.getElementById('app-main').getBoundingClientRect().width === 320")
-        (page.evaluate("() => document.getElementById('app-rail').getBoundingClientRect().width") as Number).toInt() shouldBe 1120
+        page.waitForFunction("() => document.getElementById('app-main').getBoundingClientRect().width === 758")
+        width("app-browser") shouldBe 480
         page.keyboard().press("Home")
-        page.waitForFunction("() => document.getElementById('app-main').getBoundingClientRect().width > 1000")
+        page.waitForFunction("() => document.getElementById('app-main').getBoundingClientRect().width === 998")
+        width("app-browser") shouldBe 240
         page.evaluate(
             "() => window.__rowWitness === document.querySelector('#nav-tree-pipelines [data-tree-key=\"folder:scope\"]')",
         ) shouldBe
             true
-        // Pointer resizing goes beyond the retired cap and remains authoritative when folders close/reopen.
-        val handle = checkNotNull(page.locator("#rail-resize").boundingBox())
+        // Pointer resizing on the browser/content boundary stays authoritative when folders close/reopen.
+        val handle = checkNotNull(page.locator("#browser-boundary").boundingBox())
         page.mouse().move(handle.x + handle.width / 2, handle.y + handle.height / 2)
         page.mouse().down()
-        page.mouse().move(900.0, 500.0)
+        page.mouse().move(202.0 + 400.0, 500.0)
         page.mouse().up()
-        (page.evaluate("() => document.getElementById('app-rail').getBoundingClientRect().width") as Number).toInt() shouldBe 900
+        width("app-browser") shouldBe 400
         page.locator("#nav-tree-pipelines [data-tree-key='folder:scope'] > .dp-tree-line button").click()
         expand("scope")
         requests.size shouldBe 3
-        (page.evaluate("() => document.getElementById('app-rail').getBoundingClientRect().width") as Number).toInt() shouldBe 900
+        width("app-browser") shouldBe 400
+        width("app-rail") shouldBe 202
         page.reload()
         page.waitForSelector("#nav-tree-pipelines [data-tree-key='folder:scope']")
         page.locator("#nav-tree-pipelines [aria-expanded=true]").count() shouldBe 0
-        (page.evaluate("() => document.getElementById('app-rail').getBoundingClientRect().width") as Number).toInt() shouldBe 900
+        width("app-browser") shouldBe 400
     }
 
     @Test
@@ -174,7 +183,9 @@ class ReusableRestTreeBrowserTest : BrowserSuite() {
         })
         listOf("pipelines", "templates", "dashboards", "visualizations", "parameter-sets").forEach { family ->
             val panel = "#nav-tree-$family"
-            page.click("[data-nav-branch='$family'] [data-nav-tree-toggle]")
+            // #554: each family's page shows its own panel in the browser (a boosted menu click).
+            page.click(".app-nav-link[data-nav-section='/$family']")
+            page.waitForURL("**/$family")
             page.waitForFunction(
                 "selector => !!document.querySelector(selector + ' [data-tree-key]') || " +
                     "!!document.querySelector(selector + ' .dp-tree-status button')",
@@ -290,7 +301,8 @@ class ReusableRestTreeBrowserTest : BrowserSuite() {
             }
             if (hold) held += answer else answer()
         })
-        page.click("[data-nav-branch=pipelines] [data-nav-tree-toggle]")
+        page.click(".app-nav-link[data-nav-section='/pipelines']")
+        page.waitForURL("**/pipelines")
         page.waitForSelector("#nav-tree-pipelines [data-tree-key='folder:root']")
         page.click("#nav-tree-pipelines [data-tree-key='folder:root'] > .dp-tree-line button")
         page.waitForSelector("#nav-tree-pipelines [data-tree-key='artifact:root/item79']")
@@ -300,8 +312,8 @@ class ReusableRestTreeBrowserTest : BrowserSuite() {
               const row = document.querySelector('#nav-tree-pipelines [data-tree-key="artifact:root/item40"]');
               row.focus(); scroll.scrollTop = 600;
               const folder = document.querySelector('#nav-tree-pipelines [data-tree-key="folder:root"]');
-              const offset = () => Math.round(row.getBoundingClientRect().top - scroll.getBoundingClientRect().top);
-              window.__refresh = { scroll, row, top: scroll.scrollTop, offset, at: offset(), folder, loading: 0, removed: 0 };
+              const raw = () => row.getBoundingClientRect().top - scroll.getBoundingClientRect().top;
+              window.__refresh = { scroll, row, top: scroll.scrollTop, raw, rawAt: raw(), folder, loading: 0, removed: 0 };
               new MutationObserver(records => records.forEach(record => {
                 if ((record.target.textContent || '').includes('Loading')) window.__refresh.loading += 1;
                 record.removedNodes.forEach(node => {
@@ -329,25 +341,43 @@ class ReusableRestTreeBrowserTest : BrowserSuite() {
         parents shouldBe listOf("", "root")
         // One field per witness, so a red names the one that moved. "added" sorts above the focused row: the
         // browser's scroll anchoring moves scrollTop by that row so the reader's rows stay put on screen —
-        // the witness is the focused row's place in the viewport, not the raw scrollTop.
+        // the witness is the focused row's place in the viewport, not the raw scrollTop. A 27.5px row asks
+        // for a fractional scrollTop that Chrome snaps to a whole pixel, either way (measured, #554: 527.5 ->
+        // 528 on one layout, 531.5 -> 531 on another), so the row stays within one pixel; a lost anchor moves it a row.
         page.evaluate(
-            """() => ({ focus: document.activeElement === window.__refresh.row, rowAt: window.__refresh.offset() - window.__refresh.at,
+            """() => ({ focus: document.activeElement === window.__refresh.row,
+              rowAt: Math.abs(window.__refresh.raw() - window.__refresh.rawAt) < 1,
               folder: window.__refresh.folder === document.querySelector('#nav-tree-pipelines [data-tree-key="folder:root"]'),
               expanded: window.__refresh.folder.getAttribute('aria-expanded') })""",
-        ) shouldBe mapOf("focus" to true, "rowAt" to 0, "folder" to true, "expanded" to "true")
+        ) shouldBe mapOf("focus" to true, "rowAt" to true, "folder" to true, "expanded" to "true")
         (page.evaluate("() => window.__refresh.loading + window.__refresh.removed") as Number).toInt() shouldBe 0
     }
 
     @Test
-    fun `a saved wide rail keeps the main gutter at phone width`() {
+    fun `a retired rail width and accordion key are ignored and removed and the phone keeps its gutter`() {
         ready()
         val workspace = page.locator("html").getAttribute("data-dp-workspace")
-        page.evaluate("workspace => localStorage.setItem('dp-rail-width:' + workspace, '2000')", workspace)
+        // #554 A.4(f): before #554, rail.js honoured this 2000 as `--app-rail-preferred: 2000px`. The key
+        // is retired: never reinterpreted, removed on sight, as is the in-rail accordion's open family.
+        page.evaluate(
+            "workspace => { localStorage.setItem('dp-rail-width:' + workspace, '2000'); " +
+                "localStorage.setItem('dp-tree-open:' + workspace, 'pipelines'); }",
+            workspace,
+        )
+        page.navigate("$baseUrl/pipelines")
+        page.waitForFunction("() => window.DatapipelinesSidebarTrees.get('pipelines')?.state.levels.get(null)?.complete")
+        page.evaluate(
+            """workspace => ({ rail: localStorage.getItem('dp-rail-width:' + workspace),
+              open: localStorage.getItem('dp-tree-open:' + workspace),
+              preferred: document.documentElement.style.getPropertyValue('--app-rail-preferred'),
+              browser: document.documentElement.style.getPropertyValue('--app-browser-preferred') })""",
+            workspace,
+        ) shouldBe mapOf("rail" to null, "open" to null, "preferred" to "", "browser" to "")
+        width("app-rail") shouldBe 202
+        width("app-browser") shouldBe 300
         page.setViewportSize(390, 844)
         page.reload()
         page.waitForSelector("#app-main")
-        // The preference is in force (the drawer reads it as ~100vw), yet main keeps the phone band's gutter.
-        page.evaluate("() => document.documentElement.style.getPropertyValue('--app-rail-preferred')") shouldBe "2000px"
         val gutter =
             page.evaluate(
                 """() => {
@@ -361,6 +391,7 @@ class ReusableRestTreeBrowserTest : BrowserSuite() {
         ((gutter[0] as Number).toDouble() > 0) shouldBe true
         (gutter[1] as Number).toDouble() shouldBe (gutter[0] as Number).toDouble()
         (gutter[2] as Number).toDouble() shouldBe (gutter[0] as Number).toDouble()
+        width("app-main") shouldBe 390
     }
 
     private fun fulfillTree(
@@ -416,9 +447,13 @@ class ReusableRestTreeBrowserTest : BrowserSuite() {
         )
     }
 
+    private fun width(id: String): Int =
+        (page.evaluate("id => Math.round(document.getElementById(id).getBoundingClientRect().width)", id) as Number).toInt()
+
     private fun sameRail() {
         page.evaluate(
-            "() => window.__railWitness === document.getElementById('app-rail') && window.__documentWitness === document",
+            "() => window.__railWitness === document.getElementById('app-rail') && " +
+                "window.__browserWitness === document.getElementById('app-browser') && window.__documentWitness === document",
         ) shouldBe
             true
         page.evaluate(

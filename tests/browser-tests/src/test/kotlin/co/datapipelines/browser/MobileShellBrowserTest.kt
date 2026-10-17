@@ -21,12 +21,14 @@ import java.util.UUID
  * 110 §D — the phone shell in a real browser, at 390×844 unless a test says otherwise.
  *
  * The static audits and `node --test` pin the pieces (the state machine, the sprite, the
- * tokens); this pins what only a live page can show: that the rail is an off-canvas
- * drawer below 768px that opens, hands over focus, and closes by every path the brief
+ * tokens); this pins what only a live page can show: that the menu is an off-canvas
+ * drawer at 760px and below that opens, hands over focus, and closes by every path the brief
  * names (Escape, the scrim, a boosted navigation) and never survives a navigation; that
- * from 768 to 1099px the rail STARTS collapsed without any class on `<html>` (the CSS
+ * from 761 to 1100px the menu STARTS compact without any class on `<html>` (the CSS
  * default) and that a user who expands it wins over that default; that reduced motion
  * really removes the drawer's transition; and it produces the handback's screenshot set.
+ * #554 re-cut the bands at the record's 760/761 and 1100/1101 edges (were 767/768 and
+ * 1099/1100); the browser drawer's own paths are `ShellColumnsBrowserTest`'s.
  *
  * The document-level overflow walk lives in [AppShellBrowserTest] — 110 §D extends that
  * test in place rather than forking it; this class owns only the drawer's behaviour.
@@ -97,7 +99,7 @@ class MobileShellBrowserTest : BrowserSuite() {
         waitForDrawerClosed()
         activeElementIs("#rail-open").shouldBeTrue()
 
-        // The scrim closes too — clicked OUTSIDE the drawer's 232px column.
+        // The scrim closes too — clicked OUTSIDE the drawer's 202px menu column.
         page.locator("#rail-open").click()
         page.locator("html.rail-open").waitFor()
         page.locator(".app-rail-backdrop").click(
@@ -129,29 +131,29 @@ class MobileShellBrowserTest : BrowserSuite() {
         // No drawer control at tablet width — hidden by CSS, so it cannot be clicked.
         page.locator("#rail-open").isVisible().shouldBeFalse()
         // The DEFAULT flip: no class on <html>, yet the labels the user would read
-        // are hidden — assert on the LABEL's visibility, which is what is seen.
+        // are hidden — assert on what is SEEN: the menu's width and the label's painted box.
+        // #554: a compact label is visually hidden (a 1px clipped box), not `display: none` — it
+        // stays each link's accessible name — so Playwright's isVisible() no longer reads it.
         htmlHas("rail-collapsed").shouldBeFalse()
-        page
-            .locator(".app-nav-link .app-rail-label")
-            .first()
-            .isVisible()
-            .shouldBeFalse()
+        menuSeen() shouldBe (64 to false)
 
         // The user's explicit choice beats the default, and is remembered.
         page.locator("#rail-collapse").click()
-        page
-            .locator(".app-nav-link .app-rail-label")
-            .first()
-            .isVisible()
-            .shouldBeTrue()
+        menuSeen() shouldBe (202 to true)
         page.evaluate("() => localStorage.getItem('dp-rail')") shouldBe "0"
         page.reload()
         page.waitForLoadState(LoadState.NETWORKIDLE)
-        page
-            .locator(".app-nav-link .app-rail-label")
-            .first()
-            .isVisible()
-            .shouldBeTrue()
+        menuSeen() shouldBe (202 to true)
+    }
+
+    /** The menu's width and whether the first link's label paints wider than the visually-hidden 1px box. */
+    private fun menuSeen(): Pair<Int, Boolean> {
+        val seen =
+            page.evaluate(
+                """() => [Math.round(document.getElementById('app-rail').getBoundingClientRect().width),
+                  document.querySelector('.app-nav-link .app-rail-label').getBoundingClientRect().width > 1]""",
+            ) as List<*>
+        return (seen[0] as Number).toInt() to (seen[1] as Boolean)
     }
 
     @Test
@@ -174,7 +176,7 @@ class MobileShellBrowserTest : BrowserSuite() {
     }
 
     /**
-     * #159 — the 768–1099 band's search entry point. On the base the band had NO search:
+     * #159 — the 761–1100 band's search entry point (#554: was 768–1099). On the base the band had NO search:
      * the topbar copy hides below 1100px and the drawer copy above 767px, so ⌘K had no
      * control to drive (this test is red there at the first assertion — the button does
      * not exist). The entry button opens THE SAME palette (the topbar copy's ids, revealed
@@ -183,7 +185,7 @@ class MobileShellBrowserTest : BrowserSuite() {
      * entry point.
      */
     @Test
-    fun `in the 768-1099 band the search button opens the palette and the chord does too`() {
+    fun `in the 761-1100 band the search button opens the palette and the chord does too`() {
         startTrace()
         signedIn("band")
         val fixture = seededPipeline("band")

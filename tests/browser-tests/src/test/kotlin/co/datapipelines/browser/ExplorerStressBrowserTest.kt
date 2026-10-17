@@ -206,8 +206,8 @@ class ExplorerStressBrowserTest : BrowserSuite() {
         seedTemplates()
         val throttle = PartialThrottle(seed = 85_071).apply { install() }
         try {
-            page.navigate("$baseUrl/dashboard", Page.NavigateOptions().setWaitUntil(WaitUntilState.DOMCONTENTLOADED))
-            page.click("[data-nav-branch=templates] [data-nav-tree-toggle]")
+            // #554: the Templates page shows the browser's Templates panel, mounted at load.
+            page.navigate("$baseUrl/templates", Page.NavigateOptions().setWaitUntil(WaitUntilState.DOMCONTENTLOADED))
             throttle.releaseUntil { page.locator(summary("nyc")).count() > 0 }
             listOf("nyc", "trade", "wide").forEach { expand(it) }
             repeat(20) {
@@ -247,8 +247,7 @@ class ExplorerStressBrowserTest : BrowserSuite() {
         tree = "#nav-tree-pipelines"
         val throttle = PartialThrottle(seed = 85_073).apply { install() }
         try {
-            page.navigate("$baseUrl/dashboard", Page.NavigateOptions().setWaitUntil(WaitUntilState.DOMCONTENTLOADED))
-            page.click("[data-nav-branch=pipelines] [data-nav-tree-toggle]")
+            page.navigate("$baseUrl/pipelines", Page.NavigateOptions().setWaitUntil(WaitUntilState.DOMCONTENTLOADED))
             throttle.releaseUntil { page.locator(summary("nyc")).count() > 0 }
             expand("nyc")
             throttle.releaseUntil { page.locator(summary("nyc/lib")).count() > 0 }
@@ -259,14 +258,19 @@ class ExplorerStressBrowserTest : BrowserSuite() {
             throttle.releaseAll()
             page.locator("$tree [aria-expanded=true]").count() shouldBe 0
             page.locator("$tree .dp-tree-rows > [role=treeitem]").count() shouldBe 3
-            page.evaluate("() => window.__stressRail=document.getElementById('app-rail')")
+            page.evaluate("() => window.__stressRail=document.getElementById('app-browser')")
             page.click(summary("nyc"))
             expand("nyc/lib")
+            // A boosted swap to Templates hides the Pipelines panel mid-load; its held level still
+            // lands in the kept instance, once, and Back shows it again in the same document.
             page.click("a.app-nav-link[data-nav-section='/templates']")
             page.waitForSelector("#template-list-wrapper")
             throttle.releaseUntil { page.locator(summary("nyc/lib/mobility")).count() > 0 }
-            page.evaluate("() => window.__stressRail===document.getElementById('app-rail')") shouldBe true
+            page.evaluate("() => window.__stressRail===document.getElementById('app-browser')") shouldBe true
             uniqueRows()
+            page.goBack()
+            page.waitForURL("**/pipelines")
+            page.waitForSelector("$tree:not([hidden])")
             expand("nyc/hr")
             page.reload()
             throttle.releaseUntil { page.locator(summary("nyc")).count() > 0 }
@@ -275,7 +279,7 @@ class ExplorerStressBrowserTest : BrowserSuite() {
             uniqueRows()
             throttle.uninstall()
             tree = "#nav-tree-templates"
-            page.click("[data-nav-branch=templates] [data-nav-tree-toggle]")
+            openBrowserTree("templates")
             page.waitForSelector(summary("nyc"))
             page.fill("$tree input[type=search]", "mob")
             page.waitForSelector(leaf("nyc/lib/mobility/trips"))

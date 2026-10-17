@@ -1043,7 +1043,7 @@ test("the entrance class comes off on animationend, and off anyway if none ever 
 // but NEVER persisted, and the focus choreography only fires on a real state
 // CHANGE (the no-change early return is what makes an afterSettle-wired close
 // safe at desktop widths). rail-expanded records the opposite rail choice for
-// the 768–1099 default flip; only a REAL user click may write it.
+// the 761–1100 default flip; only a REAL user click may write it.
 // ---------------------------------------------------------------------------
 
 test("setRailOpen toggles the class on <html>, mirrors aria-expanded, and moves focus only on a change", () => {
@@ -1094,7 +1094,7 @@ test("only a real click records the expanded choice; the init sync must not", ()
   const saved = {};
   const storage = { setItem: (k, v) => { saved[k] = v; } };
 
-  // Init-style sync (storage = null): the class is left alone so the 768–1099
+  // Init-style sync (storage = null): the class is left alone so the 761–1100
   // CSS default keeps governing an undecided user.
   const initDoc = mkDoc({});
   shell.setRailCollapsed(initDoc, false, null);
@@ -1117,7 +1117,7 @@ test("only a real click records the expanded choice; the init sync must not", ()
 
 test("railVisuallyCollapsed reads the band the reader is in, not just the class", () => {
   const shell = loadShell();
-  // A window whose matchMedia says "you are in the 768–1099 default band".
+  // A window whose matchMedia says "you are in the 761–1100 default band".
   const inBand = { matchMedia: (q) => ({ matches: q === shell.DEFAULT_COLLAPSED_QUERY }) };
   // A window above the band (desktop default: expanded).
   const wide = { matchMedia: () => ({ matches: false }) };
@@ -1144,9 +1144,193 @@ test("syncCollapseButton states the VISUAL state and writes nothing", () => {
   // to stay classless; the browser owns that state, not the document).
   shell.syncCollapseButton(doc, true);
   assert.equal(button.attr("aria-expanded"), "false");
-  assert.equal(button.attr("title"), "Expand sidebar");
+  assert.equal(button.attr("title"), "Expand menu");
   assert.equal(doc.rootHas(shell.COLLAPSED_CLASS), false);
 });
+// ---------------------------------------------------------------------------
+// #554 — two named drawers under one discipline, the shell's `inert`, focus
+// containment, and the resource browser's Hide (record §3 rules 6–7, §4 "Phone").
+// ---------------------------------------------------------------------------
+
+/** The shell's children as `inert` sees them: id, class and attributes. */
+function mkShellChild(id, className = "") {
+  const el = mkEl({});
+  el.id = id;
+  el.classList = { contains: (c) => className.split(" ").includes(c) };
+  return el;
+}
+
+function mkDrawerDoc({ rootClasses = [], workspace = "acme" } = {}) {
+  const rail = mkShellChild("app-rail", "app-rail");
+  const browser = mkShellChild("app-browser", "app-browser");
+  const backdrop = mkShellChild("", "app-rail-backdrop");
+  const topbar = mkShellChild("", "app-topbar");
+  const main = mkShellChild("app-main");
+  const railOpener = mkEl({ "aria-expanded": "false" });
+  const browserOpener = mkEl({ "aria-expanded": "false" });
+  const browserHide = mkEl({});
+  const search = mkEl({});
+  const firstLink = mkEl({});
+  const events = [];
+  const doc = mkDoc({
+    rootClasses,
+    byId: { "app-rail": rail, "app-browser": browser, "rail-open": railOpener, "browser-open": browserOpener, "browser-hide": browserHide },
+    byQuery: {
+      ".app-shell": { children: [rail, browser, backdrop, topbar, main] },
+      ".app-nav-link": firstLink,
+      "#app-browser .app-browser-tree:not([hidden]) input": search,
+    },
+  });
+  doc.documentElement.setAttribute("data-dp-workspace", workspace);
+  doc.dispatchEvent = (event) => events.push(event);
+  return { doc, rail, browser, backdrop, topbar, main, railOpener, browserOpener, browserHide, search, firstLink, events };
+}
+
+const inert = (el) => el.attr("inert") !== undefined;
+const phone = { matchMedia: (q) => ({ matches: q.includes("max-width: 760.98px") }) };
+const desktop = { matchMedia: () => ({ matches: false }) };
+
+test("opening one drawer closes the other; only the open drawer and the scrim stay interactive", () => {
+  const shell = loadShell();
+  const page = mkDrawerDoc();
+
+  shell.setRailOpen(page.doc, true);
+  assert.equal(shell.openDrawer(page.doc), "rail");
+  assert.deepEqual([page.rail, page.browser, page.backdrop, page.topbar, page.main].map(inert), [false, true, false, true, true]);
+  assert.equal(page.firstLink.focused, true);
+
+  shell.setBrowserOpen(page.doc, true);
+  assert.equal(shell.railOpen(page.doc), false, "one drawer at a time");
+  assert.equal(page.railOpener.attr("aria-expanded"), "false");
+  assert.equal(page.browserOpener.attr("aria-expanded"), "true");
+  assert.deepEqual([page.rail, page.browser, page.backdrop, page.topbar, page.main].map(inert), [true, false, false, true, true]);
+  assert.equal(page.search.focused, true, "the browser drawer focuses its search");
+  assert.equal(page.events.at(-1).type, shell.BROWSER_VISIBILITY_EVENT);
+
+  // Escape / scrim / navigation: closeDrawers returns focus to THIS drawer's opener.
+  assert.equal(shell.closeDrawers(page.doc), "browser");
+  assert.equal(shell.openDrawer(page.doc), null);
+  assert.equal(page.browserOpener.focused, true);
+  assert.equal(page.railOpener.focused, false);
+  assert.deepEqual([page.rail, page.browser, page.backdrop, page.topbar, page.main].map(inert), [false, false, false, false, false]);
+  assert.equal(shell.closeDrawers(page.doc), null, "nothing open: a no-op");
+});
+
+test("leaving the drawer band releases an open drawer and its inert without moving focus", () => {
+  const shell = loadShell();
+  const page = mkDrawerDoc();
+  shell.setBrowserOpen(page.doc, true);
+  page.search.focused = false;
+  page.events.length = 0;
+
+  assert.equal(shell.releaseDrawers(page.doc), "browser");
+  assert.equal(shell.openDrawer(page.doc), null);
+  assert.equal(page.browserOpener.attr("aria-expanded"), "false");
+  assert.deepEqual([page.rail, page.browser, page.backdrop, page.topbar, page.main].map(inert), [false, false, false, false, false]);
+  assert.equal(page.browserOpener.focused, false, "no focus return to a phone opener that is off screen");
+  assert.equal(page.events.at(-1).type, shell.BROWSER_VISIBILITY_EVENT);
+  assert.equal(shell.releaseDrawers(page.doc), null, "nothing open: a no-op");
+});
+
+test("Tab wraps inside the open drawer at both ends and is left alone in between", () => {
+  const shell = loadShell();
+  const page = mkDrawerDoc({ rootClasses: ["rail-open"] });
+  const items = [mkEl({}), mkEl({}), mkEl({})];
+  items.forEach((item) => { item.closest = () => null; item.getClientRects = () => [1]; });
+  page.rail.querySelectorAll = () => items;
+  page.rail.contains = (el) => items.includes(el);
+  const key = (shiftKey) => {
+    let prevented = false;
+    return { key: "Tab", shiftKey, preventDefault: () => { prevented = true; }, get prevented() { return prevented; } };
+  };
+
+  page.doc.activeElement = items[2];
+  let evt = key(false);
+  assert.equal(shell.containDrawerFocus(page.doc, evt), true);
+  assert.equal(items[0].focused, true);
+  assert.equal(evt.prevented, true);
+
+  page.doc.activeElement = items[0];
+  evt = key(true);
+  assert.equal(shell.containDrawerFocus(page.doc, evt), true);
+  assert.equal(items[2].focused, true);
+
+  page.doc.activeElement = items[1];
+  evt = key(false);
+  assert.equal(shell.containDrawerFocus(page.doc, evt), false);
+  assert.equal(evt.prevented, false);
+
+  // No drawer open: Tab is the page's.
+  shell.closeDrawers(page.doc);
+  assert.equal(shell.containDrawerFocus(page.doc, key(false)), false);
+});
+
+test("Hide records a boolean per workspace, never touches the menu collapse, and Show removes it", () => {
+  const shell = loadShell();
+  const page = mkDrawerDoc({ rootClasses: ["rail-collapsed"] });
+  const stored = new Map();
+  const storage = { setItem: (k, v) => stored.set(k, v), removeItem: (k) => stored.delete(k) };
+
+  shell.hideBrowser(page.doc, storage);
+  assert.equal(shell.browserHidden(page.doc), true);
+  assert.deepEqual([...stored], [["dp-browser-hidden:acme", "1"]]);
+  assert.equal(page.browserOpener.attr("aria-expanded"), "false");
+  assert.equal(page.browserOpener.focused, true, "focus goes to the folder button that stands in for the browser");
+  assert.equal(page.doc.rootHas(shell.COLLAPSED_CLASS), true, "the menu collapse is independent");
+
+  shell.revealBrowser(page.doc, desktop, storage);
+  assert.equal(shell.browserHidden(page.doc), false);
+  assert.equal(stored.size, 0);
+  assert.equal(page.browserOpener.attr("aria-expanded"), "true");
+  assert.equal(page.search.focused, true);
+  assert.equal(page.doc.rootHas(shell.COLLAPSED_CLASS), true);
+  assert.equal(page.doc.rootHas(shell.EXPANDED_CLASS), false, "a reveal never expands the menu (one writer)");
+});
+
+test("a storage that throws still hides this page", () => {
+  const shell = loadShell();
+  const page = mkDrawerDoc();
+  shell.setBrowserHidden(page.doc, true, { setItem() { throw new Error("denied"); } });
+  assert.equal(shell.browserHidden(page.doc), true);
+});
+
+test("on a phone, Browse opens the drawer and Hide closes it — neither records a preference", () => {
+  const shell = loadShell();
+  const page = mkDrawerDoc();
+  const stored = new Map();
+  const storage = { setItem: (k, v) => stored.set(k, v), removeItem: (k) => stored.delete(k) };
+
+  shell.revealBrowser(page.doc, phone, storage);
+  assert.equal(shell.browserOpen(page.doc), true);
+  shell.hideBrowser(page.doc, storage);
+  assert.equal(shell.browserOpen(page.doc), false);
+  assert.equal(shell.browserHidden(page.doc), false);
+  assert.equal(stored.size, 0);
+  assert.equal(page.browserOpener.focused, true);
+});
+
+test("the named tooltip shows only for a compact desktop menu, with the link's label", () => {
+  const shell = loadShell();
+  const tip = mkEl({ hidden: true });
+  const props = {};
+  tip.style = { setProperty: (k, v) => { props[k] = v; } };
+  const link = mkEl({ "data-nav-label": "Visualizations" });
+  link.getBoundingClientRect = () => ({ top: 100, height: 40 });
+
+  const compact = mkDoc({ byId: { "app-nav-tip": tip }, rootClasses: ["rail-collapsed"] });
+  assert.equal(shell.showNavTip(compact, desktop, link), true);
+  assert.equal(tip.hidden, false);
+  assert.equal(tip.textContent, "Visualizations");
+  assert.equal(props["--app-nav-tip-y"], "120px");
+  shell.hideNavTip(compact);
+  assert.equal(tip.hidden, true);
+
+  const expanded = mkDoc({ byId: { "app-nav-tip": tip }, rootClasses: [] });
+  assert.equal(shell.showNavTip(expanded, desktop, link), false);
+  assert.equal(shell.showNavTip(compact, phone, link), false, "the phone drawer shows its labels");
+  assert.equal(tip.hidden, true);
+});
+
 
 // ---------------------------------------------------------------------------
 // 161 — the search palette (#155). The pure halves: open/close state, the

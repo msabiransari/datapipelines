@@ -29,19 +29,28 @@ import java.nio.file.StandardOpenOption
  * track geometry, so "full width" is a number (12), not an inline style read back. The plot area is
  * Plotly's own `_fullLayout._size.h` (the `nsewdrag` rect beside it in the record).
  *
- * The 640 px breakpoint is measured on the board: the 735 px board at 767 px viewport holds its
- * 6/6/3/9 grid, while the 1000 px board at 1280 px (the History lives in the bottom dock since #473)
- * holds it under the default and collapses under an explicit 1024 px threshold. A live host-width
+ * The 640 px breakpoint is measured on the board: the 728 px board at the 760 px phone viewport holds
+ * its 6/6/3/9 grid, while the ~730 px board at 1280 px beside the 202 px menu and the 300 px resource
+ * browser (#554; the History lives in the bottom dock since #473) holds it under the default and
+ * collapses under an explicit 1024 px threshold. A live host-width
  * crossing proves the slots re-place AND the figure re-measures to its new width.
  */
 class DashboardGridRowUnitBrowserTest : DashboardBrowserSuite() {
     @Test
-    fun `the board page holds the stored grid at 767, 768 and 1280 px, in both themes`() {
+    fun `the board page holds the stored grid at 760, 768 with the browser hidden and 1280 px, in both themes`() {
         startTrace()
         val root = ready("dprow")
         val board = seedBoardWithGrid(root)
         for (width in listOf(DESKTOP_WIDTH_PX, TABLET_WIDTH_PX, INVERTED_VIEWPORT_PX)) {
             page.setViewportSize(width, VIEWPORT_HEIGHT_PX)
+            // #554: at 768 (the 761–1100 band) the 64 px menu and the 270 px browser leave a board below
+            // 640; the reader's Hide (a per-workspace preference, applied before the first paint)
+            // returns the browser's width, and the board (768 - 64 less padding) holds the grid again.
+            page.evaluate(
+                "hidden => { const key = 'dp-browser-hidden:' + document.documentElement.dataset.dpWorkspace; " +
+                    "if (hidden) localStorage.setItem(key, '1'); else localStorage.removeItem(key); }",
+                width == TABLET_WIDTH_PX,
+            )
             for (theme in THEMES) {
                 openBoard(board, theme)
                 val measured = measure(page, BOARD_SCOPE, BOARD_SLOTS_ALL.keys, "board/$width/$theme")
@@ -122,28 +131,27 @@ class DashboardGridRowUnitBrowserTest : DashboardBrowserSuite() {
     }
 
     @Test
-    fun `widening the navigation rail stacks a narrow board and resetting it restores the stored grid`() {
+    fun `widening the resource browser stacks a narrow board and resetting it restores the stored grid`() {
         startTrace()
         val root = ready("dprowtree")
         val board = seedBoardWithGrid(root)
         page.setViewportSize(DESKTOP_WIDTH_PX, VIEWPORT_HEIGHT_PX)
         openBoard(board, THEMES.first())
 
-        // The reader's rail control is the board host's narrowing cause: the rail is user-resizable
-        // (#460's separator; owner ruling 2026-10-09 — the Pipelines tree no longer reflows the page,
-        // it opens inside the rail). Each shifted press widens the rail by 50 px: eight take it from
-        // 232 to 632 px, the board from ~1000 to ~600 px — one crossing below the 640 default (seven
-        // would leave ~650). Home resets the rail to 232.
-        val separator = page.locator("#rail-resize")
+        // The reader's browser width is the board host's narrowing cause (#554: the separator on the
+        // browser/content boundary; #460's rail separator before it). End takes the browser to its
+        // 480 px maximum, main to 1280 - 202 - 480 = 598 and the board below the 640 default; Home
+        // takes it to its 240 px floor, main to 838.
+        val separator = page.locator("#browser-boundary")
         separator.focus()
-        repeat(RAIL_WIDENING_PRESSES) { page.keyboard().press("Shift+ArrowRight") }
+        page.keyboard().press("End")
         page.waitForFunction(
             "() => { var board = document.querySelector('#dp-board .dp-dashboard'); " +
                 "return !!board && board.getBoundingClientRect().width > 0 && board.getBoundingClientRect().width < 640; }",
         )
         page.waitForFunction(SETTLED_JS, mapOf("scope" to BOARD_SCOPE, "slots" to BOARD_SLOTS.keys.toList(), "full" to true))
-        val narrow = measure(page, BOARD_SCOPE, BOARD_SLOTS_ALL.keys, "rail/wide/$DESKTOP_WIDTH_PX")
-        record("rail=wide viewport=$DESKTOP_WIDTH_PX boardWidth=${narrow.boardWidth} columns=full")
+        val narrow = measure(page, BOARD_SCOPE, BOARD_SLOTS_ALL.keys, "browser/wide/$DESKTOP_WIDTH_PX")
+        record("browser=wide viewport=$DESKTOP_WIDTH_PX boardWidth=${narrow.boardWidth} columns=full")
         (narrow.boardWidth < BREAKPOINT_PX) shouldBe true
         assertColumns(narrow, BOARD_SLOTS_ALL.keys.associateWith { GRID_COLUMNS })
         assertStackedInGridOrder(narrow, BOARD_GRID_ORDER)
@@ -151,17 +159,17 @@ class DashboardGridRowUnitBrowserTest : DashboardBrowserSuite() {
         separator.focus()
         page.keyboard().press("Home")
         page.waitForFunction(SETTLED_JS, mapOf("scope" to BOARD_SCOPE, "slots" to BOARD_SLOTS.keys.toList(), "full" to false))
-        val restored = measure(page, BOARD_SCOPE, BOARD_SLOTS_ALL.keys, "rail/home/$DESKTOP_WIDTH_PX")
-        record("rail=home viewport=$DESKTOP_WIDTH_PX boardWidth=${restored.boardWidth} columns=stored")
+        val restored = measure(page, BOARD_SCOPE, BOARD_SLOTS_ALL.keys, "browser/home/$DESKTOP_WIDTH_PX")
+        record("browser=home viewport=$DESKTOP_WIDTH_PX boardWidth=${restored.boardWidth} columns=stored")
         (restored.boardWidth >= BREAKPOINT_PX) shouldBe true
         assertColumns(restored, BOARD_STORED_COLUMNS)
         drainCspViolations().shouldBeEmpty()
     }
 
     @Test
-    fun `a 767 px viewport keeps the 735 px board grid`() {
+    fun `a 760 px viewport keeps the 728 px board grid`() {
         startTrace()
-        val root = ready("dpro767")
+        val root = ready("dpro760")
         val board = seedBoardWithGrid(root)
         page.setViewportSize(INVERTED_VIEWPORT_PX, VIEWPORT_HEIGHT_PX)
         openBoard(board, THEMES.first())
@@ -522,13 +530,11 @@ class DashboardGridRowUnitBrowserTest : DashboardBrowserSuite() {
         const val BREAKPOINT_PX = 640
         const val NARROW_WIDTH_PX = BREAKPOINT_PX - 1
         const val TABLET_WIDTH_PX = 768
-        const val INVERTED_VIEWPORT_PX = 767
+        /** The widest phone-band viewport (#554 re-cut the band at 760/761): the menu and browser are drawers. */
+        const val INVERTED_VIEWPORT_PX = 760
         const val CONFIGURED_BREAKPOINT_PX = 1024
         const val DESKTOP_WIDTH_PX = 1280
         const val VIEWPORT_HEIGHT_PX = 900
-
-        /** Eight 50 px steps of the rail separator: 232 -> 632 px, the 1280 px board ~1000 -> ~600 px. */
-        const val RAIL_WIDENING_PRESSES = 8
 
         const val TOLERANCE_PX = 3.0
         const val WIDTH_TOLERANCE_PX = 3.0

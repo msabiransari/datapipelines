@@ -10,7 +10,7 @@ import java.net.URI
 class PersistentChartNavigationBrowserTest : VisualizationBrowserSuite() {
     @Test
     @Suppress("LongMethod") // a single chart/history/zero-width journey keeps identity witnesses live
-    fun `2d and 3d workspaces versions and cached history share one bundle and retain the rail`() {
+    fun `2d and 3d workspaces versions and cached history share one bundle and retain the shell`() {
         val root = ready("persistcharts")
         page.setViewportSize(1440, 1000)
         val (flat, _) = createVisualization("$root/charts/flat")
@@ -18,8 +18,8 @@ class PersistentChartNavigationBrowserTest : VisualizationBrowserSuite() {
         openVisualizations(root)
         page.evaluate(
             "() => " +
-                "{window.__rail=document.getElementById('app-rail');window.__rootRow=document.querySelector" +
-                "('#nav-tree-visualizations [role=treeitem]')}",
+                "{window.__rail=document.getElementById('app-rail');window.__browser=document.getElementById('app-browser');" +
+                "window.__rootRow=document.querySelector('#nav-tree-visualizations [role=treeitem]')}",
         )
         val treeRequests = mutableListOf<String>()
         page.onRequest { if (it.url().contains("/api/v1/visualizations/tree")) treeRequests += it.url() }
@@ -27,13 +27,15 @@ class PersistentChartNavigationBrowserTest : VisualizationBrowserSuite() {
         preview()
         page.evaluate("() => {window.__plotly=window.Plotly;window.__runtime=window.DatapipelinesDashboard}")
         sameShell()
-        page.locator("#rail-resize").focus()
+        // #554: the browser's End (480 at 1440) leaves main 1440 - 202 - 480; Home (240) gives the chart room back.
+        page.locator("#browser-boundary").focus()
         page.keyboard().press("End")
-        page.waitForFunction("() => document.getElementById('app-main').getBoundingClientRect().width === 320")
+        page.waitForFunction("() => document.getElementById('app-main').getBoundingClientRect().width === 758")
+        val narrow = "() => document.querySelector('[data-viz-case-index=\"0\"] .js-plotly-plot')?.getBoundingClientRect().width"
+        page.waitForFunction("() => (${'$'}narrow)() < 758")
+        val chart = (page.evaluate(narrow) as Number).toDouble()
         page.keyboard().press("Home")
-        page.waitForFunction(
-            "() => document.querySelector('[data-viz-case-index=\"0\"] .js-plotly-plot')?.getBoundingClientRect().width > 320",
-        )
+        page.waitForFunction("chart => (${'$'}narrow)() > chart", chart)
         page.click(".dp-versions a[href='/visualizations/$flat?version=1&tab=preview']")
         page.waitForURL("**/visualizations/$flat?version=1&tab=preview")
         preview()
@@ -78,12 +80,15 @@ class PersistentChartNavigationBrowserTest : VisualizationBrowserSuite() {
         seedParameterisedBoard(root)
         page.setViewportSize(1440, 1000)
         page.waitForFunction("() => window.DatapipelinesSidebarTrees instanceof Map")
-        page.evaluate("() => {window.__rail=document.getElementById('app-rail');window.__doc=document}")
+        page.evaluate(
+            "() => {window.__rail=document.getElementById('app-rail');window.__browser=document.getElementById('app-browser');" +
+                "window.__doc=document}",
+        )
         val requests = mutableListOf<String>()
         page.onRequest { if (it.url().contains("/tree")) requests += it.url() }
         listOf("pipelines", "templates", "dashboards", "visualizations", "parameter-sets").forEach { family ->
             val panel = "#nav-tree-$family"
-            page.click("[data-nav-branch='$family'] [data-nav-tree-toggle]")
+            openBrowserTree(family)
             page.waitForSelector("$panel [role=treeitem]")
             val href =
                 page.evaluate(
@@ -115,7 +120,7 @@ class PersistentChartNavigationBrowserTest : VisualizationBrowserSuite() {
                 page.locator("#app-main a[href^='$href?version=1']").first().click()
                 page.waitForURL("**$href?version=1*")
             }
-            page.click("[data-nav-branch='$family'] .app-nav-link")
+            page.click(".app-nav-link[data-nav-section='/$family']")
             page.waitForURL("**/$family")
             page.goBack()
             page.waitForURL("**$href*")
@@ -123,6 +128,7 @@ class PersistentChartNavigationBrowserTest : VisualizationBrowserSuite() {
             page.waitForURL("**/$family")
             page.evaluate(
                 "family => window.__doc===document && window.__rail===document.getElementById('app-rail') && " +
+                    "window.__browser===document.getElementById('app-browser') && " +
                     "window.__familyRow===document.querySelector('#nav-tree-'+family+' [role=treeitem]')",
                 family,
             ) shouldBe true
@@ -257,7 +263,7 @@ class PersistentChartNavigationBrowserTest : VisualizationBrowserSuite() {
     }
 
     private fun openVisualizations(root: String) {
-        page.click("[data-nav-branch=visualizations] [data-nav-tree-toggle]")
+        openBrowserTree("visualizations")
         page.waitForSelector("#nav-tree-visualizations [data-tree-key='folder:$root']")
         for (path in listOf(root, "$root/charts")) {
             page.click("#nav-tree-visualizations [data-tree-key='folder:$path'] > .dp-tree-line button")
@@ -519,7 +525,7 @@ class PersistentChartNavigationBrowserTest : VisualizationBrowserSuite() {
 
     private fun sameShell() {
         page.evaluate(
-            "() => window.__rail===document.getElementById('app-rail') && " +
+            "() => window.__rail===document.getElementById('app-rail') && window.__browser===document.getElementById('app-browser') && " +
                 "window.__rootRow===document.querySelector('#nav-tree-visualizations [role=treeitem]')",
         ) shouldBe true
     }

@@ -16,9 +16,10 @@ class PipelineSidebarTreeStateBrowserTest : RestTreeBrowserFixture() {
                 "localStorage.setItem('dp-nav:pipelines:'+document.documentElement.dataset.dpWorkspace, " +
                 "JSON.stringify({open:true,paths:['acme','acme/a','acme/a/b']}))",
         )
-        page.navigate("$baseUrl/pipelines/$id")
+        // #554: on a Pipelines page the browser mounts its tree at load, so the listener goes on first.
         val requests = mutableListOf<String>()
         page.onRequest { if (it.url().contains("/api/v1/pipelines/tree")) requests += it.url() }
+        page.navigate("$baseUrl/pipelines/$id")
         openTree()
         closedRoot()
         requests.size shouldBe 1
@@ -122,6 +123,8 @@ class PipelineSidebarTreeStateBrowserTest : RestTreeBrowserFixture() {
         openTree()
         page.locator("$panel [data-tree-key]").count() shouldBe 0
         page.locator("$panel .dp-tree-status").innerText() shouldContain "No items"
+        // #554: the header's admitted count is the NEW workspace's — never the prior one's 1.
+        page.locator("#app-browser .app-browser-count[data-browser-family=pipelines] > span").first().textContent() shouldBe "0"
     }
 
     @Test
@@ -162,8 +165,8 @@ class PipelineSidebarTreeStateBrowserTest : RestTreeBrowserFixture() {
         page.waitForSelector("${leaf("acme/history/leaf")}[aria-current=page]")
         page.click(".app-nav-link[data-nav-section='/templates']")
         page.waitForSelector("#template-list-wrapper")
-        // The rail drops the mark in markCurrent on htmx:afterSettle, a settle delay AFTER the swap
-        // that adds #template-list-wrapper: wait for the settled rail, never read it at the swap.
+        // The browser drops the mark in markCurrent on htmx:afterSettle, a settle delay AFTER the swap
+        // that adds #template-list-wrapper: wait for the settled browser, never read it at the swap.
         page.waitForFunction("() => !document.querySelector('$panel [aria-current=page]')")
         page.goBack()
         page.waitForURL("**/pipelines/$id")

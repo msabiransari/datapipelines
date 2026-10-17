@@ -53,8 +53,7 @@ class TemplatesGoldenPathBrowserTest : BrowserSuite() {
         val name = "test/$leaf"
 
         page.navigate("$baseUrl/templates")
-        page.click("[data-nav-branch='templates'] [data-nav-tree-toggle]")
-        page.waitForFunction("() => window.DatapipelinesSidebarTrees.get('templates')?.state.levels.get(null)?.complete")
+        openBrowserTree("templates")
         page.click("text=Create Template")
         page.locator("#create-template-modal").isVisible shouldBe true
 

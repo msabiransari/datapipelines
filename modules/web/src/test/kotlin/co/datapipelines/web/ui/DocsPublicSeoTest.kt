@@ -106,6 +106,8 @@ class DocsPublicSeoTest {
 
                     "class=\"app-rail\"" in html -> "$slug: rendered the signed-in application rail"
 
+                    "id=\"app-browser\"" in html -> "$slug: rendered the signed-in resource browser"
+
                     "href=\"/dashboard\"" in html -> "$slug: links into the authenticated app"
 
                     // The CHROME only: 13 packaged docs legitimately carry ${VAR} placeholders

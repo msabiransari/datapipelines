@@ -92,7 +92,10 @@ class SchedulesPageRenderTest {
             html shouldContain "data-nav-section=\"/schedules\""
             html shouldContain "lucide-sprite.svg#calendar-clock"
         }
-        val rail = viewer.substringAfter("app-rail-label\">Operate<").substringBefore("app-rail-label\">Organisation<")
+        val rail =
+            viewer
+                .substringAfter("id=\"app-nav-group-operate\">Operate<")
+                .substringBefore("id=\"app-nav-group-organisation\">Organisation<")
         val executions = rail.indexOf("data-nav-section=\"/executions\"")
         val schedules = rail.indexOf("data-nav-section=\"/schedules\"")
         (executions >= 0 && schedules > executions && schedules < rail.indexOf("data-nav-section=\"/api-console\"")) shouldBe true

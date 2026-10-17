@@ -63,10 +63,12 @@ class PipelineExplorerRenderTest {
         main shouldNotContain "tpl-folder"
         main shouldNotContain "/js/splitter.js"
         main shouldNotContain "/js/explorer-detail.js"
-        // The sidebar tree's other door, and the sidebar tree itself in the same document.
+        // The resource browser's other door, and the browser's tree itself in the same document
+        // (#554: outside #app-main, in the layout's #app-browser column).
         main shouldContain "data-nav-tree-reveal=\"pipelines\""
         html shouldContain "data-nav-tree=\"pipelines\""
         html shouldContain "id=\"nav-tree-pipelines\""
+        main shouldNotContain "id=\"nav-tree-pipelines\""
     }
 
     @Test

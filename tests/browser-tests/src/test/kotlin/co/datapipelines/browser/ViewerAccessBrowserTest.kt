@@ -251,10 +251,10 @@ class ViewerAccessBrowserTest : BrowserSuite() {
             .locator("[data-lens-unavailable]")
             .first()
             .waitFor()
-        promoter.page
-            .locator("nav.app-nav .app-nav-badge")
-            .allInnerTexts()
-            .map { it.trim() } shouldBe listOf("0", "0")
+        // #554: an unreadable target has no admitted size — the browser header shows no count (the rail's
+        // badges read "0" and "0" before, indistinguishable from an empty set).
+        promoter.page.locator("#app-browser .app-browser-count").count() shouldBe 0
+        promoter.page.locator("nav.app-nav .app-nav-badge").count() shouldBe 0
         promoterWatch.bad shouldBe emptyList()
         promoter.close()
     }
