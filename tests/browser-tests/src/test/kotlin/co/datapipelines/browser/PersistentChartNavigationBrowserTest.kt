@@ -1,10 +1,12 @@
 package co.datapipelines.browser
 
+import com.microsoft.playwright.Page
 import com.microsoft.playwright.Route
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
 import java.net.URI
+import java.nio.file.Paths
 
 /** Real charts and runtime ownership across prepared navigation, failed preparation and cached history. */
 class PersistentChartNavigationBrowserTest : VisualizationBrowserSuite() {
@@ -452,12 +454,17 @@ class PersistentChartNavigationBrowserTest : VisualizationBrowserSuite() {
         parameterWorkspaceActive()
         inShell("/pipelines/$pipeline")
         editorActive()
+        calculatorCardContent()
         page.goBack()
         page.waitForURL("**/parameter-sets/$parameterSet*")
         parameterWorkspaceActive()
         page.goForward()
         page.waitForURL("**/pipelines/$pipeline")
         editorActive()
+        calculatorCardContent()
+        page.screenshot(
+            Page.ScreenshotOptions().setPath(Paths.get("build", "reports", "477-node-content.png")),
+        )
         val counts = assertEachScriptEvaluatedOnce("494-dashboard-first")
         // The sources the editor shares with pages that loaded them first: the dashboard's tab core and history
         // listener, the parameter workspace's vendors and one Cytoscape plugin (the editor's catalog names two).
@@ -475,6 +482,15 @@ class PersistentChartNavigationBrowserTest : VisualizationBrowserSuite() {
             "() => !!window.__peInstance && !!document.querySelector('.pe-root') && " +
                 "!document.querySelector('.pe-root[x-ignore]')",
         )
+    }
+
+    private fun calculatorCardContent() {
+        page.waitForFunction(
+            "() => document.querySelector(\".pe-card[data-node-id='n1'] .pe-card-id\")?.innerText === 'n1'",
+        )
+        val card = page.locator(".pe-card[data-node-id='n1']")
+        card.locator(".pe-card-id").innerText() shouldBe "n1"
+        card.locator(".pe-card-kind").innerText().lowercase() shouldBe "calculator"
     }
 
     private fun parameterWorkspaceActive() {
