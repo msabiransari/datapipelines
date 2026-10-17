@@ -11,6 +11,8 @@ import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.visualization.DashboardRepository
 import co.datapipelines.visualization.VisualizationRepository
 import co.datapipelines.web.SharedPostgres
+import co.datapipelines.web.pipelines.PromotableView
+import co.datapipelines.web.pipelines.PromotionWire
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import io.kotest.assertions.withClue
@@ -151,6 +153,104 @@ class FamilyInventoryE2eTest {
         catalog(family, ReadLens.Everything).size shouldBe NavigationRequest.PAGE_SIZE
     }
 
+    @Test
+    fun `a draft pointer is not promotable through the real derivation and the family inventory agrees`() {
+        // Surface (c) of #563's brief: the family inventory agrees with the ONE derivation the
+        // promotion page and the promoter lens share (PromotableView.of), under the owner
+        // ruling 2026-10-17. The state is the discard-of-current chain's exact end state
+        // (versioning §3.4) that the integration module's DraftPointerPromotabilityE2eTest
+        // reaches by verbs — this module may not be imported from there (module-structure
+        // §5.11), so the state is seeded: v1 RELEASED, v2 RELEASED then DISCARDED, v3 DRAFT,
+        // and the pointer ON THE DRAFT. The dashboard's body pins the visualization, so the
+        // pin path of the derivation is live, and every version carries the pin.
+        insert(NavigationFamily.DASHBOARDS, chain, listOf("RELEASED", "RELEASED"))
+        version(
+            NavigationFamily.DASHBOARDS,
+            idOf(NavigationFamily.DASHBOARDS, chain),
+            3,
+            "DRAFT",
+            bodyJson = pinBody(),
+        )
+        val board = idOf(NavigationFamily.DASHBOARDS, chain)
+        jdbc.update(
+            "UPDATE dashboard_versions SET body_json = CAST(:body AS jsonb) WHERE dashboard_id = :id",
+            mapOf("body" to pinBody(), "id" to board),
+        )
+        jdbc.update(
+            "UPDATE ${NavigationFamily.DASHBOARDS.table} SET current_version = 3 WHERE id = :id",
+            mapOf("id" to board),
+        )
+        listOf(
+            NavigationFamily.PIPELINES,
+            NavigationFamily.TEMPLATES,
+            NavigationFamily.PARAMETER_SETS,
+            NavigationFamily.VISUALIZATIONS,
+        ).forEach { family ->
+            insert(family, chain, listOf("RELEASED", "RELEASED"))
+            version(family, idOf(family, chain), 3, "DRAFT")
+            jdbc.update(
+                "UPDATE ${family.table} SET current_version = 3 WHERE id = :id",
+                mapOf("id" to idOf(family, chain)),
+            )
+        }
+
+        // At the draft pointer NOTHING is promotable, so the derived lens admits nothing and
+        // every family's inventory is zero through it — the pinned visualization included,
+        // because the pinning dashboard's pointer row is a draft and a draft pin is not a
+        // lens name (#563).
+        val draftPointer = derivedLens()
+        NavigationFamily.entries.forEach { family ->
+            withClue("the draft pointer must be invisible to $family's inventory through the real derivation") {
+                available(family, draftPointer) shouldBe Inventory(0, 0, 0, 0)
+            }
+        }
+
+        // The pointer returns to the release (the manual switch back): each family's object is
+        // promotable again — the dashboard admits vacuously (no recorded sources), its pin
+        // carries the visualization — and surface c counts exactly the one admitted object.
+        NavigationFamily.entries.forEach { family ->
+            jdbc.update(
+                "UPDATE ${family.table} SET current_version = 1 WHERE id = :id",
+                mapOf("id" to idOf(family, chain)),
+            )
+        }
+        val released = derivedLens()
+        NavigationFamily.entries.forEach { family ->
+            withClue("the release must be $family inventory's one admitted object through the real derivation") {
+                available(family, released) shouldBe Inventory(0, 1, 0, 0)
+            }
+        }
+    }
+
+    /** The chain object's name, the same for every family (separate tables), pin and all. */
+    private val chain: String = "d563/chain"
+
+    private fun pinBody(): String = """{"sources": [], "visualizations": [{"visualization": {"name": "$chain"}}]}"""
+
+    /**
+     * The REAL §10.2 derivation (PromotableView.of) over the current rows, against an empty
+     * stub target — the computation the promotion page and the promoter lens share — reduced
+     * to the LensedView the production inventory factory consumes.
+     */
+    private fun derivedLens(): LensedView {
+        val view =
+            PromotableView.of(
+                localPipelines = PipelineRepository(jdbc).findCurrentVersions(workspace),
+                localTemplates = TemplateRepository(jdbc).findCurrentVersions(workspace),
+                inventory = PromotionWire.Inventory("e2e-stub", authoringEnabled = false, workspace = "inventory"),
+                localParameterSets = ParameterSetRepository(jdbc).findCurrentVersions(workspace),
+                localVisualizations = VisualizationRepository(jdbc).findCurrentVersions(workspace),
+                currentDashboards = DashboardRepository(jdbc).findCurrentPinsAndSources(workspace),
+            )
+        return LensedView(
+            pipelines = view.pipelineLens,
+            templates = view.templateLens,
+            parameterSets = view.parameterSetLens,
+            visualizations = view.visualizationsLens,
+            dashboards = view.dashboardsLens,
+        )
+    }
+
     private fun fixture(family: NavigationFamily) {
         insert(family, "draft", listOf("DRAFT"))
         insert(family, "released", listOf("RELEASED"))
@@ -234,9 +334,10 @@ class FamilyInventoryE2eTest {
         id: UUID,
         number: Int,
         status: String,
+        bodyJson: String = "{}",
     ) {
         val contentColumns = if (family == NavigationFamily.TEMPLATES) "body, dialect" else "body_json"
-        val content = if (family == NavigationFamily.TEMPLATES) "'select 1', 'POSTGRES'" else "'{}'::jsonb"
+        val content = if (family == NavigationFamily.TEMPLATES) "'select 1', 'POSTGRES'" else "CAST(:body AS jsonb)"
         val versions = family.table.removeSuffix("s") + "_versions"
         jdbc.update(
             "INSERT INTO $versions (${family.foreignKey}, version, $contentColumns, status, body_hash, " +
@@ -244,7 +345,7 @@ class FamilyInventoryE2eTest {
                 "VALUES (:id, :version, $content, :status, :hash, :actor, CASE WHEN :status <> 'DRAFT' THEN NOW() END, " +
                 "CASE WHEN :status <> 'DRAFT' THEN :actor END, CASE WHEN :status = 'DISCARDED' THEN NOW() END, " +
                 "CASE WHEN :status = 'DISCARDED' THEN :actor END)",
-            mapOf("id" to id, "version" to number, "status" to status, "hash" to "a".repeat(64), "actor" to actor),
+            mapOf("id" to id, "version" to number, "status" to status, "hash" to "a".repeat(64), "actor" to actor, "body" to bodyJson),
         )
     }
 

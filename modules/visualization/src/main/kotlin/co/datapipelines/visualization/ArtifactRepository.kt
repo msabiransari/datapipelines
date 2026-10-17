@@ -220,7 +220,10 @@ open class ArtifactRepository<B : Any>(
         query: String,
     ): Set<UUID> = jdbc.queryForList(sql.searchIds, searchParams(workspaceId, query), UUID::class.java).toSet()
 
-    /** Every live artifact that HAS a current RELEASED version — the promoter lens's input (versioning §10.2). */
+    /**
+     * Every live artifact that HAS a current RELEASED version — the promoter lens's input
+     * (versioning §10.2); the status travels (#563).
+     */
     fun findCurrentVersions(workspaceId: UUID): List<CurrentArtifactVersion> =
         jdbc.query(sql.currentVersions, mapOf("workspaceId" to workspaceId)) { rs, _ ->
             CurrentArtifactVersion(
@@ -229,6 +232,7 @@ open class ArtifactRepository<B : Any>(
                 displayName = rs.getString("display_name"),
                 version = rs.getInt("version"),
                 bodyHash = rs.getString("body_hash"),
+                status = PipelineVersionStatus.fromWire(rs.getString("status")),
             )
         }
 
@@ -709,7 +713,7 @@ class DashboardRepository(
     fun findCurrentPinsAndSources(workspaceId: UUID): List<DashboardCurrentPins> =
         jdbc.query(
             """
-            SELECT s.id, s.name, s.display_name, v.version, v.body_hash,
+            SELECT s.id, s.name, s.display_name, v.version, v.body_hash, v.status,
                    COALESCE(v.body_json -> 'sources', '[]'::jsonb)::TEXT AS sources,
                    COALESCE(v.body_json -> 'visualizations', '[]'::jsonb)::TEXT AS pins
               FROM dashboards s
@@ -725,6 +729,7 @@ class DashboardRepository(
                 displayName = rs.getString("display_name"),
                 version = rs.getInt("version"),
                 bodyHash = rs.getString("body_hash"),
+                status = PipelineVersionStatus.fromWire(rs.getString("status")),
                 sourcePipelineNames = namesOf(rs.getString("sources")) { it.path("pipeline").path("name") },
                 pinnedVisualizationNames = namesOf(rs.getString("pins")) { it.path("visualization").path("name") },
             )
@@ -760,10 +765,18 @@ data class DashboardCurrentPins(
     val displayName: String,
     val version: Int,
     val bodyHash: String,
+    val status: PipelineVersionStatus,
     val sourcePipelineNames: List<String>,
     val pinnedVisualizationNames: List<String>,
 ) {
     /** The identity half, for the promotion page's dashboard rows (the shape `currentVersions` answered). */
     fun toCurrentVersion(): CurrentArtifactVersion =
-        CurrentArtifactVersion(id = id, name = name, displayName = displayName, version = version, bodyHash = bodyHash)
+        CurrentArtifactVersion(
+            id = id,
+            name = name,
+            displayName = displayName,
+            version = version,
+            bodyHash = bodyHash,
+            status = status,
+        )
 }

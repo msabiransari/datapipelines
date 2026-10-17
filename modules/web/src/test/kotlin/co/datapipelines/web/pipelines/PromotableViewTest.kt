@@ -1,6 +1,7 @@
 package co.datapipelines.web.pipelines
 
 import co.datapipelines.pipeline.CurrentPipelineVersion
+import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.templates.CurrentTemplateVersion
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldContainExactly
@@ -91,17 +92,148 @@ class PromotableViewTest {
         all.templates.map { it.name } shouldContainExactly listOf("t/x.sql")
     }
 
+    // ---- #563: a pointer can name the DRAFT under development posture (D60); the RELEASED half of
+    // rule 1 is applied HERE, so a draft-pointer object is invisible to a promoter. Per arm.
+
+    @Test
+    fun `a pipeline whose pointer names the DRAFT is not promotable and is in no lens, but is still examined`() {
+        val view =
+            PromotableView.of(
+                listOf(
+                    pipeline("released_one", 1, "h-one"),
+                    pipeline("draft_pointer", 2, "h-two", PipelineVersionStatus.DRAFT),
+                    pipeline("discarded_pointer", 3, "h-three", PipelineVersionStatus.DISCARDED),
+                ),
+                emptyList(),
+                inventory(),
+            )
+
+        view.pipelines.map { it.name } shouldContainExactly listOf("released_one")
+        view.pipelineLens.admits("released_one") shouldBe true
+        view.pipelineLens.admits("draft_pointer") shouldBe false
+        view.pipelineLens.admits("discarded_pointer") shouldBe false
+        view.pipeline("draft_pointer") shouldBe null
+        // The count is over POINTER rows, before the status filter: the object exists, it is
+        // just not promotable — an empty listing must read as "in sync", not "broken".
+        view.examinedPipelines shouldBe 3
+    }
+
+    @Test
+    fun `a template whose pointer names the DRAFT is not promotable and is in no lens, but is still examined`() {
+        val view =
+            PromotableView.of(
+                emptyList(),
+                listOf(
+                    template("finance/live.sql", 1, "h-live"),
+                    template("finance/draft.sql", 2, "h-draft", PipelineVersionStatus.DRAFT),
+                ),
+                inventory(),
+            )
+
+        view.templates.map { it.name } shouldContainExactly listOf("finance/live.sql")
+        view.templateLens.admits("finance/draft.sql") shouldBe false
+        view.examinedTemplates shouldBe 2
+    }
+
+    @Test
+    fun `a set whose pointer names the DRAFT is dropped even though its reader already filters - the arm restates rule 1`() {
+        val local =
+            listOf(
+                co.datapipelines.parameters.CurrentParameterSetVersion(
+                    UUID.randomUUID(),
+                    "ops/sets/released",
+                    "Released",
+                    1,
+                    "h-set",
+                    PipelineVersionStatus.RELEASED,
+                ),
+                co.datapipelines.parameters.CurrentParameterSetVersion(
+                    UUID.randomUUID(),
+                    "ops/sets/draft",
+                    "Draft",
+                    2,
+                    "h-set-draft",
+                    PipelineVersionStatus.DRAFT,
+                ),
+            )
+
+        val view = PromotableView.of(emptyList(), emptyList(), inventory(), localParameterSets = local)
+
+        view.parameterSets.map { it.name } shouldContainExactly listOf("ops/sets/released")
+        view.parameterSetLens.admits("ops/sets/draft") shouldBe false
+        view.parameterSet("ops/sets/draft") shouldBe null
+    }
+
+    @Test
+    fun `a draft visualization's pin is not a lens name even when an admitted dashboard pins it`() {
+        val local =
+            listOf(
+                visualization("ops/visualizations/released_pin", PipelineVersionStatus.RELEASED),
+                visualization("ops/visualizations/draft_pin", PipelineVersionStatus.DRAFT),
+            )
+        val dashboard =
+            projection(
+                "ops/dashboards/board",
+                PipelineVersionStatus.RELEASED,
+                listOf("ops/visualizations/released_pin", "ops/visualizations/draft_pin"),
+            )
+        val draftDashboard =
+            projection(
+                "ops/dashboards/draft_board",
+                PipelineVersionStatus.DRAFT,
+                listOf("ops/visualizations/released_pin"),
+            )
+
+        val view =
+            PromotableView.of(
+                listOf(pipeline("p", 1, "h")),
+                emptyList(),
+                inventory(),
+                localVisualizations = local,
+                currentDashboards = listOf(dashboard, draftDashboard),
+            )
+
+        // Only the RELEASED dashboard is admitted, and only its RELEASED pin is a lens name.
+        view.dashboards.map { it.name } shouldContainExactly listOf("ops/dashboards/board")
+        view.visualizations.map { it.name } shouldContainExactly listOf("ops/visualizations/released_pin")
+        view.visualizationsLens.admits("ops/visualizations/released_pin") shouldBe true
+        view.visualizationsLens.admits("ops/visualizations/draft_pin") shouldBe false
+        view.dashboardsLens.admits("ops/dashboards/draft_board") shouldBe false
+    }
+
+    private fun visualization(
+        name: String,
+        status: PipelineVersionStatus,
+    ) = co.datapipelines.visualization.CurrentArtifactVersion(UUID.randomUUID(), name, name.substringAfterLast('/'), 1, "h-$name", status)
+
+    private fun projection(
+        name: String,
+        status: PipelineVersionStatus,
+        pins: List<String>,
+    ) = co.datapipelines.visualization.DashboardCurrentPins(
+        UUID.randomUUID(),
+        name,
+        "Board",
+        1,
+        "h-board",
+        status,
+        listOf("p"),
+        pins,
+    )
+
     private fun pipeline(
         name: String,
         version: Int,
         hash: String,
-    ) = CurrentPipelineVersion(UUID.randomUUID(), name, name, version, hash)
+        status: PipelineVersionStatus = PipelineVersionStatus.RELEASED,
+    ) = CurrentPipelineVersion(UUID.randomUUID(), name, name, version, hash, status)
 
     private fun template(
         id: String,
         version: Int,
         hash: String,
-    ) = CurrentTemplateVersion(id, id, version, hash)
+        status: PipelineVersionStatus = PipelineVersionStatus.RELEASED,
+    ) = CurrentTemplateVersion(id, id, version, hash, status)
 
     private fun entry(
         name: String,

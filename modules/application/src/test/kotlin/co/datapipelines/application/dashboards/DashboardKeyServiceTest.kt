@@ -6,6 +6,7 @@ import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.pipeline.PipelineErrorCodes
+import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.visualization.CurrentArtifactVersion
 import co.datapipelines.visualization.DashboardService
@@ -118,7 +119,7 @@ class DashboardKeyServiceTest {
         service.admittedNames(workspace, "dpk_HOSTKEY01", names) shouldBe emptySet()
     }
 
-    private fun current(name: String) = CurrentArtifactVersion(UUID.randomUUID(), name, name, 1, "h")
+    private fun current(name: String) = CurrentArtifactVersion(UUID.randomUUID(), name, name, 1, "h", PipelineVersionStatus.RELEASED)
 
     private fun binding(
         prefix: String,

@@ -31,8 +31,9 @@ import java.util.UUID
  * constant. A lensed principal: the pipelines/template/set arms derive per request (the three
  * current-version reads they always cost); the TWO DASHBOARD ARMS derive on FIRST USE of
  * either (#330) — a request that never asks for visualizations or dashboards issues zero
- * dashboard reads, and one that does pays ONE pins-and-sources statement for the whole answer,
- * never the dashboards' bodies. The arms' thunk closes over the SAME [PromotionWire.Inventory]
+ * dashboard reads, and one that does pays the ONE pins-and-sources statement plus the ONE
+ * released-visualization-names read for the whole answer (#563's pin narrowing), never the
+ * dashboards' bodies. The arms' thunk closes over the SAME [PromotionWire.Inventory]
  * snapshot the eager arms were computed from, so one request's view is one §10.2 world.
  * Promoters are ops people; the read surfaces they reach are the listing screens, not the
  * execution hot path.
@@ -86,8 +87,14 @@ class PromotableViews(
                     parameterSets = families.parameterSetLens,
                     arms = {
                         PromotableView
-                            .dashboardArms(families.pipelineLens, cached.inventory, dashboards.findCurrentPinsAndSources(workspace.id))
-                            .let { it.visualizationsLens to it.dashboardsLens }
+                            .dashboardArms(
+                                families.pipelineLens,
+                                cached.inventory,
+                                // #563 — the pins arm sees only RELEASED pins: the visualization reader
+                                // answers RELEASED rows, so its names are the narrowing set.
+                                visualizations.currentVersions(workspace.id).mapTo(LinkedHashSet()) { it.name },
+                                dashboards.findCurrentPinsAndSources(workspace.id),
+                            ).let { it.visualizationsLens to it.dashboardsLens }
                     },
                 )
             }

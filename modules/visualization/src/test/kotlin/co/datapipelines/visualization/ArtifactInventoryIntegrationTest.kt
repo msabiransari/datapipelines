@@ -2,6 +2,7 @@ package co.datapipelines.visualization
 
 import co.datapipelines.pipeline.CreateLifecycle
 import co.datapipelines.pipeline.Inventory
+import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.pipeline.WriteSurface
 import co.datapipelines.visualization.VisualizationTestDb.AUTHOR
@@ -27,6 +28,55 @@ class ArtifactInventoryIntegrationTest {
     fun `dashboard inventory follows create release edit discard and purge`() {
         val body = ValidatorFakes.dashboardDocument(DocumentFixtures.dashboard()).body
         exercise(DashboardRepository(VisualizationTestDb.jdbc), body, body.copy(displayName = "Changed dashboard"))
+    }
+
+    @Test
+    fun `the current-version readers carry the pointer's status to the promoter lens (#563)`() {
+        val vizRepo = VisualizationRepository(VisualizationTestDb.jdbc)
+        val dashRepo = DashboardRepository(VisualizationTestDb.jdbc)
+        val vizId = UUID.randomUUID()
+        val dashId = UUID.randomUUID()
+        val vizName = "inventory/${vizRepo.kind.index}/status"
+        val dashName = "inventory/${dashRepo.kind.index}/status"
+
+        val vizDraft =
+            vizRepo.create(
+                WORKSPACE,
+                vizId,
+                vizName,
+                ValidatorFakes.visualizationDocument(DocumentFixtures.visualization()).body,
+                AUTHOR,
+                CreateLifecycle.DRAFT,
+                WriteSurface.MCP,
+            )
+        vizRepo.findCurrentVersions(WORKSPACE) shouldBe emptyList()
+        requireNotNull(vizRepo.releaseDraft(WORKSPACE, vizId, vizDraft.bodyHash, AUTHOR))
+        val vizCurrent = vizRepo.findCurrentVersions(WORKSPACE).single()
+        vizCurrent.name shouldBe vizName
+        vizCurrent.version shouldBe 1
+        vizCurrent.status shouldBe PipelineVersionStatus.RELEASED
+
+        val dashDraft =
+            dashRepo.create(
+                WORKSPACE,
+                dashId,
+                dashName,
+                ValidatorFakes.dashboardDocument(DocumentFixtures.dashboard()).body,
+                AUTHOR,
+                CreateLifecycle.DRAFT,
+                WriteSurface.MCP,
+            )
+        dashRepo.findCurrentPinsAndSources(WORKSPACE) shouldBe emptyList()
+        requireNotNull(dashRepo.releaseDraft(WORKSPACE, dashId, dashDraft.bodyHash, AUTHOR))
+        val dashCurrent = dashRepo.findCurrentPinsAndSources(WORKSPACE).single()
+        dashCurrent.name shouldBe dashName
+        dashCurrent.version shouldBe 1
+        dashCurrent.status shouldBe PipelineVersionStatus.RELEASED
+        dashCurrent.sourcePipelineNames shouldBe listOf("finance/pipelines/monthly_revenue")
+        dashCurrent.pinnedVisualizationNames shouldBe listOf("finance/visualizations/monthly_revenue")
+        val roundTrip = dashCurrent.toCurrentVersion()
+        roundTrip.status shouldBe PipelineVersionStatus.RELEASED
+        roundTrip.bodyHash shouldBe dashCurrent.bodyHash
     }
 
     private fun <B : Any> exercise(

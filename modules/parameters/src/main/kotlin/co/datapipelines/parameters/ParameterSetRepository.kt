@@ -334,14 +334,17 @@ class ParameterSetRepository(
         )
 
     /**
-     * Every live set that HAS a current version, with that version's number and hash — the promoter
-     * lens's input (versioning §10.2: released and newer than the target's). A never-released set is
-     * absent: a draft is never promotable.
+     * Every live set that HAS a current version, with that version's number, hash and STATUS —
+     * the promoter lens's input (versioning §10.2: released and newer than the target's). A
+     * never-released set is absent: a draft is never promotable — the reader admits only
+     * RELEASED rows (`v.status = 'RELEASED'`, #194 lane B) because a pointer could name a
+     * DRAFT under development posture (D60); the status travels (#563) and restates the
+     * filter, the same shape every family's lens input now carries.
      */
     fun findCurrentVersions(workspaceId: UUID): List<CurrentParameterSetVersion> =
         jdbc.query(
             """
-            SELECT s.id, s.name, s.display_name, v.version, v.body_hash
+            SELECT s.id, s.name, s.display_name, v.version, v.body_hash, v.status
               FROM parameter_sets s
               JOIN parameter_set_versions v ON v.parameter_set_id = s.id AND v.version = s.current_version
              WHERE s.workspace_id = :workspaceId AND $LIVE_S AND v.status = 'RELEASED'
@@ -355,6 +358,7 @@ class ParameterSetRepository(
                 displayName = rs.getString("display_name"),
                 version = rs.getInt("version"),
                 bodyHash = rs.getString("body_hash"),
+                status = PipelineVersionStatus.fromWire(rs.getString("status")),
             )
         }
 

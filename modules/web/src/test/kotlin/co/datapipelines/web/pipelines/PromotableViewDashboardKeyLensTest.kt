@@ -7,6 +7,7 @@ import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.KeyRole
 import co.datapipelines.pipeline.PipelineRepository
+import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.visualization.CurrentArtifactVersion
@@ -53,9 +54,9 @@ class PromotableViewDashboardKeyLensTest {
 
     private fun everyDashboardNamed(): List<CurrentArtifactVersion> =
         listOf(
-            CurrentArtifactVersion(UUID.randomUUID(), "ops/boards/public", "Public", 1, "h1"),
-            CurrentArtifactVersion(UUID.randomUUID(), "ops/boards/private/secret", "Secret", 1, "h2"),
-            CurrentArtifactVersion(UUID.randomUUID(), "ops/other/away", "Away", 1, "h3"),
+            CurrentArtifactVersion(UUID.randomUUID(), "ops/boards/public", "Public", 1, "h1", PipelineVersionStatus.RELEASED),
+            CurrentArtifactVersion(UUID.randomUUID(), "ops/boards/private/secret", "Secret", 1, "h2", PipelineVersionStatus.RELEASED),
+            CurrentArtifactVersion(UUID.randomUUID(), "ops/other/away", "Away", 1, "h3", PipelineVersionStatus.RELEASED),
         )
 
     @Test
