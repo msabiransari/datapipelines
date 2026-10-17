@@ -43,7 +43,7 @@ class PromotionSetsBrowserTest : BrowserSuite() {
 
         // The promoter sees the sets table inside the form, with the same Send column.
         page.navigate("$baseUrl/promotion")
-        page.waitForSelector("h2:has-text('Parameter sets')")
+        page.waitForSelector("#app-main h2:has-text('Parameter sets')")
         val box = page.locator("form input[name=parameter_set][value=\"$SET_PREFIX/$setSuffix\"]")
         box.count() shouldBe 1
         page.locator("form table[data-promotion-sets=send] th:has-text('Send')").count() shouldBe 1

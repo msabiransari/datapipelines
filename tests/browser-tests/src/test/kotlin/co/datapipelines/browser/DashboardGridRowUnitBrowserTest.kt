@@ -530,6 +530,7 @@ class DashboardGridRowUnitBrowserTest : DashboardBrowserSuite() {
         const val BREAKPOINT_PX = 640
         const val NARROW_WIDTH_PX = BREAKPOINT_PX - 1
         const val TABLET_WIDTH_PX = 768
+
         /** The widest phone-band viewport (#554 re-cut the band at 760/761): the menu and browser are drawers. */
         const val INVERTED_VIEWPORT_PX = 760
         const val CONFIGURED_BREAKPOINT_PX = 1024

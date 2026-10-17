@@ -4,6 +4,7 @@ import com.microsoft.playwright.options.SelectOption
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 
 /**
@@ -23,7 +24,7 @@ import org.junit.jupiter.api.Test
  * row's width and wraps as prose (the first child's client rects grouped by top give the line
  * count: at most two on the board's panel, three in the 390 px drawer), and the code chip's right
  * edge never passes the boundary's content-box right edge. Measured at both board widths
- * (1440x900, 1280x800) and in the drawer (390x844), light and dark; the parameter-set page's
+ * (1440x900, 1400x800 since #554) and in the drawer (390x844), light and dark; the parameter-set page's
  * wider row carries the same chip-inside bound (green there before and after - it guards the
  * shared class).
  *
@@ -34,6 +35,12 @@ import org.junit.jupiter.api.Test
  * groups report the flex layout - red on exactly what this lane changes.
  */
 class DashboardParametersPaneBrowserTest : ParameterSetBrowserSuite() {
+    /** #554: these cases assert the filters column, which needs the desktop width (see [desktopBoard]). */
+    @BeforeEach
+    fun desktopWidth() {
+        desktopBoard()
+    }
+
     private val limitRow = "#dp-board-filters [data-dp-parameter=\"limit\"]"
     private val panel = "#dp-board-filters"
 
@@ -324,7 +331,7 @@ class DashboardParametersPaneBrowserTest : ParameterSetBrowserSuite() {
     private companion object {
         const val WIDE_WIDTH = 1440
         const val WIDE_HEIGHT = 900
-        const val NARROW_WIDTH = 1280
+        const val NARROW_WIDTH = NARROW_DESKTOP_BOARD_WIDTH
         const val NARROW_HEIGHT = 800
         const val PHONE_WIDTH = 390
         const val PHONE_HEIGHT = 844

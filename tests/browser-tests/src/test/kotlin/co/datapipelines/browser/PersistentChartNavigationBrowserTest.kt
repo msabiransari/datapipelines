@@ -32,10 +32,10 @@ class PersistentChartNavigationBrowserTest : VisualizationBrowserSuite() {
         page.keyboard().press("End")
         page.waitForFunction("() => document.getElementById('app-main').getBoundingClientRect().width === 758")
         val narrow = "() => document.querySelector('[data-viz-case-index=\"0\"] .js-plotly-plot')?.getBoundingClientRect().width"
-        page.waitForFunction("() => (${'$'}narrow)() < 758")
+        page.waitForFunction("() => ($narrow)() < 758")
         val chart = (page.evaluate(narrow) as Number).toDouble()
         page.keyboard().press("Home")
-        page.waitForFunction("chart => (${'$'}narrow)() > chart", chart)
+        page.waitForFunction("chart => ($narrow)() > chart", chart)
         page.click(".dp-versions a[href='/visualizations/$flat?version=1&tab=preview']")
         page.waitForURL("**/visualizations/$flat?version=1&tab=preview")
         preview()
@@ -80,10 +80,7 @@ class PersistentChartNavigationBrowserTest : VisualizationBrowserSuite() {
         seedParameterisedBoard(root)
         page.setViewportSize(1440, 1000)
         page.waitForFunction("() => window.DatapipelinesSidebarTrees instanceof Map")
-        page.evaluate(
-            "() => {window.__rail=document.getElementById('app-rail');window.__browser=document.getElementById('app-browser');" +
-                "window.__doc=document}",
-        )
+        pinShellNodes()
         val requests = mutableListOf<String>()
         page.onRequest { if (it.url().contains("/tree")) requests += it.url() }
         listOf("pipelines", "templates", "dashboards", "visualizations", "parameter-sets").forEach { family ->
@@ -260,6 +257,14 @@ class PersistentChartNavigationBrowserTest : VisualizationBrowserSuite() {
         page.locator("#pipeline-list-wrapper").count() shouldBe 1
         page.locator("#template-list-wrapper").count() shouldBe 0
         page.evaluate("() => window.__rail===document.getElementById('app-rail')") shouldBe true
+    }
+
+    /** Keeps the document and both shell columns as page globals, so a later read proves they were never replaced. */
+    private fun pinShellNodes() {
+        page.evaluate(
+            "() => {window.__rail=document.getElementById('app-rail');window.__browser=document.getElementById('app-browser');" +
+                "window.__doc=document}",
+        )
     }
 
     private fun openVisualizations(root: String) {

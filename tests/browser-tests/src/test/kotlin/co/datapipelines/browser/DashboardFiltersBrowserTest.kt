@@ -9,6 +9,7 @@ import com.microsoft.playwright.options.WaitForSelectorState
 import io.kotest.matchers.doubles.plusOrMinus
 import io.kotest.matchers.doubles.shouldBeLessThanOrEqual
 import io.kotest.matchers.shouldBe
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.MethodOrderer
 import org.junit.jupiter.api.Order
 import org.junit.jupiter.api.Test
@@ -30,6 +31,12 @@ import java.nio.file.Paths
  */
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
 class DashboardFiltersBrowserTest : DashboardBrowserSuite() {
+    /** #554: these cases assert the filters column, which needs the desktop width (see [desktopBoard]). */
+    @BeforeEach
+    fun desktopWidth() {
+        desktopBoard()
+    }
+
     private fun openBoard(board: String) {
         page.navigate("$baseUrl/dashboards/$board")
         page.waitForFunction("() => window.__dpPage && (window.__dpPage.ready || window.__dpPage.code)")
@@ -124,7 +131,7 @@ class DashboardFiltersBrowserTest : DashboardBrowserSuite() {
 
         // Measured at both desktop sizes: the panel ends at or before the board begins, it holds
         // the set's field, and the board keeps a usable width.
-        for ((width, height) in listOf(1440 to 900, 1280 to 800)) {
+        for ((width, height) in listOf(DESKTOP_BOARD_WIDTH to 900, NARROW_DESKTOP_BOARD_WIDTH to 800)) {
             page.setViewportSize(width, height)
             page.waitForFunction("() => document.querySelector('.dp-board-page').getAttribute('data-dp-filters') === 'some'")
             val r = regions()
@@ -189,7 +196,7 @@ class DashboardFiltersBrowserTest : DashboardBrowserSuite() {
         // to be expanded, and the next narrowing starts closed.
         page.click("#dp-board-filters-trigger")
         page.waitForFunction("() => document.getElementById('dp-board-filters').classList.contains('is-open')")
-        page.setViewportSize(1280, 900)
+        desktopBoard(900)
         page.waitForFunction(
             """() => { const panel = document.getElementById('dp-board-filters');
               return !panel.classList.contains('is-open') &&
@@ -213,7 +220,7 @@ class DashboardFiltersBrowserTest : DashboardBrowserSuite() {
         page.setViewportSize(900, 900)
         page.waitForFunction("() => getComputedStyle(document.querySelector('.dp-board-toolbar')).display !== 'none'")
         (page.evaluate("() => document.getElementById('dp-board-filters').classList.contains('is-open')") as Boolean) shouldBe false
-        page.setViewportSize(1280, 900)
+        desktopBoard(900)
     }
 
     /**
@@ -335,7 +342,7 @@ class DashboardFiltersBrowserTest : DashboardBrowserSuite() {
             page.keyboard().press("Escape")
             page.waitForFunction("() => !document.getElementById('dp-board-filters').classList.contains('is-open')")
         }
-        page.setViewportSize(1280, 900)
+        desktopBoard(900)
     }
 
     /** The parsed `selections` of every refresh POST the page sent, oldest first. */
