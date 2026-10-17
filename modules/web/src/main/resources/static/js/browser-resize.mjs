@@ -90,14 +90,19 @@ export function mountBrowserResize(document) {
   separator.addEventListener("pointerup", finish); separator.addEventListener("pointercancel", finish);
   separator.addEventListener("lostpointercapture", () => { pointer = null; });
   separator.addEventListener("keydown", event => {
-    const next = keyedWidth(event.key, browser.getBoundingClientRect().width, maximum());
+    const current = Math.round(browser.getBoundingClientRect().width);
+    const next = keyedWidth(event.key, current, maximum());
     if (next === null) return;
-    event.preventDefault(); apply(next);
+    // A press that cannot move the column (an arrow at the clamp) writes nothing: the clamp
+    // must never overwrite the preference a wider screen will honour again.
+    event.preventDefault(); if (next !== current) apply(next);
   });
   document.getElementById("browser-width-reset")?.addEventListener("click", reset);
   // A viewport change moves the effective width and the range, never the preference.
   window.addEventListener("resize", sync);
   document.addEventListener("dp:browser-visibility", sync);
+  // The menu's collapse (a class on <html>) moves the range too.
+  new window.MutationObserver(sync).observe(html, { attributes: true, attributeFilter: ["class"] });
   sync();
 }
 if (typeof document !== "undefined") mountBrowserResize(document);

@@ -30,7 +30,7 @@ try {
  * ("1"; anything else is removed). Both are presentation only — a width and a boolean, never
  * a query, a path or a name. The retired keys go on sight and are never reinterpreted:
  * `dp-rail-width:<ws>` measured the rail+tree composition, not this column.
- * browser-resize.mjs and sidebar.mjs write the same keys under the same rules.
+ * browser-resize.mjs writes the width and shell.js the Hide, under the same rules.
  */
 try {
   var dpRoot = document.documentElement;

@@ -863,6 +863,22 @@
     return name;
   }
 
+  /* The viewport left the drawer band (a rotation, a resized window) with a drawer open:
+     the drawer state is dropped WITHOUT the focus choreography — the drawer is a desktop
+     column again, so focus may stay where it is and the phone opener it would return to
+     is not on screen — and `inert` leaves the top bar and main, which would otherwise stay
+     unreachable on a desktop that has no scrim to dismiss. Returns the released name. */
+  function releaseDrawers(doc) {
+    var name = openDrawer(doc);
+    if (!name) return null;
+    doc.documentElement.classList.toggle(DRAWERS[name].openClass, false);
+    var opener = doc.getElementById(DRAWERS[name].openerId);
+    if (opener) opener.setAttribute("aria-expanded", "false");
+    syncInert(doc, null);
+    if (name === "browser") dispatchBrowserVisibility(doc, false);
+    return name;
+  }
+
   /* Focus containment: Tab from the drawer's last focusable control wraps to its first,
      Shift+Tab from the first to the last. The siblings are already `inert`, so this only
      has to close the loop at the drawer's two ends. Returns true when it moved focus. */
@@ -1830,6 +1846,14 @@
     // matching. (No state change, so the focus choreography cannot fire.)
     setRailOpen(doc, railOpen(doc));
     setBrowserOpen(doc, browserOpen(doc));
+    var phoneQuery = window.matchMedia ? window.matchMedia(PHONE_QUERY) : null;
+    if (phoneQuery && phoneQuery.addEventListener) {
+      phoneQuery.addEventListener("change", function (evt) {
+        if (evt.matches || !releaseDrawers(doc)) return;
+        var opener = doc.getElementById("browser-open");
+        if (opener) opener.setAttribute("aria-expanded", String(!browserHidden(doc)));
+      });
+    }
     // The folder button's desktop state: expanded unless the user hid the browser.
     var browserOpener = doc.getElementById("browser-open");
     if (browserOpener && !browserOpen(doc)) browserOpener.setAttribute("aria-expanded", String(!browserHidden(doc)));
@@ -1893,6 +1917,7 @@
     setDrawerOpen: setDrawerOpen,
     openDrawer: openDrawer,
     closeDrawers: closeDrawers,
+    releaseDrawers: releaseDrawers,
     containDrawerFocus: containDrawerFocus,
     browserHidden: browserHidden,
     setBrowserHidden: setBrowserHidden,
