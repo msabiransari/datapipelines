@@ -79,7 +79,10 @@ class PromotableView private constructor(
         val bodyHash: String,
     )
 
-    /** §10.2's set for pipelines, the lens name set, and the admitted pins — one derivation. */
+    /**
+     * The two dashboard arms (#330): the admitted RELEASED dashboards, and the pin names their
+     * lenses read — kept only when a RELEASED visualization carries the name (#563).
+     */
     data class DashboardArms(
         val dashboards: List<Candidate>,
         val pinNames: Set<String>,
@@ -167,8 +170,8 @@ class PromotableView private constructor(
         /**
          * The full §10.2 view for the promotion page and the plan: the five candidate sets and the
          * examined counts, from the four current-version readers and the #330 projection. The last
-         * three parameters are defaulted so every earlier caller keeps compiling; an unnamed view is
-         * everything the pipeline and template arms see, never a silent narrowing.
+         * three parameters are defaulted so every earlier caller keeps compiling; a family left at its
+         * default contributes no candidates.
          */
         fun of(
             localPipelines: List<CurrentPipelineVersion>,
