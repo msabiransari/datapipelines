@@ -144,7 +144,7 @@ class ShellRenderTest {
         groups.forEach { group ->
             val caption = CAPTION.find(group).shouldNotBeNull()
             val names = Regex("""data-nav-group="([^"]*)"""").findAll(group).map { it.groupValues[1] }.toList()
-            names.forEach { it shouldBe caption.groupValues[1] }
+            names.forEach { it shouldBe caption.groupValues[2] }
             grouped += names.size
         }
         // Non-vacuous: every grouped AppNav row was found in a box (Home is the one ungrouped row).
