@@ -10,6 +10,7 @@ import com.fasterxml.jackson.databind.JsonMappingException
 import com.fasterxml.jackson.databind.exc.MismatchedInputException
 import com.fasterxml.jackson.databind.exc.UnrecognizedPropertyException
 import jakarta.servlet.http.HttpServletRequest
+import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
@@ -24,6 +25,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException
 import org.springframework.web.server.ResponseStatusException
 import org.springframework.web.servlet.resource.NoResourceFoundException
+import org.springframework.web.util.DisconnectedClientHelper
 
 /**
  * The one place a thrown failure becomes an HTTP response (rest-api.md §4.2).
@@ -308,12 +310,16 @@ class ApiExceptionHandler {
      * `Throwable` rather than `Exception`: an `Error` escaping a handler would otherwise bypass
      * the envelope entirely, and a stack-trace HTML page is exactly the topology disclosure
      * observability §6.4 exists to prevent.
+     *
+     * A client that has gone away is not a failure of ours (#562): [clientDisconnected] logs it at
+     * DEBUG and the `null` return writes nothing, because nobody is left to read a 500.
      */
     @ExceptionHandler(Throwable::class)
     fun onUnexpected(
         error: Throwable,
         request: HttpServletRequest,
-    ): ResponseEntity<ApiErrorResponse> {
+    ): ResponseEntity<ApiErrorResponse>? {
+        if (clientDisconnected(error, request, log)) return null
         log.error("500 {} {}: unhandled {}", request.method, request.requestURI, error::class.java.name, error)
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).contentType(JSON).body(
             ApiErrorResponse.of(
@@ -405,6 +411,32 @@ class ApiExceptionHandler {
         /** The non-technical message for a non-404 [ResponseStatusException]. */
         const val GENERIC_STATUS_MESSAGE = "That action isn't available right now."
     }
+}
+
+/**
+ * #562 — the client is gone mid-response: a closed tab or a navigation during a streamed answer
+ * (`AsyncRequestNotUsableException`), an aborted static fetch (Tomcat's `ClientAbortException`),
+ * or the broken-pipe `IOException` they wrap. One recognition for both `Throwable` backstops
+ * ([ApiExceptionHandler] and `UiExceptionHandler`), so the two cannot drift apart.
+ *
+ * The predicate is Spring's own: [DisconnectedClientHelper.isClientDisconnectedException], the one
+ * `DefaultHandlerExceptionResolver` applies to an exception no advice claims. Our backstops claim
+ * every `Throwable`, so without this the framework's recognition never runs. It walks the cause
+ * chain by simple class name (so `modules/web` never imports the servlet container's class) and
+ * matches the "broken pipe" / "connection reset by peer" phrases in the most specific cause.
+ *
+ * When it matches, [log] gets ONE DEBUG line — method, URI and the exception's class name, never
+ * the throwable: a stack trace for a request nobody is waiting on is the noise #562 removes, and an
+ * error-rate reading from the log would count it as our failure. The caller then writes no response.
+ */
+internal fun clientDisconnected(
+    error: Throwable,
+    request: HttpServletRequest,
+    log: Logger,
+): Boolean {
+    if (!DisconnectedClientHelper.isClientDisconnectedException(error)) return false
+    log.debug("disconnected {} {}: {}", request.method, request.requestURI, error::class.java.name)
+    return true
 }
 
 /**

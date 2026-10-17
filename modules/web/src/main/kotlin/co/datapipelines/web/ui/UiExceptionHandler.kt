@@ -7,6 +7,7 @@ import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.web.api.ApiErrorCatalog
 import co.datapipelines.web.api.ApiErrorResponse
 import co.datapipelines.web.api.CorrelationId
+import co.datapipelines.web.api.clientDisconnected
 import co.datapipelines.web.api.notAcceptableResponse
 import jakarta.servlet.http.HttpServletRequest
 import org.slf4j.LoggerFactory
@@ -220,11 +221,17 @@ class UiExceptionHandler(
         return notAcceptableResponse(error)
     }
 
+    /**
+     * The backstop: an htmx toast or the `error/500` page, with the correlation id. A client that
+     * has gone away (#562) gets neither — `null` writes nothing, and [clientDisconnected] logs one
+     * DEBUG line instead of this ERROR.
+     */
     @ExceptionHandler(Throwable::class)
     fun onUnexpected(
         error: Throwable,
         request: HttpServletRequest,
-    ): Any {
+    ): Any? {
+        if (clientDisconnected(error, request, log)) return null
         log.error("500 {} {}: unhandled {}", request.method, request.requestURI, error::class.java.name, error)
         if (isHtmx(request)) {
             return toast(
