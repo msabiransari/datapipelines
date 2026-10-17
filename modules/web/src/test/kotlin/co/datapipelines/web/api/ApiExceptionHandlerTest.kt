@@ -1,17 +1,28 @@
 package co.datapipelines.web.api
 
+import ch.qos.logback.classic.Level
+import ch.qos.logback.classic.Logger
+import ch.qos.logback.classic.spi.ILoggingEvent
 import co.datapipelines.pipeline.PipelineErrorCodes
+import co.datapipelines.web.capturingLogEvents
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.collections.shouldNotContain
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
+import org.apache.catalina.connector.ClientAbortException
+import org.junit.jupiter.api.Assertions.assertTimeoutPreemptively
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertAll
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.EnumSource
+import org.slf4j.LoggerFactory
 import org.springframework.http.MediaType
 import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter
+import org.springframework.mock.web.MockHttpServletRequest
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
@@ -24,7 +35,9 @@ import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException
 import java.net.URI
+import java.time.Duration
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -159,6 +172,22 @@ class ApiExceptionHandlerTest {
 
         @GetMapping("/probe/unexpected")
         fun unexpected(): Nothing = error("boom")
+
+        /** #562 — a genuine I/O failure of ours: the disconnect recognition must not swallow it. */
+        @GetMapping("/probe/io-failure")
+        fun ioFailure(): Nothing = throw java.io.IOException("No space left on device")
+
+        /** #562 — the client is gone; [kind] names which of [ClientGone]'s shapes the route throws. */
+        @PostMapping("/probe/gone/{kind}")
+        fun gone(
+            @PathVariable kind: ClientGone,
+        ): Nothing = throw kind.error()
+
+        /** #562 amendment 1 — an I/O failure that LOOKS like a disconnect; [kind] names which of [NotGone]'s shapes. */
+        @GetMapping("/probe/not-gone/{kind}")
+        fun notGone(
+            @PathVariable kind: NotGone,
+        ): Nothing = throw kind.error()
 
         /** #298 — the binder's mixed refusal: the caller's bad value first, the stored declaration second. */
         @GetMapping("/probe/mixed-refusal")
@@ -339,9 +368,139 @@ class ApiExceptionHandlerTest {
 
     @Test
     fun `an unexpected failure is a 500 envelope, never a container error page`() {
-        val result = mvc.perform(get("/probe/unexpected")).andExpect(status().isInternalServerError).andReturn()
+        lateinit var result: org.springframework.test.web.servlet.MvcResult
+        val events = loggedAtDebug { result = mvc.perform(get("/probe/unexpected")).andReturn() }
+        // #562's regression: the disconnect recognition leaves a genuine failure's ERROR line and stack alone.
+        events.shouldBeOneErrorLineWithItsStack("500 GET /probe/unexpected: unhandled java.lang.IllegalStateException")
+        result.response.status shouldBe 500
         result.response.contentAsString shouldContain "\"reason\":\"internal_error\""
         result.response.contentAsString.contains("IllegalStateException") shouldBe false
+    }
+
+    @Test
+    fun `a genuine IOException is still the 500 envelope with its ERROR line - a disconnect is not every IO failure (#562)`() {
+        lateinit var result: org.springframework.test.web.servlet.MvcResult
+        val events = loggedAtDebug { result = mvc.perform(get("/probe/io-failure")).andReturn() }
+        events.shouldBeOneErrorLineWithItsStack("500 GET /probe/io-failure: unhandled java.io.IOException")
+        result.response.status shouldBe 500
+        result.response.contentAsString shouldContain "\"reason\":\"internal_error\""
+    }
+
+    /**
+     * #562 — the client went away mid-response, so no 500 can reach it: one DEBUG line naming the
+     * method, the URI and the class, no stack, nothing at ERROR, and nothing written. Before the fix
+     * every one of these was `500 … unhandled …` at ERROR with a stack and an envelope body.
+     */
+    @ParameterizedTest
+    @EnumSource(ClientGone::class)
+    fun `a client disconnect logs one DEBUG line without a stack and writes no response`(kind: ClientGone) {
+        lateinit var result: org.springframework.test.web.servlet.MvcResult
+        val events = loggedAtDebug { result = mvc.perform(post("/probe/gone/{kind}", kind)).andReturn() }
+
+        withClue("log events ${events.map { "${it.level} ${it.formattedMessage}" }}") {
+            assertAll(
+                { events.map { it.level } shouldNotContain Level.ERROR },
+                { events.map { it.level } shouldBe listOf(Level.DEBUG) },
+                { events.single().formattedMessage shouldBe "disconnected POST /probe/gone/$kind: ${kind.className}" },
+                { events.single().throwableProxy shouldBe null },
+                { result.response.contentAsString shouldBe "" },
+                { result.response.contentType shouldBe null },
+            )
+        }
+    }
+
+    /** #562's two disconnect shapes, as production raises them — the only two [clientDisconnected] recognises (amendment 1). */
+    enum class ClientGone(
+        val className: String,
+        val error: () -> Throwable,
+    ) {
+        /** A streamed answer (SSE, `ResponseBodyEmitter`) whose client closed the tab. */
+        ASYNC_NOT_USABLE(
+            AsyncRequestNotUsableException::class.java.name,
+            { AsyncRequestNotUsableException("ServletOutputStream failed to write", java.io.IOException("Broken pipe")) },
+        ),
+
+        /** An aborted static fetch: Tomcat's wrapper around the socket's broken pipe. */
+        CLIENT_ABORT(ClientAbortException::class.java.name, { ClientAbortException(java.io.IOException("Broken pipe")) }),
+    }
+
+    /**
+     * #562 amendment 1 — the precision side: an I/O failure with no client-write exception in its cause chain is
+     * ours (a reset on the Postgres pool, a datasource, S3, an HTTP client), so it keeps the ERROR line, its stack
+     * and the 500 envelope. Spring's `DisconnectedClientHelper` matched every one of these by name or phrase.
+     */
+    @ParameterizedTest
+    @EnumSource(NotGone::class)
+    fun `an IO failure that is not a client write is still the 500 envelope with its ERROR line and stack`(kind: NotGone) {
+        lateinit var result: org.springframework.test.web.servlet.MvcResult
+        val events = loggedAtDebug { result = mvc.perform(get("/probe/not-gone/{kind}", kind)).andReturn() }
+        events.shouldBeOneErrorLineWithItsStack("500 GET /probe/not-gone/$kind: unhandled ${kind.className}")
+        result.response.status shouldBe 500
+        result.response.contentAsString shouldContain "\"reason\":\"internal_error\""
+    }
+
+    /** I/O failures that share a disconnect's name or wording but arise on a connection of OURS (#562 amendment 1). */
+    enum class NotGone(
+        val className: String,
+        val error: () -> Throwable,
+    ) {
+        /** A truncated read: Spring's helper matched `EOFException` by simple name anywhere in the chain. */
+        EOF(java.io.EOFException::class.java.name, { java.io.EOFException("Unexpected end of stream") }),
+
+        /** A peer reset on an outbound socket: Spring's helper matched the phrase in the most specific cause. */
+        CONNECTION_RESET(java.net.SocketException::class.java.name, { java.net.SocketException("Connection reset by peer") }),
+
+        /** The same reset wrapped by a client library, as a driver or SDK surfaces it. */
+        WRAPPED_RESET(
+            IllegalStateException::class.java.name,
+            { IllegalStateException("object store read failed", java.net.SocketException("Connection reset by peer")) },
+        ),
+
+        /** A broken pipe that no client-write exception wraps: a write to one of our own connections. */
+        BROKEN_PIPE(java.io.IOException::class.java.name, { java.io.IOException("Broken pipe") }),
+    }
+
+    /**
+     * The walk is bounded and so terminates on a cyclic cause chain (`initCause` permits A → B → A): a cycle with
+     * no client-write exception is not a disconnect, and one that holds a `ClientAbortException` still is.
+     */
+    @Test
+    fun `the disconnect walk terminates on a cyclic cause chain (#562)`() {
+        val request = MockHttpServletRequest("GET", "/probe/cycle")
+        val log = LoggerFactory.getLogger(ApiExceptionHandler::class.java)
+
+        val inner = java.io.IOException("Broken pipe")
+        val outer = IllegalStateException("outer", inner)
+        inner.initCause(outer)
+        val abort = ClientAbortException()
+        val wrapper = IllegalStateException("wrapper", abort)
+        abort.initCause(wrapper)
+
+        // Preemptive, so an unbounded walk (Spring's helper spins forever on this chain) fails here instead of hanging the run.
+        assertTimeoutPreemptively(Duration.ofSeconds(5)) {
+            clientDisconnected(outer, request, log) shouldBe false
+            clientDisconnected(wrapper, request, log) shouldBe true
+        }
+    }
+
+    /** Runs [block] with this advice's logger forced to DEBUG, so "no ERROR" cannot pass because nothing logged. */
+    private fun loggedAtDebug(block: () -> Unit): List<ILoggingEvent> {
+        val logger = LoggerFactory.getLogger(ApiExceptionHandler::class.java) as Logger
+        val level = logger.level
+        logger.level = Level.DEBUG
+        try {
+            return capturingLogEvents(logger, block = block)
+        } finally {
+            logger.level = level
+        }
+    }
+
+    private fun List<ILoggingEvent>.shouldBeOneErrorLineWithItsStack(message: String) {
+        withClue("log events ${map { "${it.level} ${it.formattedMessage}" }}") {
+            map { it.level } shouldBe listOf(Level.ERROR)
+            single().formattedMessage shouldBe message
+            single().throwableProxy shouldNotBe null
+        }
     }
 
     @Test

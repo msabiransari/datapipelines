@@ -7,6 +7,7 @@ import ch.qos.logback.core.read.ListAppender
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.web.api.ApiExceptionHandler
+import co.datapipelines.web.api.ApiExceptionHandlerTest
 import co.datapipelines.web.api.CorrelationId
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldNotContain
@@ -20,6 +21,10 @@ import io.mockk.every
 import io.mockk.mockk
 import jakarta.servlet.http.HttpServletRequest
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertAll
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.Arguments
+import org.junit.jupiter.params.provider.MethodSource
 import org.slf4j.LoggerFactory
 import org.springframework.core.MethodParameter
 import org.springframework.http.HttpStatus
@@ -88,8 +93,11 @@ class UiExceptionHandlerTest {
         val request = mockRequest()
         val error = RuntimeException("boom")
 
-        val result = handler.onUnexpected(error, request).shouldBeInstanceOf<ModelAndView>()
+        val (answer, events) = logged { handler.onUnexpected(error, request) }
 
+        // #562's regression: the disconnect recognition leaves a genuine failure's ERROR line and stack alone.
+        events.shouldBeOneUnexpectedErrorLine()
+        val result = answer.shouldBeInstanceOf<ModelAndView>()
         result.viewName shouldBe "error/500"
         result.status shouldBe HttpStatus.INTERNAL_SERVER_ERROR
         result.model["correlationId"].shouldNotBeNull()
@@ -100,11 +108,14 @@ class UiExceptionHandlerTest {
         val request = mockRequest(htmx = true)
         val correlationId = UUID.randomUUID()
 
-        val result =
-            CorrelationId
-                .withId(correlationId) {
+        val (answer, events) =
+            logged {
+                CorrelationId.withId(correlationId) {
                     handler.onUnexpected(RuntimeException("boom — secret detail"), request)
-                }.shouldBeInstanceOf<ResponseEntity<*>>()
+                }
+            }
+        events.shouldBeOneUnexpectedErrorLine()
+        val result = answer.shouldBeInstanceOf<ResponseEntity<*>>()
 
         result.statusCode shouldBe HttpStatus.INTERNAL_SERVER_ERROR
         result.headers.getFirst("HX-Retarget") shouldBe "#toast"
@@ -238,6 +249,71 @@ class UiExceptionHandlerTest {
         fun json(): Map<String, String> {
             calls.incrementAndGet()
             return mapOf("key" to UI_SECRET)
+        }
+
+        /** #562 — a page route whose client is gone; [kind] names the shape it throws. */
+        @GetMapping("/probe/ui-gone/{kind}")
+        fun gone(
+            @PathVariable kind: ApiExceptionHandlerTest.ClientGone,
+        ): String = throw kind.error()
+    }
+
+    /**
+     * #562 — a client disconnect under a `web.ui` route, through a real MVC pipeline with both advices
+     * in production order: one DEBUG line (method, URI, class; no stack), nothing at ERROR, and nothing
+     * written — no `error/500` page, no toast, no body — for the page request and the htmx request alike.
+     */
+    @ParameterizedTest(name = "{0} htmx={1}")
+    @MethodSource("disconnects")
+    fun `a client disconnect on a ui route logs one DEBUG line and renders neither the page nor the toast`(
+        kind: ApiExceptionHandlerTest.ClientGone,
+        htmx: Boolean,
+    ) {
+        val mvc =
+            MockMvcBuilders
+                .standaloneSetup(UiProbeController())
+                .setControllerAdvice(UiExceptionHandler(), ApiExceptionHandler())
+                .build()
+        val request = get("/probe/ui-gone/{kind}", kind)
+        if (htmx) request.header("HX-Request", "true")
+
+        val (result, events) = logged { mvc.perform(request).andReturn() }
+
+        withClue("log events ${events.map { "${it.level} ${it.formattedMessage}" }}") {
+            assertAll(
+                { events.map { it.level } shouldNotContain Level.ERROR },
+                { events.map { it.level } shouldBe listOf(Level.DEBUG) },
+                { events.single().formattedMessage shouldBe "disconnected GET /probe/ui-gone/$kind: ${kind.className}" },
+                { events.single().throwableProxy shouldBe null },
+                { result.response.contentAsString shouldBe "" },
+                { result.response.forwardedUrl shouldBe null },
+                { result.modelAndView shouldBe null },
+                { result.response.getHeader("HX-Retarget") shouldBe null },
+            )
+        }
+    }
+
+    /**
+     * #562 amendment 1 — an I/O failure with no client-write exception in its chain is ours: the page request
+     * still gets the `error/500` page and the htmx request the toast, each after ONE ERROR line with its stack.
+     */
+    @ParameterizedTest(name = "{0} htmx={1}")
+    @MethodSource("notDisconnects")
+    fun `an IO failure that is not a client write is still the 500 page or toast with its ERROR line`(
+        kind: ApiExceptionHandlerTest.NotGone,
+        htmx: Boolean,
+    ) {
+        val (answer, events) = logged { handler.onUnexpected(kind.error(), mockRequest(htmx = htmx)) }
+
+        events.shouldBeOneUnexpectedErrorLine(kind.className)
+        if (htmx) {
+            val toast = answer.shouldBeInstanceOf<ResponseEntity<*>>()
+            toast.statusCode shouldBe HttpStatus.INTERNAL_SERVER_ERROR
+            toast.headers.getFirst("HX-Retarget") shouldBe "#toast"
+        } else {
+            val page = answer.shouldBeInstanceOf<ModelAndView>()
+            page.viewName shouldBe "error/500"
+            page.status shouldBe HttpStatus.INTERNAL_SERVER_ERROR
         }
     }
 
@@ -404,6 +480,15 @@ class UiExceptionHandlerTest {
         } finally {
             logger.detachAppender(appender)
             logger.level = level
+        }
+    }
+
+    /** The backstop's log shape for a genuine failure: ONE ERROR line naming the class, with its stack. */
+    private fun List<ILoggingEvent>.shouldBeOneUnexpectedErrorLine(className: String = "java.lang.RuntimeException") {
+        withClue("log events ${map { "${it.level} ${it.formattedMessage}" }}") {
+            map { it.level } shouldBe listOf(Level.ERROR)
+            single().formattedMessage shouldContain "unhandled $className"
+            single().throwableProxy.shouldNotBeNull()
         }
     }
 
@@ -697,6 +782,16 @@ class UiExceptionHandlerTest {
     }
 
     private companion object {
+        /** Every #562 disconnect shape, as a page request and as an htmx request. */
+        @JvmStatic
+        fun disconnects(): List<Arguments> =
+            ApiExceptionHandlerTest.ClientGone.entries.flatMap { kind -> listOf(false, true).map { Arguments.of(kind, it) } }
+
+        /** Every #562 amendment-1 shape that is NOT a disconnect, as a page request and as an htmx request. */
+        @JvmStatic
+        fun notDisconnects(): List<Arguments> =
+            ApiExceptionHandlerTest.NotGone.entries.flatMap { kind -> listOf(false, true).map { Arguments.of(kind, it) } }
+
         /** A value no real client sends; a 406 body carrying it would be echoing the Accept header. */
         const val ACCEPT_CANARY = "application/x-accept-canary-222"
 

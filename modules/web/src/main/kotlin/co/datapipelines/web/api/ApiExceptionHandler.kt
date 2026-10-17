@@ -10,6 +10,7 @@ import com.fasterxml.jackson.databind.JsonMappingException
 import com.fasterxml.jackson.databind.exc.MismatchedInputException
 import com.fasterxml.jackson.databind.exc.UnrecognizedPropertyException
 import jakarta.servlet.http.HttpServletRequest
+import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
@@ -21,6 +22,7 @@ import org.springframework.web.HttpRequestMethodNotSupportedException
 import org.springframework.web.bind.MissingServletRequestParameterException
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException
 import org.springframework.web.server.ResponseStatusException
 import org.springframework.web.servlet.resource.NoResourceFoundException
@@ -308,12 +310,16 @@ class ApiExceptionHandler {
      * `Throwable` rather than `Exception`: an `Error` escaping a handler would otherwise bypass
      * the envelope entirely, and a stack-trace HTML page is exactly the topology disclosure
      * observability §6.4 exists to prevent.
+     *
+     * A client that has gone away is not a failure of ours (#562): [clientDisconnected] logs it at
+     * DEBUG and the `null` return writes nothing, because nobody is left to read a 500.
      */
     @ExceptionHandler(Throwable::class)
     fun onUnexpected(
         error: Throwable,
         request: HttpServletRequest,
-    ): ResponseEntity<ApiErrorResponse> {
+    ): ResponseEntity<ApiErrorResponse>? {
+        if (clientDisconnected(error, request, log)) return null
         log.error("500 {} {}: unhandled {}", request.method, request.requestURI, error::class.java.name, error)
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).contentType(JSON).body(
             ApiErrorResponse.of(
@@ -406,6 +412,44 @@ class ApiExceptionHandler {
         const val GENERIC_STATUS_MESSAGE = "That action isn't available right now."
     }
 }
+
+/**
+ * #562 — the client is gone mid-response: a closed tab or a navigation during a streamed answer
+ * (`AsyncRequestNotUsableException`) or an aborted static fetch (Tomcat's `ClientAbortException`).
+ * One recognition for both `Throwable` backstops ([ApiExceptionHandler] and `UiExceptionHandler`),
+ * so the two cannot drift apart.
+ *
+ * Only those two count, anywhere in the first [MAX_DISCONNECT_CAUSE_DEPTH] links of the cause chain
+ * (the bound also ends a cyclic chain). Spring's `DisconnectedClientHelper` is deliberately NOT used
+ * (amendment 1): it also matches `EOFException` by name and "broken pipe" / "connection reset by
+ * peer" in any message, which a reset on one of OUR outbound connections (the pool, a datasource,
+ * S3, an HTTP client) raises too — that would turn our failure into a silent empty 200 — and it walks
+ * the chain unbounded, spinning forever on a cyclic one. A broken pipe counts only inside one of the
+ * two; everything else keeps the ERROR line and the 500.
+ *
+ * When it matches, [log] gets ONE DEBUG line — method, URI and the exception's class name, never
+ * the throwable: a stack trace for a request nobody is waiting on is the noise #562 removes, and an
+ * error-rate reading from the log would count it as our failure. The caller then writes no response.
+ */
+internal fun clientDisconnected(
+    error: Throwable,
+    request: HttpServletRequest,
+    log: Logger,
+): Boolean {
+    val gone =
+        generateSequence(error) { it.cause }
+            .take(MAX_DISCONNECT_CAUSE_DEPTH)
+            .any { it is AsyncRequestNotUsableException || it.javaClass.simpleName == CLIENT_ABORT_SIMPLE_NAME }
+    if (!gone) return false
+    log.debug("disconnected {} {}: {}", request.method, request.requestURI, error::class.java.name)
+    return true
+}
+
+/** Tomcat's client-write failure, named by simple class name so `modules/web` never imports the servlet container. */
+private const val CLIENT_ABORT_SIMPLE_NAME = "ClientAbortException"
+
+/** How deep [clientDisconnected] looks for a client-write failure; finite, so a cyclic cause chain ends. */
+private const val MAX_DISCONNECT_CAUSE_DEPTH = 8
 
 /**
  * The #222 406, one body for both advices: [ApiExceptionHandler] (the mapping-time refusal, where

@@ -1,6 +1,6 @@
 # Observability Specification
 
-**Status:** v1.40 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
+**Status:** v1.41 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-10-08
@@ -574,6 +574,8 @@ Uncaught exceptions in any thread / coroutine:
 - Exception class and method are deliberately **not** tags: both are unbounded, code-shape-derived dimensions that §4.3 forbids. That detail is already carried by the ERROR log line's stack trace and the trace span's exception event, which are the right places to search it.
 - For pipeline-execution coroutines, fails the execution with the mapped `pipeline.*` code ([dag-executor §8.2](dag-executor.md)); a cancelled execution is `execution_aborted`, counted by `datapipelines.executions.aborted{reason}` (§4.1), not by `errors.total`.
 
+A client disconnect is not an uncaught exception (#562): when the client has gone away mid-response, both `Throwable` backstops (`ApiExceptionHandler`, `UiExceptionHandler`) log one DEBUG line, `disconnected {method} {uri}: {exception class}`, with no stack trace, write no response (no envelope, no page, no toast), and it is not counted as an error. Exactly two exceptions are recognised, anywhere in the first eight links of the cause chain: `AsyncRequestNotUsableException` (a streamed answer whose client went away) and Tomcat's `ClientAbortException` (an aborted fetch). Both arise only from writing to the client's own response. A broken-pipe or connection-reset `IOException` is recognised only when one of them wraps it. On its own, or inside anything else, it is a failure on one of our connections (the pool, a datasource, object storage, an HTTP client), as is an `EOFException`: those keep the ERROR line, the stack and the 500. Every other exception that reaches the backstops keeps the ERROR line and stack above.
+
 ### 8.2 External error reporting (optional)
 
 - Sentry / Bugsnag / Rollbar integration via Spring Boot's `spring-boot-starter-actuator` + vendor SDK.
@@ -649,6 +651,7 @@ This is a construction rule, not a filter — the redacting encoder covers logs,
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-17 | v1.41 | 562 (#562) a client disconnect is not an uncaught exception | **§8.1** gains the rule: a client that went away mid-response is recognised at both `Throwable` backstops — one DEBUG line with method, URI and class, no stack trace, no response written, not counted. Exactly two exceptions count, in the cause chain: `AsyncRequestNotUsableException` and `ClientAbortException`. A broken-pipe or connection-reset `IOException` counts only inside one of them; any other I/O failure, `EOFException` included, keeps its ERROR line and 500. Until now each disconnect logged `500 … unhandled …` at ERROR with a stack for a 500 no client could receive. Every other exception's ERROR line is unchanged. |
 | 2026-10-08 | v1.40 | #443 event-catalogue parity | §3.4 adds 37 rows to complete the seven remaining catalogued namespaces; all twelve are enforced with count floors. Audit retention and execution shutdown receive additive §3.4N/O tables. Computed event fields are refused except the two exact, count-pinned legacy audit-row formats; production logs and §3.4G FailureShape/SQLSTATE prose are unchanged. |
 | 2026-10-06 | v1.39 | #446 bounded driver SQLSTATE (2026-10-06T03:09:15Z) | §3.4G defines the one-to-five ASCII letter/digit shape, fixed `invalid` replacement and preserved `none` fallback. Valid states pass unchanged; rejected driver values are never logged. |
 | 2026-10-04 | v1.38 | 329a (#329), store-failure log shapes | §3.4C lake outcome-recorder field list gains `sql_state` and defines `error` as the exception class; §3.4G records the narrow reuse of its rule at four existing failure lines. Event names and failure behavior stay unchanged; the remaining inventory stays open on #329. |
