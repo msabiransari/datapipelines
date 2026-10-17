@@ -133,6 +133,27 @@ abstract class BrowserSuite {
     }
 
     /**
+     * #554: shows [family]'s panel of the resource browser on [on] and waits for its root level.
+     * The browser shows the family of the CURRENT page, so off a page of that family this follows
+     * the menu's link (a boosted swap: the same document) or, with the menu off screen (a phone),
+     * navigates to the catalog; on a phone it then opens the browser drawer.
+     */
+    protected fun openBrowserTree(
+        family: String,
+        on: Page = page,
+    ) {
+        if (!(on.evaluate("() => location.pathname") as String).startsWith("/$family")) {
+            val link = on.locator(".app-nav-link[data-nav-section='/$family']")
+            if (link.isVisible) link.click() else on.navigate("$baseUrl/$family")
+            on.waitForURL("**/$family")
+        }
+        val closedDrawer =
+            "() => matchMedia('(max-width: 760.98px)').matches && !document.documentElement.classList.contains('browser-open')"
+        if (on.evaluate(closedDrawer) == true) on.click("#browser-open")
+        on.waitForFunction("family => window.DatapipelinesSidebarTrees.get(family)?.state.levels.get(null)?.complete", family)
+    }
+
+    /**
      * Drives the SELF-SERVE workspace creation flow (the default provisioning mode,
      * configuration.md §3.17): a first-login user has NO workspace until they create one
      * at /workspaces. Plain form POST + redirect — no htmx to wait out.

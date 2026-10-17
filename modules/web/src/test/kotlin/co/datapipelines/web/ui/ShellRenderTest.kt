@@ -97,8 +97,13 @@ class ShellRenderTest {
         label.substringBefore("</span>") shouldContain "app-ws-role"
     }
 
+    /**
+     * #554 (shell record §3): four groups under Home, each a `role=group` labelled by its
+     * caption, and no count beside any item — "resource counts belong in the resource browser,
+     * not repeated beside every primary item". The menu holds no tree either.
+     */
     @Test
-    fun `the rail renders the three groups, the collapse control and the counts`() {
+    fun `the menu renders the four groups in order, the collapse control, and no counts or trees`() {
         val html =
             engine.process(
                 "pipelines/list",
@@ -107,29 +112,89 @@ class ShellRenderTest {
                     setVariable("navCounts", NavCounts.Counts(9, 27))
                 },
             )
+        val menu = html.substringAfter("<aside class=\"app-rail\"").substringBefore("</aside>")
 
         html shouldContain "class=\"app-shell\""
-        html shouldContain "app-nav-section app-rail-label\">Build<"
-        html shouldContain "app-nav-section app-rail-label\">Operate<"
-        html shouldContain "app-nav-section app-rail-label\">Organisation<"
-        html shouldContain "id=\"rail-collapse\""
-        // Counts render as badges only when the cache produced a number (§A).
-        html shouldContain "app-nav-badge app-rail-label\">9<"
-        html shouldContain "app-nav-badge app-rail-label\">27<"
+        val captions = CAPTION.findAll(menu).toList()
+        captions.map { it.groupValues[2] } shouldBe listOf(AppNav.BUILD, AppNav.EXPLORE, AppNav.OPERATE, AppNav.ORGANISATION)
+        captions.forEach { caption ->
+            menu shouldContain "<div class=\"app-nav-group\" role=\"group\" aria-labelledby=\"app-nav-group-${caption.groupValues[1]}\">"
+        }
+        menu shouldContain "id=\"rail-collapse\""
+        menu shouldNotContain "app-nav-badge"
+        menu shouldNotContain ">9<"
+        menu shouldNotContain "data-nav-tree"
+        html shouldNotContain "data-nav-branch"
+        html shouldNotContain "data-nav-tree-toggle"
     }
 
+    /**
+     * #554: every menu link sits inside the group whose caption its `data-nav-group` names — the
+     * markup's grouping and [AppNav]'s table cannot drift apart (the breadcrumb agreement test
+     * below holds the table to the link's attributes; this holds the attributes to the box the
+     * reader sees them in).
+     */
     @Test
-    fun `a workspace with unreadable counts renders no badges rather than a zero`() {
+    fun `every menu link sits inside the group its data-nav-group names`() {
+        val html = engine.process("pipelines/list", webContext().apply { fillList() })
+        val menu = html.substringAfter("<nav class=\"app-nav\"").substringBefore("</nav>")
+        val groups = menu.split("<div class=\"app-nav-group\"").drop(1)
+        groups.size shouldBe 4
+        var grouped = 0
+        groups.forEach { group ->
+            val caption = CAPTION.find(group).shouldNotBeNull()
+            val names = Regex("""data-nav-group="([^"]*)"""").findAll(group).map { it.groupValues[1] }.toList()
+            names.forEach { it shouldBe caption.groupValues[2] }
+            grouped += names.size
+        }
+        // Non-vacuous: every grouped AppNav row was found in a box (Home is the one ungrouped row).
+        grouped shouldBe AppNav.ITEMS.count { it.group != null }
+    }
+
+    /**
+     * #554 (record §3 rule 4–5, §7): the family title and its admitted count head the browser;
+     * only the ACTIVE family's parts are visible, the others ship `hidden` for the in-document
+     * family switch. The count's number is followed by a visually-hidden noun, so a screen
+     * reader hears "9 pipelines", not a bare number.
+     */
+    @Test
+    fun `the browser header carries the active family's title and admitted count`() {
         val html =
             engine.process(
                 "pipelines/list",
                 webContext().apply {
                     fillList()
-                    setVariable("navCounts", NavCounts.Counts(null, null))
+                    setVariable("navCounts", NavCounts.Counts(9, 27, dashboards = 4))
+                },
+            )
+        val head = html.substringAfter("class=\"app-browser-head\"").substringBefore("</div>")
+
+        head shouldContain "<span data-browser-family=\"pipelines\">Pipelines</span>"
+        head shouldContain "<span data-browser-family=\"templates\" hidden=\"hidden\">Templates</span>"
+        head shouldContain
+            "<span class=\"app-browser-count\" data-browser-family=\"pipelines\"><span>9</span>" +
+            "<span class=\"app-visually-hidden\"> pipelines</span></span>"
+        head shouldContain "data-browser-family=\"templates\" hidden=\"hidden\"><span>27</span>"
+        head shouldContain "data-browser-family=\"dashboards\" hidden=\"hidden\"><span>4</span>"
+        // Unknown counts are omitted, never a zero (record §7).
+        head shouldNotContain "app-browser-count\" data-browser-family=\"visualizations\""
+        head shouldContain "id=\"browser-hide\""
+        head shouldContain "aria-label=\"Hide resource browser\""
+    }
+
+    @Test
+    fun `a workspace with unreadable counts renders the browser header with no count rather than a zero`() {
+        val html =
+            engine.process(
+                "pipelines/list",
+                webContext().apply {
+                    fillList()
+                    setVariable("navCounts", NavCounts.Counts.NONE)
                 },
             )
 
-        html shouldContain "data-nav-label=\"Pipelines\""
+        html shouldContain "id=\"app-browser-title\""
+        html shouldNotContain "app-browser-count"
         html shouldNotContain "app-nav-badge"
     }
 
@@ -416,127 +481,134 @@ class ShellRenderTest {
 
     /**
      * D58 (#10 L3b): the landing item is RENAMED Home — the route (/dashboard) and its
-     * exact-match section are unchanged, so the pin is on the label pair, and the new
-     * Dashboards item sits in Build with its lazy branch beside it (the branch is not a link:
-     * the rail's link count stays the table's count — the agreement test above holds it).
+     * exact-match section are unchanged. #554 (record §3): Dashboards, Visualizations and
+     * Parameter Sets leave Build for Explore, in that order, between Build and Operate.
      */
     @Test
-    fun `the landing item is Home and the Dashboards item sits in Build with its lazy branch`() {
+    fun `the landing item is Home and the three read-and-compose families sit in Explore`() {
         val html = engine.process("pipelines/list", webContext().apply { fillList() })
+        val explore =
+            html
+                .substringAfter("id=\"app-nav-group-explore\">Explore<", missingDelimiterValue = "")
+                .substringBefore("id=\"app-nav-group-operate\">Operate<")
 
-        html shouldContain "data-nav-section=\"/dashboard\""
         html shouldContain "data-nav-group=\"\" data-nav-label=\"Home\""
-        html shouldContain "data-nav-section=\"/dashboards\""
-        html shouldContain "data-nav-group=\"Build\" data-nav-label=\"Dashboards\""
-        // The lazy branch: since #350 the rail's ONE navigating-tree pattern — a toggle BUTTON
-        // beside the link (aria-controls the panel), a panel whose root URL is the nav scope
-        // (one level per request), and the NAV instance's root placeholder, never the page's.
-        html shouldContain "aria-controls=\"nav-tree-dashboards\" aria-label=\"Dashboard folders\""
-        html shouldContain "data-nav-tree=\"dashboards\""
-        // #400 — the branch gains the search input in the Pipelines branch's exact markup:
-        // the shared engine (js/tree/) serves it with no JS change, and the results swap
-        // into THIS panel's root (clearing returns to the tree by construction).
         html shouldNotContain "data-nav-label=\"Dashboard\""
-        // The second tree engine is gone: no <details> disclosure of its own.
-        html shouldNotContain "app-nav-branch-tree"
+        val families = listOf("Dashboards" to "/dashboards", "Visualizations" to "/visualizations", "Parameter Sets" to "/parameter-sets")
+        families.forEach { (label, section) ->
+            explore shouldContain "data-nav-section=\"$section\""
+            explore shouldContain "data-nav-group=\"Explore\" data-nav-label=\"$label\""
+        }
+        explore.indexOf("/dashboards\"") shouldBeLessThan explore.indexOf("/visualizations\"")
+        explore.indexOf("/visualizations\"") shouldBeLessThan explore.indexOf("/parameter-sets\"")
+        // The lucide glyphs, from the vendored sprite (icons-from-lucide-only).
+        explore shouldContain "/vendor/icons/lucide-sprite.svg#chart-line"
+        explore shouldContain "/vendor/icons/lucide-sprite.svg#sliders-horizontal"
+        html shouldNotContain "data-nav-group=\"Build\" data-nav-label=\"Dashboards\""
     }
 
+    /**
+     * #554 (record §3, §7): the resource browser is the menu's SIBLING, outside the boosted
+     * #app-main, hosting the five REST-tree panels with their #350 ids and `data-nav-tree` — the
+     * active family's visible, the rest `hidden` — then the footer's View all for that family,
+     * the width reset, and the separator on the browser/content boundary.
+     */
     @Test
-    fun `#350 - Pipelines carries the same branch - link, a separate toggle, and the lazy sidebar tree with its search`() {
+    fun `the browser column hosts the five tree panels outside main, the active family visible`() {
         val html = engine.process("pipelines/list", webContext().apply { fillList() })
-        val branch = html.substringAfter("data-nav-branch=\"pipelines\"").substringBefore("data-nav-branch=\"dashboards\"")
+        val shell = html.substringAfter("<div class=\"app-shell\"")
+        val browser =
+            shell
+                .substringAfter("<aside class=\"app-browser\" id=\"app-browser\"", missingDelimiterValue = "")
+                .substringBefore("</aside>")
 
-        // The item LINK is unchanged: the catalog page, the active section, the crumb pair.
-        branch shouldContain "href=\"/pipelines\" class=\"app-nav-link"
-        branch shouldContain "data-nav-group=\"Build\" data-nav-label=\"Pipelines\""
-        // The TOGGLE is its own control — opening the tree is not navigating.
-        branch shouldContain "<button type=\"button\" class=\"app-nav-branch-toggle app-rail-label\" data-nav-tree-toggle"
-        branch shouldContain "aria-expanded=\"false\" aria-controls=\"nav-tree-pipelines\""
-        // The PANEL: closed on paint, the nav-scope root URL, the document's workspace for the
-        // admission guard, the sidebar search addressing the sidebar's root, the bounded region.
-        branch shouldContain "id=\"nav-tree-pipelines\" data-nav-tree=\"pipelines\" hidden"
-        branch shouldContain "data-nav-workspace=\"acme\""
-        // The shared engine and the branch controller load once, from the layout's footer.
+        // Order of the siblings: menu, browser, backdrop, top bar, main.
+        shell.indexOf("id=\"app-rail\"") shouldBeLessThan shell.indexOf("id=\"app-browser\"")
+        shell.indexOf("id=\"app-browser\"") shouldBeLessThan shell.indexOf("<main id=\"app-main\"")
+        html.substringAfter("<main id=\"app-main\"") shouldNotContain "data-nav-tree=\""
+        browser shouldContain "hx-boost=\"true\""
+        browser shouldContain "aria-labelledby=\"app-browser-title\""
+        browser.substringBefore(">") shouldNotContain "hidden"
+
+        val panels = PANEL.findAll(browser).toList()
+        panels.map { it.groupValues[1] } shouldBe listOf("pipelines", "templates", "dashboards", "visualizations", "parameter-sets")
+        panels.forEach { panel ->
+            panel.groupValues[2] shouldBe panel.groupValues[1]
+            panel.value shouldContain "data-nav-workspace=\"acme\""
+            (panel.value.contains("hidden=\"hidden\"")) shouldBe (panel.groupValues[1] != "pipelines")
+        }
+        browser shouldContain "<a href=\"/pipelines\" class=\"app-browser-all\" data-browser-family=\"pipelines\">"
+        browser shouldContain "View all pipelines"
+        browser shouldContain "id=\"browser-width-reset\""
+        browser shouldContain
+            "<div id=\"browser-boundary\" class=\"app-browser-boundary\" role=\"separator\" tabindex=\"0\""
+        browser shouldContain "aria-valuemin=\"240\" aria-valuemax=\"480\""
+
+        // The engine, the browser lifecycle and the width control load once, from the footer.
         html shouldContain "<script src=\"/js/template-explorer.js\"></script>"
         html shouldContain "<script type=\"module\" src=\"/js/tree/sidebar.mjs\"></script>"
-        html shouldContain "<script type=\"module\" src=\"/js/rail-resize.mjs\"></script>"
-        html shouldContain "id=\"rail-resize\""
+        html shouldContain "<script type=\"module\" src=\"/js/browser-resize.mjs\"></script>"
+        html shouldNotContain "rail-resize"
+        html shouldNotContain "rail-boundary"
+        html shouldNotContain "rail-width-reset"
         html shouldNotContain "src=\"/js/nav-tree.js\""
         html shouldNotContain "data-nav-root-url"
-        // rail.js reads the active workspace's pre-paint width key off <html>.
+        // rail.js reads the active workspace's pre-paint browser keys off <html>.
         html shouldContain "data-dp-workspace=\"acme\""
-        // #513 — the sidebar search boxes' client-side bound rides the same <html> attribute
-        // belt: the layout renders the server's one constant, so no JS file retypes it.
+        // #513 — the browser search's client-side bound rides the same <html> attribute belt.
         html shouldContain "data-dp-search-max-length=\"${SearchNeedle.MAX_LENGTH}\""
     }
 
+    /** #554 (record §3 rule 7): the folder button is named for the family it reveals. */
     @Test
-    fun `#398 - Templates carries the same branch - link, a separate toggle, and the lazy sidebar tree with its search`() {
-        val html = engine.process("pipelines/list", webContext().apply { fillList() })
-        // missingDelimiterValue = "": an ABSENT branch must leave `branch` empty (substringAfter
-        // returns the WHOLE page when its delimiter is missing, and every assertion below would
-        // then be satisfied by some other part of the page — the 398b F7 re-plant found this).
-        val branch =
-            html
-                .substringAfter("data-nav-branch=\"templates\"", missingDelimiterValue = "")
-                .substringBefore("data-nav-branch=\"dashboards\"")
-
-        // The item LINK is unchanged: the catalog page, the active section, the crumb pair.
-        branch shouldContain "href=\"/templates\" class=\"app-nav-link"
-        branch shouldContain "data-nav-group=\"Build\" data-nav-label=\"Templates\""
-        // The TOGGLE is its own control — opening the tree is not navigating.
-        branch shouldContain "<button type=\"button\" class=\"app-nav-branch-toggle app-rail-label\" data-nav-tree-toggle"
-        branch shouldContain "aria-expanded=\"false\" aria-controls=\"nav-tree-templates\""
-        // The PANEL: closed on paint, the nav-scope root URL, the document's workspace for the
-        // admission guard, the sidebar search addressing the sidebar's root, the bounded region.
-        branch shouldContain "id=\"nav-tree-templates\" data-nav-tree=\"templates\" hidden"
-        branch shouldContain "data-nav-workspace=\"acme\""
+    fun `the top bar's folder button is named for the active family`() {
+        listOf(
+            "/pipelines" to "Pipelines",
+            "/templates/x" to "Templates",
+            "/dashboards/x" to "Dashboards",
+            "/visualizations" to "Visualizations",
+            "/parameter-sets/x" to "Parameter Sets",
+        ).forEach { (path, label) ->
+            val html =
+                engine.process(
+                    "pipelines/list",
+                    webContext().apply {
+                        fillList()
+                        setVariable("currentPath", path)
+                    },
+                )
+            val button = html.substringAfter("<button type=\"button\" id=\"browser-open\"").substringBefore(">")
+            button shouldContain "aria-controls=\"app-browser\""
+            button shouldContain "aria-label=\"Browse $label\" title=\"Browse $label\""
+            button shouldNotContain "hidden"
+            html.substringAfter("id=\"browser-open\"").substringBefore("</button>") shouldContain "lucide-sprite.svg#folder"
+        }
     }
 
+    /** #554 (record §3 rule 5): off the five families the browser and its folder button render hidden. */
     @Test
-    fun `#415 - Parameter Sets carries the same branch in Build - link, a separate toggle, the lazy nav-scope tree and its search`() {
-        val html = engine.process("pipelines/list", webContext().apply { fillList() })
-        val branch =
-            html
-                .substringAfter("data-nav-branch=\"parameter-sets\"")
-                .substringBefore("<div class=\"app-nav-section app-rail-label\">Operate")
-
-        branch shouldContain "href=\"/parameter-sets\" class=\"app-nav-link"
-        branch shouldContain "data-nav-group=\"Build\" data-nav-label=\"Parameter Sets\""
-        // The lucide sliders-horizontal glyph, from the vendored sprite (icons-from-lucide-only).
-        branch shouldContain "/vendor/icons/lucide-sprite.svg#sliders-horizontal"
-        branch shouldContain "<button type=\"button\" class=\"app-nav-branch-toggle app-rail-label\" data-nav-tree-toggle"
-        branch shouldContain "aria-expanded=\"false\" aria-controls=\"nav-tree-parameter-sets\" aria-label=\"Parameter set folders\""
-        branch shouldContain "id=\"nav-tree-parameter-sets\" data-nav-tree=\"parameter-sets\" hidden"
-        branch shouldContain "data-nav-workspace=\"acme\""
-        // #415 — the branch gains the search input in the Pipelines branch's exact markup:
-        // the shared engine (js/tree/) serves it with no JS change, and the results swap
-        // into THIS panel's root (clearing returns to the tree by construction).
-        // The branch sits in Build, before Operate, and is one more item - not a second tree engine.
-        html.indexOf("data-nav-branch=\"parameter-sets\"") shouldBeLessThan html.indexOf(">Operate<")
+    fun `a non-family page renders the browser and its folder button hidden`() {
+        listOf("/executions", "/datasources", "/dashboard", "/schedules").forEach { path ->
+            val html =
+                engine.process(
+                    "pipelines/list",
+                    webContext().apply {
+                        fillList()
+                        setVariable("currentPath", path)
+                    },
+                )
+            html.substringAfter("<aside class=\"app-browser\"").substringBefore(">") shouldContain "hidden=\"hidden\""
+            html.substringAfter("<button type=\"button\" id=\"browser-open\"").substringBefore(">") shouldContain "hidden=\"hidden\""
+            Regex("""id="nav-tree-[a-z-]+"[^>]*>""").findAll(html).forEach { it.value shouldContain "hidden=\"hidden\"" }
+        }
     }
 
-    @Test
-    fun `#399 - Visualizations carries the same branch between Dashboards and Parameter Sets - link, toggle, lazy tree and search`() {
-        val html = engine.process("pipelines/list", webContext().apply { fillList() })
-        val branch =
-            html
-                .substringAfter("data-nav-branch=\"visualizations\"", missingDelimiterValue = "")
-                .substringBefore("data-nav-branch=\"parameter-sets\"")
+    private companion object {
+        /** A menu group's caption: its id suffix and its visible word. */
+        val CAPTION = Regex("""<div class="app-nav-section" id="app-nav-group-([a-z]+)">([A-Za-z]+)</div>""")
 
-        branch shouldContain "href=\"/visualizations\" class=\"app-nav-link"
-        branch shouldContain "data-nav-group=\"Build\" data-nav-label=\"Visualizations\""
-        // The lucide chart-line glyph, from the vendored sprite (icons-from-lucide-only).
-        branch shouldContain "/vendor/icons/lucide-sprite.svg#chart-line"
-        branch shouldContain "<button type=\"button\" class=\"app-nav-branch-toggle app-rail-label\" data-nav-tree-toggle"
-        branch shouldContain "aria-expanded=\"false\" aria-controls=\"nav-tree-visualizations\" aria-label=\"Visualization folders\""
-        branch shouldContain "id=\"nav-tree-visualizations\" data-nav-tree=\"visualizations\" hidden"
-        branch shouldContain "data-nav-workspace=\"acme\""
-        // The Pipelines branch's search box, addressing THIS panel's root.
-        // Order in Build: Dashboards → Visualizations → Parameter Sets → Operate.
-        html.indexOf("data-nav-branch=\"dashboards\"") shouldBeLessThan html.indexOf("data-nav-branch=\"visualizations\"")
-        html.indexOf("data-nav-branch=\"visualizations\"") shouldBeLessThan html.indexOf("data-nav-branch=\"parameter-sets\"")
-        html.indexOf("data-nav-branch=\"parameter-sets\"") shouldBeLessThan html.indexOf(">Operate<")
+        /** One resource-browser tree panel: its #350 id suffix and its `data-nav-tree`. */
+        val PANEL = Regex("""<div class="app-nav-tree app-browser-tree" id="nav-tree-([a-z-]+)" data-nav-tree="([a-z-]+)"[^>]*>""")
     }
 
     private fun webContext(): WebContext =

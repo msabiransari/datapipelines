@@ -9,59 +9,83 @@ import org.junit.jupiter.api.Test
 import java.nio.file.Files
 import java.nio.file.Paths
 
-/** Computed geometry and interactions for the global rail; user width owns layout, independent of tree content. */
+/**
+ * Computed geometry and interactions for the resource browser (#554, record §4): the menu has fixed
+ * 202/64 widths, the browser's user width (240–480, clamped to leave main 320) owns its column, and
+ * neither moves with tree content. At 1440 (the 1101–1599 band): 202 + 300 default + main 938.
+ */
 class PipelineSidebarTreeBrowserTest : RestTreeBrowserFixture() {
     @Test
-    fun `the rail resizes past 400 while reserving the main minimum then recovers the content`() {
+    fun `the browser resizes within 240-480 on its boundary, main keeps its minimum, and depth moves nothing`() {
         readyTree()
         seedPipeline("acme/deep/one")
         openTree()
         expand("acme")
-        page.locator("#rail-resize").focus()
+        menuWidth() shouldBe 202
+        width() shouldBe 300
+        mainWidth() shouldBe 1440 - 202 - 300
+        page.locator("#browser-boundary").focus()
         page.keyboard().press("End")
-        width() shouldBe 1120
-        (page.evaluate("() => document.getElementById('app-main').getBoundingClientRect().width") as Number).toInt() shouldBe 320
+        width() shouldBe 480
+        mainWidth() shouldBe 1440 - 202 - 480
+        page.locator("#browser-boundary").getAttribute("aria-valuenow") shouldBe "480"
         page.keyboard().press("Home")
-        width() shouldBe 232
-        (page.evaluate("() => document.getElementById('app-main').getBoundingClientRect().width") as Number).toInt() shouldBe 1208
-        val box = checkNotNull(page.locator("#rail-resize").boundingBox())
+        width() shouldBe 240
+        mainWidth() shouldBe 1440 - 202 - 240
+        page.keyboard().press("ArrowRight")
+        width() shouldBe 256
+        val box = checkNotNull(page.locator("#browser-boundary").boundingBox())
         page.mouse().move(box.x + box.width / 2, box.y + box.height / 2)
         page.mouse().down()
-        page.mouse().move(900.0, 400.0)
+        page.mouse().move(202.0 + 400, 400.0)
         page.evaluate(
-            "() => document.getElementById('rail-resize').dispatchEvent(new PointerEvent('pointercancel', {pointerId:1,bubbles:true}))",
+            "() => document.getElementById('browser-boundary')" +
+                ".dispatchEvent(new PointerEvent('pointercancel', {pointerId:1,bubbles:true}))",
         )
-        page.mouse().move(1100.0, 400.0)
+        page.mouse().move(202.0 + 470, 400.0)
         page.mouse().up()
-        width() shouldBe 900
+        width() shouldBe 400
         page.click("${folder("acme")} > .dp-tree-line button")
         expand("acme")
-        width() shouldBe 900
+        expand("acme/deep")
+        width() shouldBe 400
+        menuWidth() shouldBe 202
     }
 
     @Test
-    fun `collapse reset and temporary viewport clamps preserve and recover the preferred width`() {
+    fun `the menu collapse, a narrow window and a reload keep the browser preference, and reset returns the default`() {
         readyTree()
         seedPipeline("acme/one")
         openTree()
-        page.locator("#rail-resize").focus()
-        repeat(14) { page.keyboard().press("Shift+ArrowRight") }
-        width() shouldBe 932
-        page.click("#rail-boundary-collapse")
-        width() shouldBe 60
+        val key = "dp-browser-width:" + page.evaluate("() => document.documentElement.dataset.dpWorkspace")
+        page.locator("#browser-boundary").focus()
+        repeat(5) { page.keyboard().press("ArrowRight") }
+        width() shouldBe 380
+        page.evaluate("k => localStorage.getItem(k)", key) shouldBe "380"
+        // The menu's collapse and the browser's width are independent (record §3 rule 7).
         page.click("#rail-collapse")
-        width() shouldBe 932
+        menuWidth() shouldBe 64
+        width() shouldBe 380
+        page.click("#rail-collapse")
+        menuWidth() shouldBe 202
+        // A narrow window clamps the EFFECTIVE width to leave main 320 and never rewrites the
+        // preference: the explicit expansion holds in the 761–1100 band, so 800 - 202 - 320.
         page.setViewportSize(800, 900)
         settle()
-        width() shouldBe 480
+        menuWidth() shouldBe 202
+        width() shouldBe 278
+        mainWidth() shouldBe 320
+        page.locator("#browser-boundary").getAttribute("aria-valuemax") shouldBe "278"
+        page.evaluate("k => localStorage.getItem(k)", key) shouldBe "380"
         page.setViewportSize(1440, 900)
         settle()
-        width() shouldBe 932
+        width() shouldBe 380
         page.reload()
         page.waitForFunction("() => window.DatapipelinesSidebarTrees instanceof Map")
-        width() shouldBe 932
-        page.click("#rail-width-reset")
-        width() shouldBe 232
+        width() shouldBe 380
+        page.click("#browser-width-reset")
+        width() shouldBe 300
+        page.evaluate("k => localStorage.getItem(k)", key) shouldBe null
     }
 
     @Test
@@ -79,12 +103,16 @@ class PipelineSidebarTreeBrowserTest : RestTreeBrowserFixture() {
         openTree()
         expand("acme")
         expand("acme/flows")
-        page.evaluate("() => window.__railWitness=document.getElementById('app-rail')")
+        page.evaluate(
+            "() => {window.__railWitness=document.getElementById('app-rail');" +
+                "window.__browserWitness=document.getElementById('app-browser')}",
+        )
         page.locator(leaf(name)).getAttribute("href") shouldBe "/pipelines/$id"
         page.click(leaf(name))
         page.waitForURL("**/pipelines/$id")
         page.waitForFunction("() => !!window.__peInstance")
         page.evaluate("() => window.__railWitness===document.getElementById('app-rail')") shouldBe true
+        page.evaluate("() => window.__browserWitness===document.getElementById('app-browser')") shouldBe true
         val json = page.locator("#pipeline-data").textContent()
         json shouldContain "n_v1"
         json shouldNotContain "n_v2"
@@ -163,7 +191,7 @@ class PipelineSidebarTreeBrowserTest : RestTreeBrowserFixture() {
     }
 
     @Test
-    fun `catalog q deep links and Browse folders opens only the root then a row preserves the rail`() {
+    fun `catalog q deep links and Browse folders shows the hidden browser at its root then a row preserves both columns`() {
         readyTree()
         val id = seedPipeline("acme/catalog/first")
         seedPipeline("trade/catalog/second")
@@ -171,7 +199,11 @@ class PipelineSidebarTreeBrowserTest : RestTreeBrowserFixture() {
         page.waitForSelector("#pipeline-list-wrapper a.tpl-result")
         page.locator("#pipeline-list-wrapper a.tpl-result").count() shouldBe 1
         page.locator("#pipeline-filter-q").inputValue() shouldBe "first"
+        // #554: Browse folders SHOWS the browser — here after the reader hid it — and focuses its search.
+        page.click("#browser-hide")
+        page.locator("#app-browser").isVisible shouldBe false
         page.click("[data-nav-tree-reveal=pipelines]")
+        page.locator("#app-browser").isVisible shouldBe true
         page.waitForSelector(folder("acme"))
         page.evaluate("() => document.activeElement===window.DatapipelinesSidebarTrees.get('pipelines').input") shouldBe true
         page.locator("$panel [aria-expanded=true]").count() shouldBe 0
@@ -179,44 +211,52 @@ class PipelineSidebarTreeBrowserTest : RestTreeBrowserFixture() {
         page.click("#pipeline-list-wrapper a.tpl-result")
         page.waitForURL("**/pipelines/$id")
         page.evaluate("() => window.__railWitness===document.getElementById('app-rail')") shouldBe true
+        page.locator("#app-browser").isVisible shouldBe true
     }
 
     @Test
-    fun `phone drawer keeps long tree labels inside its scroll region without document overflow`() {
+    fun `the phone browser drawer wraps a long tree label inside itself with no sideways scroll anywhere`() {
         readyTree()
-        seedPipeline("acme/deep/leaf_with_a_deliberately_long_name_for_horizontal_scrolling")
+        val name = "acme/deep/leaf_with_a_deliberately_long_name_for_horizontal_scrolling"
+        seedPipeline(name)
         page.setViewportSize(390, 844)
-        page.reload()
-        page.click("#rail-open")
+        page.navigate("$baseUrl/pipelines")
         openTree()
         expand("acme")
         expand("acme/deep")
-        page.locator("#rail-resize").isVisible shouldBe false
+        page.locator("#browser-boundary").isVisible shouldBe false
+        width() shouldBe 360
         overflow() shouldBe false
-        page.evaluate("() => {const r=document.querySelector('#nav-tree-pipelines .dp-tree-scroll');r.scrollLeft=r.scrollWidth}")
-        (page.evaluate("() => document.querySelector('#nav-tree-pipelines .dp-tree-scroll').scrollLeft") as Number).toInt().let {
-            (it > 0) shouldBe
-                true
-        }
+        // Record §7: resource names wrap, unbroken ones included; the scroll region never widens.
+        page.evaluate(
+            "() => {const r=document.querySelector('#nav-tree-pipelines .dp-tree-scroll');return r.scrollWidth<=r.clientWidth}",
+        ) shouldBe true
+        val leafBox = checkNotNull(page.locator(leaf(name)).boundingBox())
+        val drawer = checkNotNull(page.locator("#app-browser").boundingBox())
+        (leafBox.x + leafBox.width <= drawer.x + drawer.width) shouldBe true
+        // Wrapped, not clipped: the whole name is laid out inside the anchor.
+        page.locator(leaf(name)).evaluate("a => a.scrollWidth <= a.clientWidth") shouldBe true
     }
 
     @Test
-    fun `tablet starts collapsed and explicit expansion uses the bounded preference`() {
+    fun `the tablet band starts with a 64 menu and a 270 browser, and the browser stays bounded once the menu expands`() {
         readyTree()
         seedPipeline("acme/one")
         page.setViewportSize(900, 900)
-        page.reload()
-        page.waitForFunction("() => window.DatapipelinesSidebarTrees instanceof Map")
-        width() shouldBe 60
-        page.click("#rail-collapse")
+        settle()
         openTree()
-        width() shouldBe 232
-        page.locator("#rail-resize").focus()
+        menuWidth() shouldBe 64
+        width() shouldBe 270
+        page.click("#rail-collapse")
+        menuWidth() shouldBe 202
+        width() shouldBe 270
+        page.locator("#browser-boundary").focus()
         page.keyboard().press("End")
-        width() shouldBe 580
+        width() shouldBe 900 - 202 - 320
+        mainWidth() shouldBe 320
         overflow() shouldBe false
         page.keyboard().press("Home")
-        width() shouldBe 232
+        width() shouldBe 240
     }
 
     @Test

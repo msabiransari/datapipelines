@@ -9,7 +9,11 @@ import java.net.URI
 import java.nio.file.Files
 import java.nio.file.Paths
 
-/** Template branch geometry, canonical links, keyboard, phone drawer and themes on the real REST tree. */
+/**
+ * The Templates panel of the resource browser (#554; the #478 in-rail accordion before it):
+ * family switching, geometry, canonical links, keyboard, the phone drawer and both themes on
+ * the real REST tree.
+ */
 class TemplateSidebarTreeBrowserTest : BrowserSuite() {
     private fun loginReadyUser(slug: String): String {
         val user =
@@ -68,12 +72,14 @@ class TemplateSidebarTreeBrowserTest : BrowserSuite() {
         )
     }
 
-    // ------------------------------------------------------------------ the rail
+    // ------------------------------------------------------------------ the browser
 
     private val panel = "#nav-tree-templates"
 
-    private fun railWidth(): Double =
-        (page.evaluate("() => document.querySelector('.app-rail').getBoundingClientRect().width") as Number).toDouble()
+    private fun width(id: String): Double =
+        (page.evaluate("id => Math.round(document.getElementById(id).getBoundingClientRect().width)", id) as Number).toDouble()
+
+    private fun browserWidth(): Double = width("app-browser")
 
     /** Two animation frames: the fit is written in one, the grid lays out by the next. */
     private fun settle() {
@@ -81,17 +87,12 @@ class TemplateSidebarTreeBrowserTest : BrowserSuite() {
     }
 
     /**
-     * Ensures the Templates panel is OPEN and its root level has landed. The toggle is a
-     * TOGGLE: after a navigation that restored the remembered open state, the panel is
-     * already open and clicking it would CLOSE it — so the click is conditional on the
-     * panel's own state, and the wait is scoped to the OPEN panel.
+     * Ensures the Templates panel is on screen and its tree has rendered (#554): the browser
+     * shows the family of the current page, so off a Templates page this goes to the catalog;
+     * on a phone the browser is a drawer, opened by the top bar's Browse control.
      */
     private fun openTree() {
-        val alreadyOpen =
-            page.evaluate("() => { const p = document.getElementById('nav-tree-templates'); return !!p && !p.hidden; }") as Boolean
-        if (!alreadyOpen) {
-            page.click("[data-nav-branch='templates'] [data-nav-tree-toggle]")
-        }
+        openBrowserTree("templates")
         page.waitForSelector("#nav-tree-templates:not([hidden]) [role=tree]")
         settle()
     }
@@ -117,24 +118,22 @@ class TemplateSidebarTreeBrowserTest : BrowserSuite() {
         page.screenshot(Page.ScreenshotOptions().setPath(dir.resolve("$name.png")).setFullPage(false))
     }
 
-    /** Wait for each resize's layout write before issuing the next key. */
-    private fun screenshotRail(width: String) {
+    /**
+     * The browser at one of the photographed widths: "narrow" its 240 floor (Home), "wide"
+     * its 480 ceiling (End, at 1440 the cap wins over 1440 - 202 - 320); a phone opens the
+     * drawer instead. Each key's layout write is waited for before the next step.
+     */
+    private fun screenshotBrowser(width: String) {
         if (width == "phone") {
-            page.click("#rail-open")
+            page.click("#browser-open")
             return
         }
-        page.focus("#rail-resize")
-        page.keyboard().press("Home")
-        page.waitForFunction("() => document.querySelector('.app-rail').getBoundingClientRect().width === 232")
-        if (width == "wide") {
-            repeat(4) { index ->
-                page.keyboard().press("Shift+ArrowRight")
-                page.waitForFunction(
-                    "expected => document.querySelector('.app-rail').getBoundingClientRect().width === expected",
-                    232 + (index + 1) * 50,
-                )
-            }
-        }
+        page.focus("#browser-boundary")
+        page.keyboard().press(if (width == "wide") "End" else "Home")
+        page.waitForFunction(
+            "expected => Math.round(document.getElementById('app-browser').getBoundingClientRect().width) === expected",
+            if (width == "wide") 480 else 240,
+        )
     }
 
     private val consoleErrors = mutableListOf<String>()
@@ -195,25 +194,30 @@ class TemplateSidebarTreeBrowserTest : BrowserSuite() {
             "href" to null,
         )
 
+    /**
+     * Exactly the family's panel is on screen (null: the browser column is hidden — Hide keeps the
+     * active panel unhidden inside a column that is off screen, so the check reads visibility).
+     */
     private fun assertOpen(family: String?) {
-        page.locator(".app-nav-tree:not([hidden])").count() shouldBe if (family == null) 0 else 1
-        page.locator("[data-nav-tree-toggle][aria-expanded=true]").count() shouldBe if (family == null) 0 else 1
-        page.locator(".app-nav-branch.is-tree-open").count() shouldBe if (family == null) 0 else 1
+        page.locator("#app-browser .app-nav-tree:visible").count() shouldBe if (family == null) 0 else 1
+        if (family != null) page.locator("#app-browser .app-nav-tree:not([hidden])").count() shouldBe 1
+        page.locator("#app-browser").isVisible shouldBe (family != null)
         if (family != null) page.locator("#nav-tree-$family").isVisible shouldBe true
     }
 
     @Test
     @Suppress("LongMethod") // one fixture carries the query, folder, scroll and request witnesses through A → B → A
-    fun `the accordion switches exclusively retains context and excludes hidden controls from tab order`() {
+    fun `switching families keeps each panel's query expansion and scroll and hidden panels leave the tab order`() {
         startTrace()
         page.setViewportSize(1440, 900)
-        loginReadyUser("accordion478")
+        loginReadyUser("browser554")
         val requests = mutableListOf<String>()
         page.route(java.util.function.Predicate { it.contains("/api/v1/pipelines/tree") }, { route ->
             requests += route.request().url()
             answerPipelines(route)
         })
-        page.click("[data-nav-branch=pipelines] [data-nav-tree-toggle]")
+        page.click(".app-nav-link[data-nav-section='/pipelines']")
+        page.waitForURL("**/pipelines")
         page.waitForSelector("#nav-tree-pipelines [data-tree-key='folder:root']")
         assertOpen("pipelines")
         page.locator("#nav-tree-pipelines input").getAttribute("placeholder") shouldBe "Search pipelines…"
@@ -231,18 +235,17 @@ class TemplateSidebarTreeBrowserTest : BrowserSuite() {
             }""",
         )
         page.evaluate("() => window.__accordion.top") shouldBe 600
+        settle()
         val before = requests.size
-        page.click("[data-nav-branch=templates] [data-nav-tree-toggle]")
+        // #554 A.4(c): the menu's Templates link (a boosted swap) shows the Templates panel in the
+        // same document; coming back shows the Pipelines instance exactly as it was left.
+        page.click(".app-nav-link[data-nav-section='/templates']")
+        page.waitForSelector("#template-list-wrapper")
         page.waitForSelector("#nav-tree-templates [role=tree]")
         assertOpen("templates")
         page.locator("$panel input").getAttribute("placeholder") shouldBe "Search templates…"
-        // Native Enter closes, and Space opens: both use the same click path as the pointer.
-        page.press("[data-nav-branch=templates] [data-nav-tree-toggle]", "Enter")
-        assertOpen(null)
-        page.evaluate("() => document.activeElement.checkVisibility()") shouldBe true
-        page.press("[data-nav-branch=templates] [data-nav-tree-toggle]", "Space")
-        assertOpen("templates")
-        page.click("[data-nav-branch=pipelines] [data-nav-tree-toggle]")
+        page.click(".app-nav-link[data-nav-section='/pipelines']")
+        page.waitForURL("**/pipelines")
         assertOpen("pipelines")
         page.inputValue("#nav-tree-pipelines input") shouldBe "item"
         page.locator(folder).getAttribute("aria-expanded") shouldBe "true"
@@ -260,28 +263,30 @@ class TemplateSidebarTreeBrowserTest : BrowserSuite() {
             page.keyboard().press("Tab")
             page.evaluate("() => !!document.activeElement && !document.activeElement.closest('[hidden]')") shouldBe true
         }
+        // The menu's collapse is not the browser's: the panel, its query and its scroll stay put.
         page.click("#rail-collapse")
         page.waitForFunction("() => document.documentElement.classList.contains('rail-collapsed')")
-        page.locator("#nav-tree-pipelines input").isVisible shouldBe false
+        width("app-rail") shouldBe 64.0
+        page.locator("#nav-tree-pipelines input").isVisible shouldBe true
+        browserWidth() shouldBe 300.0
         page.click("#rail-collapse")
         page.waitForFunction("() => !document.documentElement.classList.contains('rail-collapsed')")
         assertOpen("pipelines")
         page.inputValue("#nav-tree-pipelines input") shouldBe "item"
         page.evaluate("() => window.__accordion.tree.scroll.scrollTop === window.__accordion.top") shouldBe true
         requests.size shouldBe before
-        // The catalog link keeps navigation separate from disclosure; Browse folders then switches and focuses.
-        page.click("[data-nav-branch=templates] .app-nav-link")
+        // Hide hands focus to the folder button; the catalog's Browse folders shows the browser again
+        // and focuses the active family's search.
+        page.click(".app-nav-link[data-nav-section='/templates']")
         page.waitForSelector("#template-list-wrapper")
-        assertOpen("pipelines")
-        page.focus("#nav-tree-pipelines input")
+        page.click("#browser-hide")
+        assertOpen(null)
+        page.evaluate("() => document.activeElement?.id") shouldBe "browser-open"
+        page.evaluate("() => document.activeElement.checkVisibility()") shouldBe true
         page.evaluate("() => document.querySelector('[data-nav-tree-reveal=templates]').click()")
         assertOpen("templates")
         page.evaluate("() => document.activeElement.matches('#nav-tree-templates input')") shouldBe true
-        // A programmatic collapse cannot leave focus stranded in its hidden search.
-        page.evaluate("() => document.querySelector('[data-nav-branch=templates] [data-nav-tree-toggle]').click()")
-        assertOpen(null)
-        page.evaluate("() => document.activeElement.matches('[data-nav-branch=templates] [data-nav-tree-toggle]')") shouldBe true
-        page.evaluate("() => document.activeElement.checkVisibility()") shouldBe true
+        requests.size shouldBe before
         consoleErrors shouldBe emptyList()
     }
 
@@ -291,9 +296,10 @@ class TemplateSidebarTreeBrowserTest : BrowserSuite() {
         loginReadyUser("late478")
         val held = mutableListOf<Route>()
         page.route(java.util.function.Predicate { it.contains("/api/v1/pipelines/tree") }, { held += it })
-        page.click("[data-nav-branch=pipelines] [data-nav-tree-toggle]")
+        page.click(".app-nav-link[data-nav-section='/pipelines']")
         page.waitForCondition { held.size == 1 }
-        page.click("[data-nav-branch=templates] [data-nav-tree-toggle]")
+        page.click(".app-nav-link[data-nav-section='/templates']")
+        page.waitForSelector("#nav-tree-templates input")
         page.focus("#nav-tree-templates input")
         assertOpen("templates")
         answerPipelines(held.removeAt(0))
@@ -305,44 +311,36 @@ class TemplateSidebarTreeBrowserTest : BrowserSuite() {
     }
 
     @Test
-    fun `legacy restoration chooses the current page then menu order and removes old keys`() {
+    fun `the retired accordion keys are removed on sight and never choose a panel - the page's family does`() {
         startTrace()
-        val workspace = loginReadyUser("restore478")
-        for ((path, family) in listOf("/pipelines" to "pipelines", "/templates" to "templates", "/dashboard" to "pipelines")) {
-            page.evaluate(
-                """ws => {
-                  localStorage.removeItem('dp-tree-open:' + ws);
-                  localStorage.setItem('dp-tree-panel:' + ws + ':pipelines', '1');
-                  localStorage.setItem('dp-tree-panel:' + ws + ':templates', '1');
-                }""",
-                workspace,
-            )
+        val workspace = loginReadyUser("restore554")
+        val seed =
+            """ws => {
+              localStorage.setItem('dp-tree-open:' + ws, 'parameter-sets');
+              ['pipelines','templates'].forEach(f => localStorage.setItem('dp-tree-panel:' + ws + ':' + f, '1'));
+            }"""
+        val retiredGone =
+            """ws => localStorage.getItem('dp-tree-open:' + ws) === null &&
+              ['pipelines','templates','dashboards','visualizations','parameter-sets']
+                .every(f => localStorage.getItem('dp-tree-panel:' + ws + ':' + f) === null)"""
+        for ((path, family) in listOf("/dashboard" to null, "/pipelines" to "pipelines", "/templates" to "templates")) {
+            page.evaluate(seed, workspace)
             page.navigate("$baseUrl$path")
-            page.waitForSelector("#nav-tree-$family [role=tree]")
+            page.waitForFunction("() => window.DatapipelinesSidebarTrees instanceof Map")
+            if (family != null) page.waitForSelector("#nav-tree-$family [role=tree]")
             assertOpen(family)
-            page.evaluate(
-                """ws => ['pipelines','templates','dashboards','visualizations','parameter-sets']
-                  .every(f => localStorage.getItem('dp-tree-panel:' + ws + ':' + f) === null)""",
-                workspace,
-            ) shouldBe true
-            page.evaluate("ws => localStorage.getItem('dp-tree-open:' + ws)", workspace) shouldBe family
+            page.evaluate(retiredGone, workspace) shouldBe true
         }
-        page.evaluate("ws => localStorage.setItem('dp-tree-open:' + ws, 'parameter-sets')", workspace)
-        page.reload()
+        page.navigate("$baseUrl/parameter-sets")
         page.waitForSelector("#nav-tree-parameter-sets input")
         assertOpen("parameter-sets")
         page.locator("#nav-tree-parameter-sets input").getAttribute("placeholder") shouldBe "Search parameter sets…"
         page.locator("#nav-tree-parameter-sets input").getAttribute("aria-label") shouldBe "Search Parameter Sets"
-        page.evaluate("ws => localStorage.setItem('dp-tree-open:' + ws, '<unknown>')", workspace)
-        page.reload()
-        page.waitForFunction("() => window.DatapipelinesSidebarTrees instanceof Map")
-        assertOpen(null)
-        page.evaluate("ws => localStorage.getItem('dp-tree-open:' + ws)", workspace) shouldBe null
         consoleErrors shouldBe emptyList()
     }
 
     // A deep, long-named path: four levels with long segments, so its leaf row is wider than
-    // the rail's maximum at 1440 (the measured case, not a guess).
+    // the browser's maximum at 1440 (the measured case, not a guess); the row wraps.
     private val deepFolders =
         listOf(
             "acme",
@@ -360,21 +358,28 @@ class TemplateSidebarTreeBrowserTest : BrowserSuite() {
         loginReadyUser("tpl398geo")
         seedTemplate(deepLeaf)
         seedTemplate("acme/short/s1.sql")
-        page.navigate("$baseUrl/dashboard")
         openTree()
         page.locator("$panel a").count() shouldBe 0
-        railWidth() shouldBe 232.0
-        page.locator("#rail-resize").focus()
-        repeat(12) { page.keyboard().press("Shift+ArrowRight") }
-        railWidth() shouldBe 832.0
+        browserWidth() shouldBe 300.0
+        page.locator("#browser-boundary").focus()
+        repeat(6) { page.keyboard().press("ArrowRight") }
+        browserWidth() shouldBe 396.0
         deepFolders.forEach { expand(it) }
         page.waitForSelector(leaf(deepLeaf))
         page.locator("${leaf(deepLeaf)} span").first().innerText() shouldBe deepLeaf.substringAfterLast('/')
-        railWidth() shouldBe 832.0
+        browserWidth() shouldBe 396.0
+        width("app-rail") shouldBe 202.0
+        // Record §7: long names wrap inside the column — the tree never scrolls sideways.
+        val noSideways =
+            "() => { const s = document.querySelector('#nav-tree-templates .dp-tree-scroll'); return s.scrollWidth <= s.clientWidth; }"
+        page.evaluate(noSideways) shouldBe true
         page.click("${folder(deepFolders[1])} > .dp-tree-line button")
-        railWidth() shouldBe 832.0
-        page.click("[data-nav-branch='templates'] [data-nav-tree-toggle]")
-        railWidth() shouldBe 832.0
+        browserWidth() shouldBe 396.0
+        // Hide returns the browser's width to the content: main grows by exactly the column.
+        val main = width("app-main")
+        page.click("#browser-hide")
+        assertOpen(null)
+        width("app-main") shouldBe main + 396.0
         consoleErrors shouldBe emptyList()
     }
 
@@ -382,15 +387,14 @@ class TemplateSidebarTreeBrowserTest : BrowserSuite() {
     fun `a leaf preserves its loaded row into the workspace and marks current without restoration fetch`() {
         loginReadyUser("tpl398leaf")
         seedTemplate("test/nav_probe.sql")
-        page.navigate("$baseUrl/dashboard")
         openTree()
         expand("test")
         page.waitForSelector(leaf("test/nav_probe.sql"))
 
         page.evaluate(
             "() => " +
-                "{window.__templateRail=document.getElementById('app-rail');window.__templateRow=document.q" +
-                "uerySelector('#nav-tree-templates [role=treeitem]')}",
+                "{window.__templateRail=document.getElementById('app-rail');window.__templateBrowser=document.getElementById(" +
+                "'app-browser');window.__templateRow=document.querySelector('#nav-tree-templates [role=treeitem]')}",
         )
         page.locator(leaf("test/nav_probe.sql")).getAttribute("href") shouldBe "/templates/test/nav_probe.sql"
 
@@ -399,6 +403,7 @@ class TemplateSidebarTreeBrowserTest : BrowserSuite() {
         page.waitForSelector(".tw-root")
         page.evaluate(
             "() => window.__templateRail===document.getElementById('app-rail') && " +
+                "window.__templateBrowser===document.getElementById('app-browser') && " +
                 "window.__templateRow===document.querySelector('#nav-tree-templates [role=treeitem]')",
         ) shouldBe
             true
@@ -426,7 +431,6 @@ class TemplateSidebarTreeBrowserTest : BrowserSuite() {
     fun `a template loaded only by search marks current without browsing its ancestors`() {
         loginReadyUser("tpl460searchcurrent")
         seedTemplate("search/deep/current_probe.sql")
-        page.navigate("$baseUrl/dashboard")
         val requests = mutableListOf<String>()
         page.onRequest { if (it.url().contains("/api/v1/templates/tree")) requests += it.url() }
         openTree()
@@ -454,7 +458,7 @@ class TemplateSidebarTreeBrowserTest : BrowserSuite() {
     }
 
     @Test
-    fun `the catalog has no tree and its Browse folders opens the sidebar - the keyboard reaches the rows`() {
+    fun `the catalog has no tree and its Browse folders shows the browser - the keyboard reaches the rows`() {
         loginReadyUser("tpl398cat")
         seedTemplate("test/cat_probe.sql")
         page.setViewportSize(1440, 900)
@@ -471,8 +475,10 @@ class TemplateSidebarTreeBrowserTest : BrowserSuite() {
         row.getAttribute("href") shouldBe "/templates/test/cat_probe.sql"
         row.locator(".tpl-path").getAttribute("title") shouldBe "test/cat_probe.sql"
 
-        // Browse folders is the sidebar tree's other door: the branch opens, focus lands in
-        // its search (the host adapter's reveal).
+        // Browse folders is the browser's other door (#554): with the browser hidden, it shows it
+        // and focus lands in the Templates search (the host adapter's reveal).
+        page.click("#browser-hide")
+        assertOpen(null)
         page.click("[data-nav-tree-reveal='templates']")
         page.waitForSelector("#nav-tree-templates [role=tree]")
         page.waitForSelector("#nav-tree-templates [aria-expanded]")
@@ -492,7 +498,7 @@ class TemplateSidebarTreeBrowserTest : BrowserSuite() {
     }
 
     @Test
-    @Suppress("LongMethod") // the six theme/rail combinations photograph four real, synchronized tree states each
+    @Suppress("LongMethod") // the six theme/width combinations photograph four real, synchronized tree states each
     fun `the phone drawer carries the tree, and both themes photograph it`() {
         startTrace()
         loginReadyUser("tpl398phone")
@@ -524,16 +530,22 @@ class TemplateSidebarTreeBrowserTest : BrowserSuite() {
         })
         listOf("light", "dark").forEach { theme ->
             page.setViewportSize(1440, 900)
-            page.navigate("$baseUrl/pipelines")
+            page.navigate("$baseUrl/templates")
             ensureTheme(theme)
             for (width in listOf("wide", "narrow", "phone")) {
                 page.setViewportSize(if (width == "phone") 390 else 1440, if (width == "phone") 844 else 900)
-                page.navigate("$baseUrl/pipelines")
-                screenshotRail(width)
+                page.navigate("$baseUrl/templates")
+                screenshotBrowser(width)
                 openTree()
-                railWidth() shouldBe if (width == "wide") 432.0 else 232.0
+                // #554: the phone drawer is min(360px, 100vw) wide.
+                browserWidth() shouldBe
+                    when (width) {
+                        "wide" -> 480.0
+                        "narrow" -> 240.0
+                        else -> 360.0
+                    }
                 assertOpen("templates")
-                page.locator("[data-nav-branch=pipelines] .app-nav-link.active").count() shouldBe 1
+                page.locator(".app-nav-link[data-nav-section='/templates'].active").count() shouldBe 1
                 hold = true
                 page.fill("$panel input", "leaf_template")
                 page.waitForCondition { held.size == 1 }

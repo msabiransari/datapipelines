@@ -47,7 +47,8 @@ class BrandMarkDarkModeShotsBrowserTest : DashboardBrowserSuite() {
         val board = seedBoardWithGrid(root)
         page.navigate("$baseUrl/pipelines")
         page.locator("#pipeline-filter-q").waitFor()
-        page.locator(".app-nav-link[aria-current='page'] .app-nav-badge").waitFor()
+        // #554: the admitted count moved from the menu badge to the resource browser's header.
+        page.locator("#app-browser .app-browser-count[data-browser-family='pipelines']").waitFor()
         paletteShot("pipelines")
         val measurements = measurePalette()
 
@@ -166,10 +167,11 @@ class BrandMarkDarkModeShotsBrowserTest : DashboardBrowserSuite() {
               };
               const nav = document.querySelector('.app-nav-link[aria-current="page"]');
               const frame = document.querySelector('#pipeline-filter-q');
-              const badge = nav.querySelector('.app-nav-badge');
+              const badge = document.querySelector('#app-browser .app-browser-count:not([hidden])');
               const measured = {
                 page: background(document.querySelector('#app-main')),
                 rail: background(document.querySelector('.app-rail')),
+                browser: background(document.querySelector('#app-browser')),
                 selected: background(nav), indicator: style(nav).borderLeftColor,
                 indicatorWidth: style(nav).borderLeftWidth,
                 boundary: style(frame).borderTopColor, boundaryWidth: style(frame).borderTopWidth,
@@ -186,6 +188,7 @@ class BrandMarkDarkModeShotsBrowserTest : DashboardBrowserSuite() {
               const pairs = [
                 ['body on page', measured.bodyText, measured.page, 4.5],
                 ['body on rail', measured.bodyText, measured.rail, 4.5],
+                ['body on browser', measured.bodyText, measured.browser, 4.5],
                 ['nav on selected', measured.navText, measured.selected, 4.5],
                 ['badge on its surface', measured.badgeText, measured.badgeSurface, 4.5],
                 ['boundary inside', measured.boundary, measured.boundarySurface, 3],

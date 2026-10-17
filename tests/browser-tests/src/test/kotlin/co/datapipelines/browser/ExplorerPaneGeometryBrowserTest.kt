@@ -297,10 +297,10 @@ class ExplorerPaneGeometryBrowserTest : SchedulesBrowserSuite() {
                 """"inputs":{"date":"${'$'}current_date","fiscal_start":"${'$'}org_fiscal_start_date"}}]}""",
         )
 
-        // #350: the pipeline tree is the SIDEBAR's — its leaf carries the same badges.
+        // #350: the pipeline tree is the resource browser's (#554) — its leaf carries the same badges.
         page.setViewportSize(WIDTHS.first(), 900)
         page.navigate("$baseUrl/dashboard")
-        page.click("[data-nav-branch='pipelines'] [data-nav-tree-toggle]")
+        openBrowserTree("pipelines")
         page.waitForSelector("#nav-tree-pipelines [aria-expanded] > .dp-tree-line button")
         page.waitForResponse({ it.url().contains("/api/v1/pipelines/tree") && it.url().contains("parent=") }) {
             page.locator("#nav-tree-pipelines [aria-expanded] > .dp-tree-line button").first().click()

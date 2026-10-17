@@ -1153,9 +1153,9 @@ object SiteShotsMain {
             setTheme("dark")
             page.navigate("$baseUrl/pipelines")
             waitFor("#pipeline-list-wrapper")
-            // #350: the pipeline tree is the SIDEBAR's — open it and the showcase's folders, so
-            // the dark shell shows the pipeline the other shots do.
-            if (page.locator("#nav-tree-pipelines").isHidden) page.click("[data-nav-branch='pipelines'] [data-nav-tree-toggle]")
+            // #350: the pipeline tree is the resource browser's (#554), which a Pipelines page
+            // shows — open the showcase's folders, so the dark shell shows the pipeline the
+            // other shots do.
             page.waitForFunction("() => window.DatapipelinesSidebarTrees.get('pipelines')?.state.levels.get(null)?.complete")
             folderPrefixes(showcase).forEach { expandTreeFolder("pipelines", it) }
             page.locator("#nav-tree-pipelines a[title='$showcase']").waitFor()

@@ -54,29 +54,29 @@ class DashboardPagesBrowserTest : DashboardBrowserSuite() {
 
     @Test
     @Order(2)
-    fun `the sidebar's Dashboards branch expands lazily, expands search paths, and clearing returns the tree`() {
+    fun `the browser's Dashboards panel expands lazily, expands search paths, and clearing returns the tree`() {
         startTrace()
         val root = ready("dpbranch")
         seedBoard(root)
         page.navigate("$baseUrl/dashboard")
-        page.waitForSelector("[data-nav-branch='dashboards']")
 
-        // Closed until its own toggle is clicked (#350: the rail's one navigating-tree pattern —
-        // a toggle beside the link, a panel below).
+        // #554: mounted lazily — nothing on a non-family page; the family's page shows it in the
+        // resource browser.
+        page.locator("#app-browser").isVisible shouldBe false
         page.locator("#nav-tree-dashboards [role=tree]").count() shouldBe 0
-        page.click("[data-nav-branch='dashboards'] [data-nav-tree-toggle]")
+        openBrowserTree("dashboards")
         page.waitForSelector("#nav-tree-dashboards [role=tree]")
         page.waitForSelector("#nav-tree-dashboards [aria-expanded]")
-        page.locator("[data-nav-branch='dashboards'] [data-nav-tree-toggle]").getAttribute("aria-expanded") shouldBe "true"
+        page.locator("#nav-tree-dashboards").isVisible shouldBe true
 
         // #400 — the branch's search: a non-empty query swaps the FLAT results into the same
         // nav root (role=listbox), the shared engine serving it with no JS change.
-        page.fill("[data-nav-branch='dashboards'] input[type=search]", root)
+        page.fill("#nav-tree-dashboards input[type=search]", root)
         page.waitForSelector("#nav-tree-dashboards a.dp-tree-activate")
         page.locator("#nav-tree-dashboards a.dp-tree-activate").count() shouldBe 1
         // Clearing the box returns the tree, by construction: the dispatcher answers the
         // empty query with the root level again.
-        page.fill("[data-nav-branch='dashboards'] input[type=search]", "")
+        page.fill("#nav-tree-dashboards input[type=search]", "")
         page.waitForSelector("#nav-tree-dashboards [aria-expanded]")
         // The shared engine's NAV context: the arrows move focus through the tree and navigate
         // nowhere (L3b left this tree unwired for exactly that reason; the context solves it).

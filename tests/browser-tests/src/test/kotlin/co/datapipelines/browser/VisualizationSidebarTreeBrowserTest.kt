@@ -9,19 +9,21 @@ import java.nio.file.Files
 import java.nio.file.Paths
 
 /**
- * #399 — the rail's Visualizations branch and the flat catalog in a real browser (ui-screens.md §3.4, §4.24): the
- * item sits in Build between Dashboards and Parameter Sets; the toggle opens the lazy tree without navigating; a
- * folder loads its level once; a leaf is a FULL document onto the workspace, which marks it current; the search
- * swaps the flat results into the root and clearing returns the tree; the catalog's `q` deep-links; the phone
- * drawer never makes the page scroll sideways; both themes. Every page is ZERO-CSP (the suite's after-each).
+ * #399 — the Visualizations menu item, its resource-browser panel and the flat catalog in a real browser (ui-screens.md
+ * §3.4, §4.24): the item sits in Explore between Dashboards and Parameter Sets (#554); the family's page shows the
+ * lazy tree in the browser, in the same document; a folder loads its level once; a leaf is a FULL document onto the
+ * workspace, which marks it current; the search swaps the flat results into the root and clearing returns the tree;
+ * the catalog's `q` deep-links; the phone drawer never makes the page scroll sideways; both themes. Every page is
+ * ZERO-CSP (the suite's after-each).
  */
 class VisualizationSidebarTreeBrowserTest : VisualizationBrowserSuite() {
     private val panel = "#nav-tree-visualizations"
 
-    private fun openTree() {
-        page.click("[data-nav-branch='visualizations'] [data-nav-tree-toggle]")
-        page.waitForFunction("() => window.DatapipelinesSidebarTrees.get('visualizations')?.state.levels.get(null)?.complete")
-    }
+    /**
+     * The browser shows the family of the current page (#554): off a Visualizations page the menu's
+     * link gets there in the same document; on a phone the browser is a drawer, opened by Browse.
+     */
+    private fun openTree() = openBrowserTree("visualizations")
 
     private fun folder(path: String) = "$panel [data-tree-key='folder:$path']"
 
@@ -45,17 +47,17 @@ class VisualizationSidebarTreeBrowserTest : VisualizationBrowserSuite() {
 
         val order =
             page.evaluate(
-                "() => Array.from(document.querySelectorAll('.app-nav [data-nav-group=\"Build\"]'))" +
+                "() => Array.from(document.querySelectorAll('.app-nav [data-nav-group=\"Explore\"]'))" +
                     ".map(a => a.getAttribute('data-nav-section'))",
             ) as List<*>
         val at = order.indexOf("/visualizations")
         order[at - 1] shouldBe "/dashboards"
         order[at + 1] shouldBe "/parameter-sets"
-        page.locator("[data-nav-branch='visualizations'] .app-nav-link use").getAttribute("href") shouldContain "#chart-line"
+        page.locator(".app-nav-link[data-nav-section='/visualizations'] use").getAttribute("href") shouldContain "#chart-line"
 
         page.evaluate("() => { window.__v399Tree = 1; }")
         openTree()
-        page.evaluate("() => window.__v399Tree") shouldBe 1 // opening a tree is not navigating
+        page.evaluate("() => window.__v399Tree") shouldBe 1 // the menu link is a boosted swap: the same document
         expand(root)
         expand("$root/charts")
         page.locator(leaf(id)).getAttribute("hx-boost") shouldBe null
@@ -104,14 +106,14 @@ class VisualizationSidebarTreeBrowserTest : VisualizationBrowserSuite() {
         startTrace()
         page.setViewportSize(DESKTOP_W, DESKTOP_H)
         val root = ready("vtph")
-        val (id, _) = createVisualization("$root/charts/units_with_a_deliberately_long_leaf_name_for_the_rail")
+        val (id, _) = createVisualization("$root/charts/units_with_a_deliberately_long_leaf_name_for_the_browser")
 
         for (theme in listOf("light", "dark")) {
             page.setViewportSize(DESKTOP_W, DESKTOP_H)
             ensureTheme(theme)
             page.navigate("$baseUrl/visualizations/$id")
             page.waitForSelector("#viz-pane-preview:not([hidden])")
-            if (!page.locator(panel).isVisible) openTree()
+            openTree()
             expand(root)
             expand("$root/charts")
             page.waitForSelector("${leaf(id)}[aria-current='page']")
@@ -126,9 +128,8 @@ class VisualizationSidebarTreeBrowserTest : VisualizationBrowserSuite() {
 
             page.setViewportSize(PHONE_W, PHONE_H)
             page.navigate("$baseUrl/visualizations/$id")
-            page.click("#rail-open")
-            page.waitForSelector("html.rail-open")
-            if (!page.locator(panel).isVisible) openTree()
+            openTree()
+            page.waitForSelector("html.browser-open")
             expand(root)
             expand("$root/charts")
             page.waitForSelector("${leaf(id)}[aria-current='page']")

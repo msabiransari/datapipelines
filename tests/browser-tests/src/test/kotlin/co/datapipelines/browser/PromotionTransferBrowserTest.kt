@@ -55,7 +55,7 @@ class PromotionTransferBrowserTest : BrowserSuite() {
 
         // The promoter sees the two family tables inside the form, with the same Send column.
         page.navigate("$baseUrl/promotion")
-        page.waitForSelector("h2:has-text('Visualizations')")
+        page.waitForSelector("#app-main h2:has-text('Visualizations')")
         // The reused browser database holds earlier runs' dashboards too (each admitted) — the
         // assertion is THIS run's rows, pinned by value, the 313 test's shape.
         page.locator("form input[name=visualization][value=\"tx-viz/$suffix\"]").count() shouldBe 1

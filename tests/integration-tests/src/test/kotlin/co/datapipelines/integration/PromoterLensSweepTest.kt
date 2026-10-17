@@ -219,7 +219,7 @@ class PromoterLensSweepTest {
     }
 
     private fun screensAreTheNewerSet(auth: (RequestSpecification) -> RequestSpecification) {
-        withClue("the catalogs, the search palette, the dashboard tile and the rail badges") {
+        withClue("the catalogs, the search palette, the dashboard tile and the browser header counts") {
             val pipelinesCatalog = call("/partials/pipelines", auth).body
             VISIBLE_PIPELINES.forEach { pipelinesCatalog.contains(it) shouldBe true }
             val templatesCatalog = call("/partials/templates", auth).body
@@ -227,7 +227,8 @@ class PromoterLensSweepTest {
             val search = call("/partials/search?q=$P/", auth).body
             VISIBLE_PIPELINES.forEach { search.contains(it) shouldBe true }
             statNumber(call("/partials/dashboard-stats", auth).body) shouldBe VISIBLE_PIPELINES.size
-            railBadges(call("/pipelines", auth).body) shouldBe listOf(VISIBLE_PIPELINES.size, VISIBLE_TEMPLATES.size)
+            browserCounts(call("/pipelines", auth).body).filterKeys { it in TREE_FAMILIES } shouldBe
+                mapOf("pipelines" to VISIBLE_PIPELINES.size, "templates" to VISIBLE_TEMPLATES.size)
         }
         treesAreTheNewerSet("pipelines", P, VISIBLE_PIPELINES, auth)
         treesAreTheNewerSet("templates", T, VISIBLE_TEMPLATES, auth)
@@ -420,8 +421,11 @@ class PromoterLensSweepTest {
         reachableGetRoutes().forEach { route -> identifierPairs(route).forEach { (hidden, _) -> call(hidden, auth) } }
         names(toolResult(tool("pipelines_list", "{}", keyFor(AUTHOR))), "name") shouldContainExactlyInAnyOrder
             VISIBLE_PIPELINES + HIDDEN_PIPELINES
-        railBadges(call("/pipelines", auth).body) shouldBe
-            listOf(VISIBLE_PIPELINES.size + HIDDEN_PIPELINES.size, VISIBLE_TEMPLATES.size + HIDDEN_TEMPLATES.size)
+        browserCounts(call("/pipelines", auth).body).filterKeys { it in TREE_FAMILIES } shouldBe
+            mapOf(
+                "pipelines" to VISIBLE_PIPELINES.size + HIDDEN_PIPELINES.size,
+                "templates" to VISIBLE_TEMPLATES.size + HIDDEN_TEMPLATES.size,
+            )
 
         withClue("a non-lensed principal never triggers the inventory call — the stub's request log must not grow") {
             stubRequests.size shouldBe before
@@ -484,7 +488,9 @@ class PromoterLensSweepTest {
                 call("/partials/pipelines", auth).body.contains("Could not read the target") shouldBe true
                 call("/partials/templates", auth).body.contains("Could not read the target") shouldBe true
             }
-            railBadges(call("/pipelines", auth).body) shouldBe listOf(0, 0)
+            // #554: an unreadable target has no admitted size, so the browser header shows no count at all
+            // (before #554 the rail badges read 0 and 0 — a number the reader could not tell from an empty set).
+            browserCounts(call("/pipelines", auth).body) shouldBe emptyMap()
             val key = keyFor(PROMOTER)
             toolResult(tool("pipelines_list", "{}", key)).size() shouldBe 0
             refused(tool("pipelines_get", """{"id":"$PIPE_NEWER"}""", key)) shouldBe true
@@ -679,7 +685,9 @@ class PromoterLensSweepTest {
             "no stat tile in: ${html.take(LEAK_EXCERPT)}"
         }.groupValues[1].toInt()
 
-    private fun railBadges(html: String): List<Int> = BADGE.findAll(html).map { it.groupValues[1].toInt() }.toList()
+    /** #554: the resource browser header's admitted count per family (one span per family, the inactive ones hidden). */
+    private fun browserCounts(html: String): Map<String, Int> =
+        BROWSER_COUNT.findAll(html).associate { match -> match.groupValues[1] to match.groupValues[2].toInt() }
 
     private fun tool(
         tool: String,
@@ -758,7 +766,8 @@ class PromoterLensSweepTest {
         private val VARIABLE_PATTERN = Regex("\\{([^}]+)\\}")
         private val CORRELATION_ID = Regex("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
         private val STAT = Regex("app-stat-v\">(\\d+)<")
-        private val BADGE = Regex("app-nav-badge app-rail-label\">(\\d+)<")
+        private val BROWSER_COUNT = Regex("class=\"app-browser-count\" data-browser-family=\"([a-z-]+)\"[^>]*><span>(\\d+)</span>")
+        private val TREE_FAMILIES = setOf("pipelines", "templates")
 
         /**
          * Floors, not targets — the 2026-09-21 walk: 57 promoter-reachable GET routes, 57

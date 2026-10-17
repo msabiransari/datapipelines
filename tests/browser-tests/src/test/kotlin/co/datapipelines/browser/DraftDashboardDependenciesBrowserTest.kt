@@ -2,10 +2,17 @@ package co.datapipelines.browser
 
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 
 /** #459: a browser builds and runs an entirely draft graph through the real authoring API. */
 class DraftDashboardDependenciesBrowserTest : DashboardBrowserSuite() {
+    /** #554: these cases assert the filters column, which needs the desktop width (see [desktopBoard]). */
+    @BeforeEach
+    fun desktopWidth() {
+        desktopBoard()
+    }
+
     @Test
     @Suppress("LongMethod") // creation, initial render, parameter change, edit and discard are one ordered API/browser experiment
     fun `all draft dependencies render through nested composition selectors imports and transforms`() {

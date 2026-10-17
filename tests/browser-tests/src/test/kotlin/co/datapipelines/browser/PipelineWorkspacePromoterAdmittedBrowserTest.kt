@@ -348,7 +348,7 @@ class PipelineWorkspacePromoterAdmittedBrowserTest : BrowserSuite() {
         }
         promoter.page.navigate("$baseUrl/pipelines/$id")
         promoter.page.waitForSelector(".pe-root")
-        promoter.page.click("[data-nav-branch='pipelines'] [data-nav-tree-toggle]")
+        // #554: a Pipelines page shows the resource browser's Pipelines panel at load.
         promoter.page.waitForSelector("#nav-tree-pipelines [data-tree-key='folder:p348']")
         promoter.page.locator("#nav-tree-pipelines [aria-expanded=true]").count() shouldBe 0
         promoter.page.click("#nav-tree-pipelines [data-tree-key='folder:p348'] > .dp-tree-line button")

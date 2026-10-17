@@ -1,9 +1,9 @@
 # UI Screens Inventory
 
-**Status:** v1.155
+**Status:** v1.156
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
-**Last updated:** 2026-10-16 (#551 merge follow-up; #551; #555; #552; #553; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
+**Last updated:** 2026-10-17 (#554); 2026-10-16 (#551 merge follow-up; #551; #555; #552; #553; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
 
 ---
 
@@ -20,7 +20,7 @@ These are standard CRUD + list/detail screens. They don't need pipeline-editor-l
 1. **Server-rendered by default.** Thymeleaf renders full HTML pages. htmx handles partial updates (search, filter, pagination, form submission) without full page reload. Navigation is boosted (§3.2): a section click fetches the SAME full page and swaps only the main region — the MPA is the design, the document-per-click feel is not required by it.
 2. **htmx for these screens, fetch for the pipeline editor.** htmx is the right tool for "server renders partial HTML, swap it in" patterns. The pipeline editor is the exception (graph + SSE requires vanilla JS).
 3. **Design system everywhere.** Every screen uses `@acme/design-tokens` tokens and `.ds-*` primitives. No exceptions, no hardcoded colors. Where a class named below has no counterpart in the vendored `primitives.css` (`.ds-spinner`, `.ds-toast*`, `.ds-empty-state` and `.ds-avatar` are the candidates — the roster is ~80 classes and is not enumerated in these docs), the app defines it in `app.css` **derived from design tokens**, never from literal values ([Pipeline Editor §3.4](pipeline-editor.md#34-design-system-acmedesign-tokens)). Confirm against the vendored file at implementation time before adding an app-level class.
-4. **Two layouts, and only two (090 §C, normative).** App screens share the shell — rail, top bar, boosted `<main id="app-main">` — from `layouts/default.html`. **Ceremony screens** — the login page and the forced-password-change gate — use `layouts/auth.html`: brand line, centred card, the resolved theme, htmx and the toast stack, and *nothing else*. No rail, no top bar, no workspace switcher, no `#app-main`, no `hx-boost` anywhere in the layout. A ceremony screen exists to move a visitor across the session boundary; until that move completes there is nothing to navigate to, so a shell around it is a menu of dead ends — and, since `#app-main` is the boosted swap target, a shell around it is also a screen that can be swapped into an app page. `AuthLayoutRenderTest` pins both layouts, including that the login page renders no shell even when handed an authenticated model.
+4. **Two layouts, and only two (090 §C, normative).** App screens share the shell — primary menu, resource browser, top bar, boosted `<main id="app-main">` — from `layouts/default.html`. **Ceremony screens** — the login page and the forced-password-change gate — use `layouts/auth.html`: brand line, centred card, the resolved theme, htmx and the toast stack, and *nothing else*. No menu, no resource browser, no top bar, no workspace switcher, no `#app-main`, no `hx-boost` anywhere in the layout. A ceremony screen exists to move a visitor across the session boundary; until that move completes there is nothing to navigate to, so a shell around it is a menu of dead ends — and, since `#app-main` is the boosted swap target, a shell around it is also a screen that can be swapped into an app page. `AuthLayoutRenderTest` pins both layouts, including that the login page renders no shell even when handed an authenticated model.
    *Before 090 the login page decorated with `layouts/default`, which renders the shell whenever `authenticated` is true, so a signed-in visitor who opened `/login` in a second tab got the sign-in form inside a working app (owner's walk, 2026-09-07). Both halves are closed: the layout above, and the redirect in §4.1.*
 5. **Three URL spaces, never mixed.** Pages, HTML fragments, and JSON live under distinct prefixes — see §2.1.
 6. **The server holds no UI state.** The app is stateless behind a load balancer with no sticky sessions ([Deployment](deployment.md)); every user preference that must survive a request lives on the `users` row, never in an `HttpSession`.
@@ -63,28 +63,27 @@ Its response contract, so the idiom cannot drift into a third one:
 All authenticated pages use a shared layout:
 
 ```
-┌──────────────┬───────────────────────────────────────────────────────┐
-│ ▣ datapipe…  │ Build / Pipelines     [⌘K search]  ☀  (MS)            │ --header-height
-│ ┌──────────┐ ├───────────────────────────────────────────────────────┤
-│ │TS workspc│ │                                                       │
-│ └──────────┘ │                                                       │
-│  Dashboard   │                   Page content                        │
-│  BUILD       │                                                       │
-│  Pipelines 9 │                                                       │
-│  Templates 27│                                                       │
-│  Datasources │                                                       │
-│  OPERATE     │                                                       │
-│  Executions  │                                                       │
-│  Schedules   │                                                       │
-│  API         │                                                       │
-│  Promotion   │                                                       │
-│  ORGANISATION│                                                       │
-│  Workspaces  │                                                       │
-│  Admin       │                                                       │
-│  Docs        │                                                       │
-│ ◀ Collapse   │                                                       │
-└──────────────┴───────────────────────────────────────────────────────┘
- --app-rail-width (232px, or 60px collapsed)
+┌──────────────┬──────────────────────┬──────────────────────────────────────┐
+│ ▣ datapipe…  │ Pipelines  9      ⟨⟨ │ Build / Pipelines  📁 [⌘K]  ☀  (MS)  │ --app-header-h (58px)
+│ ┌──────────┐ ├──────────────────────┼──────────────────────────────────────┤
+│ │TS workspc│ │ [search] ✕ ↻         │                                      │
+│ └──────────┘ │ ▸ acme               │                                      │
+│  Home        │   ▸ mobility         │            Page content              │
+│  BUILD       │     daily_by_zone    │      (<main id="app-main">, the      │
+│  Pipelines   │ ▸ finance            │       one scroll container)          │
+│  Templates   │                      │                                      │
+│  Datasources │                      │                                      │
+│  EXPLORE     │                      │                                      │
+│  Dashboards  │                      │                                      │
+│  Visualiz…   │                      │                                      │
+│  Param. Sets │                      │                                      │
+│  OPERATE  …  │                      │                                      │
+│  ORGANISAT…  │ View all pipelines ⟲ │                                      │
+│ ◀ Collapse   │                      ┆ ← #browser-boundary (resize)         │
+└──────────────┴──────────────────────┴──────────────────────────────────────┘
+ menu: 202px       browser: 320 / 300 / 270 by band,   main: minmax(0, 1fr),
+ (64px compact)    240–480 by the user; hidden off a    never under 320px
+                   family page (its width goes to main)
 ```
 
 Thymeleaf layout: `layouts/default.html` — includes navbar, design system CSS, htmx, theme switcher.
@@ -166,7 +165,10 @@ The 076 horizontal navbar became a left rail plus a top bar
 (`design-records/mocks/2026-09-05-app-shell-v2.html`, owner approved 2026-09-05). The boosted
 -navigation contract of §3.2 is unchanged — same `nav.app-nav`, same `hx-boost`, same swap
 target, same `data-nav-section` mirror. Only where the links sit changed, and what the shell
-must therefore keep true after a swap grew.
+must therefore keep true after a swap grew. **Since #554 the shell is three sibling columns**
+(design record 2026-10-16 §3–§4, owner approved; umbrella #547): the primary menu
+(`#app-rail`), the resource browser (`#app-browser`) and `<main id="app-main">`. The browser is
+never a row inside the menu, and both live outside the boosted swap.
 
 **The shell is the viewport (2026-09-11, owner).** `.app-shell` is exactly `100dvh` tall and
 `<main>` is the one scroll container under the bar; the document never scrolls. A screen built
@@ -178,26 +180,50 @@ than the viewport at 1440×900 or 1920×1080, and `/docs` proves the model by ov
 `<main>`. **The deployment default theme is `dark`** (`datapipelines.ui.theme`, matching the
 marketing site); each user can choose light/system/a palette in Settings.
 
-**The rail** (`--app-rail-width`, 232px; 60px collapsed). Brand, then the workspace switcher as
+**The primary menu** (`#app-rail`, `--app-menu-width`: 202px expanded, 64px compact). Brand, then the workspace switcher as
 a card (keeping its POST form and its `<select>`, which is present and operable and simply
-styled transparent over the card), then the sections grouped **Build** / **Operate** /
-**Organisation** with Home alone above them (D58, #10 L3b — the landing item `Dashboard` was
-RENAMED Home; the route `/dashboard` and its exact-match section are unchanged), then the
-collapse control at the foot. The nav packs to the top; the free space below it is deliberate.
-Build's **Pipelines** (#350), **Templates** (#398) and **Dashboards** (#10 L3b, D58) items are
-**Navigating-tree branches (#460).** Pipelines, Templates, Dashboards, Visualizations and Parameter Sets
-share the reusable REST search-and-tree in a single-open, collapsible accordion (#478). The disclosure
-toggles its branch, closing the previous branch; zero open is allowed. The section-name link navigates
-to its catalog. Each open panel is an inset, subtly bordered, rounded surface with a family-specific
-search/clear/refresh toolbar above a divider; expanded-section styling stays distinct from the active page.
-Closing hides the mounted tree and keeps its query, expanded folders and scroll without a toggle refetch.
-A hidden panel initializes on first open; initialization requests only the root and leaves
-all folders closed. Expanding a folder automatically pages its immediate children, including folders and
+styled transparent over the card), then the destinations, then the collapse control at the foot. The
+groups and their order are the record's: Home alone above them (D58, #10 L3b — the landing item
+`Dashboard` was RENAMED Home; the route `/dashboard` and its exact-match section are unchanged), then
+**Build** (Pipelines, Templates, Datasources), **Explore** (Dashboards, Visualizations, Parameter Sets —
+`AppNav.EXPLORE`, #554), **Operate** and **Organisation**. A group whose every item the reader's role
+removed renders no link and vanishes (`.app-nav-group:not(:has(.app-nav-link))`). The nav packs to the
+top; the free space below it is deliberate. The menu holds no tree: expanding a folder at any depth moves
+no menu item and changes no menu width (`ShellColumnsBrowserTest`, the record's first acceptance). The
+compact menu keeps its group spacing and drops the uppercase group labels; each item's label is visually
+hidden (still its accessible name) and ONE `#app-nav-tip` tooltip, shown by `shell.js` beside the hovered
+or keyboard-focused item, names it for sighted readers.
+
+**The resource browser (#554; formerly the in-rail accordion of #460/#478).** Pipelines, Templates,
+Dashboards, Visualizations and Parameter Sets share the reusable REST search-and-tree, hosted in their
+own column: a 58px header (`--app-header-h`) with the family title, the admitted count and **Hide**; the
+tree's search/clear/refresh toolbar; the tree; a footer with **View all <family>** (the catalog) and
+**Reset resource browser width**. The five panels keep their `#nav-tree-<family>` ids and
+`data-nav-tree="<family>"`; one is visible. The column is shown on a family page only — the active family
+is derived from the path (`familyForPath`), never stored — and `hidden` elsewhere, its width returned to
+main. Each family's tree mounts lazily the first time it is shown and stays mounted for the life of the
+document, so switching family and returning finds its query, open folders and scroll as they were, with no
+refetch. Initialization requests only the root and leaves all folders closed. A catalog's **Browse folders**
+(`data-nav-tree-reveal`) shows the browser and puts focus in its search; the top bar's folder button
+(`#browser-open`, named "Browse <Family>") reopens a hidden browser. **Hide** and the menu's collapse are
+independent controls: icon mode never closes the browser and Hide never changes the page.
+Expanding a folder automatically pages its immediate children, including folders and
 leaves beyond 200, without fetching grandchildren, up to the **level ceiling**: ten 200-row pages per load
 (`PAGE_CEILING` in `tree/state.mjs`, #465). A level stopped at the ceiling states how many rows it holds and
 offers **Load more**, which continues from the kept cursor with a fresh ten-page budget; a page that lands
 re-renders only its own level, never the whole panel. Complete valid levels remain in memory and keep keyed
 DOM rows, focus and scroll during navigation.
+
+The eight selection rules of the record (§3), as built: (1) the family link still leads to its
+**catalog** — the overview destination is #556's, and View all stays the explicit catalog action;
+(2) a leaf opens its existing workspace URL and is marked current, the family's browser state kept;
+(3) a folder toggles only itself; (4) a deep link selects its family, with no recursive fetch to reveal the
+leaf — it is marked current when present; (5) a non-family page hides the browser and returning restores
+the in-document state; (6) back/forward restores page, family and current leaf through the existing history
+integration (`historyRestore` re-syncs the column); (7) collapse and Hide are independent, and the folder
+button carries the family's name; (8) a workspace or account switch is a fresh document, so no prior
+workspace's rows, count or selection can show. All, Recent and Pinned (§7) are not built: the browser
+shows All and the search (Recent/Pinned are #557's ruling, built after this).
 
 **Refresh (#465).** The named Refresh button, a return to the tab (`visibilitychange`, every mounted tree)
 and an affected-parent invalidation after a change all refresh the same way: the level is refetched into a
@@ -223,16 +249,27 @@ separate from current-page selection, and the focus ring answers keyboard focus 
 focused row's line and never around the subtree its item contains (#516) — a mouse click leaves the
 selected-row tint. Labels use text sinks and fixed vendored lucide icons.
 
-The global rail's pointer and keyboard separator adjusts from its 232px default up to the viewport less
-`--app-main-min-width` (320px) where the rail is a column; the phone drawer is unchanged. Collapse and Reset stay reachable at that boundary.
-Opening a tree never changes user width. `dp-rail-width:<workspace>` stores only the preferred width; a
-smaller viewport clamps it temporarily without replacing that preference. `dp-tree-open:<workspace>`
-stores the one open family or nothing. Legacy `dp-tree-panel:<workspace>:<family>` preferences migrate once,
-preferring the current page's family among saved-open flags, otherwise menu order, and are removed.
-Unknown families or unavailable storage restore nothing. Queries, results and descendant expansions are never persisted or restored;
-fresh initialization does not reveal the current selection. Workspace/account switches create a fresh document.
+**Width (#554).** The menu's two widths are fixed; the browser's is the reader's. Its default follows the
+band — 320px at 1600px and wider, 300px from 1101 to 1599px, 270px from 761 to 1100px — and the
+`#browser-boundary` separator (`role="separator"`, pointer drag, arrows ±16px, Home 240, End to the
+maximum, `aria-valuemin/max/now` kept current) sets a preference from 240 to 480px, clamped to leave main
+`--app-main-min-width` (320px): `--app-browser-width` is `clamp()` over the preference, so a narrow window
+changes the effective width and never the preference, and an arrow pressed at the clamp writes nothing.
+Opening a folder never changes the width. **Storage** holds widths and booleans only, per user and
+workspace — never a query, a path, a title or an expansion; when storage cannot be read the shell renders
+its defaults:
 
-Artifact, catalog and version navigation preserves the rail through `#app-main` swaps. The navigation host
+| Key | Holds | Written by | Status |
+|---|---|---|---|
+| `dp-rail` | `"1"` compact / `"0"` explicitly expanded (the menu) | `shell.js`; read pre-paint by `rail.js` | kept, same semantics |
+| `dp-browser-width:<workspace>` | the preferred browser width, 240–480 | `browser-resize.mjs`; read pre-paint by `rail.js` | new; any other value is removed |
+| `dp-browser-hidden:<workspace>` | `"1"` when the reader hid the browser | `shell.js`; read pre-paint by `rail.js` | new; any other value is removed |
+| `dp-rail-width:<workspace>` | the old rail+tree width | — | retired: removed on sight by `rail.js`, never reinterpreted (it measured a different composition) |
+| `dp-tree-open:<workspace>`, `dp-tree-panel:<workspace>:<family>` | the old accordion's open family | — | retired: removed on sight by `tree/sidebar.mjs` |
+
+Workspace/account switches create a fresh document.
+
+Artifact, catalog and version navigation preserves the menu and the browser through `#app-main` swaps. The navigation host
 validates the destination and prepares dependencies before requesting the final freshly authorized boosted
 response; this adds one preparation GET (two server renders per navigation, by design). The shell's progress
 bar shows from the click: preparation counts as one in-flight request (#465). Failed or superseded preparation leaves the outgoing page usable,
@@ -251,13 +288,16 @@ foreign responses refuse admission, and a changed view clears cached levels befo
   The ceremony screens carry the same fragment since 161 (#161) — the auth layout's brand link
   and the login card's brand had kept the retired filled tile as inline copies, which is what
   `BrandMarkParityRenderTest` now renders and what its source sweep of every template forbids.
-- **Counts.** Pipelines and Templates carry a badge from `NavCounts`, one cheap `COUNT(*)`
-  each behind a 60-second TTL keyed by workspace. There is no general metadata cache in this
+- **Counts (#554: in the browser header).** The browser header carries the active family's admitted
+  count from `NavCounts` — all five families, keyed by the closed `NavigationFamily` set, one cheap
+  `COUNT(*)` each behind a 60-second TTL keyed by workspace; for a lensed principal (a promoter) the count
+  is the SIZE of the admitted set, so the header never says "3 pipelines" beside an empty tree. Counts
+  are no longer repeated beside menu items (record §3). There is no general metadata cache in this
   tree to reuse — `DatasourceMetadataCache` is keyed by datasource name and `AuthCache` lives
   in `modules/auth`, which by design cannot see the `pipelines` or `templates` tables — so
   `NavCounts` copies the former's discipline (ConcurrentHashMap, injected ticker, lazy expiry,
-  misses never cached) rather than its instance. A count that cannot be read renders **no
-  badge**, never a zero.
+  misses never cached) rather than its instance. A count that cannot be read — including a lens whose
+  higher environment is unavailable — renders **no count**, never a zero.
 - **The Admin item follows the reader's authority (143, T315).** It leads only where its
   reader may go, or it is absent: a **super admin** gets `/admin/users` (instance user
   administration, `user.manage`, boosted like every item); a **workspace admin** gets
@@ -273,15 +313,16 @@ foreign responses refuse admission, and a changed view clears cached levels befo
   narrowed by the credential axis like every rung (no key holds `admin`, O-2). Active state
   is the path rule unchanged: `/admin/*` lights Admin; on `/workspaces` the Workspaces item is
   the active one and the members shortcut never lights by itself.
-- **The collapsed state** is a class on `<html>`, written by `/js/rail.js` — a
+- **The collapsed (compact) state** is a class on `<html>`, written by `/js/rail.js` — a
   parser-blocking script in the layout's `<head>` — before the first paint and toggled by
   `shell.js` afterwards. It was the layout's one inline script until 188 (#188): the enforced
   Content-Security-Policy has no `'unsafe-inline'`, so **no template carries an inline
   `<script>`, an `on*=` handler or a `style=` attribute** (`InlineScriptAuditTest`; the
   browser suite holds every page to zero CSP violations). The reason the rail script cannot
-  be deferred still holds — a deferred script runs after the document paints, so the rail
-  would render at 232px and snap to 60px on every navigation — which is why it is its own
-  blocking file rather than part of `shell.js`.
+  be deferred still holds — a deferred script runs after the document paints, so the menu
+  would render at 202px and snap to 64px on every navigation (and a hidden or resized browser
+  would jump) — which is why it is its own blocking file rather than part of `shell.js`. Since
+  #554 it also stamps the browser's preferred width and Hide (the storage table above).
 - **The active item** is `--brand-soft` background, `--brand` text and icon, **plus a 3px
   `--border-focus` left bar**. The bar is not decoration: §2.8 is normative that
   `surface-selected` reaches only 1.5:1 and a tint alone cannot carry selection. The mock
@@ -333,10 +374,11 @@ foreign responses refuse admission, and a changed view clears cached levels befo
   is the third shell-changing verb and re-issues the session cookie — a full navigation by
   construction.
 
-**The top bar** (`--header-height`). Breadcrumb (`<group> / <page>`, group muted, page bold),
+**The top bar** (`--header-height`). Breadcrumb (`<group> / <page>`, group muted, page bold — the group reads
+Explore for the three Explore families), on a family page the folder button that reopens a hidden browser (§3.4),
 the search field **palette** (161), the light/dark toggle, and the avatar menu. The **MCP-key
 chip** (179) sat between the toggle and the menu until keys v2 (233, A15) retired it — see below.
-From 768 to 1099px the search field itself hides (§3.6) and a search **icon button** stands in
+From 761 to 1100px the search field itself hides (§3.6) and a search **icon button** stands in
 (#159): it reveals the same palette in place, and ⌘K drives it too.
 
 - **The MCP-key chip is retired** (keys v2 — 233, A15, 2026-09-25). 179 (D16, ruling 7) put
@@ -354,7 +396,7 @@ From 768 to 1099px the search field itself hides (§3.6) and a search **icon but
   `data-nav-label`. `ShellRenderTest` asserts the Kotlin table and the rendered markup agree
   for every link, so the highlighted section and the crumb cannot drift apart.
 - **The search field is real (161, #155).** A `<input role="combobox">` in the top bar — and
-  the same control in the drawer's head below 768px — opens a palette on focus/click or
+  the same control in the menu drawer's head at 760px and below — opens a palette on focus/click or
   **⌘K / Ctrl+K** and fetches `GET /partials/search?q=…` over htmx (`input changed
   delay:200ms`; a BLANK query fetches nothing — `shell.js` cancels the request, so an empty
   box never claims to have matched nothing). The answer (`SearchController` /
@@ -366,7 +408,7 @@ From 768 to 1099px the search field itself hides (§3.6) and a search **icon but
   stays in the input; `aria-activedescendant`), Enter opens it, Esc or an outside click
   closes, and any boosted navigation closes the palette. Both copies (top bar + drawer) share
   the behaviour through `data-search-*` hooks; ⌘K drives whichever copy is displayed, and in the
-  768–1099px band — where neither is (#159) — it drives the band's entry button, a topbar icon
+  761–1100px band — where neither is (#159) — it drives the band's entry button, a topbar icon
   button lit only in that band, which reveals the topbar copy in place (no third copy of the
   control: same ids, same fetch) and stands down when the palette closes. The search is read-only for every
   role — a viewer sees what a viewer may open.
@@ -469,10 +511,10 @@ stylesheet or template starts naming a font host over the network. The marketing
 | Heading | `--app-text-heading` | 0.875 | 14 | — | a dialog's title, a workspace's name in its top bar, a detail pane's title |
 | Browser title | `--app-text-browser-title` | 0.875 | 14 | weight 600 | the resource browser's heading (#554 consumes it) |
 | Page title | `--app-text-title` | 1.5 | 24 | `--app-leading-title` 1.35 (32.4px) · `--app-weight-title` 600 · `--app-tracking-title` −0.025em (−0.6px) | the ONE `.ds-headline` |
-| Page title, phone | `--app-text-title-phone` | 1.3125 | 21 | 1.35 (28.35px) | the same title below 768px |
+| Page title, phone | `--app-text-title-phone` | 1.3125 | 21 | 1.35 (28.35px) | the same title at 760px and below (the phone band since #554) |
 | Badge | `--app-text-badge` | 0.6875 | 11 | weight 500, sentence case | status badges and chips, version chips, a table's column labels, counts on tabs |
 | Meta | `--app-text-meta` | 0.625 | 10 | `--app-tracking-caption` 0.12em when uppercase | short metadata and group captions (`.ds-caption`, `.app-eyebrow`) ONLY — never a name, a value, an error or a paragraph |
-| Phone text entry | `--app-text-entry-phone` | 1 | 16 | — | text inputs, selects and textareas below 768px, so a phone browser does not zoom the page on focus |
+| Phone text entry | `--app-text-entry-phone` | 1 | 16 | — | text inputs, selects and textareas at 760px and below, so a phone browser does not zoom the page on focus |
 
 | Shape role | Token | Value | For |
 |---|---|---|---|
@@ -496,7 +538,7 @@ Spacing has no role tokens: the record's 4/8/12/16/20/24/32/40/48 scale is the d
 | Body | 13px on a 1.5 leading |
 | Button (`.ds-button`) | ≥36px high, 8px/12px padding, 13px, 8px radius |
 | Small or icon button (`.ds-button-sm`, a dialog's close) | ≥32px, 4px/8px padding, 12px; the close is 32×32 around its 16px glyph |
-| Input, select (`.ds-input`, `.ds-select`, `.app-filter-control`) | ≥36px high, 13px, 8px radius; 16px text below 768px |
+| Input, select (`.ds-input`, `.ds-select`, `.app-filter-control`) | ≥36px high, 13px, 8px radius; 16px text at 760px and below |
 | Field label, help, error | 12px |
 | Tab (`.ds-tab` and every screen's tab: `.pe-tab`, `.tw-tab`, `.tplx-tab`, `.dp-ws-tab`) | ≥44px: 12px text on the UI leading, 12px padding above and below and none at the sides, the 2px underline as wide as the label; 24px between two tabs (`--app-tab-gap`) |
 | Table (`.ds-table`; a framed one through `data-table.css`'s `--dt-font`/`--dt-head-font`) | 12px cells, 11px column labels; row padding, the cap and the measured sticky header unchanged (§3.7) |
@@ -529,24 +571,25 @@ Owner, 2026-09-08: *"algoschool.app looks so native SPA than datapipelines altho
 
 **Not in scope:** the three list-screen first-paint strategies (rows / skeleton+load / empty+load) are 097's `BrowseModel` work and are untouched here.
 
-### 3.6 The shell at three widths (110, normative)
+### 3.6 The shell at four widths (110; re-cut by #554, normative)
 
-One breakpoint table for the whole shell — the rail, the top bar and the main gutter at every width the app is used at. It nests with the explorers' own drawer (`.tplx-tree` becomes a drawer below 1100px) and the login split (below 900px); it does not fight either.
+One breakpoint table for the whole shell — the menu, the resource browser, the top bar and the main gutter at every width the app is used at. Since #554 the edges are the design record's (§4): 1600, 1101 and 761, with the `.98` ceilings (`max-width: 760.98px`, `1100.98px`) so a fractional viewport never falls between two bands. It nests with the explorers' own drawer (`.tplx-tree` becomes a drawer at 1100px and below) and the login split (below 900px); it does not fight either.
 
-| Width | Rail | Topbar | Main gutter |
-|---|---|---|---|
-| ≥ 1100 px | as today (expanded; `rail-collapsed` on user choice, remembered); **user resizing reaches the viewport less `--app-main-min-width` (320px)**, independent of tree content | as today | `--gap-lg` |
-| 768–1099 px | **starts collapsed** (icons only) unless the user expanded it — same class, same `localStorage` key, one more rule: the default flips at this width; an expanded rail keeps the user's preferred width, bounded by the viewport less `--app-main-min-width` (320px) — the icon default hides the trees with every label | search text hidden (the existing 900 rule moves to this breakpoint) and the search ICON BUTTON stands in (#159: it reveals the topbar copy in place; ⌘K drives it too), crumbs truncate to the LEAF with the full path in `title` (106's pattern on `h2.tplx-detail-title`) | `--gap-lg` |
-| < 768 px | **off-canvas drawer**: not in the grid (`grid-template-columns: 1fr`), `position: fixed`, `z-index: var(--z-drawer)`, translated off-screen; opened by a hamburger button that appears FIRST in the topbar; closed by Escape, backdrop tap, or any boosted navigation; the drawer keeps its full 232px with a tree open (#350: the phone breakpoint wins over the desktop minimum) and the tree scrolls sideways inside it | brand tile → hamburger, crumbs (leaf only), workspace switcher as its avatar only, user menu; **nothing wraps**; the search moves INTO the drawer's head (it is hidden today — `app.css` — it must not disappear, it must move) | `--gap-md` |
+| Width | Menu (`#app-rail`) | Resource browser (`#app-browser`) | Topbar | Main gutter |
+|---|---|---|---|---|
+| ≥ 1600 px | 202px expanded; 64px compact on the user's choice (`rail-collapsed`, remembered in `dp-rail`) | 320px default; the user's 240–480px preference, clamped to leave main 320px | as today | `--gap-lg` |
+| 1101–1599 px | as above | 300px default, same range and clamp | as today | `--gap-lg` |
+| 761–1100 px | **starts compact** (64px, icons + named tooltips) unless the user expanded it — same class, same key: a stored `"0"` (`rail-expanded`) opts out of the band default | 270px default, same range; with the menu expanded the clamp tightens (378px at a 900px viewport) | search text hidden and the search ICON BUTTON stands in (#159: it reveals the topbar copy in place; ⌘K drives it too), crumbs truncate to the LEAF with the full path in `title` (106's pattern on `h2.tplx-detail-title`) | `--gap-lg` |
+| ≤ 760 px | **off-canvas Navigation drawer** (`rail-open`): not in the grid (`grid-template-columns: 1fr`), `position: fixed`, `z-index: var(--z-drawer)`, translated off-screen, 232px (`--app-menu-drawer`, the drawer width before #554: its brand row also seats the 48px close control) with its labels whatever `dp-rail` says | **off-canvas Browse resources drawer** (`browser-open`), at most 360px and never wider than the viewport | `#rail-open` (Navigation) first, `#browser-open` (Browse resources) on a family page, crumbs (leaf only), workspace switcher as its avatar only, user menu; **nothing wraps**; the search moves INTO the menu drawer's head | `--gap-md` |
 
 Rules the table rides on, all testable:
 
-1. **One element, one class.** The drawer is the SAME `<aside class="app-rail">` — no second nav. Its state is `rail-open` on `<html>`, set/cleared by `shell.js` beside `rail-collapsed`, exported for `node --test`, and NEVER persisted: a drawer is closed on every load.
-2. **The default flip is pure CSS**, so it survives a live resize. The user's explicit choice travels the SAME key and the SAME pre-paint script: a stored `"1"` carries `rail-collapsed` (as always); a stored `"0"` carries `rail-expanded`, which opts out of the 768–1099 default.
-3. **Closing is a union**: `#rail-close`, Escape (a document-level listener installed once — never per-swap), the `.app-rail-backdrop` scrim, and `htmx:afterSettle` for BOOSTED navigations only (the same one-shot `applyBoostSwap` arms for the entrance decides the close, so a background partial settling while the drawer is open cannot slam it shut).
-4. **Focus is choreographed on change only**: opening moves focus to the first nav link, closing returns it to `#rail-open`, and `aria-expanded` mirrors the state — but a swap that arrives while the drawer is closed moves nothing. Body scroll is locked while open (`overflow: hidden` on `<html>` via the same class, no inline style).
-5. **Motion is `transform` on the drawer and `opacity` on the backdrop**, both silenced under `prefers-reduced-motion: reduce`.
-6. **Touch targets**: every control in the drawer and the topbar is at least `var(--field-height-lg)` tall below 768px; the nav links get the same minimum at that width only.
+1. **One element per drawer, one class each.** The Navigation drawer is the SAME `<aside class="app-rail">` and the Browse resources drawer the SAME `<aside class="app-browser">` — no second nav, no second tree. Their states are `rail-open` and `browser-open` on `<html>`, set and cleared by `shell.js` through one `setOpen` discipline, exported for `node --test`, and NEVER persisted: a drawer is closed on every load. **One drawer is open at a time**: opening one closes the other. Leaving the band with a drawer open releases it (the class, the opener's `aria-expanded` and every `inert`), without moving focus.
+2. **The default flip is pure CSS**, so it survives a live resize. The user's explicit choice travels the SAME key and the SAME pre-paint script: a stored `"1"` carries `rail-collapsed` (as always); a stored `"0"` carries `rail-expanded`, which opts out of the 761–1100 default.
+3. **Closing is a union**: `#rail-close` for the menu and the header's **Hide** (`#browser-hide`) for the browser, Escape (a document-level listener installed once — never per-swap), the one `.app-rail-backdrop` scrim, and `htmx:afterSettle` for BOOSTED navigations only (the same one-shot `applyBoostSwap` arms for the entrance decides the close, so a background partial settling while a drawer is open cannot slam it shut).
+4. **Focus is choreographed on change only, and contained while open**: opening moves focus into the drawer (the first nav link; the browser's search), closing returns it to the drawer's opener (`#rail-open` / `#browser-open`), and `aria-expanded` mirrors the state — but a swap that arrives while the drawers are closed moves nothing. While a drawer is open every other child of `.app-shell` (the scrim excepted) carries `inert`, so nothing behind it can take focus or a click, and Tab wraps inside the drawer (`ShellColumnsBrowserTest`). Body scroll is locked while open (`overflow: hidden` on `<html>` via the same classes, no inline style).
+5. **Motion is `transform` on the drawers and `opacity` on the backdrop**, both silenced under `prefers-reduced-motion: reduce`. No column width animates.
+6. **Touch targets**: every control in the drawers and the topbar is at least `var(--field-height-lg)` tall at 760px and below; the nav links get the same minimum at that width only.
 
 ### 3.7 The data table (282, normative)
 
@@ -669,7 +712,7 @@ Content:
 - **My pipelines** (top 5 by updated_at): name, description, version. Clickable → pipeline editor.
 - **Quick stats**: total pipelines, total executions today, success rate.
 
-### 4.3 Pipelines — the catalog page and the sidebar tree (#350)
+### 4.3 Pipelines — the catalog page and the resource browser (#350, #554)
 
 | Attribute | Value |
 |---|---|
@@ -677,7 +720,7 @@ Content:
 | Auth required | Yes (`read`) |
 | Purpose | The **catalog**: one flat, server-paged list of full paths — every pipeline the caller may read (newest first, the service's own page) or the matches of `q` — each row a link into the pipeline's workspace (§4.4). The folder TREE is the sidebar's (§3.4) |
 | Design primitives | `.ds-input`, `.ds-badge`, `.ds-button`, `.ds-empty`; the rows are `template-tree.css`'s `.tpl-results` / `a.tpl-result` |
-| JS | none of its own — the sidebar's `tree/sidebar.mjs` owns **Browse folders** (`data-nav-tree-reveal`), which opens the sidebar's Pipelines tree (the phone drawer first; an icon-collapsed rail is expanded — the reader's explicit choice) and puts focus in its search |
+| JS | none of its own — `tree/sidebar.mjs` owns **Browse folders** (`data-nav-tree-reveal`), which shows the resource browser's Pipelines tree (the Browse resources drawer at 760px and below) and puts focus in its search; since #554 it leaves the menu's collapse alone |
 | htmx | the search input (`#pipeline-filter-q`, `input changed delay:300ms, search`, `hx-sync="this:replace"`) and the shared §5 pager re-fetch ONLY the list into its stable root `#pipeline-list-wrapper` (`GET /partials/pipelines`, `outerHTML`); the sidebar uses REST tree/search (§3.4) |
 
 **Owner ruling 2026-10-02 (#350):** with the tree in the sidebar, the page keeps the catalog the
@@ -1013,7 +1056,7 @@ Each boolean narrows for an API-key principal by the key's SCOPE as well as its 
 | Shell (§3.4) | the **Executions**, **Promotion** and **Workspaces** rail items (177) | `navExecutions` (= `canReadExecutions`), `navPromotion` (= `canReadPromotion`), `navWorkspaces` (workspace admin, super admin, or a principal with no workspace — the no-workspace page is the one screen that explains their state) | `execution.read` / `promotion.read` / `workspace.read` |
 | Shell (§3.4) | the header search (161, #155) | every role — a READ over what the session's workspace already shows; each result is a link to a page the destination screen's own guards govern | `pipeline.read` |
 | Dashboard (§4.2) | the Recent executions panel (177) | `canReadExecutions` — the promoter's dashboard does not draw it; the stat tiles are not a verb and count the promoter's OWN runs (#293) | `execution.read` |
-| Every pipeline/template read — the catalogs and sidebar trees (§4.3/§4.6), the workspaces' tabs, the header search, the rail badges, the dashboard tile (178) | not a verb: WHAT the screen shows. A **promoter** sees the LENS — released pipelines and templates newer than the promotion target's, and the endpoints of those pipelines; a hidden object is absent (its URL is the not-found page, its id 404s), a visible object's pending draft is invisible (the detail panes, the editors' read-only view, the version lists, the node-SQL section, the checks pane and the used-by list show the release only — 178b), and when the target cannot be read the lists are empty and say why | the principal's `LensedView`, passed into every read ([Auth §11A.1](auth.md#11a1-the-404-rule)) | `pipeline.read` / `template.read` / `endpoint.read` (the cell is `lens`) |
+| Every pipeline/template read — the catalogs and sidebar trees (§4.3/§4.6), the workspaces' tabs, the header search, the browser header's count (the rail badges before #554), the dashboard tile (178) | not a verb: WHAT the screen shows. A **promoter** sees the LENS — released pipelines and templates newer than the promotion target's, and the endpoints of those pipelines; a hidden object is absent (its URL is the not-found page, its id 404s), a visible object's pending draft is invisible (the detail panes, the editors' read-only view, the version lists, the node-SQL section, the checks pane and the used-by list show the release only — 178b), and when the target cannot be read the lists are empty and say why | the principal's `LensedView`, passed into every read ([Auth §11A.1](auth.md#11a1-the-404-rule)) | `pipeline.read` / `template.read` / `endpoint.read` (the cell is `lens`) |
 | Datasources (§4.5) | Register, Edit, Delete | `canAdminWorkspace` | `datasource.manage` |
 | Datasources | **Test** | `canExecute` — the connection test **follows execute** (ratified 2026-09-20) | `datasource.test` |
 | Datasource grants (§4.5a) | Grants, Grant, Revoke | `isSuperAdmin` | `datasource.grant` |
@@ -1088,7 +1131,7 @@ Fully specified in [Pipeline Editor spec](pipeline-editor.md). Only the rows tha
 - **Editor entry preserves the rail (#460):** the host validates the destination and dependencies before
   the boosted main-content swap. The pipeline runtime's inert catalog and exclusive activation prevent
   Alpine from initializing before its dependencies; cached history mounts once. See Pipeline Editor §4.1.
-- **Phone widths (110): desktop-first by decision, not omission.** Below 768px the page renders a `.app-wide-screen-note` band above the workspace — "Open on a wider screen to inspect the graph" (the pre-#348 "to edit" named an authoring act this read page does not carry), the pipeline's name, its viewed-version badge (the same `viewedLabel` the topbar's chip reads) and a link back to the Pipelines explorer — while the page itself stays rendered and scrollable underneath; no editor script is touched.
+- **Phone widths (110): desktop-first by decision, not omission.** At 760px and below (#554's phone band; 768 before) the page renders a `.app-wide-screen-note` band above the workspace — "Open on a wider screen to inspect the graph" (the pre-#348 "to edit" named an authoring act this read page does not carry), the pipeline's name, its viewed-version badge (the same `viewedLabel` the topbar's chip reads) and a link back to the Pipelines explorer — while the page itself stays rendered and scrollable underneath; no editor script is touched.
 
 ### 4.5 Datasource List
 
@@ -1196,7 +1239,7 @@ Until this round the detail route served only LAKE; every other dialect's row ha
 
 **Rendered for.** Read-only by construction on every dialect: no `data-verb` anywhere in the tree, the same role floor as the list itself (a viewer may open it). The list's **Tables**/**Lake tables** button is `data-read`, exactly like the Facts button above. An invisible or unknown datasource name redirects to the listing, on every route this section adds.
 
-### 4.6 Templates — the catalog page and the sidebar tree (#398)
+### 4.6 Templates — the catalog page and the resource browser (#398, #554)
 
 | Attribute | Value |
 |---|---|
@@ -1204,7 +1247,7 @@ Until this round the detail route served only LAKE; every other dialect's row ha
 | Auth required | Yes (`read` to browse; `author` to create — the create button is role-gated per [§4.3e](#43e-role-visibility--every-verb-and-the-role-boolean-that-renders-it-114-normative)) |
 | Purpose | The **catalog**: one flat, server-paged list of full paths — every template the caller may read when `q` is empty, or the matches of `q` — with the dialect and type filters, and (an author's) the create modal. Each row links into the template workspace (§4.7). The folder TREE is the sidebar's (§3.4) |
 | Design primitives | `.ds-input`, `.ds-badge`, `.ds-button`, `.ds-empty`; the rows are `template-tree.css`'s `.tpl-results` / `a.tpl-result`; the create modal is `.u-backdrop` + `.ds-card` |
-| JS | the create modal's lifecycle (`/js/template-create-modal.js`: open/close, inline refusal, dialect-conditional-on-type, the transform blocks); none of its own otherwise — the sidebar's `tree/sidebar.mjs` owns **Browse folders** (`data-nav-tree-reveal`), which opens the sidebar's Templates tree and puts focus in its search |
+| JS | the create modal's lifecycle (`/js/template-create-modal.js`: open/close, inline refusal, dialect-conditional-on-type, the transform blocks); none of its own otherwise — `tree/sidebar.mjs` owns **Browse folders** (`data-nav-tree-reveal`), which shows the resource browser's Templates tree and puts focus in its search |
 | htmx | the search input and the two filter selects re-fetch ONLY the list into its stable root `#template-list-wrapper` (`GET /partials/templates`, `outerHTML`); the sidebar uses REST tree/search (§3.4) |
 
 **#398 (the #396 ruling's first reuse of the workspace pattern):** with the tree in the sidebar,
@@ -1231,7 +1274,7 @@ folders are browsed in the sidebar.
 - **The filters (`dialect`, `type`) are the CATALOG's** (exact matches on the version row; the
   dialect match is repository-level `ILIKE`, so a `sqlite` query finds templates whose names
   never mention it). The sidebar's tree carries its search alone — the filters narrow the
-  catalog's list and the tree's folders are the unfiltered lens's answer (§3.4's rule: the rail
+  catalog's list and the tree's folders are the unfiltered lens's answer (§3.4's rule: the browser
   searches, the page filters).
 - **No lifecycle verbs.** The catalog renders no verb: Release, Edit, the purges, discard and
   restore are the workspace's (§4.7, §4.3d). Create stays here (Q1(b), owner ruling
@@ -1264,14 +1307,14 @@ folders are browsed in the sidebar.
   **Clear filters**, which resets all three and fetches the unfiltered first page; a lensed caller
   whose target cannot be read gets the promotion page's sentence (178).
 
-#### 4.6a The sidebar tree (§3.4's Templates branch)
+#### 4.6a The resource browser (§3.4's Templates panel; the sidebar tree before #554)
 
-The Templates item links the catalog beside a separate toggle and a panel
+The Templates item links the catalog; on a Templates page the resource browser shows the panel
 (`#nav-tree-templates`) mounted with the reusable REST search-and-tree component (§3.4).
 The root contains closed folders only; expansion exhausts immediate-child pages. Search
 returns all matches and ancestors, initially expanded; clear closes every folder. A leaf
 enters its workspace through prepared main-content navigation and is marked `aria-current`
-when loaded. User width is authoritative; only panel visibility and preferred width persist.
+when loaded. User width is authoritative; only the browser's Hide and its preferred width persist (§3.4's storage table).
 A leaf whose listed version reads `needs_review` (REST §24's flag, #533) carries the catalog
 row's **needs review** marker — the same warning badge, `data-needs-review` and title — after
 its version and draft badges; the tree keeps complete levels, so a drift that changed a fact and
@@ -1286,8 +1329,8 @@ Every capability the old two-pane explorer offered has a new home and an execute
 
 | Capability (old explorer) | New home | Guard |
 |---|---|---|
-| Folder browse, one level per request, counts, paging, empty/overflow | the sidebar tree (§4.6a) | `TemplateSidebarTreeBrowserTest`, `TemplateTreeRenderTest`, `TemplatePartialControllerTest` |
-| Search (flat full-path list) | the sidebar's search (nav) and the catalog (page) | `TemplateSidebarTreeBrowserTest`, `TemplateUiControllerTest` |
+| Folder browse, one level per request, counts, paging, empty/overflow | the resource browser (§4.6a) | `TemplateSidebarTreeBrowserTest`, `TemplateTreeRenderTest`, `TemplatePartialControllerTest` |
+| Search (flat full-path list) | the resource browser's search (nav) and the catalog (page) | `TemplateSidebarTreeBrowserTest`, `TemplateUiControllerTest` |
 | Dialect/type filters | the catalog's controls (§4.6) | `TemplateUiControllerTest`, `TemplatesGoldenPathBrowserTest` |
 | The detail pane's header verbs (Release, Discard, Purge draft/template) | the workspace header + Versions tab (§4.7) | `TemplateWorkspaceBrowserTest`, `LifecycleDialogBrowserTest` |
 | "Open in editor" | the workspace IS the destination; the old route redirects | `TemplateEditorControllerTest`, `TemplateWorkspaceRouteTest` |
@@ -2027,7 +2070,7 @@ association save swaps in all render `api/keys :: keysTable` / `:: keyRows` from
 
 Guards: `SchedulesUiControllerTest` (the route's row, `canAuthor` = the five write rows, the zone list against the scheduler's parser), `SchedulesPageRenderTest` (the role ladder at the render; no htmx request attribute and no partial route; the script order), `SchedulesCssTokenTest`, `schedules-model.test.mjs`, `ApiErrorCatalogUserMessageTest` (#280 — every field-placed code carries its override), and the browser suites `SchedulesBrowserTest` (explorer by prefix and search; create with field-level refusals asserting the catalogue's own words, the draft-only pipeline named at pick time and refused at save with the release-first words, and the next five equal to §20.9; the stale revision; pause/resume/block/unblock; Run now with the merged trail; delete; the role ladder and a viewer's refused POST from the page's own request path; light/dark; no overflow at 1100/1440/1920) and `SchedulesShotsBrowserTest` (the picture set).
 
-### 4.21 Dashboards — the catalog, the sidebar tree and the workspace (#400; the L3b pages before it)
+### 4.21 Dashboards — the catalog, the resource browser and the workspace (#400, #554; the L3b pages before it)
 
 **The catalog.**
 
@@ -2036,7 +2079,7 @@ Guards: `SchedulesUiControllerTest` (the route's row, `canAuthor` = the five wri
 | URL | `GET /dashboards` (`?q=&offset=` the deep links) |
 | Auth required | Yes — `dashboard.read`, every role (a promoter through the lens: released dashboards whose every source pipeline her pipeline lens admits; a hidden one is absent from the list) |
 | Purpose | The flat catalog landing: every dashboard the caller may read — or the matches of `q` (a dashboard whose name, display name or description contains the term, case-insensitive, `%` and `_` literal; the term trimmed and cut to 200 characters first, #504b) — one row each, a row linking the workspace. The page and the pager's total come from the lensed SQL read, so a match past the 200th dashboard is listed and counted (#512) |
-| Design primitives | §4.3's catalog shape ([Pipelines](#43-pipelines--the-catalog-page-and-the-sidebar-tree-350), #350's owner ruling — one flat, server-paged list, no tree, no detail pane): `.app-catalog-search`, `.tpl-results`, the shared pager; `dashboards.css` dresses the page's own bits |
+| Design primitives | §4.3's catalog shape ([Pipelines](#43-pipelines--the-catalog-page-and-the-resource-browser-350-554), #350's owner ruling — one flat, server-paged list, no tree, no detail pane): `.app-catalog-search`, `.tpl-results`, the shared pager; `dashboards.css` dresses the page's own bits |
 | JS | None of its own — the search control is the htmx SPA pattern (a debounced `hx-get` into the stable `#dash-list-wrapper` root, focus and value preserved) |
 | htmx | Yes — the search and the pager re-fetch `GET /partials/dashboards` into `#dash-list-wrapper`, `outerHTML` |
 
@@ -2045,8 +2088,8 @@ draft (versioning §7: unreleased edits stay visible; a draft-ONLY dashboard's r
 the list page's "opening a dashboard with no release says so" promise survives as a ROW
 state, and opening one selects its admitted draft directly, labelled, with the Board pane
 mounted (#537); no admitted draft leaves the choose-a-version state below (#409)).
-**Rows preserve the rail** through prepared main-content navigation (#460, §3.4). Empty state:
-dashboards are authored through MCP. Browse folders opens the shared REST sidebar host. The tree
+**Rows preserve the menu and the browser** through prepared main-content navigation (#460, §3.4). Empty state:
+dashboards are authored through MCP. Browse folders shows the resource browser. The tree
 loads immediate levels completely, searches canonical/display names with fully expanded ancestors,
 and Clear collapses to the normal root. The catalog retains its flat search and pager contract.
 
@@ -2146,7 +2189,7 @@ start → preview → screenshot → submit → upload → release flow), `Publi
 `PublicRouteWalkerTest`, `PublicContractE2eTest`.
 
 **The signed-in twin (#399).** A person reads the same per-case rendering on the workspace's
-Preview tab ([§4.24](#424-visualizations--the-catalog-the-sidebar-tree-and-the-workspace-399-396)):
+Preview tab ([§4.24](#424-visualizations--the-catalog-the-resource-browser-and-the-workspace-399-396-554)):
 the same builder writes the same configuration block, keyed by the version instead of the run and
 carrying no deadline, behind `visualization.read` and the session. This page stays the agent's
 capability page — its public route admits nothing of the workspace.
@@ -2291,7 +2334,7 @@ browser suite `ParameterSetHistoryBrowserTest` (both themes, the overlapping att
 pinned selector templates, a hard-coded `measure` choice and a typed `min_trips` input. The seeder derives
 the set's id per workspace and states the body's shape hash; the examples file carries neither.
 
-### 4.24 Visualizations — the catalog, the sidebar tree and the workspace (#399, #396)
+### 4.24 Visualizations — the catalog, the resource browser and the workspace (#399, #396, #554)
 
 **The catalog.**
 
@@ -2305,8 +2348,8 @@ the set's id per workspace and states the body's shape hash; the examples file c
 | htmx | Yes — the search and the pager re-fetch `GET /partials/visualizations` into `#viz-list-wrapper`, `outerHTML` |
 
 Content: flat rows at their WORKING version, with draft badges and the existing paged catalog search.
-Rows and version links preserve the rail through prepared main-content navigation. The Visualizations
-sidebar branch uses the shared REST component (§3.4), with complete lazy levels, server name search
+Rows and version links preserve the menu and the browser through prepared main-content navigation. The Visualizations
+panel of the resource browser uses the shared REST component (§3.4), with complete lazy levels, server name search
 and expanded ancestors, and clear-to-root. The signed-in chart loader reuses one compatible 3D bundle.
 
 **The workspace.**
@@ -2513,6 +2556,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-17 | v1.156 | #554 the shell becomes three sibling columns: a stable primary menu, a separate resource browser, the workspace | **Principle 4, §3, §3.4, §3.6, §4.3, §4.6, §4.6a/b, §4.21, §4.24:** the in-rail accordion (#460/#478) and the rail resize (#465/#503) retire. The menu is 202px expanded / 64px compact, with Explore (Dashboards, Visualizations, Parameter Sets) as a new group between Build and Operate; compact mode has named tooltips and no group labels. The five REST trees move into `#app-browser` beside it, outside the boosted main: header with title, admitted count (moved from the menu badges, all five families) and Hide; search; tree; View all + width reset. The browser is visible only on a family page, mounts each family lazily and keeps it in-document, and is resizable 240–480px on its boundary, clamped to leave main 320px. §3.6 is re-cut to the record's four bands (≥1600 / 1101–1599 / 761–1100 / ≤760): two phone drawers, one open at a time, the rest of the shell `inert`; the menu drawer keeps its 232px (`--app-menu-drawer`) so its close control clears the wordmark. A storage table: `dp-rail` kept; `dp-browser-width:<ws>` and `dp-browser-hidden:<ws>` new; `dp-rail-width:<ws>`, `dp-tree-open:<ws>` and `dp-tree-panel:*` removed on sight, never reinterpreted. The record's eight selection rules are stated as built (rule 1's overview destination is #556's). The #555 phone rows follow the band edge (760px and below). The "document never scrolls" and "`<main>` is the one scroll container" sentences are unchanged. |
 | 2026-10-16 | v1.155 | #536 small chart sizing | Dashboard grid: Plotly bodies keep a 64 px token minimum; undersized slots scroll the entire bordered card instead of failing during axis scaling. |
 | 2026-10-16 | v1.154 | #536 renderer diagnostics | Dashboard workspace: renderer rejections write bounded browser-console diagnostics; the visible error sentence is unchanged. |
 | 2026-10-16 | v1.153 | #551 merge follow-up: §3.3's font-face count | **§3.3:** the vendoring paragraph counted four `@font-face` blocks and one preloaded sans; since #551 there are six (Noto Sans latin and latin-ext, upright and italic; JetBrains Mono 400 and 500) and both upright sans subsets are preloaded with the regular mono. Prose only. |

@@ -211,11 +211,11 @@ class ShellBusyBrowserTest : BrowserSuite() {
 
     private fun leafLink(path: String) = "$navRoot a.dp-tree-activate[title='$path']"
 
-    /** The catalog page, its sidebar Templates branch open and its root level loaded. */
+    /** The catalog page, the resource browser's Templates panel beside it (#554), its root level loaded. */
     private fun openCatalogAndSidebarTree() {
         page.navigate("$baseUrl/templates", domContentLoaded())
         page.waitForSelector(catalog)
-        page.click("[data-nav-branch='templates'] [data-nav-tree-toggle]")
+        openBrowserTree("templates")
         page.waitForSelector(folderSummary("nyc"))
     }
 

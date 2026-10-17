@@ -1,63 +1,48 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { nextOpen, restoreOpen } from "../../main/resources/static/js/tree/sidebar-state.mjs";
+import { browseLabel, familyForPath, retiredTreeKeys } from "../../main/resources/static/js/tree/sidebar-state.mjs";
 
 const order = ["pipelines", "templates", "dashboards", "visualizations", "parameter-sets"];
-for (const open of [null, ...order]) {
-  for (const clicked of order) {
-    test(`accordion ${open ?? "closed"} → ${clicked}`, () => {
-      assert.equal(nextOpen(open, clicked), open === clicked ? null : clicked);
-    });
-  }
-}
 
-test("no remembered family opens nothing", () => {
-  assert.equal(restoreOpen({ stored: null, legacyFlags: {}, current: "pipelines", order }), null);
-});
-
-test("each sole legacy open family restores", () => {
+test("each family's catalog and artifact pages belong to that family", () => {
   for (const family of order) {
-    assert.equal(restoreOpen({ stored: null, legacyFlags: { [family]: "1" }, current: null, order }), family);
+    assert.equal(familyForPath(`/${family}`, order), family);
+    assert.equal(familyForPath(`/${family}/0b3c7f0e-2f7a-4e55-9d55-31f1f0a6b2c1`, order), family);
   }
 });
 
-test("several legacy flags prefer the flagged current page", () => {
-  assert.equal(restoreOpen({ stored: null, legacyFlags: { pipelines: "1", templates: "1" }, current: "templates", order }), "templates");
-});
-
-test("several legacy flags without the current page use menu order", () => {
-  assert.equal(restoreOpen({ stored: null, legacyFlags: { templates: "1", pipelines: "1" }, current: "dashboards", order }), "pipelines");
-});
-
-test("every allowlisted new preference wins without reading legacy flags", () => {
-  for (const stored of order) {
-    assert.equal(restoreOpen({ stored, get legacyFlags() { throw new Error("must not read"); }, current: "pipelines", order }), stored);
+test("pages outside the five families have no browser", () => {
+  for (const path of ["/", "/datasources", "/executions", "/schedules", "/admin/members", "/keys", "/overview/pipelines"]) {
+    assert.equal(familyForPath(path, order), null, path);
   }
 });
 
-test("unknown or empty stored families open nothing even with legacy flags", () => {
-  for (const stored of ["unknown", "", "<img src=x>", "__proto__"]) {
-    assert.equal(restoreOpen({ stored, legacyFlags: { pipelines: "1" }, current: "pipelines", order }), null);
-  }
+test("a family the browser does not host is never answered", () => {
+  assert.equal(familyForPath("/dashboards/x", ["pipelines", "templates"]), null);
+  assert.equal(familyForPath("/templates/x", ["pipelines", "templates"]), "templates");
 });
 
-test("unknown legacy and current families are ignored", () => {
-  assert.equal(restoreOpen({ stored: null, legacyFlags: { unknown: "1", pipelines: "0" }, current: "unknown", order }), null);
+test("a missing or empty path has no family", () => {
+  for (const path of [null, undefined, "", 42]) assert.equal(familyForPath(path, order), null);
 });
 
-test("legacy values must be the exact saved-open string", () => {
-  for (const value of [true, 1, "true", "0", null]) {
-    assert.equal(restoreOpen({ stored: null, legacyFlags: { pipelines: value }, current: "pipelines", order }), null);
-  }
+test("the retired accordion keys are named per workspace and family", () => {
+  assert.deepEqual(retiredTreeKeys("acme", order), [
+    "dp-tree-open:acme",
+    "dp-tree-panel:acme:pipelines",
+    "dp-tree-panel:acme:templates",
+    "dp-tree-panel:acme:dashboards",
+    "dp-tree-panel:acme:visualizations",
+    "dp-tree-panel:acme:parameter-sets",
+  ]);
 });
 
-test("throwing storage reads leave everything closed", () => {
-  assert.equal(restoreOpen({ get stored() { throw new Error("storage denied"); }, order }), null);
-  assert.equal(restoreOpen({ stored: null, get legacyFlags() { throw new Error("storage denied"); }, order }), null);
+test("no workspace names no retired key", () => {
+  for (const workspace of [null, undefined, ""]) assert.deepEqual(retiredTreeKeys(workspace, order), []);
 });
 
-test("the live menu allowlist and order govern migration", () => {
-  const legacyFlags = { pipelines: "1", templates: "1" };
-  assert.equal(restoreOpen({ stored: "pipelines", legacyFlags, current: "pipelines", order: ["templates"] }), null);
-  assert.equal(restoreOpen({ stored: null, legacyFlags, current: "dashboards", order: ["templates", "pipelines"] }), "templates");
+test("the folder button is named for the family it shows", () => {
+  assert.equal(browseLabel("Parameter Sets"), "Browse Parameter Sets");
+  assert.equal(browseLabel(null), "Browse resources");
+  assert.equal(browseLabel(""), "Browse resources");
 });

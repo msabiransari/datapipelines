@@ -83,12 +83,11 @@ class TreeIndentAndVersionMenuBrowserTest : BrowserSuite() {
 
     /**
      * The root level shows FOLDERS; the `test` folder must be open before its leaf exists.
-     * #398: [root] scopes the tree — BOTH trees are the SIDEBAR's now (whose leaves are
-     * links: `.tpl-leaf`, either element), so each needs its branch toggle first.
+     * #398: [root] scopes the tree — BOTH trees are the resource browser's now (#554; whose
+     * leaves are links: `.tpl-leaf`, either element), so each family's page is shown first.
      */
     private fun openTestFolder(root: String) {
-        val branch = if (root == PIPELINES) "pipelines" else "templates"
-        page.click("[data-nav-branch='$branch'] [data-nav-tree-toggle]")
+        openBrowserTree(if (root == PIPELINES) "pipelines" else "templates")
         page.waitForSelector("$root [data-tree-key='folder:test']")
         page.waitForResponse({ it.url().contains("/tree?") && it.url().contains("parent=test") }) {
             page.click("$root [data-tree-key='folder:test'] > .dp-tree-line button")
@@ -123,7 +122,7 @@ class TreeIndentAndVersionMenuBrowserTest : BrowserSuite() {
         seedPipeline("test/indent_leaf")
         seedPipeline("test/sub/indent_nested")
 
-        // #350/#398: BOTH trees are the SIDEBAR's — the same rows, measured in the rail.
+        // #350/#398: BOTH trees are the resource browser's (#554) — the same rows, measured there.
         for ((screen, root) in listOf("pipelines" to PIPELINES, "templates" to TEMPLATES)) {
             page.setViewportSize(1280, 900)
             named(page, "the dashboard navigation to $baseUrl/dashboard") {

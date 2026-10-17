@@ -33,6 +33,15 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
     protected fun suffix(): String = generatedPassword("d").takeLast(8).lowercase()
 
     /**
+     * #554: the shell's desktop reference width for a case that asserts the filters COLUMN.
+     * Playwright's default 1280 leaves main 1280 - 202 (menu) - 300 (browser) = 778 px, a board
+     * region under the filters' 820 px drawer threshold (dashboards.css); 1440 leaves main 938.
+     */
+    protected fun desktopBoard(height: Int = DEFAULT_VIEWPORT_HEIGHT) {
+        page.setViewportSize(DESKTOP_BOARD_WIDTH, height)
+    }
+
+    /**
      * True when the page scrolls sideways — a page must never, at any width. `<main>` is the shell's scroll container
      * (`overflow-x: auto`), so a too-wide card scrolls MAIN while the document stays put: both are read.
      * (Moved up from VisualizationBrowserSuite, a subclass of this one — #422.)
@@ -1019,5 +1028,15 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
             ) as String?
         check(!name.isNullOrBlank()) { "the session's active workspace could not be read from the switcher" }
         return name
+    }
+
+    protected companion object {
+        const val DESKTOP_BOARD_WIDTH = 1440
+
+        /** #554: the narrower desktop the column still holds at: main 1400 - 202 - 300 = 898, the region 850. */
+        const val NARROW_DESKTOP_BOARD_WIDTH = 1400
+
+        /** Playwright's default viewport height, kept so a case's vertical geometry is unchanged. */
+        const val DEFAULT_VIEWPORT_HEIGHT = 720
     }
 }

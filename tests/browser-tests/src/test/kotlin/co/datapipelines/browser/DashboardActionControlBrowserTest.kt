@@ -6,11 +6,18 @@ import com.microsoft.playwright.Page
 import com.microsoft.playwright.Route
 import com.microsoft.playwright.options.SelectOption
 import io.kotest.matchers.shouldBe
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.nio.file.Paths
 
 /** #543 — explicit controls on the product board: real evaluation, action gate, refresh wire and filters panel. */
 class DashboardActionControlBrowserTest : DashboardBrowserSuite() {
+    /** #554: these cases assert the filters column, which needs the desktop width (see [desktopBoard]). */
+    @BeforeEach
+    fun desktopWidth() {
+        desktopBoard()
+    }
+
     private val button = "#dp-board-filters [data-dp-action-control='apply']"
     private val limit = "#dp-board-filters [data-dp-parameter='limit'] input"
 

@@ -23,8 +23,14 @@ package co.datapipelines.web.ui
  * matching section, so a future `/settings/api-keys` row would win over `/settings`.
  */
 object AppNav {
-    /** The three group headings, in rail order. Home sits above them all, ungrouped. */
+    /** The four group headings, in menu order. Home sits above them all, ungrouped. */
     const val BUILD = "Build"
+
+    /**
+     * #554 (shell record §3): the families a person reads and composes from — Dashboards,
+     * Visualizations and Parameter Sets — leave Build for their own group.
+     */
+    const val EXPLORE = "Explore"
     const val OPERATE = "Operate"
     const val ORGANISATION = "Organisation"
 
@@ -51,16 +57,16 @@ object AppNav {
             Item("/datasources", "Datasources", BUILD),
             // #10 L3b (D58): the Dashboards item — an every-role read (the promoter through
             // the lens), so unlike Executions/Promotion it rides no advice boolean. The item
-            // links the tree page; its lazy branch expands beside it in the rail.
-            Item("/dashboards", "Dashboards", BUILD),
+            // links the catalog; its tree lives in the resource browser beside the menu (#554).
+            Item("/dashboards", "Dashboards", EXPLORE),
             // #399 (#396): the Visualizations item — an every-role read (`visualization.read`, the
             // promoter through the lens), no advice boolean. The item links the flat catalog page;
-            // its lazy, searchable branch expands beside it in the rail.
-            Item("/visualizations", "Visualizations", BUILD),
+            // its lazy, searchable tree lives in the resource browser (#554).
+            Item("/visualizations", "Visualizations", EXPLORE),
             // #374 (#357 S1): the Parameter Sets item — an every-role read (`parameter_set.read`, the
             // promoter through the lens), so it rides no advice boolean either. The item links the
-            // flat catalog page; its lazy branch expands beside it in the rail.
-            Item("/parameter-sets", "Parameter Sets", BUILD),
+            // flat catalog page; its lazy tree lives in the resource browser (#554).
+            Item("/parameter-sets", "Parameter Sets", EXPLORE),
             Item("/executions", "Executions", OPERATE),
             // #9 slice 2: every member reads schedules (`schedule.read`), so unlike Executions
             // the item is drawn for every role — a promoter reads through the lens.

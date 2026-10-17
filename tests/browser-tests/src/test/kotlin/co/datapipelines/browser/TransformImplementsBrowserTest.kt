@@ -235,11 +235,8 @@ class TransformImplementsBrowserTest : BrowserSuite() {
 
     // ------------------------------------------------------------------ the sidebar's REST tree (#533)
 
-    /** Opens the Templates panel (a toggle: clicked only when closed) and waits for its root level. */
-    private fun openTemplatesTree() {
-        if (page.locator(TREE_PANEL).isHidden) page.click("[data-nav-branch='templates'] [data-nav-tree-toggle]")
-        page.waitForFunction("() => window.DatapipelinesSidebarTrees.get('templates')?.state.levels.get(null)?.complete")
-    }
+    /** Shows the resource browser's Templates panel (#554) and waits for its root level. */
+    private fun openTemplatesTree() = openBrowserTree("templates")
 
     /** Expands the folder at [path] (when closed) and waits for its level to be complete. */
     private fun expandTree(path: String) {

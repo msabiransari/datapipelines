@@ -53,10 +53,8 @@ abstract class RestTreeBrowserFixture : BrowserSuite() {
         return id
     }
 
-    protected fun openTree() {
-        page.click("[data-nav-branch=pipelines] [data-nav-tree-toggle]")
-        page.waitForFunction("() => window.DatapipelinesSidebarTrees.get('pipelines')?.state.levels.get(null)?.complete")
-    }
+    /** #554: the Pipelines panel of the resource browser, on screen with its root level loaded. */
+    protected fun openTree() = openBrowserTree("pipelines")
 
     protected fun folder(path: String) = "$panel [data-tree-key='folder:$path']"
 
@@ -83,8 +81,16 @@ abstract class RestTreeBrowserFixture : BrowserSuite() {
         page.locator("$panel .dp-tree-rows > [role=treeitem]").count() shouldBe 1
     }
 
-    protected fun width(): Int =
-        (page.evaluate("() => document.getElementById('app-rail').getBoundingClientRect().width") as Number).toInt()
+    /** The resource browser's rendered width (#554: the column the separator resizes). */
+    protected fun width(): Int = boxWidth("app-browser")
+
+    /** The primary menu's rendered width: 202 expanded, 64 compact (#554). */
+    protected fun menuWidth(): Int = boxWidth("app-rail")
+
+    protected fun mainWidth(): Int = boxWidth("app-main")
+
+    protected fun boxWidth(id: String): Int =
+        (page.evaluate("id => Math.round(document.getElementById(id).getBoundingClientRect().width)", id) as Number).toInt()
 
     protected fun settle() {
         page.evaluate("() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))")

@@ -63,8 +63,8 @@ class VisualizationWorkspaceBrowserTest : VisualizationBrowserSuite() {
             "() => { const c = document.querySelector(\"#viz-pane-preview section[data-viz-case-index='1'] .dp-dashboard-status\");" +
                 " return c && c.getAttribute('data-dp-state') === 'no-data'; }",
         )
-        withClue("the fixture mode ran on the block alone: no request reached /api/v1 — $requested") {
-            requested.filter { it.contains("/api/v1/") }.shouldBeEmpty()
+        withClue("the fixture mode ran on the block alone: no data request reached /api/v1 — $requested") {
+            dataRequests(requested).shouldBeEmpty()
         }
 
         // In page: the same document, each lazy pane loading once, the URL carrying the tab.
@@ -488,7 +488,7 @@ class VisualizationWorkspaceBrowserTest : VisualizationBrowserSuite() {
                 )} mounts=${previewObservation("mounts.length")} selectors=${previewObservation("selectors.length")} swaps=$swapListeners",
             )
         }
-        requested.filter { it.contains("/api/v1/") }.shouldBeEmpty()
+        dataRequests(requested).shouldBeEmpty()
         requested.count { it.contains("/partials/visualizations/$id/preview") } shouldBe previewRequests
         requested.count { it.contains("/visualizations/$id") && !it.contains("/partials/") } shouldBe 1
         errors.shouldBeEmpty()
@@ -605,6 +605,14 @@ class VisualizationWorkspaceBrowserTest : VisualizationBrowserSuite() {
         target.waitForFunction("t => !document.querySelector('#viz-pane-' + t + ' > p.dp-tab-note')", tab)
     }
 
+    /**
+     * The /api/v1 requests other than the resource browser's root tree read: #554 mounts the browser on
+     * every family page (this workspace, and the templates catalog the #444 case visits), and that read
+     * is navigation, not preview data. The match is the exact root-read URL of a family.
+     */
+    private fun dataRequests(requested: List<String>): List<String> =
+        requested.filter { it.contains("/api/v1/") && !BROWSER_TREE_READ.containsMatchIn(it) }
+
     /** The card of preview case [index], as the probes address it. */
     private fun previewCase(index: Int): String = "#viz-pane-preview section[data-viz-case-index='$index']"
 
@@ -617,6 +625,8 @@ class VisualizationWorkspaceBrowserTest : VisualizationBrowserSuite() {
         const val DESKTOP_W = 1440
         const val DESKTOP_H = 900
         const val SETTLE_MS = 300.0
+        val BROWSER_TREE_READ =
+            Regex("^GET [^ ]+/api/v1/(pipelines|templates|dashboards|visualizations|parameter-sets)/tree\\?root=&parent=$")
         val WIDTHS = listOf(1440 to 900, 1100 to 800, 390 to 844)
         val TABS = listOf("preview", "overview", "evidence", "used-by", "versions")
         val SHOTS = Paths.get("build", "reports", "399-visualizations")

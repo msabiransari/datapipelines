@@ -196,8 +196,9 @@ class LifecycleDialogBrowserTest : BrowserSuite() {
         if (tab == "versions") page.waitForSelector("tr[data-version-row]")
     }
 
+    /** The workspace is a Pipelines page, so the resource browser already shows its panel (#554). */
     private fun openSidebarTree() {
-        page.click("[data-nav-branch='pipelines'] [data-nav-tree-toggle]")
+        openBrowserTree("pipelines")
         page.waitForSelector("#nav-tree-pipelines [role=tree]")
     }
 
