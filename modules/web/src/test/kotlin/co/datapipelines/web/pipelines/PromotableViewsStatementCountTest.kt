@@ -9,7 +9,9 @@ import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.CreateLifecycle
 import co.datapipelines.pipeline.CurrentPipelineVersion
 import co.datapipelines.pipeline.PipelineRepository
+import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.ReadLens
+import co.datapipelines.pipeline.TemplateVersionStatuses
 import co.datapipelines.pipeline.WriteSurface
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.visualization.ArtifactRef
@@ -19,6 +21,7 @@ import co.datapipelines.visualization.DashboardRepository
 import co.datapipelines.visualization.DashboardService
 import co.datapipelines.visualization.DashboardSource
 import co.datapipelines.visualization.DashboardValidator
+import co.datapipelines.visualization.VisualizationRepository
 import co.datapipelines.visualization.VisualizationService
 import co.datapipelines.web.SharedPostgres
 import io.kotest.matchers.shouldBe
@@ -38,13 +41,15 @@ import javax.sql.DataSource
 
 /**
  * #330's acceptance, at the JDBC boundary: a lensed principal's request that touches neither family issues ZERO
- * dashboard reads; one that does issues at most ONE statement for the pins — the pins-and-sources projection,
- * once for both arms. The dashboard reads are real statements against the module's migrated [SharedPostgres];
+ * dashboard reads; one that does issues the pins-and-sources projection ONCE for both arms plus the ONE released
+ * pins read that narrows the pin arm (#563) — two statements, never the dashboards' bodies, never per-arm work.
+ * The dashboard reads are real statements against the module's migrated [SharedPostgres];
  * the other families are mocks, so every statement the counter sees is a dashboard read. The workspace holds
  * [SEEDED_DASHBOARDS] current RELEASED dashboards sourcing the one admitted pipeline, so the bound is measured
  * against rows that exist: red if the view builds the dashboard arms eagerly (the pre-#330 view read every
- * current released dashboard's BODY per lensed request — `1 + N` here, not 1), if it runs the derivation once
- * per arm, or if the projection stopped admitting the dashboards it read (the review of #330's merge, F3).
+ * current released dashboard's BODY per lensed request — `1 + N` here, not 2), if it runs the derivation once
+ * per arm, if the projection stopped admitting the dashboards it read (the review of #330's merge, F3), or if
+ * the pin narrowing read was dropped or run outside the arms' lazy window (#563).
  */
 class PromotableViewsStatementCountTest {
     private val workspace = UUID.randomUUID()
@@ -58,6 +63,20 @@ class PromotableViewsStatementCountTest {
             sets = { _, _ -> null },
             authoring = AuthoringGuard(true),
             transactions = TransactionTemplate(DataSourceTransactionManager(SharedPostgres.dataSource())),
+        )
+
+    /**
+     * REAL over the counting source, not a mock (#563): the pin narrowing's released-visualization
+     * read is one of the two statements the bound counts, and a mock would hide it from the
+     * counter — the exact silence a statement-count test exists to prevent.
+     */
+    private val visualizations =
+        VisualizationService(
+            VisualizationRepository(NamedParameterJdbcTemplate(counting)),
+            mockk(),
+            DashboardRepository(NamedParameterJdbcTemplate(counting)),
+            AuthoringGuard(true),
+            mockk<TemplateVersionStatuses>(),
         )
 
     @BeforeEach
@@ -109,19 +128,20 @@ class PromotableViewsStatementCountTest {
     }
 
     @Test
-    fun `a request that touches the families derives BOTH arms from ONE projection statement`() {
+    fun `a request that touches the families derives BOTH arms from TWO statements - the projection and the released pins`() {
         val pipelines = mockk<PipelineRepository>()
         every { pipelines.findCurrentVersions(workspace) } returns
-            listOf(CurrentPipelineVersion(UUID.randomUUID(), ADMITTED_PIPELINE, "A", 1, "h"))
+            listOf(CurrentPipelineVersion(UUID.randomUUID(), ADMITTED_PIPELINE, "A", 1, "h", PipelineVersionStatus.RELEASED))
 
         counting.statements = 0
         val view = views(pipelines = pipelines).viewFor(promoter())
 
         // The seeded dashboards source the one admitted pipeline, so the arm admits every one of them
-        // (the seed is SEEN, not merely present) — and reading them cost the one projection statement.
+        // (the seed is SEEN, not merely present) — and reading them cost the projection statement plus
+        // the released-pins narrowing read (#563), never a per-dashboard body.
         view.dashboards shouldBe ReadLens.Only(SEEDED_NAMES.toSet())
         view.visualizations shouldBe ReadLens.Only(emptySet())
-        counting.statements shouldBe 1
+        counting.statements shouldBe 2
     }
 
     @Test
@@ -166,7 +186,7 @@ class PromotableViewsStatementCountTest {
             client,
             sets,
             dashboards,
-            mockk<VisualizationService>(),
+            visualizations,
             mockk<DashboardKeyBindingRepository>(),
         )
     }

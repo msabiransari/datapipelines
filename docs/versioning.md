@@ -1,6 +1,6 @@
 # Versioning: Draft, Release, Promotion
 
-**Status:** v1.28 — #459: draft authoring may pin DRAFT or RELEASED children (D58, §3); #462: both pipeline draft purges refuse named parent/dashboard pins before destructive writes. #328: the release flip records the caller output (§5.3). #349: the UI workspace row states the in-page version switch (§7.2); #344: the push closure is read at the pinned versions without the promoter lens (§10.4); #332: the three families audit every lifecycle verb (§7's blanket sentence); #348: §7.2's table disambiguates the REST `GET /api/v1/pipelines/{id}` from the UI read workspace `GET /pipelines/{id}`; #10 L1c-c: the count ceiling stated as aggregate; the receive's refused-dashboard rollback witnessed (§10.4); #320: the reverse arrows into other families (§3.5.3); #10: visualizations and dashboards join the lifecycle table (§3.5)
+**Status:** v1.29 — #563: an object whose current pointer names a DRAFT is not promotable and is invisible to a promoter whatever releases it holds (§10.2, §3.4). v1.28 — #459: draft authoring may pin DRAFT or RELEASED children (D58, §3); #462: both pipeline draft purges refuse named parent/dashboard pins before destructive writes. #328: the release flip records the caller output (§5.3). #349: the UI workspace row states the in-page version switch (§7.2); #344: the push closure is read at the pinned versions without the promoter lens (§10.4); #332: the three families audit every lifecycle verb (§7's blanket sentence); #348: §7.2's table disambiguates the REST `GET /api/v1/pipelines/{id}` from the UI read workspace `GET /pipelines/{id}`; #10 L1c-c: the count ceiling stated as aggregate; the receive's refused-dashboard rollback witnessed (§10.4); #320: the reverse arrows into other families (§3.5.3); #10: visualizations and dashboards join the lifecycle table (§3.5)
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Contract](pipeline-contract.md) (§13 error catalog, §17 persistence), [Templates](templates.md), [Metadata DB](metadata-db.md) (§4.4/§4.5/§4.8/§4.9 — DDL authority), [REST API](rest-api.md), [Pipeline Editor UI](pipeline-editor.md)
 **Last updated:** 2026-10-06
@@ -194,7 +194,9 @@ when it moves it picks the **highest-numbered ELIGIBLE live version**:
 Under any other posture only RELEASED is eligible — there are no drafts there by
 construction (§5.5), but the rule is stated, not assumed. A draft's mere EXISTENCE never
 moves the pointer; a draft is chosen only when the pointer must move and the draft is the
-highest live version (the discard/purge fallback above).
+highest live version (the discard/purge fallback above). A pointer that NAMES a draft has
+one promotion consequence: while it stays there the object is not promotable and is
+invisible to a promoter whatever releases it holds (§10.2, #563).
 
 **Dependents read the pointer; authors read "last" (D56, unchanged).** Manual execute
 with no version is NOT a pointer read: it runs the working version — the draft when one
@@ -1107,7 +1109,11 @@ endpoints are specified in [REST API §18](rest-api.md#18-promotion-endpoints-re
 
 > The promotion screen lists only pipelines that are **RELEASED** and whose current version
 > number is **greater than** the target's current version for that pipeline (a pipeline the
-> target does not have counts as target version 0). Drafts are never listed. Same-version
+> target does not have counts as target version 0). Drafts are never listed. The same holds
+> when the pointer itself names a draft — §3.4's development-posture fallback or a manual
+> switch (#563): an object whose current version is a DRAFT is not promotable and is
+> invisible to a promoter whatever releases it holds; it returns when the pointer names a
+> release. Same-version
 > entries are never listed.
 
 **The same rule is the promoter LENS (178, [Auth §11A.1](auth.md#11a1-the-404-rule)).** Since
@@ -1493,6 +1499,7 @@ re-opening it.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-17 | v1.29 | #563 draft pointer not promotable | §10.2 states the rule: an object whose current pointer names a DRAFT (§3.4's development-posture fallback or a manual switch) is not promotable and is invisible to a promoter whatever releases it holds; it returns when the pointer names a release. §3.4 carries the cross-reference. Code: the pointer-row status travels with the four current-version readers and the promotion derivation filters RELEASED itself (the lens, the listing, the counts and the family inventory read one computation). |
 | 2026-10-06 | v1.28 | #462 draft purge pins | Both pipeline draft purge entry points refuse named inbound pins before deletion; §3.5 adds draft-pin refusal rows and the dashboard reverse arrow, states the existing parent/dashboard scope asymmetry and residual concurrency window; §5.4 states hash precedence and preflight behavior. |
 | 2026-10-06 | v1.27 | 459 (#459) draft dependencies — merge follow-up | **D58 relaxed** (the row was changed by the lane): a draft pipeline may pin a live DRAFT or RELEASED child at save; release and import still require RELEASED children (`pipeline_reference_not_released`). **§3's composition paragraph** now says so (it still said RELEASED-only at save). **§3 graph rule 3 and the "moot" paragraph** no longer rest on "a never-released pipeline cannot be pinned": the pipeline entity purge asks the any-version question (it always ran `refuseIfPinned`). The pipeline draft purges (`purge`, `purgeVersion`) carry no pin guard and now owe one, because a draft parent or a draft dashboard may pin the draft they take. That gap and its traced impact are stated in rule 3 and tracked as #462. |
 | 2026-10-02 | v1.26 | 328 (#328) the flip records the caller output | **§5.3's sketch mirrors the statement**: the flip now also sets `caller_output_json` — the D1 subselect over `pipeline_executions` (SUCCESS, root, non-null schema, `started_at >` the last draft write's clock), in the SAME statement, so the record is atomic with the flip and cannot drift from it. A never-run draft releases with NULL (`not_observed` in the response/audit); the release is never refused for a missing run; the record is outside `body_hash`. Shape and precedence: pipeline-contract §3.3.1. |

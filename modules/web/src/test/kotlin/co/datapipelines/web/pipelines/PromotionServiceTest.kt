@@ -425,8 +425,14 @@ class PromotionServiceTest {
         stubReleased(root, bodyOf("root", template = BEHIND to 2))
         every { templates.findCurrentVersions(workspaceId) } returns
             listOf(
-                co.datapipelines.templates.CurrentTemplateVersion(BEHIND, BEHIND, 2, "hash-$BEHIND"),
-                co.datapipelines.templates.CurrentTemplateVersion(ON_TARGET_SAME, ON_TARGET_SAME, 1, "hash-$ON_TARGET_SAME"),
+                co.datapipelines.templates.CurrentTemplateVersion(BEHIND, BEHIND, 2, "hash-$BEHIND", PipelineVersionStatus.RELEASED),
+                co.datapipelines.templates.CurrentTemplateVersion(
+                    ON_TARGET_SAME,
+                    ON_TARGET_SAME,
+                    1,
+                    "hash-$ON_TARGET_SAME",
+                    PipelineVersionStatus.RELEASED,
+                ),
             )
         val target =
             inventory(templates = listOf(entry(BEHIND, 5, "hash-theirs"), entry(ON_TARGET_SAME, 1, "hash-$ON_TARGET_SAME")))
@@ -604,7 +610,8 @@ class PromotionServiceTest {
     private fun current(
         record: PipelineRecord,
         hash: String,
-    ) = CurrentPipelineVersion(record.id, record.name, record.displayName, checkNotNull(record.currentVersion), hash)
+        status: PipelineVersionStatus = PipelineVersionStatus.RELEASED,
+    ) = CurrentPipelineVersion(record.id, record.name, record.displayName, checkNotNull(record.currentVersion), hash, status)
 
     private fun present(inventory: PromotionWire.Inventory) = PromotionTargetClient.CachedInventory.Present(inventory)
 

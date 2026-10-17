@@ -51,6 +51,9 @@ class PromotableViewDashboardLensTest {
                         Triple("ops/dashboards/half", listOf("ops/pipelines/a", "ops/pipelines/hidden"), listOf("ops/visualizations/two")),
                         Triple("ops/dashboards/none", listOf("ops/pipelines/hidden"), listOf("ops/visualizations/one")),
                     ),
+                // #563 — the pin arm admits a name only when a RELEASED visualization carries it; both
+                // pins must exist so the differential below is about PINNING, not existence.
+                visualizations = listOf("ops/visualizations/one", "ops/visualizations/two"),
             )
 
         assertAll(
@@ -117,7 +120,7 @@ class PromotableViewDashboardLensTest {
         every { client.cachedInventory("ops") } returns
             PromotionTargetClient.CachedInventory.Present(PromotionWire.Inventory("uat", false, "ops"))
         every { pipelines.findCurrentVersions(workspace) } returns
-            listOf(CurrentPipelineVersion(UUID.randomUUID(), "ops/pipelines/a", "A", 1, "h"))
+            listOf(CurrentPipelineVersion(UUID.randomUUID(), "ops/pipelines/a", "A", 1, "h", PipelineVersionStatus.RELEASED))
         every { templates.findCurrentVersions(workspace) } returns emptyList()
         every { sets.findCurrentVersions(workspace) } returns emptyList()
         val shown = UUID.randomUUID()
@@ -136,6 +139,9 @@ class PromotableViewDashboardLensTest {
                     listOf("ops/visualizations/hidden"),
                 ),
             )
+        // #563 — the pin arm sees only the RELEASED visualizations' names; the reader answers them.
+        every { visualizations.currentVersions(workspace) } returns
+            listOf(CurrentArtifactVersion(UUID.randomUUID(), "ops/visualizations/shown", "Shown", 1, "vh", PipelineVersionStatus.RELEASED))
 
         val view =
             PromotableViews(pipelines, templates, client, sets, dashboards, visualizations, mockk(relaxed = true))
@@ -154,10 +160,11 @@ class PromotableViewDashboardLensTest {
         val pipelines = mockk<PipelineRepository>()
         val client = mockk<PromotionTargetClient>()
         val dashboards = mockk<DashboardService>()
+        val visualizations = mockk<VisualizationService>()
         every { client.cachedInventory("ops") } returns
             PromotionTargetClient.CachedInventory.Present(PromotionWire.Inventory("uat", false, "ops"))
         every { pipelines.findCurrentVersions(workspace) } returns
-            listOf(CurrentPipelineVersion(UUID.randomUUID(), "ops/pipelines/a", "A", 1, "h"))
+            listOf(CurrentPipelineVersion(UUID.randomUUID(), "ops/pipelines/a", "A", 1, "h", PipelineVersionStatus.RELEASED))
 
         val view =
             PromotableViews(
@@ -167,19 +174,24 @@ class PromotableViewDashboardLensTest {
                 mockk<co.datapipelines.parameters.ParameterSetRepository>()
                     .also { every { it.findCurrentVersions(workspace) } returns emptyList() },
                 dashboards,
-                mockk<VisualizationService>(),
+                visualizations,
                 // a promoter never reaches the key arm (L5): a strict mock proves no binding read runs
                 mockk<DashboardKeyBindingRepository>(),
             ).viewFor(promoter(workspace))
 
-        // The pipelines-shaped request: the pipeline lens only, so no dashboard statement may run.
+        // The pipelines-shaped request: the pipeline lens only, so no dashboard statement may run —
+        // the released-pins narrowing read is INSIDE the lazy window too (#563).
         view.pipelines shouldBe ReadLens.Only(setOf("ops/pipelines/a"))
         verify(exactly = 0) { dashboards.findCurrentPinsAndSources(any()) }
-        // A request that DOES touch the families derives both arms from the ONE projection read.
+        verify(exactly = 0) { visualizations.currentVersions(any()) }
+        // A request that DOES touch the families derives both arms from the ONE projection read
+        // plus the ONE released-pins read.
         every { dashboards.findCurrentPinsAndSources(workspace) } returns emptyList()
+        every { visualizations.currentVersions(workspace) } returns emptyList()
         view.dashboards shouldBe ReadLens.Only(emptySet())
         view.visualizations shouldBe ReadLens.Only(emptySet())
         verify(exactly = 1) { dashboards.findCurrentPinsAndSources(workspace) }
+        verify(exactly = 1) { visualizations.currentVersions(workspace) }
     }
 
     @Test
@@ -228,15 +240,53 @@ class PromotableViewDashboardLensTest {
         verify(exactly = 0) { dashboards.findCurrentPinsAndSources(any()) }
     }
 
+    @Test
+    fun `a non-lensed principal sees EVERYTHING and pays no read - #563 changes the lensed answer only`() {
+        val workspace = UUID.randomUUID()
+        val pipelines = mockk<PipelineRepository>()
+        val templates = mockk<TemplateRepository>()
+        val sets = mockk<co.datapipelines.parameters.ParameterSetRepository>()
+        val dashboards = mockk<DashboardService>()
+        val visualizations = mockk<VisualizationService>()
+
+        val view =
+            PromotableViews(pipelines, templates, mockk(), sets, dashboards, visualizations, mockk(relaxed = true))
+                .viewFor(author(workspace))
+
+        view shouldBe LensedView.EVERYTHING
+        verify(exactly = 0) { pipelines.findCurrentVersions(any()) }
+        verify(exactly = 0) { templates.findCurrentVersions(any()) }
+        verify(exactly = 0) { sets.findCurrentVersions(any()) }
+        verify(exactly = 0) { dashboards.findCurrentPinsAndSources(any()) }
+        verify(exactly = 0) { visualizations.currentVersions(any()) }
+    }
+
     // ---- fixtures -------------------------------------------------------------------------------------
 
-    /** The view over promotable [pipelines] (no target entries → all newer) and the given dashboards. */
+    /**
+     * The view over promotable [pipelines] (no target entries → all newer) and the given dashboards.
+     * [visualizations] are the workspace's RELEASED visualization rows (#563): a pin is admitted only
+     * when a name passed here carries it.
+     */
     private fun view(
         pipelines: List<String>,
         dashboards: List<Triple<String, List<String>, List<String>>>,
         dashboardsOnTarget: List<PromotionWire.Entry> = emptyList(),
+        visualizations: List<String> = emptyList(),
     ): PromotableView {
-        val localPipelines = pipelines.map { CurrentPipelineVersion(UUID.randomUUID(), it, "P", 1, "p-hash-$it") }
+        val localPipelines =
+            pipelines.map { CurrentPipelineVersion(UUID.randomUUID(), it, "P", 1, "p-hash-$it", PipelineVersionStatus.RELEASED) }
+        val localVisualizations =
+            visualizations.map { name ->
+                CurrentArtifactVersion(
+                    UUID.randomUUID(),
+                    name,
+                    name.substringAfterLast('/'),
+                    1,
+                    "v-hash-$name",
+                    PipelineVersionStatus.RELEASED,
+                )
+            }
         val currentDashboards =
             dashboards.mapIndexed { index, (name, sources, pins) ->
                 projection(UUID.randomUUID(), name, 3, "d-hash-$name", sources, pins)
@@ -248,7 +298,7 @@ class PromotableViewDashboardLensTest {
                 "ops",
                 dashboards = dashboardsOnTarget,
             )
-        return PromotableView.of(localPipelines, emptyList(), inventory, emptyList(), emptyList(), currentDashboards)
+        return PromotableView.of(localPipelines, emptyList(), inventory, emptyList(), localVisualizations, currentDashboards)
     }
 
     /** The #330 projection row: the identity plus the two name lists, no body. */
@@ -259,7 +309,16 @@ class PromotableViewDashboardLensTest {
         bodyHash: String,
         sources: List<String>,
         pins: List<String>,
-    ) = co.datapipelines.visualization.DashboardCurrentPins(id, name, "D", version, bodyHash, sources, pins)
+    ) = co.datapipelines.visualization.DashboardCurrentPins(
+        id,
+        name,
+        "D",
+        version,
+        bodyHash,
+        PipelineVersionStatus.RELEASED,
+        sources,
+        pins,
+    )
 
     private fun promoter(workspace: UUID) =
         AuthenticatedPrincipal(
@@ -268,5 +327,15 @@ class PromotableViewDashboardLensTest {
             "P",
             AuthMethod.OIDC,
             workspace = WorkspaceContext(workspace, "ops", role = WorkspaceRole.PROMOTER),
+        )
+
+    /** The non-lensed control: an author holds the workspace and pays no lens read (roles design §3.1). */
+    private fun author(workspace: UUID) =
+        AuthenticatedPrincipal(
+            UUID.randomUUID(),
+            "a@e.test",
+            "A",
+            AuthMethod.OIDC,
+            workspace = WorkspaceContext(workspace, "ops", role = WorkspaceRole.AUTHOR),
         )
 }
