@@ -528,7 +528,7 @@
   /**
    * The cap's two numbers and, on a page-flow frame, whether the table fits it — and, while it
    * does, `--dt-flow-top`: MINUS its scroller's top padding. Chromium sticks a `top: 0` cell at
-   * the scroller's CONTENT edge (measured: <main>'s 24px `--gap-lg` below the top bar, rows
+   * the scroller's CONTENT edge (measured: the main gutter, `--app-main-pad`, below the top bar, rows
    * showing through the band above the header); the negative inset puts it on the scroller's
    * visible edge — under the top bar on a page, at a dialog's edge in a dialog.
    */

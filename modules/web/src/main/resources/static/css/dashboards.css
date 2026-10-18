@@ -173,7 +173,7 @@ fieldset.dp-dashboard-parameter > .dp-dashboard-parameter-error {
    constraint lands on the WORKSPACE while the board tab is the one showing (`:has`, the
    cascade-consent's house pattern); the other tabs keep their ordinary flow. */
 .dp-workspace:has(.dp-ws-pane[data-dp-pane="board"]:not([hidden])) {
-  height: calc(100dvh - var(--header-height) - var(--space-px) - (var(--gap-lg) * 2));
+  height: calc(100dvh - var(--header-height) - var(--space-px) - (var(--app-main-pad) * 2));
 }
 
 .dp-ws-pane[data-dp-pane="board"] {

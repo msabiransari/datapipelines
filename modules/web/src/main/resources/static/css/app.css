@@ -555,18 +555,18 @@ body {
    files; app-level chrome and component polish layer on top here.
    --------------------------------------------------------------------------- */
 
-/* 076 §A — one width policy (ui-screens.md §3.x "Shell and width policy").
-   EVERY app screen is full-bleed: the nav and <main> span the viewport minus
-   one gutter (the editor's 065 opt-in became the rule; --app-content-max and
-   .app-main-bleed are gone). Reading content — docs prose, settings cards,
-   empty states, forms — gets .app-reading instead of a different container. */
+/* #573 — one width policy (ui-screens.md §3.1, the application-shell record §4).
+   <main> pads all four sides by the viewport's band through ONE role token,
+   `--app-main-pad` (40 / 32 / 24 / 20, declared with the shell geometry below);
+   reading content — docs prose, settings cards, empty states, forms — gets
+   .app-reading inside it, never a different container. */
 .app-container {
   width: 100%;
-  padding-inline: var(--gap-lg);
+  padding-inline: var(--app-main-pad);
 }
 
 .app-main {
-  padding-block: var(--gap-lg);
+  padding-block: var(--app-main-pad);
 }
 
 /* The reading column: prose and cards sit in a 90ch measure, LEFT-aligned
@@ -903,6 +903,10 @@ button.app-busy::after {
   /* The browser's band default (300 here, 320 from 1600, 270 from 761 to 1100), the
      user's range, and the at-most-360 phone drawer. */
   --app-browser-default: 300px;
+  /* <main>'s padding on all four sides, by the record §4 table's bands: 40 from 1600,
+     32 from 1101 to 1599 (here), 24 from 761 to 1100, 20 at 760 and below. Every
+     full-height canvas's calc and the status pill's offset read it (ui-screens §3.6). */
+  --app-main-pad: var(--space-8);
   --app-browser-min: 240px;
   --app-browser-max: 480px;
   --app-drawer-max: 360px;
@@ -934,6 +938,7 @@ button.app-busy::after {
 @media (min-width: 1600px) {
   :root {
     --app-browser-default: 320px;
+    --app-main-pad: var(--space-10);
   }
 }
 
@@ -975,15 +980,6 @@ button.app-busy::after {
   min-height: 0;
   overflow-y: auto;
   overflow-x: auto;
-}
-
-/* The desktop gutter. At 760px and below main keeps the phone band's .app-container
-   --gap-md. Since #554 the browser's maximum always leaves <main> its 320px, so the
-   gutter no longer has to yield to a rail that takes the width (#465's guard retired). */
-@media (min-width: 761px) {
-  .app-shell > .app-main {
-    padding-inline: var(--gap-lg);
-  }
 }
 
 /* Signed out (login, the public docs, error pages): no menu, no browser, no top bar
@@ -3532,7 +3528,7 @@ button.app-busy::after {
 .app-status-pill {
   position: fixed;
   top: calc(var(--app-header-h) + var(--gap-md));
-  left: calc(var(--app-menu-width) + var(--app-browser-col) + var(--gap-lg));
+  left: calc(var(--app-menu-width) + var(--app-browser-col) + var(--app-main-pad));
   z-index: var(--z-fixed);
   display: flex;
   align-items: center;
@@ -3553,7 +3549,7 @@ button.app-busy::after {
    `#app-main` still boosts — so without this the pill would appear 202px from the left of
    a page with nothing there. */
 :root:has(.app-shell-anon) .app-status-pill {
-  left: var(--gap-lg);
+  left: var(--app-main-pad);
 }
 
 .app-status-pill-spinner {
@@ -3766,6 +3762,7 @@ button.app-busy::after {
 @media (min-width: 761px) and (max-width: 1100.98px) {
   :root {
     --app-browser-default: 270px;
+    --app-main-pad: var(--space-6);
   }
 
   /* The default flips: compact, unless the user explicitly expanded. A stored "1"
@@ -3862,12 +3859,16 @@ button.app-busy::after {
       "main";
   }
 
-  /* Neither drawer is a column, so the fixed siblings measure from the window's edge. */
-  .app-status-pill {
-    left: var(--gap-md);
+  /* #573: the record §4 phone band — <main> pads 20 (the top bar keeps its own 16 below). */
+  :root {
+    --app-main-pad: var(--space-5);
   }
 
-  .app-container,
+  /* Neither drawer is a column, so the fixed siblings measure from the window's edge. */
+  .app-status-pill {
+    left: var(--app-main-pad);
+  }
+
   .app-topbar {
     padding-inline: var(--gap-md);
   }
