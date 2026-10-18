@@ -211,7 +211,9 @@ class TemplatesGoldenPathBrowserTest : BrowserSuite() {
         page.locator(".ds-empty-title").first().innerText()
             shouldContain "No templates match: With releases"
 
-        page.waitForResponse({ r -> r.url().contains("/partials/templates") && !r.url().contains("lifecycle=draft") && !r.url().contains("lifecycle=with") }) {
+        page.waitForResponse({ r ->
+            r.url().contains("/partials/templates") && !r.url().contains("lifecycle=draft") && !r.url().contains("lifecycle=with")
+        }) {
             page.selectOption("#template-filter-lifecycle", "")
         }
         row(name).waitFor()
