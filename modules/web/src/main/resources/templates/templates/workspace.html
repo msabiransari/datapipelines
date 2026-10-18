@@ -72,7 +72,7 @@
     </p>
   </div>
 
-  <div class="tw-root" th:if="${hasSelectedBody}"
+  <div class="tw-root app-canvas" th:if="${hasSelectedBody}"
        th:attr="data-template-id=${templateName}, data-viewed-version=${viewedVersion}, data-can-render=${canAuthor == true and isTransform != true}">
     <!-- Header: back to the catalog, crumb (folder muted + leaf bold), the viewed-version
          chip, the version selector, the read-only note, and the header verbs (102 §B.1's

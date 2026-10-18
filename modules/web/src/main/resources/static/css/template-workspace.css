@@ -16,7 +16,7 @@
   gap: var(--gap-md, 12px);
   /* The viewport fill the source column's math expects: the editor's `--header-height`
      contract counts from the shell header, and the workspace adds one bar of its own. */
-  min-height: calc(100vh - var(--header-height, 56px) - var(--gap-lg, 16px) * 2);
+  min-height: calc(100vh - var(--header-height, 56px) - var(--app-main-pad) * 2);
 }
 
 /* ---- the top bar ----------------------------------------------------------------- */

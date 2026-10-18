@@ -253,7 +253,7 @@ class PipelineEditorRenderTest {
     fun `no selected body is the choose-a-version state and renders no graph root`() {
         val html = render(hasSelectedBody = false, versions = listOf(vr(1, "RELEASED", isCurrent = true), vr(2, "DRAFT")))
 
-        html shouldNotContain "class=\"pe-root\""
+        html shouldNotContain "class=\"pe-root"
         html shouldNotContain "id=\"pipeline-data\""
         html shouldContain "Choose a version"
         html shouldContain "href=\"/pipelines/$LEAF_ID?version=1\""
@@ -266,7 +266,7 @@ class PipelineEditorRenderTest {
     fun `no admitted versions at all is the honest empty state`() {
         val html = render(hasSelectedBody = false, versions = emptyList())
 
-        html shouldNotContain "class=\"pe-root\""
+        html shouldNotContain "class=\"pe-root"
         html shouldContain "No viewable version"
         html shouldContain "has no version your role can view yet"
     }

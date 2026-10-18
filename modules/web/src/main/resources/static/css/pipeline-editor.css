@@ -57,7 +57,7 @@
   /* Full height below the sticky nav — the 041 math verbatim (059 §B): layouts/
      default.html gives <main> padding-block var(--gap-lg), the nav adds its 1px
      border; the floor keeps short screens usable. */
-  height: calc(100dvh - var(--header-height) - var(--space-px) - (var(--gap-lg) * 2));
+  height: calc(100dvh - var(--header-height) - var(--space-px) - (var(--app-main-pad) * 2));
   min-height: 540px;
   font-size: var(--app-text-ui);
 }

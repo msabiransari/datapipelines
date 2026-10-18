@@ -31,10 +31,10 @@
   grid-template-rows: auto auto minmax(0, 1fr);
   gap: var(--gap-md);
   /* Full height below the sticky nav, the 041 math verbatim: layouts/default.html gives
-     <main> padding-block: var(--gap-lg), hence twice that; the nav's 1px border-bottom is
+     <main> padding-block: var(--app-main-pad), hence twice that; the nav's 1px border-bottom is
      chrome too, so --space-px covers it. The floor keeps short screens usable: below it
      the page scrolls instead of crushing the panes. */
-  height: calc(100dvh - var(--header-height) - var(--space-px) - (var(--gap-lg) * 2));
+  height: calc(100dvh - var(--header-height) - var(--space-px) - (var(--app-main-pad) * 2));
   min-height: 640px;
 }
 

@@ -106,7 +106,7 @@
   --dt-col-max: 25rem;           /* a dense column's automatic ceiling (drag past it freely) */
   --dt-handle: var(--space-2);   /* the resize handle's hit width */
   --dt-max-h: min(40rem, 60dvh); /* a FIXED viewport's height */
-  --dt-flow-max-h: calc(100dvh - var(--header-height) - 2 * var(--gap-lg));
+  --dt-flow-max-h: calc(100dvh - var(--header-height) - 2 * var(--app-main-pad));
   position: relative;
   min-width: 0;
   max-width: 100%;
