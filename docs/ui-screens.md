@@ -1,9 +1,9 @@
 # UI Screens Inventory
 
-**Status:** v1.158
+**Status:** v1.159
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
-**Last updated:** 2026-10-17 (#556; #578; #554); 2026-10-16 (#551 merge follow-up; #551; #555; #552; #553; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
+**Last updated:** 2026-10-18 (#582); 2026-10-17 (#556; #578; #554); 2026-10-16 (#551 merge follow-up; #551; #555; #552; #553; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
 
 ---
 
@@ -2218,9 +2218,9 @@ capability page — its public route admits nothing of the workspace.
 
 | Attribute | Value |
 |---|---|
-| URL | `GET /parameter-sets` (`?q=` searches it, `?offset=` pages it) |
+| URL | `GET /parameter-sets` (`?q=` searches it, `?lifecycle=` keeps one inventory bucket, `?offset=` pages it) |
 | Auth required | Yes — `parameter_set.read`, every role (a promoter through the lens: only sets whose current version is RELEASED and admitted; a hidden set is absent — not listed, not counted, not paged, not a search hit) |
-| Purpose | Find a parameter set and open its workspace — the menu's Parameter Sets item lands here; `/overview/parameter-sets` serves the inventory (§4.25) and takes the menu with #582 |
+| Purpose | Find a parameter set and open its workspace. Since #582 the menu's Parameter Sets item leads to `/overview/parameter-sets` (§4.25), whose counts and bars link here filtered; View all — the overview's and the resource browser's — lands here unfiltered |
 | Design primitives | The house list: `.ds-empty` for the empty state, the shared §5 pager; `parameter-sets.css` (`ps-*`), head-loaded (§3.0 is normative) |
 | JS | None of its own |
 | htmx | The route's rows are the same read the sidebar's tree is built from; a row preserves the rail through main-content navigation |
@@ -2233,6 +2233,16 @@ read the sidebar's branch searches with. It is the page `/parameter-sets` always
 search control re-fetches ONLY the list fragment into the stable `#parameter-set-list-wrapper` root
 (§4.3's contract: the control is never re-rendered, so focus and value survive); `?q=` stays the deep
 link every "find this parameter set" link uses.
+**The lifecycle filter (#582).** `?lifecycle=` takes §4.3's wire values `draft`, `released`,
+`released-with-draft`, `with-drafts` and `with-releases`, composes with `?q=` and `?offset=`, and keeps the
+sets the overview's inventory counts in that bucket, so on one workspace the filtered total equals the
+overview's number under every lens. A Lifecycle control beside the search box sends it with every search;
+an empty filtered list says which filter emptied it and offers Clear search and Clear filters; the pager
+carries it. `discarded` is not offered and, like any unknown value, is the house 400 before any read: a
+discarded-only set has no workspace page (its pointer falls to none when its last release is discarded,
+so the workspace route answers 404). Through a promoter's lens the filter reads the admitted names'
+RELEASED versions only — the inventory's rule, not the unfiltered catalog's current-pointer rule above — and
+lists each set at a released version, never at a draft.
 `GET /partials/parameter-sets/tree` keeps its historical path and, since #466, renders the catalog list
 alone: its `scope=nav` and prefix presentations were removed, and a stale `scope` or `prefix` is ignored.
 The sidebar uses its REST tree/search routes (§3.4, rest-api §24), under the same read lens.
@@ -2484,6 +2494,13 @@ inventory's, unlensed and narrowed), `PromoterLensSweepTest`, `overview.test.mjs
 `OverviewBrowserTest` (copy resolves and refuses with zero requests; the menu lands on the overview with
 its tree; a workspace switch).
 
+**Families as built.**
+
+| Family | Menu item links the overview since | Guide | Recently updated | Catalog `lifecycle` filter |
+|---|---|---|---|---|
+| Pipelines | #556 | `overview/guide-pipelines.html` | `PipelineRepository.recent` | `/pipelines?lifecycle=`, all but `discarded` (§4.3) |
+| Parameter Sets | #582 | `overview/guide-parameter-sets.html`: what parameter sets are for, a starter prompt that drafts a set and checks it by evaluating, Templates and Dashboards as related families | `ParameterSetRepository.recent`, linking `/parameter-sets/<id>` | `/parameter-sets?lifecycle=`, all but `discarded` (§4.23); guards `OverviewParameterSetsRenderTest`, `OverviewParameterSetsE2eTest`, `OverviewParameterSetsBrowserTest` |
+
 ## 5. htmx Usage Pattern
 
 Standard pattern for list/filter/pagination. The page (`GET /pipelines`) renders the shell **and** the initial fragment; every subsequent refresh hits the partial endpoint (`GET /partials/pipelines`) and swaps the fragment only.
@@ -2649,6 +2666,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-18 | v1.159 | #582 the Parameter Sets overview | **§4.25:** the Parameter Sets menu item now links `/overview/parameter-sets`, which carries its guide (introduction, Create with your agent, related families and help) and Recently updated, with Review drafts opening the catalog filtered to With drafts; a **Families as built** table closes the section with the Pipelines and Parameter Sets rows. **§4.23:** the catalog's `?lifecycle=` filter (the five offered values, the 400 for `discarded` and unknown values, the promoter's released-only reading) and the Purpose row's menu destination. |
 | 2026-10-17 | v1.158 | #556 the family overview pages | **§4.25, new:** `GET /overview/<family>` for the five families from one template: the inventory (four counts, four bars and a hidden table from one `FamilyInventory` read, the unavailable state without a number) and, for Pipelines, the introduction, Create with your agent (Copy prompt, clipboard only), Recently updated and related help. **§3.4:** the four path rules treat an overview as its family's; selection rule 1 — the Pipelines menu item now leads to its overview, the other four keep their catalog until #579–#582. **§4.3:** the `?lifecycle=` filter, its 400 and its equality with the overview's counts. **§4.6, §4.21, §4.23, §4.24:** each names its served overview and the issue that moves the menu. |
 | 2026-10-17 | v1.157 | #578 browser reveal | **§3.4:** desktop chevron-right at the browser edge; phone keeps the folder glyph. A desktop family menu click clears Hide and shows the browser, including the active family; non-family destinations preserve Hide. Storage table and **§3.6** updated. |
 | 2026-10-17 | v1.156 | #554 the shell becomes three sibling columns: a stable primary menu, a separate resource browser, the workspace | **Principle 4, §3, §3.4, §3.6, §4.3, §4.6, §4.6a/b, §4.21, §4.24:** the in-rail accordion (#460/#478) and the rail resize (#465/#503) retire. The menu is 202px expanded / 64px compact, with Explore (Dashboards, Visualizations, Parameter Sets) as a new group between Build and Operate; compact mode has named tooltips and no group labels. The five REST trees move into `#app-browser` beside it, outside the boosted main: header with title, admitted count (moved from the menu badges, all five families) and Hide; search; tree; View all + width reset. The browser is visible only on a family page, mounts each family lazily and keeps it in-document, and is resizable 240–480px on its boundary, clamped to leave main 320px. §3.6 is re-cut to the record's four bands (≥1600 / 1101–1599 / 761–1100 / ≤760): two phone drawers, one open at a time, the rest of the shell `inert`; the menu drawer keeps its 232px (`--app-menu-drawer`) so its close control clears the wordmark. A storage table: `dp-rail` kept; `dp-browser-width:<ws>` and `dp-browser-hidden:<ws>` new; `dp-rail-width:<ws>`, `dp-tree-open:<ws>` and `dp-tree-panel:*` removed on sight, never reinterpreted. The record's eight selection rules are stated as built (rule 1's overview destination is #556's). The #555 phone rows follow the band edge (760px and below). The "document never scrolls" and "`<main>` is the one scroll container" sentences are unchanged. |
