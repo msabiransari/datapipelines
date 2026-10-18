@@ -1241,25 +1241,25 @@ class TemplateRepository(
                     "v.version = (SELECT MAX(x.version) FROM template_versions x WHERE x.template_id = t.id)"
                 }
             return """
-            WHERE $live
-              AND t.workspace_id = :workspaceId
-              AND $version
-              AND (CAST(:dialect AS TEXT) IS NULL OR v.dialect = CAST(:dialect AS TEXT))
-              AND (CAST(:type AS TEXT) IS NULL OR v.type = CAST(:type AS TEXT))
-              AND (
-                    CAST(:implements AS UUID) IS NULL
-                    OR EXISTS (SELECT 1 FROM template_implements ti JOIN learned_facts f ON f.id = ti.fact_id
-                                WHERE ti.template_id = v.template_id AND ti.version = v.version
-                                  AND ti.fact_id = CAST(:implements AS UUID) AND f.workspace_id = t.workspace_id)
-                  )
-              AND (
-                    CAST(:pattern AS TEXT) IS NULL
-                    OR t.name ILIKE CAST(:pattern AS TEXT) ESCAPE '\'
-                    OR t.display_name ILIKE CAST(:pattern AS TEXT) ESCAPE '\'
-                    OR t.description ILIKE CAST(:pattern AS TEXT) ESCAPE '\'
-                    OR v.dialect ILIKE CAST(:pattern AS TEXT) ESCAPE '\'
-                  )
-            """.trimIndent()
+                WHERE $live
+                  AND t.workspace_id = :workspaceId
+                  AND $version
+                  AND (CAST(:dialect AS TEXT) IS NULL OR v.dialect = CAST(:dialect AS TEXT))
+                  AND (CAST(:type AS TEXT) IS NULL OR v.type = CAST(:type AS TEXT))
+                  AND (
+                        CAST(:implements AS UUID) IS NULL
+                        OR EXISTS (SELECT 1 FROM template_implements ti JOIN learned_facts f ON f.id = ti.fact_id
+                                    WHERE ti.template_id = v.template_id AND ti.version = v.version
+                                      AND ti.fact_id = CAST(:implements AS UUID) AND f.workspace_id = t.workspace_id)
+                      )
+                  AND (
+                        CAST(:pattern AS TEXT) IS NULL
+                        OR t.name ILIKE CAST(:pattern AS TEXT) ESCAPE '\'
+                        OR t.display_name ILIKE CAST(:pattern AS TEXT) ESCAPE '\'
+                        OR t.description ILIKE CAST(:pattern AS TEXT) ESCAPE '\'
+                        OR v.dialect ILIKE CAST(:pattern AS TEXT) ESCAPE '\'
+                      )
+                """.trimIndent()
         }
 
         /**

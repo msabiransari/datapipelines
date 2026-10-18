@@ -253,8 +253,15 @@ open class TemplateService(
         while (true) {
             val page =
                 templates.list(
-                    workspaceId, dialect, type, q, offset, TemplateRepository.MAX_PAGE_LIMIT, implements,
-                    lifecycle, releasedOnly = true,
+                    workspaceId,
+                    dialect,
+                    type,
+                    q,
+                    offset,
+                    TemplateRepository.MAX_PAGE_LIMIT,
+                    implements,
+                    lifecycle,
+                    releasedOnly = true,
                 )
             all += page
             if (page.size < TemplateRepository.MAX_PAGE_LIMIT) break

@@ -162,10 +162,11 @@ class FamilyRecentE2eTest {
     fun `an empty lens reads nothing, an unknown lens is unavailable, a failed read is unavailable`() {
         fixture()
         val source = CountingSource(requireNotNull(jdbc.jdbcTemplate.dataSource))
-        val counted = FamilyRecent(
-            PipelineRepository(NamedParameterJdbcTemplate(source)),
-            TemplateRepository(NamedParameterJdbcTemplate(source)),
-        )
+        val counted =
+            FamilyRecent(
+                PipelineRepository(NamedParameterJdbcTemplate(source)),
+                TemplateRepository(NamedParameterJdbcTemplate(source)),
+            )
 
         counted.forFamily(NavigationFamily.PIPELINES, workspace, lens(ReadLens.NOTHING)) shouldBe RecentResult.Available(emptyList())
         source.reads shouldBe 0

@@ -45,8 +45,7 @@ class FamilyRecent(
     private val log = LoggerFactory.getLogger(FamilyRecent::class.java)
 
     /** True when [family] has an adapter, so its overview renders the section. */
-    fun supports(family: NavigationFamily): Boolean =
-        family == NavigationFamily.PIPELINES || family == NavigationFamily.TEMPLATES
+    fun supports(family: NavigationFamily): Boolean = family == NavigationFamily.PIPELINES || family == NavigationFamily.TEMPLATES
 
     /** Null for a family with no adapter; otherwise the newest admitted objects or why they are unknown. */
     @Suppress("TooGenericExceptionCaught") // the read boundary FamilyInventory draws, lazy lens derivation included
@@ -60,11 +59,17 @@ class FamilyRecent(
         return try {
             RecentResult.Available(
                 when (family) {
-                    NavigationFamily.PIPELINES ->
+                    NavigationFamily.PIPELINES -> {
                         pipelines.recent(workspaceId, view.pipelines).map { it.entry("/pipelines/${it.id}") }
-                    NavigationFamily.TEMPLATES ->
+                    }
+
+                    NavigationFamily.TEMPLATES -> {
                         templates.recent(workspaceId, view.templates).map { it.entry(templateHref(it.name)) }
-                    else -> emptyList()
+                    }
+
+                    else -> {
+                        emptyList()
+                    }
                 },
             )
         } catch (failure: Exception) {
@@ -75,11 +80,14 @@ class FamilyRecent(
 
     /** Templates link by NAME — the tree's form, every path segment URL-encoded (TreeProjection). */
     private fun templateHref(name: String): String =
-        "/templates/" + name
-            .split('/')
-            .joinToString("/") { segment ->
-                java.net.URLEncoder.encode(segment, java.nio.charset.StandardCharsets.UTF_8).replace("+", "%20")
-            }
+        "/templates/" +
+            name
+                .split('/')
+                .joinToString("/") { segment ->
+                    java.net.URLEncoder
+                        .encode(segment, java.nio.charset.StandardCharsets.UTF_8)
+                        .replace("+", "%20")
+                }
 
     private fun RecentRow.entry(href: String) = RecentEntry(name, href, modifiedAt, hasDraft)
 }
