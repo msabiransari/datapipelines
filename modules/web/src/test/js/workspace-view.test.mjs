@@ -190,3 +190,30 @@ test("#349 wiring: the served beforeSwap guard cancels a stale sink response", a
   assert.match(window_, /evt\.detail\.shouldSwap = false;/, "a stale response is cancelled before it can paint");
   assert.match(window_, /DP-PE-Sink-Token/, "the token rides the request (a sink-carried token cannot catch an in-flight response)");
 });
+
+test("#607 the selector's viewed row carries no status suffix — the chip says it once; the other rows keep theirs", () => {
+  const editor = loaded({ viewedVersion: 3 });
+  editor.versionRows = [
+    { version: 1, status: "RELEASED", current: true, viewed: false },
+    { version: 2, status: "RELEASED", current: false, viewed: false },
+    { version: 3, status: "DRAFT", current: false, viewed: true },
+  ];
+  const rows = editor.selectorRows;
+  assert.deepEqual(
+    rows.map((r) => [r.label, r.currentSuffix, r.ariaCurrent]),
+    [
+      ["v1", "· current", null],
+      ["v2", "", null],
+      ["v3", "", "page"],
+    ],
+  );
+  assert.equal(rows[2].titleText, "draft", "the viewed row's title keeps its full status");
+
+  editor.versionRows = editor.versionRows.map((r) => ({ ...r, viewed: r.version === 1 }));
+  assert.deepEqual(
+    editor.selectorRows.map((r) => r.currentSuffix),
+    ["", "", "· draft"],
+    "viewing v1: its '· current' is the chip's; the draft row names its own status",
+  );
+  assert.equal(editor.selectorRows[0].titleText, "released · current");
+});

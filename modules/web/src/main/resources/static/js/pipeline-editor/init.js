@@ -1998,7 +1998,10 @@
         return null;
       },
 
-      /** The header selector's rows: label, suffixes, canonical href, viewed mark. */
+      /** The header selector's rows: label, suffixes, canonical href, viewed mark.
+       *  #607: the VIEWED row carries no suffix — the chip beside the selector already says
+       *  the viewed version's status, and the heading says the draft state once. Every other
+       *  row keeps "· current" / "· draft" (it names ITS status); `titleText` keeps it all. */
       get selectorRows() {
         var self = this;
         var id = self.pipeline && self.pipeline.id ? self.pipeline.id : "";
@@ -2006,6 +2009,7 @@
         return (self.versionRows || []).map(function (row) {
           var suffix = row.current ? "· current" : "";
           if (!suffix && String(row.status).toUpperCase() === "DRAFT") suffix = "· draft";
+          if (row.viewed) suffix = "";
           var params = "version=" + encodeURIComponent(row.version);
           if (tab && tab !== "flow") params += "&tab=" + encodeURIComponent(tab);
           return {

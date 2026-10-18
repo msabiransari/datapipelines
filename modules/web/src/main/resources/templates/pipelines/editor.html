@@ -163,96 +163,111 @@
                 data-can-read-executions=${canReadExecutions == true},
                 data-has-draft=${hasDraft == true}">
 
-    <!-- Top bar (080 §D — the mock's 52px bar): back, crumb (folder muted + name
-         bold), viewed-version chip, version selector, run status, Execute. -->
+    <!-- #607 (the #558 exemplar; shell record §9) — the RESOURCE HEADING: `.pe-topbar` is the
+         heading BLOCK, the overview's `.app-page-h` inside it, so the heading's top edge and the
+         title's inset align with the family overview by construction. The title column is the
+         context line (back to Pipelines + the folder, support scale, secondary), the ONE page
+         title (the leaf, `h1.ds-headline`, wrapping — never truncated) and the version/status
+         line (the viewed-version chip, the selector, the read-only note); the actions sit in
+         `.app-page-actions` beside it and wrap under it when the two no longer fit. Then the
+         tabs, then the panes. A template, dashboard, visualization or parameter-set workspace
+         copies this block (ui-screens §4.4). -->
     <div class="pe-topbar">
-      <a th:href="@{/pipelines}" class="pe-back"><svg class="ds-icon ds-icon-xs" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#arrow-left"></use></svg> Pipelines</a>
-      <div class="pe-crumb">
-        <span class="pe-crumb-path" x-show="crumbPath" x-text="crumbPath"></span>
-        <span class="pe-crumb-name" x-text="crumbName"></span>
-        <!-- #348: the chip names the VIEWED version and its own status — never the
-              working version, never "latest release" (versioning §3.4: the current
-              pointer is sticky and event-driven, and this page displays the row it
-              resolved). data-pe-viewed-label (#349): an in-page version switch updates
-              every such chip by textContent. -->
-        <span class="pe-vchip" data-pe-viewed-label th:classappend="${viewedIsDraft} ? 'pe-vchip-draft'"
-              th:text="${viewedLabel}">v1 · released · current</span>
+      <div class="app-page-h">
+        <div class="pe-crumb">
+          <div class="pe-context-line">
+            <a th:href="@{/pipelines}" class="pe-back"><svg class="ds-icon ds-icon-xs" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#arrow-left"></use></svg> Pipelines</a>
+            <span class="pe-crumb-path" x-show="crumbPath" x-text="crumbPath"></span>
+          </div>
+          <h1 class="ds-headline pe-crumb-name" x-text="crumbName"></h1>
+          <div class="pe-version-line">
+            <!-- #348: the chip names the VIEWED version and its own status — never the
+                  working version, never "latest release" (versioning §3.4: the current
+                  pointer is sticky and event-driven, and this page displays the row it
+                  resolved). data-pe-viewed-label (#349): an in-page version switch updates
+                  every such chip by textContent. #607: it is where the draft state is said —
+                  once; the selector's viewed row carries no second status. -->
+            <span class="pe-vchip" data-pe-viewed-label th:classappend="${viewedIsDraft} ? 'pe-vchip-draft'"
+                  th:text="${viewedLabel}">v1 · released · current</span>
+            <!-- #348 — the version selector: READ navigation over the admitted history (D5).
+                 #349: the rows are the workspace block's admitted history (one lens-filtered
+                 source the client also re-reads on an in-page switch — the selector never
+                 reloads the document to change the viewed version, because a reload would
+                 detach the page from an active run, spec §4.3). The row's href is still the
+                 canonical deep link (middle-click, no-JS); the client intercepts a plain
+                 click and applies the version in place. -->
+            <nav class="pe-versions" aria-label="View another version" x-show="selectorRows.length">
+              <template x-for="row in selectorRows" :key="row.version">
+                <a class="ds-button ds-button-ghost ds-button-sm" data-pe-version-link hx-boost="false"
+                   x-bind:href="row.href"
+                   x-bind:data-version="row.version"
+                   x-bind:aria-current="row.ariaCurrent"
+                   x-bind:title="row.titleText">
+                  <span x-text="row.label"></span>
+                  <span class="u-muted" x-show="row.currentSuffix" x-text="row.currentSuffix"></span>
+                </a>
+              </template>
+            </nav>
+            <!-- 114 §A — a viewer's editor is READ-ONLY: it loads (canRead), the mutating verbs
+                 are absent, and the line below says so once, quietly. No toast: nothing failed. -->
+            <div th:if="${canAuthor != true}" class="app-note" data-role-note="read-only">
+              <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#info"></use></svg>
+              <span>Read-only — you are a viewer in <span th:text="${activeWorkspace}">workspace</span>.</span>
+            </div>
+          </div>
+        </div>
+        <div class="app-page-actions">
+          <div class="pe-topbar-actions">
+            <!-- versioning §3.5/§7, since 102 through the §4.3d dialogs (never a native
+                 confirm): Release opens the release dialog — it shows the draft's template pins
+                 and refuses on a DRAFT pin — and Discard draft opens the PURGE dialog (§5.4: the
+                 pre-102 text claiming an executed draft "is kept as history" was false). The POST
+                 answers HX-Redirect and the page reloads: the editor's draft state is
+                 document-wide. Agents never release (D4). -->
+            <button th:if="${hasDraft == true and canAuthor == true}" data-verb="pipeline-release" class="ds-button ds-button-primary ds-button-sm"
+                    id="pe-release-draft"
+                    th:attr="hx-get=@{'/partials/pipelines/{id}/lifecycle/release'(id=${pipelineId}, from='editor')},
+                             hx-target='#pe-dialog', hx-swap='innerHTML'"
+                    th:text="'Release v' + ${draftVersion} + '…'">Release v2…</button>
+            <!-- #395 — ONE destructive in the header (the explorer's 102 §B.1 rule, kept now that the
+                 explorer's detail pane is gone, #350): a draft-only pipeline (the {D} shape) offers the
+                 ENTITY purge — its own dialog, with the exclusive draft templates and #335's kept list —
+                 and every other draft the version purge below. -->
+            <button th:if="${canDelete == true and canAuthor == true}" data-verb="pipeline-purge-entity" class="ds-button ds-button-secondary ds-button-sm"
+                    id="pe-purge-entity"
+                    th:attr="hx-get=@{'/partials/pipelines/{id}/lifecycle/purge-entity'(id=${pipelineId}, from='editor')},
+                             hx-target='#pe-dialog', hx-swap='innerHTML'">
+              Purge pipeline…
+            </button>
+            <button th:if="${hasDraft == true and canAuthor == true and canDelete != true}" data-verb="pipeline-purge" class="ds-button ds-button-secondary ds-button-sm"
+                    id="pe-discard-draft"
+                    th:attr="hx-get=@{'/partials/pipelines/{id}/lifecycle/purge'(id=${pipelineId}, version=${draftVersion}, from='editor')},
+                             hx-target='#pe-dialog', hx-swap='innerHTML'">
+              Purge draft…
+            </button>
+          </div>
+          <!-- #349 — run overrides reachable BESIDE Execute as well as in the Parameters tab
+               (spec §4.1): the button is tab navigation only — it opens the Parameters tab,
+               it never touches the run state. Rendered beside Execute, so a reader who may
+               run sees the override affordance where the run is. -->
+          <button th:if="${canExecute}" type="button" class="ds-button ds-button-ghost ds-button-sm"
+                  @click="openRunParameters" aria-label="Run parameters">Run parameters</button>
+          <div class="pe-status" x-bind:class="statusClass" role="status">
+            <span class="pe-status-dot"></span><span x-text="runStatus.text">Idle</span>
+          </div>
+          <button th:if="${canExecute}" data-verb="pipeline-execute" class="pe-run" x-bind:disabled="isExecuting" @click="executePipeline">
+            <!-- 085 §B: the sprite's play, not a hand-drawn filled triangle — one icon
+                 source, and the stroke glyph matches the canvas controls beside it. -->
+            <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#play"></use></svg>
+            <span x-show="notExecuting">Execute</span>
+            <span x-show="isExecuting">Running…</span>
+          </button>
+          <button th:if="${canExecute}" data-verb="execution-cancel" x-show="isExecuting" class="ds-button ds-button-danger ds-button-sm" @click="cancelExecution">
+            <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#square"></use></svg>
+            Cancel
+          </button>
+        </div>
       </div>
-      <!-- #348 — the version selector: READ navigation over the admitted history (D5).
-           #349: the rows are the workspace block's admitted history (one lens-filtered
-           source the client also re-reads on an in-page switch — the selector never
-           reloads the document to change the viewed version, because a reload would
-           detach the page from an active run, spec §4.3). The row's href is still the
-           canonical deep link (middle-click, no-JS); the client intercepts a plain
-           click and applies the version in place. -->
-      <nav class="pe-versions" aria-label="View another version" x-show="selectorRows.length">
-        <template x-for="row in selectorRows" :key="row.version">
-          <a class="ds-button ds-button-ghost ds-button-sm" data-pe-version-link hx-boost="false"
-             x-bind:href="row.href"
-             x-bind:data-version="row.version"
-             x-bind:aria-current="row.ariaCurrent"
-             x-bind:title="row.titleText">
-            <span x-text="row.label"></span>
-            <span class="u-muted" x-show="row.currentSuffix" x-text="row.currentSuffix"></span>
-          </a>
-        </template>
-      </nav>
-      <!-- 114 §A — a viewer's editor is READ-ONLY: it loads (canRead), the mutating verbs
-           are absent, and the line below says so once, quietly. No toast: nothing failed. -->
-      <div th:if="${canAuthor != true}" class="app-note" data-role-note="read-only">
-        <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#info"></use></svg>
-        <span>Read-only — you are a viewer in <span th:text="${activeWorkspace}">workspace</span>.</span>
-      </div>
-      <div class="pe-topbar-actions">
-        <!-- versioning §3.5/§7, since 102 through the §4.3d dialogs (never a native
-             confirm): Release opens the release dialog — it shows the draft's template pins
-             and refuses on a DRAFT pin — and Discard draft opens the PURGE dialog (§5.4: the
-             pre-102 text claiming an executed draft "is kept as history" was false). The POST
-             answers HX-Redirect and the page reloads: the editor's draft state is
-             document-wide. Agents never release (D4). -->
-        <button th:if="${hasDraft == true and canAuthor == true}" data-verb="pipeline-release" class="ds-button ds-button-primary ds-button-sm"
-                id="pe-release-draft"
-                th:attr="hx-get=@{'/partials/pipelines/{id}/lifecycle/release'(id=${pipelineId}, from='editor')},
-                         hx-target='#pe-dialog', hx-swap='innerHTML'"
-                th:text="'Release v' + ${draftVersion} + '…'">Release v2…</button>
-        <!-- #395 — ONE destructive in the header (the explorer's 102 §B.1 rule, kept now that the
-             explorer's detail pane is gone, #350): a draft-only pipeline (the {D} shape) offers the
-             ENTITY purge — its own dialog, with the exclusive draft templates and #335's kept list —
-             and every other draft the version purge below. -->
-        <button th:if="${canDelete == true and canAuthor == true}" data-verb="pipeline-purge-entity" class="ds-button ds-button-secondary ds-button-sm"
-                id="pe-purge-entity"
-                th:attr="hx-get=@{'/partials/pipelines/{id}/lifecycle/purge-entity'(id=${pipelineId}, from='editor')},
-                         hx-target='#pe-dialog', hx-swap='innerHTML'">
-          Purge pipeline…
-        </button>
-        <button th:if="${hasDraft == true and canAuthor == true and canDelete != true}" data-verb="pipeline-purge" class="ds-button ds-button-secondary ds-button-sm"
-                id="pe-discard-draft"
-                th:attr="hx-get=@{'/partials/pipelines/{id}/lifecycle/purge'(id=${pipelineId}, version=${draftVersion}, from='editor')},
-                         hx-target='#pe-dialog', hx-swap='innerHTML'">
-          Purge draft…
-        </button>
-      </div>
-      <div class="pe-spacer"></div>
-      <!-- #349 — run overrides reachable BESIDE Execute as well as in the Parameters tab
-           (spec §4.1): the button is tab navigation only — it opens the Parameters tab,
-           it never touches the run state. Rendered beside Execute, so a reader who may
-           run sees the override affordance where the run is. -->
-      <button th:if="${canExecute}" type="button" class="ds-button ds-button-ghost ds-button-sm"
-              @click="openRunParameters" aria-label="Run parameters">Run parameters</button>
-      <div class="pe-status" x-bind:class="statusClass" role="status">
-        <span class="pe-status-dot"></span><span x-text="runStatus.text">Idle</span>
-      </div>
-      <button th:if="${canExecute}" data-verb="pipeline-execute" class="pe-run" x-bind:disabled="isExecuting" @click="executePipeline">
-        <!-- 085 §B: the sprite's play, not a hand-drawn filled triangle — one icon
-             source, and the stroke glyph matches the canvas controls beside it. -->
-        <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#play"></use></svg>
-        <span x-show="notExecuting">Execute</span>
-        <span x-show="isExecuting">Running…</span>
-      </button>
-      <button th:if="${canExecute}" data-verb="execution-cancel" x-show="isExecuting" class="ds-button ds-button-danger ds-button-sm" @click="cancelExecution">
-        <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#square"></use></svg>
-        Cancel
-      </button>
     </div>
 
     <!-- Execution status banner (connection loss / recovery) -->

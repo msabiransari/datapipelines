@@ -8,9 +8,9 @@
 
 :root {
   /* #349: the settings sidebar is gone (its content lives in the Overview and
-     Parameters tabs); the workspace's own geometry is the topbar, the tab strip,
-     the stage and the dock. */
-  --pe-topbar-height: 52px;
+     Parameters tabs); the workspace's own geometry is the heading, the tab strip,
+     the stage and the dock. #607: the heading is the shared resource heading, as tall
+     as its content — the 080 mock's 52px bar height is retired with the bar. */
   --pe-gap: var(--gap-md, 16px);
   --pe-transition: 200ms ease;
   /* Node card geometry: ONE source for the box the canvas paints and the HTML overlay
@@ -62,54 +62,83 @@
   font-size: var(--app-text-ui);
 }
 
-/* ---- Top bar (080 §D — the mock's 52px bar) ---- */
+/* ---- The resource heading (#607, the #558 exemplar; shell record §9) ----
+ * `.pe-topbar` is the heading BLOCK, no longer the 080 mock's 52px bar: the overview's
+ * `.app-page-h` row inside it holds the title column (`.pe-crumb`: the context line, the
+ * ONE page title, the version/status line) beside `.app-page-actions`, so the heading's
+ * top edge and the title's inset are the family overview's by construction. A heading
+ * has no surface of its own — the page is its surface — and the tab strip's bottom edge
+ * is the one rule under it. The title's size, weight, tracking and leading are the
+ * `.app-main .ds-headline` role (app.css), never restated here. */
 .pe-topbar {
-  display: flex;
-  align-items: center;
-  gap: var(--gap-md, 14px);
-  padding: 0 var(--gap-md, 16px);
-  min-height: var(--pe-topbar-height);
-  background: var(--surface-default, #fff);
-  border-bottom: 1px solid var(--border-faint, #e6e9ee);
   flex-shrink: 0;
 }
 
+/* The actions sit beside the title while both fit and wrap under it when they do not:
+   the title column's 24rem basis is the width below which it stops yielding room. */
+.pe-topbar .app-page-h {
+  flex-wrap: wrap;
+}
+
+.pe-topbar .app-page-actions {
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.pe-crumb {
+  flex: 1 1 24rem;
+  min-width: 0;
+}
+
+/* The context line: where this pipeline lives — back to Pipelines, then its folder — at
+   the support scale in the secondary colour (record §5's breadcrumb row). */
+.pe-context-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin-bottom: var(--space-1);
+  color: var(--text-secondary, #334155);
+  font-size: var(--app-text-support);
+}
+
 .pe-back {
-  color: var(--text-muted, #64748b);
-  font-size: var(--app-text-ui);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: inherit;
   text-decoration: none;
-  padding: 6px 8px;
   border-radius: var(--radius-base, 6px);
 }
 
 .pe-back:hover {
-  background: var(--surface-inset, #f1f3f6);
   color: var(--text-primary, #0f172a);
+  text-decoration: underline;
 }
 
-.pe-crumb {
-  display: flex;
-  align-items: baseline;
-  gap: var(--gap-sm, 8px);
-  min-width: 0;
-}
-
+/* The folder wraps like the title does: a deep path is read, never clipped. */
 .pe-crumb-path {
-  color: var(--text-muted, #64748b);
   font-family: var(--font-mono, monospace);
-  font-size: var(--app-text-support);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
 }
 
+/* The page title. `overflow-wrap: anywhere` lets a long snake_case leaf — one unbroken
+   word — wrap inside its column instead of widening it. */
 .pe-crumb-name {
-  font-weight: var(--weight-semibold, 600);
-  font-size: var(--app-text-heading);
+  margin: 0;
   color: var(--text-primary, #0f172a);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
+}
+
+/* The version/status line (the record's metadata row): the viewed-version chip, the
+   version selector, the read-only note. */
+.pe-version-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
 }
 
 .pe-vchip {
@@ -126,10 +155,6 @@
 .pe-vchip-draft {
   background: var(--accent-warning-bg, #fef9c3);
   color: var(--accent-warning, #a16207);
-}
-
-.pe-topbar .pe-spacer {
-  flex: 1;
 }
 
 /* The run status: dot + text; the dot pulses brand while running (stopped under
@@ -199,7 +224,7 @@
 }
 
 /* The draft lifecycle actions keep their 054 buttons; only the badge is restyled
-   into the bar's chip vocabulary. */
+   into the heading's chip vocabulary. */
 .pe-topbar-actions {
   display: flex;
   align-items: center;
@@ -249,17 +274,19 @@
 }
 
 /* ---- The workspace's six tabs (#349, spec §4.1) ----
- * One strip under the topbar, the dock's tab idiom at page scale: plain buttons, the
+ * One strip under the heading, the dock's tab idiom at page scale: plain buttons, the
  * active one carrying the brand underline-and-ink, aria-selected bound from tabs.js.
  * Runs renders only for a caller with the execution read (server th:if) — the strip
- * shows five tabs there, not a disabled sixth. */
+ * shows five tabs there, not a disabled sixth. #607: the strip closes the heading, so
+ * it sits on the page as the heading does — no surface of its own, its bottom edge the
+ * one rule — and has no inline padding: the first tab starts at the title's left edge
+ * (a tab has no inline padding of its own either). */
 .pe-tabs {
   display: flex;
   align-items: stretch;
   gap: var(--app-tab-gap);
-  padding: 0 var(--pe-gap);
+  padding: 0;
   border-bottom: 1px solid var(--border-faint, #e6e9ee);
-  background: var(--surface-default, #fff);
   overflow-x: auto;
 }
 
