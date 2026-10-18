@@ -1,9 +1,9 @@
 # UI Screens Inventory
 
-**Status:** v1.158
+**Status:** v1.159
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
-**Last updated:** 2026-10-17 (#556; #578; #554); 2026-10-16 (#551 merge follow-up; #551; #555; #552; #553; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
+**Last updated:** 2026-10-18 (#580); 2026-10-17 (#556; #578; #554); 2026-10-16 (#551 merge follow-up; #551; #555; #552; #553; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
 
 ---
 
@@ -2092,12 +2092,12 @@ Guards: `SchedulesUiControllerTest` (the route's row, `canAuthor` = the five wri
 
 | Attribute | Value |
 |---|---|
-| URL | `GET /dashboards` (`?q=&offset=` the deep links) |
+| URL | `GET /dashboards` (`?q=&lifecycle=&offset=` the deep links) |
 | Auth required | Yes — `dashboard.read`, every role (a promoter through the lens: released dashboards whose every source pipeline her pipeline lens admits; a hidden one is absent from the list) |
-| Purpose | The flat catalog landing (the menu's Dashboards item; `/overview/dashboards` serves the inventory, §4.25, and takes the menu with #580): every dashboard the caller may read — or the matches of `q` (a dashboard whose name, display name or description contains the term, case-insensitive, `%` and `_` literal; the term trimmed and cut to 200 characters first, #504b) — one row each, a row linking the workspace. The page and the pager's total come from the lensed SQL read, so a match past the 200th dashboard is listed and counted (#512) |
+| Purpose | The flat catalog landing (since #580 the menu's Dashboards item links `/overview/dashboards`, §4.25, which reaches this page through View all, its counts and bars, and Review drafts): every dashboard the caller may read — or the matches of `q` (a dashboard whose name, display name or description contains the term, case-insensitive, `%` and `_` literal; the term trimmed and cut to 200 characters first, #504b) — one row each, a row linking the workspace. The page and the pager's total come from the lensed SQL read, so a match past the 200th dashboard is listed and counted (#512). With `lifecycle` (#580) the list is one lifecycle bucket, chosen by the inventory's own predicate (§4.3's rule): `draft`, `released`, `released-with-draft`, `with-drafts` or `with-releases`; `discarded` is not offered, since a discarded-only dashboard has no workspace page, and an unknown or unoffered value is the house 400 |
 | Design primitives | §4.3's catalog shape ([Pipelines](#43-pipelines--the-catalog-page-and-the-resource-browser-350-554), #350's owner ruling — one flat, server-paged list, no tree, no detail pane): `.app-catalog-search`, `.tpl-results`, the shared pager; `dashboards.css` dresses the page's own bits |
 | JS | None of its own — the search control is the htmx SPA pattern (a debounced `hx-get` into the stable `#dash-list-wrapper` root, focus and value preserved) |
-| htmx | Yes — the search and the pager re-fetch `GET /partials/dashboards` into `#dash-list-wrapper`, `outerHTML` |
+| htmx | Yes — the search, the lifecycle control and the pager re-fetch `GET /partials/dashboards` into `#dash-list-wrapper`, `outerHTML`, each carrying the other's value |
 
 Content: the flat rows at their WORKING version — a row's badge names the version and marks a
 draft (versioning §7: unreleased edits stay visible; a draft-ONLY dashboard's row says so —
@@ -2105,7 +2105,10 @@ the list page's "opening a dashboard with no release says so" promise survives a
 state, and opening one selects its admitted draft directly, labelled, with the Board pane
 mounted (#537); no admitted draft leaves the choose-a-version state below (#409)).
 **Rows preserve the menu and the browser** through prepared main-content navigation (#460, §3.4). Empty state:
-dashboards are authored through MCP. Browse folders shows the resource browser. The tree
+dashboards are authored through MCP. **Filtered by lifecycle** (#580), the count of rows equals the overview's count for
+that bucket under every lens: a promoter's filtered rows are the admitted names that hold a released version, each shown
+at a release, never a draft, while the unfiltered list keeps the current-pointer rule (§4.25, #563). A filter that
+matches nothing says "No dashboards match: <bucket>" with Clear filters (and Clear search when a term is set). Browse folders shows the resource browser. The tree
 loads immediate levels completely, searches canonical/display names with fully expanded ancestors,
 and Clear collapses to the normal root. The catalog retains its flat search and pager contract.
 
@@ -2484,6 +2487,14 @@ inventory's, unlensed and narrowed), `PromoterLensSweepTest`, `overview.test.mjs
 `OverviewBrowserTest` (copy resolves and refuses with zero requests; the menu lands on the overview with
 its tree; a workspace switch).
 
+**Families as built.** Each family's row lands with the lane that builds its home page; a family without a row is
+served (inventory only) and its menu item still links the catalog.
+
+| Family | Menu item links the overview since | Guide | Recently updated | Catalog `lifecycle` filter |
+|---|---|---|---|---|
+| Pipelines | #556 | `overview/guide-pipelines.html` | `PipelineRepository.recent` | `/pipelines?lifecycle=` — every bucket but `discarded` (§4.3) |
+| Dashboards | #580 | `overview/guide-dashboards.html` — related: Pipelines, Visualizations, Parameter Sets, MCP server reference | `DashboardRepository.recent`, the same `RecentSource` rule | `/dashboards?lifecycle=` — every bucket but `discarded` (§4.21); `OverviewDashboardsE2eTest` pins each count equal to the inventory's, unlensed and through the promoter's real lens; `OverviewDashboardsRenderTest`, `OverviewDashboardsBrowserTest` |
+
 ## 5. htmx Usage Pattern
 
 Standard pattern for list/filter/pagination. The page (`GET /pipelines`) renders the shell **and** the initial fragment; every subsequent refresh hits the partial endpoint (`GET /partials/pipelines`) and swaps the fragment only.
@@ -2649,6 +2660,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-18 | v1.159 | #580 the Dashboards overview | **§4.25:** the closing **Families as built** table, with the Pipelines (#556) and Dashboards rows. **§4.21:** the menu's Dashboards item links `/overview/dashboards`; the catalog's `?lifecycle=` filter (every bucket but discarded, the house 400 otherwise), its control, its empty state and its equality with the overview's counts under every lens. |
 | 2026-10-17 | v1.158 | #556 the family overview pages | **§4.25, new:** `GET /overview/<family>` for the five families from one template: the inventory (four counts, four bars and a hidden table from one `FamilyInventory` read, the unavailable state without a number) and, for Pipelines, the introduction, Create with your agent (Copy prompt, clipboard only), Recently updated and related help. **§3.4:** the four path rules treat an overview as its family's; selection rule 1 — the Pipelines menu item now leads to its overview, the other four keep their catalog until #579–#582. **§4.3:** the `?lifecycle=` filter, its 400 and its equality with the overview's counts. **§4.6, §4.21, §4.23, §4.24:** each names its served overview and the issue that moves the menu. |
 | 2026-10-17 | v1.157 | #578 browser reveal | **§3.4:** desktop chevron-right at the browser edge; phone keeps the folder glyph. A desktop family menu click clears Hide and shows the browser, including the active family; non-family destinations preserve Hide. Storage table and **§3.6** updated. |
 | 2026-10-17 | v1.156 | #554 the shell becomes three sibling columns: a stable primary menu, a separate resource browser, the workspace | **Principle 4, §3, §3.4, §3.6, §4.3, §4.6, §4.6a/b, §4.21, §4.24:** the in-rail accordion (#460/#478) and the rail resize (#465/#503) retire. The menu is 202px expanded / 64px compact, with Explore (Dashboards, Visualizations, Parameter Sets) as a new group between Build and Operate; compact mode has named tooltips and no group labels. The five REST trees move into `#app-browser` beside it, outside the boosted main: header with title, admitted count (moved from the menu badges, all five families) and Hide; search; tree; View all + width reset. The browser is visible only on a family page, mounts each family lazily and keeps it in-document, and is resizable 240–480px on its boundary, clamped to leave main 320px. §3.6 is re-cut to the record's four bands (≥1600 / 1101–1599 / 761–1100 / ≤760): two phone drawers, one open at a time, the rest of the shell `inert`; the menu drawer keeps its 232px (`--app-menu-drawer`) so its close control clears the wordmark. A storage table: `dp-rail` kept; `dp-browser-width:<ws>` and `dp-browser-hidden:<ws>` new; `dp-rail-width:<ws>`, `dp-tree-open:<ws>` and `dp-tree-panel:*` removed on sight, never reinterpreted. The record's eight selection rules are stated as built (rule 1's overview destination is #556's). The #555 phone rows follow the band edge (760px and below). The "document never scrolls" and "`<main>` is the one scroll container" sentences are unchanged. |
