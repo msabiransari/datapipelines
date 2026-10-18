@@ -354,7 +354,7 @@
              every-role reads (the promoter through the lens), so they ride no advice boolean. -->
         <div class="app-nav-group" role="group" aria-labelledby="app-nav-group-explore">
           <div class="app-nav-section" id="app-nav-group-explore">Explore</div>
-          <a th:href="@{/dashboards}" class="app-nav-link" data-nav-section="/dashboards"
+          <a th:href="@{/overview/dashboards}" class="app-nav-link" data-nav-section="/dashboards"
              data-nav-group="Explore" data-nav-label="Dashboards"
              th:classappend="${browserFamily == 'dashboards'} ? 'active' : null"
              th:attr="aria-current=${browserFamily == 'dashboards'} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#boxes"></use></svg><span class="app-rail-label">Dashboards</span></a>
