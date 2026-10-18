@@ -189,11 +189,12 @@
   var SWAP_SPEC = "outerHTML show:window:top";
 
   /* The nav's active-section rule — mirrors layouts/default.html's server-side
-     currentPath classappend exactly: Dashboard by equality, others by prefix. */
+     currentPath classappend exactly: Dashboard by equality, others by prefix, and a
+     section's overview (#556: /overview/pipelines) belongs to that section. */
   function isActiveSection(section, path) {
     if (!section || !path) return false;
     if (section === "/dashboard") return path === "/dashboard";
-    return path.indexOf(section) === 0;
+    return path.indexOf(section) === 0 || path.indexOf("/overview" + section) === 0;
   }
 
   function syncNavActive(doc, path) {
