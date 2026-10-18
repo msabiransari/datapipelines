@@ -166,6 +166,7 @@ class FamilyRecentE2eTest {
             FamilyRecent(
                 PipelineRepository(NamedParameterJdbcTemplate(source)),
                 TemplateRepository(NamedParameterJdbcTemplate(source)),
+                DashboardRepository(NamedParameterJdbcTemplate(source)),
             )
 
         counted.forFamily(NavigationFamily.PIPELINES, workspace, lens(ReadLens.NOTHING)) shouldBe RecentResult.Available(emptyList())
@@ -178,8 +179,8 @@ class FamilyRecentE2eTest {
         source.fail = true
         counted.forFamily(NavigationFamily.PIPELINES, workspace, LensedView.EVERYTHING) shouldBe
             RecentResult.Unavailable("Recently updated could not be read.")
-        // #579: the families still without an adapter answer null (templates joined pipelines).
-        listOf(NavigationFamily.DASHBOARDS, NavigationFamily.VISUALIZATIONS, NavigationFamily.PARAMETER_SETS).forEach { family ->
+        // #579, #580: the families still without an adapter answer null.
+        listOf(NavigationFamily.VISUALIZATIONS, NavigationFamily.PARAMETER_SETS).forEach { family ->
             counted.forFamily(family, workspace, LensedView.EVERYTHING) shouldBe null
         }
     }
@@ -315,7 +316,7 @@ class FamilyRecentE2eTest {
 
         @Bean
         fun recent(jdbc: NamedParameterJdbcTemplate): FamilyRecent =
-            UiConfig().familyRecent(PipelineRepository(jdbc), TemplateRepository(jdbc))
+            UiConfig().familyRecent(PipelineRepository(jdbc), TemplateRepository(jdbc), DashboardRepository(jdbc))
 
         @Bean
         fun inventory(jdbc: NamedParameterJdbcTemplate): FamilyInventory =

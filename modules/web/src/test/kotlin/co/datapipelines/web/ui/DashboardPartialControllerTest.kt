@@ -8,16 +8,20 @@ import co.datapipelines.executor.ExecutionRecord
 import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ExecutionStatus
 import co.datapipelines.executor.ExecutionTrigger
+import co.datapipelines.pipeline.LifecycleBucket
 import co.datapipelines.pipeline.PipelineRepository
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
+import org.springframework.http.HttpStatus
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.ui.ExtendedModelMap
+import org.springframework.web.server.ResponseStatusException
 import java.time.Instant
 import java.util.UUID
 
@@ -190,7 +194,7 @@ class DashboardPartialControllerTest {
     fun `the catalog partial is the flat list, threading the pager's offset (#400)`() {
         authenticate()
 
-        controller.dashboardCatalog(model, q = null, offset = 50)
+        controller.dashboardCatalog(model, q = null, offset = 50, lifecycle = null)
 
         verify(exactly = 1) { browse.fillWrapper(model, workspaceId, any(), q = null, offset = 50) }
     }
@@ -199,9 +203,34 @@ class DashboardPartialControllerTest {
     fun `the catalog partial without an offset is page one`() {
         authenticate()
 
-        controller.dashboardCatalog(model, q = "revenue", offset = null)
+        controller.dashboardCatalog(model, q = "revenue", offset = null, lifecycle = null)
 
         verify(exactly = 1) { browse.fillWrapper(model, workspaceId, any(), q = "revenue", offset = 0) }
+    }
+
+    @Test
+    fun `the catalog partial threads every offered lifecycle bucket with the search and the offset (#580)`() {
+        authenticate()
+
+        CatalogLifecycle.DASHBOARDS.forEach { bucket ->
+            controller.dashboardCatalog(model, q = "revenue", offset = 25, lifecycle = bucket.wire)
+
+            verify(exactly = 1) { browse.fillWrapper(model, workspaceId, any(), q = "revenue", offset = 25, lifecycle = bucket) }
+        }
+    }
+
+    @Test
+    fun `the catalog partial refuses an unknown or unoffered lifecycle with the house 400 before any read (#580)`() {
+        authenticate()
+
+        listOf("discarded", "bogus", "<b>draft</b>").forEach { raw ->
+            val refused =
+                shouldThrow<ResponseStatusException> { controller.dashboardCatalog(model, q = null, offset = null, lifecycle = raw) }
+            refused.statusCode shouldBe HttpStatus.BAD_REQUEST
+            refused.reason shouldBe CatalogLifecycle.BAD_LIFECYCLE
+        }
+        verify(exactly = 0) { browse.fillWrapper(any(), any(), any(), any(), any(), any()) }
+        (LifecycleBucket.DISCARDED_ONLY in CatalogLifecycle.DASHBOARDS) shouldBe false
     }
 
     @Test

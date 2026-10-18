@@ -275,6 +275,8 @@ class DashboardKeyE2eTest {
             listOf(
                 "GET" to "/api/v1/dashboards",
                 "GET" to "/dashboards",
+                // #580: the family's overview, the menu item's landing page, is a session page too.
+                "GET" to "/overview/dashboards",
                 "GET" to "/partials/dashboards",
                 "POST" to "/mcp",
                 "GET" to "/api/$PROBE_CATEGORY/v1/anything",

@@ -109,7 +109,8 @@ class UiConfig {
     fun familyRecent(
         pipelines: co.datapipelines.pipeline.PipelineRepository,
         templates: TemplateRepository,
-    ): FamilyRecent = FamilyRecent(pipelines, templates)
+        dashboards: co.datapipelines.visualization.DashboardRepository,
+    ): FamilyRecent = FamilyRecent(pipelines, templates, dashboards)
 
     /** 106: the version/execution actor lookup both explorer details render. */
     @Bean

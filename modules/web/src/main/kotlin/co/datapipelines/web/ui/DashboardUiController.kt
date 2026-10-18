@@ -37,7 +37,9 @@ class DashboardUiController(
      * may read — or the matches of `q` — one row each, a row linking the workspace, paged at
      * the explorers' page size. The L3b tree page is retired: the folder tree is the
      * sidebar's navigating-tree branch, and a dashboard opens in its workspace — there is no
-     * second tree and no detail pane here.
+     * second tree and no detail pane here. #580: `?lifecycle=` keeps one inventory bucket
+     * ([CatalogLifecycle.DASHBOARDS]) — the overview's bars, counts and Review drafts — and an
+     * unknown or unoffered value is the house 400.
      */
     @GetMapping("/dashboards")
     @RequiredScope(Permission.DASHBOARD_READ)
@@ -46,7 +48,9 @@ class DashboardUiController(
         request: HttpServletRequest,
         @RequestParam(required = false) q: String?,
         @RequestParam(required = false) offset: Int?,
+        @RequestParam(required = false) lifecycle: String?,
     ): String {
+        val bucket = CatalogLifecycle.parse(lifecycle, CatalogLifecycle.DASHBOARDS)
         model.addAttribute("activeTheme", themeResolver.resolve(request))
         RoleModel.stamp(model)
         model.addAttribute("q", q ?: "")
@@ -57,6 +61,7 @@ class DashboardUiController(
             lens.viewFor(principal),
             q?.trim()?.takeIf { it.isNotEmpty() },
             maxOf(0, offset ?: 0),
+            bucket,
         )
         return "dashboards/list"
     }

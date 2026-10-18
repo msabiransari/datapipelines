@@ -1,5 +1,9 @@
 package co.datapipelines.visualization
 
+import co.datapipelines.pipeline.InventorySource
+import co.datapipelines.pipeline.LifecycleBucket
+import co.datapipelines.pipeline.NavigationFamily
+
 /**
  * Every statement of one family, built ONCE from its [ArtifactKind] — `ParameterSetRepository`'s SQL line for
  * line, with the table and foreign-key names substituted. The substituted names are the enum's closed constants
@@ -13,6 +17,11 @@ internal class ArtifactSql(
     private val index = kind.index
     private val versions = kind.versions
     private val fk = kind.fk
+    private val family =
+        when (kind) {
+            ArtifactKind.VISUALIZATION -> NavigationFamily.VISUALIZATIONS
+            ArtifactKind.DASHBOARD -> NavigationFamily.DASHBOARDS
+        }
 
     /** The canonical hash of the `:bodyJson` bind — one expression in every write (versioning §4.1). */
     val hashExpr = HASH_EXPR
@@ -89,16 +98,18 @@ internal class ArtifactSql(
 
     val countAll = "SELECT COUNT(*) FROM $index s WHERE s.workspace_id = :workspaceId AND $liveS"
 
+    /** [searchWhere]'s text half: the index row's name, display name or description matching `:pattern`. */
+    private val searchMatch =
+        "(s.name ILIKE CAST(:pattern AS TEXT) ESCAPE '\\'" +
+            " OR s.display_name ILIKE CAST(:pattern AS TEXT) ESCAPE '\\'" +
+            " OR s.description ILIKE CAST(:pattern AS TEXT) ESCAPE '\\')"
+
     /**
      * The name search's scope (#399; `TemplateRepository`'s shape): the workspace, the live artifacts, and the index row's
      * name, display name or description matching `:pattern` — a bind the repository builds as `%term%` with the term's
      * LIKE metacharacters escaped, so `%`, `_` and `\` match literally and case-insensitively. Never string-built.
      */
-    private val searchWhere =
-        "WHERE s.workspace_id = :workspaceId AND $liveS AND (" +
-            "s.name ILIKE CAST(:pattern AS TEXT) ESCAPE '\\'" +
-            " OR s.display_name ILIKE CAST(:pattern AS TEXT) ESCAPE '\\'" +
-            " OR s.description ILIKE CAST(:pattern AS TEXT) ESCAPE '\\')"
+    private val searchWhere = "WHERE s.workspace_id = :workspaceId AND $liveS AND $searchMatch"
 
     /** [listAll] narrowed by [searchWhere] — each match at its listed version, by name. */
     val search =
@@ -115,6 +126,55 @@ internal class ArtifactSql(
 
     /** Every match's id, unpaged — the narrowing lens intersects it with the admitted set and pages in memory. */
     val searchIds = "SELECT s.id FROM $index s $searchWhere"
+
+    /**
+     * #580 — the catalog `lifecycle` filter's scope: [bucket]'s membership ([InventorySource.membership], the inventory's
+     * rule over the same versions) REPLACES [liveS], as `PipelineRepository.liveness` does. A [narrowed] lens reads
+     * RELEASED versions only and binds its names (`:names`, never empty — the repository answers an empty lens itself);
+     * [searching] adds [searchMatch].
+     */
+    private fun bucketWhere(
+        bucket: LifecycleBucket,
+        narrowed: Boolean,
+        searching: Boolean,
+    ): String =
+        "WHERE s.workspace_id = :workspaceId AND ${InventorySource.membership(family, "s", bucket, narrowed)}" +
+            (if (narrowed) " AND s.name IN (:names)" else "") +
+            (if (searching) " AND $searchMatch" else "")
+
+    /**
+     * The version a filtered row shows. Unlensed: [listedVersion], else (a discarded-only artifact: NULL pointer, no
+     * draft) its newest version. Narrowed: the pointer when it names a RELEASED version, else the newest RELEASED one —
+     * never a draft; every narrowed bucket requires a RELEASED version, so one exists.
+     */
+    private fun bucketListedVersion(narrowed: Boolean): String =
+        if (narrowed) {
+            "COALESCE((SELECT p.version FROM $versions p WHERE p.$fk = s.id AND p.version = s.current_version" +
+                " AND p.status = 'RELEASED'), (SELECT MAX(r.version) FROM $versions r WHERE r.$fk = s.id AND r.status = 'RELEASED'))"
+        } else {
+            "COALESCE($listedVersion, (SELECT MAX(m.version) FROM $versions m WHERE m.$fk = s.id))"
+        }
+
+    /** [listAll]'s shape over [bucketWhere] — each member at [bucketListedVersion], by name. */
+    fun listIn(
+        bucket: LifecycleBucket,
+        narrowed: Boolean,
+        searching: Boolean,
+    ): String =
+        """
+        $selectVersion
+        ${bucketWhere(bucket, narrowed, searching)}
+           AND v.version = ${bucketListedVersion(narrowed)}
+         ORDER BY s.name
+         LIMIT :limit OFFSET :offset
+        """.trimIndent()
+
+    /** The truthful total of [listIn]. */
+    fun countIn(
+        bucket: LifecycleBucket,
+        narrowed: Boolean,
+        searching: Boolean,
+    ): String = "SELECT COUNT(*) FROM $index s ${bucketWhere(bucket, narrowed, searching)}"
 
     val currentVersions =
         """

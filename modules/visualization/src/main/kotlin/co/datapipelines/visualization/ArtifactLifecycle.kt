@@ -2,6 +2,7 @@ package co.datapipelines.visualization
 
 import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.CreateLifecycle
+import co.datapipelines.pipeline.LifecycleBucket
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.pipeline.ValidationFailure
@@ -455,6 +456,31 @@ class ArtifactLifecycle<B : Any>(
         val matches = repository.searchIds(workspaceId, query)
         val admitted = admitted(workspaceId, lens).filter { it.id in matches }
         return ArtifactPage(page(admitted, offset, limit).mapNotNull { repository.findCurrent(workspaceId, it.id) }, admitted.size)
+    }
+
+    /**
+     * #580 — the catalog `lifecycle` filter under every lens over ONE SQL rule, the inventory's
+     * ([ArtifactRepository.listIn]): a narrowing lens passes its names, so the total equals the inventory's
+     * [bucket] count under the same lens. Unlike [listAll]'s narrowed path, which reads the current pointer, an
+     * admitted artifact whose pointer sits on a draft over an older release is a member here (Amendment 6).
+     */
+    fun listIn(
+        workspaceId: UUID,
+        lens: ReadLens,
+        bucket: LifecycleBucket,
+        query: String?,
+        offset: Int = 0,
+        limit: Int = ArtifactRepository.DEFAULT_PAGE_LIMIT,
+    ): ArtifactPage<B> {
+        val names =
+            when (lens) {
+                ReadLens.Everything -> null
+                is ReadLens.Only -> lens.names
+            }
+        return ArtifactPage(
+            repository.listIn(workspaceId, bucket, names, query, offset, limit),
+            repository.countIn(workspaceId, bucket, names, query),
+        )
     }
 
     /** The promoter lens's input — every live artifact's current RELEASED version (versioning §10.2). */

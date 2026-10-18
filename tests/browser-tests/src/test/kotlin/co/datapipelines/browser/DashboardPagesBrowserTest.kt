@@ -129,11 +129,11 @@ class DashboardPagesBrowserTest : DashboardBrowserSuite() {
         page.navigate("$baseUrl/dashboards/$board")
         page.waitForFunction("() => window.__dpPage && window.__dpPage.ready === true")
 
-        // AWAY: the nav's Dashboards link is a BOOSTED navigation (the catalog is an
-        // ordinary page); the board document is left.
+        // AWAY: the nav's Dashboards link is a BOOSTED navigation (#580: to the family's
+        // overview, an ordinary page); the board document is left.
         page.click("a[data-nav-section='/dashboards']")
-        page.waitForURL("**/dashboards")
-        page.waitForSelector("#dash-list-wrapper")
+        page.waitForURL("**/overview/dashboards")
+        page.waitForSelector("[data-overview='dashboards']")
 
         // BACK: htmx restores its snapshot first (the glue disposed on the way out, so the
         // snapshot is the unmarked shell) and then fetches the page — the settled state is
@@ -153,7 +153,7 @@ class DashboardPagesBrowserTest : DashboardBrowserSuite() {
         // fresh fetch re-mounts exactly once. Each hop is synchronised on the DOM the hop
         // lands (a boosted restore swaps; no load event fires), never on the URL alone.
         page.goForward()
-        page.waitForSelector("#dash-list-wrapper")
+        page.waitForSelector("[data-overview='dashboards']")
         page.waitForTimeout(250.0) // the boosted swap's own settle before the next history hop
         page.goBack()
         page.waitForURL("**/dashboards/$board")

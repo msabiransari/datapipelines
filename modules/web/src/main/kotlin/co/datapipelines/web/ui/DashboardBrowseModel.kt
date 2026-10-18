@@ -2,6 +2,7 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.application.lens.LensedView
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.pipeline.LifecycleBucket
 import co.datapipelines.pipeline.SearchNeedle
 import co.datapipelines.visualization.ArtifactVersion
 import co.datapipelines.visualization.DashboardBody
@@ -57,6 +58,10 @@ class DashboardBrowseModel(
      * the admitted set (admitted intersected with the matches) so a lensed principal is handled
      * there, not here (#512). The needle is trimmed and truncated to the shared bound
      * ([SearchNeedle.MAX_LENGTH], #504b) before the call: a box truncates its own term, never refuses.
+     *
+     * #580: a [lifecycle] bucket takes the page and its total from [DashboardService.listIn] — the
+     * inventory's membership rule under every lens, `q` composed — so the filtered total is the
+     * overview's bucket count; the bucket renders back into the control and rides on the pager.
      */
     fun fillList(
         model: Model,
@@ -64,11 +69,17 @@ class DashboardBrowseModel(
         view: LensedView,
         q: String?,
         offset: Int,
+        lifecycle: LifecycleBucket? = null,
     ): String {
         val page = maxOf(0, offset)
         // A box truncates its own term to the shared bound (#504b) before the call, never refuses.
         val needle = q?.trim()?.takeIf { it.isNotEmpty() }?.take(SearchNeedle.MAX_LENGTH)
-        if (needle == null) {
+        if (lifecycle != null) {
+            val found = dashboards.listIn(workspaceId, view.dashboards, lifecycle, needle, page, PAGE_SIZE)
+            model.addAttribute("hasMore", found.total > page + PAGE_SIZE)
+            model.addAttribute("total", found.total)
+            model.addAttribute("dashboards", found.items.map(::DashboardLeafView))
+        } else if (needle == null) {
             // One past the page size decides `hasMore` — the honest-pager rule (034 E3).
             val rows = dashboards.listAll(workspaceId, view.dashboards, page, PAGE_SIZE + 1)
             model.addAttribute("hasMore", rows.size > PAGE_SIZE)
@@ -81,6 +92,9 @@ class DashboardBrowseModel(
             model.addAttribute("dashboards", found.items.map(::DashboardLeafView))
         }
         model.addAttribute("lensUnavailable", view.unavailable)
+        model.addAttribute("lifecycle", lifecycle?.wire.orEmpty())
+        model.addAttribute("lifecycleLabel", lifecycle?.let(CatalogLifecycle::label))
+        model.addAttribute("lifecycleOptions", CatalogLifecycle.options(CatalogLifecycle.DASHBOARDS))
         model.addAttribute("searching", true)
         model.addAttribute("rootId", PAGE_ROOT_ID)
         model.addAttribute("q", needle.orEmpty())
@@ -98,8 +112,9 @@ class DashboardBrowseModel(
         view: LensedView,
         q: String?,
         offset: Int,
+        lifecycle: LifecycleBucket? = null,
     ): String {
-        fillList(model, workspaceId, view, q, offset)
+        fillList(model, workspaceId, view, q, offset, lifecycle)
         return WRAPPER_VIEW
     }
 

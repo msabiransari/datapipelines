@@ -32,15 +32,28 @@
 
   <!-- SPA search control (ui-screens.md §4.3's contract): it re-fetches ONLY the list
        fragment into the stable #dash-list-wrapper root, so the control is never re-rendered
-       and the search keeps focus and value. -->
+       and the search keeps focus and value. #580: the lifecycle select is the overview's
+       drill-down (`?lifecycle=`, the inventory's buckets, the pipelines catalog's control); each
+       control carries the other. -->
   <div class="u-row-md app-catalog-search">
     <input type="search" id="dashboard-filter-q" name="q" th:value="${q}"
            placeholder="Search dashboards..." aria-label="Search dashboards"
            th:attr="hx-get=@{/partials/dashboards}, hx-target='#dash-list-wrapper', hx-swap='outerHTML'"
            hx-trigger="input changed delay:300ms, search"
+           hx-include="#dashboard-filter-lifecycle"
            hx-sync="this:replace"
            hx-indicator="#dashboard-filter-spinner"
            class="ds-input app-search-input">
+    <select id="dashboard-filter-lifecycle" name="lifecycle" class="ds-input app-select-auto"
+            aria-label="Filter by lifecycle"
+            th:attr="hx-get=@{/partials/dashboards}, hx-target='#dash-list-wrapper', hx-swap='outerHTML'"
+            hx-trigger="change"
+            hx-include="#dashboard-filter-q"
+            hx-indicator="#dashboard-filter-spinner">
+      <option value="" th:selected="${#strings.isEmpty(lifecycle)}">All lifecycles</option>
+      <option th:each="o : ${lifecycleOptions}" th:value="${o.value}" th:text="${o.label}"
+              th:selected="${o.value == lifecycle}">Draft only</option>
+    </select>
     <span id="dashboard-filter-spinner" class="htmx-indicator ds-spinner" aria-hidden="true"></span>
   </div>
 

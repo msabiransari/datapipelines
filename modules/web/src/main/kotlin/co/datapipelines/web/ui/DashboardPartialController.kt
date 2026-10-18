@@ -84,7 +84,8 @@ class DashboardPartialController(
      * #400 — the `/dashboards` CATALOG's swap root: the flat list under `#dash-list-wrapper`,
      * every dashboard the caller may read or the matches of `q`, in the pipelines catalog
      * partial's shape. The sidebar's tree levels (`/partials/dashboards/tree`) are gone with
-     * #466 — the sidebar has read `/api/v1/dashboards/tree` since #460.
+     * #466 — the sidebar has read `/api/v1/dashboards/tree` since #460. #580: `lifecycle`
+     * narrows it to one inventory bucket, as on the page (the house 400 for a bad value).
      */
     @GetMapping("/dashboards")
     @RequiredScope(Permission.DASHBOARD_READ)
@@ -92,7 +93,9 @@ class DashboardPartialController(
         model: Model,
         @RequestParam(required = false) q: String?,
         @RequestParam(required = false) offset: Int?,
+        @RequestParam(required = false) lifecycle: String?,
     ): String {
+        val bucket = CatalogLifecycle.parse(lifecycle, CatalogLifecycle.DASHBOARDS)
         val principal = currentPrincipal()
         return browse.fillWrapper(
             model,
@@ -100,6 +103,7 @@ class DashboardPartialController(
             lens.viewFor(principal),
             q,
             offset = offset ?: 0,
+            lifecycle = bucket,
         )
     }
 

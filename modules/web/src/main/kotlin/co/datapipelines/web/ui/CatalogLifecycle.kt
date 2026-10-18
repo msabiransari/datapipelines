@@ -28,6 +28,13 @@ object CatalogLifecycle {
     /** The templates catalog's filters — the pipelines set: a discarded-only template has no page (#579). */
     val TEMPLATES: List<LifecycleBucket> = LifecycleBucket.entries.filter { it != LifecycleBucket.DISCARDED_ONLY }
 
+    /**
+     * #580 — the dashboards catalog's filters, the same rule: a discarded-only dashboard has no
+     * workspace page either (discarding its last release clears the pointer, so the workspace's
+     * `findWorking` answers nothing and the page is the family's 404).
+     */
+    val DASHBOARDS: List<LifecycleBucket> = LifecycleBucket.entries.filter { it != LifecycleBucket.DISCARDED_ONLY }
+
     /** `null`/empty → null (no filter); an offered bucket's wire value → it; anything else → the 400. */
     fun parse(
         raw: String?,

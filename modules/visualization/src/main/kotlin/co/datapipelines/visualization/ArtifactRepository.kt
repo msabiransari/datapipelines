@@ -1,6 +1,7 @@
 package co.datapipelines.visualization
 
 import co.datapipelines.pipeline.CreateLifecycle
+import co.datapipelines.pipeline.LifecycleBucket
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.WriteSurface
 import co.datapipelines.typesystem.DatapipelinesException
@@ -213,6 +214,48 @@ open class ArtifactRepository<B : Any>(
         workspaceId: UUID,
         query: String,
     ): Int = checkNotNull(jdbc.queryForObject(sql.countSearch, searchParams(workspaceId, query), Int::class.java))
+
+    /**
+     * #580 — the catalog `lifecycle` filter: [bucket]'s members, the inventory's rule in place of the live artifacts
+     * ([ArtifactSql.listIn]), matching [query] when given — literally, as [search] — by name. [names] non-null is a
+     * narrowed lens: those names only, over RELEASED versions only, each row at a RELEASED version; empty reads nothing.
+     */
+    fun listIn(
+        workspaceId: UUID,
+        bucket: LifecycleBucket,
+        names: Set<String>?,
+        query: String?,
+        offset: Int = 0,
+        limit: Int = DEFAULT_PAGE_LIMIT,
+    ): List<ArtifactVersion<B>> =
+        if (names?.isEmpty() == true) {
+            emptyList()
+        } else {
+            jdbc.query(
+                sql.listIn(bucket, narrowed = names != null, searching = query != null),
+                bucketParams(workspaceId, names, query) + paging(offset, limit),
+                versionMapper,
+            )
+        }
+
+    /** The truthful total of [listIn]. */
+    fun countIn(
+        workspaceId: UUID,
+        bucket: LifecycleBucket,
+        names: Set<String>?,
+        query: String?,
+    ): Int =
+        if (names?.isEmpty() == true) {
+            0
+        } else {
+            checkNotNull(
+                jdbc.queryForObject(
+                    sql.countIn(bucket, narrowed = names != null, searching = query != null),
+                    bucketParams(workspaceId, names, query),
+                    Int::class.java,
+                ),
+            )
+        }
 
     /** Every [search] match's id, unpaged — the narrowing lens's input. */
     fun searchIds(
@@ -453,6 +496,17 @@ open class ArtifactRepository<B : Any>(
         query: String,
     ): Map<String, Any?> = mapOf("workspaceId" to workspaceId, "pattern" to "%${escapeLike(query)}%")
 
+    private fun bucketParams(
+        workspaceId: UUID,
+        names: Set<String>?,
+        query: String?,
+    ): Map<String, Any?> =
+        buildMap {
+            put("workspaceId", workspaceId)
+            names?.let { put("names", it) }
+            query?.let { put("pattern", "%${escapeLike(it)}%") }
+        }
+
     private fun writeParams(
         workspaceId: UUID,
         id: UUID,
@@ -625,6 +679,15 @@ class VisualizationRepository(
 class DashboardRepository(
     jdbc: NamedParameterJdbcTemplate,
 ) : ArtifactRepository<DashboardBody>(jdbc, ArtifactKind.DASHBOARD, BodyCodec.Dashboard) {
+    /** #580 — the Dashboards overview's Recently updated list under the caller's workspace and version lens. */
+    fun recent(
+        workspaceId: UUID,
+        lens: co.datapipelines.pipeline.ReadLens,
+        limit: Int = co.datapipelines.pipeline.RecentSource.DEFAULT_LIMIT,
+    ): List<co.datapipelines.pipeline.RecentRow> =
+        co.datapipelines.pipeline.RecentSource
+            .recent(jdbc, co.datapipelines.pipeline.NavigationFamily.DASHBOARDS, workspaceId, lens, limit)
+
     /**
      * The LIVE (DRAFT or RELEASED) dashboard versions that pin visualization [name] — at [version], or at any
      * version when null — as `name@version` (the design record §4.2: purge and discard guards keep referenced
