@@ -48,8 +48,7 @@ class MainFrameBrowserTest : DashboardBrowserSuite() {
                            rail: visible('app-rail'), docOverflowX: doc.scrollWidth - doc.clientWidth,
                            mainOverflowY: m.scrollHeight - m.clientHeight,
                            innerHeight: m.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom),
-                           canvasHeight: document.querySelector('.app-main > .pe-root, .app-main > .tw-root, .app-main > .dp-workspace')
-                             ?.getBoundingClientRect().height ?? 0,
+                           canvasHeight: document.querySelector('.app-main > .app-canvas')?.getBoundingClientRect().height ?? 0,
                            canvas: document.querySelector('.app-main > .app-canvas') ? 1 : 0 };
                 }""",
             ) as Map<String, Number>
@@ -195,6 +194,78 @@ class MainFrameBrowserTest : DashboardBrowserSuite() {
         }
     }
 
+    @Test
+    fun `the frame binds at 1500 and centres in its track - expanded and compact menu`() {
+        ready("mfbind")
+        page.setViewportSize(FRAME_W, FRAME_H)
+        page.navigate("$baseUrl/settings")
+        page.locator(".app-main .ds-headline").first().waitFor()
+        settle()
+        readMain("expanded")
+        shot("settings-2200-framed")
+        page.click("#rail-collapse")
+        settle()
+        readMain("compact")
+        printReadings("frame-2200")
+        assertSoftly {
+            for ((state, rail) in listOf("expanded" to 202.0, "compact" to 64.0)) {
+                near("$state.rail", rail)
+                near("$state.width", FRAME_MAX)
+                near("$state.left", rail + (FRAME_W - rail - FRAME_MAX) / 2, 1.0)
+                withClue("$state.right") { reading("$state.right") shouldBeLessThanOrEqual FRAME_W.toDouble() }
+                near("$state.canvas", 0.0)
+            }
+        }
+    }
+
+    @Test
+    @Suppress("LongMethod") // one walk over the five canvases: each opt-out is read on its own page
+    fun `a canvas page opts out of the frame and keeps the whole track`() {
+        startTrace()
+        val root = ready("mfcanvas")
+        page.setViewportSize(FRAME_W, FRAME_H)
+        val board = seedBoardWithGrid(root)
+        val pipeline = createDraftPipeline("$root/frame/probe")
+        createTemplate("test/${root}_frame.sql", "SELECT 1 AS one")
+
+        openBoard(board)
+        settle()
+        readMain("board")
+        page.navigate("$baseUrl/pipelines/$pipeline")
+        page.waitForSelector(".pe-root")
+        settle()
+        readMain("editor")
+        shot("editor-2200-canvas")
+        page.navigate("$baseUrl/templates/test/${root}_frame.sql")
+        page.waitForSelector(".tw-root")
+        settle()
+        readMain("template")
+        page.navigate("$baseUrl/schedules")
+        page.waitForSelector(".tplx-page")
+        settle()
+        readMain("schedules")
+        // The board's refresh above is what gives the history a row.
+        openExecutionDetail()
+        settle()
+        readMain("execution")
+        printReadings("canvas-2200")
+        assertSoftly {
+            for (canvas in listOf("board", "editor", "template", "schedules", "execution")) {
+                near("$canvas.canvas", 1.0)
+                near("$canvas.width", reading("$canvas.track"), 1.0)
+                // Non-vacuity: the track is wider than the frame, so a framed page would read 1500.
+                withClue("$canvas.track") { reading("$canvas.track") shouldBeGreaterThan FRAME_MAX }
+            }
+        }
+    }
+
+    /**
+     * The canvases' height calcs subtract the band twice (`--app-main-pad`): each canvas root fills <main>'s inner
+     * height, less at most the 1px the calcs keep for the header's border. The editor and the template workspace
+     * therefore never scroll <main>. The board's root fills it too, but its content does not yet shrink into
+     * it (`.dp-ws-root` keeps its natural height: 31px past the fold at the base, before #573 — a follow-up), so its
+     * overflow is printed, not asserted.
+     */
     @Test
     fun `every full-height canvas fills main's inner height at the 1512 band`() {
         startTrace()

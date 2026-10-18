@@ -65,7 +65,7 @@ class RoleVisibilityRenderTest {
         viewer shouldNotContain "data-verb=\"pipeline-release\" disabled"
         // 151/#144: the canvas's Start marker is a run trigger exactly when the toolbar's
         // Execute renders — the SAME flag, stamped once on the root for the script to read.
-        viewer shouldContain "class=\"pe-root\" data-can-execute=\"true\""
+        viewer shouldContain "class=\"pe-root app-canvas\" data-can-execute=\"true\""
     }
 
     /**
@@ -83,7 +83,7 @@ class RoleVisibilityRenderTest {
             }
 
         noExecute shouldNotContain "data-verb=\"pipeline-execute\""
-        noExecute shouldContain "class=\"pe-root\" data-can-execute=\"false\""
+        noExecute shouldContain "class=\"pe-root app-canvas\" data-can-execute=\"false\""
         // The canvas is a group, not an image: its buttons must stay in the accessible tree.
         noExecute shouldContain "id=\"cy-canvas\" role=\"group\""
     }

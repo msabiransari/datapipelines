@@ -557,9 +557,10 @@ body {
 
 /* #573 — one width policy (ui-screens.md §3.1, the application-shell record §4).
    <main> pads all four sides by the viewport's band through ONE role token,
-   `--app-main-pad` (40 / 32 / 24 / 20, declared with the shell geometry below);
-   reading content — docs prose, settings cards, empty states, forms — gets
-   .app-reading inside it, never a different container. */
+   `--app-main-pad` (40 / 32 / 24 / 20, declared with the shell geometry below),
+   and is a frame of at most `--app-frame-max` (1500px, padding included), centred
+   in the content track. Reading content — docs prose, settings cards, empty
+   states, forms — gets .app-reading inside it, never a different container. */
 .app-container {
   width: 100%;
   padding-inline: var(--app-main-pad);
@@ -567,6 +568,16 @@ body {
 
 .app-main {
   padding-block: var(--app-main-pad);
+  max-width: var(--app-frame-max);
+  margin-inline: auto;
+}
+
+/* A page opts out of the 1500px frame by carrying `app-canvas` on its root (a direct
+   child of <main>): operational canvases, authored dashboards and result tables keep the
+   whole track (record §4). Reading pages never carry it — a table on a catalog, an
+   overview or a settings page does not make it a canvas. */
+.app-main:has(> .app-canvas) {
+  max-width: none;
 }
 
 /* The reading column: prose and cards sit in a 90ch measure, LEFT-aligned
@@ -907,6 +918,8 @@ button.app-busy::after {
      32 from 1101 to 1599 (here), 24 from 761 to 1100, 20 at 760 and below. Every
      full-height canvas's calc and the status pill's offset read it (ui-screens §3.6). */
   --app-main-pad: var(--space-8);
+  /* <main>'s maximum OUTER width, its padding included (record §4); `app-canvas` opts out. */
+  --app-frame-max: 1500px;
   --app-browser-min: 240px;
   --app-browser-max: 480px;
   --app-drawer-max: 360px;

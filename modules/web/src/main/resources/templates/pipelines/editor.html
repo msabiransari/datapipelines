@@ -157,7 +157,7 @@
        runtime owns activation exclusively: it removes the attribute inside its one
        `mutateDom` init and re-arms it before every history save (the cached snapshot
        carries it back). -->
-  <div x-data="pipelineEditor" x-ignore class="pe-root" th:if="${hasSelectedBody}"
+  <div x-data="pipelineEditor" x-ignore class="pe-root app-canvas" th:if="${hasSelectedBody}"
        th:attr="data-can-execute=${canExecute == true},
                 data-active-tab=${activeTab},
                 data-can-read-executions=${canReadExecutions == true},
