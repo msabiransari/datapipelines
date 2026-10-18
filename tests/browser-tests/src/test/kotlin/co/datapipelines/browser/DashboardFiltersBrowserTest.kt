@@ -90,7 +90,8 @@ class DashboardFiltersBrowserTest : DashboardBrowserSuite() {
         repeat(2) { visit ->
             page.evaluate("() => { window.__leftBoard = window.__dpPage; }")
             page.click(".app-nav-link[data-nav-section='/templates']")
-            page.waitForSelector("#template-list-wrapper")
+            // #579: the Templates item lands on the family overview (a boosted leave either way).
+            page.waitForSelector(".app-overview[data-overview='templates']")
             page.goBack()
             page.waitForFunction("() => window.__dpPage !== window.__leftBoard && window.__dpPage.ready === true")
             val count = documentListenerCount("keydown")
