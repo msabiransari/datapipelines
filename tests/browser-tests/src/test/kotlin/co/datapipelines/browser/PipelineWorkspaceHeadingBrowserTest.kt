@@ -1,14 +1,17 @@
 package co.datapipelines.browser
 
 import com.microsoft.playwright.Page
+import com.microsoft.playwright.options.WaitForSelectorState
 import io.kotest.assertions.assertSoftly
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.doubles.shouldBeBetween
+import io.kotest.matchers.doubles.shouldBeGreaterThan
 import io.kotest.matchers.doubles.shouldBeGreaterThanOrEqual
 import io.kotest.matchers.doubles.shouldBeLessThanOrEqual
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
 import java.nio.file.Files
 import java.nio.file.Paths
@@ -276,9 +279,118 @@ class PipelineWorkspaceHeadingBrowserTest : BrowserSuite() {
         failures.shouldBeEmpty()
     }
 
+    /** At a phone viewport the band is the page: nothing of the workspace is laid out beneath it. */
+    private fun bandIsThePage(
+        width: Int,
+        height: Int,
+    ) {
+        startTrace()
+        val url = seededWorkspace()
+        page.setViewportSize(width, height)
+        page.navigate(url)
+        val band = page.locator(".app-wide-screen-note").first()
+        band.waitFor()
+        val link = band.locator("a:has-text('Open in Pipelines')")
+        link.scrollIntoViewIfNeeded()
+
+        @Suppress("UNCHECKED_CAST")
+        val phone =
+            page.evaluate(
+                """() => {
+                  const box = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 || r.height > 0; };
+                  const root = document.querySelector('.pe-root');
+                  const rr = root.getBoundingClientRect();
+                  const band = document.querySelector('.app-wide-screen-note');
+                  const a = [...band.querySelectorAll('a')].find((e) => /Open in Pipelines/.test(e.innerText));
+                  const ar = a.getBoundingClientRect();
+                  const hit = document.elementFromPoint(ar.left + ar.width / 2, ar.top + ar.height / 2);
+                  return {
+                    rootW: rr.width, rootH: rr.height, rootOffsetParentNull: root.offsetParent === null,
+                    laidOut: ['.pe-topbar', '.pe-tab', '.pe-dock'].filter((s) => [...document.querySelectorAll(s)].some(box)),
+                    linkLeft: ar.left, linkRight: ar.right, linkHit: hit === a || a.contains(hit),
+                    bandOverflowX: band.scrollWidth - band.clientWidth,
+                    docOverflowX: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+                    bandText: band.innerText,
+                  };
+                }""",
+            ) as Map<String, Any?>
+        readings.putAll(phone.mapKeys { "$width.${it.key}" })
+        shot("phone-$width")
+        printReadings("phone-$width")
+
+        assertSoftly {
+            withClue("band text") {
+                val text = phone["bandText"] as String
+                text shouldContain LONG_LEAF
+                text shouldContain "v1"
+                text shouldContain "Open in Pipelines"
+            }
+            near("$width.rootW", 0.0, 0.0)
+            near("$width.rootH", 0.0, 0.0)
+            withClue("rootOffsetParentNull") { phone["rootOffsetParentNull"] shouldBe true }
+            withClue("laidOut") { (phone["laidOut"] as List<*>).shouldBeEmpty() }
+            withClue("linkLeft") { num("$width.linkLeft") shouldBeGreaterThanOrEqual 0.0 }
+            withClue("linkRight") { num("$width.linkRight") shouldBeLessThanOrEqual width.toDouble() }
+            withClue("linkHit") { phone["linkHit"] shouldBe true }
+            withClue("bandOverflowX") { num("$width.bandOverflowX") shouldBeLessThanOrEqual 0.0 }
+            near("$width.docOverflowX", 0.0, 0.0)
+        }
+    }
+
+    @Test
+    fun `phone 390 - the band is the page and its controls are reachable`() {
+        bandIsThePage(390, 844)
+    }
+
+    @Test
+    fun `phone 320 - the band is the page and its controls are reachable`() {
+        bandIsThePage(320, 568)
+    }
+
+    @Test
+    fun `a phone-first load rotated to desktop without a reload shows a fitted graph`() {
+        startTrace()
+        val url = seededWorkspace()
+        page.setViewportSize(390, 844)
+        page.navigate(url)
+        page.locator(".app-wide-screen-note").first().waitFor()
+        page.waitForSelector(".pe-card", Page.WaitForSelectorOptions().setState(WaitForSelectorState.ATTACHED))
+
+        page.setViewportSize(ROTATED_W, ROTATED_H)
+        page.waitForFunction("() => document.querySelector('.pe-stage').getBoundingClientRect().height > 0")
+        // The stage ResizeObserver's re-fit is a canvas tween (PipelineEditorFitBrowserTest's 600ms).
+        page.waitForTimeout(600.0)
+
+        @Suppress("UNCHECKED_CAST")
+        val graph =
+            page.evaluate(
+                """() => {
+                  const c = document.getElementById('cy-canvas').getBoundingClientRect();
+                  const cards = [...document.querySelectorAll('.pe-card')];
+                  const outside = cards.map((el) => ({ id: el.getAttribute('data-node-id'), r: el.getBoundingClientRect() }))
+                    .filter(({ r }) => r.width === 0 || r.top < c.top - 1 || r.bottom > c.bottom + 1
+                                    || r.left < c.left - 1 || r.right > c.right + 1)
+                    .map(({ id }) => id);
+                  return { cards: cards.length, firstCardW: cards.length ? cards[0].getBoundingClientRect().width : 0,
+                           canvasW: c.width, canvasH: c.height, outside };
+                }""",
+            ) as Map<String, Any?>
+        readings.putAll(graph.mapKeys { "rotate.${it.key}" })
+        shot("rotate-$ROTATED_W")
+        printReadings("rotate")
+
+        assertSoftly {
+            withClue("cards") { num("rotate.cards") shouldBeGreaterThan 0.0 }
+            withClue("firstCardW") { num("rotate.firstCardW") shouldBeGreaterThan 0.0 }
+            withClue("outside") { (graph["outside"] as List<*>).shouldBeEmpty() }
+        }
+    }
+
     private companion object {
         const val DESK_W = 1512
         const val DESK_H = 982
+        const val ROTATED_W = 1440
+        const val ROTATED_H = 900
 
         /** 60 characters with no space: it can only wrap if the title breaks anywhere. */
         val LONG_LEAF = "monthly_revenue_reconciliation_across_regions_and_channels_x".also { require(it.length == 60) }

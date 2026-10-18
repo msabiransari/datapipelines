@@ -104,10 +104,11 @@
          ARE cloaked, which is where the unbound content actually is; the root itself is a
          flex container whose children are server-rendered chrome. */-->
   <!--/* 110 §C — the phone band. This screen is desktop-first BY DECISION, not by
-         omission: below 768px the band renders above the workspace (which stays on the
-         page, rendered and scrollable underneath) and says so, with the entity's name
-         and the viewed-version chip — the same viewedLabel the topbar reads. Hidden at
-         every width by app.css except < 768px. The chip carries data-pe-viewed-label
+         omission: at 760px and below (#554) the band IS the page (#607, owner ruling
+         2026-10-18) — the workspace root is not laid out beneath it (pipeline-editor.css)
+         — and it says so, with the entity's name and the viewed-version chip — the same
+         viewedLabel the heading's chip reads. Hidden at every width by app.css except
+         760px and below. The chip carries data-pe-viewed-label
          (#349): an in-page version switch updates every such chip by textContent, so
          the band never names a version the page stopped showing. */-->
   <div class="ds-empty app-wide-screen-note">

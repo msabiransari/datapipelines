@@ -2330,3 +2330,25 @@ html.dp-splitting-y * {
     flex-wrap: wrap;
   }
 }
+
+/* #607 — at the phone breakpoint the band IS the page (owner ruling 2026-10-18, option (a);
+ * the 110 desktop-first decision stands): the workspace root is not laid out at all, so
+ * nothing of it renders or scrolls beneath `.app-wide-screen-note` (app.css shows the band
+ * at this width and owns its two shared rules — the template workspace keeps the 110
+ * behaviour until its own #558 slice). The root is hidden, not removed: a phone-first load
+ * still builds the graph into it, and widening the viewport lays the stage out again, where
+ * graph.js's stage ResizeObserver resizes and re-fits it (PipelineWorkspaceHeadingBrowserTest's
+ * rotate case). The band carries the pipeline's name, one unbroken snake_case word that can
+ * be wider than a 320px screen. `break-word` (the paragraph's inherited default) breaks it
+ * only AFTER the line box is sized, so the centred paragraph took its full 320px max-width
+ * and overflowed the band by 16px at 320; `anywhere` also lowers its min-content, so the
+ * paragraph fits the band and the name wraps inside it. */
+@media (max-width: 760.98px) {
+  .pe-root {
+    display: none;
+  }
+
+  .app-wide-screen-note .ds-empty-description {
+    overflow-wrap: anywhere;
+  }
+}
