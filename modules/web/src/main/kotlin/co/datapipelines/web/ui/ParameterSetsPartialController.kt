@@ -39,8 +39,11 @@ class ParameterSetsPartialController(
         @RequestParam(required = false) offset: Int?,
         // #415 — the catalog's name search.
         @RequestParam(required = false) q: String?,
+        // #582 — the catalog's lifecycle filter, parsed before any read (the page route's rule).
+        @RequestParam(required = false) lifecycle: String?,
     ): String {
+        val bucket = CatalogLifecycle.parse(lifecycle, CatalogLifecycle.PARAMETER_SETS)
         val principal = currentPrincipal()
-        return browse.fillWrapper(model, principal.requireWorkspace().id, lens.viewFor(principal), q, offset ?: 0)
+        return browse.fillWrapper(model, principal.requireWorkspace().id, lens.viewFor(principal), q, offset ?: 0, bucket)
     }
 }

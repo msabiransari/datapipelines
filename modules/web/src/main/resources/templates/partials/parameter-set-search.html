@@ -6,7 +6,7 @@
   </th:block>
   <!-- The catalog with no query and no rows is the workspace's EMPTY state, not a failed
        search: it says how sets arrive (R10 — authored through agents). -->
-  <th:block th:if="${lensUnavailable == null and #lists.isEmpty(parameterSets) and #strings.isEmpty(q)}">
+  <th:block th:if="${lensUnavailable == null and #lists.isEmpty(parameterSets) and #strings.isEmpty(q) and #strings.isEmpty(lifecycle)}">
     <div class="ds-empty">
       <p class="ds-empty-title">No parameter sets yet</p>
       <p class="ds-empty-description">
@@ -16,13 +16,21 @@
       </p>
     </div>
   </th:block>
-  <th:block th:if="${lensUnavailable == null and #lists.isEmpty(parameterSets) and !#strings.isEmpty(q)}">
+  <!-- #582: a lifecycle filter with no rows is a filtered empty state, like a search with
+       none; Clear search keeps the lifecycle, Clear filters resets both controls. -->
+  <th:block th:if="${lensUnavailable == null and #lists.isEmpty(parameterSets) and !(#strings.isEmpty(q) and #strings.isEmpty(lifecycle))}">
     <div class="ds-empty">
-      <p class="ds-empty-title">No parameter sets match your search</p>
+      <p class="ds-empty-title" th:if="${#strings.isEmpty(lifecycle)}">No parameter sets match your search</p>
+      <p class="ds-empty-title" th:unless="${#strings.isEmpty(lifecycle)}"
+         th:text="${'No parameter sets match: ' + lifecycleLabel + (#strings.isEmpty(q) ? '' : ', with your search')}">No parameter sets match: Draft only</p>
       <div class="ds-empty-actions">
-        <button type="button" class="ds-button ds-button-secondary ds-button-sm"
+        <button th:if="${!#strings.isEmpty(q)}" type="button" class="ds-button ds-button-secondary ds-button-sm"
                 data-dp-clear-filters="#parameter-set-filter-q" hx-sync="#parameter-set-filter-q:replace"
+                hx-include="#parameter-set-filter-lifecycle"
                 th:attr="hx-get=@{/partials/parameter-sets/tree}, hx-target='#' + ${rootId}, hx-swap='outerHTML'">Clear search</button>
+        <button th:if="${!#strings.isEmpty(lifecycle)}" type="button" class="ds-button ds-button-secondary ds-button-sm"
+                data-dp-clear-filters="#parameter-set-filter-q, #parameter-set-filter-lifecycle" hx-sync="#parameter-set-filter-q:replace"
+                th:attr="hx-get=@{/partials/parameter-sets/tree}, hx-target='#' + ${rootId}, hx-swap='outerHTML'">Clear filters</button>
       </div>
     </div>
   </th:block>
@@ -46,8 +54,8 @@
   </ul>
 
   <th:block th:unless="${#lists.isEmpty(parameterSets)}"
-            th:with="prevUrl=@{/partials/parameter-sets/tree(q=${q}, offset=${offset - 25})},
-                     nextUrl=@{/partials/parameter-sets/tree(q=${q}, offset=${offset + 25})}">
+            th:with="prevUrl=@{/partials/parameter-sets/tree(q=${q}, lifecycle=${lifecycle}, offset=${offset - 25})},
+                     nextUrl=@{/partials/parameter-sets/tree(q=${q}, lifecycle=${lifecycle}, offset=${offset + 25})}">
     <div th:replace="~{partials/pager :: pager('#' + ${rootId}, ${prevUrl}, ${nextUrl}, ${offset}, ${hasMore}, ${parameterSets.size()}, ${total})}"></div>
   </th:block>
 </div>

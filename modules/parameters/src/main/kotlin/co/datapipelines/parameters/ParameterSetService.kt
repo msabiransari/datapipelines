@@ -3,6 +3,7 @@ package co.datapipelines.parameters
 import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.CreateLifecycle
 import co.datapipelines.pipeline.DashboardPin
+import co.datapipelines.pipeline.LifecycleBucket
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.pipeline.SearchNeedle
@@ -11,6 +12,7 @@ import co.datapipelines.pipeline.TemplateReleaser
 import co.datapipelines.pipeline.TemplateVersionStatuses
 import co.datapipelines.pipeline.ValidationResult
 import co.datapipelines.pipeline.WriteSurface
+import co.datapipelines.pipeline.through
 import co.datapipelines.typesystem.DatapipelinesException
 import org.springframework.transaction.support.SimpleTransactionStatus
 import org.springframework.transaction.support.TransactionCallback
@@ -533,14 +535,29 @@ class ParameterSetService(
      * §5.7 shape, no level clause. The everything lens reads [ParameterSetRepository.listAll] in
      * SQL; a narrowing lens filters the admitted names in memory over `findCurrentVersions`
      * (the [countChildSets] shape), so a promoter's page can never name a set her lens hides.
+     *
+     * ## The lifecycle filter (#582, `PipelineService.list`'s rule)
+     * A [lifecycle] keeps the sets of one inventory bucket, decided IN the SQL over the versions the
+     * lens admits — the everything lens: all of them ([ParameterSetRepository.listAll]); a narrowing
+     * lens: RELEASED rows only ([ParameterSetRepository.findMembers]), before the name half of the lens
+     * applies — so the rows are the ones the overview's inventory counts in that bucket. The narrowed
+     * arm therefore takes membership, not the unfiltered arm's current-pointer rule (#556 amendment 3),
+     * and lists each set at a RELEASED version ([releasedListing]); the catalog screen is its one caller.
      */
     fun listAll(
         workspaceId: UUID,
         lens: ReadLens,
         offset: Int = 0,
         limit: Int = ParameterSetRepository.DEFAULT_PAGE_LIMIT,
+        lifecycle: LifecycleBucket? = null,
     ): List<ParameterSetVersion> {
-        if (lens.isEverything) return repository.listAll(workspaceId, offset, limit)
+        if (lens.isEverything) return repository.listAll(workspaceId, offset, limit, lifecycle)
+        if (lifecycle != null) {
+            return lensedMembers(workspaceId, lens, lifecycle)
+                .drop(maxOf(0, offset))
+                .take(limit.coerceIn(1, ParameterSetRepository.MAX_PAGE_LIMIT + 1))
+                .mapNotNull { releasedListing(workspaceId, it) }
+        }
         return repository
             .findCurrentVersions(workspaceId)
             .filter { lens.admits(it.name) }
@@ -559,11 +576,12 @@ class ParameterSetService(
     fun countAll(
         workspaceId: UUID,
         lens: ReadLens,
+        lifecycle: LifecycleBucket? = null,
     ): Int =
-        if (lens.isEverything) {
-            repository.countAll(workspaceId)
-        } else {
-            repository.findCurrentVersions(workspaceId).count { lens.admits(it.name) }
+        when {
+            lens.isEverything -> repository.countAll(workspaceId, lifecycle)
+            lifecycle != null -> lensedMembers(workspaceId, lens, lifecycle).size
+            else -> repository.findCurrentVersions(workspaceId).count { lens.admits(it.name) }
         }
 
     /**
@@ -586,10 +604,11 @@ class ParameterSetService(
         query: String?,
         offset: Int = 0,
         limit: Int = ParameterSetRepository.DEFAULT_PAGE_LIMIT,
+        lifecycle: LifecycleBucket? = null,
     ): List<ParameterSetVersion> {
-        val needle = needleOf(query) ?: return listAll(workspaceId, lens, offset, limit)
-        if (lens.isEverything) return repository.searchAll(workspaceId, needle, offset, limit)
-        return searchInMemory(workspaceId, lens, needle)
+        val needle = needleOf(query) ?: return listAll(workspaceId, lens, offset, limit, lifecycle)
+        if (lens.isEverything) return repository.searchAll(workspaceId, needle, offset, limit, lifecycle)
+        return searchInMemory(workspaceId, lens, needle, lifecycle)
             .drop(maxOf(0, offset))
             .take(limit.coerceIn(1, ParameterSetRepository.MAX_PAGE_LIMIT + 1))
     }
@@ -604,12 +623,13 @@ class ParameterSetService(
         workspaceId: UUID,
         lens: ReadLens,
         query: String?,
+        lifecycle: LifecycleBucket? = null,
     ): Int {
-        val needle = needleOf(query) ?: return countAll(workspaceId, lens)
+        val needle = needleOf(query) ?: return countAll(workspaceId, lens, lifecycle)
         return if (lens.isEverything) {
-            repository.countSearchAll(workspaceId, needle)
+            repository.countSearchAll(workspaceId, needle, lifecycle)
         } else {
-            searchInMemory(workspaceId, lens, needle).size
+            searchInMemory(workspaceId, lens, needle, lifecycle).size
         }
     }
 
@@ -624,20 +644,51 @@ class ParameterSetService(
     /**
      * The narrowing lens's search read — every admitted set with a current version, q-matched in
      * memory ([ParameterSetService.countChildSets]'s shape). A promoter learns what HER LENS admits
-     * that matches, never that a hidden set exists.
+     * that matches, never that a hidden set exists. A [lifecycle] reads [listAll]'s lensed members instead.
      */
     private fun searchInMemory(
         workspaceId: UUID,
         lens: ReadLens,
         needle: String,
+        lifecycle: LifecycleBucket? = null,
     ): List<ParameterSetVersion> {
         val q = needle.lowercase()
-        return repository
-            .findCurrentVersions(workspaceId)
-            .filter { lens.admits(it.name) }
-            .mapNotNull { repository.findCurrent(workspaceId, it.id) }
-            .filter { it.matchesSearch(q) }
+        val admitted =
+            if (lifecycle == null) {
+                repository
+                    .findCurrentVersions(workspaceId)
+                    .filter { lens.admits(it.name) }
+                    .mapNotNull { repository.findCurrent(workspaceId, it.id) }
+            } else {
+                lensedMembers(workspaceId, lens, lifecycle).mapNotNull { releasedListing(workspaceId, it) }
+            }
+        return admitted.filter { it.matchesSearch(q) }
     }
+
+    /** A narrowing lens's members of [bucket] (RELEASED versions only), the lens's names applied; an empty lens reads nothing. */
+    private fun lensedMembers(
+        workspaceId: UUID,
+        lens: ReadLens,
+        bucket: LifecycleBucket,
+    ): List<ParameterSetRecord> {
+        if ((lens as? ReadLens.Only)?.names?.isEmpty() == true) return emptyList()
+        return repository.findMembers(workspaceId, bucket).through(lens) { it.name }
+    }
+
+    /**
+     * The version a lensed filtered row shows — the current one when it is RELEASED (every set the
+     * production lens admits), else the newest RELEASED one; never a DRAFT, so a hidden draft's body
+     * (its display name included) cannot reach a lensed caller's row.
+     */
+    private fun releasedListing(
+        workspaceId: UUID,
+        record: ParameterSetRecord,
+    ): ParameterSetVersion? =
+        repository.findCurrent(workspaceId, record.id)?.takeIf { it.detail.status == PipelineVersionStatus.RELEASED }
+            ?: repository
+                .listVersions(workspaceId, record.id)
+                .firstOrNull { it.status == PipelineVersionStatus.RELEASED }
+                ?.let { repository.findVersion(workspaceId, record.id, it.version) }
 
     /** The `q` rule, in one place: a case-insensitive substring of name, display name or description (PipelineService's rule). */
     private fun ParameterSetVersion.matchesSearch(lowercaseQuery: String): Boolean =

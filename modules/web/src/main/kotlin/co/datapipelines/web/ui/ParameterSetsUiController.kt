@@ -51,7 +51,10 @@ class ParameterSetsUiController(
     // Guarded by ObjectMapperDefaultParameterKonsistTest.
     private val mapper: ObjectMapper = ParameterSetJson.mapper
 
-    /** The catalog page — a flat, server-paged list over the same read the sidebar's tree is built from, searched by `q` (#415). */
+    /**
+     * The catalog page — a flat, server-paged list over the same read the browser's tree is built from, searched by `q`
+     * (#415) and filtered by `lifecycle` (#582, the overview's drill-down; an unknown or unoffered value is the house 400).
+     */
     @GetMapping("/parameter-sets")
     @RequiredScope(Permission.PARAMETER_SET_READ)
     fun list(
@@ -59,7 +62,9 @@ class ParameterSetsUiController(
         request: HttpServletRequest,
         @RequestParam(required = false) q: String?,
         @RequestParam(required = false) offset: Int?,
+        @RequestParam(required = false) lifecycle: String?,
     ): String {
+        val bucket = CatalogLifecycle.parse(lifecycle, CatalogLifecycle.PARAMETER_SETS)
         model.addAttribute("activeTheme", themeResolver.resolve(request))
         RoleModel.stamp(model)
         val principal = currentPrincipal()
@@ -69,6 +74,7 @@ class ParameterSetsUiController(
             lens.viewFor(principal),
             q,
             offset ?: 0,
+            bucket,
         )
         return LIST_VIEW
     }

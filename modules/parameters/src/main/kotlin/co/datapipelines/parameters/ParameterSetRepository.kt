@@ -1,6 +1,9 @@
 package co.datapipelines.parameters
 
 import co.datapipelines.pipeline.CreateLifecycle
+import co.datapipelines.pipeline.InventorySource
+import co.datapipelines.pipeline.LifecycleBucket
+import co.datapipelines.pipeline.NavigationFamily
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.WriteSurface
 import co.datapipelines.typesystem.DatapipelinesException
@@ -258,16 +261,22 @@ class ParameterSetRepository(
      * The FLAT listing (#312): every live set at its LISTED version (D55), no level clause — the
      * pipelines §5.7 mould, [listChildSets] minus the folder cut. The tree routes keep
      * [listChildSets]; this is what `GET /parameter-sets` without a prefix pages through.
+     *
+     * #582: with a [lifecycle] the bucket's membership REPLACES the liveness predicate
+     * ([InventorySource.membership], `PipelineRepository.findAll`'s rule) — the rows are then exactly
+     * the sets the unrestricted inventory counts in that bucket. The everything lens's read only: a
+     * narrowing lens reads [findMembers].
      */
     fun listAll(
         workspaceId: UUID,
         offset: Int = 0,
         limit: Int = DEFAULT_PAGE_LIMIT,
+        lifecycle: LifecycleBucket? = null,
     ): List<ParameterSetVersion> =
         jdbc.query(
             """
             $SELECT_VERSION
-            WHERE s.workspace_id = :workspaceId AND $LIVE_S
+            WHERE s.workspace_id = :workspaceId AND ${liveness(lifecycle)}
                AND v.version = $LISTED_VERSION
              ORDER BY s.name
              LIMIT :limit OFFSET :offset
@@ -276,11 +285,14 @@ class ParameterSetRepository(
             VERSION,
         )
 
-    /** The truthful total of [listAll] — the same predicate, no paging. */
-    fun countAll(workspaceId: UUID): Int =
+    /** The truthful total of [listAll] — the same predicate (a [lifecycle] included), no paging. */
+    fun countAll(
+        workspaceId: UUID,
+        lifecycle: LifecycleBucket? = null,
+    ): Int =
         checkNotNull(
             jdbc.queryForObject(
-                "SELECT COUNT(*) FROM parameter_sets s WHERE s.workspace_id = :workspaceId AND $LIVE_S",
+                "SELECT COUNT(*) FROM parameter_sets s WHERE s.workspace_id = :workspaceId AND ${liveness(lifecycle)}",
                 mapOf("workspaceId" to workspaceId),
                 Int::class.java,
             ),
@@ -295,18 +307,19 @@ class ParameterSetRepository(
      * `%<escaped>%` pattern ([escapeLike]), never as SQL text. Name-ordered, so paging is stable and
      * a page boundary can neither duplicate nor drop a row. The everything-lens arm of
      * [ParameterSetService.search]; a narrowing lens filters in memory, never here — the admitted set
-     * is a per-request name set the SQL pager cannot take.
+     * is a per-request name set the SQL pager cannot take. A [lifecycle] is [listAll]'s (#582).
      */
     fun searchAll(
         workspaceId: UUID,
         query: String,
         offset: Int = 0,
         limit: Int = DEFAULT_PAGE_LIMIT,
+        lifecycle: LifecycleBucket? = null,
     ): List<ParameterSetVersion> =
         jdbc.query(
             """
             $SELECT_VERSION
-            WHERE s.workspace_id = :workspaceId AND $LIVE_S
+            WHERE s.workspace_id = :workspaceId AND ${liveness(lifecycle)}
                AND v.version = $LISTED_VERSION
                AND (s.name ILIKE CAST(:needle AS TEXT) ESCAPE '\'
                  OR s.display_name ILIKE CAST(:needle AS TEXT) ESCAPE '\'
@@ -323,16 +336,17 @@ class ParameterSetRepository(
             VERSION,
         )
 
-    /** The truthful total of [searchAll] — the same predicate, no paging. */
+    /** The truthful total of [searchAll] — the same predicate (a [lifecycle] included), no paging. */
     fun countSearchAll(
         workspaceId: UUID,
         query: String,
+        lifecycle: LifecycleBucket? = null,
     ): Int =
         checkNotNull(
             jdbc.queryForObject(
                 """
                 SELECT COUNT(*) FROM parameter_sets s
-                WHERE s.workspace_id = :workspaceId AND $LIVE_S
+                WHERE s.workspace_id = :workspaceId AND ${liveness(lifecycle)}
                    AND (s.name ILIKE CAST(:needle AS TEXT) ESCAPE '\'
                      OR s.display_name ILIKE CAST(:needle AS TEXT) ESCAPE '\'
                      OR s.description ILIKE CAST(:needle AS TEXT) ESCAPE '\')
@@ -341,6 +355,27 @@ class ParameterSetRepository(
                 Int::class.java,
             ),
         )
+
+    /**
+     * #582 — the narrowing lens's half of a lifecycle filter: every set of the workspace in [bucket]
+     * judged over its RELEASED versions only ([InventorySource.membership] narrowed, the narrowed
+     * inventory's rule), name-ordered, records only (no body). The caller applies the lens's names and
+     * reads each listed set's RELEASED version, so no draft of any set is read for a lensed caller.
+     */
+    fun findMembers(
+        workspaceId: UUID,
+        bucket: LifecycleBucket,
+    ): List<ParameterSetRecord> =
+        jdbc.query(
+            "$SELECT_RECORD WHERE s.workspace_id = :workspaceId AND " +
+                "${InventorySource.membership(NavigationFamily.PARAMETER_SETS, "s", bucket, narrowed = true)} ORDER BY s.name",
+            mapOf("workspaceId" to workspaceId),
+            RECORD,
+        )
+
+    /** The catalog's row predicate: liveness, or a lifecycle bucket's membership in its place (#582). */
+    private fun liveness(lifecycle: LifecycleBucket?): String =
+        lifecycle?.let { InventorySource.membership(NavigationFamily.PARAMETER_SETS, "s", it, narrowed = false) } ?: LIVE_S
 
     /**
      * Every live set that HAS a current version, with that version's number, hash and STATUS —
