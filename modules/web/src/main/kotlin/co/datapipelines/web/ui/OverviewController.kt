@@ -8,6 +8,7 @@ import jakarta.servlet.http.HttpServletRequest
 import org.springframework.stereotype.Controller
 import org.springframework.ui.Model
 import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.RequestParam
 import java.time.Instant
 
 /**
@@ -43,7 +44,14 @@ class OverviewController(
     fun templates(
         model: Model,
         request: HttpServletRequest,
-    ): String = render(OverviewPage.Family.TEMPLATES, model, request)
+        @RequestParam(required = false) lifecycle: String?,
+    ): String {
+        // #579: this URL IS the templates catalog, so it carries the catalog's contract — a
+        // lifecycle value its family does not offer is the house 400 before any SQL. The other
+        // overviews are pages, not catalogs; their filters live on the catalogs' own routes.
+        CatalogLifecycle.parse(lifecycle, OverviewPage.Family.TEMPLATES.offered)
+        return render(OverviewPage.Family.TEMPLATES, model, request)
+    }
 
     @GetMapping("/overview/dashboards")
     @RequiredScope(Permission.DASHBOARD_READ)

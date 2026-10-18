@@ -340,7 +340,7 @@
              data-nav-group="Build" data-nav-label="Pipelines"
              th:classappend="${browserFamily == 'pipelines'} ? 'active' : null"
              th:attr="aria-current=${browserFamily == 'pipelines'} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#workflow"></use></svg><span class="app-rail-label">Pipelines</span></a>
-          <a th:href="@{/templates}" class="app-nav-link" data-nav-section="/templates"
+          <a th:href="@{/overview/templates}" class="app-nav-link" data-nav-section="/templates"
              data-nav-group="Build" data-nav-label="Templates"
              th:classappend="${browserFamily == 'templates'} ? 'active' : null"
              th:attr="aria-current=${browserFamily == 'templates'} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#code"></use></svg><span class="app-rail-label">Templates</span></a>

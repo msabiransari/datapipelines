@@ -120,10 +120,11 @@ class TemplateTreeRenderTest {
             }
         emptyCatalog shouldNotContain "data-nav-tree-clear"
         emptyCatalog shouldContain "Clear search"
-        // #432: the clear empties the box (shell.js, by the ids named here), keeps dialect and type,
-        // and its one request describes the two it keeps; it replaces a search still in flight.
+        // #432: the clear empties the box (shell.js, by the ids named here), keeps dialect, type
+        // and — since #579 — lifecycle, and its one request describes the three it keeps; it
+        // replaces a search still in flight.
         emptyCatalog shouldContain "data-dp-clear-filters=\"#template-filter-q\""
-        emptyCatalog shouldContain "hx-include=\"#template-filter-dialect, #template-filter-type\""
+        emptyCatalog shouldContain "hx-include=\"#template-filter-dialect, #template-filter-type, #template-filter-lifecycle\""
         emptyCatalog shouldContain "hx-sync=\"#template-filter-q:replace\""
         TemplateBrowseModel.CATALOG_ROOT_ID shouldBe "template-list-wrapper"
     }
@@ -226,8 +227,8 @@ class TemplateTreeRenderTest {
         val html = render("templates/list") { fillPage() }
 
         html shouldContain "id=\"template-filter-type\""
-        html shouldContain "hx-include=\"#template-filter-q, #template-filter-dialect\""
-        html shouldContain "hx-include=\"#template-filter-dialect, #template-filter-type\""
+        html shouldContain "hx-include=\"#template-filter-q, #template-filter-dialect, #template-filter-lifecycle\""
+        html shouldContain "hx-include=\"#template-filter-dialect, #template-filter-type, #template-filter-lifecycle\""
         html shouldContain "id=\"template-list-wrapper\""
         // #398: the catalog's other door is the sidebar tree's reveal, not a page tree.
         html shouldContain "data-nav-tree-reveal=\"templates\""

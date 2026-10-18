@@ -5,6 +5,7 @@ import co.datapipelines.application.templates.TemplateUsage
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.executor.ExecutionRecord
 import co.datapipelines.executor.ExecutionRepository
+import co.datapipelines.pipeline.LifecycleBucket
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.SearchNeedle
 import co.datapipelines.pipeline.TemplateType
@@ -48,9 +49,13 @@ class TemplateBrowseModel(
      * `q`, or — `q` absent — every template the caller may read (the owner's ruling for the
      * pipelines catalog, #398's own floor).
      *
-     * Also stamps `filtered` (#510): whether ANY of `q`, `dialect` or `type` stands — the
-     * flag the fragment's empty states read to choose "nothing exists" vs "nothing
-     * matched" (§5.1), never `q` alone.
+     * Also stamps `filtered` (#510): whether ANY of `q`, `dialect`, `type` or [lifecycle]
+     * stands — the flag the fragment's empty states read to choose "nothing exists" vs
+     * "nothing matched" (§5.1), never `q` alone.
+     *
+     * #579: [lifecycle] is the catalog's lifecycle filter (the overview bar's deep link);
+     * `lifecycleOptions`/`lifecycleLabel` render the select and the empty state, exactly as
+     * the pipelines catalog's do.
      */
     fun fillSearch(
         model: Model,
@@ -60,6 +65,7 @@ class TemplateBrowseModel(
         dialect: Dialect?,
         type: TemplateType?,
         offset: Int,
+        lifecycle: LifecycleBucket? = null,
     ): String {
         val page = maxOf(0, offset)
         // A box truncates its own term to the shared bound (#504b) before the call, never refuses;
@@ -74,6 +80,7 @@ class TemplateBrowseModel(
                 q = needle,
                 offset = page,
                 limit = PAGE_SIZE + 1,
+                lifecycle = lifecycle,
             )
         val items = probe.take(PAGE_SIZE)
         model.addAttribute(PipelineBrowseModel.LENS_UNAVAILABLE, view.unavailable)
@@ -84,10 +91,16 @@ class TemplateBrowseModel(
         model.addAttribute(NEEDS_REVIEW_IDS, needReview(items))
         model.addAttribute("offset", page)
         model.addAttribute("hasMore", probe.size > PAGE_SIZE)
-        model.addAttribute("total", templates.count(workspaceId, view.templates, dialect = dialect, type = type, q = needle))
+        model.addAttribute(
+            "total",
+            templates.count(workspaceId, view.templates, dialect = dialect, type = type, q = needle, lifecycle = lifecycle),
+        )
+        model.addAttribute("lifecycle", lifecycle?.wire.orEmpty())
+        model.addAttribute("lifecycleLabel", lifecycle?.let(CatalogLifecycle::label))
+        model.addAttribute("lifecycleOptions", CatalogLifecycle.options(CatalogLifecycle.TEMPLATES))
         // #510: the empty catalog's answer — "nothing exists" vs "nothing matched" (§5.1) —
         // reads ANY standing filter, not q alone; the fragment's clear control is chosen on this.
-        model.addAttribute("filtered", needle != null || dialect != null || type != null)
+        model.addAttribute("filtered", needle != null || dialect != null || type != null || lifecycle != null)
         return SEARCH_VIEW
     }
 

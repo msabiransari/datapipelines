@@ -133,6 +133,15 @@ class TemplateRepository(
         co.datapipelines.pipeline.InventorySource
             .aggregate(jdbc, co.datapipelines.pipeline.NavigationFamily.TEMPLATES, workspaceId, lens)
 
+    /** #579 — the overview's Recently updated list under the caller's workspace and version lens. */
+    fun recent(
+        workspaceId: UUID,
+        lens: co.datapipelines.pipeline.ReadLens,
+        limit: Int = co.datapipelines.pipeline.RecentSource.DEFAULT_LIMIT,
+    ): List<co.datapipelines.pipeline.RecentRow> =
+        co.datapipelines.pipeline.RecentSource
+            .recent(jdbc, co.datapipelines.pipeline.NavigationFamily.TEMPLATES, workspaceId, lens, limit)
+
     /** Complete, body-free tree pages; authorization precedes folder derivation. */
     fun navigation(request: co.datapipelines.pipeline.NavigationRequest): List<co.datapipelines.pipeline.NavigationRow> =
         co.datapipelines.pipeline.NavigationSource
@@ -244,11 +253,13 @@ class TemplateRepository(
         offset: Int = 0,
         limit: Int = DEFAULT_PAGE_LIMIT,
         implements: UUID? = null,
+        lifecycle: co.datapipelines.pipeline.LifecycleBucket? = null,
+        releasedOnly: Boolean = false,
     ): List<Template> =
         jdbc.query(
             """
             $SELECT_JOINED
-            $LIST_WHERE
+            ${listWhere(lifecycle, releasedOnly)}
              ORDER BY t.name
              LIMIT :limit OFFSET :offset
             """.trimIndent(),
@@ -278,6 +289,8 @@ class TemplateRepository(
         type: TemplateType? = null,
         q: String? = null,
         implements: UUID? = null,
+        lifecycle: co.datapipelines.pipeline.LifecycleBucket? = null,
+        releasedOnly: Boolean = false,
     ): Int =
         checkNotNull(
             jdbc.queryForObject(
@@ -285,7 +298,7 @@ class TemplateRepository(
                 SELECT COUNT(*)
                   FROM templates t
                   JOIN template_versions v ON v.template_id = t.id
-                $LIST_WHERE
+                ${listWhere(lifecycle, releasedOnly)}
                 """.trimIndent(),
                 mapOf(
                     "dialect" to dialect?.wire,
@@ -1195,42 +1208,69 @@ class TemplateRepository(
          * so the page and its total can never disagree. Every optional filter is CAST in the
          * SQL: a bare `? IS NULL` gives Postgres no type to infer and the statement will not
          * even prepare.
+         *
+         * #579: with a [lifecycle] the bucket's membership REPLACES the liveness predicate
+         * ([co.datapipelines.pipeline.InventorySource.membership] — the INVENTORY's rule, so a
+         * filtered catalog's count is the number the overview's bar shows), over RELEASED
+         * versions only when [releasedOnly] (a narrowed lens). The joined row is then the
+         * template's LATEST version, whatever its status — a discarded-only template has no
+         * working version (D55's COALESCE is empty for it), and the bucket's semantics live
+         * entirely in the membership subquery. The unfiltered predicate is the one it always was.
          */
-        private val LIST_WHERE =
-            """
-            WHERE $TEMPLATE_LIVE_T
-              AND t.workspace_id = :workspaceId
-              AND v.version = COALESCE(
-                    t.current_version,
-                    (SELECT MAX(d.version) FROM template_versions d
-                      WHERE d.template_id = t.id AND d.status = 'DRAFT')
-                  )
-              AND (CAST(:dialect AS TEXT) IS NULL OR v.dialect = CAST(:dialect AS TEXT))
-              AND (CAST(:type AS TEXT) IS NULL OR v.type = CAST(:type AS TEXT))
-              AND (
-                    CAST(:implements AS UUID) IS NULL
-                    OR EXISTS (SELECT 1 FROM template_implements ti JOIN learned_facts f ON f.id = ti.fact_id
-                                WHERE ti.template_id = v.template_id AND ti.version = v.version
-                                  AND ti.fact_id = CAST(:implements AS UUID) AND f.workspace_id = t.workspace_id)
-                  )
-              AND (
-                    CAST(:pattern AS TEXT) IS NULL
-                    OR t.name ILIKE CAST(:pattern AS TEXT) ESCAPE '\'
-                    OR t.display_name ILIKE CAST(:pattern AS TEXT) ESCAPE '\'
-                    OR t.description ILIKE CAST(:pattern AS TEXT) ESCAPE '\'
-                    OR v.dialect ILIKE CAST(:pattern AS TEXT) ESCAPE '\'
-                  )
-            """.trimIndent()
+        private fun listWhere(
+            lifecycle: co.datapipelines.pipeline.LifecycleBucket?,
+            releasedOnly: Boolean,
+        ): String {
+            val live =
+                lifecycle
+                    ?.let {
+                        co.datapipelines.pipeline.InventorySource
+                            .membership(co.datapipelines.pipeline.NavigationFamily.TEMPLATES, "t", it, releasedOnly)
+                    }
+                    ?: TEMPLATE_LIVE_T
+            val version =
+                if (lifecycle == null) {
+                    """
+                    v.version = COALESCE(
+                          t.current_version,
+                          (SELECT MAX(d.version) FROM template_versions d
+                            WHERE d.template_id = t.id AND d.status = 'DRAFT')
+                        )
+                    """.trimIndent()
+                } else {
+                    "v.version = (SELECT MAX(x.version) FROM template_versions x WHERE x.template_id = t.id)"
+                }
+            return """
+                WHERE $live
+                  AND t.workspace_id = :workspaceId
+                  AND $version
+                  AND (CAST(:dialect AS TEXT) IS NULL OR v.dialect = CAST(:dialect AS TEXT))
+                  AND (CAST(:type AS TEXT) IS NULL OR v.type = CAST(:type AS TEXT))
+                  AND (
+                        CAST(:implements AS UUID) IS NULL
+                        OR EXISTS (SELECT 1 FROM template_implements ti JOIN learned_facts f ON f.id = ti.fact_id
+                                    WHERE ti.template_id = v.template_id AND ti.version = v.version
+                                      AND ti.fact_id = CAST(:implements AS UUID) AND f.workspace_id = t.workspace_id)
+                      )
+                  AND (
+                        CAST(:pattern AS TEXT) IS NULL
+                        OR t.name ILIKE CAST(:pattern AS TEXT) ESCAPE '\'
+                        OR t.display_name ILIKE CAST(:pattern AS TEXT) ESCAPE '\'
+                        OR t.description ILIKE CAST(:pattern AS TEXT) ESCAPE '\'
+                        OR v.dialect ILIKE CAST(:pattern AS TEXT) ESCAPE '\'
+                      )
+                """.trimIndent()
+        }
 
         /**
          * The working-version predicate of ONE tree level, shared by [listChildFolders],
          * [listChildTemplates] and [countChildTemplates] so a level, its folders and its total can
-         * never disagree. It carries [LIST_WHERE]'s D55 COALESCE for the same reason: a
+         * never disagree. It carries [listWhere]'s D55 COALESCE for the same reason: a
          * never-released template must still have a row in the tree.
          *
-         * It is [LIST_WHERE] minus the `q` clause (browse and search are different
+         * It is the unfiltered [listWhere] minus the `q` clause (browse and search are different
          * presentations, §9.2) plus the prefix scope. Every optional filter is CAST in the
-         * SQL for the same reason as [LIST_WHERE]: a bare `? IS NULL` gives Postgres no type
+         * SQL for the same reason as [listWhere]: a bare `? IS NULL` gives Postgres no type
          * to infer and the statement will not even prepare.
          */
         private val TREE_WHERE =

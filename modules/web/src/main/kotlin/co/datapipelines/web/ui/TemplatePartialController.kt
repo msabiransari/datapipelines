@@ -63,6 +63,7 @@ class TemplatePartialController(
         @RequestParam(required = false) dialect: String?,
         @RequestParam(required = false) type: String?,
         @RequestParam(required = false) offset: Int?,
+        @RequestParam(required = false) lifecycle: String?,
     ): String {
         val principal = currentPrincipal()
         TemplateFilters.fill(model, dialect, type)
@@ -76,6 +77,7 @@ class TemplatePartialController(
             dialect = TemplateFilters.dialect(dialect),
             type = TemplateFilters.type(type),
             offset = offset ?: 0,
+            lifecycle = CatalogLifecycle.parse(lifecycle, CatalogLifecycle.TEMPLATES),
         )
     }
 

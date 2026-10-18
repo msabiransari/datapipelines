@@ -240,7 +240,8 @@ class TemplateSidebarTreeBrowserTest : BrowserSuite() {
         // #554 A.4(c): the menu's Templates link (a boosted swap) shows the Templates panel in the
         // same document; coming back shows the Pipelines instance exactly as it was left.
         page.click(".app-nav-link[data-nav-section='/templates']")
-        page.waitForSelector("#template-list-wrapper")
+        // #579: the menu's Templates link lands on the family overview — the newer page here.
+        page.waitForSelector(".app-overview[data-overview='templates']")
         page.waitForSelector("#nav-tree-templates [role=tree]")
         assertOpen("templates")
         page.locator("$panel input").getAttribute("placeholder") shouldBe "Search templates…"
@@ -278,7 +279,8 @@ class TemplateSidebarTreeBrowserTest : BrowserSuite() {
         // Hide hands focus to the folder button; the catalog's Browse folders shows the browser again
         // and focuses the active family's search.
         page.click(".app-nav-link[data-nav-section='/templates']")
-        page.waitForSelector("#template-list-wrapper")
+        // #579: the Templates item now lands on the family overview.
+        page.waitForSelector(".app-overview[data-overview='templates']")
         page.click("#browser-hide")
         assertOpen(null)
         page.evaluate("() => document.activeElement?.id") shouldBe "browser-open"

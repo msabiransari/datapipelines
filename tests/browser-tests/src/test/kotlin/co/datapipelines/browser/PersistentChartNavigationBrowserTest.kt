@@ -219,7 +219,9 @@ class PersistentChartNavigationBrowserTest : VisualizationBrowserSuite() {
         page.waitForRequest({ it.url().contains("/refreshes/") && it.url().endsWith("/abort") }) {
             page.click(".app-nav-link[data-nav-section='/templates']")
         }
-        page.waitForSelector("#template-list-wrapper")
+        // #579: the Templates item lands on the family overview — the newer page whose
+        // pending refreshes must abort.
+        page.waitForSelector(".app-overview[data-overview='templates']")
         page.evaluate("() => window.__disposals") shouldBe 1
         page.goBack()
         page.waitForFunction("() => window.__dpPage?.ready===true")

@@ -7,8 +7,8 @@
   <!-- The catalog's two empty answers (§5.1). "Nothing exists" — no rows, no standing
        filter (#510: the choice reads the `filtered` flag, never q alone) — explains how
        templates arrive. "Nothing matched" offers the control that drops
-       what stands: with q standing, #432's box-only control (it keeps dialect/type); with
-       only a select standing, the all-filters control resets all three and fetches the
+       what stands: with q standing, #432's box-only control (it keeps dialect/type/lifecycle);
+       with only a select standing, the all-filters control resets all four and fetches the
        unfiltered first page. -->
   <th:block th:if="${lensUnavailable == null and #lists.isEmpty(templates) and !filtered}">
     <div class="ds-empty">
@@ -22,14 +22,20 @@
   </th:block>
   <th:block th:if="${lensUnavailable == null and #lists.isEmpty(templates) and filtered}">
     <div class="ds-empty">
-      <p class="ds-empty-title">No templates match your search</p>
+      <!-- #579: the lifecycle-aware title, pipelines' shape — the standing bucket is named,
+           and "with your search" joins it when q stands too. -->
+      <p class="ds-empty-title"
+         th:text="${#strings.isEmpty(lifecycle)
+             ? 'No templates match your search'
+             : 'No templates match: ' + lifecycleLabel + (#strings.isEmpty(q) ? '' : ', with your search')}">
+        No templates match your search</p>
       <div class="ds-empty-actions">
         <button th:if="${!#strings.isEmpty(q)}" type="button" class="ds-button ds-button-secondary ds-button-sm"
                 data-dp-clear-filters="#template-filter-q" hx-sync="#template-filter-q:replace"
-                hx-include="#template-filter-dialect, #template-filter-type"
+                hx-include="#template-filter-dialect, #template-filter-type, #template-filter-lifecycle"
                 th:attr="hx-get=@{/partials/templates}, hx-target='#' + ${rootId}, hx-swap='outerHTML'">Clear search</button>
         <button th:if="${#strings.isEmpty(q)}" type="button" class="ds-button ds-button-secondary ds-button-sm"
-                data-dp-clear-filters="#template-filter-q, #template-filter-dialect, #template-filter-type" hx-sync="#template-filter-q:replace"
+                data-dp-clear-filters="#template-filter-q, #template-filter-dialect, #template-filter-type, #template-filter-lifecycle" hx-sync="#template-filter-q:replace"
                 th:attr="hx-get=@{/partials/templates}, hx-target='#' + ${rootId}, hx-swap='outerHTML'">Clear filters</button>
       </div>
     </div>
@@ -56,8 +62,8 @@
   </ul>
 
   <th:block th:unless="${#lists.isEmpty(templates)}"
-            th:with="prevUrl=@{/partials/templates(q=${q}, dialect=${selectedDialect}, type=${selectedType}, offset=${offset - 25})},
-                     nextUrl=@{/partials/templates(q=${q}, dialect=${selectedDialect}, type=${selectedType}, offset=${offset + 25})}">
+            th:with="prevUrl=@{/partials/templates(q=${q}, dialect=${selectedDialect}, type=${selectedType}, lifecycle=${lifecycle}, offset=${offset - 25})},
+                     nextUrl=@{/partials/templates(q=${q}, dialect=${selectedDialect}, type=${selectedType}, lifecycle=${lifecycle}, offset=${offset + 25})}">
     <div th:replace="~{partials/pager :: pager('#' + ${rootId}, ${prevUrl}, ${nextUrl}, ${offset}, ${hasMore}, ${templates.size()}, ${total})}"></div>
   </th:block>
 </div>

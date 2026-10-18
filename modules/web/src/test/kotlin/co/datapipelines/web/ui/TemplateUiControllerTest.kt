@@ -4,6 +4,7 @@ import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.pipeline.AuthoringGuard
+import co.datapipelines.pipeline.LifecycleBucket
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.templates.Template
@@ -11,15 +12,18 @@ import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateUsageService
 import co.datapipelines.templates.TemplateValidator
 import co.datapipelines.typesystem.Dialect
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import io.mockk.every
 import io.mockk.mockk
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
+import org.springframework.http.HttpStatus
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.ui.ExtendedModelMap
+import org.springframework.web.server.ResponseStatusException
 import java.util.UUID
 
 /**
@@ -108,7 +112,7 @@ class TemplateUiControllerTest {
         stubFlatList(leaves = listOf(template(), template("test/orders_v2.sql")), total = 42)
 
         val model = ExtendedModelMap()
-        val viewName = controller.list(model, mockk(), null, null, null, null)
+        val viewName = controller.list(model, mockk(), null, null, null, null, null)
 
         viewName shouldBe "templates/list"
         model["activeTheme"] shouldBe "saas"
@@ -128,7 +132,7 @@ class TemplateUiControllerTest {
         every { repository.findDrafts(any(), any()) } returns emptyMap()
 
         val searching = ExtendedModelMap()
-        controller.list(searching, mockk(), "orders", "POSTGRES", "sql", null)
+        controller.list(searching, mockk(), "orders", "POSTGRES", "sql", null, null)
 
         searching["searching"] shouldBe true
         (searching["templates"] as List<*>) shouldHaveSize 1
@@ -138,13 +142,46 @@ class TemplateUiControllerTest {
     }
 
     @Test
+    fun `the lifecycle filter reaches the repository as its bucket and stamps the select (#579)`() {
+        authenticate()
+        every { themeResolver.resolve(any()) } returns "saas"
+        every {
+            repository.list(any(), null, null, null, 0, 26, null, LifecycleBucket.DRAFT_ONLY, false)
+        } returns listOf(template())
+        every { repository.count(any(), null, null, null, null, LifecycleBucket.DRAFT_ONLY, false) } returns 1
+        every { repository.findDrafts(any(), any()) } returns emptyMap()
+
+        val model = ExtendedModelMap()
+        controller.list(model, mockk(), null, null, null, null, "draft")
+
+        (model["templates"] as List<*>) shouldHaveSize 1
+        model["lifecycle"] shouldBe "draft"
+        model["lifecycleLabel"] shouldBe "Draft only"
+        model["filtered"] shouldBe true
+    }
+
+    @Test
+    fun `a lifecycle the templates catalog does not offer is the house 400 (#579)`() {
+        authenticate()
+        every { themeResolver.resolve(any()) } returns "saas"
+
+        // `discarded` is not offered: a discarded-only template has no page to open.
+        val refused =
+            shouldThrow<ResponseStatusException> {
+                controller.list(ExtendedModelMap(), mockk(), null, null, null, null, "discarded")
+            }
+        refused.statusCode shouldBe HttpStatus.BAD_REQUEST
+        refused.reason shouldBe CatalogLifecycle.BAD_LIFECYCLE
+    }
+
+    @Test
     fun `the create form carries the SERVER's grammar, not a copy of it`() {
         authenticate()
         every { themeResolver.resolve(any()) } returns "saas"
         stubFlatList()
 
         val model = ExtendedModelMap()
-        controller.list(model, mockk(), null, null, null, null)
+        controller.list(model, mockk(), null, null, null, null, null)
 
         model["namePattern"] shouldBe co.datapipelines.templates.TemplateNameGrammar.pattern
         model["nameMaxLength"] shouldBe co.datapipelines.templates.TemplateNameGrammar.maxLength
@@ -157,7 +194,7 @@ class TemplateUiControllerTest {
         stubFlatList()
 
         val model = ExtendedModelMap()
-        val viewName = partialController.list(model, q = null, dialect = null, type = null, offset = 0)
+        val viewName = partialController.list(model, q = null, dialect = null, type = null, offset = 0, lifecycle = null)
 
         viewName shouldBe TemplateBrowseModel.SEARCH_VIEW
         model["rootId"] shouldBe TemplateBrowseModel.CATALOG_ROOT_ID
@@ -170,7 +207,7 @@ class TemplateUiControllerTest {
         stubFlatList(leaves = emptyList(), total = 0)
 
         val model = ExtendedModelMap()
-        controller.list(model, mockk(), null, null, null, null)
+        controller.list(model, mockk(), null, null, null, null, null)
 
         // The dead `scopes` attribute went with the scopes (#215 PK8); `RoleModel`'s booleans
         // are what the templates read.
@@ -184,7 +221,7 @@ class TemplateUiControllerTest {
         stubFlatList(leaves = emptyList(), total = 0)
 
         val model = ExtendedModelMap()
-        controller.list(model, mockk(), null, null, null, null)
+        controller.list(model, mockk(), null, null, null, null, null)
 
         (model["templates"] as List<*>) shouldHaveSize 0
         model["hasMore"] shouldBe false

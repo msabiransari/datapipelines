@@ -116,6 +116,23 @@ class OverviewRenderTest {
     }
 
     @Test
+    fun `the templates links filter the templates overview and the discarded bar stays unlinked (#579)`() {
+        val doc = render(page(InventoryResult.Available(Inventory(1, 1, 1, 1)), family = OverviewPage.Family.TEMPLATES))
+
+        doc.select("[data-overview-chart] [data-bar] a").map { it.attr("href") } shouldContainExactly
+            listOf(
+                "/overview/templates?lifecycle=draft",
+                "/overview/templates?lifecycle=released",
+                "/overview/templates?lifecycle=released-with-draft",
+            )
+        doc.selectFirst("[data-bar=discarded] a").shouldBeNull()
+        doc.select("[data-overview-inventory] [data-count] a").map { it.attr("href") } shouldContainExactly
+            listOf("/overview/templates?lifecycle=with-drafts", "/overview/templates?lifecycle=with-releases")
+        doc.selectFirst("[data-overview-view-all]")!!.attr("href") shouldBe "/overview/templates"
+        doc.selectFirst("[data-overview-review]")!!.attr("href") shouldBe "/overview/templates?lifecycle=with-drafts"
+    }
+
+    @Test
     fun `the starter prompt names the active workspace through th-text`() {
         val html = html(page(Inventory(1, 0, 0, 0)), workspace = "<b>acme</b>")
         val doc = Jsoup.parse(html)

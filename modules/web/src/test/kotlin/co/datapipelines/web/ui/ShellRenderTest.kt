@@ -642,7 +642,7 @@ class ShellRenderTest {
         }
 
         href("Pipelines") shouldBe "/overview/pipelines"
-        href("Templates") shouldBe "/templates"
+        href("Templates") shouldBe "/overview/templates"
         href("Dashboards") shouldBe "/dashboards"
         href("Visualizations") shouldBe "/visualizations"
         href("Parameter Sets") shouldBe "/parameter-sets"

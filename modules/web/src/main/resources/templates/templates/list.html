@@ -28,9 +28,9 @@
     </div>
   </div>
 
-  <!-- Search, dialect and type address each other by ID (hx-include): a name-based include
-       would also sweep up the create modal's own name="dialect" and name="type" inputs (§4.6).
-       The filters are the CATALOG's — the sidebar's tree carries its search alone (§3.4). -->
+  <!-- Search, dialect, type and lifecycle address each other by ID (hx-include): a name-based
+       include would also sweep up the create modal's own name="dialect" and name="type" inputs
+       (§4.6). The filters are the CATALOG's — the sidebar's tree carries its search alone (§3.4). -->
   <!-- `.ds-input` is `width: 100%`, so a bare select in a flex row grows without bound; the
        selects are sized by their content and only the search box flexes. -->
   <div class="u-row-md u-wrap u-mb-md app-catalog-search">
@@ -38,14 +38,14 @@
            placeholder="Search templates..."
            th:attr="hx-get=@{/partials/templates}, hx-target='#template-list-wrapper', hx-swap='outerHTML'"
            hx-trigger="input changed delay:300ms, search"
-           hx-include="#template-filter-dialect, #template-filter-type"
+           hx-include="#template-filter-dialect, #template-filter-type, #template-filter-lifecycle"
            hx-sync="this:replace"
            hx-indicator="#template-filter-spinner"
            class="ds-input app-search-input">
     <select id="template-filter-dialect" name="dialect" class="ds-input app-select-auto"
             th:attr="hx-get=@{/partials/templates}, hx-target='#template-list-wrapper', hx-swap='outerHTML'"
             hx-trigger="change"
-            hx-include="#template-filter-q, #template-filter-type"
+            hx-include="#template-filter-q, #template-filter-type, #template-filter-lifecycle"
             hx-indicator="#template-filter-spinner">
       <option value="" th:selected="${#strings.isEmpty(selectedDialect)}">All Dialects</option>
       <option th:each="d : ${dialects}" th:value="${d}" th:text="${d}"
@@ -55,11 +55,22 @@
     <select id="template-filter-type" name="type" class="ds-input app-select-auto"
             th:attr="hx-get=@{/partials/templates}, hx-target='#template-list-wrapper', hx-swap='outerHTML'"
             hx-trigger="change"
-            hx-include="#template-filter-q, #template-filter-dialect"
+            hx-include="#template-filter-q, #template-filter-dialect, #template-filter-lifecycle"
             hx-indicator="#template-filter-spinner">
       <option value="" th:selected="${#strings.isEmpty(selectedType)}">All Types</option>
       <option th:each="ty : ${types}" th:value="${ty}" th:text="${ty}"
               th:selected="${ty == selectedType}"></option>
+    </select>
+    <select id="template-filter-lifecycle" name="lifecycle" class="ds-input app-select-auto"
+            th:attr="hx-get=@{/partials/templates}, hx-target='#template-list-wrapper', hx-swap='outerHTML'"
+            hx-trigger="change"
+            hx-include="#template-filter-q, #template-filter-dialect, #template-filter-type"
+            hx-indicator="#template-filter-spinner">
+      <!-- #579: the lifecycle filter — the overview's bars deep-link here. Discarded only is
+           not offered: a discarded-only template has no workspace page to open (§4.25). -->
+      <option value="" th:selected="${#strings.isEmpty(lifecycle)}">All lifecycle stages</option>
+      <option th:each="o : ${lifecycleOptions}" th:value="${o.value}" th:text="${o.label}"
+              th:selected="${o.value == lifecycle}"></option>
     </select>
     <span id="template-filter-spinner" class="htmx-indicator ds-spinner" aria-hidden="true"></span>
   </div>

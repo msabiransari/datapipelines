@@ -264,7 +264,8 @@ class ExplorerStressBrowserTest : BrowserSuite() {
             // A boosted swap to Templates hides the Pipelines panel mid-load; its held level still
             // lands in the kept instance, once, and Back shows it again in the same document.
             page.click("a.app-nav-link[data-nav-section='/templates']")
-            page.waitForSelector("#template-list-wrapper")
+            // #579: the Templates item lands on the family overview.
+            page.waitForSelector(".app-overview[data-overview='templates']")
             throttle.releaseUntil { page.locator(summary("nyc/lib/mobility")).count() > 0 }
             page.evaluate("() => window.__stressRail===document.getElementById('app-browser')") shouldBe true
             uniqueRows()

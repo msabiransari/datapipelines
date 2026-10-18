@@ -217,8 +217,10 @@ class ListPartialsRenderTest {
         html shouldNotContain "No templates yet"
         // The box is already empty, so the control drops EVERY standing filter — all three
         // named for shell.js — and its own request is the unfiltered first page (no hx-include).
+        // #579: lifecycle joins the standing filters, so the clear drops all four.
         html shouldContain "Clear filters"
-        html shouldContain "data-dp-clear-filters=\"#template-filter-q, #template-filter-dialect, #template-filter-type\""
+        html shouldContain
+            "data-dp-clear-filters=\"#template-filter-q, #template-filter-dialect, #template-filter-type, #template-filter-lifecycle\""
         html shouldNotContain "hx-include"
         html shouldNotContain "Clear search"
     }
@@ -240,7 +242,7 @@ class ListPartialsRenderTest {
         html shouldContain "Clear search"
         html shouldNotContain "Clear filters"
         html shouldContain "data-dp-clear-filters=\"#template-filter-q\""
-        html shouldContain "hx-include=\"#template-filter-dialect, #template-filter-type\""
+        html shouldContain "hx-include=\"#template-filter-dialect, #template-filter-type, #template-filter-lifecycle\""
         html shouldContain "hx-sync=\"#template-filter-q:replace\""
     }
 
@@ -267,8 +269,8 @@ class ListPartialsRenderTest {
         html shouldContain "id=\"template-filter-dialect\""
         html shouldContain "id=\"template-filter-type\""
         // By ID, never by name — the create modal carries its own name="dialect"/name="type".
-        html shouldContain "hx-include=\"#template-filter-dialect, #template-filter-type\""
-        html shouldContain "hx-include=\"#template-filter-q, #template-filter-dialect\""
+        html shouldContain "hx-include=\"#template-filter-dialect, #template-filter-type, #template-filter-lifecycle\""
+        html shouldContain "hx-include=\"#template-filter-q, #template-filter-dialect, #template-filter-lifecycle\""
         html shouldContain "hx-target=\"#template-list-wrapper\""
         html shouldContain "id=\"template-filter-spinner\""
     }

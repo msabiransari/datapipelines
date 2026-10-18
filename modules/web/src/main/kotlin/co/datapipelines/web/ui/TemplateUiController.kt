@@ -37,6 +37,7 @@ class TemplateUiController(
         @RequestParam(required = false) dialect: String?,
         @RequestParam(required = false) type: String?,
         @RequestParam(required = false) offset: Int?,
+        @RequestParam(required = false) lifecycle: String?,
     ): String {
         model.addAttribute("activeTheme", themeResolver.resolve(request))
         RoleModel.stamp(model)
@@ -62,6 +63,7 @@ class TemplateUiController(
             dialect = TemplateFilters.dialect(dialect),
             type = TemplateFilters.type(type),
             offset = offset ?: 0,
+            lifecycle = CatalogLifecycle.parse(lifecycle, CatalogLifecycle.TEMPLATES),
         )
         return "templates/list"
     }
