@@ -24,6 +24,15 @@ class ShellSurfacesBrowserTest : DashboardBrowserSuite() {
                 val m = page.evaluate(SURFACES) as Map<*, *>
                 println("606-surfaces|$width|$path|$m")
                 readings.add(m)
+                if (path == "/overview/pipelines") {
+                    page.evaluate(
+                        """() => { const el = document.querySelector('#app-main .ds-card');
+                          const probe = document.createElement('span'); probe.style.color = 'var(--border-default)';
+                          document.body.appendChild(probe);
+                          const result = !!el && getComputedStyle(el).borderTopColor === getComputedStyle(probe).color;
+                          probe.remove(); return result; }""",
+                    ) shouldBe true
+                }
                 val directory = Paths.get("build", "reports", "606-shell-surfaces").also { it.toFile().mkdirs() }
                 page.screenshot(
                     Page.ScreenshotOptions().setPath(directory.resolve("$width-${path.replace('/', '_')}.png")),
@@ -56,18 +65,26 @@ class ShellSurfacesBrowserTest : DashboardBrowserSuite() {
                     ".map(e => e.dataset.mode || e.dataset.swatch)",
             ) as List<*>
         themes.isNotEmpty() shouldBe true
-        for (theme in themes) {
+        val measurements = themes.associateWith { theme ->
             page.evaluate(SWAP_THEME, theme)
+            // The input transitions its border when the stylesheet swaps; wait on that animation.
+            page.evaluate(
+                """() => Promise.all(document.getAnimations()
+                  .filter(a => a.effect.getTiming().iterations !== Infinity).map(a => a.finished))""",
+            )
             val rows = page.evaluate(EDGES) as List<*>
             rows.isNotEmpty() shouldBe true
             println("606-edges|$theme|$rows")
-            assertSoftly {
+            rows
+        }
+        assertSoftly {
+            for ((theme, rows) in measurements) {
                 for (row in rows) {
                     val m = row as Map<*, *>
                     withClue("$theme: $m") {
                         m["present"] shouldBe true
                         m["actual"] shouldBe m["expected"]
-                        m["width"] shouldBe "1px"
+                        m["width"] shouldBe if (m["role"] == null) "0px" else "1px"
                     }
                 }
             }
@@ -121,7 +138,9 @@ class ShellSurfacesBrowserTest : DashboardBrowserSuite() {
             () => {
               const rows = [
                 ['.app-rail', 'Right', '--app-line-decorative'],
-                ['.app-brand', 'Bottom', '--app-line-decorative'],
+                ['.app-brand', 'Bottom', null],
+                ['.app-avatar', 'Top', null],
+                ['.app-kbd', 'Top', '--app-line-decorative'],
                 ['.app-browser-head', 'Bottom', '--app-line-decorative'],
                 ['.app-rail-foot', 'Top', '--app-line-decorative'],
                 ['.app-topbar', 'Bottom', '--app-line-decorative'],
@@ -134,9 +153,9 @@ class ShellSurfacesBrowserTest : DashboardBrowserSuite() {
               document.body.appendChild(probe);
               const result = rows.map(([selector, side, role]) => {
                 const el = document.querySelector(selector);
-                probe.style.color = 'var(' + role + ')';
-                return { selector, role, present: !!el, expected: getComputedStyle(probe).color,
-                  actual: el && getComputedStyle(el)['border' + side + 'Color'],
+                probe.style.color = role ? 'var(' + role + ')' : '';
+                return { selector, role, present: !!el, expected: role && getComputedStyle(probe).color,
+                  actual: role && el && getComputedStyle(el)['border' + side + 'Color'],
                   width: el && getComputedStyle(el)['border' + side + 'Width'] };
               });
               probe.remove();

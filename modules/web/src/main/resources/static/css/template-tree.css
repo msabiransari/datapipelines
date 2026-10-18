@@ -635,7 +635,7 @@ a.tpl-result {
   display: flex;
   gap: var(--app-tab-gap);
   padding: 0 var(--gap-md);
-  border-bottom: 1px solid var(--border-faint, var(--border-subtle));
+  border-bottom: 1px solid var(--app-line-decorative);
   overflow-x: auto;
 }
 
