@@ -106,7 +106,10 @@ class UiConfig {
 
     /** #556: the overviews' Recently updated lists — one adapter per family that has one. */
     @Bean
-    fun familyRecent(pipelines: co.datapipelines.pipeline.PipelineRepository): FamilyRecent = FamilyRecent(pipelines)
+    fun familyRecent(
+        pipelines: co.datapipelines.pipeline.PipelineRepository,
+        parameterSets: co.datapipelines.parameters.ParameterSetRepository,
+    ): FamilyRecent = FamilyRecent(pipelines, parameterSets)
 
     /** 106: the version/execution actor lookup both explorer details render. */
     @Bean

@@ -55,6 +55,15 @@ class ParameterSetRepository(
             lens,
         )
 
+    /** #582 — the overview's Recently updated list under the caller's workspace and version lens. */
+    fun recent(
+        workspaceId: UUID,
+        lens: co.datapipelines.pipeline.ReadLens,
+        limit: Int = co.datapipelines.pipeline.RecentSource.DEFAULT_LIMIT,
+    ): List<co.datapipelines.pipeline.RecentRow> =
+        co.datapipelines.pipeline.RecentSource
+            .recent(jdbc, co.datapipelines.pipeline.NavigationFamily.PARAMETER_SETS, workspaceId, lens, limit)
+
     /** Complete, body-free tree pages; authorization precedes folder derivation. */
     fun navigation(request: co.datapipelines.pipeline.NavigationRequest): List<co.datapipelines.pipeline.NavigationRow> =
         co.datapipelines.pipeline.NavigationSource
