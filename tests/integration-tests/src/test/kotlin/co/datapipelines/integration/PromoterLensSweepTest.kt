@@ -233,6 +233,7 @@ class PromoterLensSweepTest {
         treesAreTheNewerSet("pipelines", P, VISIBLE_PIPELINES, auth)
         treesAreTheNewerSet("templates", T, VISIBLE_TEMPLATES, auth)
         overviewIsTheNewerSet(auth)
+        templatesOverviewIsTheNewerSet(auth)
         staleSidebarParametersAreIgnored("pipelines", "pipeline-list-wrapper", VISIBLE_PIPELINES, auth)
         staleSidebarParametersAreIgnored("templates", "template-list-wrapper", VISIBLE_TEMPLATES, auth)
     }
@@ -269,6 +270,40 @@ class PromoterLensSweepTest {
         }
     }
 
+    /**
+     * #579 — the Templates overview's three surfaces are the admitted set, exactly as the
+     * Pipelines overview's: `lt/newer.sql`'s pending DRAFT is hidden, so it classifies as
+     * released only, the With drafts filter is empty, and no hidden name reaches the page or
+     * the recent list. Each offered filter's row count is its bar's number.
+     */
+    private fun templatesOverviewIsTheNewerSet(auth: (RequestSpecification) -> RequestSpecification) {
+        withClue("#579: the promoter's Templates overview counts, lists and filters only the admitted versions") {
+            val page = call("/overview/templates", auth)
+            page.status shouldBe HTTP_OK
+            overviewNumbers(page.body) shouldBe
+                mapOf(
+                    "objects" to 2,
+                    "with-drafts" to 0,
+                    "with-releases" to 2,
+                    "discarded" to 0,
+                    "draft" to 0,
+                    "released" to 2,
+                    "released-with-draft" to 0,
+                )
+            val recent = page.body.substringAfter("data-overview-recent", "").substringBefore("</section>")
+            VISIBLE_TEMPLATES.forEach { recent.contains(it) shouldBe true }
+            HIDDEN_TEMPLATES.filter { it in recent } shouldBe emptyList()
+            recent.contains("ds-badge-warning") shouldBe false
+            val withDrafts = call("/partials/templates?lifecycle=with-drafts", auth).body
+            (VISIBLE_TEMPLATES + HIDDEN_TEMPLATES).filter { it in withDrafts } shouldBe emptyList()
+            val released = call("/partials/templates?lifecycle=released", auth).body
+            VISIBLE_TEMPLATES.forEach { released.contains(it) shouldBe true }
+            HIDDEN_TEMPLATES.filter { it in released } shouldBe emptyList()
+            Regex("data-leaf-id=").findAll(released).count() shouldBe 2
+            HIDDEN_TOKENS.filter { it in page.body } shouldBe emptyList()
+        }
+    }
+
     private fun viewerOverviewSeesEverything(auth: (RequestSpecification) -> RequestSpecification) {
         withClue("#556: the viewer's overview counts the draft the promoter's does not") {
             overviewNumbers(call("/overview/pipelines", auth).body) shouldBe
@@ -289,10 +324,40 @@ class PromoterLensSweepTest {
             templates.status shouldBe HTTP_OK
             templates.body.contains("data-overview=\"templates\"") shouldBe true
         }
+        withClue("#579: the viewer's Templates overview counts every template and each filter's rows are its bar's number") {
+            overviewNumbers(call("/overview/templates", auth).body) shouldBe
+                mapOf(
+                    "objects" to 5,
+                    "with-drafts" to 2,
+                    "with-releases" to 4,
+                    "discarded" to 0,
+                    "draft" to 1,
+                    "released" to 3,
+                    "released-with-draft" to 1,
+                )
+            fun rows(body: String): Int = Regex("data-leaf-id=").findAll(body).count()
+            val draftRows = call("/partials/templates?lifecycle=draft", auth).body
+            rows(draftRows) shouldBe 1
+            draftRows.contains("$T/draft_only.sql") shouldBe true
+            val releasedRows = call("/partials/templates?lifecycle=released", auth).body
+            rows(releasedRows) shouldBe 3
+            listOf("$T/absent_there.sql", "$T/on_target_same.sql", "$T/behind.sql").forEach { releasedRows.contains(it) shouldBe true }
+            val rwdRows = call("/partials/templates?lifecycle=released-with-draft", auth).body
+            rows(rwdRows) shouldBe 1
+            rwdRows.contains("$T/newer.sql") shouldBe true
+            val withDraftRows = call("/partials/templates?lifecycle=with-drafts", auth).body
+            rows(withDraftRows) shouldBe 2
+            listOf("$T/newer.sql", "$T/draft_only.sql").forEach { withDraftRows.contains(it) shouldBe true }
+            val withReleaseRows = call("/partials/templates?lifecycle=with-releases", auth).body
+            rows(withReleaseRows) shouldBe 4
+            withReleaseRows.contains("$T/draft_only.sql") shouldBe false
+        }
         withClue("#556: a lifecycle value the catalog does not offer is a 400 before any SQL") {
             listOf("bogus", "discarded", "DRAFT").forEach { value ->
                 call("/pipelines?lifecycle=$value", auth).status shouldBe HTTP_BAD_REQUEST
                 call("/partials/pipelines?lifecycle=$value", auth).status shouldBe HTTP_BAD_REQUEST
+                call("/overview/templates?lifecycle=$value", auth).status shouldBe HTTP_BAD_REQUEST
+                call("/partials/templates?lifecycle=$value", auth).status shouldBe HTTP_BAD_REQUEST
             }
         }
     }
