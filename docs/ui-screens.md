@@ -1,9 +1,9 @@
 # UI Screens Inventory
 
-**Status:** v1.157
+**Status:** v1.158
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
-**Last updated:** 2026-10-17 (#578; #554); 2026-10-16 (#551 merge follow-up; #551; #555; #552; #553; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
+**Last updated:** 2026-10-17 (#556; #578; #554); 2026-10-16 (#551 merge follow-up; #551; #555; #552; #553; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
 
 ---
 
@@ -200,7 +200,7 @@ own column: a 58px header (`--app-header-h`) with the family title, the admitted
 tree's search/clear/refresh toolbar; the tree; a footer with **View all <family>** (the catalog) and
 **Reset resource browser width**. The five panels keep their `#nav-tree-<family>` ids and
 `data-nav-tree="<family>"`; one is visible. The column is shown on a family page only — the active family
-is derived from the path (`familyForPath`), never stored — and `hidden` elsewhere, its width returned to
+is derived from the path (`familyForPath`; a family's overview `/overview/<family>` is that family's, #556), never stored — and `hidden` elsewhere, its width returned to
 main. Each family's tree mounts lazily the first time it is shown and stays mounted for the life of the
 document, so switching family and returning finds its query, open folders and scroll as they were, with no
 refetch. Initialization requests only the root and leaves all folders closed. A catalog's **Browse folders**
@@ -217,8 +217,10 @@ offers **Load more**, which continues from the kept cursor with a fresh ten-page
 re-renders only its own level, never the whole panel. Complete valid levels remain in memory and keep keyed
 DOM rows, focus and scroll during navigation.
 
-The eight selection rules of the record (§3), as built: (1) the family link still leads to its
-**catalog** — the overview destination is #556's, and View all stays the explicit catalog action;
+The eight selection rules of the record (§3), as built: (1) the family link leads to the family's
+**overview** (§4.25) once its page is written — Pipelines since #556 (`/overview/pipelines`); Templates,
+Dashboards, Visualizations and Parameter Sets keep their catalog link until #579–#582 — and View all stays
+the explicit catalog action;
 a desktop family menu click also shows a hidden browser and clears its saved Hide;
 (2) a leaf opens its existing workspace URL and is marked current, the family's browser state kept;
 (3) a folder toggles only itself; (4) a deep link selects its family, with no recursive fetch to reveal the
@@ -721,9 +723,9 @@ Content:
 
 | Attribute | Value |
 |---|---|
-| URL | `GET /pipelines` (`?q=` — the deep link every "find this pipeline" link uses: the search palette's "All pipelines matching", datasource delete, the node-SQL and Details child links, the schedules detail, the workspace's phone note) |
+| URL | `GET /pipelines` (`?q=` — the deep link every "find this pipeline" link uses: the search palette's "All pipelines matching", datasource delete, the node-SQL and Details child links, the schedules detail, the workspace's phone note; `?lifecycle=` — #556's filter, the overview's drill-down) |
 | Auth required | Yes (`read`) |
-| Purpose | The **catalog**: one flat, server-paged list of full paths — every pipeline the caller may read (newest first, the service's own page) or the matches of `q` — each row a link into the pipeline's workspace (§4.4). The folder TREE is the sidebar's (§3.4) |
+| Purpose | The **catalog**: one flat, server-paged list of full paths — every pipeline the caller may read (newest first, the service's own page) or the matches of `q` — each row a link into the pipeline's workspace (§4.4). The folder TREE is the sidebar's (§3.4). Since #556 the menu's Pipelines item lands on the overview (§4.25); the catalog is its **View all**, the browser footer's, and the target of the overview's linked counts and bars |
 | Design primitives | `.ds-input`, `.ds-badge`, `.ds-button`, `.ds-empty`; the rows are `template-tree.css`'s `.tpl-results` / `a.tpl-result` |
 | JS | none of its own — `tree/sidebar.mjs` owns **Browse folders** (`data-nav-tree-reveal`), which shows the resource browser's Pipelines tree (the Browse resources drawer at 760px and below) and puts focus in its search; since #554 it leaves the menu's collapse alone |
 | htmx | the search input (`#pipeline-filter-q`, `input changed delay:300ms, search`, `hx-sync="this:replace"`) and the shared §5 pager re-fetch ONLY the list into its stable root `#pipeline-list-wrapper` (`GET /partials/pipelines`, `outerHTML`); the sidebar uses REST tree/search (§3.4) |
@@ -734,6 +736,15 @@ flat list, not a second tree and not a detail pane: a pipeline is read, run and 
 place, its workspace. Since 067 pipeline names are **folder paths**
 ([Template Hierarchy §14](template-hierarchy-design.md)); the folders are browsed in the sidebar.
 
+- **The lifecycle filter (#556).** A select beside the search (`#pipeline-filter-lifecycle`, "All
+  lifecycles" first) narrows the list to one of the inventory's buckets: `draft` (draft only),
+  `released` (released only), `released-with-draft`, `with-drafts` or `with-releases` — the
+  wire values of `LifecycleBucket`, whose predicates the overview's counts read, so a filtered
+  total equals the overview's number (`OverviewE2eTest`). The search and the select each include
+  the other, the pager carries both, and a filter with no rows is a filtered empty state with
+  **Clear filters**. Any other value, `discarded` included, is a 400 with a constant reason: a
+  discarded-only pipeline has no workspace page to open. Through a promoter's lens the filter
+  reads admitted RELEASED versions only, as the inventory does.
 - **Separate catalog and tree transport.** `GET /partials/pipelines` (`pipeline.read`, the lens)
   serves the catalog's flat list — the only presentation it has: the server-rendered `scope=nav`
   and prefix fragments were removed with #466, and a stale `scope` or `prefix` is ignored (the
@@ -1250,7 +1261,7 @@ Until this round the detail route served only LAKE; every other dialect's row ha
 |---|---|
 | URL | `GET /templates` (`?q=` — the deep link every "find this template" link uses; the search covers id/path, display name, description and the dialect badge's wire value, the §5.1 Search rule) |
 | Auth required | Yes (`read` to browse; `author` to create — the create button is role-gated per [§4.3e](#43e-role-visibility--every-verb-and-the-role-boolean-that-renders-it-114-normative)) |
-| Purpose | The **catalog**: one flat, server-paged list of full paths — every template the caller may read when `q` is empty, or the matches of `q` — with the dialect and type filters, and (an author's) the create modal. Each row links into the template workspace (§4.7). The folder TREE is the sidebar's (§3.4) |
+| Purpose | The **catalog**: one flat, server-paged list of full paths — every template the caller may read when `q` is empty, or the matches of `q` — with the dialect and type filters, and (an author's) the create modal. Each row links into the template workspace (§4.7). The folder TREE is the sidebar's (§3.4). The menu's Templates item still lands here; `/overview/templates` already serves the family's inventory (§4.25) and becomes the menu's destination with #579 |
 | Design primitives | `.ds-input`, `.ds-badge`, `.ds-button`, `.ds-empty`; the rows are `template-tree.css`'s `.tpl-results` / `a.tpl-result`; the create modal is `.u-backdrop` + `.ds-card` |
 | JS | the create modal's lifecycle (`/js/template-create-modal.js`: open/close, inline refusal, dialect-conditional-on-type, the transform blocks); none of its own otherwise — `tree/sidebar.mjs` owns **Browse folders** (`data-nav-tree-reveal`), which shows the resource browser's Templates tree and puts focus in its search |
 | htmx | the search input and the two filter selects re-fetch ONLY the list into its stable root `#template-list-wrapper` (`GET /partials/templates`, `outerHTML`); the sidebar uses REST tree/search (§3.4) |
@@ -2083,7 +2094,7 @@ Guards: `SchedulesUiControllerTest` (the route's row, `canAuthor` = the five wri
 |---|---|
 | URL | `GET /dashboards` (`?q=&offset=` the deep links) |
 | Auth required | Yes — `dashboard.read`, every role (a promoter through the lens: released dashboards whose every source pipeline her pipeline lens admits; a hidden one is absent from the list) |
-| Purpose | The flat catalog landing: every dashboard the caller may read — or the matches of `q` (a dashboard whose name, display name or description contains the term, case-insensitive, `%` and `_` literal; the term trimmed and cut to 200 characters first, #504b) — one row each, a row linking the workspace. The page and the pager's total come from the lensed SQL read, so a match past the 200th dashboard is listed and counted (#512) |
+| Purpose | The flat catalog landing (the menu's Dashboards item; `/overview/dashboards` serves the inventory, §4.25, and takes the menu with #580): every dashboard the caller may read — or the matches of `q` (a dashboard whose name, display name or description contains the term, case-insensitive, `%` and `_` literal; the term trimmed and cut to 200 characters first, #504b) — one row each, a row linking the workspace. The page and the pager's total come from the lensed SQL read, so a match past the 200th dashboard is listed and counted (#512) |
 | Design primitives | §4.3's catalog shape ([Pipelines](#43-pipelines--the-catalog-page-and-the-resource-browser-350-554), #350's owner ruling — one flat, server-paged list, no tree, no detail pane): `.app-catalog-search`, `.tpl-results`, the shared pager; `dashboards.css` dresses the page's own bits |
 | JS | None of its own — the search control is the htmx SPA pattern (a debounced `hx-get` into the stable `#dash-list-wrapper` root, focus and value preserved) |
 | htmx | Yes — the search and the pager re-fetch `GET /partials/dashboards` into `#dash-list-wrapper`, `outerHTML` |
@@ -2209,7 +2220,7 @@ capability page — its public route admits nothing of the workspace.
 |---|---|
 | URL | `GET /parameter-sets` (`?q=` searches it, `?offset=` pages it) |
 | Auth required | Yes — `parameter_set.read`, every role (a promoter through the lens: only sets whose current version is RELEASED and admitted; a hidden set is absent — not listed, not counted, not paged, not a search hit) |
-| Purpose | Find a parameter set and open its workspace |
+| Purpose | Find a parameter set and open its workspace — the menu's Parameter Sets item lands here; `/overview/parameter-sets` serves the inventory (§4.25) and takes the menu with #582 |
 | Design primitives | The house list: `.ds-empty` for the empty state, the shared §5 pager; `parameter-sets.css` (`ps-*`), head-loaded (§3.0 is normative) |
 | JS | None of its own |
 | htmx | The route's rows are the same read the sidebar's tree is built from; a row preserves the rail through main-content navigation |
@@ -2347,7 +2358,7 @@ the set's id per workspace and states the body's shape hash; the examples file c
 |---|---|
 | URL | `GET /visualizations` (`?q=&offset=` the deep links) |
 | Auth required | Yes — `visualization.read`, every role (a promoter through the lens: the visualizations a dashboard her lens admits pins; a hidden one is absent — not listed, not counted, not paged) |
-| Purpose | The flat catalog landing: every visualization the caller may read — or the matches of `q` over name, display name and description — one row each, a row linking the workspace |
+| Purpose | The flat catalog landing (the menu's Visualizations item; `/overview/visualizations` serves the inventory, §4.25, and takes the menu with #581): every visualization the caller may read — or the matches of `q` over name, display name and description — one row each, a row linking the workspace |
 | Design primitives | §4.21's catalog shape exactly (`.app-catalog-search`, `.tpl-results`, the shared pager); `visualizations.css` (head-loaded, §3.0) dresses the page's own bits with design tokens only |
 | JS | None of its own — the search is the htmx SPA pattern (a debounced `hx-get` into the stable `#viz-list-wrapper` root) |
 | htmx | Yes — the search and the pager re-fetch `GET /partials/visualizations` into `#viz-list-wrapper`, `outerHTML` |
@@ -2395,6 +2406,83 @@ node --test), and the browser suites `VisualizationSidebarTreeBrowserTest` +
 `VisualizationWorkspaceBrowserTest` (every tab in both themes under the live CSP with zero
 violations, the promoter's page issuing no lifecycle request, the 2d and 3d bundles, three widths).
 
+
+### 4.25 Family overviews (#556)
+
+| Attribute | Value |
+|---|---|
+| URL | `GET /overview/pipelines`, `/overview/templates`, `/overview/dashboards`, `/overview/visualizations`, `/overview/parameter-sets` — five literal routes, no path variable, no query |
+| Auth required | Yes — each family's own read permission (`pipeline.read`, `template.read`, `dashboard.read`, `visualization.read`, `parameter_set.read`; [Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative) names each route in its row's Surfaces cell); every role, a promoter through the lens. GET only; nothing on the page writes |
+| Purpose | A family's home page: what the workspace holds in that family, by lifecycle, and — for a family whose guide is written — what the family is for, how to start one with an agent, and where work left off |
+| Design primitives | `.app-page-h`, `.ds-card` (`.app-card-h`/`.app-card-b`), `.ds-button`, `.ds-badge`, `.ds-textarea`; the house data-table frame (§3.7) around the visually hidden table; the `.app-overview-*` rules in `app.css`, design tokens only |
+| JS | `overview.mjs` (Copy prompt), on a guided overview only, through the page-assets template (§3.0); no other script |
+| htmx | none of its own — every link is a boosted navigation |
+
+One template, `overview/family.html`, renders all five over one model (`OverviewController`,
+`OverviewPage`). The shell treats `/overview/<family>` as that family's in all four path rules (the
+layout's `navPath`/`browserFamily`, `AppNav.matches`, `shell.js` `isActiveSection`, `familyForPath`):
+the family's menu item is active, the crumb names it and its resource browser panel opens (§3.4).
+Since #556 the Pipelines menu item links `/overview/pipelines`; the other four overviews are served and
+linked from Pipelines' related list, and become their menu destinations with #579–#582.
+
+**Hierarchy.** The family title, the workspace line ("In workspace <name>."; a promoter's adds that
+the counts are the admitted inventory) and **View all** (the catalog). Then the **Inventory** card
+("Admitted inventory" through a lens): four counts — Objects, With drafts, With releases, Discarded
+only, each with a one-line help — and four bars: Draft only, Released only, Released with draft
+changes, Discarded only. For a guided family (Pipelines today; `overview/guide-<family>.html`), **What
+pipelines are for**, **Create with your agent**, and side by side **Continue your work** and **Related
+resources and help** follow. An unguided overview shows the inventory card and nothing else — no
+placeholder prose, no script.
+
+**The counting model**, restated once (the record's §8; #553's `FamilyInventory`): one SQL snapshot
+places each object of the workspace in exactly one of the four buckets by its versions. Objects is
+their sum; With drafts is draft only plus released with draft changes; With releases is released only
+plus released with draft changes, so those two overlap by design and say so. Every number on the page —
+counts, bars, bar labels and the table — is read from that one value, so the chart cannot disagree with
+its totals. A bar's width is its value relative to the tallest, 0–100, written as the SVG `rect`'s
+`width` attribute (the CSP admits no style); a zero is a zero-width bar beside its "0", never a
+visible minimum. A visually hidden table repeats the four rows for assistive technology.
+
+**Links.** For Pipelines, With drafts, With releases and the Draft only, Released only and Released
+with draft changes bars link the catalog filtered to that bucket (`/pipelines?lifecycle=…`, §4.3);
+Objects links nothing (View all is the unfiltered catalog) and Discarded only stays unlinked, since a
+discarded-only pipeline has no workspace page. An unguided family links no count or bar until its
+catalog offers the filter.
+
+**Create with your agent (Pipelines).** Three steps and a starter prompt in an editable textarea, the
+workspace name the menu shows substituted server-side and the bracketed parts left for the reader. The
+prompt names no key, credential, datasource configuration or hidden resource. **Copy prompt** puts the
+textarea's current text, edits included, on the clipboard: on success the button reads "Copied" and
+returns; when the clipboard refuses or is absent, the text is selected, the button reads "Select and
+copy" and a status line says how to finish by hand. Copying sends no request and grants nothing; the note
+under it says so, and, for a role that does not author pipelines, suggests copying it for a collaborator.
+
+**Continue your work (Pipelines).** **Recently updated**: up to five pipelines that hold a draft or a
+release, newest change first, each a link to its workspace with a draft badge when it has one and a
+relative time (the absolute time as its title). The time is the latest of the pipeline's own update and
+its versions' draft write, release and discard (`RecentSource`). It is the workspace's modification data,
+not anyone's history (#557 owns Recent and Pinned). **Review drafts** opens the catalog filtered to With
+drafts.
+
+**Through a promoter's lens** every surface reads the same admitted set: the admitted names' RELEASED
+versions only. The counts and bars, the recent list (ordered by release time alone, so a hidden draft's
+write moves nothing) and the filtered catalog all omit a hidden draft (`PromoterLensSweepTest`). The
+narrowed inventory admits an object with ANY released version, while the lensed catalogs keep their
+current-pointer rule; the two can differ for an object whose current pointer is not a released version
+(#563). Neither rule changes here.
+
+**States.** An inventory that cannot be read says "The inventory is unavailable." with a reason and
+shows no number at all — an unknown count never reads as zero. Recently updated has its own unavailable
+line and, in an empty workspace, a note pointing at the starter prompt. A real zero is a "0".
+
+**Storage:** none — no browser key, cookie or server preference.
+
+Guards: `OverviewRenderTest` (one inventory feeds counts, bars and table; widths; unavailable without a
+digit; links; escaping; unguided families bare), `ShellRenderTest` (all five paths light their item,
+crumb and panel), `FamilyRecentE2eTest`, `OverviewE2eTest` (each catalog lifecycle count equals the
+inventory's, unlensed and narrowed), `PromoterLensSweepTest`, `overview.test.mjs` and
+`OverviewBrowserTest` (copy resolves and refuses with zero requests; the menu lands on the overview with
+its tree; a workspace switch).
 
 ## 5. htmx Usage Pattern
 
@@ -2561,6 +2649,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-17 | v1.158 | #556 the family overview pages | **§4.25, new:** `GET /overview/<family>` for the five families from one template: the inventory (four counts, four bars and a hidden table from one `FamilyInventory` read, the unavailable state without a number) and, for Pipelines, the introduction, Create with your agent (Copy prompt, clipboard only), Recently updated and related help. **§3.4:** the four path rules treat an overview as its family's; selection rule 1 — the Pipelines menu item now leads to its overview, the other four keep their catalog until #579–#582. **§4.3:** the `?lifecycle=` filter, its 400 and its equality with the overview's counts. **§4.6, §4.21, §4.23, §4.24:** each names its served overview and the issue that moves the menu. |
 | 2026-10-17 | v1.157 | #578 browser reveal | **§3.4:** desktop chevron-right at the browser edge; phone keeps the folder glyph. A desktop family menu click clears Hide and shows the browser, including the active family; non-family destinations preserve Hide. Storage table and **§3.6** updated. |
 | 2026-10-17 | v1.156 | #554 the shell becomes three sibling columns: a stable primary menu, a separate resource browser, the workspace | **Principle 4, §3, §3.4, §3.6, §4.3, §4.6, §4.6a/b, §4.21, §4.24:** the in-rail accordion (#460/#478) and the rail resize (#465/#503) retire. The menu is 202px expanded / 64px compact, with Explore (Dashboards, Visualizations, Parameter Sets) as a new group between Build and Operate; compact mode has named tooltips and no group labels. The five REST trees move into `#app-browser` beside it, outside the boosted main: header with title, admitted count (moved from the menu badges, all five families) and Hide; search; tree; View all + width reset. The browser is visible only on a family page, mounts each family lazily and keeps it in-document, and is resizable 240–480px on its boundary, clamped to leave main 320px. §3.6 is re-cut to the record's four bands (≥1600 / 1101–1599 / 761–1100 / ≤760): two phone drawers, one open at a time, the rest of the shell `inert`; the menu drawer keeps its 232px (`--app-menu-drawer`) so its close control clears the wordmark. A storage table: `dp-rail` kept; `dp-browser-width:<ws>` and `dp-browser-hidden:<ws>` new; `dp-rail-width:<ws>`, `dp-tree-open:<ws>` and `dp-tree-panel:*` removed on sight, never reinterpreted. The record's eight selection rules are stated as built (rule 1's overview destination is #556's). The #555 phone rows follow the band edge (760px and below). The "document never scrolls" and "`<main>` is the one scroll container" sentences are unchanged. |
 | 2026-10-16 | v1.155 | #536 small chart sizing | Dashboard grid: Plotly bodies keep a 64 px token minimum; undersized slots scroll the entire bordered card instead of failing during axis scaling. |
