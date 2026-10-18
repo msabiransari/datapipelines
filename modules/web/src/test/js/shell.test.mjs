@@ -1187,7 +1187,7 @@ function mkDrawerDoc({ rootClasses = [], workspace = "acme", section = "/pipelin
   return { doc, rail, browser, backdrop, topbar, main, railOpener, browserOpener, browserHide, search, firstLink, events };
 }
 
-/** Drive every real body click listener; the selector count proves a non-family click entered it. */
+/** Drive every real body click listener; count entry into the drawer handler even at the base. */
 function familyClick({ section = "/pipelines", win = desktop, hidden = true, modifiers = {} } = {}) {
   const page = mkDrawerDoc({ rootClasses: hidden ? ["browser-hidden"] : [], section });
   const stored = new Map([["dp-browser-hidden:acme", "1"]]);
@@ -1195,12 +1195,16 @@ function familyClick({ section = "/pipelines", win = desktop, hidden = true, mod
   let entries = 0;
   page.firstLink.closest = (selector) => {
     if (selector === "#app-rail .app-nav-link[data-nav-section]") {
-      entries += 1;
       return page.firstLink;
     }
     return null;
   };
-  page.doc.body = { addEventListener(type, fn) { if (type === "click") listeners.push(fn); } };
+  page.doc.body = { addEventListener(type, fn) {
+    if (type === "click") listeners.push((evt) => {
+      if (fn.toString().includes("revealBrowser(doc")) entries += 1;
+      fn(evt);
+    });
+  } };
   page.doc.addEventListener = () => {};
   const previous = { window: globalThis.window, document: globalThis.document };
   globalThis.window = {
