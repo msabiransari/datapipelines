@@ -204,6 +204,8 @@ class CompactScaleBrowserTest : DashboardBrowserSuite() {
         read("editorTab.fontSize", ".pe-tab", "fontSize")
         read("editorTab.padLeft", ".pe-tab", "padLeft")
         readTabGap("editorTab.gap", ".pe-tab")
+        // #565: the dock's tab strip shares the shell's tab height (`--pe-dock-tabs-h: var(--app-tab-h)`).
+        read("dockTab.height", ".pe-dock-tab", "height")
         shot("editor-1512")
         page.locator(".pe-topbar [data-verb='pipeline-release']").click()
         page.locator("#pe-dialog [data-lifecycle-dialog='pipeline-release'] .app-modal").waitFor()
@@ -261,6 +263,7 @@ class CompactScaleBrowserTest : DashboardBrowserSuite() {
             near("editorTab.fontSize", SUPPORT_PX)
             near("editorTab.padLeft", 0.0)
             near("editorTab.gap", TAB_GAP_PX, 0.5)
+            near("dockTab.height", TAB_PX, 0.5)
             near("lifecycleDialog.padTop", DIALOG_PAD_PX)
             atMost("lifecycleDialog.width", DIALOG_MAX_PX)
             near("lifecycleTitle.fontSize", HEADING_PX)
