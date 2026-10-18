@@ -24,15 +24,6 @@ class ShellSurfacesBrowserTest : DashboardBrowserSuite() {
                 val m = page.evaluate(SURFACES) as Map<*, *>
                 println("606-surfaces|$width|$path|$m")
                 readings.add(m)
-                if (path == "/overview/pipelines") {
-                    page.evaluate(
-                        """() => { const el = document.querySelector('#app-main .ds-card');
-                          const probe = document.createElement('span'); probe.style.color = 'var(--border-default)';
-                          document.body.appendChild(probe);
-                          const result = !!el && getComputedStyle(el).borderTopColor === getComputedStyle(probe).color;
-                          probe.remove(); return result; }""",
-                    ) shouldBe true
-                }
                 photograph("$width-${path.replace('/', '_')}")
             }
         }
@@ -45,6 +36,7 @@ class ShellSurfacesBrowserTest : DashboardBrowserSuite() {
                     m["topbar"] shouldBe m["pageToken"]
                     m["rail"] shouldBe m["panelToken"]
                     m["bodyImage"] shouldBe "none"
+                    if (m["cardBorder"] != null) m["cardBorder"] shouldBe m["boundaryToken"]
                 }
             }
         }
@@ -211,6 +203,9 @@ class ShellSurfacesBrowserTest : DashboardBrowserSuite() {
               const token = name => { probe.style.color = 'var(' + name + ')'; return getComputedStyle(probe).color; };
               const result = { backdrops: document.querySelectorAll('.app-backdrop').length,
                 pageToken: token('--surface-page'), panelToken: token('--surface-default'),
+                boundaryToken: token('--border-default'),
+                cardBorder: document.querySelector('#app-main .ds-card') &&
+                  getComputedStyle(document.querySelector('#app-main .ds-card')).borderTopColor,
                 body: background(document.body), main: background(document.querySelector('#app-main')),
                 topbar: background(document.querySelector('.app-topbar')),
                 rail: background(document.querySelector('.app-rail')), bodyImage: getComputedStyle(document.body).backgroundImage };
