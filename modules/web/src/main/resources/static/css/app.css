@@ -1482,8 +1482,11 @@ button.app-busy::after {
 }
 
 /* #350 — the /pipelines catalog: the search above the flat list (the list rows are
-   template-tree.css's .tpl-results). */
+   template-tree.css's .tpl-results). Every family catalog's search row (#556, #579–#582)
+   carries a content-sized lifecycle select beside the flexing search box; the row wraps so
+   a phone width (390) and the shell's breakpoint (768) never scroll sideways. */
 .app-catalog-search {
+  flex-wrap: wrap;
   margin-bottom: var(--gap-md);
 }
 
