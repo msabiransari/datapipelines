@@ -101,7 +101,7 @@ data class OverviewPage(
             "parameter set",
             "parameter sets",
             emptyList(),
-            guided = false,
+            guided = true,
         ),
         ;
 
