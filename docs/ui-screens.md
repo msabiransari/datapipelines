@@ -2367,8 +2367,9 @@ Content: flat rows at their listed version, with draft badges and the existing p
 Since #581, `lifecycle=draft|released|released-with-draft|with-drafts|with-releases` composes with `q`
 and paging on the page and partial. Unknown or unoffered values return a constant 400. The filter
 uses the inventory's admitted-version membership in SQL for both rows and total. A narrowed reader
-gets RELEASED versions even if an admitted object's pointer names a draft; the unfiltered catalog
-keeps its current-pointer rule. Discarded only stays unlinked and is not offered, because its
+gets RELEASED versions even if an admitted object's pointer names a draft. An admitted current
+release keeps precedence; filtered searches match the selected release's metadata, so a hidden draft's
+title or description cannot affect matches. The unfiltered catalog keeps its current-pointer rule. Discarded only stays unlinked and is not offered, because its
 workspace has no working version. Search and lifecycle controls include each other; the pager
 carries both, Clear search keeps the lifecycle, and Clear filters resets both.
 Rows and version links preserve the menu and the browser through prepared main-content navigation. The Visualizations

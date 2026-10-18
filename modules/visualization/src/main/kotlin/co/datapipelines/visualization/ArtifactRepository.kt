@@ -196,7 +196,8 @@ open class ArtifactRepository<B : Any>(
     /**
      * An inventory bucket REPLACES liveness. Both the rows and total use the same membership and
      * literal search. Narrowed reads select a RELEASED version even when the pointer names a draft;
-     * this is the filtered catalog's inventory rule, leaving the unfiltered pointer rule unchanged.
+     * an admitted current release keeps precedence, with the newest release as fallback. This is the
+     * filtered catalog's inventory rule, leaving the unfiltered pointer rule unchanged.
      */
     @Suppress("LongParameterList") // the catalog's existing paging/search inputs plus its bucket and lens
     fun lifecyclePage(
@@ -218,12 +219,14 @@ open class ArtifactRepository<B : Any>(
             co.datapipelines.pipeline.InventorySource
                 .membership(family, "s", bucket, narrowed = names != null)
         val nameFilter = if (names == null) "" else " AND s.name IN (:names)"
+        val displayName = if (names == null) "s.display_name" else "(v.body_json ->> 'display_name')"
+        val description = if (names == null) "s.description" else "(v.body_json ->> 'description')"
         val search =
             if (query == null) {
                 ""
             } else {
-                " AND (s.name ILIKE :pattern ESCAPE '\\' OR s.display_name ILIKE :pattern ESCAPE '\\'" +
-                    " OR s.description ILIKE :pattern ESCAPE '\\')"
+                " AND (s.name ILIKE :pattern ESCAPE '\\' OR $displayName ILIKE :pattern ESCAPE '\\'" +
+                    " OR $description ILIKE :pattern ESCAPE '\\')"
             }
         val where = "WHERE s.workspace_id = :workspaceId AND $membership$nameFilter$search"
         val params =
@@ -231,19 +234,28 @@ open class ArtifactRepository<B : Any>(
                 mapOf("names" to names)
         val listed =
             if (names != null) {
-                "(SELECT MAX(r.version) FROM ${kind.versions} r WHERE r.${kind.fk} = s.id AND r.status = 'RELEASED')"
+                "(SELECT r.version FROM ${kind.versions} r WHERE r.${kind.fk} = s.id AND r.status = 'RELEASED'" +
+                    " ORDER BY (r.version = s.current_version) DESC NULLS LAST, r.version DESC LIMIT 1)"
             } else if (bucket == co.datapipelines.pipeline.LifecycleBucket.DISCARDED_ONLY) {
                 "(SELECT MAX(x.version) FROM ${kind.versions} x WHERE x.${kind.fk} = s.id AND x.status = 'DISCARDED')"
             } else {
                 sql.listedVersion
             }
+        val scope = "$where AND v.version = $listed"
         val rows =
             jdbc.query(
-                "${sql.selectVersion} $where AND v.version = $listed ORDER BY s.name LIMIT :limit OFFSET :offset",
+                "${sql.selectVersion} $scope ORDER BY s.name LIMIT :limit OFFSET :offset",
                 params + paging(offset, limit),
                 versionMapper,
             )
-        val total = checkNotNull(jdbc.queryForObject("SELECT COUNT(*) FROM ${kind.index} s $where", params, Int::class.java))
+        val total =
+            checkNotNull(
+                jdbc.queryForObject(
+                    "SELECT COUNT(*) FROM ${kind.index} s JOIN ${kind.versions} v ON v.${kind.fk} = s.id $scope",
+                    params,
+                    Int::class.java,
+                ),
+            )
         return ArtifactPage(rows, total)
     }
 
