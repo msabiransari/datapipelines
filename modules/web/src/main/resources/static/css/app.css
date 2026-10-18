@@ -1533,7 +1533,7 @@ button.app-busy::after {
   align-items: center;
   gap: var(--gap-sm);
   padding-inline: var(--gap-lg);
-  background: var(--surface-default);
+  background: var(--surface-page);
   border-bottom: 1px solid var(--border-faint);
   position: sticky;
   top: 0;
