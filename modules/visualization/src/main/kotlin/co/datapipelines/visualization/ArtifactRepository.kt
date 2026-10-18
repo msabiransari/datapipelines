@@ -625,6 +625,15 @@ class VisualizationRepository(
 class DashboardRepository(
     jdbc: NamedParameterJdbcTemplate,
 ) : ArtifactRepository<DashboardBody>(jdbc, ArtifactKind.DASHBOARD, BodyCodec.Dashboard) {
+    /** #580 — the Dashboards overview's Recently updated list under the caller's workspace and version lens. */
+    fun recent(
+        workspaceId: UUID,
+        lens: co.datapipelines.pipeline.ReadLens,
+        limit: Int = co.datapipelines.pipeline.RecentSource.DEFAULT_LIMIT,
+    ): List<co.datapipelines.pipeline.RecentRow> =
+        co.datapipelines.pipeline.RecentSource
+            .recent(jdbc, co.datapipelines.pipeline.NavigationFamily.DASHBOARDS, workspaceId, lens, limit)
+
     /**
      * The LIVE (DRAFT or RELEASED) dashboard versions that pin visualization [name] — at [version], or at any
      * version when null — as `name@version` (the design record §4.2: purge and discard guards keep referenced

@@ -162,7 +162,8 @@ class FamilyRecentE2eTest {
     fun `an empty lens reads nothing, an unknown lens is unavailable, a failed read is unavailable`() {
         fixture()
         val source = CountingSource(requireNotNull(jdbc.jdbcTemplate.dataSource))
-        val counted = FamilyRecent(PipelineRepository(NamedParameterJdbcTemplate(source)))
+        val counted =
+            FamilyRecent(PipelineRepository(NamedParameterJdbcTemplate(source)), DashboardRepository(NamedParameterJdbcTemplate(source)))
 
         counted.forFamily(NavigationFamily.PIPELINES, workspace, lens(ReadLens.NOTHING)) shouldBe RecentResult.Available(emptyList())
         source.reads shouldBe 0
@@ -174,7 +175,7 @@ class FamilyRecentE2eTest {
         source.fail = true
         counted.forFamily(NavigationFamily.PIPELINES, workspace, LensedView.EVERYTHING) shouldBe
             RecentResult.Unavailable("Recently updated could not be read.")
-        NavigationFamily.entries.filter { it != NavigationFamily.PIPELINES }.forEach { family ->
+        NavigationFamily.entries.filter { it != NavigationFamily.PIPELINES && it != NavigationFamily.DASHBOARDS }.forEach { family ->
             counted.forFamily(family, workspace, LensedView.EVERYTHING) shouldBe null
         }
     }
@@ -309,7 +310,8 @@ class FamilyRecentE2eTest {
         fun jdbc(source: DataSource): NamedParameterJdbcTemplate = NamedParameterJdbcTemplate(source)
 
         @Bean
-        fun recent(jdbc: NamedParameterJdbcTemplate): FamilyRecent = UiConfig().familyRecent(PipelineRepository(jdbc))
+        fun recent(jdbc: NamedParameterJdbcTemplate): FamilyRecent =
+            UiConfig().familyRecent(PipelineRepository(jdbc), DashboardRepository(jdbc))
 
         @Bean
         fun inventory(jdbc: NamedParameterJdbcTemplate): FamilyInventory =
