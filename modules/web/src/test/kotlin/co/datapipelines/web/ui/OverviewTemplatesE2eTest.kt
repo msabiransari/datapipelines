@@ -42,7 +42,10 @@ import java.util.UUID
  * RELEASED version, the catalog's D55 pointer rule is its own.
  */
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
-@SpringBootTest(classes = [OverviewTemplatesE2eTest.OverviewTemplatesConfiguration::class], webEnvironment = SpringBootTest.WebEnvironment.NONE)
+@SpringBootTest(
+    classes = [OverviewTemplatesE2eTest.OverviewTemplatesConfiguration::class],
+    webEnvironment = SpringBootTest.WebEnvironment.NONE,
+)
 class OverviewTemplatesE2eTest {
     @Autowired
     private lateinit var inventory: FamilyInventory
@@ -97,7 +100,10 @@ class OverviewTemplatesE2eTest {
 
         val table = equalityTable(ReadLens.Everything, counted)
         table.forEach { row -> withClue(row.toString()) { row.listed shouldBe row.counted } }
-        println("event=overview.a6.equality family=templates lens=everything ${table.joinToString(" ") { "${it.bucket.wire}=${it.listed}/${it.counted}" }}")
+        println(
+            "event=overview.a6.equality family=templates lens=everything " +
+                table.joinToString(" ") { "${it.bucket.wire}=${it.listed}/${it.counted}" },
+        )
         names(ReadLens.Everything, LifecycleBucket.DRAFT_ONLY) shouldBe setOf("a/draft", "a/discarded_draft")
         names(ReadLens.Everything, LifecycleBucket.RELEASED_WITH_DRAFT) shouldBe setOf("c/both", "c/both_hidden_draft")
         withClue("the plain catalog is the live objects: the inventory without its discarded-only") {
@@ -118,7 +124,10 @@ class OverviewTemplatesE2eTest {
 
         val table = equalityTable(lens, counted)
         table.forEach { row -> withClue(row.toString()) { row.listed shouldBe row.counted } }
-        println("event=overview.a6.equality family=templates lens=narrowed ${table.joinToString(" ") { "${it.bucket.wire}=${it.listed}/${it.counted}" }}")
+        println(
+            "event=overview.a6.equality family=templates lens=narrowed " +
+                table.joinToString(" ") { "${it.bucket.wire}=${it.listed}/${it.counted}" },
+        )
         names(lens, LifecycleBucket.RELEASED_ONLY) shouldBe setOf("b/released", "c/both_hidden_draft")
         names(lens, LifecycleBucket.WITH_DRAFTS) shouldBe emptySet()
         names(lens, LifecycleBucket.DRAFT_ONLY) shouldBe emptySet()
