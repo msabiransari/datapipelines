@@ -1,5 +1,6 @@
 package co.datapipelines.templates
 
+import co.datapipelines.pipeline.LifecycleBucket
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.pipeline.TemplateType
@@ -103,6 +104,10 @@ open class TemplateService(
     /**
      * The `GET /templates` page: the repository's SQL page, or the admitted rows paged in memory.
      * [implements] (7e, §8.3) keeps the templates whose listed version cites that fact.
+     *
+     * #579: [lifecycle] narrows the SQL to one inventory bucket; under a narrowing lens the
+     * bucket reads RELEASED versions only (the lens's rule, so promoter and viewer agree on
+     * the numbers the overview bars show).
      */
     open fun list(
         workspaceId: UUID,
@@ -113,9 +118,12 @@ open class TemplateService(
         offset: Int = 0,
         limit: Int = TemplateRepository.DEFAULT_PAGE_LIMIT,
         implements: UUID? = null,
+        lifecycle: LifecycleBucket? = null,
     ): List<Template> {
-        if (lens.isEverything) return templates.list(workspaceId, dialect, type, q, offset, limit, implements)
-        return admitted(workspaceId, lens, dialect, type, q, implements)
+        if (lens.isEverything) {
+            return templates.list(workspaceId, dialect, type, q, offset, limit, implements, lifecycle, releasedOnly = false)
+        }
+        return admitted(workspaceId, lens, dialect, type, q, implements, lifecycle)
             .drop(maxOf(0, offset))
             .take(limit.coerceIn(1, TemplateRepository.MAX_PAGE_LIMIT))
     }
@@ -128,9 +136,12 @@ open class TemplateService(
         type: TemplateType? = null,
         q: String? = null,
         implements: UUID? = null,
+        lifecycle: LifecycleBucket? = null,
     ): Int {
-        if (lens.isEverything) return templates.count(workspaceId, dialect, type, q, implements)
-        return admitted(workspaceId, lens, dialect, type, q, implements).size
+        if (lens.isEverything) {
+            return templates.count(workspaceId, dialect, type, q, implements, lifecycle, releasedOnly = false)
+        }
+        return admitted(workspaceId, lens, dialect, type, q, implements, lifecycle).size
     }
 
     /** One tree level's direct sub-folders, counted over the admitted subtree. */
@@ -235,11 +246,16 @@ open class TemplateService(
         type: TemplateType?,
         q: String?,
         implements: UUID? = null,
+        lifecycle: LifecycleBucket? = null,
     ): List<Template> {
         val all = mutableListOf<Template>()
         var offset = 0
         while (true) {
-            val page = templates.list(workspaceId, dialect, type, q, offset, TemplateRepository.MAX_PAGE_LIMIT, implements)
+            val page =
+                templates.list(
+                    workspaceId, dialect, type, q, offset, TemplateRepository.MAX_PAGE_LIMIT, implements,
+                    lifecycle, releasedOnly = true,
+                )
             all += page
             if (page.size < TemplateRepository.MAX_PAGE_LIMIT) break
             offset += TemplateRepository.MAX_PAGE_LIMIT

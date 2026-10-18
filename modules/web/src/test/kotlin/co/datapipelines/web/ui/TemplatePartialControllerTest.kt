@@ -82,14 +82,14 @@ class TemplatePartialControllerTest {
 
     @Test
     fun `the catalog's flat list with the trimmed query`() {
-        controller.list(model, q = "  rev  ", dialect = null, type = null, offset = 0)
+        controller.list(model, q = "  rev  ", dialect = null, type = null, offset = 0, lifecycle = null)
 
         verify { browse.fillSearch(model, workspaceId, any(), q = "rev", dialect = null, type = null, offset = 0) }
     }
 
     @Test
     fun `a blank query is not a query`() {
-        controller.list(model, q = "   ", dialect = null, type = null, offset = 0)
+        controller.list(model, q = "   ", dialect = null, type = null, offset = 0, lifecycle = null)
 
         verify { browse.fillSearch(model, workspaceId, any(), q = null, dialect = null, type = null, offset = 0) }
     }

@@ -11,7 +11,9 @@ import org.springframework.web.server.ResponseStatusException
  * A family offers a bucket only when every object in it has a page to open: a discarded-only
  * pipeline has none (its workspace answers 404, the live-only `findById`), so the pipelines
  * catalog does not offer [LifecycleBucket.DISCARDED_ONLY] and its overview leaves that bar
- * unlinked. A family without an entry offers nothing yet (#579–#582 add theirs).
+ * unlinked. A discarded-only template is the same (#579: its workspace route resolves live
+ * names), so the templates catalog offers the same five. A family without an entry offers
+ * nothing yet (#580–#582 add theirs).
  *
  * Bound as a STRING by the callers, like [RequestedVersion]: an unknown or unoffered value is the
  * house 400 with the constant [BAD_LIFECYCLE], which never carries the input.
@@ -22,6 +24,9 @@ object CatalogLifecycle {
 
     /** The pipelines catalog's filters: every bucket whose objects all have a workspace page. */
     val PIPELINES: List<LifecycleBucket> = LifecycleBucket.entries.filter { it != LifecycleBucket.DISCARDED_ONLY }
+
+    /** The templates catalog's filters — the pipelines set: a discarded-only template has no page (#579). */
+    val TEMPLATES: List<LifecycleBucket> = LifecycleBucket.entries.filter { it != LifecycleBucket.DISCARDED_ONLY }
 
     /** `null`/empty → null (no filter); an offered bucket's wire value → it; anything else → the 400. */
     fun parse(

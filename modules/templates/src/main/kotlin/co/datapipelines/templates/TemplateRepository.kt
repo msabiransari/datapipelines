@@ -253,11 +253,13 @@ class TemplateRepository(
         offset: Int = 0,
         limit: Int = DEFAULT_PAGE_LIMIT,
         implements: UUID? = null,
+        lifecycle: co.datapipelines.pipeline.LifecycleBucket? = null,
+        releasedOnly: Boolean = false,
     ): List<Template> =
         jdbc.query(
             """
             $SELECT_JOINED
-            $LIST_WHERE
+            ${listWhere(lifecycle, releasedOnly)}
              ORDER BY t.name
              LIMIT :limit OFFSET :offset
             """.trimIndent(),
@@ -287,6 +289,8 @@ class TemplateRepository(
         type: TemplateType? = null,
         q: String? = null,
         implements: UUID? = null,
+        lifecycle: co.datapipelines.pipeline.LifecycleBucket? = null,
+        releasedOnly: Boolean = false,
     ): Int =
         checkNotNull(
             jdbc.queryForObject(
@@ -294,7 +298,7 @@ class TemplateRepository(
                 SELECT COUNT(*)
                   FROM templates t
                   JOIN template_versions v ON v.template_id = t.id
-                $LIST_WHERE
+                ${listWhere(lifecycle, releasedOnly)}
                 """.trimIndent(),
                 mapOf(
                     "dialect" to dialect?.wire,
@@ -1204,10 +1208,23 @@ class TemplateRepository(
          * so the page and its total can never disagree. Every optional filter is CAST in the
          * SQL: a bare `? IS NULL` gives Postgres no type to infer and the statement will not
          * even prepare.
+         *
+         * #579: with a [lifecycle] the bucket's membership REPLACES the liveness predicate
+         * ([co.datapipelines.pipeline.InventorySource.membership] — the INVENTORY's rule, so a
+         * filtered catalog's count is the number the overview's bar shows), over RELEASED
+         * versions only when [releasedOnly] (a narrowed lens). The unfiltered predicate is the
+         * one it always was.
          */
-        private val LIST_WHERE =
-            """
-            WHERE $TEMPLATE_LIVE_T
+        private fun listWhere(
+            lifecycle: co.datapipelines.pipeline.LifecycleBucket?,
+            releasedOnly: Boolean,
+        ): String {
+            val live =
+                lifecycle
+                    ?.let { co.datapipelines.pipeline.InventorySource.membership(co.datapipelines.pipeline.NavigationFamily.TEMPLATES, "t", it, releasedOnly) }
+                    ?: TEMPLATE_LIVE_T
+            return """
+            WHERE $live
               AND t.workspace_id = :workspaceId
               AND v.version = COALESCE(
                     t.current_version,
@@ -1230,16 +1247,17 @@ class TemplateRepository(
                     OR v.dialect ILIKE CAST(:pattern AS TEXT) ESCAPE '\'
                   )
             """.trimIndent()
+        }
 
         /**
          * The working-version predicate of ONE tree level, shared by [listChildFolders],
          * [listChildTemplates] and [countChildTemplates] so a level, its folders and its total can
-         * never disagree. It carries [LIST_WHERE]'s D55 COALESCE for the same reason: a
+         * never disagree. It carries [listWhere]'s D55 COALESCE for the same reason: a
          * never-released template must still have a row in the tree.
          *
-         * It is [LIST_WHERE] minus the `q` clause (browse and search are different
+         * It is the unfiltered [listWhere] minus the `q` clause (browse and search are different
          * presentations, §9.2) plus the prefix scope. Every optional filter is CAST in the
-         * SQL for the same reason as [LIST_WHERE]: a bare `? IS NULL` gives Postgres no type
+         * SQL for the same reason as [listWhere]: a bare `? IS NULL` gives Postgres no type
          * to infer and the statement will not even prepare.
          */
         private val TREE_WHERE =

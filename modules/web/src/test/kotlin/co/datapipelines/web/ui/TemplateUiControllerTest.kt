@@ -108,7 +108,7 @@ class TemplateUiControllerTest {
         stubFlatList(leaves = listOf(template(), template("test/orders_v2.sql")), total = 42)
 
         val model = ExtendedModelMap()
-        val viewName = controller.list(model, mockk(), null, null, null, null)
+        val viewName = controller.list(model, mockk(), null, null, null, null, null)
 
         viewName shouldBe "templates/list"
         model["activeTheme"] shouldBe "saas"
@@ -128,7 +128,7 @@ class TemplateUiControllerTest {
         every { repository.findDrafts(any(), any()) } returns emptyMap()
 
         val searching = ExtendedModelMap()
-        controller.list(searching, mockk(), "orders", "POSTGRES", "sql", null)
+        controller.list(searching, mockk(), "orders", "POSTGRES", "sql", null, null)
 
         searching["searching"] shouldBe true
         (searching["templates"] as List<*>) shouldHaveSize 1
@@ -144,7 +144,7 @@ class TemplateUiControllerTest {
         stubFlatList()
 
         val model = ExtendedModelMap()
-        controller.list(model, mockk(), null, null, null, null)
+        controller.list(model, mockk(), null, null, null, null, null)
 
         model["namePattern"] shouldBe co.datapipelines.templates.TemplateNameGrammar.pattern
         model["nameMaxLength"] shouldBe co.datapipelines.templates.TemplateNameGrammar.maxLength
@@ -157,7 +157,7 @@ class TemplateUiControllerTest {
         stubFlatList()
 
         val model = ExtendedModelMap()
-        val viewName = partialController.list(model, q = null, dialect = null, type = null, offset = 0)
+        val viewName = partialController.list(model, q = null, dialect = null, type = null, offset = 0, lifecycle = null)
 
         viewName shouldBe TemplateBrowseModel.SEARCH_VIEW
         model["rootId"] shouldBe TemplateBrowseModel.CATALOG_ROOT_ID
@@ -170,7 +170,7 @@ class TemplateUiControllerTest {
         stubFlatList(leaves = emptyList(), total = 0)
 
         val model = ExtendedModelMap()
-        controller.list(model, mockk(), null, null, null, null)
+        controller.list(model, mockk(), null, null, null, null, null)
 
         // The dead `scopes` attribute went with the scopes (#215 PK8); `RoleModel`'s booleans
         // are what the templates read.
@@ -184,7 +184,7 @@ class TemplateUiControllerTest {
         stubFlatList(leaves = emptyList(), total = 0)
 
         val model = ExtendedModelMap()
-        controller.list(model, mockk(), null, null, null, null)
+        controller.list(model, mockk(), null, null, null, null, null)
 
         (model["templates"] as List<*>) shouldHaveSize 0
         model["hasMore"] shouldBe false

@@ -85,7 +85,7 @@ data class OverviewPage(
         val guided: Boolean,
     ) {
         PIPELINES(NavigationFamily.PIPELINES, "Pipelines", "pipeline", "pipelines", CatalogLifecycle.PIPELINES, guided = true),
-        TEMPLATES(NavigationFamily.TEMPLATES, "Templates", "template", "templates", emptyList(), guided = true),
+        TEMPLATES(NavigationFamily.TEMPLATES, "Templates", "template", "templates", CatalogLifecycle.TEMPLATES, guided = true),
         DASHBOARDS(NavigationFamily.DASHBOARDS, "Dashboards", "dashboard", "dashboards", emptyList(), guided = false),
         VISUALIZATIONS(
             NavigationFamily.VISUALIZATIONS,
