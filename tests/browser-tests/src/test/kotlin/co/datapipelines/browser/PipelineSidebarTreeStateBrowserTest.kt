@@ -178,7 +178,7 @@ class PipelineSidebarTreeStateBrowserTest : RestTreeBrowserFixture() {
         ) shouldBe
             true
         page.goForward()
-        page.waitForSelector("#template-list-wrapper")
+        page.waitForSelector(".app-overview[data-overview='templates']")
         page.locator("$panel [aria-current=page]").count() shouldBe 0
     }
 

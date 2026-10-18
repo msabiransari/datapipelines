@@ -1,6 +1,8 @@
 import { preparePage, mountPage } from "./page-assets.mjs";
 
-const FAMILIES = /^\/(?:pipelines|templates|dashboards|visualizations|parameter-sets)(?:\/|$)/;
+// A family page or its overview (#556/#579–#582: the menu links /overview/<family>). An unmatched
+// boosted GET carries no ticket, so a held response of it could still swap over a newer page.
+const FAMILIES = /^\/(?:overview\/)?(?:pipelines|templates|dashboards|visualizations|parameter-sets)(?:\/|$)/;
 // shell.js's busy pair (NAVIGATION_PREPARE_START/END): the bar counts a preparation like a request.
 const PREPARE_START = "dp:navigation-prepare-start";
 const PREPARE_END = "dp:navigation-prepare-end";

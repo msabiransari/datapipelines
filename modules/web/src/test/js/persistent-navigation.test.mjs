@@ -102,6 +102,21 @@ test("a workspace change refuses the destination and still ends the busy signal"
   assert.equal(elements.get("dp-navigation-notice")?.textContent, "Session or workspace changed. Reload to continue.");
 });
 
+test("a family's overview is prepared like the family, so a held overview response cannot replace a newer page", async () => {
+  // #556/#579–#582: the menu links /overview/<family>; an unticketed boosted response swapped over a newer page.
+  for (const family of ["pipelines", "templates", "dashboards", "visualizations", "parameter-sets"]) {
+    log.length = 0; replies.length = 0;
+    assert.equal(confirm(anchor(family), `/overview/${family}`).defaultPrevented, true, `/overview/${family}`);
+    replies[0].resolve(html()); await flush();
+    assert.deepEqual(log, [["start", undefined], ["issue", family], ["end", undefined]], `/overview/${family}`);
+  }
+  log.length = 0; replies.length = 0;
+  for (const pathname of ["/overview", "/overview/settings", "/overviews/pipelines"]) {
+    assert.equal(confirm(anchor("x"), pathname).defaultPrevented, false, pathname);
+  }
+  assert.deepEqual(log, []); assert.equal(replies.length, 0);
+});
+
 test("non-family, non-GET, foreign and unboosted links pass through untouched", () => {
   log.length = 0; replies.length = 0;
   for (const [elt, pathname, verb] of [[anchor("a"), "/settings", "get"], [anchor("b"), "/pipelines/1", "post"],
