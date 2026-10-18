@@ -8,6 +8,7 @@ import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.parameters.ParameterEvaluationRepository
 import co.datapipelines.parameters.ParameterSetService
+import co.datapipelines.pipeline.LifecycleBucket
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.ReadLens
 import io.kotest.assertions.throwables.shouldThrow
@@ -203,7 +204,7 @@ class ParameterSetsUiControllerTest {
         every { sets.search(ws, ReadLens.Everything, null, 0, ParameterSetsBrowseModel.PAGE_SIZE) } returns emptyList()
         every { sets.countSearch(ws, ReadLens.Everything, null) } returns 0
         val m = ExtendedModelMap()
-        controller.list(m, request, null, null) shouldBe "parameter-sets/list"
+        controller.list(m, request, null, null, null) shouldBe "parameter-sets/list"
         m["activeTheme"] shouldBe "saas"
         m["canEvaluateParameterSets"] shouldBe true
         m["rootId"] shouldBe ParameterSetsBrowseModel.CATALOG_ROOT_ID
@@ -215,8 +216,31 @@ class ParameterSetsUiControllerTest {
         every { sets.search(ws, ReadLens.Everything, "geo", 0, ParameterSetsBrowseModel.PAGE_SIZE) } returns emptyList()
         every { sets.countSearch(ws, ReadLens.Everything, "geo") } returns 0
         val m = ExtendedModelMap()
-        controller.list(m, request, "  geo  ", null) shouldBe "parameter-sets/list"
+        controller.list(m, request, "  geo  ", null, null) shouldBe "parameter-sets/list"
         m["q"] shouldBe "geo"
         m["searching"] shouldBe true
+    }
+
+    @Test
+    fun `the catalog page filters by lifecycle and renders the bucket back into its control (#582)`() {
+        authenticate(WorkspaceRole.AUTHOR, everything)
+        val bucket = LifecycleBucket.RELEASED_WITH_DRAFT
+        every { sets.search(ws, ReadLens.Everything, null, 0, ParameterSetsBrowseModel.PAGE_SIZE, bucket) } returns emptyList()
+        every { sets.countSearch(ws, ReadLens.Everything, null, bucket) } returns 0
+        val m = ExtendedModelMap()
+        controller.list(m, request, null, null, "released-with-draft") shouldBe "parameter-sets/list"
+        m["lifecycle"] shouldBe "released-with-draft"
+        m["lifecycleLabel"] shouldBe "Released with draft changes"
+        m["lifecycleOptions"] shouldBe CatalogLifecycle.options(CatalogLifecycle.PARAMETER_SETS)
+    }
+
+    @Test
+    fun `the catalog page refuses discarded and unknown lifecycles with the house 400 (#582)`() {
+        authenticate(WorkspaceRole.AUTHOR, everything)
+        for (raw in listOf("discarded", "released_only", "x")) {
+            val refused = shouldThrow<ResponseStatusException> { controller.list(ExtendedModelMap(), request, null, null, raw) }
+            refused.statusCode shouldBe HttpStatus.BAD_REQUEST
+            refused.reason shouldBe CatalogLifecycle.BAD_LIFECYCLE
+        }
     }
 }

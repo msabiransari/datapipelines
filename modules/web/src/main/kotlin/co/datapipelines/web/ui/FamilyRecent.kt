@@ -1,6 +1,7 @@
 package co.datapipelines.web.ui
 
 import co.datapipelines.application.lens.LensedView
+import co.datapipelines.parameters.ParameterSetRepository
 import co.datapipelines.pipeline.NavigationFamily
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.RecentRow
@@ -36,15 +37,16 @@ sealed interface RecentResult {
  * (`RecentSource`) and no cache.
  *
  * Only families with an adapter answer; [forFamily] returns null for the rest and the overview
- * renders no Continue your work section for them. Pipelines, templates (#579), dashboards (#580) and
- * visualizations (#581) have one; the parameter-set adapter belongs to #582 (templates link
- * by NAME — their workspace route is `/templates/{*name}`).
+ * renders no Continue your work section for them. Every family has one since #579–#582: pipelines
+ * (#556), templates, dashboards, visualizations and parameter sets (`/parameter-sets/<id>`); templates
+ * link by NAME — their workspace route is `/templates/{*name}`.
  */
 class FamilyRecent(
     private val pipelines: PipelineRepository,
     private val templates: TemplateRepository,
     private val dashboards: DashboardRepository,
     private val visualizations: VisualizationRepository,
+    private val parameterSets: ParameterSetRepository,
 ) {
     private val log = LoggerFactory.getLogger(FamilyRecent::class.java)
 
@@ -79,8 +81,8 @@ class FamilyRecent(
                         visualizations.recent(workspaceId, view.visualizations).map { it.entry("/visualizations/${it.id}") }
                     }
 
-                    else -> {
-                        return null
+                    NavigationFamily.PARAMETER_SETS -> {
+                        parameterSets.recent(workspaceId, view.parameterSets).map { it.entry("/parameter-sets/${it.id}") }
                     }
                 }
             RecentResult.Available(entries)
@@ -111,6 +113,7 @@ class FamilyRecent(
                 NavigationFamily.TEMPLATES,
                 NavigationFamily.DASHBOARDS,
                 NavigationFamily.VISUALIZATIONS,
+                NavigationFamily.PARAMETER_SETS,
             )
     }
 }

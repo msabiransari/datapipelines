@@ -42,10 +42,14 @@ class ParameterSetsRenderTest {
     private fun search(
         leaves: List<ParameterSetsBrowseModel.ParameterSetLeafView>,
         q: String,
+        lifecycle: String = "",
+        lifecycleLabel: String? = null,
     ): String =
         engine.process(
             "partials/parameter-set-search",
             webContext("/parameter-sets").apply {
+                setVariable("lifecycle", lifecycle)
+                setVariable("lifecycleLabel", lifecycleLabel)
                 setVariable("searching", true)
                 setVariable("rootId", ParameterSetsBrowseModel.CATALOG_ROOT_ID)
                 setVariable("q", q)
@@ -87,7 +91,27 @@ class ParameterSetsRenderTest {
         val html = search(listOf(released), "geo")
         html shouldContain "id=\"parameter-set-list-wrapper\""
         html shouldNotContain "role=\"listbox\""
-        html shouldContain "/partials/parameter-sets/tree?q=geo&amp;offset=25"
+        // #582: the pager carries the lifecycle filter beside the search; empty is no filter.
+        html shouldContain "/partials/parameter-sets/tree?q=geo&amp;lifecycle=&amp;offset=25"
+    }
+
+    @Test
+    fun `#582 - the pager keeps the lifecycle filter it pages`() {
+        val html = search(listOf(released), "geo", lifecycle = "with-drafts", lifecycleLabel = "With drafts")
+        html shouldContain "/partials/parameter-sets/tree?q=geo&amp;lifecycle=with-drafts&amp;offset=25"
+    }
+
+    @Test
+    fun `#582 - a lifecycle with no rows is a filtered empty state naming the bucket, not the empty catalog`() {
+        val filtered = search(emptyList(), "", lifecycle = "draft", lifecycleLabel = "Draft only")
+        filtered shouldContain "No parameter sets match: Draft only"
+        filtered shouldNotContain "No parameter sets yet"
+        // Clear filters resets both controls; Clear search keeps the lifecycle it was filtered by.
+        filtered shouldContain "data-dp-clear-filters=\"#parameter-set-filter-q, #parameter-set-filter-lifecycle\""
+        filtered shouldNotContain ">Clear search<"
+        val both = search(emptyList(), "geo", lifecycle = "draft", lifecycleLabel = "Draft only")
+        both shouldContain "No parameter sets match: Draft only, with your search"
+        both shouldContain "hx-include=\"#parameter-set-filter-lifecycle\""
     }
 
     @Test

@@ -3,6 +3,7 @@ package co.datapipelines.web.ui
 import co.datapipelines.application.lens.LensedView
 import co.datapipelines.parameters.ParameterSetService
 import co.datapipelines.parameters.ParameterSetVersion
+import co.datapipelines.pipeline.LifecycleBucket
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.SearchNeedle
 import org.springframework.ui.Model
@@ -32,7 +33,9 @@ class ParameterSetsBrowseModel(
      * Fills [model] for the catalog's **flat list of sets** — every set the caller may read when `q`
      * is absent, the matches otherwise — and returns the view name. [PipelineBrowseModel.fillSearch]'s
      * shape: the lensed flat listing through [ParameterSetService.search], the truthful total through
-     * [ParameterSetService.countSearch], the pager bound to [CATALOG_ROOT_ID] (`rootId`).
+     * [ParameterSetService.countSearch], the pager bound to [CATALOG_ROOT_ID] (`rootId`). #582: a
+     * [lifecycle] keeps one inventory bucket, decided in the service's read; the fragment renders it
+     * back into the catalog's control and carries it on the pager (PipelineBrowseModel's shape).
      */
     fun fillSearch(
         model: Model,
@@ -40,6 +43,7 @@ class ParameterSetsBrowseModel(
         view: LensedView,
         q: String?,
         offset: Int,
+        lifecycle: LifecycleBucket? = null,
     ): String {
         val page = maxOf(0, offset)
         // The trim is the model's, in one place: a blank `q` is no search (the catalog's plain
@@ -48,9 +52,12 @@ class ParameterSetsBrowseModel(
         // refuses a longer needle on REST and MCP; a search box TRUNCATES to it before the call
         // instead, so a typed overflow never errors the box (#415's posture, unchanged).
         val needle = q?.trim()?.takeIf { it.isNotEmpty() }?.take(MAX_QUERY_LENGTH)
-        val loaded = sets.search(workspaceId, view.parameterSets, needle, page, PAGE_SIZE)
-        val total = sets.countSearch(workspaceId, view.parameterSets, needle)
+        val loaded = sets.search(workspaceId, view.parameterSets, needle, page, PAGE_SIZE, lifecycle)
+        val total = sets.countSearch(workspaceId, view.parameterSets, needle, lifecycle)
         model.addAttribute("lensUnavailable", view.unavailable)
+        model.addAttribute("lifecycle", lifecycle?.wire.orEmpty())
+        model.addAttribute("lifecycleLabel", lifecycle?.let(CatalogLifecycle::label))
+        model.addAttribute("lifecycleOptions", CatalogLifecycle.options(CatalogLifecycle.PARAMETER_SETS))
         model.addAttribute("searching", true)
         model.addAttribute("rootId", CATALOG_ROOT_ID)
         model.addAttribute("q", needle.orEmpty())
@@ -72,8 +79,9 @@ class ParameterSetsBrowseModel(
         view: LensedView,
         q: String?,
         offset: Int,
+        lifecycle: LifecycleBucket? = null,
     ): String {
-        fillSearch(model, workspaceId, view, q, offset)
+        fillSearch(model, workspaceId, view, q, offset, lifecycle)
         return WRAPPER_VIEW
     }
 

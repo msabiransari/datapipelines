@@ -100,8 +100,8 @@ data class OverviewPage(
             "Parameter Sets",
             "parameter set",
             "parameter sets",
-            emptyList(),
-            guided = false,
+            CatalogLifecycle.PARAMETER_SETS,
+            guided = true,
         ),
         ;
 

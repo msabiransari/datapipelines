@@ -4,14 +4,19 @@ import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.auth.WorkspaceRole
+import co.datapipelines.pipeline.LifecycleBucket
 import co.datapipelines.web.EVERYTHING_LENS
+import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.matchers.shouldBe
 import io.mockk.mockk
 import io.mockk.verify
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
+import org.springframework.http.HttpStatus
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.ui.ExtendedModelMap
+import org.springframework.web.server.ResponseStatusException
 import java.util.UUID
 
 /**
@@ -47,16 +52,37 @@ class ParameterSetsPartialControllerTest {
     @Test
     fun `the catalog without a query is the flat list from page one`() {
         authenticate()
-        controller.catalog(model, offset = null, q = null)
+        controller.catalog(model, offset = null, q = null, lifecycle = null)
 
-        verify(exactly = 1) { browse.fillWrapper(model, any(), any(), q = null, offset = 0) }
+        verify(exactly = 1) { browse.fillWrapper(model, any(), any(), q = null, offset = 0, lifecycle = null) }
     }
 
     @Test
     fun `the catalog's search rides the flat list and threads the pager's offset`() {
         authenticate()
-        controller.catalog(model, offset = 50, q = "geo")
+        controller.catalog(model, offset = 50, q = "geo", lifecycle = null)
 
-        verify(exactly = 1) { browse.fillWrapper(model, any(), any(), q = "geo", offset = 50) }
+        verify(exactly = 1) { browse.fillWrapper(model, any(), any(), q = "geo", offset = 50, lifecycle = null) }
+    }
+
+    @Test
+    fun `the catalog's lifecycle reaches the list as its bucket, composed with q and the offset (#582)`() {
+        authenticate()
+        controller.catalog(model, offset = 25, q = "geo", lifecycle = "with-drafts")
+
+        verify(exactly = 1) {
+            browse.fillWrapper(model, any(), any(), q = "geo", offset = 25, lifecycle = LifecycleBucket.WITH_DRAFTS)
+        }
+    }
+
+    @Test
+    fun `an unknown or unoffered lifecycle is the house 400 before any read (#582)`() {
+        authenticate()
+        for (raw in listOf("discarded", "DRAFT", "nope")) {
+            val refused = shouldThrow<ResponseStatusException> { controller.catalog(model, offset = null, q = null, lifecycle = raw) }
+            refused.statusCode shouldBe HttpStatus.BAD_REQUEST
+            refused.reason shouldBe CatalogLifecycle.BAD_LIFECYCLE
+        }
+        verify(exactly = 0) { browse.fillWrapper(any(), any(), any(), any(), any(), any()) }
     }
 }

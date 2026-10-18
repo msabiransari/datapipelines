@@ -38,6 +38,13 @@ object CatalogLifecycle {
     /** #581 — discarded-only visualizations have no working version and their workspace answers 404. */
     val VISUALIZATIONS: List<LifecycleBucket> = LifecycleBucket.entries.filter { it != LifecycleBucket.DISCARDED_ONLY }
 
+    /**
+     * #582 — the parameter-sets catalog's filters, the same five: a discarded-only set has no page
+     * either (its pointer falls to NULL when its last release is discarded, so the workspace's
+     * `findWorking` answers nothing and the route is the family's 404).
+     */
+    val PARAMETER_SETS: List<LifecycleBucket> = LifecycleBucket.entries.filter { it != LifecycleBucket.DISCARDED_ONLY }
+
     /** `null`/empty → null (no filter); an offered bucket's wire value → it; anything else → the 400. */
     fun parse(
         raw: String?,

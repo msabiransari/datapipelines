@@ -168,6 +168,7 @@ class FamilyRecentE2eTest {
                 TemplateRepository(NamedParameterJdbcTemplate(source)),
                 DashboardRepository(NamedParameterJdbcTemplate(source)),
                 VisualizationRepository(NamedParameterJdbcTemplate(source)),
+                ParameterSetRepository(NamedParameterJdbcTemplate(source)),
             )
 
         counted.forFamily(NavigationFamily.PIPELINES, workspace, lens(ReadLens.NOTHING)) shouldBe RecentResult.Available(emptyList())
@@ -180,9 +181,8 @@ class FamilyRecentE2eTest {
         source.fail = true
         counted.forFamily(NavigationFamily.PIPELINES, workspace, LensedView.EVERYTHING) shouldBe
             RecentResult.Unavailable("Recently updated could not be read.")
-        NavigationFamily.entries.filter { !counted.supports(it) }.forEach { family ->
-            counted.forFamily(family, workspace, LensedView.EVERYTHING) shouldBe null
-        }
+        // #579–#582: every family has an adapter, so every overview renders its Recently updated section.
+        NavigationFamily.entries.filterNot { counted.supports(it) } shouldBe emptyList()
     }
 
     /** Fact 6's parity: on one snapshot the browser header's count is the inventory's A + B + C. */
@@ -321,6 +321,7 @@ class FamilyRecentE2eTest {
                 TemplateRepository(jdbc),
                 DashboardRepository(jdbc),
                 VisualizationRepository(jdbc),
+                ParameterSetRepository(jdbc),
             )
 
         @Bean

@@ -111,7 +111,8 @@ class UiConfig {
         templates: TemplateRepository,
         dashboards: co.datapipelines.visualization.DashboardRepository,
         visualizations: co.datapipelines.visualization.VisualizationRepository,
-    ): FamilyRecent = FamilyRecent(pipelines, templates, dashboards, visualizations)
+        parameterSets: co.datapipelines.parameters.ParameterSetRepository,
+    ): FamilyRecent = FamilyRecent(pipelines, templates, dashboards, visualizations, parameterSets)
 
     /** 106: the version/execution actor lookup both explorer details render. */
     @Bean

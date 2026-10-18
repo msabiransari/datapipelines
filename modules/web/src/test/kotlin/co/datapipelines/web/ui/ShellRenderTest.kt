@@ -645,7 +645,7 @@ class ShellRenderTest {
         href("Templates") shouldBe "/overview/templates"
         href("Dashboards") shouldBe "/overview/dashboards"
         href("Visualizations") shouldBe "/overview/visualizations"
-        href("Parameter Sets") shouldBe "/parameter-sets"
+        href("Parameter Sets") shouldBe "/overview/parameter-sets"
     }
 
     /** #554 (record §3 rule 5): off the five families the browser and its folder button render hidden. */

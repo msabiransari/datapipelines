@@ -480,6 +480,7 @@ class OverviewDashboardsE2eTest {
                 TemplateRepository(jdbc),
                 DashboardRepository(jdbc),
                 VisualizationRepository(jdbc),
+                ParameterSetRepository(jdbc),
             )
 
         @Bean

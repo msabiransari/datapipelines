@@ -362,7 +362,7 @@
              data-nav-group="Explore" data-nav-label="Visualizations"
              th:classappend="${browserFamily == 'visualizations'} ? 'active' : null"
              th:attr="aria-current=${browserFamily == 'visualizations'} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#chart-line"></use></svg><span class="app-rail-label">Visualizations</span></a>
-          <a th:href="@{/parameter-sets}" class="app-nav-link" data-nav-section="/parameter-sets"
+          <a th:href="@{/overview/parameter-sets}" class="app-nav-link" data-nav-section="/parameter-sets"
              data-nav-group="Explore" data-nav-label="Parameter Sets"
              th:classappend="${browserFamily == 'parameter-sets'} ? 'active' : null"
              th:attr="aria-current=${browserFamily == 'parameter-sets'} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#sliders-horizontal"></use></svg><span class="app-rail-label">Parameter Sets</span></a>

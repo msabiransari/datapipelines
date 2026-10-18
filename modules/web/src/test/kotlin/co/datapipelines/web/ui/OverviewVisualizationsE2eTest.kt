@@ -55,7 +55,13 @@ class OverviewVisualizationsE2eTest {
         )
     }
     private val recent by lazy {
-        UiConfig().familyRecent(PipelineRepository(jdbc), TemplateRepository(jdbc), DashboardRepository(jdbc), repository)
+        UiConfig().familyRecent(
+            PipelineRepository(jdbc),
+            TemplateRepository(jdbc),
+            DashboardRepository(jdbc),
+            repository,
+            ParameterSetRepository(jdbc),
+        )
     }
 
     @BeforeEach
