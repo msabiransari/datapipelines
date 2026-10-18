@@ -181,7 +181,8 @@ class MainFrameBrowserTest : DashboardBrowserSuite() {
         openBrowserTree("pipelines")
         settle()
         readMain("main")
-        readings["browser.width"] = (page.evaluate("() => document.getElementById('app-browser').getBoundingClientRect().width") as Number).toDouble()
+        val browserWidth = page.evaluate("() => document.getElementById('app-browser').getBoundingClientRect().width")
+        readings["browser.width"] = (browserWidth as Number).toDouble()
         val content = reading("main.clientWidth") - reading("main.padLeft") - reading("main.padRight")
         readings["main.content"] = content
         printReadings("reference-1512")
