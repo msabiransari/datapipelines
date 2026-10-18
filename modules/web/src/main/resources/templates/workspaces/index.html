@@ -178,7 +178,7 @@
           </td>
           <td>
             <span th:text="${inv.roleLabel}">viewer</span>
-            <span class="u-secondary u-text-xs"> · becomes a member at first sign-in</span>
+            <span class="u-secondary u-text-meta"> · becomes a member at first sign-in</span>
           </td>
           <td class="num">
             <form th:action="@{/workspaces/{name}/invitations/revoke(name=${entry.key})}" method="post">

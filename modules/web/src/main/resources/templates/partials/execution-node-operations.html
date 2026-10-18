@@ -29,7 +29,7 @@
         <td class="u-mono" th:text="${op.destination}">tempdb.t</td>
         <td>
           <span th:text="${op.state}">completed</span>
-          <span class="u-muted u-text-xs" th:unless="${op.terminal}">(not observed to end)</span>
+          <span class="u-muted u-text-meta" th:unless="${op.terminal}">(not observed to end)</span>
         </td>
         <td class="num" th:text="${op.rowsFetched != null} ? ${#numbers.formatInteger(op.rowsFetched, 1, 'COMMA')} : '—'">0</td>
         <td class="num" th:text="${op.rowsWritten != null} ? ${#numbers.formatInteger(op.rowsWritten, 1, 'COMMA')} : '—'">0</td>
@@ -42,7 +42,7 @@
           <span th:if="${op.committed == null and op.terminal and op.destination != 'no output'}" class="u-muted">not observed</span>
           <span th:if="${op.committed == null and (!op.terminal or op.destination == 'no output')}" class="u-muted">—</span>
         </td>
-        <td class="u-text-xs u-secondary" th:text="${op.timings != null} ? ${op.timings} : '—'">timings</td>
+        <td class="u-secondary" th:text="${op.timings != null} ? ${op.timings} : '—'">timings</td>
       </tr>
     </tbody>
   </table>

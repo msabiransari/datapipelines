@@ -7,7 +7,7 @@
 <th:block xmlns:th="http://www.thymeleaf.org" th:fragment="error">
   <div class="ds-empty" th:if="${introspectionErrorCode} != null">
     <div class="app-row-baseline u-wrap u-mb-xs">
-      <span class="ds-badge ds-badge-danger u-mono u-text-xs u-break"
+      <span class="ds-badge ds-badge-danger u-mono u-break"
             th:text="${introspectionErrorCode}">pipeline.execution.datasource_unreachable</span>
     </div>
     <p class="ds-empty-description" th:text="${introspectionErrorMessage}">message</p>

@@ -26,7 +26,7 @@
       <div class="u-mb-md">
         <label class="u-block u-secondary u-text-sm u-mb-xs" for="ds-edit-dialect">Dialect</label>
         <input class="ds-input" id="ds-edit-dialect" type="text" disabled th:value="${datasource.dialect.wire}">
-        <p class="u-muted u-text-xs u-mt-0">The name and the dialect are fixed once a datasource exists.</p>
+        <p class="u-muted u-text-sm u-mt-0">The name and the dialect are fixed once a datasource exists.</p>
       </div>
       <div class="u-mb-md">
         <label class="u-block u-secondary u-text-sm u-mb-xs" for="ds-edit-display">Display name</label>
@@ -75,7 +75,7 @@
             <input type="checkbox" name="global" value="true" th:checked="${datasource.workspaceName} == null"> Global
           </label>
         </th:block>
-        <span class="u-muted u-text-xs" th:unless="${isAdmin}"
+        <span class="u-muted u-text-sm" th:unless="${isAdmin}"
               th:text="${datasource.workspaceName} != null ? 'Bound to ' + ${datasource.workspaceName} : 'Global'">Bound</span>
       </div>
 

@@ -35,14 +35,14 @@
     <label class="u-block u-secondary u-text-sm u-mb-xs"
            th:for="${prefix} + ${f.key}">
       <span th:text="${f.label}">Maximum pool size</span>
-      <span class="u-muted u-text-xs" th:text="'(' + ${f.unit} + ')'">(count)</span>
+      <span class="u-muted u-text-meta" th:text="'(' + ${f.unit} + ')'">(count)</span>
     </label>
     <input class="ds-input" type="number" min="0" step="1"
            th:id="${prefix} + ${f.key}"
            th:name="${f.name}"
            th:value="${f.value}"
            th:attr="aria-describedby=${prefix} + ${f.key} + '-help'">
-    <p class="u-muted u-text-xs u-mt-0" th:id="${prefix} + ${f.key} + '-help'">
+    <p class="u-muted u-text-sm u-mt-0" th:id="${prefix} + ${f.key} + '-help'">
       <span th:text="${f.meaning}">What it does.</span>
       <span th:text="${f.help}">Default 10 — HikariCP's own.</span>
     </p>
@@ -53,7 +53,7 @@
            th:for="${prefix} + 'pool-readonly'">Read only</label>
     <input class="ds-input" th:id="${prefix} + 'pool-readonly'" type="text" disabled
            th:value="${poolReadonly} ? 'true' : 'false'">
-    <p class="u-muted u-text-xs u-mt-0">
+    <p class="u-muted u-text-sm u-mt-0">
       Mirrors this datasource's <code>readonly</code> flag above — the pool is built with it and it
       cannot be set separately.
     </p>

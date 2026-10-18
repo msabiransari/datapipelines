@@ -42,7 +42,7 @@
             <span class="u-mono" th:text="${p.label}">demo/x.sql@1</span>
             <span class="ds-badge ds-badge-default" th:classappend="${p.blocksRelease} ? 'ds-badge-danger'"
                   th:text="${p.statusLabel}">RELEASED</span>
-            <span th:if="${p.blocksRelease}" class="tplx-danger u-text-sm"> — release the template first</span>
+            <span th:if="${p.blocksRelease}" class="tplx-danger"> — release the template first</span>
           </li>
         </ul>
         <p class="u-secondary u-text-sm">
