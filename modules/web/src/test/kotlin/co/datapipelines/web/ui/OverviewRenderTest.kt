@@ -13,6 +13,8 @@ import io.kotest.matchers.string.shouldNotContain
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.EnumSource
 import org.springframework.mock.web.MockHttpServletRequest
 import org.springframework.mock.web.MockHttpServletResponse
 import org.springframework.mock.web.MockServletContext
@@ -42,16 +44,19 @@ class OverviewRenderTest {
             )
         }
 
-    @Test
-    fun `one inventory feeds the bars, the counts and the table`() {
-        val doc = render(page(Inventory(1, 1, 1, 1)))
+    /** Amendment 1: the structural case runs on every family, one fixture each. */
+    @ParameterizedTest
+    @EnumSource(OverviewPage.Family::class)
+    fun `one inventory feeds the bars, the counts and the table`(family: OverviewPage.Family) {
+        val doc = render(page(InventoryResult.Available(Inventory(1, 1, 1, 1)), family = family))
 
         val bars = doc.select("[data-overview-chart] [data-bar]")
         bars.map { it.attr("data-bar") } shouldContainExactly listOf("draft", "released", "released-with-draft", "discarded")
         bars.map { it.selectFirst(".app-overview-bar-v")!!.text() } shouldContainExactly listOf("1", "1", "1", "1")
         bars.map { it.selectFirst("rect")!!.attr("width") } shouldContainExactly listOf("100.0", "100.0", "100.0", "100.0")
         bars.map { it.attr("data-tone") } shouldContainExactly listOf("draft", "released", "mixed", "discarded")
-        bars[0].selectFirst("svg")!!.attr("aria-label") shouldBe "Draft only: 1 pipeline"
+        bars[0].selectFirst("svg")!!.attr("aria-label") shouldBe "Draft only: 1 ${family.singular}"
+        doc.selectFirst(".app-overview")!!.attr("data-overview") shouldBe family.navigation.route
 
         val counts =
             doc
@@ -84,9 +89,11 @@ class OverviewRenderTest {
             listOf("0", "0", "0", "0")
     }
 
-    @Test
-    fun `an unknown inventory says why and shows no number in the inventory area`() {
-        val doc = render(page(InventoryResult.Unavailable("Inventory could not be read.")))
+    /** Amendment 1: the Unavailable case runs on every family, one fixture each. */
+    @ParameterizedTest
+    @EnumSource(OverviewPage.Family::class)
+    fun `an unknown inventory says why and shows no number in the inventory area`(family: OverviewPage.Family) {
+        val doc = render(page(InventoryResult.Unavailable("Inventory could not be read."), family = family))
 
         val area = doc.selectFirst("[data-overview-inventory]").shouldNotBeNull()
         area.selectFirst("[data-overview-unavailable]").shouldNotBeNull().text() shouldContain "Inventory could not be read."
@@ -188,7 +195,8 @@ class OverviewRenderTest {
     private fun page(
         inventory: InventoryResult,
         recent: RecentResult? = RecentResult.Available(emptyList()),
-    ): OverviewPage = OverviewPage.of(OverviewPage.Family.PIPELINES, false, inventory, recent, NOW)
+        family: OverviewPage.Family = OverviewPage.Family.PIPELINES,
+    ): OverviewPage = OverviewPage.of(family, false, inventory, recent, NOW)
 
     private fun render(page: OverviewPage): Document = Jsoup.parse(html(page))
 
