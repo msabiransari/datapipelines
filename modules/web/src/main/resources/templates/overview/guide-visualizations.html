@@ -1,0 +1,59 @@
+<!--/* #581 — Visualizations guidance aligned with skill/dashboards.md, authoring steps 3, 7 and 8. */-->
+<th:block xmlns:th="http://www.thymeleaf.org" th:fragment="intro">
+  <section class="ds-card" aria-labelledby="overview-intro-h" data-overview-intro>
+    <div class="app-card-h"><h2 class="ds-title" id="overview-intro-h">What visualizations are for</h2></div>
+    <div class="app-card-b app-overview-prose">
+      <p>
+        Visualizations define how data is presented, such as a chart, table or KPI. They include the
+        input contract and rendering configuration so the presentation can be reused and tested.
+        For example, show each borough's rideshare share in a comparison chart.
+      </p>
+    </div>
+  </section>
+
+  <section class="ds-card" aria-labelledby="overview-agent-h" data-overview-prompt>
+    <div class="app-card-h"><h2 class="ds-title" id="overview-agent-h">Create with your agent</h2></div>
+    <div class="app-card-b app-overview-prose">
+      <ol class="app-overview-steps">
+        <li>Describe the question, the chart, table or KPI you want, and the input fields it should use.</li>
+        <li>Ask a connected agent to build a draft visualization and test normal, empty and boundary fixtures
+          in the renderer.</li>
+        <li>Open the draft's Preview (test fixtures) tab, inspect its labels, units and empty states, and
+          review the agent's test evidence. Someone allowed to release visualizations releases it from
+          its workspace when it is ready.</li>
+      </ol>
+      <label class="app-overview-label" for="overview-prompt">Starter prompt — edit the bracketed parts before you copy it</label>
+      <textarea id="overview-prompt" class="ds-textarea app-overview-prompt" rows="7" spellcheck="false"
+                aria-describedby="overview-prompt-note"
+                th:text="|In workspace ${activeWorkspace ?: '[workspace]'}, create a draft visualization for [question] using [chart, table or KPI]. The input should contain [fields and their meaning]. Read the current visualization guidance, define the input contract, labels, units and bindings, and include representative normal, empty and boundary test cases. Run the supported renderer tests and report any remaining visual checks. Return the draft link, expected input and test evidence. Leave release to me.|">In workspace [workspace], create a draft visualization for [question].</textarea>
+      <div class="app-overview-copy">
+        <button type="button" class="ds-button ds-button-primary ds-button-sm"
+                data-overview-copy data-copy-label="Copy prompt" aria-controls="overview-prompt">Copy prompt</button>
+        <span class="app-card-note" role="status" data-overview-copy-status></span>
+      </div>
+      <p class="app-card-note" id="overview-prompt-note">
+        Copying puts the text on your clipboard and nothing else: it sends no request and grants no access.
+        <th:block th:if="${canAuthor == true}">Your agent works with the permissions of its own API key.</th:block>
+        <th:block th:unless="${canAuthor == true}">Your role here does not author visualizations, so copy the request
+          for a collaborator who can.</th:block>
+      </p>
+    </div>
+  </section>
+</th:block>
+
+<th:block xmlns:th="http://www.thymeleaf.org" th:fragment="related">
+  <section class="ds-card" aria-labelledby="overview-related-h" data-overview-related>
+    <div class="app-card-h"><h2 class="ds-title" id="overview-related-h">Related resources and help</h2></div>
+    <div class="app-card-b app-overview-prose">
+      <ul class="app-overview-related">
+        <li><a hx-boost="true" th:href="@{/overview/pipelines}">Pipelines</a> supply the source columns
+          a visualization presents.</li>
+        <li><a hx-boost="true" th:href="@{/overview/dashboards}">Dashboards</a> reuse visualizations with
+          sources whose columns match their input contracts.</li>
+      </ul>
+      <p class="app-card-note">Test a visualization with fixtures before using it in a dashboard.
+        The visualization's Preview shows fixtures; live data runs inside a dashboard.</p>
+      <p><a th:href="@{/docs/mcp-server}">MCP server reference</a></p>
+    </div>
+  </section>
+</th:block>

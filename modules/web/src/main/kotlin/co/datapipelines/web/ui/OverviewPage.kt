@@ -92,8 +92,8 @@ data class OverviewPage(
             "Visualizations",
             "visualization",
             "visualizations",
-            emptyList(),
-            guided = false,
+            CatalogLifecycle.VISUALIZATIONS,
+            guided = true,
         ),
         PARAMETER_SETS(
             NavigationFamily.PARAMETER_SETS,

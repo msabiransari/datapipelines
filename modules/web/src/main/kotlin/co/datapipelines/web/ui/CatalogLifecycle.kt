@@ -23,6 +23,9 @@ object CatalogLifecycle {
     /** The pipelines catalog's filters: every bucket whose objects all have a workspace page. */
     val PIPELINES: List<LifecycleBucket> = LifecycleBucket.entries.filter { it != LifecycleBucket.DISCARDED_ONLY }
 
+    /** Discarded-only visualizations have no working version and their workspace answers 404. */
+    val VISUALIZATIONS: List<LifecycleBucket> = LifecycleBucket.entries.filter { it != LifecycleBucket.DISCARDED_ONLY }
+
     /** `null`/empty → null (no filter); an offered bucket's wire value → it; anything else → the 400. */
     fun parse(
         raw: String?,
