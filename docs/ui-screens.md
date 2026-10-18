@@ -1,9 +1,9 @@
 # UI Screens Inventory
 
-**Status:** v1.158
+**Status:** v1.159
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
-**Last updated:** 2026-10-17 (#556; #578; #554); 2026-10-16 (#551 merge follow-up; #551; #555; #552; #553; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
+**Last updated:** 2026-10-18 (#581); 2026-10-17 (#556; #578; #554); 2026-10-16 (#551 merge follow-up; #551; #555; #552; #553; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
 
 ---
 
@@ -2356,14 +2356,21 @@ the set's id per workspace and states the body's shape hash; the examples file c
 
 | Attribute | Value |
 |---|---|
-| URL | `GET /visualizations` (`?q=&offset=` the deep links) |
+| URL | `GET /visualizations` (`?q=&lifecycle=&offset=` the deep links) |
 | Auth required | Yes — `visualization.read`, every role (a promoter through the lens: the visualizations a dashboard her lens admits pins; a hidden one is absent — not listed, not counted, not paged) |
-| Purpose | The flat catalog landing (the menu's Visualizations item; `/overview/visualizations` serves the inventory, §4.25, and takes the menu with #581): every visualization the caller may read — or the matches of `q` over name, display name and description — one row each, a row linking the workspace |
+| Purpose | The flat catalog (View all; the menu's Visualizations item leads to `/overview/visualizations` since #581, §4.25): every visualization the caller may read — or the matches of `q` over name, display name and description — one row each, a row linking the workspace |
 | Design primitives | §4.21's catalog shape exactly (`.app-catalog-search`, `.tpl-results`, the shared pager); `visualizations.css` (head-loaded, §3.0) dresses the page's own bits with design tokens only |
 | JS | None of its own — the search is the htmx SPA pattern (a debounced `hx-get` into the stable `#viz-list-wrapper` root) |
 | htmx | Yes — the search and the pager re-fetch `GET /partials/visualizations` into `#viz-list-wrapper`, `outerHTML` |
 
-Content: flat rows at their WORKING version, with draft badges and the existing paged catalog search.
+Content: flat rows at their listed version, with draft badges and the existing paged catalog search.
+Since #581, `lifecycle=draft|released|released-with-draft|with-drafts|with-releases` composes with `q`
+and paging on the page and partial. Unknown or unoffered values return a constant 400. The filter
+uses the inventory's admitted-version membership in SQL for both rows and total. A narrowed reader
+gets RELEASED versions even if an admitted object's pointer names a draft; the unfiltered catalog
+keeps its current-pointer rule. Discarded only stays unlinked and is not offered, because its
+workspace has no working version. Search and lifecycle controls include each other; the pager
+carries both, Clear search keeps the lifecycle, and Clear filters resets both.
 Rows and version links preserve the menu and the browser through prepared main-content navigation. The Visualizations
 panel of the resource browser uses the shared REST component (§3.4), with complete lazy levels, server name search
 and expanded ancestors, and clear-to-root. The signed-in chart loader reuses one compatible 3D bundle.
@@ -2483,6 +2490,13 @@ crumb and panel), `FamilyRecentE2eTest`, `OverviewE2eTest` (each catalog lifecyc
 inventory's, unlensed and narrowed), `PromoterLensSweepTest`, `overview.test.mjs` and
 `OverviewBrowserTest` (copy resolves and refuses with zero requests; the menu lands on the overview with
 its tree; a workspace switch).
+
+**Families as built.**
+
+| Family | Menu item links the overview since | Guide | Recently updated | Catalog `lifecycle` filter |
+|---|---|---|---|---|
+| Pipelines | #556 | `overview/guide-pipelines.html` | Yes | Five values; discarded only unlinked |
+| Visualizations | #581 | `overview/guide-visualizations.html` | Yes; admitted versions, release time alone through a lens | Five values; discarded only unlinked |
 
 ## 5. htmx Usage Pattern
 
@@ -2649,6 +2663,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-18 | v1.159 | #581 Visualizations overview | **§4.24:** menu leads to `/overview/visualizations`; the catalog adds the inventory lifecycle filter, composed with search and paging. **§4.25:** Visualizations guide, editable starter prompt, Recently updated and Review drafts; family adoption table. |
 | 2026-10-17 | v1.158 | #556 the family overview pages | **§4.25, new:** `GET /overview/<family>` for the five families from one template: the inventory (four counts, four bars and a hidden table from one `FamilyInventory` read, the unavailable state without a number) and, for Pipelines, the introduction, Create with your agent (Copy prompt, clipboard only), Recently updated and related help. **§3.4:** the four path rules treat an overview as its family's; selection rule 1 — the Pipelines menu item now leads to its overview, the other four keep their catalog until #579–#582. **§4.3:** the `?lifecycle=` filter, its 400 and its equality with the overview's counts. **§4.6, §4.21, §4.23, §4.24:** each names its served overview and the issue that moves the menu. |
 | 2026-10-17 | v1.157 | #578 browser reveal | **§3.4:** desktop chevron-right at the browser edge; phone keeps the folder glyph. A desktop family menu click clears Hide and shows the browser, including the active family; non-family destinations preserve Hide. Storage table and **§3.6** updated. |
 | 2026-10-17 | v1.156 | #554 the shell becomes three sibling columns: a stable primary menu, a separate resource browser, the workspace | **Principle 4, §3, §3.4, §3.6, §4.3, §4.6, §4.6a/b, §4.21, §4.24:** the in-rail accordion (#460/#478) and the rail resize (#465/#503) retire. The menu is 202px expanded / 64px compact, with Explore (Dashboards, Visualizations, Parameter Sets) as a new group between Build and Operate; compact mode has named tooltips and no group labels. The five REST trees move into `#app-browser` beside it, outside the boosted main: header with title, admitted count (moved from the menu badges, all five families) and Hide; search; tree; View all + width reset. The browser is visible only on a family page, mounts each family lazily and keeps it in-document, and is resizable 240–480px on its boundary, clamped to leave main 320px. §3.6 is re-cut to the record's four bands (≥1600 / 1101–1599 / 761–1100 / ≤760): two phone drawers, one open at a time, the rest of the shell `inert`; the menu drawer keeps its 232px (`--app-menu-drawer`) so its close control clears the wordmark. A storage table: `dp-rail` kept; `dp-browser-width:<ws>` and `dp-browser-hidden:<ws>` new; `dp-rail-width:<ws>`, `dp-tree-open:<ws>` and `dp-tree-panel:*` removed on sight, never reinterpreted. The record's eight selection rules are stated as built (rule 1's overview destination is #556's). The #555 phone rows follow the band edge (760px and below). The "document never scrolls" and "`<main>` is the one scroll container" sentences are unchanged. |
