@@ -344,10 +344,14 @@
              data-nav-group="Build" data-nav-label="Templates"
              th:classappend="${browserFamily == 'templates'} ? 'active' : null"
              th:attr="aria-current=${browserFamily == 'templates'} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#code"></use></svg><span class="app-rail-label">Templates</span></a>
-          <a th:href="@{/datasources}" class="app-nav-link" data-nav-section="/datasources"
+          <!-- #583: the Datasources item links its overview like the five families above, and
+               the same two prefixes light it. It is deliberately NOT a browserFamily: the
+               resource browser opens only on the five tree families — the datasources overview
+               is an ordinary section page, its item rides this rule instead. -->
+          <a th:href="@{/overview/datasources}" class="app-nav-link" data-nav-section="/datasources"
              data-nav-group="Build" data-nav-label="Datasources"
-             th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/datasources')} ? 'active' : null"
-             th:attr="aria-current=${currentPath != null and #strings.startsWith(currentPath, '/datasources')} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#database"></use></svg><span class="app-rail-label">Datasources</span></a>
+             th:classappend="${currentPath != null and (#strings.startsWith(currentPath, '/datasources') or #strings.startsWith(currentPath, '/overview/datasources'))} ? 'active' : null"
+             th:attr="aria-current=${currentPath != null and (#strings.startsWith(currentPath, '/datasources') or #strings.startsWith(currentPath, '/overview/datasources'))} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#database"></use></svg><span class="app-rail-label">Datasources</span></a>
         </div>
 
         <!-- D58 (#10 L3b), #399, #374: Dashboards, Visualizations and Parameter Sets are
