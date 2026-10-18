@@ -347,16 +347,8 @@ class PipelineWorkspaceHeadingBrowserTest : BrowserSuite() {
         bandIsThePage(320, 568)
     }
 
-    @Test
-    fun `a phone-first load rotated to desktop without a reload shows a fitted graph`() {
-        startTrace()
-        val url = seededWorkspace()
-        page.setViewportSize(390, 844)
-        page.navigate(url)
-        page.locator(".app-wide-screen-note").first().waitFor()
-        page.waitForSelector(".pe-card", Page.WaitForSelectorOptions().setState(WaitForSelectorState.ATTACHED))
-
-        page.setViewportSize(ROTATED_W, ROTATED_H)
+    /** After a viewport change with no reload, the graph is laid out again and fitted inside its canvas. */
+    private fun assertGraphFitted(prefix: String) {
         page.waitForFunction("() => document.querySelector('.pe-stage').getBoundingClientRect().height > 0")
         // The stage ResizeObserver's re-fit is a canvas tween (PipelineEditorFitBrowserTest's 600ms).
         page.waitForTimeout(600.0)
@@ -375,20 +367,53 @@ class PipelineWorkspaceHeadingBrowserTest : BrowserSuite() {
                            canvasW: c.width, canvasH: c.height, outside };
                 }""",
             ) as Map<String, Any?>
-        readings.putAll(graph.mapKeys { "rotate.${it.key}" })
-        shot("rotate-$ROTATED_W")
-        printReadings("rotate")
+        readings.putAll(graph.mapKeys { "$prefix.${it.key}" })
+        shot("$prefix-$ROTATED_W")
+        printReadings(prefix)
 
         assertSoftly {
-            withClue("cards") { num("rotate.cards") shouldBeGreaterThan 0.0 }
-            withClue("firstCardW") { num("rotate.firstCardW") shouldBeGreaterThan 0.0 }
-            withClue("outside") { (graph["outside"] as List<*>).shouldBeEmpty() }
+            withClue("$prefix.cards") { num("$prefix.cards") shouldBeGreaterThan 0.0 }
+            withClue("$prefix.firstCardW") { num("$prefix.firstCardW") shouldBeGreaterThan 0.0 }
+            withClue("$prefix.outside") { (graph["outside"] as List<*>).shouldBeEmpty() }
         }
+    }
+
+    @Test
+    fun `a phone-first load rotated to desktop without a reload shows a fitted graph`() {
+        startTrace()
+        val url = seededWorkspace()
+        page.setViewportSize(PHONE_W, PHONE_H)
+        page.navigate(url)
+        page.locator(".app-wide-screen-note").first().waitFor()
+        page.waitForSelector(".pe-card", Page.WaitForSelectorOptions().setState(WaitForSelectorState.ATTACHED))
+
+        page.setViewportSize(ROTATED_W, ROTATED_H)
+        assertGraphFitted("rotate")
+    }
+
+    @Test
+    fun `a desktop load rotated to phone and back without a reload shows the band, then a fitted graph`() {
+        startTrace()
+        val url = seededWorkspace()
+        page.setViewportSize(ROTATED_W, ROTATED_H)
+        page.navigate(url)
+        page.locator(".pe-card").first().waitFor()
+
+        page.setViewportSize(PHONE_W, PHONE_H)
+        page.locator(".app-wide-screen-note").first().waitFor()
+        val root = page.locator(".pe-root").first().boundingBox()
+        readings["rotate-back.phoneRoot"] = root?.let { "${it.width}x${it.height}" }
+        withClue("rotate-back.phoneRoot") { root shouldBe null }
+
+        page.setViewportSize(ROTATED_W, ROTATED_H)
+        assertGraphFitted("rotate-back")
     }
 
     private companion object {
         const val DESK_W = 1512
         const val DESK_H = 982
+        const val PHONE_W = 390
+        const val PHONE_H = 844
         const val ROTATED_W = 1440
         const val ROTATED_H = 900
 
