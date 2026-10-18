@@ -6,6 +6,7 @@ import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.RecentRow
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.visualization.DashboardRepository
+import co.datapipelines.visualization.VisualizationRepository
 import org.slf4j.LoggerFactory
 import java.time.Instant
 import java.util.UUID
@@ -35,14 +36,15 @@ sealed interface RecentResult {
  * (`RecentSource`) and no cache.
  *
  * Only families with an adapter answer; [forFamily] returns null for the rest and the overview
- * renders no Continue your work section for them. Pipelines, templates (#579) and dashboards (#580)
- * have one; the visualizations and parameter-set adapters belong to #581 and #582 (templates link
+ * renders no Continue your work section for them. Pipelines, templates (#579), dashboards (#580) and
+ * visualizations (#581) have one; the parameter-set adapter belongs to #582 (templates link
  * by NAME — their workspace route is `/templates/{*name}`).
  */
 class FamilyRecent(
     private val pipelines: PipelineRepository,
     private val templates: TemplateRepository,
     private val dashboards: DashboardRepository,
+    private val visualizations: VisualizationRepository,
 ) {
     private val log = LoggerFactory.getLogger(FamilyRecent::class.java)
 
@@ -73,6 +75,10 @@ class FamilyRecent(
                         dashboards.recent(workspaceId, view.dashboards).map { it.entry("/dashboards/${it.id}") }
                     }
 
+                    NavigationFamily.VISUALIZATIONS -> {
+                        visualizations.recent(workspaceId, view.visualizations).map { it.entry("/visualizations/${it.id}") }
+                    }
+
                     else -> {
                         return null
                     }
@@ -99,6 +105,12 @@ class FamilyRecent(
 
     private companion object {
         /** The families with an adapter — one branch of [forFamily] each. */
-        val ADAPTED = setOf(NavigationFamily.PIPELINES, NavigationFamily.TEMPLATES, NavigationFamily.DASHBOARDS)
+        val ADAPTED =
+            setOf(
+                NavigationFamily.PIPELINES,
+                NavigationFamily.TEMPLATES,
+                NavigationFamily.DASHBOARDS,
+                NavigationFamily.VISUALIZATIONS,
+            )
     }
 }

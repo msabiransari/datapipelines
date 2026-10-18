@@ -36,18 +36,27 @@ class VisualizationBrowseModel(
         view: LensedView,
         q: String?,
         offset: Int,
+        lifecycle: co.datapipelines.pipeline.LifecycleBucket? = null,
     ): String {
         val page = maxOf(0, offset)
         // The needle's bound is the shared one (#504b, `SearchNeedle.MAX_LENGTH`): the model keeps
         // only the truncating half — a box truncates its own term, never refuses.
         val needle = q?.trim()?.takeIf { it.isNotEmpty() }?.take(SearchNeedle.MAX_LENGTH)
         val (rows, total) =
-            if (needle == null) {
+            if (lifecycle != null) {
+                visualizations.lifecyclePage(workspaceId, view.visualizations, needle, page, PAGE_SIZE, lifecycle).let {
+                    it.items to
+                        it.total
+                }
+            } else if (needle == null) {
                 visualizations.listAll(workspaceId, view.visualizations, page, PAGE_SIZE) to
                     visualizations.countAll(workspaceId, view.visualizations)
             } else {
                 visualizations.search(workspaceId, view.visualizations, needle, page, PAGE_SIZE).let { it.items to it.total }
             }
+        model.addAttribute("lifecycle", lifecycle?.wire.orEmpty())
+        model.addAttribute("lifecycleLabel", lifecycle?.let(CatalogLifecycle::label))
+        model.addAttribute("lifecycleOptions", CatalogLifecycle.options(CatalogLifecycle.VISUALIZATIONS))
         model.addAttribute("lensUnavailable", view.unavailable)
         model.addAttribute("searching", true)
         model.addAttribute("rootId", PAGE_ROOT_ID)
@@ -66,8 +75,9 @@ class VisualizationBrowseModel(
         view: LensedView,
         q: String?,
         offset: Int,
+        lifecycle: co.datapipelines.pipeline.LifecycleBucket? = null,
     ): String {
-        fillList(model, workspaceId, view, q, offset)
+        fillList(model, workspaceId, view, q, offset, lifecycle)
         return WRAPPER_VIEW
     }
 

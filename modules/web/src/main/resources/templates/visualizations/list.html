@@ -32,9 +32,20 @@
            placeholder="Search visualizations..." aria-label="Search visualizations"
            th:attr="hx-get=@{/partials/visualizations}, hx-target='#viz-list-wrapper', hx-swap='outerHTML'"
            hx-trigger="input changed delay:300ms, search"
+           hx-include="#visualization-filter-lifecycle"
            hx-sync="this:replace"
            hx-indicator="#visualization-filter-spinner"
            class="ds-input app-search-input">
+    <select id="visualization-filter-lifecycle" name="lifecycle" class="ds-input app-select-auto"
+            aria-label="Filter by lifecycle"
+            th:attr="hx-get=@{/partials/visualizations}, hx-target='#viz-list-wrapper', hx-swap='outerHTML'"
+            hx-trigger="change"
+            hx-include="#visualization-filter-q"
+            hx-indicator="#visualization-filter-spinner">
+      <option value="" th:selected="${#strings.isEmpty(lifecycle)}">All lifecycles</option>
+      <option th:each="o : ${lifecycleOptions}" th:value="${o.value}" th:text="${o.label}"
+              th:selected="${o.value == lifecycle}">Draft only</option>
+    </select>
     <span id="visualization-filter-spinner" class="htmx-indicator ds-spinner" aria-hidden="true"></span>
   </div>
 

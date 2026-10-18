@@ -35,6 +35,9 @@ object CatalogLifecycle {
      */
     val DASHBOARDS: List<LifecycleBucket> = LifecycleBucket.entries.filter { it != LifecycleBucket.DISCARDED_ONLY }
 
+    /** #581 — discarded-only visualizations have no working version and their workspace answers 404. */
+    val VISUALIZATIONS: List<LifecycleBucket> = LifecycleBucket.entries.filter { it != LifecycleBucket.DISCARDED_ONLY }
+
     /** `null`/empty → null (no filter); an offered bucket's wire value → it; anything else → the 400. */
     fun parse(
         raw: String?,

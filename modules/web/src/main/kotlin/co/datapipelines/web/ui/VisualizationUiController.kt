@@ -47,11 +47,13 @@ class VisualizationUiController(
         request: HttpServletRequest,
         @RequestParam(required = false) q: String?,
         @RequestParam(required = false) offset: Int?,
+        @RequestParam(required = false) lifecycle: String? = null,
     ): String {
+        val bucket = CatalogLifecycle.parse(lifecycle, CatalogLifecycle.VISUALIZATIONS)
         model.addAttribute("activeTheme", themeResolver.resolve(request))
         RoleModel.stamp(model)
         val principal = currentPrincipal()
-        browse.fillWrapper(model, principal.requireWorkspace().id, lens.viewFor(principal), q, offset ?: 0)
+        browse.fillWrapper(model, principal.requireWorkspace().id, lens.viewFor(principal), q, offset ?: 0, bucket)
         return LIST_VIEW
     }
 

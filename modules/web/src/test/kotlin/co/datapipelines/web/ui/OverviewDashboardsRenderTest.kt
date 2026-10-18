@@ -155,7 +155,7 @@ class OverviewDashboardsRenderTest {
     private fun through(dashboards: DashboardRepository): OverviewPage {
         val workspace = UUID.randomUUID()
         val inventory = UiConfig().familyInventory(mockk(), mockk(), dashboards, mockk(), mockk())
-        val recent = UiConfig().familyRecent(mockk(), mockk(), dashboards)
+        val recent = UiConfig().familyRecent(mockk(), mockk(), dashboards, mockk())
         return OverviewPage.of(
             OverviewPage.Family.DASHBOARDS,
             false,

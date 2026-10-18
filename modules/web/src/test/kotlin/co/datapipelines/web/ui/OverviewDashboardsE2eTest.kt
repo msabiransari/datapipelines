@@ -475,7 +475,12 @@ class OverviewDashboardsE2eTest {
 
         @Bean
         fun recent(jdbc: NamedParameterJdbcTemplate): FamilyRecent =
-            UiConfig().familyRecent(PipelineRepository(jdbc), TemplateRepository(jdbc), DashboardRepository(jdbc))
+            UiConfig().familyRecent(
+                PipelineRepository(jdbc),
+                TemplateRepository(jdbc),
+                DashboardRepository(jdbc),
+                VisualizationRepository(jdbc),
+            )
 
         @Bean
         fun inventory(jdbc: NamedParameterJdbcTemplate): FamilyInventory =
