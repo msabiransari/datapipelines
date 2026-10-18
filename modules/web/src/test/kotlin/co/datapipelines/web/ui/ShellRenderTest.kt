@@ -561,7 +561,7 @@ class ShellRenderTest {
 
     /** #554 (record §3 rule 7): the folder button is named for the family it reveals. */
     @Test
-    fun `the top bar's folder button is named for the active family`() {
+    fun `the top bar's browser opener has desktop and phone glyphs and the active family's name`() {
         listOf(
             "/pipelines" to "Pipelines",
             "/templates/x" to "Templates",
@@ -581,7 +581,11 @@ class ShellRenderTest {
             button shouldContain "aria-controls=\"app-browser\""
             button shouldContain "aria-label=\"Browse $label\" title=\"Browse $label\""
             button shouldNotContain "hidden"
-            html.substringAfter("id=\"browser-open\"").substringBefore("</button>") shouldContain "lucide-sprite.svg#folder"
+            val content = html.substringAfter("id=\"browser-open\"").substringBefore("</button>")
+            content shouldContain "lucide-sprite.svg#chevron-right"
+            content shouldContain "lucide-sprite.svg#folder"
+            Regex("app-browser-open-desktop").findAll(content).count() shouldBe 1
+            Regex("app-browser-open-phone").findAll(content).count() shouldBe 1
         }
     }
 

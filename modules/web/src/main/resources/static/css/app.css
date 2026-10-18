@@ -1844,7 +1844,7 @@ button.app-busy::after {
   color: var(--text-primary);
 }
 
-/* #554 — the resource browser's opener, the folder button ("Browse <Family>"): on a
+/* #554 — the resource browser's opener, the chevron / phone folder button ("Browse <Family>"): on a
    desktop it is lit only while the user has hidden a family page's browser (record §3
    rule 7); at 760px and below it is the Browse resources drawer's opener (the phone
    section). `[hidden]` on a non-family page outranks both. */
@@ -1866,7 +1866,17 @@ button.app-busy::after {
   color: var(--text-primary);
 }
 
+/* #578 — one button, two glyphs: the chevron-right on a desktop, the folder at 760px and
+   below (the phone section swaps them). */
+.app-browser-open-phone {
+  display: none;
+}
+
 @media (min-width: 761px) {
+  .app-browser-open {
+    margin-inline: calc(-1 * var(--gap-sm)) var(--gap-sm);
+  }
+
   :root.browser-hidden .app-browser-open:not([hidden]) {
     display: grid;
   }
@@ -3912,6 +3922,14 @@ button.app-busy::after {
   .app-rail-open,
   .app-browser-open:not([hidden]) {
     display: grid;
+  }
+
+  .app-browser-open-desktop {
+    display: none;
+  }
+
+  .app-browser-open-phone {
+    display: block;
   }
 
   .app-browser-boundary,

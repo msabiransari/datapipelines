@@ -28,6 +28,14 @@ class ShellColumnsBrowserTest : RestTreeBrowserFixture() {
             })""",
         ) as Map<*, *>
 
+    /** SVG has no offsetParent in Chromium; the rendered SVG box identifies the visible glyph. */
+    private fun visibleOpenerGlyph(): Any? =
+        page.evaluate(
+            """() => Array.from(document.querySelectorAll('#browser-open svg'))
+              .filter(svg => getComputedStyle(svg).display !== 'none' && svg.getClientRects().length > 0)
+              .map(svg => svg.querySelector('use').getAttribute('href').split('#')[1])""",
+        )
+
     @Test
     fun `a deep folder expansion moves no menu item and leaves the menu width identical`() {
         readyTree()
@@ -71,6 +79,12 @@ class ShellColumnsBrowserTest : RestTreeBrowserFixture() {
         page.evaluate("ws => localStorage.getItem('dp-browser-hidden:' + ws)", workspace) shouldBe "1"
         page.locator("#browser-open").getAttribute("aria-label") shouldBe "Browse Pipelines"
         page.locator("#browser-open").getAttribute("aria-expanded") shouldBe "false"
+        page.locator("#browser-open").isVisible shouldBe true
+        visibleOpenerGlyph() shouldBe listOf("chevron-right")
+        page.evaluate(
+            """() => Math.abs(document.getElementById('browser-open').getBoundingClientRect().left -
+              document.getElementById('app-main').getBoundingClientRect().left) <= 16""",
+        ) shouldBe true
         // The menu's collapse while the browser is hidden does not bring it back, and vice versa.
         page.click("#rail-collapse")
         page.locator("#app-browser").isVisible shouldBe false
@@ -78,7 +92,8 @@ class ShellColumnsBrowserTest : RestTreeBrowserFixture() {
         page.click("#rail-collapse")
         menuWidth() shouldBe 202
         rail() shouldBe listOf("0", false)
-        page.click("#browser-open")
+        page.focus("#browser-open")
+        page.keyboard().press("Enter")
         page.locator("#app-browser").isVisible shouldBe true
         width() shouldBe 300
         page.evaluate("() => document.activeElement.matches('#nav-tree-pipelines input[type=search]')") shouldBe true
@@ -87,6 +102,54 @@ class ShellColumnsBrowserTest : RestTreeBrowserFixture() {
         page.evaluate("ws => localStorage.getItem('dp-browser-hidden:' + ws)", workspace) shouldBe null
         page.url() shouldBe url
         requests shouldBe emptyList()
+    }
+
+    @Test
+    fun `family menu navigation reveals Hide with one boosted GET and the active family click reveals it again`() {
+        readyTree()
+        openTree()
+        val workspace = page.evaluate("() => document.documentElement.dataset.dpWorkspace") as String
+        val boosted = mutableListOf<String>()
+        val documents = mutableListOf<String>()
+        page.onRequest { request ->
+            if (request.resourceType() == "document") documents += request.url()
+            if (request.method() == "GET" && request.headers()["hx-request"] == "true") {
+                boosted += request.url()
+            }
+        }
+        page.click("#browser-hide")
+        page.evaluate("ws => localStorage.getItem('dp-browser-hidden:' + ws)", workspace) shouldBe "1"
+        page.click("#app-rail .app-nav-link[data-nav-section='/templates']")
+        page.waitForURL("**/templates")
+        page.waitForFunction("() => document.querySelector('#app-browser-title [data-browser-family=templates]:not([hidden])') !== null")
+        settle()
+        page.locator("#app-browser").isVisible shouldBe true
+        page.locator("#app-browser-title [data-browser-family=templates]").innerText() shouldBe "Templates"
+        width() shouldBe 300
+        mainWidth() shouldBe 1440 - 202 - 300
+        page.evaluate("ws => localStorage.getItem('dp-browser-hidden:' + ws)", workspace) shouldBe null
+        boosted.size shouldBe 1
+        boosted.single().substringBefore('?').endsWith("/templates") shouldBe true
+        documents shouldBe emptyList()
+
+        page.click("#browser-hide")
+        page.click("#app-rail .app-nav-link[data-nav-section='/templates']")
+        page.waitForFunction("() => !document.documentElement.classList.contains('browser-hidden')")
+        page.locator("#app-browser").isVisible shouldBe true
+        page.evaluate("ws => localStorage.getItem('dp-browser-hidden:' + ws)", workspace) shouldBe null
+
+        // A future overview href must not change how the click identifies a family (#556).
+        page.click("#browser-hide")
+        page.evaluate(
+            """() => {
+              const link = document.querySelector('#app-rail .app-nav-link[data-nav-section="/pipelines"]');
+              link.setAttribute('href', '/overview/pipelines');
+              link.addEventListener('click', event => event.preventDefault(), {once: true});
+            }""",
+        )
+        page.click("#app-rail .app-nav-link[data-nav-section='/pipelines']")
+        page.waitForFunction("() => !document.documentElement.classList.contains('browser-hidden')")
+        page.evaluate("ws => localStorage.getItem('dp-browser-hidden:' + ws)", workspace) shouldBe null
     }
 
     @Test
@@ -136,6 +199,7 @@ class ShellColumnsBrowserTest : RestTreeBrowserFixture() {
         val open = { page.evaluate("() => ['rail-open', 'browser-open'].filter(c => document.documentElement.classList.contains(c))") }
         open() shouldBe emptyList<String>()
         page.locator("[inert]").count() shouldBe 0
+        visibleOpenerGlyph() shouldBe listOf("folder")
 
         page.click("#rail-open")
         open() shouldBe listOf("rail-open")
