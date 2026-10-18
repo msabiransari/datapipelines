@@ -509,7 +509,10 @@ class MailNoticesE2eTest {
         private const val STREAM = "outbound"
 
         private val CSRF_FIELD = Regex("""name="_csrf" value="([^"]+)"""")
-        private val ONE_TIME_PASSWORD = Regex("""([A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4})""")
+
+        // A whole token only (#616): unanchored, a v4 UUID's digit-only segments ("-2345-4678-9234-")
+        // matched it one id in 668, and the create page renders the new user's id.
+        private val ONE_TIME_PASSWORD = Regex("""(?<![0-9A-Za-z-])([A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4})(?![0-9A-Za-z-])""")
 
         /**
          * #317 — every identity the suite authenticates with or delivers to, provisioned at
