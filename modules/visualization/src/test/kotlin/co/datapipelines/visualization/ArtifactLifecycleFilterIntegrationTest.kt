@@ -126,8 +126,8 @@ class ArtifactLifecycleFilterIntegrationTest {
         val both = repository.listIn(WORKSPACE, LifecycleBucket.RELEASED_ONLY, all, null).single { it.record.name.endsWith("/both") }
         both.detail.version shouldBe 1
         // Unlensed, a discarded-only row (NULL pointer, no draft) lists its newest version.
-        repository.listIn(WORKSPACE, LifecycleBucket.DISCARDED_ONLY, null, null).single().detail.status shouldBe
-            PipelineVersionStatus.DISCARDED
+        val discarded = repository.listIn(WORKSPACE, LifecycleBucket.DISCARDED_ONLY, null, null).single()
+        discarded.detail.status shouldBe PipelineVersionStatus.DISCARDED
     }
 
     /**
