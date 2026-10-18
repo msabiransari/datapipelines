@@ -82,7 +82,7 @@ class PipelineUiControllerTest {
         stubCatalog(pipeline("legacy_flat"), pipeline("nyc/mobility/alpha"))
 
         val model = ExtendedModelMap()
-        val viewName = controller.list(model, mockk(), null, null)
+        val viewName = controller.list(model, mockk(), null, null, null)
 
         viewName shouldBe "pipelines/list"
         model["activeTheme"] shouldBe "saas"
@@ -106,7 +106,7 @@ class PipelineUiControllerTest {
         every { repository.findDrafts(any(), any()) } returns emptyMap()
 
         val model = ExtendedModelMap()
-        controller.list(model, mockk(), "beta", null)
+        controller.list(model, mockk(), "beta", null, null)
 
         model["searching"] shouldBe true
         @Suppress("UNCHECKED_CAST")
@@ -130,7 +130,7 @@ class PipelineUiControllerTest {
         every { repository.findDrafts(any(), any()) } returns emptyMap()
 
         val model = ExtendedModelMap()
-        controller.list(model, mockk(), "bravo", null)
+        controller.list(model, mockk(), "bravo", null, null)
 
         @Suppress("UNCHECKED_CAST")
         (model["pipelines"] as List<PipelineRecord>) shouldHaveSize 2
@@ -142,7 +142,7 @@ class PipelineUiControllerTest {
         every { themeResolver.resolve(any()) } returns "saas"
         stubCatalog()
 
-        controller.list(ExtendedModelMap(), mockk(), "   ", null)
+        controller.list(ExtendedModelMap(), mockk(), "   ", null, null)
 
         verify(exactly = 0) { repository.findAll(workspaceId) }
         verify(exactly = 1) { repository.findAll(workspaceId, null, pageSize + 1, 0) }
@@ -155,7 +155,7 @@ class PipelineUiControllerTest {
         stubCatalog()
 
         val model = ExtendedModelMap()
-        controller.list(model, mockk(), null, -5)
+        controller.list(model, mockk(), null, -5, null)
 
         model["offset"] shouldBe 0
     }
@@ -167,7 +167,7 @@ class PipelineUiControllerTest {
         stubCatalog()
 
         val model = ExtendedModelMap()
-        controller.list(model, mockk(), null, null)
+        controller.list(model, mockk(), null, null, null)
 
         // The dead `scopes` attribute went with the scopes (#215 PK8); `RoleModel`'s booleans
         // are what the templates read.
@@ -181,7 +181,7 @@ class PipelineUiControllerTest {
         stubCatalog()
 
         val model = ExtendedModelMap()
-        controller.list(model, mockk(), null, null)
+        controller.list(model, mockk(), null, null, null)
 
         model["total"] shouldBe 0
         model["hasMore"] shouldBe false

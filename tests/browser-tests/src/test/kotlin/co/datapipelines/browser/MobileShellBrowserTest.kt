@@ -111,13 +111,13 @@ class MobileShellBrowserTest : BrowserSuite() {
 
         // A boosted navigation from a drawer link must not survive the swap: the
         // drawer closes when the new screen lands (htmx:afterSettle) and the URL
-        // is /pipelines.
+        // is the Pipelines overview (#556: the menu item links /overview/pipelines).
         page.locator("#rail-open").click()
         page.locator("html.rail-open").waitFor()
-        page.locator("nav.app-nav a[href='/pipelines']").first().click()
+        page.locator("nav.app-nav a[data-nav-section='/pipelines']").first().click()
         page.waitForURL("**/pipelines")
         waitForDrawerClosed()
-        page.url() shouldContain "/pipelines"
+        page.url() shouldContain "/overview/pipelines"
     }
 
     @Test

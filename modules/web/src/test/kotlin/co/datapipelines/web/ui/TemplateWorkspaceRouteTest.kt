@@ -46,6 +46,9 @@ class TemplateWorkspaceRouteTest {
     private val catalog: PathPattern = parser.parse("/templates")
     private val editor: PathPattern = parser.parse("/templates/editor")
 
+    /** #556 — the Templates overview, outside the family's prefix (OverviewController). */
+    private val overview: PathPattern = parser.parse(OVERVIEW_PATTERN)
+
     private data class Routed(
         val pattern: PathPattern?,
         val name: String?,
@@ -54,7 +57,7 @@ class TemplateWorkspaceRouteTest {
     /** Spring's own routing: the most specific matching pattern (the comparator sorts more-specific-first). */
     private fun route(path: String): Routed {
         val container = PathContainer.parsePath(path)
-        val candidates = listOf(catalog, editor, canonical).filter { it.matches(container) }
+        val candidates = listOf(catalog, editor, canonical, overview).filter { it.matches(container) }
         val best = candidates.minWithOrNull(PathPattern.SPECIFICITY_COMPARATOR)
         val name = best?.matchAndExtract(container)?.uriVariables?.get("name")
         return Routed(best, name)
@@ -117,6 +120,20 @@ class TemplateWorkspaceRouteTest {
         hit.name shouldBe "/../secret"
     }
 
+    /**
+     * #556 — the overview lives at `/overview/templates`, so the capture-everything pattern never
+     * sees it, and a template NAMED like an overview is still the capture's: the two cannot shadow
+     * each other in either direction. `OverviewE2eTest` asserts the request reaches the overview.
+     */
+    @Test
+    fun `the templates overview is its own route and never a captured name`() {
+        route("/overview/templates").pattern shouldBe overview
+        route("/overview/templates").name shouldBe null
+        route("/templates/overview/templates").pattern shouldBe canonical
+        route("/templates/overview/templates").name shouldBe "/overview/templates"
+        route("/overview/templates/x").pattern shouldBe null
+    }
+
     @Test
     fun `the capture-everything pattern is the least specific of the family`() {
         PathPattern.SPECIFICITY_COMPARATOR.compare(canonical, catalog) shouldNotBe 0
@@ -127,5 +144,8 @@ class TemplateWorkspaceRouteTest {
     private companion object {
         /** What the workspace controller maps — the doc's §7.6 spelling is this string. */
         const val CANONICAL_PATTERN = "/templates/{*name}"
+
+        /** What OverviewController maps for the Templates family. */
+        const val OVERVIEW_PATTERN = "/overview/templates"
     }
 }

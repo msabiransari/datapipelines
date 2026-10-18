@@ -31,6 +31,11 @@ test("the active-section rule mirrors the server: Dashboard exact, others by pre
   // /admin is the section prefix even though the link's href is /admin/users.
   assert.equal(shell.isActiveSection("/admin", "/admin/users"), true);
   assert.equal(shell.isActiveSection("/pipelines", "/templates"), false);
+  // #556: a family's overview is that family's page; another family's overview is not.
+  assert.equal(shell.isActiveSection("/pipelines", "/overview/pipelines"), true);
+  assert.equal(shell.isActiveSection("/parameter-sets", "/overview/parameter-sets"), true);
+  assert.equal(shell.isActiveSection("/pipelines", "/overview/templates"), false);
+  assert.equal(shell.isActiveSection("/dashboard", "/overview/dashboards"), false);
   assert.equal(shell.isActiveSection(null, "/pipelines"), false);
   assert.equal(shell.isActiveSection("/pipelines", null), false);
 });

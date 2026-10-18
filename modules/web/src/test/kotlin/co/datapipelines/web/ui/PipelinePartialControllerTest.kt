@@ -43,7 +43,7 @@ class PipelinePartialControllerTest {
     private fun list(
         q: String?,
         offset: Int?,
-    ): String = controller.list(model, q, offset)
+    ): String = controller.list(model, q, offset, null)
 
     @AfterEach
     fun clearContext() = SecurityContextHolder.clearContext()
@@ -231,7 +231,7 @@ class PipelinePartialControllerTest {
             listOf(record("nyc/mobility/admitted"), record("nyc/mobility/hidden"), record("trade/hidden"))
         every { repository.findDrafts(workspaceId, any()) } returns emptyMap()
 
-        lensed.list(model, q = "nyc/mobility", offset = 0)
+        lensed.list(model, q = "nyc/mobility", offset = 0, lifecycle = null)
 
         // The rows are the lens's answer — the hidden ones are absent from the model, not
         // rendered and left to CSS.

@@ -58,8 +58,23 @@ class ListPartialsRenderTest {
 
         html shouldContain "hx-target=\"#pipeline-list-wrapper\""
         html shouldContain "hx-swap=\"outerHTML\""
-        html shouldContain "hx-get=\"/partials/pipelines?q=&amp;offset=-25\""
-        html shouldContain "hx-get=\"/partials/pipelines?q=&amp;offset=25\""
+        // #556: the pager carries the lifecycle filter beside the search; empty is no filter.
+        html shouldContain "hx-get=\"/partials/pipelines?q=&amp;lifecycle=&amp;offset=-25\""
+        html shouldContain "hx-get=\"/partials/pipelines?q=&amp;lifecycle=&amp;offset=25\""
+    }
+
+    @Test
+    fun `the pipelines pager keeps the lifecycle filter it pages`() {
+        val html =
+            engine.process(
+                "partials/pipelines",
+                webContext().apply {
+                    fillPipelinesModel(listOf(pipelineRecord()))
+                    setVariable("lifecycle", "with-drafts")
+                },
+            )
+
+        html shouldContain "hx-get=\"/partials/pipelines?q=&amp;lifecycle=with-drafts&amp;offset=25\""
     }
 
     @Test
