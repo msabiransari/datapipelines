@@ -90,6 +90,25 @@ class ShellSurfacesBrowserTest : DashboardBrowserSuite() {
     }
 
     @Test
+    fun `shared tab strip specimens paint the decorative baseline`() {
+        startTrace()
+        ready("tabs606")
+        page.navigate("$baseUrl/pipelines")
+        // Isolated specimens measure the shared CSS without seeding unrelated resource workflows.
+        val rows = page.evaluate(SHARED_TABS) as List<*>
+        rows.size shouldBe SHARED_TAB_COUNT
+        assertSoftly {
+            for (row in rows) {
+                val m = row as Map<*, *>
+                withClue(m.toString()) {
+                    m["actual"] shouldBe m["expected"]
+                    m["width"] shouldBe "1px"
+                }
+            }
+        }
+    }
+
+    @Test
     fun `the overview catalog and editor are photographed in expanded compact and phone modes`() {
         startTrace()
         val root = ready("shots606")
@@ -138,6 +157,31 @@ class ShellSurfacesBrowserTest : DashboardBrowserSuite() {
         const val PHONE_WIDTH = 390
         const val WIDE_WIDTH = 1920
         const val REVIEW_HEIGHT = 982
+        const val SHARED_TAB_COUNT = 3
+
+        val SHARED_TABS =
+            """
+            async () => {
+              for (const file of ['dashboards.css', 'template-tree.css', 'pipeline-editor.css']) {
+                await new Promise((resolve, reject) => {
+                  const link = document.createElement('link'); link.rel = 'stylesheet';
+                  link.href = '/css/' + file; link.onload = resolve; link.onerror = reject;
+                  document.head.appendChild(link);
+                });
+              }
+              const probe = document.createElement('span'); probe.style.color = 'var(--app-line-decorative)';
+              document.body.appendChild(probe);
+              const expected = getComputedStyle(probe).color;
+              const result = ['dp-ws-tabs', 'tplx-tabs', 'pe-dock-tabs'].map(name => {
+                const el = document.createElement('div'); el.className = name;
+                document.querySelector('#app-main').appendChild(el);
+                const cs = getComputedStyle(el);
+                const row = { name, actual: cs.borderBottomColor, width: cs.borderBottomWidth, expected };
+                el.remove(); return row;
+              });
+              probe.remove(); return result;
+            }
+            """.trimIndent()
 
         val SWAP_THEME =
             """
@@ -184,6 +228,7 @@ class ShellSurfacesBrowserTest : DashboardBrowserSuite() {
                 ['.app-avatar', 'Top', null],
                 ['.app-kbd', 'Top', '--app-line-decorative'],
                 ['.app-browser-head', 'Bottom', '--app-line-decorative'],
+                ['.app-browser-foot', 'Top', '--app-line-decorative'],
                 ['.app-rail-foot', 'Top', '--app-line-decorative'],
                 ['.app-topbar', 'Bottom', '--app-line-decorative'],
                 ['.app-ws', 'Top', '--border-default'],
