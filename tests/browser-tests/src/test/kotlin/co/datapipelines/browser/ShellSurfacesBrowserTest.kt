@@ -65,18 +65,19 @@ class ShellSurfacesBrowserTest : DashboardBrowserSuite() {
                     ".map(e => e.dataset.mode || e.dataset.swatch)",
             ) as List<*>
         themes.isNotEmpty() shouldBe true
-        val measurements = themes.associateWith { theme ->
-            page.evaluate(SWAP_THEME, theme)
-            // The input transitions its border when the stylesheet swaps; wait on that animation.
-            page.evaluate(
-                """() => Promise.all(document.getAnimations()
-                  .filter(a => a.effect.getTiming().iterations !== Infinity).map(a => a.finished))""",
-            )
-            val rows = page.evaluate(EDGES) as List<*>
-            rows.isNotEmpty() shouldBe true
-            println("606-edges|$theme|$rows")
-            rows
-        }
+        val measurements =
+            themes.associateWith { theme ->
+                page.evaluate(SWAP_THEME, theme)
+                // The input transitions its border when the stylesheet swaps; await that animation.
+                page.evaluate(
+                    """() => Promise.all(document.getAnimations()
+                      .filter(a => a.effect.getTiming().iterations !== Infinity).map(a => a.finished))""",
+                )
+                val rows = page.evaluate(EDGES) as List<*>
+                rows.isNotEmpty() shouldBe true
+                println("606-edges|$theme|$rows")
+                rows
+            }
         assertSoftly {
             for ((theme, rows) in measurements) {
                 for (row in rows) {
@@ -89,6 +90,46 @@ class ShellSurfacesBrowserTest : DashboardBrowserSuite() {
                 }
             }
         }
+    }
+
+    @Test
+    fun `the overview catalog and editor are photographed in expanded compact and phone modes`() {
+        startTrace()
+        val root = ready("shots606")
+        ensureTheme("dark")
+        val id =
+            page.evaluate(
+                """async name => {
+                  const csrf = document.cookie.match(/(?:^|\s*)dp_csrf=([^;]*)/);
+                  const response = await fetch('/api/v1/pipelines', { method: 'POST', credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json',
+                      'DP-CSRF-Token': csrf ? decodeURIComponent(csrf[1]) : '' },
+                    body: JSON.stringify({name, display_name: 'Revenue by borough', nodes: [{id: 'quarter',
+                      type: 'CALCULATOR', kind: 'fiscal_quarter', context_key: 'run_quarter',
+                      inputs: {date: '${'$'}current_date', fiscal_start: '${'$'}org_fiscal_start_date'}}]}) });
+                  if (response.status !== 201) throw new Error('fixture refused: ' + response.status);
+                  return (await response.json()).data.id;
+                }""",
+                "$root/mobility/revenue_by_borough",
+            ) as String
+        page.setViewportSize(DESKTOP_WIDTH, REVIEW_HEIGHT)
+        for ((name, path) in listOf("overview" to "/overview/pipelines", "catalog" to "/pipelines", "editor" to "/pipelines/$id")) {
+            page.navigate("$baseUrl$path")
+            page.locator(if (name == "editor") ".pe-root" else "#app-main").waitFor()
+            photograph("$name-expanded")
+        }
+        page.navigate("$baseUrl/overview/pipelines")
+        page.click("#rail-collapse")
+        page.waitForFunction("() => document.documentElement.classList.contains('rail-collapsed')")
+        photograph("overview-compact")
+        page.setViewportSize(PHONE_WIDTH, REVIEW_HEIGHT)
+        photograph("overview-phone")
+    }
+
+    private fun photograph(name: String) {
+        page.evaluate("() => document.fonts.ready")
+        val directory = Paths.get("build", "reports", "606-shell-surfaces").also { it.toFile().mkdirs() }
+        page.screenshot(Page.ScreenshotOptions().setPath(directory.resolve("$name.png")))
     }
 
     private companion object {
