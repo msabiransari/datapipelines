@@ -2,13 +2,15 @@
 <html xmlns:th="http://www.thymeleaf.org"
       th:replace="~{layouts/default :: page(~{::content})}">
 <th:block th:fragment="content">
-  <!--/* #556 — a family overview (ui-screens.md §4.25; shell design §8), ONE template for all five
+  <!--/* #556 — a family overview (ui-screens.md §4.25; shell design §8), ONE template for all
        families over `overview` (OverviewController, OverviewPage). Hierarchy: heading, workspace
-       line and View all; the inventory (four counts, four bars, a table twin); then, for a family
-       whose guide is written (`overview/guide-<family>.html`), What this is for and Create with
-       your agent; Continue your work where the family has a Recently updated adapter; related
-       families and help from the guide. Every number on the page is read from `o.inventory`,
-       one value built from one inventory read, so the chart cannot disagree with its totals. */-->
+       line and View all; the inventory (counts, then the panel's charts, each with its table
+       twin); then, for a family whose guide is written (`overview/guide-<family>.html`), What
+       this is for and Create with your agent; Continue your work where the family has a recent
+       adapter; related families and help from the guide. Every number on the page is read from
+       `o.inventory` and `o.recent`, the values the page's controller built, so a chart cannot
+       disagree with its totals. #583 generalized the frame: the panel's charts and the recent
+       card's sections are lists — the five lifecycle families build one of each. */-->
   <div class="app-overview" th:with="o=${overview}" th:attr="data-overview=${o.family}">
     <template data-page-assets th:if="${o.guided}">
       <script type="module" th:src="@{/js/overview.mjs}"></script>
@@ -49,32 +51,40 @@
               <dd class="app-overview-count-help" th:text="${c.help}">Each counted once.</dd>
             </div>
           </dl>
-          <!--/* Four labelled bars: numbers outside the bars, widths as SVG attributes (the CSP
+          <!--/* #583: the panel's charts, one loop — most families carry the one lifecycle chart,
+               a family whose inventory reads differently carries its own. Each chart's caption
+               names it everywhere words go (the list's aria-label, the hidden table's caption);
+               a chart's note is the caveat sentence under its bars, absent when the model
+               passes none. Bars: numbers outside the bars, widths as SVG attributes (the CSP
                admits no style), a zero is a zero-width rect beside its "0". The visually hidden
-               table repeats the four rows for assistive technology, in the house frame (§3.7). */-->
-          <ul class="app-overview-chart" aria-label="Objects by lifecycle" data-overview-chart>
-            <li class="app-overview-bar" th:each="b : ${inv.bars}" th:attr="data-bar=${b.key}, data-tone=${b.tone}">
-              <span class="app-overview-bar-name">
-                <a th:if="${b.href != null}" hx-boost="true" th:href="@{${b.href}}" th:text="${b.name}">Draft only</a>
-                <th:block th:if="${b.href == null}" th:text="${b.name}">Discarded only</th:block>
-              </span>
-              <svg class="app-overview-bar-track" viewBox="0 0 100 1" preserveAspectRatio="none"
-                   role="img" th:attr="aria-label=${b.label}"><rect class="app-overview-bar-fill"
-                   x="0" y="0" height="1" th:attr="width=${b.width}"></rect></svg>
-              <span class="app-overview-bar-v" th:text="${b.value}">0</span>
-            </li>
-          </ul>
-          <div class="dt-frame app-visually-hidden">
-            <div class="dt-viewport" tabindex="-1">
-              <table class="ds-table" data-overview-table>
-                <caption th:text="${o.title + ' by lifecycle'}">Pipelines by lifecycle</caption>
-                <thead><tr><th scope="col">Lifecycle</th><th scope="col">Objects</th></tr></thead>
-                <tbody>
-                  <tr th:each="b : ${inv.bars}"><th scope="row" th:text="${b.name}">Draft only</th><td th:text="${b.value}">0</td></tr>
-                </tbody>
-              </table>
+               table repeats each chart's rows for assistive technology, in the house frame
+               (§3.7). */-->
+          <th:block th:each="chart : ${inv.charts}">
+            <ul class="app-overview-chart" th:attr="aria-label=${chart.caption}, data-chart=${chart.key}" data-overview-chart>
+              <li class="app-overview-bar" th:each="b : ${chart.bars}" th:attr="data-bar=${b.key}, data-tone=${b.tone}">
+                <span class="app-overview-bar-name">
+                  <a th:if="${b.href != null}" hx-boost="true" th:href="@{${b.href}}" th:text="${b.name}">Draft only</a>
+                  <th:block th:if="${b.href == null}" th:text="${b.name}">Discarded only</th:block>
+                </span>
+                <svg class="app-overview-bar-track" viewBox="0 0 100 1" preserveAspectRatio="none"
+                     role="img" th:attr="aria-label=${b.label}"><rect class="app-overview-bar-fill"
+                     x="0" y="0" height="1" th:attr="width=${b.width}"></rect></svg>
+                <span class="app-overview-bar-v" th:text="${b.value}">0</span>
+              </li>
+            </ul>
+            <p class="app-card-note" th:if="${chart.note != null}" th:text="${chart.note}">Chart note</p>
+            <div class="dt-frame app-visually-hidden">
+              <div class="dt-viewport" tabindex="-1">
+                <table class="ds-table" th:attr="data-chart-table=${chart.key}" data-overview-table>
+                  <caption th:text="${chart.caption}">Pipelines by lifecycle</caption>
+                  <thead><tr><th scope="col" th:each="h : ${chart.headings}" th:text="${h}">Lifecycle</th></tr></thead>
+                  <tbody>
+                    <tr th:each="b : ${chart.bars}"><th scope="row" th:text="${b.name}">Draft only</th><td th:text="${b.value}">0</td></tr>
+                  </tbody>
+                </table>
+              </div>
             </div>
-          </div>
+          </th:block>
         </th:block>
       </div>
     </section>
@@ -89,25 +99,31 @@
       <section class="ds-card" th:if="${o.recent != null}" aria-labelledby="overview-recent-h" data-overview-recent>
         <div class="app-card-h">
           <h2 class="ds-title" id="overview-recent-h">Continue your work</h2>
-          <a class="ds-button ds-button-ghost ds-button-sm" hx-boost="true" th:href="@{${o.recent.reviewHref}}"
-             data-overview-review>Review drafts</a>
+          <!--/* #583: the card's one action, when the model carries one — a family whose catalog
+               offers no filter for it renders no dead link. */-->
+          <a class="ds-button ds-button-ghost ds-button-sm" hx-boost="true" th:if="${o.recent.review != null}"
+             th:href="@{${o.recent.review.href}}" th:text="${o.recent.review.label}" data-overview-review>Review drafts</a>
         </div>
         <div class="app-card-b">
-          <h3 class="app-overview-sub">Recently updated</h3>
-          <p class="app-card-note">The latest changes in this workspace, newest first. Not a personal history.</p>
-          <p th:if="${o.recent.entries == null}" class="app-overview-unavailable" role="status">
-            <b>Recently updated is unavailable.</b> <span th:text="${o.recent.unavailable}">Recently updated could not be read.</span>
-          </p>
-          <p th:if="${o.recent.entries != null and #lists.isEmpty(o.recent.entries)}" class="app-card-note" data-overview-recent-empty>
-            Nothing here yet. The starter prompt above is a good first step.
-          </p>
-          <ul class="app-overview-recent" th:if="${o.recent.entries != null and !#lists.isEmpty(o.recent.entries)}">
-            <li th:each="r : ${o.recent.entries}">
-              <a hx-boost="true" th:href="@{${r.href}}" th:text="${r.name}" th:title="${r.name}">nyc/mobility/revenue_by_borough</a>
-              <span class="ds-badge ds-badge-warning" th:if="${r.hasDraft}">draft</span>
-              <time th:attr="datetime=${r.datetime}" th:title="${r.absolute}" th:text="${r.ago}">3 hours ago</time>
-            </li>
-          </ul>
+          <!--/* #583: the card's sections, one loop — heading, note, and then exactly one of:
+               the unavailable line (the read failed; entries are null), the empty note (the read
+               answered and found nothing), or the rows. */-->
+          <th:block th:each="s : ${o.recent.sections}">
+            <h3 class="app-overview-sub" th:text="${s.heading}">Recently updated</h3>
+            <p class="app-card-note" th:if="${s.note != null}" th:text="${s.note}">The latest changes in this workspace, newest first.</p>
+            <p th:if="${s.entries == null}" class="app-overview-unavailable" role="status">
+              <b th:text="${s.heading + ' is unavailable.'}">Recently updated is unavailable.</b> <span th:text="${s.unavailable}">Recently updated could not be read.</span>
+            </p>
+            <p th:if="${s.entries != null and #lists.isEmpty(s.entries)}" class="app-card-note" data-overview-recent-empty
+               th:text="${s.emptyNote}">Nothing here yet. The starter prompt above is a good first step.</p>
+            <ul class="app-overview-recent" th:if="${s.entries != null and !#lists.isEmpty(s.entries)}">
+              <li th:each="r : ${s.entries}">
+                <a hx-boost="true" th:href="@{${r.href}}" th:text="${r.name}" th:title="${r.name}">nyc/mobility/revenue_by_borough</a>
+                <span class="ds-badge ds-badge-warning" th:if="${r.hasDraft}">draft</span>
+                <time th:attr="datetime=${r.datetime}" th:title="${r.absolute}" th:text="${r.ago}">3 hours ago</time>
+              </li>
+            </ul>
+          </th:block>
         </div>
       </section>
       <th:block th:if="${o.guided}">
