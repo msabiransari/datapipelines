@@ -265,7 +265,9 @@ class ParameterSetRepository(
      * #582: with a [lifecycle] the bucket's membership REPLACES the liveness predicate
      * ([InventorySource.membership], `PipelineRepository.findAll`'s rule) — the rows are then exactly
      * the sets the unrestricted inventory counts in that bucket. The everything lens's read only: a
-     * narrowing lens reads [findMembers].
+     * narrowing lens reads [findMembers]. [LifecycleBucket.DISCARDED_ONLY] is counted by [countAll] but
+     * lists no row here: such a set has no listed version (no pointer, no draft) and no page, which is
+     * why the catalog does not offer it.
      */
     fun listAll(
         workspaceId: UUID,
