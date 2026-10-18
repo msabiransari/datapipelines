@@ -38,6 +38,44 @@ class InventorySourceTest {
         }
     }
 
+    /**
+     * #556 — the catalog's lifecycle condition computes the SAME three flags as the inventory's
+     * statement (the aggregate's text is unchanged, so the flags are spelled twice; this pins the two
+     * spellings equal), over the same admitted versions, and reads the bucket's own predicate.
+     */
+    @ParameterizedTest
+    @EnumSource(NavigationFamily::class)
+    fun `the lifecycle membership reads the inventory's flags and the bucket's predicate`(family: NavigationFamily) {
+        val normalize = { text: String -> text.replace(Regex("\\s+"), " ").trim() }
+        val inventoryFlags = normalize(InventorySource.sql(family, narrowed = false).substringAfter("SELECT ").substringBefore(" FROM "))
+        LifecycleBucket.entries.forEach { bucket ->
+            listOf(false, true).forEach { narrowed ->
+                val condition = InventorySource.membership(family, "t", bucket, narrowed)
+                normalize(condition.substringAfter("SELECT 1 FROM (SELECT ").substringBefore(" FROM ")) shouldBe inventoryFlags
+                condition shouldContain "WHERE v.${family.foreignKey} = t.id"
+                condition shouldContain ") a WHERE ${bucket.predicate})"
+                if (narrowed) condition shouldContain "AND v.status = 'RELEASED'" else condition shouldNotContain "AND v.status"
+                condition shouldNotContain ":"
+            }
+        }
+    }
+
+    @Test
+    fun `every lifecycle wire value names one bucket and nothing else does`() {
+        LifecycleBucket.entries.forEach { LifecycleBucket.ofWire(it.wire) shouldBe it }
+        listOf("", "DRAFT", "Draft", "draft ", "discarded-only", "' OR 1=1 --").forEach { LifecycleBucket.ofWire(it) shouldBe null }
+        val inventory = Inventory(1, 2, 3, 4)
+        LifecycleBucket.entries.associateWith { it.countIn(inventory) } shouldBe
+            mapOf(
+                LifecycleBucket.DRAFT_ONLY to 1L,
+                LifecycleBucket.RELEASED_ONLY to 2L,
+                LifecycleBucket.RELEASED_WITH_DRAFT to 3L,
+                LifecycleBucket.DISCARDED_ONLY to 4L,
+                LifecycleBucket.WITH_DRAFTS to 4L,
+                LifecycleBucket.WITH_RELEASES to 5L,
+            )
+    }
+
     @Test
     fun `random bucket arithmetic preserves distinct totals and overlapping draft release counts`() {
         val random = Random(553)

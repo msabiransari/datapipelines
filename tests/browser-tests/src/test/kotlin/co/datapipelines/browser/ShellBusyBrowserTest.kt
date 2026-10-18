@@ -338,11 +338,11 @@ class ShellBusyBrowserTest : BrowserSuite() {
         startTrace()
         loginReadyUser("orphan")
         page.navigate("$baseUrl/dashboard", domContentLoaded())
-        page.waitForSelector("a.app-nav-link[href='/pipelines']")
+        page.waitForSelector("a.app-nav-link[data-nav-section='/pipelines']")
         val hold = BoostHold("/pipelines").apply { install() }
         try {
             page.waitForRequest({ req -> req.url().endsWith("/pipelines") && req.headers()["hx-request"] == "true" }) {
-                page.click("a.app-nav-link[href='/pipelines']")
+                page.click("a.app-nav-link[data-nav-section='/pipelines']")
             }
             hold.awaitCaptured(1)
             // Past the arm: the skeleton exists, and it is INSIDE #app-main, not on body.
@@ -356,7 +356,7 @@ class ShellBusyBrowserTest : BrowserSuite() {
 
             page.goBack()
             page.waitForURL("**/dashboard")
-            page.waitForSelector("a.app-nav-link[href='/pipelines']")
+            page.waitForSelector("a.app-nav-link[data-nav-section='/pipelines']")
             page.locator(".app-target-skeleton").count() shouldBe 0
             page.locator("body[aria-busy='true']").count() shouldBe 0
             documentOverflow() shouldBe 0L

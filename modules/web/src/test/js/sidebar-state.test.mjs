@@ -11,8 +11,13 @@ test("each family's catalog and artifact pages belong to that family", () => {
   }
 });
 
+// #556 (record §3 rule 1): a family's overview opens that family's browser.
+test("each family's overview belongs to that family", () => {
+  for (const family of order) assert.equal(familyForPath(`/overview/${family}`, order), family);
+});
+
 test("pages outside the five families have no browser", () => {
-  for (const path of ["/", "/datasources", "/executions", "/schedules", "/admin/members", "/keys", "/overview/pipelines"]) {
+  for (const path of ["/", "/datasources", "/executions", "/schedules", "/admin/members", "/keys", "/overview", "/overview/datasources"]) {
     assert.equal(familyForPath(path, order), null, path);
   }
 });

@@ -141,6 +141,15 @@ class PipelineRepository(
         co.datapipelines.pipeline.InventorySource
             .aggregate(jdbc, co.datapipelines.pipeline.NavigationFamily.PIPELINES, workspaceId, lens)
 
+    /** #556 — the overview's Recently updated list under the caller's workspace and version lens. */
+    fun recent(
+        workspaceId: UUID,
+        lens: co.datapipelines.pipeline.ReadLens,
+        limit: Int = co.datapipelines.pipeline.RecentSource.DEFAULT_LIMIT,
+    ): List<co.datapipelines.pipeline.RecentRow> =
+        co.datapipelines.pipeline.RecentSource
+            .recent(jdbc, co.datapipelines.pipeline.NavigationFamily.PIPELINES, workspaceId, lens, limit)
+
     /** Complete, body-free tree pages; authorization precedes folder derivation. */
     fun navigation(request: co.datapipelines.pipeline.NavigationRequest): List<co.datapipelines.pipeline.NavigationRow> =
         co.datapipelines.pipeline.NavigationSource
@@ -216,12 +225,20 @@ class PipelineRepository(
                 MAPPER,
             ).singleOrNull()
 
-    /** Every live pipeline in the workspace, newest first; optionally narrowed to one owner (§14 `GET /pipelines`). */
+    /**
+     * Every live pipeline in the workspace, newest first; optionally narrowed to one owner (§14 `GET /pipelines`).
+     *
+     * #556: with a [lifecycle] the bucket's membership REPLACES the liveness predicate
+     * ([InventorySource.membership]), over RELEASED versions only when [releasedOnly] (a narrowed
+     * lens) — the rows are then exactly the objects the inventory counts in that bucket.
+     */
     fun findAll(
         workspaceId: UUID,
         ownerId: UUID? = null,
         limit: Int? = null,
         offset: Int = 0,
+        lifecycle: LifecycleBucket? = null,
+        releasedOnly: Boolean = false,
     ): List<PipelineRecord> {
         val ownerFilter = if (ownerId == null) "" else " AND owner_id = :ownerId"
         val limitClause = if (limit != null) " LIMIT :limit OFFSET :offset" else ""
@@ -232,7 +249,7 @@ class PipelineRepository(
             params["offset"] = offset
         }
         return jdbc.query(
-            "$SELECT_COLUMNS WHERE $ENTITY_LIVE AND workspace_id = :workspaceId$ownerFilter" +
+            "$SELECT_COLUMNS WHERE ${liveness(lifecycle, releasedOnly)} AND workspace_id = :workspaceId$ownerFilter" +
                 " ORDER BY created_at DESC$limitClause",
             params,
             MAPPER,
@@ -322,15 +339,27 @@ class PipelineRepository(
         folderLimit: Int = PipelineFolderLevel.MAX_PAGE_LIMIT,
     ): PipelineFolderLevel = tree.level(workspaceId, prefix, offset, limit, folderLimit)
 
-    /** Count of live pipelines in the workspace. */
-    fun countAll(workspaceId: UUID): Int =
+    /** Count of live pipelines in the workspace — or, #556, of the [lifecycle] bucket's members ([findAll]'s rule). */
+    fun countAll(
+        workspaceId: UUID,
+        lifecycle: LifecycleBucket? = null,
+        releasedOnly: Boolean = false,
+    ): Int =
         checkNotNull(
             jdbc.queryForObject(
-                "SELECT COUNT(*) FROM pipelines WHERE $ENTITY_LIVE AND workspace_id = :workspaceId",
+                "SELECT COUNT(*) FROM pipelines WHERE ${liveness(lifecycle, releasedOnly)} AND workspace_id = :workspaceId",
                 mapOf("workspaceId" to workspaceId),
                 Int::class.java,
             ),
         )
+
+    /** The catalog's row predicate: liveness, or a lifecycle bucket's membership in its place (#556). */
+    private fun liveness(
+        lifecycle: LifecycleBucket?,
+        releasedOnly: Boolean,
+    ): String =
+        lifecycle?.let { InventorySource.membership(NavigationFamily.PIPELINES, "pipelines", it, releasedOnly) }
+            ?: ENTITY_LIVE
 
     /**
      * The stored body JSON of one version, or null when that version does not exist or the

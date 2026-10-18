@@ -233,9 +233,12 @@
        boosted swap re-renders neither — persistent-navigation.mjs and the tree instances keep
        their state across it. `browserFamily` is the family whose section the request path
        sits under (the nav's own prefix rule), or null: a non-family page renders the browser
-       `hidden` and its column collapses to nothing, giving main the width. -->
+       `hidden` and its column collapses to nothing, giving main the width. `navPath` is the
+       path with the overview root taken off (#556: /overview/pipelines belongs to Pipelines,
+       AppNav.matches), so the family items' active state and the open family read ONE rule. -->
   <div class="app-shell" th:classappend="${authenticated} ? null : 'app-shell-anon'"
-       th:with="browserFamily=${currentPath == null ? null : (#strings.startsWith(currentPath, '/pipelines') ? 'pipelines' : (#strings.startsWith(currentPath, '/templates') ? 'templates' : (#strings.startsWith(currentPath, '/dashboards') ? 'dashboards' : (#strings.startsWith(currentPath, '/visualizations') ? 'visualizations' : (#strings.startsWith(currentPath, '/parameter-sets') ? 'parameter-sets' : null)))))},
+       th:with="navPath=${currentPath != null and #strings.startsWith(currentPath, '/overview/') ? #strings.substring(currentPath, 9) : currentPath},
+                browserFamily=${navPath == null ? null : (#strings.startsWith(navPath, '/pipelines') ? 'pipelines' : (#strings.startsWith(navPath, '/templates') ? 'templates' : (#strings.startsWith(navPath, '/dashboards') ? 'dashboards' : (#strings.startsWith(navPath, '/visualizations') ? 'visualizations' : (#strings.startsWith(navPath, '/parameter-sets') ? 'parameter-sets' : null)))))},
                 browserLabel=${browserFamily == 'pipelines' ? 'Pipelines' : (browserFamily == 'templates' ? 'Templates' : (browserFamily == 'dashboards' ? 'Dashboards' : (browserFamily == 'visualizations' ? 'Visualizations' : (browserFamily == 'parameter-sets' ? 'Parameter Sets' : 'resources'))))}">
 
     <!-- 110 §A, #554: the primary menu — the SAME element at every width. 202px expanded,
@@ -330,16 +333,17 @@
 
         <div class="app-nav-group" role="group" aria-labelledby="app-nav-group-build">
           <div class="app-nav-section" id="app-nav-group-build">Build</div>
-          <!-- The family items link their catalog (#556 repoints them at the overview); the
+          <!-- #556: a family item links its overview (Pipelines now; each sibling lane, #579–#582,
+               flips its own) and is active on the family's every page (`browserFamily`); the
                family's tree is the resource browser's, beside this menu. -->
-          <a th:href="@{/pipelines}" class="app-nav-link" data-nav-section="/pipelines"
+          <a th:href="@{/overview/pipelines}" class="app-nav-link" data-nav-section="/pipelines"
              data-nav-group="Build" data-nav-label="Pipelines"
-             th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/pipelines')} ? 'active' : null"
-             th:attr="aria-current=${currentPath != null and #strings.startsWith(currentPath, '/pipelines')} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#workflow"></use></svg><span class="app-rail-label">Pipelines</span></a>
+             th:classappend="${browserFamily == 'pipelines'} ? 'active' : null"
+             th:attr="aria-current=${browserFamily == 'pipelines'} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#workflow"></use></svg><span class="app-rail-label">Pipelines</span></a>
           <a th:href="@{/templates}" class="app-nav-link" data-nav-section="/templates"
              data-nav-group="Build" data-nav-label="Templates"
-             th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/templates')} ? 'active' : null"
-             th:attr="aria-current=${currentPath != null and #strings.startsWith(currentPath, '/templates')} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#code"></use></svg><span class="app-rail-label">Templates</span></a>
+             th:classappend="${browserFamily == 'templates'} ? 'active' : null"
+             th:attr="aria-current=${browserFamily == 'templates'} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#code"></use></svg><span class="app-rail-label">Templates</span></a>
           <a th:href="@{/datasources}" class="app-nav-link" data-nav-section="/datasources"
              data-nav-group="Build" data-nav-label="Datasources"
              th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/datasources')} ? 'active' : null"
@@ -352,16 +356,16 @@
           <div class="app-nav-section" id="app-nav-group-explore">Explore</div>
           <a th:href="@{/dashboards}" class="app-nav-link" data-nav-section="/dashboards"
              data-nav-group="Explore" data-nav-label="Dashboards"
-             th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/dashboards')} ? 'active' : null"
-             th:attr="aria-current=${currentPath != null and #strings.startsWith(currentPath, '/dashboards')} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#boxes"></use></svg><span class="app-rail-label">Dashboards</span></a>
+             th:classappend="${browserFamily == 'dashboards'} ? 'active' : null"
+             th:attr="aria-current=${browserFamily == 'dashboards'} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#boxes"></use></svg><span class="app-rail-label">Dashboards</span></a>
           <a th:href="@{/visualizations}" class="app-nav-link" data-nav-section="/visualizations"
              data-nav-group="Explore" data-nav-label="Visualizations"
-             th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/visualizations')} ? 'active' : null"
-             th:attr="aria-current=${currentPath != null and #strings.startsWith(currentPath, '/visualizations')} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#chart-line"></use></svg><span class="app-rail-label">Visualizations</span></a>
+             th:classappend="${browserFamily == 'visualizations'} ? 'active' : null"
+             th:attr="aria-current=${browserFamily == 'visualizations'} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#chart-line"></use></svg><span class="app-rail-label">Visualizations</span></a>
           <a th:href="@{/parameter-sets}" class="app-nav-link" data-nav-section="/parameter-sets"
              data-nav-group="Explore" data-nav-label="Parameter Sets"
-             th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/parameter-sets')} ? 'active' : null"
-             th:attr="aria-current=${currentPath != null and #strings.startsWith(currentPath, '/parameter-sets')} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#sliders-horizontal"></use></svg><span class="app-rail-label">Parameter Sets</span></a>
+             th:classappend="${browserFamily == 'parameter-sets'} ? 'active' : null"
+             th:attr="aria-current=${browserFamily == 'parameter-sets'} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#sliders-horizontal"></use></svg><span class="app-rail-label">Parameter Sets</span></a>
         </div>
 
         <div class="app-nav-group" role="group" aria-labelledby="app-nav-group-operate">

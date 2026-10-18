@@ -540,10 +540,10 @@ class RoleWalkE2eTest {
          * 181 (it reaches the published catch-all and its runs' three execution routes).
          * A walk well under these numbers is a broken scan, not a leaner app.
          */
-        private const val MINIMUM_ROUTES = 60
-        private const val MINIMUM_HANDLERS = 100
+        private const val MINIMUM_ROUTES = 65
+        private const val MINIMUM_HANDLERS = 105
         private const val MINIMUM_TOOLS = 61
-        private const val ALLOWED_FLOOR = 20
+        private const val ALLOWED_FLOOR = 25
         private const val VIEWER_REFUSED_FLOOR = 40
         private const val AUTHOR_REFUSED_FLOOR = 15
         private const val PROMOTER_REFUSED_FLOOR = 60

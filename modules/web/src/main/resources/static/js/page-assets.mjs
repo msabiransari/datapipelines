@@ -22,6 +22,8 @@ const PROVIDED = {
   "/js/workspace/panes.js": "WorkspacePanes",
   // #465: document-level dialog wiring that must run once per document whichever page loads it first.
   "/js/lifecycle-dialog.js": "lifecycleDialog",
+  // #556: the overviews' document-level Copy prompt listener, bound once per document.
+  "/js/overview.mjs": "DatapipelinesOverview",
   // #358: a second Alpine boots a second observer and stacks the editor's bindings.
   "/vendor/alpinejs/alpine.min.js": "Alpine",
   "/vendor/dagre/dagre.min.js": "dagre",

@@ -249,14 +249,15 @@ class PersistentChartNavigationBrowserTest : VisualizationBrowserSuite() {
         )
         page.selectOption("[data-viz-case-select]", "1")
         page.waitForSelector("[data-viz-case-index='1']:not([hidden])[data-dp-ready=true]")
+        // #556: the Pipelines item lands on the family's overview, the newer page here.
         page.click(".app-nav-link[data-nav-section='/pipelines']")
-        page.waitForSelector("#pipeline-list-wrapper")
+        page.waitForSelector(".app-overview[data-overview='pipelines']")
         val route = checkNotNull(held)
         page.waitForResponse({ it.url().endsWith("/templates") && it.request().headers()["hx-request"] == "true" }) {
             route.fulfill(Route.FulfillOptions().setResponse(route.fetch()))
         }
         page.waitForFunction("() => !document.querySelector('.htmx-request')")
-        page.locator("#pipeline-list-wrapper").count() shouldBe 1
+        page.locator(".app-overview[data-overview='pipelines']").count() shouldBe 1
         page.locator("#template-list-wrapper").count() shouldBe 0
         page.evaluate("() => window.__rail===document.getElementById('app-rail')") shouldBe true
     }

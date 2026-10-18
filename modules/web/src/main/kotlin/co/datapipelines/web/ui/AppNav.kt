@@ -19,8 +19,9 @@ package co.datapipelines.web.ui
  *
  * Exactly the rule `shell.js` mirrors client-side after a boosted swap and the rule the
  * layout's `th:classappend` has used since 076: **Home by equality (section /dashboard), everything else by
- * prefix** — `/pipelines/abc` is still "Pipelines". [crumbFor] resolves ties by the LONGEST
- * matching section, so a future `/settings/api-keys` row would win over `/settings`.
+ * prefix** — `/pipelines/abc` is still "Pipelines", and so is its overview `/overview/pipelines` (#556).
+ * [crumbFor] resolves ties by the LONGEST matching section, so a future `/settings/api-keys` row would win
+ * over `/settings`.
  */
 object AppNav {
     /** The four group headings, in menu order. Home sits above them all, ungrouped. */
@@ -33,6 +34,9 @@ object AppNav {
     const val EXPLORE = "Explore"
     const val OPERATE = "Operate"
     const val ORGANISATION = "Organisation"
+
+    /** #556 — the root every family overview sits under (`OverviewController`). */
+    const val OVERVIEW_PREFIX = "/overview"
 
     /**
      * One rail item. [section] is the `data-nav-section` the template renders and `shell.js`
@@ -95,14 +99,18 @@ object AppNav {
             .maxByOrNull { it.section.length }
     }
 
-    /** The 076 rule, restated once so the server, `shell.js` and this table cannot drift. */
+    /**
+     * The 076 rule, restated once so the server, `shell.js` and this table cannot drift. #556:
+     * a section's overview (`/overview/pipelines`) belongs to that section, so the family item
+     * stays active and the crumb names the family on its home page.
+     */
     fun matches(
         section: String,
         path: String,
     ): Boolean =
         when (section) {
             "/dashboard" -> path == "/dashboard"
-            else -> path.startsWith(section)
+            else -> path.startsWith(section) || path.startsWith(OVERVIEW_PREFIX + section)
         }
 
     /**

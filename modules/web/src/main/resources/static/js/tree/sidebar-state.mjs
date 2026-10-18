@@ -4,11 +4,12 @@
  *
  * The browsable family a path belongs to: the menu's own prefix rule (shell.js
  * `isActiveSection`, the layout's `#strings.startsWith`), over the families the browser
- * hosts. Derived, never stored (record §3 rules 4–6): null on any other page.
+ * hosts; a family's overview (#556: `/overview/<family>`) belongs to the family. Derived,
+ * never stored (record §3 rules 4–6): null on any other page.
  */
 export function familyForPath(path, families) {
   if (typeof path !== "string" || !path) return null;
-  return families.find(family => path.indexOf(`/${family}`) === 0) ?? null;
+  return families.find(family => path.indexOf(`/${family}`) === 0 || path.indexOf(`/overview/${family}`) === 0) ?? null;
 }
 
 /**

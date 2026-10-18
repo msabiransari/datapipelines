@@ -295,6 +295,12 @@ open class PipelineService(
      * principal decide the lens; this service only applies it. [ReadLens.Everything] leaves each
      * read exactly as it was; [ReadLens.Only] filters by name, and an id-keyed read of a name
      * the lens does not admit answers null — the same null a row in another workspace gets.
+     *
+     * ## The lifecycle filter (#556)
+     * A [lifecycle] keeps the objects of one inventory bucket, decided IN the SQL over the versions
+     * the lens admits (a narrowing lens: RELEASED rows only, [InventorySource]'s rule) before the
+     * name half of the lens applies — so the rows are the ones the overview's inventory counts in
+     * that bucket. The catalog screen is its one caller; it does not combine with [datasourceName].
      */
     open fun list(
         workspaceId: UUID,
@@ -302,7 +308,9 @@ open class PipelineService(
         ownerId: UUID? = null,
         datasourceName: String? = null,
         query: String? = null,
+        lifecycle: LifecycleBucket? = null,
     ): List<PipelineRecord> {
+        require(lifecycle == null || datasourceName == null) { "the lifecycle filter does not combine with a datasource" }
         // The needle gate runs BEFORE the load (#504b): a refused search reads nothing — the
         // same door order ParameterSetService.search uses, and what PipelinesSearchBoundTest
         // pins on the wire (nothing read, nothing echoed).
@@ -311,7 +319,8 @@ open class PipelineService(
             if (datasourceName != null) {
                 pipelines.findAllByDatasource(workspaceId, datasourceName, ownerId)
             } else {
-                pipelines.findAll(workspaceId, ownerId)
+                // Without a lifecycle the read is the unfiltered one it always was.
+                pipelines.findAll(workspaceId, ownerId, lifecycle = lifecycle, releasedOnly = lifecycle != null && !lens.isEverything)
             }.through(lens) { it.name }
         return if (needle == null) records else records.filter { it.matches(needle) }
     }
@@ -324,7 +333,8 @@ open class PipelineService(
      * this replaced: with no `q`, the page is taken in SQL (`LIMIT size+1 OFFSET offset`) and
      * the total is a `COUNT(*)`, because an estimate rendered "Showing 25 of 26" on a 100-row
      * workspace once (034 E3); with a `q`, the rows are filtered in memory (the search spans
-     * three columns) and the total is the filtered size.
+     * three columns) and the total is the filtered size. A [lifecycle] (#556) rides BOTH paths
+     * inside their SQL, the page and its `COUNT(*)` alike ([list]'s section on it).
      *
      * This existed as FOUR copies before 056 — the REST list, the MCP list, the UI list screen
      * and its HTMX partial — which is S2's D2 in its most literal form.
@@ -335,19 +345,20 @@ open class PipelineService(
         query: String?,
         offset: Int,
         size: Int,
+        lifecycle: LifecycleBucket? = null,
     ): PipelinePage {
         // The needle rule lives in [list] (#504a); this blankness check only picks the fast SQL
         // paging path from the in-memory one.
         val page =
             if (query.isNullOrBlank() && lens.isEverything) {
-                val rows = pipelines.findAll(workspaceId, null, size + 1, offset)
-                PipelinePage(rows.take(size), pipelines.countAll(workspaceId), rows.size > size, emptyMap())
+                val rows = pipelines.findAll(workspaceId, null, size + 1, offset, lifecycle)
+                PipelinePage(rows.take(size), pipelines.countAll(workspaceId, lifecycle), rows.size > size, emptyMap())
             } else {
                 // A lensed principal's page is taken in memory even without a `q`: the admitted
                 // set is a per-request name set the SQL pager cannot take, and it is small by
                 // construction (what is promotable, never the workspace). Its total is the
                 // filtered size — the same rule the search path already follows.
-                val all = list(workspaceId, lens, query = query)
+                val all = list(workspaceId, lens, query = query, lifecycle = lifecycle)
                 PipelinePage(all.drop(offset).take(size), all.size, all.size > offset + size, emptyMap())
             }
         // versioning §7: the "unreleased edits exist" badge, for the rows actually shown.

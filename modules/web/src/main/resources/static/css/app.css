@@ -4243,3 +4243,90 @@ pre.tf-pane-input {
 .dp-tree-item[aria-expanded="true"] > .dp-tree-line .ds-icon { transform: rotate(90deg); }
 .dp-tree-item[aria-selected="true"] > .dp-tree-line { background: var(--surface-selected); color: var(--text-link); }
 .dp-tree-status { padding: var(--gap-xs); color: var(--text-muted); }
+
+/* #556 — the family overviews (templates/overview/family.html; ui-screens §4.25, shell design §8).
+   One column of cards at the 16px gap; the inventory spans the frame, Continue your work and
+   Related share a row from 1101px. The chart is four labelled rows inside a 192px band (the
+   record's 160–220px) that may grow when phone labels wrap; the bars are SVG rects whose width
+   is an attribute (the CSP admits no style), painted by the lifecycle's token: draft only
+   warning, released only success, released with draft changes the accent, discarded muted —
+   never danger red on an ordinary draft. */
+:root {
+  --overview-chart-h: calc(var(--space-12) * 4); /* 192px */
+  --overview-draft: var(--chart-series-3);
+  --overview-released: var(--chart-series-2);
+  --overview-mixed: var(--brand);
+  --overview-discarded: var(--chart-muted);
+}
+.app-overview { display: grid; gap: var(--gap-md); min-width: 0; }
+.app-overview > .app-page-h { margin-bottom: 0; }
+.app-overview-counts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  gap: var(--gap-md);
+  margin: 0 0 var(--gap-md);
+}
+.app-overview-count { min-width: 0; }
+.app-overview-count dd { margin: 0; }
+.app-overview-count-v {
+  font-size: var(--text-xl);
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
+}
+.app-overview-count-help { font-size: var(--app-text-support); color: var(--text-muted); }
+.app-overview-chart {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-auto-rows: 1fr;
+  align-items: center;
+  min-height: var(--overview-chart-h);
+}
+.app-overview-bar {
+  display: grid;
+  grid-template-columns: minmax(8rem, 14rem) minmax(0, 1fr) minmax(3rem, auto);
+  align-items: center;
+  gap: var(--gap-sm);
+}
+.app-overview-bar-name { font-size: var(--app-text-ui); }
+.app-overview-bar-track {
+  display: block;
+  width: 100%;
+  height: var(--space-3);
+  background: var(--chart-grid);
+  border-radius: var(--app-radius-badge);
+}
+.app-overview-bar-v { text-align: end; font-variant-numeric: tabular-nums; font-weight: var(--weight-semibold); }
+.app-overview-bar[data-tone="draft"] .app-overview-bar-fill { fill: var(--overview-draft); }
+.app-overview-bar[data-tone="released"] .app-overview-bar-fill { fill: var(--overview-released); }
+.app-overview-bar[data-tone="mixed"] .app-overview-bar-fill { fill: var(--overview-mixed); }
+.app-overview-bar[data-tone="discarded"] .app-overview-bar-fill { fill: var(--overview-discarded); }
+.app-overview-unavailable { margin: 0; color: var(--text-muted); }
+.app-overview-prose p { margin: 0 0 var(--gap-sm); max-width: 70ch; }
+.app-overview-prose p:last-child { margin-bottom: 0; }
+.app-overview-steps { margin: 0 0 var(--gap-md); padding-inline-start: var(--space-5); max-width: 70ch; }
+.app-overview-steps li + li { margin-top: var(--gap-xs); }
+.app-overview-label,
+.app-overview-sub {
+  display: block;
+  margin: 0 0 var(--gap-xs);
+  font-size: var(--app-text-support);
+  font-weight: var(--weight-semibold);
+}
+.app-overview-prompt { width: 100%; resize: vertical; font-size: var(--app-text-ui); }
+.app-overview-copy { display: flex; align-items: center; flex-wrap: wrap; gap: var(--gap-sm); margin: var(--gap-sm) 0; }
+.app-overview-recent,
+.app-overview-related { list-style: none; margin: var(--gap-sm) 0 0; padding: 0; display: grid; gap: var(--gap-sm); }
+.app-overview-recent li { display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--gap-sm); min-width: 0; }
+.app-overview-recent a { min-width: 0; overflow-wrap: anywhere; font-size: var(--app-text-name); }
+.app-overview-recent time { color: var(--text-muted); font-size: var(--app-text-support); }
+.app-overview-related { margin-bottom: var(--gap-sm); }
+.app-overview-pair { display: grid; gap: var(--gap-md); min-width: 0; }
+@media (min-width: 1101px) {
+  .app-overview-pair { grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr)); }
+}
+@media (max-width: 760.98px) {
+  .app-overview-bar { grid-template-columns: minmax(0, 1fr) auto; row-gap: var(--gap-xs); }
+  .app-overview-bar-track { grid-column: 1 / -1; grid-row: 2; }
+}

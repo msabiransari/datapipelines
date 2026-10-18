@@ -111,6 +111,12 @@ class ReadFloorTest {
         familyOf("/partials/dashboards/{id}/lifecycle/release") shouldBeFamily Family.LIFECYCLE_DIALOGS
         familyOf("/partials/dashboards/{id}/lifecycle/purge-entity") shouldBeFamily Family.LIFECYCLE_DIALOGS
         familyOf("/partials/dashboards/{id}/refreshes") shouldBeFamily Family.DASHBOARD_RUNTIME
+        // #556 — each family overview is its family's read, never the catch-all.
+        familyOf("/overview/parameter-sets") shouldBeFamily Family.PARAMETER_SETS
+        familyOf("/overview/visualizations") shouldBeFamily Family.VISUALIZATIONS
+        familyOf("/overview/dashboards") shouldBeFamily Family.DASHBOARDS
+        familyOf("/overview/pipelines") shouldBeFamily Family.RESOURCES
+        familyOf("/overview/templates") shouldBeFamily Family.RESOURCES
         familyOf("/workspaces") shouldBeFamily Family.WORKSPACES
         familyOf("/api/v1/workspaces") shouldBeFamily Family.WORKSPACES_LIST_OWN
         familyOf("/api/v1/workspaces/{name}/members") shouldBeFamily Family.WORKSPACES
@@ -273,12 +279,14 @@ class ReadFloorTest {
 
         /** #194 lane D: the parameter sets — an every-role read (the lens aside, one row shape). #374 added the
          * three pages (catalog, workspace, tree partial): the family's reads, never an evaluate declaration. #376
-         * added the History tab's two partials (the list and the record detail) — reads of the set, §11.2. */
+         * added the History tab's two partials (the list and the record detail) — reads of the set, §11.2. #556
+         * added the family's overview page (/overview/parameter-sets), a read of the family's inventory. */
         PARAMETER_SETS(
-            floor = 9,
+            floor = 10,
             permissions = setOf(Permission.PARAMETER_SET_READ),
             matches = { path ->
                 path.startsWith("/api/v1/parameter-sets") ||
+                    path == "/overview/parameter-sets" ||
                     path == "/parameter-sets" ||
                     path.startsWith("/parameter-sets/") ||
                     path.startsWith("/partials/parameter-sets/")
@@ -287,12 +295,13 @@ class ReadFloorTest {
 
         /** #10 L1b: the visualizations — an every-role read (the lens aside); the family's six API GET handlers (L1c's
          * export joined), and #399's two pages and eight partials (the sidebar tree, the catalog's swap root, the five
-         * workspace tabs and the run detail). The public capability preview is not a reader. */
+         * workspace tabs and the run detail), and #556's overview page. The public capability preview is not a reader. */
         VISUALIZATIONS(
-            floor = 16,
+            floor = 17,
             permissions = setOf(Permission.VISUALIZATION_READ),
             matches = { path ->
                 path.startsWith("/api/v1/visualizations") ||
+                    path == "/overview/visualizations" ||
                     path == "/visualizations" ||
                     path.startsWith("/visualizations/") ||
                     path == "/partials/visualizations" ||
@@ -320,12 +329,14 @@ class ReadFloorTest {
         ),
 
         /** #10 L1b the API family (six GET handlers, L1c's export joined), L3b the three pages, #369 the preview,
-         * #400 the catalog and the Overview/Versions tabs: the dashboards — the same row shape; the family's reads. */
+         * #400 the catalog and the Overview/Versions tabs, #556 the family overview page: the dashboards — the same
+         * row shape; the family's reads. */
         DASHBOARDS(
-            floor = 13,
+            floor = 14,
             permissions = setOf(Permission.DASHBOARD_READ),
             matches = { path ->
                 path.startsWith("/api/v1/dashboards") ||
+                    path == "/overview/dashboards" ||
                     path == "/dashboards" ||
                     path.startsWith("/dashboards/") ||
                     path == "/partials/dashboards" ||
@@ -342,9 +353,12 @@ class ReadFloorTest {
             matches = { path -> path.startsWith("/partials/dashboards/") && path.endsWith("/keys") },
         ),
 
-        /** Everything else a signed-in person reads: the every-role reads (the lens aside, one row shape). */
+        /**
+         * Everything else a signed-in person reads: the every-role reads (the lens aside, one row shape). #556's
+         * Pipelines and Templates overview pages land here, under their family's read.
+         */
         RESOURCES(
-            floor = 40,
+            floor = 42,
             permissions =
                 setOf(
                     Permission.PIPELINE_READ,

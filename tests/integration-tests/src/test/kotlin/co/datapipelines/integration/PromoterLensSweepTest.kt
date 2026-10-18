@@ -232,9 +232,78 @@ class PromoterLensSweepTest {
         }
         treesAreTheNewerSet("pipelines", P, VISIBLE_PIPELINES, auth)
         treesAreTheNewerSet("templates", T, VISIBLE_TEMPLATES, auth)
+        overviewIsTheNewerSet(auth)
         staleSidebarParametersAreIgnored("pipelines", "pipeline-list-wrapper", VISIBLE_PIPELINES, auth)
         staleSidebarParametersAreIgnored("templates", "template-list-wrapper", VISIBLE_TEMPLATES, auth)
     }
+
+    /**
+     * #556 — the Pipelines overview's three surfaces (the counts and bars, Recently updated, the
+     * lifecycle-filtered catalog) are the admitted set: `lp/newer`'s pending DRAFT is hidden, so it
+     * classifies as released only, the With drafts filter is empty, and no hidden name reaches the
+     * page. The viewer control ([viewerOverviewSeesEverything]) proves the draft is a row, not absent.
+     */
+    private fun overviewIsTheNewerSet(auth: (RequestSpecification) -> RequestSpecification) {
+        withClue("#556: the promoter's Pipelines overview counts, lists and filters only the admitted versions") {
+            val page = call("/overview/pipelines", auth)
+            page.status shouldBe HTTP_OK
+            overviewNumbers(page.body) shouldBe
+                mapOf(
+                    "objects" to 3,
+                    "with-drafts" to 0,
+                    "with-releases" to 3,
+                    "discarded" to 0,
+                    "draft" to 0,
+                    "released" to 3,
+                    "released-with-draft" to 0,
+                )
+            val recent = page.body.substringAfter("data-overview-recent", "").substringBefore("</section>")
+            VISIBLE_PIPELINES.forEach { recent.contains(it) shouldBe true }
+            recent.contains("ds-badge-warning") shouldBe false
+            HIDDEN_TOKENS.filter { it in page.body } shouldBe emptyList()
+            val withDrafts = call("/partials/pipelines?lifecycle=with-drafts", auth).body
+            (VISIBLE_PIPELINES + HIDDEN_PIPELINES).filter { it in withDrafts } shouldBe emptyList()
+            val released = call("/partials/pipelines?lifecycle=released", auth).body
+            VISIBLE_PIPELINES.forEach { released.contains(it) shouldBe true }
+            HIDDEN_PIPELINES.filter { it in released } shouldBe emptyList()
+        }
+    }
+
+    private fun viewerOverviewSeesEverything(auth: (RequestSpecification) -> RequestSpecification) {
+        withClue("#556: the viewer's overview counts the draft the promoter's does not") {
+            overviewNumbers(call("/overview/pipelines", auth).body) shouldBe
+                mapOf(
+                    "objects" to 6,
+                    "with-drafts" to 2,
+                    "with-releases" to 5,
+                    "discarded" to 0,
+                    "draft" to 1,
+                    "released" to 4,
+                    "released-with-draft" to 1,
+                )
+            val withDrafts = call("/partials/pipelines?lifecycle=with-drafts", auth).body
+            listOf("$P/draft_only", "$P/newer").forEach { withDrafts.contains(it) shouldBe true }
+        }
+        withClue("#556: /overview/templates reaches the overview, never the template capture-everything route") {
+            val templates = call("/overview/templates", auth)
+            templates.status shouldBe HTTP_OK
+            templates.body.contains("data-overview=\"templates\"") shouldBe true
+        }
+        withClue("#556: a lifecycle value the catalog does not offer is a 400 before any SQL") {
+            listOf("bogus", "discarded", "DRAFT").forEach { value ->
+                call("/pipelines?lifecycle=$value", auth).status shouldBe HTTP_BAD_REQUEST
+                call("/partials/pipelines?lifecycle=$value", auth).status shouldBe HTTP_BAD_REQUEST
+            }
+        }
+    }
+
+    /** The overview's four counts and the bars' values, by key (the discarded bar's key is its count's). */
+    private fun overviewNumbers(html: String): Map<String, Int> =
+        OVERVIEW_COUNT.findAll(html).associate { it.groupValues[1] to it.groupValues[2].toInt() } +
+            OVERVIEW_BAR.findAll(html).filter { it.groupValues[1] != "discarded" }.associate {
+                it.groupValues[1] to
+                    it.groupValues[2].toInt()
+            }
 
     /**
      * #466 — the catalog partials lost their sidebar presentation (the tree levels, the nav search and the
@@ -419,6 +488,7 @@ class PromoterLensSweepTest {
             call("/api/v1/templates?name=$T/newer.sql", auth).body.contains(DRAFT_MARKER) shouldBe true
         }
         reachableGetRoutes().forEach { route -> identifierPairs(route).forEach { (hidden, _) -> call(hidden, auth) } }
+        viewerOverviewSeesEverything(auth)
         names(toolResult(tool("pipelines_list", "{}", keyFor(AUTHOR))), "name") shouldContainExactlyInAnyOrder
             VISIBLE_PIPELINES + HIDDEN_PIPELINES
         browserCounts(call("/pipelines", auth).body).filterKeys { it in TREE_FAMILIES } shouldBe
@@ -752,6 +822,7 @@ class PromoterLensSweepTest {
         private const val API_KEY_HEADER = "DP-API-Key"
         private const val SECRET_BYTES = 32
         private const val HTTP_OK = 200
+        private const val HTTP_BAD_REQUEST = 400
         private const val HTTP_FORBIDDEN = 403
         private const val HTTP_NOT_FOUND = 404
         private const val LEAK_EXCERPT = 240
@@ -768,6 +839,15 @@ class PromoterLensSweepTest {
         private val STAT = Regex("app-stat-v\">(\\d+)<")
         private val BROWSER_COUNT = Regex("class=\"app-browser-count\" data-browser-family=\"([a-z-]+)\"[^>]*><span>(\\d+)</span>")
         private val TREE_FAMILIES = setOf("pipelines", "templates")
+
+        /** #556 — one overview count (`data-count`) and one chart bar (`data-bar`) with its number. */
+        private val OVERVIEW_COUNT =
+            Regex("""data-count="([a-z-]+)">.*?<dd class="app-overview-count-v">(\d+)</dd>""", RegexOption.DOT_MATCHES_ALL)
+        private val OVERVIEW_BAR =
+            Regex(
+                """data-bar="([a-z-]+)" data-tone="[a-z]+">.*?<span class="app-overview-bar-v">(\d+)</span>""",
+                RegexOption.DOT_MATCHES_ALL,
+            )
 
         /**
          * Floors, not targets — the 2026-09-21 walk: 57 promoter-reachable GET routes, 57

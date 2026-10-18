@@ -25,7 +25,8 @@ import java.util.UUID
  * `GET /partials/pipelines` is the `/pipelines` catalog's swap root, `#pipeline-list-wrapper`:
  * every pipeline the caller may read when `q` is empty, the matches of `q` otherwise, paged by
  * `offset` (§9.2, #350). It is the target of the catalog's search box, its pager and its
- * "Clear search" control.
+ * "Clear search" control — and, #556, of its lifecycle control: `lifecycle` keeps one inventory
+ * bucket ([CatalogLifecycle]), the page's own parse and 400.
  *
  * #466: the sidebar's server-rendered tree (`scope=nav`, `prefix` levels and their stamp
  * header) is gone — since #460 the sidebar reads `/api/v1/pipelines/tree`. A stale `scope` or
@@ -45,7 +46,9 @@ class PipelinePartialController(
         model: Model,
         @RequestParam(required = false) q: String?,
         @RequestParam(required = false) offset: Int?,
+        @RequestParam(required = false) lifecycle: String?,
     ): String {
+        val bucket = CatalogLifecycle.parse(lifecycle, CatalogLifecycle.PIPELINES)
         val principal = currentPrincipal()
         model.addAttribute("q", q ?: "")
         return browse.fillWrapper(
@@ -54,6 +57,7 @@ class PipelinePartialController(
             lens.viewFor(principal),
             q?.trim()?.takeIf { it.isNotEmpty() },
             offset ?: 0,
+            bucket,
         )
     }
 

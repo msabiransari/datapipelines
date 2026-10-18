@@ -1,0 +1,66 @@
+<!--/* #556 — the Pipelines overview's guide (shell design §8): What this is for, Create with your agent,
+     and the related families. `overview/family.html` includes `intro` after the inventory and
+     `related` beside Continue your work. The introduction is the record's, checked against the
+     agent guide (skill/pipelines.md) and docs/pipeline-editor.md. The starter prompt follows the
+     guide's workflow: pick an existing folder (step 0), learn the schema and recorded definitions
+     (step 1), reuse what exists (step 2), verify the question against the source (step 5), "Then
+     stop: leave the draft for a human to release." The workspace name is the one the menu shows;
+     the bracketed placeholders are the reader's to fill. Copying sends nothing (overview.mjs). */-->
+<th:block xmlns:th="http://www.thymeleaf.org" th:fragment="intro">
+  <section class="ds-card" aria-labelledby="overview-intro-h" data-overview-intro>
+    <div class="app-card-h"><h2 class="ds-title" id="overview-intro-h">What pipelines are for</h2></div>
+    <div class="app-card-b app-overview-prose">
+      <p>
+        Pipelines turn a data question into a repeatable workflow. They combine data sources, reusable
+        templates and processing steps, accept parameters, and produce results you can inspect or use
+        elsewhere. For example, compare rideshare share between two years and rank the largest changes.
+      </p>
+    </div>
+  </section>
+
+  <section class="ds-card" aria-labelledby="overview-agent-h" data-overview-prompt>
+    <div class="app-card-h"><h2 class="ds-title" id="overview-agent-h">Create with your agent</h2></div>
+    <div class="app-card-b app-overview-prose">
+      <ol class="app-overview-steps">
+        <li>Describe the question, the data it should use and the inputs you want to vary.</li>
+        <li>Ask a connected agent to build the pipeline as a draft and verify it against the source.</li>
+        <li>Open the draft it returns, read its description and verification steps, and run it with
+          your own inputs. Someone allowed to release pipelines releases it from its workspace when it is ready.</li>
+      </ol>
+      <label class="app-overview-label" for="overview-prompt">Starter prompt — edit the bracketed parts before you copy it</label>
+      <textarea id="overview-prompt" class="ds-textarea app-overview-prompt" rows="7" spellcheck="false"
+                aria-describedby="overview-prompt-note"
+                th:text="|In workspace ${activeWorkspace ?: '[workspace]'}, build a draft pipeline to answer: [question]. Use [data source or ask me to choose one], return [desired output], and let me vary [inputs]. Read the current product guide, inspect the available schema and recorded definitions, and reuse suitable existing resources before creating new ones. Choose an existing folder with me if the destination is unclear. Verify the calculation against the source, run with representative inputs within the agreed scope, and document assumptions and limitations. Return the draft link, dependencies and validation evidence. Leave release to me.|">In workspace [workspace], build a draft pipeline to answer: [question].</textarea>
+      <div class="app-overview-copy">
+        <button type="button" class="ds-button ds-button-primary ds-button-sm"
+                data-overview-copy data-copy-label="Copy prompt" aria-controls="overview-prompt">Copy prompt</button>
+        <span class="app-card-note" role="status" data-overview-copy-status></span>
+      </div>
+      <p class="app-card-note" id="overview-prompt-note">
+        Copying puts the text on your clipboard and nothing else: it sends no request and grants no access.
+        <th:block th:if="${canAuthor == true}">Your agent works with the permissions of its own API key.</th:block>
+        <th:block th:unless="${canAuthor == true}">Your role here does not author pipelines, so copy the request
+          for a collaborator who can.</th:block>
+      </p>
+    </div>
+  </section>
+</th:block>
+
+<th:block xmlns:th="http://www.thymeleaf.org" th:fragment="related">
+  <section class="ds-card" aria-labelledby="overview-related-h" data-overview-related>
+    <div class="app-card-h"><h2 class="ds-title" id="overview-related-h">Related resources and help</h2></div>
+    <div class="app-card-b app-overview-prose">
+      <ul class="app-overview-related">
+        <li><a hx-boost="true" th:href="@{/overview/templates}">Templates</a> hold the reusable query and
+          transformation steps a pipeline pins.</li>
+        <li><a hx-boost="true" th:href="@{/overview/visualizations}">Visualizations</a> present a pipeline's
+          results as a chart, table or KPI.</li>
+        <li><a hx-boost="true" th:href="@{/overview/dashboards}">Dashboards</a> bring pipeline results and
+          visualizations together in one view.</li>
+      </ul>
+      <p class="app-card-note">A common chain is pipelines, then visualizations, then dashboards; not every
+        dashboard needs every link.</p>
+      <p><a th:href="@{/docs/mcp-server}">MCP server reference</a></p>
+    </div>
+  </section>
+</th:block>

@@ -589,6 +589,65 @@ class ShellRenderTest {
         }
     }
 
+    /**
+     * #556 (record §3 rule 1): a family's overview is that family's page — its menu item is the
+     * active one, the breadcrumb names it, and the resource browser opens on its tree. The
+     * Pipelines item links its overview; the other four keep their catalogs until their own
+     * overview lands (#579–#582).
+     */
+    @Test
+    fun `a family overview lights its item, names its crumb and opens its browser tree`() {
+        listOf(
+            "pipelines" to "Pipelines",
+            "templates" to "Templates",
+            "dashboards" to "Dashboards",
+            "visualizations" to "Visualizations",
+            "parameter-sets" to "Parameter Sets",
+        ).forEach { (family, label) ->
+            val path = "/overview/$family"
+            val html =
+                engine.process(
+                    "pipelines/list",
+                    webContext().apply {
+                        fillList()
+                        setVariable("currentPath", path)
+                        setVariable("crumbGroup", AppNav.crumbFor(path)?.first)
+                        setVariable("crumbPage", AppNav.crumbFor(path)?.second)
+                    },
+                )
+            val active = Regex("""<a [^>]*class="app-nav-link active"[^>]*>""").findAll(html).map { it.value }.toList()
+            active.size shouldBe 1
+            active.single() shouldContain "data-nav-label=\"$label\""
+            active.single() shouldContain "aria-current=\"page\""
+            AppNav.crumbFor(path)?.second shouldBe label
+            html.substringAfter("class=\"app-crumb-page\"").substringAfter(">").substringBefore("<") shouldBe label
+
+            html.substringAfter("<aside class=\"app-browser\"").substringBefore(">") shouldNotContain "hidden"
+            html.substringAfter("<button type=\"button\" id=\"browser-open\"").substringBefore(">") shouldNotContain "hidden"
+            PANEL.findAll(html).forEach { panel ->
+                if (panel.groupValues[1] == family) panel.value shouldNotContain "hidden" else panel.value shouldContain "hidden=\"hidden\""
+            }
+        }
+    }
+
+    @Test
+    fun `the Pipelines item links its overview and the other families keep their catalogs`() {
+        val html = engine.process("pipelines/list", webContext().apply { fillList() })
+        val href = { label: String ->
+            Regex(
+                """<a href="([^"]+)" class="app-nav-link[^"]*" data-nav-section="[^"]+"\s+data-nav-group="[^"]*" data-nav-label="$label"""",
+            ).find(html)
+                ?.groupValues
+                ?.get(1)
+        }
+
+        href("Pipelines") shouldBe "/overview/pipelines"
+        href("Templates") shouldBe "/templates"
+        href("Dashboards") shouldBe "/dashboards"
+        href("Visualizations") shouldBe "/visualizations"
+        href("Parameter Sets") shouldBe "/parameter-sets"
+    }
+
     /** #554 (record §3 rule 5): off the five families the browser and its folder button render hidden. */
     @Test
     fun `a non-family page renders the browser and its folder button hidden`() {
