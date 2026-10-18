@@ -29,7 +29,7 @@
       <ul class="u-text-sm u-mb-md" data-release-refusals>
         <li th:each="r : ${dlg.refusals}" th:attr="data-refusal-code=${r.code}">
           <span class="tplx-danger" th:text="${r.message}">The latest test run is RED; a release needs its run GREEN.</span>
-          <span class="u-muted u-mono u-text-xs" th:text="${r.code}">visualization.release.tests_red</span>
+          <span class="u-muted u-mono" th:text="${r.code}">visualization.release.tests_red</span>
         </li>
       </ul>
     </th:block>

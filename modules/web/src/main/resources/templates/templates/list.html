@@ -108,10 +108,10 @@
           <!-- 077: the folder is mandatory, and the `pattern` above already refuses a bare
                name because it is the server's own grammar. This line is what tells someone
                WHY the field went red before they have to read the full rule below it. -->
-          <p class="u-muted u-text-xs u-m0 u-mt-xs">
+          <p class="u-muted u-text-sm u-m0 u-mt-xs">
             folder/name &mdash; e.g. <code>test/scratch</code>
           </p>
-          <p class="u-muted u-text-xs u-m0 u-mt-xs"
+          <p class="u-muted u-text-sm u-m0 u-mt-xs"
              th:text="${nameHint}">grammar</p>
         </div>
         <div class="u-mb-md">
@@ -159,7 +159,7 @@
              mandatory. Prefilled with the design record's example; hidden AND disabled (so not
              submitted) unless the type is a transform, exactly as `dialect` is for html. -->
         <div id="create-template-blocks-field" hidden>
-          <p class="u-muted u-text-xs u-m0 u-mb-xs">
+          <p class="u-muted u-text-sm u-m0 u-mb-xs">
             A transform declares its contract, invariants and tests; the create runs the tests.
             The example below is the design record's — edit it, or keep it and edit in the
             workspace.

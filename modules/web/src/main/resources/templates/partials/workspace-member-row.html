@@ -8,11 +8,11 @@
   <tr th:fragment="row" th:attr="data-member=${member.email}">
     <td>
       <span th:text="${member.displayName}">Alice</span>
-      <span class="u-secondary u-text-xs" th:text="' ' + ${member.email}">alice@example.com</span>
+      <span class="u-secondary" th:text="' ' + ${member.email}">alice@example.com</span>
       <!-- #200 — the member's login-minted key, as a fact the admin administers: the state
            shows for EVERY row; the key id and prefix never do (the members row is not the
            key listing, and no plaintext exists to show). -->
-      <span class="u-secondary u-text-xs" data-member-key
+      <span class="u-secondary u-text-meta" data-member-key
             th:text="${member.hasKey} ? ' · has a key' : ' · no key'"> · has a key</span>
     </td>
     <!-- ONE role per membership (D1). The <select> lists the server's roles, the member's

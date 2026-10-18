@@ -2,7 +2,7 @@
   <!-- 097 §C — the admin user table's rows: the page's first paint and the search box's
        every later swap, from the same AdminUsersBrowseModel. -->
   <tr th:if="${userRows == null || userRows.isEmpty()}">
-    <td colspan="7" class="u-p-md u-center u-secondary u-text-sm">No users found</td>
+    <td colspan="7" class="u-p-md u-center u-secondary">No users found</td>
   </tr>
   <!-- th:each and th:replace cannot share an element: fragment inclusion has the higher
        precedence, so the fragment would be resolved BEFORE the loop variable exists. -->

@@ -6,7 +6,7 @@
 <th:block th:fragment="error">
   <th:block th:if="${errorCode != null}">
     <div class="app-row-baseline u-wrap u-mb-sm">
-      <span class="ds-badge ds-badge-danger u-mono u-text-xs u-break"
+      <span class="ds-badge ds-badge-danger u-mono u-break"
            
             th:text="${errorCode}">pipeline.node.datasource_connection_failed</span>
       <span class="u-text-sm u-primary app-break-word"
@@ -14,7 +14,7 @@
     </div>
     <div class="u-text-sm u-secondary u-mb-sm"
          th:if="${errorUserMessage != null}" th:text="${errorUserMessage}">A step failed.</div>
-    <div class="u-row-md u-wrap u-text-xs u-muted u-mb-sm">
+    <div class="u-row-md u-wrap u-text-sm u-muted u-mb-sm">
       <span th:if="${failedNodeId != null}">failed node <code class="u-mono" th:text="${failedNodeId}">n</code></span>
       <span th:if="${errorCorrelationId != null}">correlation id <code class="u-mono u-break" th:text="${errorCorrelationId}">id</code></span>
       <span th:if="${errorNodeLine != null}" th:text="${errorNodeLine}">node line</span>
@@ -23,7 +23,7 @@
     <pre class="app-errblock app-errblock-12 app-errblock-wrap u-secondary u-mb-sm"
          th:if="${errorDetailsJson != null}" th:text="${errorDetailsJson}">details</pre>
     <div class="u-mb-sm" th:if="${errorSql != null}">
-      <div class="u-text-xs u-muted u-mb-xs">Rendered SQL (<code class="u-mono">:name</code> form — bound values are never included)</div>
+      <div class="u-text-sm u-muted u-mb-xs">Rendered SQL (<code class="u-mono">:name</code> form — bound values are never included)</div>
       <pre class="app-errblock app-errblock-20 u-m0"
            th:text="${errorSql}">SELECT …</pre>
     </div>
@@ -32,9 +32,9 @@
         Exception — root cause first
       </summary>
       <div class="u-mt-sm" th:each="level : ${errorChain}">
-        <div class="u-mono u-text-xs u-semibold u-break"
+        <div class="u-mono u-text-sm u-semibold u-break"
              th:text="${level['label'] + level['cls']}">java.sql.SQLException</div>
-        <div class="u-text-xs u-secondary app-break-word"
+        <div class="u-text-sm u-secondary app-break-word"
              th:if="${level['message'] != null}" th:text="${level['message']}">message</div>
         <pre class="app-errblock app-errblock-30 app-errblock-tight u-secondary"
              th:if="${level['framesText'] != null}" th:text="${level['framesText']}">frames</pre>

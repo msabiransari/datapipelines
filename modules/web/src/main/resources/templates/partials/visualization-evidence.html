@@ -22,16 +22,16 @@
         </thead>
         <tbody>
           <tr th:each="r : ${runs}" th:attr="data-run-row=${r.runId}">
-            <td class="u-mono u-text-sm" th:text="${#strings.substring(r.runId.toString(), 0, 8)}" th:title="${r.runId}">0b1c2d3e</td>
+            <td class="u-mono" th:text="${#strings.substring(r.runId.toString(), 0, 8)}" th:title="${r.runId}">0b1c2d3e</td>
             <td class="u-mono" th:text="'v' + ${r.version}">v2</td>
             <td>
               <span class="ds-badge"
                     th:classappend="${r.status == 'GREEN'} ? 'ds-badge-success' : (${r.status == 'RED'} ? 'ds-badge-danger' : 'ds-badge-default')"
                     th:text="${r.status.toLowerCase()}">green</span>
             </td>
-            <td class="u-text-sm" th:text="${r.startedAt}">2026-10-01T09:00:00Z</td>
-            <td class="u-text-sm" th:text="${r.completedAt ?: '—'}">2026-10-01T09:01:00Z</td>
-            <td class="u-text-sm" th:text="${r.mechanical ?: '—'}">passed</td>
+            <td class="" th:text="${r.startedAt}">2026-10-01T09:00:00Z</td>
+            <td class="" th:text="${r.completedAt ?: '—'}">2026-10-01T09:01:00Z</td>
+            <td class="" th:text="${r.mechanical ?: '—'}">passed</td>
             <td>
               <button type="button" class="ds-button ds-button-ghost ds-button-sm"
                       th:attr="hx-get=@{/partials/visualizations/{id}/evidence/{run}(id=${visualizationId}, run=${r.runId})},

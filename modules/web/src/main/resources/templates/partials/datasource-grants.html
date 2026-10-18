@@ -53,7 +53,7 @@
             <span th:if="${g.owner}" class="ds-badge ds-badge-default">registering workspace</span>
           </td>
           <td th:text="${g.grantedBy}">Muhammad</td>
-          <td class="u-secondary u-text-sm" th:text="${g.grantedAt}">2026-09-10T09:00:00Z</td>
+          <td class="u-secondary" th:text="${g.grantedAt}">2026-09-10T09:00:00Z</td>
           <td class="num">
             <button th:if="${isSuperAdmin == true}" type="button" data-verb="datasource-grant-remove" class="ds-button ds-button-ghost ds-button-sm"
                     th:attr="hx-post=@{/partials/datasources/{name}/grants/{workspace}/remove(name=${datasource.name}, workspace=${g.workspace})},
@@ -78,7 +78,7 @@
               hx-disabled-elt="this"
               th:disabled="${#lists.isEmpty(grantableWorkspaces)}">Grant</button>
     </form>
-    <p th:if="${#lists.isEmpty(grantableWorkspaces)}" class="u-secondary u-text-xs u-mt-xs">
+    <p th:if="${#lists.isEmpty(grantableWorkspaces)}" class="u-secondary u-text-sm u-mt-xs">
       Every active workspace already has a grant.
     </p>
   </div>

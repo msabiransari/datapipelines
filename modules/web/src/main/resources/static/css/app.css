@@ -2684,13 +2684,16 @@ button.app-busy::after {
    --------------------------------------------------------------------------- */
 
 /* type */
-/* #555: the two small steps name the scale's roles, not the design system's
-   16px-body steps. `u-text-sm` is support copy (12px: the secondary lines,
-   hand-rolled labels and lists under a 13px body — it was 14px under a 16px
-   one); `u-text-xs` is the same 12px floor, kept as its own name so a
-   metadata line can move to the 10px role on its own later. The larger steps
-   stay what they say. */
-.u-text-xs { font-size: var(--app-text-support); }
+/* #555/#565: the small steps name the scale's roles, not the design system's
+   16px-body steps — one utility per role (ui-screens §3.3). `u-text-sm` is
+   support copy (12px: the secondary lines, hand-rolled labels, help and lists
+   under a 13px body — it was 14px under a 16px one). `u-text-meta` is the 10px
+   meta role in sentence case, for a short inline annotation beside a name —
+   "(v3 released)", "· has a key" — never a name, a value, an error or a
+   paragraph; an uppercase group caption is `.ds-caption` instead (owner
+   2026-10-18). #565 folded a second 12px name into `u-text-sm`.
+   The larger steps stay what they say. */
+.u-text-meta { font-size: var(--app-text-meta); }
 .u-text-sm { font-size: var(--app-text-support); }
 .u-text-base { font-size: var(--text-base); }
 .u-text-lg { font-size: var(--text-lg); }

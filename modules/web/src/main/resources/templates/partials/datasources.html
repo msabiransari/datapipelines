@@ -99,7 +99,7 @@
                       th:title="${ds.lastTest.message} ?: 'The last connection test succeeded'">ok</span>
                 <span th:unless="${ds.lastTest.ok}" class="ds-badge ds-badge-danger"
                       th:title="${ds.lastTest.message} ?: 'The last connection test failed'">failed</span>
-                <span class="u-muted u-text-xs"
+                <span class="u-muted"
                       th:text="${#temporals.format(ds.lastTest.testedAt, 'yyyy-MM-dd HH:mm')}">2026-09-03 10:00</span>
               </th:block>
             </td>
