@@ -646,6 +646,36 @@ class ShellRenderTest {
         href("Dashboards") shouldBe "/overview/dashboards"
         href("Visualizations") shouldBe "/overview/visualizations"
         href("Parameter Sets") shouldBe "/overview/parameter-sets"
+        href("Datasources") shouldBe "/overview/datasources"
+    }
+
+    /**
+     * #583: the Datasources overview lights its item and names its crumb like the five
+     * families — but it is NOT a browserFamily, so the resource browser and its opener stay
+     * hidden: there is no datasources tree, and the page is an ordinary section page.
+     */
+    @Test
+    fun `the datasources overview lights its item and keeps the browser hidden`() {
+        val path = "/overview/datasources"
+        val html =
+            engine.process(
+                "pipelines/list",
+                webContext().apply {
+                    fillList()
+                    setVariable("currentPath", path)
+                    setVariable("crumbGroup", AppNav.crumbFor(path)?.first)
+                    setVariable("crumbPage", AppNav.crumbFor(path)?.second)
+                },
+            )
+        val active = Regex("""<a [^>]*class="app-nav-link active"[^>]*>""").findAll(html).map { it.value }.toList()
+        active.size shouldBe 1
+        active.single() shouldContain "data-nav-label=\"Datasources\""
+        active.single() shouldContain "aria-current=\"page\""
+        AppNav.crumbFor(path)?.second shouldBe "Datasources"
+        html.substringAfter("class=\"app-crumb-page\"").substringAfter(">").substringBefore("<") shouldBe "Datasources"
+
+        html.substringAfter("<aside class=\"app-browser\"").substringBefore(">") shouldContain "hidden"
+        html.substringAfter("<button type=\"button\" id=\"browser-open\"").substringBefore(">") shouldContain "hidden"
     }
 
     /** #554 (record §3 rule 5): off the five families the browser and its folder button render hidden. */
