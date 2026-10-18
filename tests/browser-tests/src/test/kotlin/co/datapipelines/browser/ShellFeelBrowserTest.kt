@@ -45,10 +45,8 @@ import java.nio.file.Paths
  *  4. **The motion is free.** Cumulative layout shift over three boosted navigations stays
  *     under the geometry suite's own 0.05 budget — a transform/opacity entrance cannot move a
  *     box, and this is the instrument that would notice if someone animated a margin.
- *  5. **The ground stays readable.** Body text over the backdrop keeps the design system's
- *     4.5:1 text floor (ui-screens.md §2 principle 8) on EVERY vendored theme, measured
- *     against the worst composite the backdrop can paint — the brand glow over a grid dot
- *     over the page surface — not against the page surface alone.
+ *  5. **The ground stays readable.** Body text on the plain page surface keeps the design
+ *     system's 4.5:1 text floor (ui-screens.md §2 principle 8) on EVERY vendored theme.
  *
  * The throttle is [ShellBusyBrowserTest]'s capture-and-hold, narrowed to the one boosted
  * document GET: a route handler that SLEEPS would serialize the click behind its own request,
@@ -503,7 +501,7 @@ class ShellFeelBrowserTest : BrowserSuite() {
     // ------------------------------------------------------------------ §C the ground
 
     @Test
-    fun `body text keeps the 4_5 to 1 text floor over the backdrop on every vendored theme`() {
+    fun `body text keeps the 4_5 to 1 text floor on the page surface on every vendored theme`() {
         startTrace()
         ready()
         page.setViewportSize(REVIEW_WIDTH, REVIEW_HEIGHT)
@@ -534,16 +532,14 @@ class ShellFeelBrowserTest : BrowserSuite() {
 
         val floor =
             measured.mapNotNull { (theme, m) ->
-                val worst = (m["worst"] as Number).toDouble()
-                val where = m["worstLayer"] as String
-                "$theme: ${"%.2f".format(worst)}:1 on $where".takeIf { worst < TEXT_CONTRAST_FLOOR }
+                val ratio = (m["ratio"] as Number).toDouble()
+                "$theme: ${"%.2f".format(ratio)}:1 on ${m["background"]}".takeIf { ratio < TEXT_CONTRAST_FLOOR }
             }
         val report =
             measured.entries.joinToString("\n") { (t, m) ->
-                "$t: ${"%.2f".format((m["worst"] as Number).toDouble())}:1 worst layer=${m["worstLayer"]} " +
-                    "(base=${m["base"]}, ${m["layers"]} gradient colours: ${m["image"]})"
+                "$t: ${"%.2f".format((m["ratio"] as Number).toDouble())}:1 text=${m["text"]} page=${m["background"]}"
             }
-        record("contrast", "floor $TEXT_CONTRAST_FLOOR:1 — body text over the backdrop\n" + report)
+        record("contrast", "floor $TEXT_CONTRAST_FLOOR:1 — body text on the page surface\n" + report)
         withClue(report) { floor shouldBe emptyList() }
     }
 
@@ -568,11 +564,10 @@ class ShellFeelBrowserTest : BrowserSuite() {
         for ((slug, path) in SHOT_SCREENS) {
             page.navigate("$baseUrl$path")
             page.waitForLoadState(LoadState.NETWORKIDLE)
-            // The ground is behind the content on every screen, and the page header is the
-            // one this round re-weighted — since #555 at the compact scale's title weight,
-            // semibold (ui-screens §3.3 item 1, the application-shell record's 600).
-            page.locator(".app-backdrop").count() shouldBe 1
-            page.evaluate("() => getComputedStyle(document.querySelector('.app-backdrop')).pointerEvents") shouldBe "none"
+            // #606: the plain page is the ground; #555 keeps the title at semibold.
+            page.locator(".app-backdrop").count() shouldBe 0
+            val surface = page.evaluate(CONTRAST_PROBE) as Map<*, *>
+            surface["background"] shouldBe surface["pageToken"]
             page.locator(".app-page-h h1").count() shouldBe 1
             page.evaluate("() => getComputedStyle(document.querySelector('.app-page-h h1')).fontWeight") shouldBe "600"
             page.screenshot(Page.ScreenshotOptions().setPath(shotDir().resolve("103-$slug-$mode.png")))
@@ -628,59 +623,34 @@ class ShellFeelBrowserTest : BrowserSuite() {
             })
             """.trimIndent()
 
-        /**
-         * "Contrast on the backdrop" has as many answers as the backdrop has layers, and this
-         * reports the WORST. The layers are not rebuilt here — they are read back off the REAL
-         * `.app-backdrop` element's computed `background-color` and `background-image`, where
-         * Chromium has already resolved every `color-mix()` to an `rgb()`/`rgba()`. Rebuilding
-         * them on a probe element measured a reconstruction, and the first version of this
-         * test proved it: a nested `color-mix` behind a custom property failed to parse on the
-         * probe, `backgroundColor` stayed `rgba(0, 0, 0, 0)`, and the sweep reported 1.17:1 on
-         * a dot that is in fact almost the page colour.
-         *
-         * Every stacked composite of those colours over the base is scored, not just the ones
-         * the paint can actually produce: a superset is conservative, and cheap at four
-         * colours.
-         */
+        /** Read the main's painted ancestor and its actual text; score one pair per theme. */
         val CONTRAST_PROBE =
             """
             () => {
-              const bd = getComputedStyle(document.querySelector('.app-backdrop'));
-              // Chromium computes `color-mix(in srgb, …)` to `color(srgb r g b / a)` — 0..1
-              // floats — and leaves plain colours as `rgb()/rgba()` — 0..255. A parser that
-              // knew only the second form matched nothing but the gradients' two `transparent`
-              // stops and reported the PAGE SURFACE as the worst layer on eight of nine themes.
-              const parse = (s) => { const n = s.match(/[\d.]+/g).map(Number);
+              const main = document.querySelector('#app-main');
+              const background = el => {
+                for (let node = el; node; node = node.parentElement) {
+                  const color = getComputedStyle(node).backgroundColor;
+                  if (color !== 'rgba(0, 0, 0, 0)' && color !== 'transparent') return color;
+                }
+                throw new Error('main has no painted ancestor');
+              };
+              const parse = s => { const n = s.match(/[\d.]+/g).map(Number);
                 const scale = s.startsWith('color(') ? 255 : 1;
-                return { r: n[0] * scale, g: n[1] * scale, b: n[2] * scale, a: n.length > 3 ? n[3] : 1 }; };
-              const over = (top, base) => ({
-                r: top.a * top.r + (1 - top.a) * base.r,
-                g: top.a * top.g + (1 - top.a) * base.g,
-                b: top.a * top.b + (1 - top.a) * base.b,
-                a: 1,
-              });
-              const lum = (c) => { const f = (v) => { const s = v / 255;
-                  return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4); };
-                return 0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b); };
-              const ratio = (a, b) => { const l1 = lum(a), l2 = lum(b);
-                return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05); };
-
-              const base = parse(bd.backgroundColor);
-              const layers = (bd.backgroundImage.match(/(?:rgba?|color)\([^)]*\)/g) || []).map(parse);
-              const candidates = { base: base };
-              layers.forEach((top, i) => {
-                const single = over(top, base);
-                candidates['layer' + i] = single;
-                layers.forEach((second, j) => { candidates['layer' + i + '_over_' + j] = over(second, single); });
-              });
-              const text = parse(getComputedStyle(document.querySelector('.app-main')).color);
-
-              let worst = Infinity, worstLayer = '';
-              for (const [name, colour] of Object.entries(candidates)) {
-                const r = ratio(text, colour);
-                if (r < worst) { worst = r; worstLayer = name; }
-              }
-              return { worst, worstLayer, layers: layers.length, base: bd.backgroundColor, image: bd.backgroundImage };
+                return n.slice(0, 3).map(v => v * scale); };
+              const lum = c => { const f = v => { const s = v / 255;
+                  return s <= 0.04045 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4); };
+                return 0.2126 * f(c[0]) + 0.7152 * f(c[1]) + 0.0722 * f(c[2]); };
+              const text = getComputedStyle(main).color;
+              const base = background(main);
+              const l1 = lum(parse(text)), l2 = lum(parse(base));
+              const probe = document.createElement('span');
+              probe.style.color = 'var(--surface-page)';
+              document.body.appendChild(probe);
+              const pageToken = getComputedStyle(probe).color;
+              probe.remove();
+              return { ratio: (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05),
+                text, background: base, pageToken };
             }
             """.trimIndent()
     }

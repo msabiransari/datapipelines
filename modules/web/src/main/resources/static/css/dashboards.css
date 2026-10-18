@@ -504,7 +504,7 @@ fieldset.dp-dashboard-parameter > .dp-dashboard-parameter-error {
   display: flex;
   flex-wrap: wrap;
   gap: var(--app-tab-gap);
-  border-bottom: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--app-line-decorative);
 }
 
 .dp-ws-tab {

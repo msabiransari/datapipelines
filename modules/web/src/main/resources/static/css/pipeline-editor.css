@@ -1622,7 +1622,7 @@ html.dp-splitting-y * {
   align-items: center;
   gap: 2px;
   padding: 0 var(--gap-sm, 8px);
-  border-bottom: 1px solid var(--border-faint, #e6e9ee);
+  border-bottom: 1px solid var(--app-line-decorative);
   min-height: var(--pe-dock-tabs-h);
 }
 
