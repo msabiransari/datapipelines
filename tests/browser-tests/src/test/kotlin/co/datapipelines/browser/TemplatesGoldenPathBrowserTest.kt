@@ -183,6 +183,7 @@ class TemplatesGoldenPathBrowserTest : BrowserSuite() {
         page.selectOption("#create-template-type", "sql")
         page.selectOption("#create-template-dialect", "POSTGRES")
         page.fill("#create-template-modal textarea[name=body]", "SELECT 1 AS v")
+        page.fill("#create-template-modal input[name=description]", "browser #579 template")
         page.waitForResponse("**/partials/templates") {
             page.click("#create-template-modal button[type=submit]")
         }
