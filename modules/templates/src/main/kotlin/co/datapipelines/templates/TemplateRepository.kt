@@ -1223,7 +1223,10 @@ class TemplateRepository(
         ): String {
             val live =
                 lifecycle
-                    ?.let { co.datapipelines.pipeline.InventorySource.membership(co.datapipelines.pipeline.NavigationFamily.TEMPLATES, "t", it, releasedOnly) }
+                    ?.let {
+                        co.datapipelines.pipeline.InventorySource
+                            .membership(co.datapipelines.pipeline.NavigationFamily.TEMPLATES, "t", it, releasedOnly)
+                    }
                     ?: TEMPLATE_LIVE_T
             val version =
                 if (lifecycle == null) {
