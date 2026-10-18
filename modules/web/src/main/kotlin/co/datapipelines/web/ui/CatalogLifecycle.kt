@@ -23,6 +23,13 @@ object CatalogLifecycle {
     /** The pipelines catalog's filters: every bucket whose objects all have a workspace page. */
     val PIPELINES: List<LifecycleBucket> = LifecycleBucket.entries.filter { it != LifecycleBucket.DISCARDED_ONLY }
 
+    /**
+     * #580 — the dashboards catalog's filters, the same rule: a discarded-only dashboard has no
+     * workspace page either (discarding its last release clears the pointer, so the workspace's
+     * `findWorking` answers nothing and the page is the family's 404).
+     */
+    val DASHBOARDS: List<LifecycleBucket> = LifecycleBucket.entries.filter { it != LifecycleBucket.DISCARDED_ONLY }
+
     /** `null`/empty → null (no filter); an offered bucket's wire value → it; anything else → the 400. */
     fun parse(
         raw: String?,

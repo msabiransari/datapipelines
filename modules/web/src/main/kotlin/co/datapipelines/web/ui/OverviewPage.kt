@@ -86,7 +86,7 @@ data class OverviewPage(
     ) {
         PIPELINES(NavigationFamily.PIPELINES, "Pipelines", "pipeline", "pipelines", CatalogLifecycle.PIPELINES, guided = true),
         TEMPLATES(NavigationFamily.TEMPLATES, "Templates", "template", "templates", emptyList(), guided = false),
-        DASHBOARDS(NavigationFamily.DASHBOARDS, "Dashboards", "dashboard", "dashboards", emptyList(), guided = false),
+        DASHBOARDS(NavigationFamily.DASHBOARDS, "Dashboards", "dashboard", "dashboards", CatalogLifecycle.DASHBOARDS, guided = true),
         VISUALIZATIONS(
             NavigationFamily.VISUALIZATIONS,
             "Visualizations",
