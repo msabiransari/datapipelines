@@ -82,6 +82,7 @@ import javax.crypto.spec.SecretKeySpec
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
 )
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
+@Suppress("LargeClass") // one sweep fixture per role; splitting it would scatter the per-role comparison the record's §8 relies on
 class PromoterLensSweepTest {
     @LocalServerPort
     private var port: Int = 0
