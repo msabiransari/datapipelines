@@ -4,6 +4,7 @@ import co.datapipelines.pipeline.Inventory
 import co.datapipelines.pipeline.SearchNeedle
 import co.datapipelines.web.ui.site.REPORT_PROBLEM_URL
 import io.kotest.matchers.collections.shouldBeEmpty
+import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
@@ -100,6 +101,77 @@ class OverviewRenderTest {
         area.select("[data-overview-chart], [data-count], [data-overview-table]").shouldBeEmpty()
         area.text() shouldNotContain "0"
         Regex("""\d""").containsMatchIn(area.text()) shouldBe false
+    }
+
+    /**
+     * #583 — the frame is loops, not slots: a panel carrying two charts renders both, each with
+     * its own caption (on the list's label and the hidden table's), bars, note and headings; a
+     * recent card carrying two sections renders both, each with its own heading, note and list —
+     * and a section whose read failed says so without touching its neighbour.
+     */
+    @Test
+    fun `a page can carry two charts and two sections, each reading its own model`() {
+        fun bar(
+            key: String,
+            name: String,
+            value: Long,
+            href: String? = null,
+        ): OverviewPage.Bar = OverviewPage.Bar(key, name, value, OverviewPage.width(value, 4), "mixed", "$name: $value", href)
+
+        val page =
+            OverviewPage(
+                family = "datasources",
+                title = "Datasources",
+                catalogHref = "/datasources",
+                lensed = false,
+                inventory =
+                    OverviewPage.InventoryPanel(
+                        counts = listOf(OverviewPage.Count("datasources", "Datasources", 4, "help", null)),
+                        charts =
+                            listOf(
+                                OverviewPage.Chart("health", "Last connection test", listOf(bar("ok", "Ok", 4)), "A shared outcome."),
+                                OverviewPage.Chart(
+                                    "dialect",
+                                    "By dialect",
+                                    listOf(bar("POSTGRES", "POSTGRES", 3, "/datasources?dialect=POSTGRES"), bar("H2", "H2", 1)),
+                                    null,
+                                    listOf("Dialect", "Datasources"),
+                                ),
+                            ),
+                    ),
+                unavailable = null,
+                recent =
+                    OverviewPage.RecentPanel(
+                        review = null,
+                        sections =
+                            listOf(
+                                OverviewPage.RecentSection("Recently added to this workspace", null, listOf(OverviewPage.RecentItem("dw-sales", "/datasources/dw-sales", NOW.toString(), "an hour ago", NOW.toString(), false)), null, null),
+                                OverviewPage.RecentSection("Recently tested", "The latest outcomes.", null, "Recent tests could not be read.", null),
+                            ),
+                    ),
+                guided = false,
+            )
+        val doc = render(page)
+
+        val charts = doc.select("[data-overview-chart]")
+        charts.map { it.attr("data-chart") } shouldContainExactly listOf("health", "dialect")
+        charts.map { it.attr("aria-label") } shouldContainExactly listOf("Last connection test", "By dialect")
+        charts.map { it.select("[data-bar]").size } shouldContainExactly listOf(1, 2)
+        doc.select(".app-card-note").map { it.text() } shouldContain "A shared outcome."
+        doc.select("[data-overview-table]").map { it.selectFirst("caption")!!.text() } shouldContainExactly
+            listOf("Last connection test", "By dialect")
+        doc.select("[data-overview-table] thead th").map { it.text() } shouldContainExactly
+            listOf("Lifecycle", "Objects", "Dialect", "Datasources")
+        doc.select("[data-chart-table=dialect] tbody td").map { it.text() } shouldContainExactly listOf("3", "1")
+        doc.select("[data-overview-chart][data-chart=dialect] [data-bar=POSTGRES] a").attr("href") shouldBe "/datasources?dialect=POSTGRES"
+
+        doc.select("[data-overview-recent] h3").map { it.text() } shouldContainExactly
+            listOf("Recently added to this workspace", "Recently tested")
+        doc.select("[data-overview-recent] .app-card-note").map { it.text() } shouldContain "The latest outcomes."
+        doc.select("[data-overview-recent] li a").map { it.attr("href") } shouldContainExactly listOf("/datasources/dw-sales")
+        doc.select("[data-overview-recent] .app-overview-unavailable").single().text() shouldContain
+            "Recently tested is unavailable. Recent tests could not be read."
+        doc.selectFirst("[data-overview-review]").shouldBeNull()
     }
 
     @Test
