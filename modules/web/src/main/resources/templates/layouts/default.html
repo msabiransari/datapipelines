@@ -525,7 +525,7 @@
               aria-controls="app-rail" aria-expanded="false" aria-label="Open navigation">
         <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#menu"></use></svg>
       </button>
-      <!-- #554 (record §3 rule 7, §4 phone): the resource browser's opener — a folder glyph
+      <!-- #554 (record §3 rule 7, §4 phone): the resource browser's opener — a desktop chevron / phone folder glyph
            named for the family ("Browse Pipelines"; sidebar.mjs renames it on a family switch).
            `hidden` with the browser on a non-family page (sidebar.mjs keeps the two in step across
            a boosted swap); otherwise lit by CSS only where it has a job: on a family page whose
@@ -533,7 +533,8 @@
       <button type="button" id="browser-open" class="app-browser-open"
               aria-controls="app-browser" aria-expanded="false"
               th:attr="aria-label='Browse ' + ${browserLabel},title='Browse ' + ${browserLabel},hidden=${browserFamily == null} ? 'hidden' : null">
-        <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#folder"></use></svg>
+        <svg class="ds-icon ds-icon-sm app-browser-open-desktop" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#chevron-right"></use></svg>
+        <svg class="ds-icon ds-icon-sm app-browser-open-phone" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#folder"></use></svg>
       </button>
       <!-- The breadcrumb is server-rendered from AppNav.crumbFor(currentPath) and
            re-derived client-side by shell.js after a boosted swap (the top bar is
