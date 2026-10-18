@@ -114,7 +114,12 @@ class OverviewParameterSetsE2eTest {
             recentWorkspace,
             setUpdated = at(0),
         )
-        insert("r/discarded", listOf(v("DISCARDED", created = at(1), released = at(1), discarded = at(7))), recentWorkspace, setUpdated = at(7))
+        insert(
+            "r/discarded",
+            listOf(v("DISCARDED", created = at(1), released = at(1), discarded = at(7))),
+            recentWorkspace,
+            setUpdated = at(7),
+        )
     }
 
     @AfterEach
@@ -256,7 +261,13 @@ class OverviewParameterSetsE2eTest {
     @Test
     fun `the browser header's count is the inventory's objects without its discarded-only`() {
         val counts =
-            UiConfig().navCounts(PipelineRepository(jdbc), TemplateRepository(jdbc), DashboardRepository(jdbc), VisualizationRepository(jdbc), repository)
+            UiConfig().navCounts(
+                PipelineRepository(jdbc),
+                TemplateRepository(jdbc),
+                DashboardRepository(jdbc),
+                VisualizationRepository(jdbc),
+                repository,
+            )
         counts.invalidate(workspace)
         val counted = counted(ReadLens.Everything)
 

@@ -59,10 +59,17 @@ class FamilyRecent(
         return try {
             RecentResult.Available(
                 when (family) {
-                    NavigationFamily.PIPELINES -> pipelines.recent(workspaceId, view.pipelines).map { it.entry("/pipelines/${it.id}") }
-                    NavigationFamily.PARAMETER_SETS ->
+                    NavigationFamily.PIPELINES -> {
+                        pipelines.recent(workspaceId, view.pipelines).map { it.entry("/pipelines/${it.id}") }
+                    }
+
+                    NavigationFamily.PARAMETER_SETS -> {
                         parameterSets.recent(workspaceId, view.parameterSets).map { it.entry("/parameter-sets/${it.id}") }
-                    else -> return null
+                    }
+
+                    else -> {
+                        return null
+                    }
                 },
             )
         } catch (failure: Exception) {
