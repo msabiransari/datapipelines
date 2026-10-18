@@ -1,6 +1,7 @@
 package co.datapipelines.visualization
 
 import co.datapipelines.pipeline.AuthoringGuard
+import co.datapipelines.pipeline.LifecycleBucket
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.pipeline.ValidationResult
@@ -375,6 +376,16 @@ class DashboardService(
         offset: Int = 0,
         limit: Int = ArtifactRepository.DEFAULT_PAGE_LIMIT,
     ): ArtifactPage<DashboardBody> = lifecycle.search(workspaceId, lens, query, offset, limit)
+
+    /** #580 — the catalog `lifecycle` filter, `q` composed: [ArtifactLifecycle.listIn], the inventory's rule under every lens. */
+    fun listIn(
+        workspaceId: UUID,
+        lens: ReadLens,
+        bucket: LifecycleBucket,
+        query: String?,
+        offset: Int = 0,
+        limit: Int = ArtifactRepository.DEFAULT_PAGE_LIMIT,
+    ): ArtifactPage<DashboardBody> = lifecycle.listIn(workspaceId, lens, bucket, query, offset, limit)
 
     fun currentVersions(workspaceId: UUID): List<CurrentArtifactVersion> = lifecycle.currentVersions(workspaceId)
 

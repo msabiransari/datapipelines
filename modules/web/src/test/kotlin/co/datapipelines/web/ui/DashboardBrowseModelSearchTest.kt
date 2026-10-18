@@ -5,6 +5,7 @@ import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.auth.WorkspaceRole
+import co.datapipelines.pipeline.LifecycleBucket
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.visualization.ArtifactPage
@@ -140,7 +141,7 @@ class DashboardBrowseModelSearchTest {
                 dashboards,
             )
 
-        val view = controller.dashboardCatalog(ui, q = needle, offset = null)
+        val view = controller.dashboardCatalog(ui, q = needle, offset = null, lifecycle = null)
         val html = render(view, ui)
 
         // The row is a dashboard whose NAME does not contain the term - only its display name does,
@@ -150,6 +151,43 @@ class DashboardBrowseModelSearchTest {
         html shouldContain "id=\"dash-list-wrapper\""
         html shouldNotContain "No dashboards match your search"
         ui["total"] shouldBe 1
+    }
+
+    /**
+     * #580 — a lifecycle bucket takes the page and its total from the service's ONE filtered read
+     * (`listIn`, the inventory's rule under every lens), the needle composed; the strict double
+     * answers only that call, so the unfiltered `listAll`/`search` path is shown not to run.
+     */
+    @Test
+    fun `a lifecycle bucket pages the filtered read with the needle and the pager carries the bucket`() {
+        every { dashboards.listIn(workspaceId, everything.dashboards, LifecycleBucket.WITH_DRAFTS, "revenue", PAGE, PAGE) } returns
+            ArtifactPage(rows(count = PAGE, from = PAGE), total = FILTERED_TOTAL)
+
+        val html = render(model.fillWrapper(ui, workspaceId, everything, " revenue ", PAGE, LifecycleBucket.WITH_DRAFTS), ui)
+
+        ui["total"] shouldBe FILTERED_TOTAL
+        ui["hasMore"] shouldBe true
+        ui["lifecycle"] shouldBe "with-drafts"
+        ui["lifecycleLabel"] shouldBe "With drafts"
+        ui["lifecycleOptions"] shouldBe CatalogLifecycle.options(CatalogLifecycle.DASHBOARDS)
+        leaves() shouldHaveSize PAGE
+        html shouldContain "q=revenue&amp;lifecycle=with-drafts&amp;offset=${PAGE * 2}"
+        html shouldContain "q=revenue&amp;lifecycle=with-drafts&amp;offset=0"
+        verify(exactly = 0) { dashboards.listAll(any(), any(), any(), any()) }
+        verify(exactly = 0) { dashboards.search(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `an empty lifecycle bucket is the filtered empty state with Clear filters, never the workspace's empty state`() {
+        every { dashboards.listIn(workspaceId, everything.dashboards, LifecycleBucket.DRAFT_ONLY, null, 0, PAGE) } returns
+            ArtifactPage(emptyList(), total = 0)
+
+        val html = render(model.fillWrapper(ui, workspaceId, everything, null, 0, LifecycleBucket.DRAFT_ONLY), ui)
+
+        html shouldContain "No dashboards match: Draft only"
+        html shouldContain ">Clear filters</button>"
+        html shouldNotContain "No dashboards yet"
+        html shouldNotContain ">Clear search</button>"
     }
 
     private fun authenticate() {
@@ -221,6 +259,7 @@ class DashboardBrowseModelSearchTest {
         const val PAGE = DashboardBrowseModel.PAGE_SIZE
         const val TOTAL = 201
         const val LAST_OFFSET = 200
+        const val FILTERED_TOTAL = 60
 
         /** The old model's whole-catalog read: [co.datapipelines.visualization.ArtifactRepository.MAX_PAGE_LIMIT]. */
         const val MAX_READ = 200

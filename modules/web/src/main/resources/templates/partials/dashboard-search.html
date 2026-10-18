@@ -6,7 +6,7 @@
   </th:block>
   <!-- The catalog with no query and no rows is the workspace's EMPTY state, not a failed
        search: it says how dashboards arrive (R10 — authored through agents). -->
-  <th:block th:if="${lensUnavailable == null and #lists.isEmpty(dashboards) and #strings.isEmpty(q)}">
+  <th:block th:if="${lensUnavailable == null and #lists.isEmpty(dashboards) and #strings.isEmpty(q) and #strings.isEmpty(lifecycle)}">
     <div class="ds-empty">
       <p class="ds-empty-title">No dashboards yet</p>
       <p class="ds-empty-description">
@@ -15,13 +15,21 @@
       </p>
     </div>
   </th:block>
-  <th:block th:if="${lensUnavailable == null and #lists.isEmpty(dashboards) and !#strings.isEmpty(q)}">
+  <!-- #580: a lifecycle filter with no rows is a filtered empty state, like a search with
+       none; Clear search keeps the lifecycle, Clear filters resets both controls. -->
+  <th:block th:if="${lensUnavailable == null and #lists.isEmpty(dashboards) and !(#strings.isEmpty(q) and #strings.isEmpty(lifecycle))}">
     <div class="ds-empty">
-      <p class="ds-empty-title">No dashboards match your search</p>
+      <p class="ds-empty-title" th:if="${#strings.isEmpty(lifecycle)}">No dashboards match your search</p>
+      <p class="ds-empty-title" th:unless="${#strings.isEmpty(lifecycle)}"
+         th:text="${'No dashboards match: ' + lifecycleLabel + (#strings.isEmpty(q) ? '' : ', with your search')}">No dashboards match: Draft only</p>
       <div class="ds-empty-actions">
-        <button type="button" class="ds-button ds-button-secondary ds-button-sm"
+        <button th:if="${!#strings.isEmpty(q)}" type="button" class="ds-button ds-button-secondary ds-button-sm"
                 data-dp-clear-filters="#dashboard-filter-q" hx-sync="#dashboard-filter-q:replace"
+                hx-include="#dashboard-filter-lifecycle"
                 th:attr="hx-get=@{/partials/dashboards}, hx-target='#' + ${rootId}, hx-swap='outerHTML'">Clear search</button>
+        <button th:if="${!#strings.isEmpty(lifecycle)}" type="button" class="ds-button ds-button-secondary ds-button-sm"
+                data-dp-clear-filters="#dashboard-filter-q, #dashboard-filter-lifecycle" hx-sync="#dashboard-filter-q:replace"
+                th:attr="hx-get=@{/partials/dashboards}, hx-target='#' + ${rootId}, hx-swap='outerHTML'">Clear filters</button>
       </div>
     </div>
   </th:block>
@@ -51,8 +59,8 @@
   </ul>
 
   <th:block th:unless="${#lists.isEmpty(dashboards)}"
-            th:with="prevUrl=@{/partials/dashboards(q=${q}, offset=${offset - 25})},
-                     nextUrl=@{/partials/dashboards(q=${q}, offset=${offset + 25})}">
+            th:with="prevUrl=@{/partials/dashboards(q=${q}, lifecycle=${lifecycle}, offset=${offset - 25})},
+                     nextUrl=@{/partials/dashboards(q=${q}, lifecycle=${lifecycle}, offset=${offset + 25})}">
     <div th:replace="~{partials/pager :: pager('#' + ${rootId}, ${prevUrl}, ${nextUrl}, ${offset}, ${hasMore}, ${dashboards.size()}, ${total})}"></div>
   </th:block>
 </div>
