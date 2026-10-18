@@ -113,8 +113,7 @@ class ShellColumnsBrowserTest : RestTreeBrowserFixture() {
         val documents = mutableListOf<String>()
         page.onRequest { request ->
             if (request.resourceType() == "document") documents += request.url()
-            if (request.method() == "GET" && request.headers()["hx-request"] == "true"
-            ) {
+            if (request.method() == "GET" && request.headers()["hx-request"] == "true") {
                 boosted += request.url()
             }
         }
