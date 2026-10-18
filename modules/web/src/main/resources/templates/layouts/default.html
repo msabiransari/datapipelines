@@ -358,7 +358,7 @@
              data-nav-group="Explore" data-nav-label="Dashboards"
              th:classappend="${browserFamily == 'dashboards'} ? 'active' : null"
              th:attr="aria-current=${browserFamily == 'dashboards'} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#boxes"></use></svg><span class="app-rail-label">Dashboards</span></a>
-          <a th:href="@{/visualizations}" class="app-nav-link" data-nav-section="/visualizations"
+          <a th:href="@{/overview/visualizations}" class="app-nav-link" data-nav-section="/visualizations"
              data-nav-group="Explore" data-nav-label="Visualizations"
              th:classappend="${browserFamily == 'visualizations'} ? 'active' : null"
              th:attr="aria-current=${browserFamily == 'visualizations'} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#chart-line"></use></svg><span class="app-rail-label">Visualizations</span></a>
