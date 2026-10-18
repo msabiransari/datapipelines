@@ -924,7 +924,8 @@
   /* Hides or shows the browser column, records the choice per workspace when it is a
      real user action (`storage` given, the setRailCollapsed convention), mirrors it onto
      the opener, and tells the browser's lifecycle. A Hide that cannot be saved
-     still hides this page. Never touches `dp-rail` or the collapse classes. */
+     still hides this page. A saved Hide is a per-page choice undone by the next desktop
+     family menu click (#578, owner 2026-10-17). Never touches `dp-rail` or the collapse classes. */
   function setBrowserHidden(doc, hidden, storage) {
     var root = doc.documentElement;
     if (!root) return hidden;
