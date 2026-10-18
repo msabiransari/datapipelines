@@ -11,7 +11,13 @@ import java.util.Locale
 /**
  * #556 — what one family overview renders (`overview/family.html`, shell design §8), built in ONE
  * place from one [InventoryResult] and one [RecentResult], so the page's summary counts and its
- * bars are read from the same [Inventory] value and cannot disagree.
+ * charts are read from the same model the page's controller built and cannot disagree.
+ *
+ * #583 widened the frame without changing these five families' page: the inventory panel carries
+ * [OverviewPage.Chart]s (these families build one, the lifecycle chart) and the recent card
+ * carries [OverviewPage.RecentSection]s (these families build one, Recently updated), so a family
+ * whose inventory or history reads differently — the datasources home — renders through the same
+ * template and tests.
  *
  * [inventory] is null exactly when the inventory is unknown ([unavailable] then says why): the
  * template renders that sentence and no number, never a zero. [recent] is null for a family whose
@@ -28,10 +34,24 @@ data class OverviewPage(
     val recent: RecentPanel?,
     val guided: Boolean,
 ) {
-    /** The four summary counts and the four bars, every number from ONE [Inventory]. */
+    /** The summary counts and the charts, every number of a chart from the one model its page built. */
     data class InventoryPanel(
         val counts: List<Count>,
+        val charts: List<Chart>,
+    )
+
+    /**
+     * #583 — one labelled bar chart: [caption] names it everywhere words go (the list's
+     * `aria-label`, the hidden table's `caption`), [note] the caveat sentence under the bars
+     * when the chart needs one said, null when it does not, and [headings] the hidden table's
+     * two column words (the lifecycle chart's own are the default).
+     */
+    data class Chart(
+        val key: String,
+        val caption: String,
         val bars: List<Bar>,
+        val note: String? = null,
+        val headings: List<String> = listOf("Lifecycle", "Objects"),
     )
 
     /** One summary count: its words, its number, the overlap it states, and its filtered catalog. */
@@ -58,11 +78,33 @@ data class OverviewPage(
         val href: String?,
     )
 
-    /** Continue your work: the newest entries (or why they are unknown) and the Review drafts link. */
+    /**
+     * Continue your work: the [Link] beside the card's title (null hides it — a family whose
+     * catalog offers no draft filter has nothing for it to open, #583) and the sections, each
+     * its own heading, caveat and list.
+     */
     data class RecentPanel(
+        val review: Link?,
+        val sections: List<RecentSection>,
+    )
+
+    /** A labelled link the template renders as-is; the label lives with the model that knows it. */
+    data class Link(
+        val href: String,
+        val label: String,
+    )
+
+    /**
+     * #583 — one titled block inside the Continue your work card: [heading] the `h3`; [note]
+     * the sentence under it; [entries] the rows (null = the read failed and [unavailable] says
+     * why); [emptyNote] what an empty list says instead of nothing.
+     */
+    data class RecentSection(
+        val heading: String,
+        val note: String?,
         val entries: List<RecentItem>?,
         val unavailable: String?,
-        val reviewHref: String,
+        val emptyNote: String?,
     )
 
     /** One Recently updated row, its time both machine-readable and relative. */
@@ -188,7 +230,10 @@ data class OverviewPage(
                         href = family.filtered(bucket),
                     )
                 }
-            return InventoryPanel(counts, bars)
+            // #583: the lifecycle chart, the one chart these five families carry — its caption
+            // is the words the hidden table has always had, now shared with the list's label.
+            val chart = Chart("lifecycle", "${family.title} by lifecycle", bars)
+            return InventoryPanel(counts, listOf(chart))
         }
 
         private fun recentPanel(
@@ -196,29 +241,35 @@ data class OverviewPage(
             recent: RecentResult,
             now: Instant,
         ): RecentPanel {
-            val review = family.filtered(LifecycleBucket.WITH_DRAFTS) ?: family.catalogHref
-            return when (recent) {
-                is RecentResult.Available -> {
-                    RecentPanel(
-                        recent.entries.map {
-                            RecentItem(
-                                name = it.name,
-                                href = it.href,
-                                datetime = it.modifiedAt.toString(),
-                                ago = RelativeTime.since(it.modifiedAt, now),
-                                absolute = RelativeTime.absolute(it.modifiedAt),
-                                hasDraft = it.hasDraft,
-                            )
-                        },
-                        null,
-                        review,
-                    )
-                }
+            val review =
+                family.filtered(LifecycleBucket.WITH_DRAFTS)?.let { href -> Link(href, REVIEW_DRAFTS) }
+            val section =
+                RecentSection(
+                    heading = RECENTLY_UPDATED,
+                    note = RECENT_NOTE,
+                    entries =
+                        when (recent) {
+                            is RecentResult.Available -> {
+                                recent.entries.map {
+                                    RecentItem(
+                                        name = it.name,
+                                        href = it.href,
+                                        datetime = it.modifiedAt.toString(),
+                                        ago = RelativeTime.since(it.modifiedAt, now),
+                                        absolute = RelativeTime.absolute(it.modifiedAt),
+                                        hasDraft = it.hasDraft,
+                                    )
+                                }
+                            }
 
-                is RecentResult.Unavailable -> {
-                    RecentPanel(null, recent.reason, review)
-                }
-            }
+                            is RecentResult.Unavailable -> {
+                                null
+                            }
+                        },
+                    unavailable = (recent as? RecentResult.Unavailable)?.reason,
+                    emptyNote = RECENT_EMPTY,
+                )
+            return RecentPanel(review, listOf(section))
         }
 
         /** [value] as a share of [tallest] in the chart's 0–100 viewBox; an all-zero chart is all zero. */
@@ -251,5 +302,11 @@ data class OverviewPage(
         const val WITH_DRAFTS_HELP = "Draft only plus released with draft changes, so it overlaps With releases."
         const val WITH_RELEASES_HELP = "Released only plus released with draft changes, so it overlaps With drafts."
         const val DISCARDED_HELP = "Every version discarded: no draft or release remains."
+
+        /** The recent card's words, model-owned since #583 — the template renders what it is given. */
+        const val REVIEW_DRAFTS = "Review drafts"
+        const val RECENTLY_UPDATED = "Recently updated"
+        const val RECENT_NOTE = "The latest changes in this workspace, newest first. Not a personal history."
+        const val RECENT_EMPTY = "Nothing here yet. The starter prompt above is a good first step."
     }
 }

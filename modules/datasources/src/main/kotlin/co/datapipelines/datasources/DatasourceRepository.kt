@@ -93,6 +93,25 @@ class DatasourceRow(
 }
 
 /**
+ * #583 — one dialect's slice of the visible set ([DatasourceRepository.visibleCounts]): the
+ * dialect's total and its partition into the three last-test outcomes. The three outcomes sum
+ * to [total]; a dialect the workspace cannot see has no row at all.
+ */
+data class DatasourceDialectCounts(
+    val dialect: Dialect,
+    val total: Long,
+    val testedOk: Long,
+    val testedFailed: Long,
+    val neverTested: Long,
+)
+
+/** #583 — one "recently added to this workspace" row: the grant that made a datasource visible, and when. */
+data class DatasourceRecentGrant(
+    val name: String,
+    val grantedAt: Instant,
+)
+
+/**
  * `NamedParameterJdbcTemplate` access to `datasources` (metadata-db §4.10 / §6). No JPA, no
  * Hibernate (module-structure §8.1): every query is explicit, parameterized SQL — the
  * credential + metadata surface is fully parameterized, so there is no string-built SQL to
@@ -198,6 +217,63 @@ class DatasourceRepository(
                 MapSqlParameterSource().addValue("name", name).addValue("workspaceId", workspaceId),
                 mapper(),
             ).singleOrNull()
+
+    /**
+     * #583 — the visible set's counts per dialect, ONE statement, the same predicate as
+     * [findAllVisible]: a dialect absent from the result has no visible datasources, and the
+     * three test outcomes partition each dialect's total (`FILTER` over the three-valued
+     * `last_test_ok` — never probed is its own bucket, not a zero).
+     */
+    fun visibleCounts(workspaceId: UUID): List<DatasourceDialectCounts> =
+        jdbc.query(
+            """
+            SELECT d.dialect,
+                   COUNT(*) AS total,
+                   COUNT(*) FILTER (WHERE d.last_test_ok IS TRUE) AS tested_ok,
+                   COUNT(*) FILTER (WHERE d.last_test_ok IS FALSE) AS tested_failed,
+                   COUNT(*) FILTER (WHERE d.last_test_ok IS NULL) AS never_tested
+              FROM datasources d
+             WHERE d.is_deleted = FALSE AND $GRANTED_PREDICATE
+             GROUP BY d.dialect
+             ORDER BY d.dialect
+            """.trimIndent(),
+            MapSqlParameterSource("workspaceId", workspaceId),
+        ) { rs, _ ->
+            DatasourceDialectCounts(
+                dialect = Dialect.fromWire(rs.getString("dialect")),
+                total = rs.getLong("total"),
+                testedOk = rs.getLong("tested_ok"),
+                testedFailed = rs.getLong("tested_failed"),
+                neverTested = rs.getLong("never_tested"),
+            )
+        }
+
+    /**
+     * #583 — the datasources most recently GRANTED to [workspaceId], newest first, name order
+     * breaking a same-instant tie. Reads the GRANT rows (that is what "added to this workspace"
+     * means) joined to live datasources, so a soft-deleted datasource drops off the list; the
+     * workspace index on `datasource_workspaces` carries the WHERE.
+     */
+    fun recentGrants(
+        workspaceId: UUID,
+        limit: Int = 5,
+    ): List<DatasourceRecentGrant> =
+        jdbc.query(
+            """
+            SELECT g.datasource_name AS name, g.granted_at
+              FROM datasource_workspaces g
+              JOIN datasources d ON d.name = g.datasource_name
+             WHERE g.workspace_id = :workspaceId AND d.is_deleted = FALSE
+             ORDER BY g.granted_at DESC, g.datasource_name ASC
+             LIMIT :limit
+            """.trimIndent(),
+            MapSqlParameterSource().addValue("workspaceId", workspaceId).addValue("limit", limit),
+        ) { rs, _ ->
+            DatasourceRecentGrant(
+                name = rs.getString("name"),
+                grantedAt = rs.getObject("granted_at", OffsetDateTime::class.java).toInstant(),
+            )
+        }
 
     /** Inserts a new datasource, returning the stored row. Maps a PK collision to duplicate_name. */
     fun create(
