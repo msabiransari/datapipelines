@@ -1160,7 +1160,7 @@ function mkShellChild(id, className = "") {
   return el;
 }
 
-function mkDrawerDoc({ rootClasses = [], workspace = "acme" } = {}) {
+function mkDrawerDoc({ rootClasses = [], workspace = "acme", section = "/pipelines" } = {}) {
   const rail = mkShellChild("app-rail", "app-rail");
   const browser = mkShellChild("app-browser", "app-browser");
   const backdrop = mkShellChild("", "app-rail-backdrop");
@@ -1170,7 +1170,7 @@ function mkDrawerDoc({ rootClasses = [], workspace = "acme" } = {}) {
   const browserOpener = mkEl({ "aria-expanded": "false" });
   const browserHide = mkEl({});
   const search = mkEl({});
-  const firstLink = mkEl({});
+  const firstLink = mkEl({ "data-nav-section": section, href: "/overview" + section });
   const events = [];
   const doc = mkDoc({
     rootClasses,
@@ -1178,6 +1178,7 @@ function mkDrawerDoc({ rootClasses = [], workspace = "acme" } = {}) {
     byQuery: {
       ".app-shell": { children: [rail, browser, backdrop, topbar, main] },
       ".app-nav-link": firstLink,
+      '#app-browser [data-browser-family="pipelines"]': browser,
       "#app-browser .app-browser-tree:not([hidden]) input": search,
     },
   });
@@ -1185,6 +1186,78 @@ function mkDrawerDoc({ rootClasses = [], workspace = "acme" } = {}) {
   doc.dispatchEvent = (event) => events.push(event);
   return { doc, rail, browser, backdrop, topbar, main, railOpener, browserOpener, browserHide, search, firstLink, events };
 }
+
+/** Drive every real body click listener; count entry into the drawer handler even at the base. */
+function familyClick({ section = "/pipelines", win = desktop, hidden = true, modifiers = {} } = {}) {
+  const page = mkDrawerDoc({ rootClasses: hidden ? ["browser-hidden"] : [], section });
+  const stored = new Map([["dp-browser-hidden:acme", "1"]]);
+  const listeners = [];
+  let entries = 0;
+  page.firstLink.closest = (selector) => {
+    if (selector === "#app-rail .app-nav-link[data-nav-section]") {
+      return page.firstLink;
+    }
+    return null;
+  };
+  page.doc.body = { addEventListener(type, fn) {
+    if (type === "click") listeners.push((evt) => {
+      if (fn.toString().includes("revealBrowser(doc")) entries += 1;
+      fn(evt);
+    });
+  } };
+  page.doc.addEventListener = () => {};
+  const previous = { window: globalThis.window, document: globalThis.document };
+  globalThis.window = {
+    ...win, location: { pathname: "/pipelines" }, addEventListener() {},
+    localStorage: { setItem: (k, v) => stored.set(k, v), removeItem: (k) => stored.delete(k) },
+  };
+  globalThis.document = page.doc;
+  try {
+    const shell = loadShell();
+    shell.init();
+    page.events.length = 0;
+    listeners.forEach((fn) => fn({ target: page.firstLink, button: 0, ...modifiers }));
+    assert.equal(entries, 1, "the real drawer listener saw this nav click exactly once");
+    return { ...page, stored, shell };
+  } finally {
+    globalThis.window = previous.window;
+    globalThis.document = previous.document;
+  }
+}
+
+test("a desktop family menu click clears Hide without focusing search", () => {
+  const page = familyClick();
+  assert.equal(page.shell.browserHidden(page.doc), false);
+  assert.equal(page.stored.size, 0);
+  assert.equal(page.browserOpener.attr("aria-expanded"), "true");
+  assert.equal(page.search.focused, false);
+  assert.equal(page.events.at(-1).type, page.shell.BROWSER_VISIBILITY_EVENT);
+});
+
+test("a non-family menu click preserves Hide and its saved preference", () => {
+  const page = familyClick({ section: "/datasources" });
+  assert.equal(page.shell.browserHidden(page.doc), true);
+  assert.equal(page.stored.get("dp-browser-hidden:acme"), "1");
+  assert.equal(page.events.length, 0);
+});
+
+test("a phone family click opens no browser drawer and preserves storage", () => {
+  for (const hidden of [false, true]) {
+    const page = familyClick({ win: phone, hidden });
+    assert.equal(page.shell.browserOpen(page.doc), false);
+    assert.equal(page.shell.browserHidden(page.doc), hidden);
+    assert.equal(page.stored.get("dp-browser-hidden:acme"), "1");
+    assert.equal(page.events.length, 0);
+  }
+});
+
+test("modified and non-primary family clicks preserve Hide", () => {
+  for (const modifiers of [{ button: 1 }, { ctrlKey: true }, { metaKey: true }, { shiftKey: true }, { altKey: true }]) {
+    const page = familyClick({ modifiers });
+    assert.equal(page.shell.browserHidden(page.doc), true);
+    assert.equal(page.stored.get("dp-browser-hidden:acme"), "1");
+  }
+});
 
 const inert = (el) => el.attr("inert") !== undefined;
 const phone = { matchMedia: (q) => ({ matches: q.includes("max-width: 760.98px") }) };
