@@ -97,7 +97,8 @@ class MainFrameBrowserTest : DashboardBrowserSuite() {
                 ),
             ) as Map<String, Any?>
         (result["status"] as Number).toInt() shouldBe 201
-        return Regex(""""id"\s*:\s*"([0-9a-f-]+)"""").find(result["body"] as String)!!.groupValues[1]
+        val id = Regex("\"id\"\\s*:\\s*\"([0-9a-f-]+)\"").find(result["body"] as String)
+        return requireNotNull(id) { "no id in the create response: ${result["body"]}" }.groupValues[1]
     }
 
     private fun openBoard(board: String) {
