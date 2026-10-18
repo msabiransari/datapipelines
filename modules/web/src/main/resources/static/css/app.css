@@ -3493,14 +3493,8 @@ button.app-busy::after {
 /* ---------------------------------------------------------------------------
    103 — THE SHELL FEELS NATIVE (ui-screens.md §3.5).
 
-   Measured against algoschool.app (owner, 2026-09-08; notes T195): that app has
-   ZERO hx-boost — every navigation is a full document load — and still reads as
-   the more native of the two. What it has that we did not is a FEEDBACK AND
-   ATMOSPHERE layer: a click-time pending state, a fixed radial-glow ground,
-   entrance motion on arrival, heading weight, and consistent elevation. We were
-   already the more SPA of the two architecturally and gave none of it. Nothing
-   below changes the architecture: no router, no view-transitions dependency, no
-   library — CSS plus the state machine in shell.js.
+   Feedback, entrance motion, heading weight and elevation; #606 removes the
+   former glow/grid ground in favour of the approved record's plain page surface.
    --------------------------------------------------------------------------- */
 
 /* --- §A the click is acknowledged ---------------------------------------- */
@@ -3585,37 +3579,6 @@ button.app-busy::after {
 
 .app-enter {
   animation: app-enter var(--duration-base) var(--ease-out);
-}
-
-/* --- §C the ground has depth --------------------------------------------- */
-
-/* The backdrop element (layouts/default.html). Fixed, inert, and painted at the
-   base layer: the rail, the top bar and every card are opaque surfaces above
-   it, so it shows exactly where the app has nothing — which is the only place
-   atmosphere belongs. The dot grid is the editor's own `--grid-dot` mixed
-   FURTHER toward the page surface (the canvas's grid is a working surface and
-   is meant to be seen; this one is meant to be felt), and the glow is one soft
-   brand radial at the top left, the login stage's idiom. Both are token
-   expressions, so all nine themes get them by construction. */
-.app-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: var(--z-base);
-  pointer-events: none;
-  background-color: var(--surface-page);
-  background-image:
-    radial-gradient(circle at 12% 0%, color-mix(in srgb, var(--brand) 10%, transparent), transparent 55%),
-    radial-gradient(color-mix(in srgb, var(--grid-dot) 45%, var(--surface-page)) 1.1px, transparent 1.2px);
-  background-size: 100% 100%, 22px 22px;
-}
-
-/* The shell rides above the backdrop. One positioned ancestor is all it takes;
-   nothing inside needs a z-index of its own (the top bar keeps its own
-   `--z-sticky`, the toast stack and the progress bar are fixed siblings
-   OUTSIDE the shell and keep `--z-fixed`/`--z-toast`). */
-.app-shell {
-  position: relative;
-  z-index: 1;
 }
 
 /* Cards are DRAWN, not raised (#555, the record's §6: "no raised shadow" for
