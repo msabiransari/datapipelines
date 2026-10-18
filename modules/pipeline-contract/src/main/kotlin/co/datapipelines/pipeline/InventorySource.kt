@@ -16,6 +16,45 @@ data class Inventory(
 }
 
 /**
+ * #556 — the lifecycle classes an object can be filtered by, each the ONE definition of its
+ * bucket: [predicate] reads the three per-object flags (`d` an admitted DRAFT, `r` an admitted
+ * RELEASED, `x` an admitted DISCARDED version) that [InventorySource] computes, so a catalog
+ * filtered by a bucket and the inventory's count of it cannot disagree (shell design §8: "the
+ * graph should never disagree with its adjacent totals"). The first four are the inventory's
+ * exclusive buckets A–D; [WITH_DRAFTS] (A + C) and [WITH_RELEASES] (B + C) are its two overlapping
+ * summary counts. [wire] is the `lifecycle` query value; a request value is parsed into this enum
+ * before any SQL, so no request text reaches a statement.
+ */
+enum class LifecycleBucket(
+    val wire: String,
+    val predicate: String,
+) {
+    DRAFT_ONLY("draft", "d AND NOT r"),
+    RELEASED_ONLY("released", "r AND NOT d"),
+    RELEASED_WITH_DRAFT("released-with-draft", "d AND r"),
+    DISCARDED_ONLY("discarded", "x AND NOT d AND NOT r"),
+    WITH_DRAFTS("with-drafts", "d"),
+    WITH_RELEASES("with-releases", "r"),
+    ;
+
+    /** How many objects of [inventory] this bucket holds — the number its filtered catalog lists. */
+    fun countIn(inventory: Inventory): Long =
+        when (this) {
+            DRAFT_ONLY -> inventory.draftOnly
+            RELEASED_ONLY -> inventory.releasedOnly
+            RELEASED_WITH_DRAFT -> inventory.releasedWithDraft
+            DISCARDED_ONLY -> inventory.discardedOnly
+            WITH_DRAFTS -> inventory.withDrafts
+            WITH_RELEASES -> inventory.withReleases
+        }
+
+    companion object {
+        /** The bucket a `lifecycle` value names, or null for any other text. */
+        fun ofWire(raw: String): LifecycleBucket? = entries.firstOrNull { it.wire == raw }
+    }
+}
+
+/**
  * One SQL statement supplies all buckets from one PostgreSQL read snapshot, without pagination.
  *
  * A: admitted DRAFT, no RELEASED. B: admitted RELEASED, no DRAFT. C: both. D: admitted versions
@@ -48,12 +87,41 @@ object InventorySource {
             }.single()
     }
 
+    /**
+     * #556 — the catalog half of a lifecycle filter: a boolean SQL condition on ONE row of the
+     * family's table (aliased [alias]) that holds exactly when the object falls in [bucket],
+     * computed from the same three flags, over the same admitted versions (a [narrowed] lens:
+     * RELEASED rows only), as [aggregate]. It REPLACES a catalog's liveness predicate rather than
+     * being ANDed to it: the live catalog excludes discarded-only objects, which the
+     * [LifecycleBucket.DISCARDED_ONLY] bucket is made of. The name half of a narrowed lens is the
+     * caller's, exactly as the catalog already applies it; nothing here is bound from a request.
+     */
+    fun membership(
+        family: NavigationFamily,
+        alias: String,
+        bucket: LifecycleBucket,
+        narrowed: Boolean,
+    ): String {
+        val released = if (narrowed) " AND v.$RELEASED_VERSION" else ""
+        return "EXISTS (SELECT 1 FROM (SELECT $FLAGS FROM ${versionsTable(family)} v" +
+            " WHERE v.${family.foreignKey} = $alias.id$released) a WHERE ${bucket.predicate})"
+    }
+
+    /** The three per-object flags every bucket predicate reads. */
+    private const val FLAGS =
+        "bool_or(v.status = 'DRAFT') AS d, bool_or(v.status = 'RELEASED') AS r, bool_or(v.status = 'DISCARDED') AS x"
+
+    /** The narrowed lens's version rule: a lensed caller is admitted RELEASED versions only. */
+    private const val RELEASED_VERSION = "status = 'RELEASED'"
+
+    private fun versionsTable(family: NavigationFamily): String = family.table.removeSuffix("s") + "_versions"
+
     internal fun sql(
         family: NavigationFamily,
         narrowed: Boolean,
     ): String {
-        val versions = family.table.removeSuffix("s") + "_versions"
-        val admitted = if (narrowed) "AND s.name IN (:names) AND v.status = 'RELEASED'" else ""
+        val versions = versionsTable(family)
+        val admitted = if (narrowed) "AND s.name IN (:names) AND v.$RELEASED_VERSION" else ""
         return """
             WITH admitted AS (
                 SELECT bool_or(v.status = 'DRAFT') AS d,
@@ -64,10 +132,10 @@ object InventorySource {
                  WHERE s.workspace_id = :workspace $admitted
                  GROUP BY s.id
             )
-            SELECT count(*) FILTER (WHERE d AND NOT r) AS draft_only,
-                   count(*) FILTER (WHERE r AND NOT d) AS released_only,
-                   count(*) FILTER (WHERE d AND r) AS released_with_draft,
-                   count(*) FILTER (WHERE x AND NOT d AND NOT r) AS discarded_only
+            SELECT count(*) FILTER (WHERE ${LifecycleBucket.DRAFT_ONLY.predicate}) AS draft_only,
+                   count(*) FILTER (WHERE ${LifecycleBucket.RELEASED_ONLY.predicate}) AS released_only,
+                   count(*) FILTER (WHERE ${LifecycleBucket.RELEASED_WITH_DRAFT.predicate}) AS released_with_draft,
+                   count(*) FILTER (WHERE ${LifecycleBucket.DISCARDED_ONLY.predicate}) AS discarded_only
               FROM admitted
             """.trimIndent()
     }

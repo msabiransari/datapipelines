@@ -20,7 +20,9 @@ import org.springframework.web.bind.annotation.RequestParam
  *
  * The page's first render goes through the same [PipelineBrowseModel] the htmx partial does,
  * so the screen and the fragment that replaces its list cannot disagree about what it contains.
- * `?q=` keeps working as the deep link every "find this pipeline" link uses.
+ * `?q=` keeps working as the deep link every "find this pipeline" link uses. #556: `?lifecycle=`
+ * keeps one inventory bucket ([CatalogLifecycle]) — the target of the overview's bars, counts
+ * and Review drafts — and an unknown or unoffered value is the house 400.
  */
 @Controller
 class PipelineUiController(
@@ -36,7 +38,9 @@ class PipelineUiController(
         request: HttpServletRequest,
         @RequestParam(required = false) q: String?,
         @RequestParam(required = false) offset: Int?,
+        @RequestParam(required = false) lifecycle: String?,
     ): String {
+        val bucket = CatalogLifecycle.parse(lifecycle, CatalogLifecycle.PIPELINES)
         model.addAttribute("activeTheme", themeResolver.resolve(request))
         model.addAttribute("dialects", Dialect.entries.map { it.wire })
         RoleModel.stamp(model)
@@ -48,6 +52,7 @@ class PipelineUiController(
             lens.viewFor(principal),
             q?.trim()?.takeIf { it.isNotEmpty() },
             maxOf(0, offset ?: 0),
+            bucket,
         )
         return "pipelines/list"
     }

@@ -5,6 +5,7 @@ import co.datapipelines.application.lens.LensedView
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.pipeline.DatasourceRegistry
+import co.datapipelines.pipeline.LifecycleBucket
 import co.datapipelines.pipeline.NodeOutput
 import co.datapipelines.pipeline.NodeSource
 import co.datapipelines.pipeline.Pipeline
@@ -70,7 +71,8 @@ class PipelineBrowseModel(
      * Fills [model] for the catalog's **flat list of full paths**, paged by the shared pager
      * against [CATALOG_ROOT_ID] (§9.2): the matches of `q`, or — `q` absent — every pipeline the
      * caller may read ([PipelineService.page]'s own null-query page, the same lens and the same
-     * page size).
+     * page size). #556: a [lifecycle] keeps one inventory bucket, decided in the page's SQL; the
+     * fragment renders it back into the catalog's control and carries it on the pager.
      */
     fun fillSearch(
         model: Model,
@@ -78,14 +80,18 @@ class PipelineBrowseModel(
         view: LensedView,
         q: String?,
         offset: Int,
+        lifecycle: LifecycleBucket? = null,
     ): String {
         val page = maxOf(0, offset)
         // The trim is the model's, in one place (#504b, the ParameterSetsBrowseModel shape): a
         // blank `q` is no search, and what renders back into the box is the trimmed needle. The
         // service still owns the refusal — a box only truncates, so a typed overflow never errors.
         val needle = q?.trim()?.takeIf { it.isNotEmpty() }?.take(SearchNeedle.MAX_LENGTH)
-        val result = pipelines.page(workspaceId, view.pipelines, needle, page, PAGE_SIZE)
+        val result = pipelines.page(workspaceId, view.pipelines, needle, page, PAGE_SIZE, lifecycle)
         model.addAttribute(LENS_UNAVAILABLE, view.unavailable)
+        model.addAttribute("lifecycle", lifecycle?.wire.orEmpty())
+        model.addAttribute("lifecycleLabel", lifecycle?.let(CatalogLifecycle::label))
+        model.addAttribute("lifecycleOptions", CatalogLifecycle.options(CatalogLifecycle.PIPELINES))
         model.addAttribute("searching", true)
         model.addAttribute("rootId", CATALOG_ROOT_ID)
         model.addAttribute("q", needle.orEmpty())
@@ -107,8 +113,9 @@ class PipelineBrowseModel(
         view: LensedView,
         q: String?,
         offset: Int,
+        lifecycle: LifecycleBucket? = null,
     ): String {
-        fillSearch(model, workspaceId, view, q, offset)
+        fillSearch(model, workspaceId, view, q, offset, lifecycle)
         return WRAPPER_VIEW
     }
 
