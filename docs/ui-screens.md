@@ -550,10 +550,16 @@ Spacing has no role tokens: the record's 4/8/12/16/20/24/32/40/48 scale is the d
 | Table (`.ds-table`; a framed one through `data-table.css`'s `--dt-font`/`--dt-head-font`) | 12px cells, 11px column labels; row padding, the cap and the measured sticky header unchanged (§3.7) |
 | Badge, chip (`.ds-badge`, `.app-chip`, `.app-method`, the version chips) | 11px at 500, 4px radius, 2px/8px padding, sentence case |
 | Card, panel (`.ds-card`) | 12px radius, 20px padding, the 1px boundary, NO shadow; a card header 16px/20px, a card body 20px |
-| Dialog (`.app-modal`) | 12px radius, 20px padding, the floating `--shadow-lg`, ≤560px and ≤90vw; title 14px |
+| Dialog (`.app-modal`) | 12px radius, 20px padding, the floating `--shadow-lg`, ≤560px and ≤90vw (desktop; see House exceptions); title 14px |
 | Caption, eyebrow (`.ds-caption`, `.app-eyebrow`) | 10px, uppercase, 0.12em |
 | Notices and states (`.ds-toast`, `.app-alert`, `.app-inline-refusal`, `.app-empty`, `.ds-empty-description`) | 13px; an empty state's title 14px |
 | Coarse pointer | every button, input and select ≥44px high; a small or icon button ≥44×44 — the HIT REGION grows, never the type or the glyph |
+
+**House exceptions (ruled).** Where the house departs from the application-shell record on purpose, the departure is listed here with its reason and its measurement; nothing else in this section departs from the record.
+
+| Exception | The record (#547, §6) | The house | Why | Measured |
+|---|---|---|---|---|
+| Phone dialogs (#565; owner 2026-10-18) | a dialog is at most 560px and at most 90vw, with 20px body padding | at 760px and below `.app-modal` is full width (`max-width: none`, `max-height: 100dvh`) with 16px padding (`--gap-md`): the phone block of `app.css`, later in the file than the `-sm`/`-md`/`-lg` max-widths it overrides; above 760px the record's 560px / 90vw / 20px apply | a 90vw dialog on a 390px phone leaves 19.5px gutters and narrows the form's fields | `CompactScaleBrowserTest`, 390×844: the datasource dialog is 390px wide (the scrim has no padding, the dialog no margin) with 16px padding |
 
 6. **Preserved: content keeps its own typography (#555).** What the scale does NOT touch, because it is content rather than chrome — each keeps an explicit size of its own and so never inherits the 13px body: the dashboards' authored renderers (`.dp-dashboard-kpi-value`/`-unit`/`-comparison`, `.dp-dashboard-table`) and a board card's padding (board layout); the docs prose (`docs.css` `.doc-body` and its headings, code and tables); the template editor's SQL and JSON surfaces (`#templateBody`, `.te-readonly`, `#contextJsonTextarea`, `.te-render-out`, `.te-render-error`); the pipeline editor's canvas (`.pe-card*` through its `--pe-card-fs*` variables, `.pe-port*`, `.pe-marker-*`), its SQL (`.pe-sql`), its event log (`.pe-events`, `.pe-ev-*`) and its error detail (`.pe-error-*`); code and figures in `app.css` (`.app-main code` and `pre`, `.app-code`, `.app-errblock`, `.tf-pane-input`, `.tf-diff`/`.tf-detail`, the `.app-stat-v` figure and its unit); the login page's illustrative miniature (`.app-auth-*` in its preview block, sized as a picture); `.viz-json` and `.ps-insp-code`. A glyph drawn as a character (a dismiss `×`) keeps its size: it is an icon. The shell's own chrome — rail, workspace switcher, breadcrumbs, global search, account menu, the status pill — is #554's to re-bind onto these roles.
 

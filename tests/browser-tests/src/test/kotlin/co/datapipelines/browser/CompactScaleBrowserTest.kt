@@ -296,7 +296,7 @@ class CompactScaleBrowserTest : DashboardBrowserSuite() {
     }
 
     @Test
-    fun `phone 390 - the 21px title, 16px text entry and 44px coarse-pointer targets without larger type`() {
+    fun `phone 390 - the 21px title, 16px text entry, 44px coarse-pointer targets, the full-width dialog`() {
         startTrace()
         ready("cs555p")
         // A touch phone: `(pointer: coarse)` is what a real 390px device reports, and the record's
@@ -331,6 +331,10 @@ class CompactScaleBrowserTest : DashboardBrowserSuite() {
             read("phone.label.fontSize", "#register-modal label", "fontSize", p)
             read("phone.close.height", "#register-modal .app-modal-close", "height", p)
             read("phone.close.width", "#register-modal .app-modal-close", "width", p)
+            // #565: the ruled house exception (ui-screens §3.3, House exceptions) — at 760px and
+            // below the dialog is full width with 16px padding, not the record's 90vw and 20px.
+            read("phone.dialog.width", "#register-modal .app-modal", "width", p)
+            read("phone.dialog.padTop", "#register-modal .app-modal", "padTop", p)
             shot("datasource-form-390", p)
 
             printReadings("phone")
@@ -347,6 +351,8 @@ class CompactScaleBrowserTest : DashboardBrowserSuite() {
                 near("phone.label.fontSize", SUPPORT_PX)
                 atLeast("phone.close.height", TARGET_PX)
                 atLeast("phone.close.width", TARGET_PX)
+                near("phone.dialog.width", PHONE_DIALOG_W_PX, 0.5)
+                near("phone.dialog.padTop", PHONE_DIALOG_PAD_PX)
             }
         } finally {
             phone.close()
@@ -386,6 +392,12 @@ class CompactScaleBrowserTest : DashboardBrowserSuite() {
         const val PANEL_RADIUS_PX = 12.0
         const val DIALOG_PAD_PX = 20.0
         const val DIALOG_MAX_PX = 560.0
+
+        // The phone house exception (#565): `.u-backdrop` is `inset: 0` with no padding and
+        // `.app-modal` has no margin, so a `max-width: none` dialog is the viewport's 390px;
+        // its padding is `--gap-md`.
+        const val PHONE_DIALOG_W_PX = 390.0
+        const val PHONE_DIALOG_PAD_PX = 16.0
 
         // The authored KPI value: `--text-xl` (dashboards.css `.dp-dashboard-kpi-value`), the number
         // read at the base 4becc8e89 before this lane changed anything — it must not move.
