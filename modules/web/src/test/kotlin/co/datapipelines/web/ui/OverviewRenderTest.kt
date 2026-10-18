@@ -104,20 +104,12 @@ class OverviewRenderTest {
     }
 
     /**
-     * #583 — the frame is loops, not slots: a panel carrying two charts renders both, each with
-     * its own caption (on the list's label and the hidden table's), bars, note and headings; a
-     * recent card carrying two sections renders both, each with its own heading, note and list —
-     * and a section whose read failed says so without touching its neighbour.
+     * #583 — the frame is loops, not slots: a panel carrying two charts renders BOTH, each with
+     * its own caption (on the list's label and the hidden table's), bars, note and headings —
+     * a template that read the first chart for every chart renders its data twice and fails here.
      */
     @Test
-    fun `a page can carry two charts and two sections, each reading its own model`() {
-        fun bar(
-            key: String,
-            name: String,
-            value: Long,
-            href: String? = null,
-        ): OverviewPage.Bar = OverviewPage.Bar(key, name, value, OverviewPage.width(value, 4), "mixed", "$name: $value", href)
-
+    fun `a panel renders both of its charts, each reading its own model`() {
         val page =
             OverviewPage(
                 family = "datasources",
@@ -126,29 +118,29 @@ class OverviewRenderTest {
                 lensed = false,
                 inventory =
                     OverviewPage.InventoryPanel(
-                        counts = listOf(OverviewPage.Count("datasources", "Datasources", 4, "help", null)),
+                        counts = emptyList(),
                         charts =
                             listOf(
-                                OverviewPage.Chart("health", "Last connection test", listOf(bar("ok", "Ok", 4)), "A shared outcome."),
+                                OverviewPage.Chart(
+                                    "health",
+                                    "Last connection test",
+                                    listOf(datasourceBar("ok", "Ok", 4)),
+                                    "A shared outcome.",
+                                ),
                                 OverviewPage.Chart(
                                     "dialect",
                                     "By dialect",
-                                    listOf(bar("POSTGRES", "POSTGRES", 3, "/datasources?dialect=POSTGRES"), bar("H2", "H2", 1)),
+                                    listOf(
+                                        datasourceBar("POSTGRES", "POSTGRES", 3, "/datasources?dialect=POSTGRES"),
+                                        datasourceBar("H2", "H2", 1),
+                                    ),
                                     null,
                                     listOf("Dialect", "Datasources"),
                                 ),
                             ),
                     ),
                 unavailable = null,
-                recent =
-                    OverviewPage.RecentPanel(
-                        review = null,
-                        sections =
-                            listOf(
-                                OverviewPage.RecentSection("Recently added to this workspace", null, listOf(OverviewPage.RecentItem("dw-sales", "/datasources/dw-sales", NOW.toString(), "an hour ago", NOW.toString(), false)), null, null),
-                                OverviewPage.RecentSection("Recently tested", "The latest outcomes.", null, "Recent tests could not be read.", null),
-                            ),
-                    ),
+                recent = null,
                 guided = false,
             )
         val doc = render(page)
@@ -164,6 +156,57 @@ class OverviewRenderTest {
             listOf("Lifecycle", "Objects", "Dialect", "Datasources")
         doc.select("[data-chart-table=dialect] tbody td").map { it.text() } shouldContainExactly listOf("3", "1")
         doc.select("[data-overview-chart][data-chart=dialect] [data-bar=POSTGRES] a").attr("href") shouldBe "/datasources?dialect=POSTGRES"
+        doc.selectFirst("[data-overview-recent]").shouldBeNull()
+    }
+
+    /**
+     * #583 — the recent card is a loop too: two sections render both, each with its own heading,
+     * note and list — and a section whose read failed says so without touching its neighbour,
+     * while a model without a Review link renders none (the lifecycle families always do).
+     */
+    @Test
+    fun `a recent card renders both of its sections, each reading its own model`() {
+        val page =
+            OverviewPage(
+                family = "datasources",
+                title = "Datasources",
+                catalogHref = "/datasources",
+                lensed = false,
+                inventory = OverviewPage.InventoryPanel(emptyList(), emptyList()),
+                unavailable = null,
+                recent =
+                    OverviewPage.RecentPanel(
+                        review = null,
+                        sections =
+                            listOf(
+                                OverviewPage.RecentSection(
+                                    "Recently added to this workspace",
+                                    null,
+                                    listOf(
+                                        OverviewPage.RecentItem(
+                                            "dw-sales",
+                                            "/datasources/dw-sales",
+                                            NOW.toString(),
+                                            "an hour ago",
+                                            NOW.toString(),
+                                            false,
+                                        ),
+                                    ),
+                                    null,
+                                    null,
+                                ),
+                                OverviewPage.RecentSection(
+                                    "Recently tested",
+                                    "The latest outcomes.",
+                                    null,
+                                    "Recent tests could not be read.",
+                                    null,
+                                ),
+                            ),
+                    ),
+                guided = false,
+            )
+        val doc = render(page)
 
         doc.select("[data-overview-recent] h3").map { it.text() } shouldContainExactly
             listOf("Recently added to this workspace", "Recently tested")
@@ -286,6 +329,14 @@ class OverviewRenderTest {
         recent: RecentResult? = RecentResult.Available(emptyList()),
         family: OverviewPage.Family = OverviewPage.Family.PIPELINES,
     ): OverviewPage = OverviewPage.of(family, false, inventory, recent, NOW)
+
+    /** A datasources-style bar (#583): tone `mixed`, share-of-tallest width, optional catalog link. */
+    private fun datasourceBar(
+        key: String,
+        name: String,
+        value: Long,
+        href: String? = null,
+    ): OverviewPage.Bar = OverviewPage.Bar(key, name, value, OverviewPage.width(value, 4), "mixed", "$name: $value", href)
 
     private fun render(page: OverviewPage): Document = Jsoup.parse(html(page))
 

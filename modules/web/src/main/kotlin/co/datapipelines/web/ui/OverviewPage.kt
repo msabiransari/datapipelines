@@ -249,7 +249,7 @@ data class OverviewPage(
                     note = RECENT_NOTE,
                     entries =
                         when (recent) {
-                            is RecentResult.Available ->
+                            is RecentResult.Available -> {
                                 recent.entries.map {
                                     RecentItem(
                                         name = it.name,
@@ -260,8 +260,11 @@ data class OverviewPage(
                                         hasDraft = it.hasDraft,
                                     )
                                 }
+                            }
 
-                            is RecentResult.Unavailable -> null
+                            is RecentResult.Unavailable -> {
+                                null
+                            }
                         },
                     unavailable = (recent as? RecentResult.Unavailable)?.reason,
                     emptyNote = RECENT_EMPTY,
