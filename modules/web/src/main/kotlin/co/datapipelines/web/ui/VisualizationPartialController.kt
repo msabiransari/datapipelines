@@ -42,7 +42,9 @@ class VisualizationPartialController(
         model: Model,
         @RequestParam(required = false) q: String?,
         @RequestParam(required = false) offset: Int?,
+        @RequestParam(required = false) lifecycle: String? = null,
     ): String {
+        val bucket = CatalogLifecycle.parse(lifecycle, CatalogLifecycle.VISUALIZATIONS)
         val principal = currentPrincipal()
         return browse.fillWrapper(
             model,
@@ -50,6 +52,7 @@ class VisualizationPartialController(
             lens.viewFor(principal),
             q,
             offset ?: 0,
+            bucket,
         )
     }
 
