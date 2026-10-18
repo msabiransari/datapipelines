@@ -923,7 +923,7 @@
 
   /* Hides or shows the browser column, records the choice per workspace when it is a
      real user action (`storage` given, the setRailCollapsed convention), mirrors it onto
-     the folder button, and tells the browser's lifecycle. A Hide that cannot be saved
+     the opener, and tells the browser's lifecycle. A Hide that cannot be saved
      still hides this page. Never touches `dp-rail` or the collapse classes. */
   function setBrowserHidden(doc, hidden, storage) {
     var root = doc.documentElement;
@@ -949,7 +949,7 @@
     doc.dispatchEvent(new CustomEvent(BROWSER_VISIBILITY_EVENT, { detail: { visible: visible } }));
   }
 
-  /* The folder button and the catalogs' Browse folders action: SHOW the browser — on a
+  /* The top-bar button and the catalogs' Browse folders action: SHOW the browser — on a
      phone by opening its drawer, on a desktop by lifting the user's Hide — then focus its
      search. One entry point, so the two callers cannot drift. */
   function revealBrowser(doc, win, storage) {
@@ -962,7 +962,7 @@
   }
 
   /* The browser head's Hide: on a phone it closes the drawer (the drawer is not a
-     preference); on a desktop it records the Hide and hands focus to the folder button
+     preference); on a desktop it records the Hide and hands focus to the opener
      that now stands in for the browser, so focus is never left on a removed control. */
   function hideBrowser(doc, storage) {
     if (browserOpen(doc)) return setBrowserOpen(doc, false);
@@ -1553,6 +1553,16 @@
        the same band query the CSS uses. */
     doc.body.addEventListener("click", function (evt) {
       if (!evt.target.closest) return;
+      // #578: a saved Hide is a per-page choice, undone by the next family menu
+      // click (owner, 2026-10-17). Let navigation decide focus; never open a phone drawer.
+      var familyLink = evt.target.closest("#app-rail .app-nav-link[data-nav-section]");
+      if (familyLink && evt.button === 0 && !evt.ctrlKey && !evt.metaKey && !evt.shiftKey && !evt.altKey &&
+          !phoneWidth(window) && browserHidden(doc)) {
+        var family = familyLink.getAttribute("data-nav-section").slice(1);
+        if (doc.querySelector('#app-browser [data-browser-family="' + family + '"]')) {
+          setBrowserHidden(doc, false, window.localStorage);
+        }
+      }
       if (evt.target.closest("#rail-open")) {
         setRailOpen(doc, true);
         return;
