@@ -182,6 +182,10 @@ fieldset.dp-dashboard-parameter > .dp-dashboard-parameter-error {
   min-height: 0;
 }
 
+.dp-workspace:has(.dp-ws-pane[data-dp-pane="board"]:not([hidden])) .dp-ws-pane[data-dp-pane="board"] {
+  flex: 1 1 auto;
+}
+
 .dp-board-page {
   container-type: inline-size;
   container-name: dp-board;
@@ -529,6 +533,19 @@ fieldset.dp-dashboard-parameter > .dp-dashboard-parameter-error {
   border-bottom-color: var(--accent-primary);
   color: var(--text-primary);
   font-weight: var(--weight-medium);
+}
+
+/* Only the visible Board tab constrains the workspace height. Carry that constraint
+   through the root and pane container; the other tabs keep their ordinary flow. */
+.dp-workspace:has(.dp-ws-pane[data-dp-pane="board"]:not([hidden])) .dp-ws-root {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.dp-workspace:has(.dp-ws-pane[data-dp-pane="board"]:not([hidden])) .dp-ws-panes {
+  flex: 1 1 auto;
 }
 
 .dp-ws-panes {

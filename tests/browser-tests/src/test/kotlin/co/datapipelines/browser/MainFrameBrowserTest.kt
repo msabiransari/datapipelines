@@ -264,9 +264,8 @@ class MainFrameBrowserTest : DashboardBrowserSuite() {
     /**
      * The canvases' height calcs subtract the band twice (`--app-main-pad`): each canvas root fills <main>'s inner
      * height, less at most the 1px the calcs keep for the header's border. The editor and the template workspace
-     * therefore never scroll <main>. The board's root fills it too, but its content does not yet shrink into
-     * it (`.dp-ws-root` keeps its natural height: 31px past the fold at the base, before #573 — a follow-up), so its
-     * overflow is printed, not asserted.
+     * therefore never scroll <main>. The board's flex chain shrinks its panes into that height too (#612),
+     * keeping the activity dock visible without scrolling <main>.
      */
     @Test
     fun `every full-height canvas fills main's inner height at the 1512 band`() {
@@ -297,6 +296,7 @@ class MainFrameBrowserTest : DashboardBrowserSuite() {
             }
             near("editor.mainOverflowY", 0.0)
             near("template.mainOverflowY", 0.0)
+            near("board.mainOverflowY", 0.0)
         }
     }
 
