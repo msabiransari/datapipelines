@@ -1,6 +1,6 @@
 # UI Screens Inventory
 
-**Status:** v1.156
+**Status:** v1.157
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
 **Last updated:** 2026-10-17 (#554); 2026-10-16 (#551 merge follow-up; #551; #555; #552; #553; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
@@ -204,8 +204,11 @@ is derived from the path (`familyForPath`), never stored — and `hidden` elsewh
 main. Each family's tree mounts lazily the first time it is shown and stays mounted for the life of the
 document, so switching family and returning finds its query, open folders and scroll as they were, with no
 refetch. Initialization requests only the root and leaves all folders closed. A catalog's **Browse folders**
-(`data-nav-tree-reveal`) shows the browser and puts focus in its search; the top bar's folder button
-(`#browser-open`, named "Browse <Family>") reopens a hidden browser. **Hide** and the menu's collapse are
+(`data-nav-tree-reveal`) shows the browser and puts focus in its search; the top bar's chevron-right
+(`#browser-open`, named "Browse <Family>") at the browser's edge reopens a hidden browser on desktop.
+On a phone the same button uses a folder glyph to open the Browse resources drawer. Clicking a family
+menu destination, including the active family, shows a hidden browser and clears the saved Hide without
+moving focus; a non-family destination preserves the preference. **Hide** and the menu's collapse are
 independent controls: icon mode never closes the browser and Hide never changes the page.
 Expanding a folder automatically pages its immediate children, including folders and
 leaves beyond 200, without fetching grandchildren, up to the **level ceiling**: ten 200-row pages per load
@@ -216,12 +219,13 @@ DOM rows, focus and scroll during navigation.
 
 The eight selection rules of the record (§3), as built: (1) the family link still leads to its
 **catalog** — the overview destination is #556's, and View all stays the explicit catalog action;
+a desktop family menu click also shows a hidden browser and clears its saved Hide;
 (2) a leaf opens its existing workspace URL and is marked current, the family's browser state kept;
 (3) a folder toggles only itself; (4) a deep link selects its family, with no recursive fetch to reveal the
 leaf — it is marked current when present; (5) a non-family page hides the browser and returning restores
 the in-document state; (6) back/forward restores page, family and current leaf through the existing history
-integration (`historyRestore` re-syncs the column); (7) collapse and Hide are independent, and the folder
-button carries the family's name; (8) a workspace or account switch is a fresh document, so no prior
+integration (`historyRestore` re-syncs the column); (7) collapse and Hide are independent, and the
+desktop chevron-right / phone folder opener carries the family's name; (8) a workspace or account switch is a fresh document, so no prior
 workspace's rows, count or selection can show. All, Recent and Pinned (§7) are not built: the browser
 shows All and the search (Recent/Pinned are #557's ruling, built after this).
 
@@ -263,7 +267,7 @@ its defaults:
 |---|---|---|---|
 | `dp-rail` | `"1"` compact / `"0"` explicitly expanded (the menu) | `shell.js`; read pre-paint by `rail.js` | kept, same semantics |
 | `dp-browser-width:<workspace>` | the preferred browser width, 240–480 | `browser-resize.mjs`; read pre-paint by `rail.js` | new; any other value is removed |
-| `dp-browser-hidden:<workspace>` | `"1"` when the reader hid the browser | `shell.js`; read pre-paint by `rail.js` | new; any other value is removed |
+| `dp-browser-hidden:<workspace>` | `"1"` when the reader hid the browser | `shell.js`; read pre-paint by `rail.js` | new; removed by a desktop family menu click; any other value is removed |
 | `dp-rail-width:<workspace>` | the old rail+tree width | — | retired: removed on sight by `rail.js`, never reinterpreted (it measured a different composition) |
 | `dp-tree-open:<workspace>`, `dp-tree-panel:<workspace>:<family>` | the old accordion's open family | — | retired: removed on sight by `tree/sidebar.mjs` |
 
@@ -580,7 +584,7 @@ One breakpoint table for the whole shell — the menu, the resource browser, the
 | ≥ 1600 px | 202px expanded; 64px compact on the user's choice (`rail-collapsed`, remembered in `dp-rail`) | 320px default; the user's 240–480px preference, clamped to leave main 320px | as today | `--gap-lg` |
 | 1101–1599 px | as above | 300px default, same range and clamp | as today | `--gap-lg` |
 | 761–1100 px | **starts compact** (64px, icons + named tooltips) unless the user expanded it — same class, same key: a stored `"0"` (`rail-expanded`) opts out of the band default | 270px default, same range; with the menu expanded the clamp tightens (378px at a 900px viewport) | search text hidden and the search ICON BUTTON stands in (#159: it reveals the topbar copy in place; ⌘K drives it too), crumbs truncate to the LEAF with the full path in `title` (106's pattern on `h2.tplx-detail-title`) | `--gap-lg` |
-| ≤ 760 px | **off-canvas Navigation drawer** (`rail-open`): not in the grid (`grid-template-columns: 1fr`), `position: fixed`, `z-index: var(--z-drawer)`, translated off-screen, 232px (`--app-menu-drawer`, the drawer width before #554: its brand row also seats the 48px close control) with its labels whatever `dp-rail` says | **off-canvas Browse resources drawer** (`browser-open`), at most 360px and never wider than the viewport | `#rail-open` (Navigation) first, `#browser-open` (Browse resources) on a family page, crumbs (leaf only), workspace switcher as its avatar only, user menu; **nothing wraps**; the search moves INTO the menu drawer's head | `--gap-md` |
+| ≤ 760 px | **off-canvas Navigation drawer** (`rail-open`): not in the grid (`grid-template-columns: 1fr`), `position: fixed`, `z-index: var(--z-drawer)`, translated off-screen, 232px (`--app-menu-drawer`, the drawer width before #554: its brand row also seats the 48px close control) with its labels whatever `dp-rail` says | **off-canvas Browse resources drawer** (`browser-open`), at most 360px and never wider than the viewport | `#rail-open` (Navigation) first, `#browser-open` (Browse resources, folder glyph) on a family page, crumbs (leaf only), workspace switcher as its avatar only, user menu; **nothing wraps**; the search moves INTO the menu drawer's head | `--gap-md` |
 
 Rules the table rides on, all testable:
 
@@ -2556,6 +2560,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-17 | v1.157 | #578 browser reveal | **§3.4:** desktop chevron-right at the browser edge; phone keeps the folder glyph. A desktop family menu click clears Hide and shows the browser, including the active family; non-family destinations preserve Hide. Storage table and **§3.6** updated. |
 | 2026-10-17 | v1.156 | #554 the shell becomes three sibling columns: a stable primary menu, a separate resource browser, the workspace | **Principle 4, §3, §3.4, §3.6, §4.3, §4.6, §4.6a/b, §4.21, §4.24:** the in-rail accordion (#460/#478) and the rail resize (#465/#503) retire. The menu is 202px expanded / 64px compact, with Explore (Dashboards, Visualizations, Parameter Sets) as a new group between Build and Operate; compact mode has named tooltips and no group labels. The five REST trees move into `#app-browser` beside it, outside the boosted main: header with title, admitted count (moved from the menu badges, all five families) and Hide; search; tree; View all + width reset. The browser is visible only on a family page, mounts each family lazily and keeps it in-document, and is resizable 240–480px on its boundary, clamped to leave main 320px. §3.6 is re-cut to the record's four bands (≥1600 / 1101–1599 / 761–1100 / ≤760): two phone drawers, one open at a time, the rest of the shell `inert`; the menu drawer keeps its 232px (`--app-menu-drawer`) so its close control clears the wordmark. A storage table: `dp-rail` kept; `dp-browser-width:<ws>` and `dp-browser-hidden:<ws>` new; `dp-rail-width:<ws>`, `dp-tree-open:<ws>` and `dp-tree-panel:*` removed on sight, never reinterpreted. The record's eight selection rules are stated as built (rule 1's overview destination is #556's). The #555 phone rows follow the band edge (760px and below). The "document never scrolls" and "`<main>` is the one scroll container" sentences are unchanged. |
 | 2026-10-16 | v1.155 | #536 small chart sizing | Dashboard grid: Plotly bodies keep a 64 px token minimum; undersized slots scroll the entire bordered card instead of failing during axis scaling. |
 | 2026-10-16 | v1.154 | #536 renderer diagnostics | Dashboard workspace: renderer rejections write bounded browser-console diagnostics; the visible error sentence is unchanged. |
