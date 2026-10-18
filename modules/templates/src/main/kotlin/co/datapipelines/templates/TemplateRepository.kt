@@ -1212,8 +1212,10 @@ class TemplateRepository(
          * #579: with a [lifecycle] the bucket's membership REPLACES the liveness predicate
          * ([co.datapipelines.pipeline.InventorySource.membership] — the INVENTORY's rule, so a
          * filtered catalog's count is the number the overview's bar shows), over RELEASED
-         * versions only when [releasedOnly] (a narrowed lens). The unfiltered predicate is the
-         * one it always was.
+         * versions only when [releasedOnly] (a narrowed lens). The joined row is then the
+         * template's LATEST version, whatever its status — a discarded-only template has no
+         * working version (D55's COALESCE is empty for it), and the bucket's semantics live
+         * entirely in the membership subquery. The unfiltered predicate is the one it always was.
          */
         private fun listWhere(
             lifecycle: co.datapipelines.pipeline.LifecycleBucket?,
@@ -1223,14 +1225,22 @@ class TemplateRepository(
                 lifecycle
                     ?.let { co.datapipelines.pipeline.InventorySource.membership(co.datapipelines.pipeline.NavigationFamily.TEMPLATES, "t", it, releasedOnly) }
                     ?: TEMPLATE_LIVE_T
+            val version =
+                if (lifecycle == null) {
+                    """
+                    v.version = COALESCE(
+                          t.current_version,
+                          (SELECT MAX(d.version) FROM template_versions d
+                            WHERE d.template_id = t.id AND d.status = 'DRAFT')
+                        )
+                    """.trimIndent()
+                } else {
+                    "v.version = (SELECT MAX(x.version) FROM template_versions x WHERE x.template_id = t.id)"
+                }
             return """
             WHERE $live
               AND t.workspace_id = :workspaceId
-              AND v.version = COALESCE(
-                    t.current_version,
-                    (SELECT MAX(d.version) FROM template_versions d
-                      WHERE d.template_id = t.id AND d.status = 'DRAFT')
-                  )
+              AND $version
               AND (CAST(:dialect AS TEXT) IS NULL OR v.dialect = CAST(:dialect AS TEXT))
               AND (CAST(:type AS TEXT) IS NULL OR v.type = CAST(:type AS TEXT))
               AND (
