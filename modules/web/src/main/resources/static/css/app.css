@@ -1311,10 +1311,6 @@ button.app-busy::after {
 
 /* The user's Hide — a desktop choice. At 760px and below the browser is a drawer that is
    closed until its opener is used, so the preference has nothing to hide there. */
-.app-browser-open-phone {
-  display: none;
-}
-
 @media (min-width: 761px) {
   :root.browser-hidden .app-browser {
     display: none;
@@ -1868,6 +1864,12 @@ button.app-busy::after {
 .app-browser-open:hover {
   background: var(--surface-hover);
   color: var(--text-primary);
+}
+
+/* #578 — one button, two glyphs: the chevron-right on a desktop, the folder at 760px and
+   below (the phone section swaps them). */
+.app-browser-open-phone {
+  display: none;
 }
 
 @media (min-width: 761px) {
