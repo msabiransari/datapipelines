@@ -334,7 +334,8 @@ class VisualizationWorkspaceBrowserTest : VisualizationBrowserSuite() {
         // A boosted leave and Back: htmx restores the page; it is wired ONCE (one root marker,
         // one window listener) and its strip still switches and replays.
         page.click(".app-nav-link[data-nav-section='/templates']")
-        page.waitForSelector("#template-list-wrapper") // #398: /templates is the flat catalog, no explorer pane
+        // #579: the Templates item lands on the family overview (a boosted leave either way).
+        page.waitForSelector(".app-overview[data-overview='templates']")
         page.goBack()
         page.waitForSelector("#viz-pane-versions:not([hidden])")
         page.waitForFunction("() => document.querySelectorAll('.dp-ws-root[data-dp-ws-wired=\"1\"]').length === 1")
@@ -428,7 +429,8 @@ class VisualizationWorkspaceBrowserTest : VisualizationBrowserSuite() {
         for (cycle in 1..2) {
             page.evaluate("() => { window.__v444.before = document.querySelector('#viz-preview-data'); }")
             page.click(".app-nav-link[data-nav-section='/templates']")
-            page.waitForSelector("#template-list-wrapper")
+            // #579: the Templates item lands on the family overview (a boosted leave either way).
+            page.waitForSelector(".app-overview[data-overview='templates']")
             page.evaluate("() => window.__v444.documentMarker") shouldBe documentMarker
             withClue("the real boosted leave saved the wired Preview in htmx's cache") {
                 page.evaluate(

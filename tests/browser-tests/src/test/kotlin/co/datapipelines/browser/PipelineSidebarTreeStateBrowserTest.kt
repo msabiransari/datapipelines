@@ -164,9 +164,10 @@ class PipelineSidebarTreeStateBrowserTest : RestTreeBrowserFixture() {
         page.waitForURL("**/pipelines/$id")
         page.waitForSelector("${leaf("acme/history/leaf")}[aria-current=page]")
         page.click(".app-nav-link[data-nav-section='/templates']")
-        page.waitForSelector("#template-list-wrapper")
+        // #579: the Templates item lands on the family overview (a boosted leave either way).
+        page.waitForSelector(".app-overview[data-overview='templates']")
         // The browser drops the mark in markCurrent on htmx:afterSettle, a settle delay AFTER the swap
-        // that adds #template-list-wrapper: wait for the settled browser, never read it at the swap.
+        // that adds the overview: wait for the settled browser, never read it at the swap.
         page.waitForFunction("() => !document.querySelector('$panel [aria-current=page]')")
         page.goBack()
         page.waitForURL("**/pipelines/$id")

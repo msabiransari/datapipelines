@@ -51,7 +51,8 @@ class PersistentChartNavigationBrowserTest : VisualizationBrowserSuite() {
         page.locator("script[data-dp-plotly-bundle]").getAttribute("data-dp-plotly-bundle") shouldBe "3d"
         page.evaluate("() => performance.getEntriesByType('resource').filter(x=>x.name.includes('plotly-2d.min.js')).length") shouldBe 0
         page.click(".app-nav-link[data-nav-section='/visualizations']")
-        page.waitForSelector("#viz-list-wrapper")
+        // #581: the Visualizations item lands on the family overview (a boosted leave either way).
+        page.waitForSelector(".app-overview[data-overview='visualizations']")
         page.goBack()
         page.waitForURL("**/visualizations/$surface")
         preview()
