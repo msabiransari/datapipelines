@@ -219,7 +219,8 @@ class ListPartialsRenderTest {
         // named for shell.js — and its own request is the unfiltered first page (no hx-include).
         // #579: lifecycle joins the standing filters, so the clear drops all four.
         html shouldContain "Clear filters"
-        html shouldContain "data-dp-clear-filters=\"#template-filter-q, #template-filter-dialect, #template-filter-type, #template-filter-lifecycle\""
+        html shouldContain
+            "data-dp-clear-filters=\"#template-filter-q, #template-filter-dialect, #template-filter-type, #template-filter-lifecycle\""
         html shouldNotContain "hx-include"
         html shouldNotContain "Clear search"
     }
