@@ -164,6 +164,57 @@ class TemplatesGoldenPathBrowserTest : BrowserSuite() {
         page.inputValue("#template-filter-q") shouldBe ""
     }
 
+    /**
+     * #579 — the lifecycle filter: the select offers the five buckets and never `discarded`
+     * (a discarded-only template has no page), choosing one refetches with `lifecycle=` and
+     * the rows are that bucket's, and the no-match state names the standing bucket.
+     */
+    @Test
+    fun `the lifecycle filter narrows the catalog and never offers discarded (#579)`() {
+        loginReadyUser()
+        page.setViewportSize(1440, 900)
+        val name = "test/lifecycle_tpl_" + generatedPassword("t").take(6).lowercase()
+
+        page.navigate("$baseUrl/templates")
+        page.waitForURL("**/templates")
+        page.click("text=Create Template")
+        page.locator("#create-template-modal").isVisible shouldBe true
+        page.fill("#create-template-modal input[name=name]", name)
+        page.selectOption("#create-template-type", "sql")
+        page.selectOption("#create-template-dialect", "POSTGRES")
+        page.fill("#create-template-modal textarea[name=body]", "SELECT 1 AS v")
+        page.waitForResponse("**/partials/templates") {
+            page.click("#create-template-modal button[type=submit]")
+        }
+        row(name).waitFor()
+
+        page.locator("#template-filter-lifecycle option").allInnerTexts() shouldBe
+            listOf(
+                "All lifecycle stages",
+                "Draft only",
+                "Released only",
+                "Released with draft changes",
+                "With drafts",
+                "With releases",
+            )
+
+        page.waitForResponse({ r -> r.url().contains("/partials/templates") && r.url().contains("lifecycle=draft") }) {
+            page.selectOption("#template-filter-lifecycle", "draft")
+        }
+        row(name).waitFor()
+
+        // Nothing is released: the miss names the standing bucket.
+        page.waitForResponse({ r -> r.url().contains("/partials/templates") && r.url().contains("lifecycle=with-releases") }) {
+            page.selectOption("#template-filter-lifecycle", "with-releases")
+        }
+        page.locator(".ds-empty-title").first().innerText() shouldContain "No templates match: With releases"
+
+        page.waitForResponse({ r -> r.url().contains("/partials/templates") && !r.url().contains("lifecycle=draft") && !r.url().contains("lifecycle=with") }) {
+            page.selectOption("#template-filter-lifecycle", "")
+        }
+        row(name).waitFor()
+    }
+
     private fun row(name: String) =
         page.locator(
             "#template-list-wrapper a.tpl-result",
