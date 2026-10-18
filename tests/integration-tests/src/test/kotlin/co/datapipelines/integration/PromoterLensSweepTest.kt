@@ -336,6 +336,7 @@ class PromoterLensSweepTest {
                     "released" to 3,
                     "released-with-draft" to 1,
                 )
+
             fun rows(body: String): Int = Regex("data-leaf-id=").findAll(body).count()
             val draftRows = call("/partials/templates?lifecycle=draft", auth).body
             rows(draftRows) shouldBe 1
