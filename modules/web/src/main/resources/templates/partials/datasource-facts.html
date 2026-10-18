@@ -51,7 +51,7 @@
     </thead>
     <tbody>
       <tr th:each="f : ${facts}" th:attr="data-fact-id=${f['id']}, data-trust=${f['trust']}">
-        <td class="u-mono u-text-sm" th:text="${f['object']}">orders.amount</td>
+        <td class="u-mono" th:text="${f['object']}">orders.amount</td>
         <td>
           <span class="ds-badge ds-badge-default" th:text="${f['kind']}">unit</span>
           <!-- A WORKSPACE fact is this organisation's meaning; a DATASOURCE one is shared with
@@ -65,13 +65,13 @@
         </td>
         <td>
           <span class="ds-badge" th:classappend="${f['trustBadge']}" th:text="${f['trust']}">observed</span>
-          <div th:if="${f['drift']} != null" class="u-secondary u-text-sm" th:text="${f['drift']}">column X no longer exists</div>
+          <div th:if="${f['drift']} != null" class="u-secondary" th:text="${f['drift']}">column X no longer exists</div>
         </td>
-        <td class="u-text-sm">
+        <td class="">
           <span th:if="${f['evidence_summary']} != null" th:text="${f['evidence_summary']}">amount=1250 | amount=300</span>
           <span th:if="${f['evidence_summary']} == null" class="u-secondary">none — asserted</span>
         </td>
-        <td class="u-secondary u-text-sm" th:attr="data-sort-value=${f['recorded_at']}">
+        <td class="u-secondary" th:attr="data-sort-value=${f['recorded_at']}">
           <span th:text="${f['recorded_at']}">2026-09-11T10:00:00Z</span>
           <span class="ds-badge ds-badge-default" th:text="${f['recorded_via']}">mcp</span>
           <!-- D-S9: a fact another workspace established arrives with its evidence and trust,
@@ -83,7 +83,7 @@
                preserved. Pre-#460 this link had to be a full document load because a boosted
                swap bound Alpine before the editor's scripts executed and no canvas mounted;
                the runtime now owns that activation (see pipeline-editor/runtime.js). -->
-          <a th:if="${f['source_pipeline']} != null" class="u-text-sm" hx-boost="true"
+          <a th:if="${f['source_pipeline']} != null" class="" hx-boost="true"
              th:href="@{/pipelines/{id}/editor(id=${f['source_pipeline']['id']})}" th:text="${f['source_pipeline']['name']}">finance/revenue</a>
         </td>
       </tr>

@@ -189,7 +189,7 @@
         <div class="u-mb-md u-hidden" id="key-role-field">
           <label class="u-block u-secondary u-text-sm u-mb-xs" for="key-role">Role</label>
           <select id="key-role" name="role" class="ds-input u-full"></select>
-          <p class="u-text-xs u-m0 u-mt-xs">What the agent may do is exactly this role's — no more, no less. You can only offer roles whose permissions you hold.</p>
+          <p class="u-text-sm u-m0 u-mt-xs">What the agent may do is exactly this role's — no more, no less. You can only offer roles whose permissions you hold.</p>
         </div>
 
         <!-- 3 — Name. Unique per workspace among LIVE keys (keys v2 A18): the database
@@ -197,7 +197,7 @@
         <div class="u-mb-md">
           <label class="u-block u-secondary u-text-sm u-mb-xs" for="key-name">Name</label>
           <input id="key-name" type="text" name="name" class="ds-input u-full" placeholder="nightly-sync" required maxlength="120">
-          <p class="u-text-xs u-m0 u-mt-xs">For you to recognise it later. Names are unique per workspace while a key lives — revoking one frees its name.</p>
+          <p class="u-text-sm u-m0 u-mt-xs">For you to recognise it later. Names are unique per workspace while a key lives — revoking one frees its name.</p>
         </div>
 
         <!-- 4 — Expiry. A select, plus a date input the last option reveals. Resolved
@@ -222,7 +222,7 @@
               <span class="ds-mono" th:text="${node == '/'} ? '/** (everything)' : ${node} + '/**'">/nyc/**</span>
             </label>
           </div>
-          <p class="u-text-xs u-m0 u-mt-xs">
+          <p class="u-text-sm u-m0 u-mt-xs">
             An association at <span class="ds-mono">/nyc</span> covers everything beneath it; one deeper down
             REPLACES it there. An API key with no association authorises nothing.
           </p>

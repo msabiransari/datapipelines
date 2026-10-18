@@ -43,7 +43,7 @@
                     th:title="${p != null} ? ${p.name} : null">pipeline</span>
               <span class="app-path" th:if="${p != null and p.displayName != null}" th:text="${p.name}">nyc/mobility/x</span>
             </th:block>
-            <div class="u-text-xs" th:if="${r.parentExecutionId != null}">
+            <div class="" th:if="${r.parentExecutionId != null}">
               <a class="u-muted" th:href="@{/executions/{id}(id=${r.parentExecutionId})}"
                  th:text="${'spawned by ' + r.parentExecutionId.toString().substring(0, 8) + '...'}">spawned by</a>
             </div>
@@ -53,7 +53,7 @@
                word is what a person reads. -->
           <td>
             <span th:text="${r.pipelineVersion}">1</span>
-            <span class="app-chip app-chip-warn u-text-xs"
+            <span class="app-chip app-chip-warn"
                   th:if="${draftRuns != null and draftRuns[r.executionId]}"
                   th:attr="data-draft-run=true">DRAFT</span>
           </td>
@@ -69,7 +69,7 @@
           <td class="num" th:text="${r.resultRowCount != null} ? ${r.resultRowCount} : '—'">rows</td>
           <!-- 079 §E: `triggered_via` rides on every ExecutionRecord already (SELECT_COLUMNS
                carries it) and was rendered only on the detail screen. -->
-          <td class="u-muted u-text-xs" th:text="${r.triggeredVia.name()}">MCP</td>
+          <td class="u-muted" th:text="${r.triggeredVia.name()}">MCP</td>
         </tr>
       </tbody>
     </table>

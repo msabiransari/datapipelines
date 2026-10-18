@@ -16,7 +16,7 @@
           <span class="ds-badge"
                 th:classappend="${record.status.name() == 'SUCCESS'} ? 'ds-badge-success' : (${record.status.name() == 'FAILED'} ? 'ds-badge-danger' : (${record.status.name() == 'RUNNING'} ? 'ds-badge-primary' : 'ds-badge-warning'))"
                 th:text="${record.status.name()}">status</span>
-          <span class="u-text-sm u-muted">v<span th:text="${record.pipelineVersion}">1</span></span>
+          <span class="u-text-meta u-muted">v<span th:text="${record.pipelineVersion}">1</span></span>
           <!-- versioning §8 / D55: this run's version was a DRAFT when it ran (or still is). -->
           <span class="ds-badge ds-badge-warning" th:if="${draftRun}" th:attr="data-draft-run=true">DRAFT</span>
         </div>
@@ -31,7 +31,7 @@
           </div>
           <div>
             <span class="u-muted">Correlation ID:</span>
-            <code class="u-text-xs" th:text="${correlationId}">corr-id</code>
+            <code class="" th:text="${correlationId}">corr-id</code>
           </div>
           <div>
             <span class="u-muted">Triggered via:</span>
@@ -80,7 +80,7 @@
             <td>
               <a th:href="@{/executions/{id}(id=${f.executionId})}"
                  th:text="${f.executionId.toString().substring(0, 8) + '...'}">exec</a>
-              <span class="u-muted u-text-xs" th:if="${f.executionId == record.executionId}"> (this one)</span>
+              <span class="u-muted u-text-meta" th:if="${f.executionId == record.executionId}"> (this one)</span>
             </td>
             <td>
               <span class="u-secondary" th:if="${f.parentExecutionId == null}">root</span>

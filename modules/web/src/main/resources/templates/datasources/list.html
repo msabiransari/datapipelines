@@ -128,7 +128,7 @@
                  th:attr="title=${isAdmin} ? 'Visible to every workspace' : 'Only admins can register global datasources'">
             <input type="checkbox" name="global" value="true" th:disabled="${!isAdmin}"> Global
           </label>
-<span class="u-muted u-text-xs" th:text="${bindingHint}"></span>
+<span class="u-muted u-text-sm" th:text="${bindingHint}"></span>
         </div>
         <details class="u-mb-md">
           <summary class="u-secondary u-text-sm">Connection pool — defaults</summary>

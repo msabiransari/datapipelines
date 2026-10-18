@@ -30,7 +30,7 @@
       <span th:if="${c.observed != null}" class="u-mono" th:text="${c.observed}">74.62</span>
       <span th:if="${c.observed == null and c.message != null}" class="u-secondary u-text-sm"
             th:text="${c.message}">The statement returned two columns.</span>
-      <span th:if="${c.ranAt != null}" class="u-muted u-text-sm">
+      <span th:if="${c.ranAt != null}" class="u-muted u-text-meta">
         <span th:text="${c.ranAgo}" th:title="${#temporals.format(c.ranAt, 'yyyy-MM-dd HH:mm')}">just now</span>
         <span th:if="${c.via != null}" th:text="' · via ' + ${c.via}"> · via ui</span>
       </span>

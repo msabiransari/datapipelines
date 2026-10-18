@@ -20,11 +20,11 @@
       <ul class="u-text-sm u-mb-md" data-purge-pinners>
         <li th:each="p : ${dlg.pinnerPipelines}" data-purge-pinner-pipeline>
           <span class="u-mono" th:text="${p.pipelineName}">parent/pipeline</span>
-          <span class="u-muted u-text-xs" th:text="'v' + ${p.pipelineVersion} + ' · node ' + ${p.nodeId}">v3 · node extract</span>
+          <span class="u-muted u-text-meta" th:text="'v' + ${p.pipelineVersion} + ' · node ' + ${p.nodeId}">v3 · node extract</span>
         </li>
         <li th:each="d : ${dlg.pinnerDashboards}" data-purge-pinner-dashboard>
           <span class="u-mono" th:text="${d.name}">acme/boards/revenue</span>
-          <span class="u-muted u-text-xs" th:text="'v' + ${d.version} + ' · dashboard · ' + ${d.status}">v4 · dashboard · DRAFT</span>
+          <span class="u-muted u-text-meta" th:text="'v' + ${d.version} + ' · dashboard · ' + ${d.status}">v4 · dashboard · DRAFT</span>
         </li>
       </ul>
     </th:block>

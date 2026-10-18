@@ -14,7 +14,7 @@
              th:text="${row.dashboardName + '@' + row.dashboardVersion}">finance/dashboards/revenue@3</a>
           <span th:if="${row.dashboardId == null}" class="u-mono"
                 th:text="${row.dashboardName + '@' + row.dashboardVersion}">finance/dashboards/revenue@3</span>
-          <span class="u-muted u-text-sm" th:unless="${#lists.isEmpty(row.pinnedVersions)}"
+          <span class="u-muted u-text-meta" th:unless="${#lists.isEmpty(row.pinnedVersions)}"
                 th:text="'pins ' + ${row.pinnedLabel}">pins v2</span>
         </li>
       </ul>

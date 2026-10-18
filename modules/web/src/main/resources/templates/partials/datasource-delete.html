@@ -41,7 +41,7 @@
             <a th:href="@{/pipelines(q=${u.pipelineName})}" th:text="${u.pipelineName}">sales_daily</a>
             <span class="u-muted">›</span>
             <span class="u-mono" th:text="${u.nodeId}">extract</span>
-            <span class="u-muted u-text-xs"
+            <span class="u-muted u-text-meta"
                   th:text="'(v' + ${u.pipelineVersion} + ' ' + ${#strings.toLowerCase(u.versionStatus)} + ')'">(v3 released)</span>
           </li>
         </ul>

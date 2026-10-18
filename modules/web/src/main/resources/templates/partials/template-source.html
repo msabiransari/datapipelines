@@ -37,7 +37,7 @@
         <span class="ds-badge"
               th:classappend="${selectedStatus == 'DRAFT'} ? 'ds-badge-warning' : 'ds-badge-success'"
               th:text="${selectedStatus}">RELEASED</span>
-        <span class="u-secondary u-text-sm">read-only</span>
+        <span class="u-secondary u-text-meta">read-only</span>
       </div>
       <div class="u-row">
         <button th:if="${canAuthor}" data-verb="template-edit" class="ds-button ds-button-primary ds-button-sm" id="tpl-edit-version"

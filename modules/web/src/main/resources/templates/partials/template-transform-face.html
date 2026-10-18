@@ -38,9 +38,9 @@
       <span class="ds-badge"
             th:classappend="${selectedStatus == 'DRAFT'} ? 'ds-badge-warning' : 'ds-badge-success'"
             th:text="${selectedStatus}">DRAFT</span>
-      <span class="u-mono u-text-xs u-secondary" data-tf-hash th:title="${faceHash}"
+      <span class="u-mono u-text-sm u-secondary" data-tf-hash th:title="${faceHash}"
             th:text="'hash ' + ${faceHashShort}">hash 1a2b3c4d5e6f</span>
-      <span th:if="${canAuthor != true or faceEditable != true}" class="u-secondary u-text-sm">read-only</span>
+      <span th:if="${canAuthor != true or faceEditable != true}" class="u-secondary u-text-meta">read-only</span>
       <!-- template-transform-face.js reveals this on the first keystroke in a pane: Release
            publishes the last SAVED draft, never what is typed, so unsaved edits say so. -->
       <span th:if="${canAuthor == true and faceEditable == true}" id="tf-dirty" class="ds-badge ds-badge-warning" hidden>unsaved changes</span>
