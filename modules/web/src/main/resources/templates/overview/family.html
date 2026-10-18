@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{layouts/default :: page(~{::content})}">
+<th:block th:fragment="content">
+  <!--/* #556 — a family overview (ui-screens.md §4.25; shell design §8), ONE template for all five
+       families over `overview` (OverviewController, OverviewPage). Hierarchy: heading, workspace
+       line and View all; the inventory (four counts, four bars, a table twin); then, for a family
+       whose guide is written (`overview/guide-<family>.html`), What this is for and Create with
+       your agent; Continue your work where the family has a Recently updated adapter; related
+       families and help from the guide. Every number on the page is read from `o.inventory`,
+       one value built from one inventory read, so the chart cannot disagree with its totals. */-->
+  <div class="app-overview" th:with="o=${overview}" th:attr="data-overview=${o.family}">
+    <template data-page-assets th:if="${o.guided}">
+      <script type="module" th:src="@{/js/overview.mjs}"></script>
+    </template>
+
+    <div class="app-page-h">
+      <div>
+        <h1 class="ds-headline" th:text="${o.title}">Pipelines</h1>
+        <p class="app-page-sub" data-overview-context>
+          <th:block th:if="${activeWorkspace != null}">In workspace <b th:text="${activeWorkspace}">acme</b>.</th:block>
+          <th:block th:if="${o.lensed}">These counts are the admitted inventory: only what your promotion view shows.</th:block>
+        </p>
+      </div>
+      <div class="app-page-actions">
+        <a class="ds-button ds-button-secondary" hx-boost="true" th:href="@{${o.catalogHref}}"
+           data-overview-view-all>View all</a>
+      </div>
+    </div>
+
+    <!--/* The reserved inventory area: an unknown inventory says so and shows no number (record §8
+         "States": unknown counts never appear as zero). */-->
+    <section class="ds-card app-overview-inventory" aria-labelledby="overview-inventory-h" data-overview-inventory>
+      <div class="app-card-h">
+        <h2 class="ds-title" id="overview-inventory-h" th:text="${o.lensed ? 'Admitted inventory' : 'Inventory'}">Inventory</h2>
+      </div>
+      <div class="app-card-b">
+        <p th:if="${o.inventory == null}" class="app-overview-unavailable" role="status" data-overview-unavailable>
+          <b>The inventory is unavailable.</b> <span th:text="${o.unavailable}">Inventory could not be read.</span>
+        </p>
+        <th:block th:if="${o.inventory != null}" th:with="inv=${o.inventory}">
+          <dl class="app-overview-counts">
+            <div class="app-overview-count" th:each="c : ${inv.counts}" th:attr="data-count=${c.key}">
+              <dt class="ds-caption">
+                <a th:if="${c.href != null}" hx-boost="true" th:href="@{${c.href}}" th:text="${c.label}">With drafts</a>
+                <th:block th:if="${c.href == null}" th:text="${c.label}">Objects</th:block>
+              </dt>
+              <dd class="app-overview-count-v" th:text="${c.value}">0</dd>
+              <dd class="app-overview-count-help" th:text="${c.help}">Each counted once.</dd>
+            </div>
+          </dl>
+          <!--/* Four labelled bars: numbers outside the bars, widths as SVG attributes (the CSP
+               admits no style), a zero is a zero-width rect beside its "0". The visually hidden
+               table repeats the four rows for assistive technology, in the house frame (§3.7). */-->
+          <ul class="app-overview-chart" aria-label="Objects by lifecycle" data-overview-chart>
+            <li class="app-overview-bar" th:each="b : ${inv.bars}" th:attr="data-bar=${b.key}, data-tone=${b.tone}">
+              <span class="app-overview-bar-name">
+                <a th:if="${b.href != null}" hx-boost="true" th:href="@{${b.href}}" th:text="${b.name}">Draft only</a>
+                <th:block th:if="${b.href == null}" th:text="${b.name}">Discarded only</th:block>
+              </span>
+              <svg class="app-overview-bar-track" viewBox="0 0 100 1" preserveAspectRatio="none"
+                   role="img" th:attr="aria-label=${b.label}"><rect class="app-overview-bar-fill"
+                   x="0" y="0" height="1" th:attr="width=${b.width}"></rect></svg>
+              <span class="app-overview-bar-v" th:text="${b.value}">0</span>
+            </li>
+          </ul>
+          <div class="dt-frame app-visually-hidden">
+            <div class="dt-viewport" tabindex="-1">
+              <table class="ds-table" data-overview-table>
+                <caption th:text="${o.title + ' by lifecycle'}">Pipelines by lifecycle</caption>
+                <thead><tr><th scope="col">Lifecycle</th><th scope="col">Objects</th></tr></thead>
+                <tbody>
+                  <tr th:each="b : ${inv.bars}"><th scope="row" th:text="${b.name}">Draft only</th><td th:text="${b.value}">0</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </th:block>
+      </div>
+    </section>
+
+    <th:block th:if="${o.guided}">
+      <th:block th:replace="~{${'overview/guide-' + o.family} :: intro}"></th:block>
+    </th:block>
+
+    <div class="app-overview-pair" th:if="${o.recent != null or o.guided}">
+      <!--/* Recently updated is the family's modification data (RecentSource), not anyone's
+           personal history (#567 owns Recent/Pinned). */-->
+      <section class="ds-card" th:if="${o.recent != null}" aria-labelledby="overview-recent-h" data-overview-recent>
+        <div class="app-card-h">
+          <h2 class="ds-title" id="overview-recent-h">Continue your work</h2>
+          <a class="ds-button ds-button-ghost ds-button-sm" hx-boost="true" th:href="@{${o.recent.reviewHref}}"
+             data-overview-review>Review drafts</a>
+        </div>
+        <div class="app-card-b">
+          <h3 class="app-overview-sub">Recently updated</h3>
+          <p class="app-card-note">The latest changes in this workspace, newest first. Not a personal history.</p>
+          <p th:if="${o.recent.entries == null}" class="app-overview-unavailable" role="status">
+            <b>Recently updated is unavailable.</b> <span th:text="${o.recent.unavailable}">Recently updated could not be read.</span>
+          </p>
+          <p th:if="${o.recent.entries != null and #lists.isEmpty(o.recent.entries)}" class="app-card-note" data-overview-recent-empty>
+            Nothing here yet. The starter prompt above is a good first step.
+          </p>
+          <ul class="app-overview-recent" th:if="${o.recent.entries != null and !#lists.isEmpty(o.recent.entries)}">
+            <li th:each="r : ${o.recent.entries}">
+              <a hx-boost="true" th:href="@{${r.href}}" th:text="${r.name}" th:title="${r.name}">nyc/mobility/revenue_by_borough</a>
+              <span class="ds-badge ds-badge-warning" th:if="${r.hasDraft}">draft</span>
+              <time th:attr="datetime=${r.datetime}" th:title="${r.absolute}" th:text="${r.ago}">3 hours ago</time>
+            </li>
+          </ul>
+        </div>
+      </section>
+      <th:block th:if="${o.guided}">
+        <th:block th:replace="~{${'overview/guide-' + o.family} :: related}"></th:block>
+      </th:block>
+    </div>
+  </div>
+</th:block>
+</html>

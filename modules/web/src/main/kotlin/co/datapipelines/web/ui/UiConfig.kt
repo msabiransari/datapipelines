@@ -104,6 +104,10 @@ class UiConfig {
         parameterSets: co.datapipelines.parameters.ParameterSetRepository,
     ): FamilyInventory = FamilyInventory(pipelines, templates, dashboards, visualizations, parameterSets)
 
+    /** #556: the overviews' Recently updated lists — one adapter per family that has one. */
+    @Bean
+    fun familyRecent(pipelines: co.datapipelines.pipeline.PipelineRepository): FamilyRecent = FamilyRecent(pipelines)
+
     /** 106: the version/execution actor lookup both explorer details render. */
     @Bean
     fun actorNames(jdbc: org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate): ActorNames = ActorNames(jdbc)
