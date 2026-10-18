@@ -380,7 +380,7 @@ foreign responses refuse admission, and a changed view clears cached levels befo
   construction.
 
 **The top bar** (`--header-height`). Breadcrumb (`<group> / <page>`, group muted, page bold — the group reads
-Explore for the three Explore families), on a family page the folder button that reopens a hidden browser (§3.4),
+Explore for the three Explore families), on a family page the browser opener (desktop chevron-right / phone folder, §3.4),
 the search field **palette** (161), the light/dark toggle, and the avatar menu. The **MCP-key
 chip** (179) sat between the toggle and the menu until keys v2 (233, A15) retired it — see below.
 From 761 to 1100px the search field itself hides (§3.6) and a search **icon button** stands in
