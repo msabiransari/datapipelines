@@ -33,10 +33,7 @@ class ShellSurfacesBrowserTest : DashboardBrowserSuite() {
                           probe.remove(); return result; }""",
                     ) shouldBe true
                 }
-                val directory = Paths.get("build", "reports", "606-shell-surfaces").also { it.toFile().mkdirs() }
-                page.screenshot(
-                    Page.ScreenshotOptions().setPath(directory.resolve("$width-${path.replace('/', '_')}.png")),
-                )
+                photograph("$width-${path.replace('/', '_')}")
             }
         }
         assertSoftly {
@@ -128,6 +125,10 @@ class ShellSurfacesBrowserTest : DashboardBrowserSuite() {
 
     private fun photograph(name: String) {
         page.evaluate("() => document.fonts.ready")
+        page.evaluate(
+            """() => Promise.all(document.getAnimations()
+              .filter(a => a.effect.getTiming().iterations !== Infinity).map(a => a.finished))""",
+        )
         val directory = Paths.get("build", "reports", "606-shell-surfaces").also { it.toFile().mkdirs() }
         page.screenshot(Page.ScreenshotOptions().setPath(directory.resolve("$name.png")))
     }
