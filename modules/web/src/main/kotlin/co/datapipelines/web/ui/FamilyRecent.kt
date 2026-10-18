@@ -39,11 +39,12 @@ sealed interface RecentResult {
  */
 class FamilyRecent(
     private val pipelines: PipelineRepository,
+    private val visualizations: co.datapipelines.visualization.VisualizationRepository,
 ) {
     private val log = LoggerFactory.getLogger(FamilyRecent::class.java)
 
     /** True when [family] has an adapter, so its overview renders the section. */
-    fun supports(family: NavigationFamily): Boolean = family == NavigationFamily.PIPELINES
+    fun supports(family: NavigationFamily): Boolean = family == NavigationFamily.PIPELINES || family == NavigationFamily.VISUALIZATIONS
 
     /** Null for a family with no adapter; otherwise the newest admitted objects or why they are unknown. */
     @Suppress("TooGenericExceptionCaught") // the read boundary FamilyInventory draws, lazy lens derivation included
@@ -55,7 +56,25 @@ class FamilyRecent(
         if (!supports(family)) return null
         view.unavailable?.let { return RecentResult.Unavailable(it.reason) }
         return try {
-            RecentResult.Available(pipelines.recent(workspaceId, view.pipelines).map { it.entry("/pipelines/${it.id}") })
+            val rows =
+                when (family) {
+                    NavigationFamily.PIPELINES -> {
+                        pipelines.recent(workspaceId, view.pipelines).map { it.entry("/pipelines/${it.id}") }
+                    }
+
+                    NavigationFamily.VISUALIZATIONS -> {
+                        visualizations
+                            .recent(
+                                workspaceId,
+                                view.visualizations,
+                            ).map { it.entry("/visualizations/${it.id}") }
+                    }
+
+                    else -> {
+                        return null
+                    }
+                }
+            RecentResult.Available(rows)
         } catch (failure: Exception) {
             log.warn("recent list unavailable for workspace {} family {}: {}", workspaceId, family, failure.toString())
             RecentResult.Unavailable("Recently updated could not be read.")
