@@ -116,20 +116,20 @@ class OverviewRenderTest {
     }
 
     @Test
-    fun `the templates links filter the templates overview and the discarded bar stays unlinked (#579)`() {
+    fun `the templates links filter the templates catalog and the discarded bar stays unlinked (#579)`() {
         val doc = render(page(InventoryResult.Available(Inventory(1, 1, 1, 1)), family = OverviewPage.Family.TEMPLATES))
 
         doc.select("[data-overview-chart] [data-bar] a").map { it.attr("href") } shouldContainExactly
             listOf(
-                "/overview/templates?lifecycle=draft",
-                "/overview/templates?lifecycle=released",
-                "/overview/templates?lifecycle=released-with-draft",
+                "/templates?lifecycle=draft",
+                "/templates?lifecycle=released",
+                "/templates?lifecycle=released-with-draft",
             )
         doc.selectFirst("[data-bar=discarded] a").shouldBeNull()
         doc.select("[data-overview-inventory] [data-count] a").map { it.attr("href") } shouldContainExactly
-            listOf("/overview/templates?lifecycle=with-drafts", "/overview/templates?lifecycle=with-releases")
-        doc.selectFirst("[data-overview-view-all]")!!.attr("href") shouldBe "/overview/templates"
-        doc.selectFirst("[data-overview-review]")!!.attr("href") shouldBe "/overview/templates?lifecycle=with-drafts"
+            listOf("/templates?lifecycle=with-drafts", "/templates?lifecycle=with-releases")
+        doc.selectFirst("[data-overview-view-all]")!!.attr("href") shouldBe "/templates"
+        doc.selectFirst("[data-overview-review]")!!.attr("href") shouldBe "/templates?lifecycle=with-drafts"
     }
 
     @Test

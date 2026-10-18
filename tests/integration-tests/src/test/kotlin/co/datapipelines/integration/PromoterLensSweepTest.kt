@@ -358,7 +358,6 @@ class PromoterLensSweepTest {
             listOf("bogus", "discarded", "DRAFT").forEach { value ->
                 call("/pipelines?lifecycle=$value", auth).status shouldBe HTTP_BAD_REQUEST
                 call("/partials/pipelines?lifecycle=$value", auth).status shouldBe HTTP_BAD_REQUEST
-                call("/overview/templates?lifecycle=$value", auth).status shouldBe HTTP_BAD_REQUEST
                 call("/partials/templates?lifecycle=$value", auth).status shouldBe HTTP_BAD_REQUEST
             }
         }
