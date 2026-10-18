@@ -489,6 +489,48 @@ class WorkspaceSurfacesE2eTest {
             .statusCode(200)
     }
 
+    /**
+     * #583 — the Datasources OVERVIEW as a workspace surface: Alice's numbers are exactly her
+     * admitted set (ds-acme + the granted ds-global), both names reach the recent list, and
+     * Globex's row is absent — the overview runs the same visibility predicate as the catalog.
+     * It is not a browserFamily, so the resource browser stays hidden (the five tree families
+     * open theirs; this page is an ordinary section page).
+     */
+    @Test
+    fun `the datasources overview counts the admitted set and hides the rest`() {
+        ensureSeeded()
+        ensureDatasourcesRegistered()
+        val body =
+            given()
+                .port(port)
+                .cookie(SESSION_COOKIE, sessionJwt(ALICE, "alice@acme.test", "acme"))
+                .header("Accept", "text/html")
+                .`when`()
+                .get("/overview/datasources")
+                .then()
+                .statusCode(200)
+                .extract()
+                .body()
+                .asString()
+
+        body.contains("data-overview=\"datasources\"") shouldBe true
+        OVERVIEW_COUNT.findAll(body).associate { it.groupValues[1] to it.groupValues[2].toInt() } shouldBe
+            mapOf("datasources" to 2)
+        OVERVIEW_BAR.findAll(body).associate { it.groupValues[1] to it.groupValues[2].toInt() } shouldBe
+            mapOf(
+                "ok" to 0,
+                "failed" to 0,
+                "never" to 2,
+                "H2" to 2,
+            )
+        val recent = body.substringAfter("data-overview-recent", "").substringBefore("</section>")
+        listOf(DS_ACME, DS_GLOBAL).forEach { recent.contains(it) shouldBe true }
+        recent.contains(DS_GLOBEX) shouldBe false
+        recent.contains(DS_UNGRANTED) shouldBe false
+        body.contains("href=\"/datasources?dialect=H2\"") shouldBe true
+        body.substringAfter("<aside class=\"app-browser\"").substringBefore(">").contains("hidden") shouldBe true
+    }
+
     // ------------------------------------------------------------ T23
 
     @Test
@@ -728,6 +770,17 @@ class WorkspaceSurfacesE2eTest {
 
         /** Registered and granted to NOBODY — the D-R7 control (see the visibility case). */
         private const val DS_UNGRANTED = "ds-ungranted"
+
+        /** #583: the overview's count tiles, parsed the same way PromoterLensSweepTest reads them. */
+        private val OVERVIEW_COUNT =
+            Regex("""data-count="([a-z-]+)">.*?<dd class="app-overview-count-v">(\d+)</dd>""", RegexOption.DOT_MATCHES_ALL)
+
+        /** #583: the overview's bars and their numbers — the key admits dialects like H2. */
+        private val OVERVIEW_BAR =
+            Regex(
+                """data-bar="([A-Za-z0-9-]+)" data-tone="[a-z]+">.*?<span class="app-overview-bar-v">(\d+)</span>""",
+                RegexOption.DOT_MATCHES_ALL,
+            )
         private const val FRESH_WS = "fresh-team"
 
         private const val H2_USER = "sa"

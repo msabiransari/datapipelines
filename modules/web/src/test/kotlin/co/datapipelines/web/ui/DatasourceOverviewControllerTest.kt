@@ -97,6 +97,29 @@ class DatasourceOverviewControllerTest {
         recent.sections.single().entries shouldBe emptyList()
     }
 
+    /** A first-run workspace has NO granted datasources: the page renders with an empty dialect chart, never a 500. */
+    @Test
+    fun `an empty workspace renders zero-width health bars and an empty dialect chart`() {
+        authenticate()
+        every { repository.visibleCounts(workspaceId) } returns emptyList()
+        every { repository.recentGrants(workspaceId) } returns emptyList()
+
+        val page = model()
+
+        val panel = page.inventory.shouldNotBeNull()
+        panel.counts.single().let { count ->
+            count.key shouldBe "datasources"
+            count.value shouldBe 0L
+        }
+        val (health, dialect) = panel.charts
+        health.bars.map { it.key to it.value } shouldBe listOf("ok" to 0L, "failed" to 0L, "never" to 0L)
+        health.bars.map { it.width } shouldBe listOf("0", "0", "0")
+        dialect.bars shouldBe emptyList()
+        val recent = page.recent.shouldNotBeNull()
+        recent.sections.single().entries shouldBe emptyList()
+        recent.sections.single().emptyNote shouldBe "No datasources have been added to this workspace yet."
+    }
+
     @Test
     fun `a failed grants read leaves the inventory up and the section says why`() {
         authenticate()

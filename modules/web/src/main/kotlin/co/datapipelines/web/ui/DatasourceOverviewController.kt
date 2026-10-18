@@ -146,9 +146,9 @@ class DatasourceOverviewController(
             href = href,
         )
 
-    /** Bar widths are shares of the chart's own tallest bar; an all-zero chart is all zero-width. */
+    /** Bar widths are shares of the chart's own tallest bar; an empty or all-zero chart is all zero-width. */
     private fun OverviewPage.Chart.withWidths(): OverviewPage.Chart {
-        val tallest = bars.maxOf { it.value }
+        val tallest = bars.maxOfOrNull { it.value } ?: 0L
         return copy(bars = bars.map { it.copy(width = OverviewPage.width(it.value, tallest)) })
     }
 
