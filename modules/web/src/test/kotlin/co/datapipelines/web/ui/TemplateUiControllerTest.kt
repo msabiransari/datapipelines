@@ -4,6 +4,7 @@ import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.pipeline.AuthoringGuard
+import co.datapipelines.pipeline.LifecycleBucket
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.templates.Template
@@ -11,15 +12,18 @@ import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateUsageService
 import co.datapipelines.templates.TemplateValidator
 import co.datapipelines.typesystem.Dialect
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import io.mockk.every
 import io.mockk.mockk
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
+import org.springframework.http.HttpStatus
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.ui.ExtendedModelMap
+import org.springframework.web.server.ResponseStatusException
 import java.util.UUID
 
 /**
@@ -135,6 +139,39 @@ class TemplateUiControllerTest {
         searching["selectedDialect"] shouldBe "POSTGRES"
         searching["selectedType"] shouldBe "sql"
         searching["q"] shouldBe "orders"
+    }
+
+    @Test
+    fun `the lifecycle filter reaches the repository as its bucket and stamps the select (#579)`() {
+        authenticate()
+        every { themeResolver.resolve(any()) } returns "saas"
+        every {
+            repository.list(any(), null, null, null, 0, 26, null, LifecycleBucket.DRAFT_ONLY, false)
+        } returns listOf(template())
+        every { repository.count(any(), null, null, null, null, LifecycleBucket.DRAFT_ONLY, false) } returns 1
+        every { repository.findDrafts(any(), any()) } returns emptyMap()
+
+        val model = ExtendedModelMap()
+        controller.list(model, mockk(), null, null, null, null, "draft")
+
+        (model["templates"] as List<*>) shouldHaveSize 1
+        model["lifecycle"] shouldBe "draft"
+        model["lifecycleLabel"] shouldBe "Draft only"
+        model["filtered"] shouldBe true
+    }
+
+    @Test
+    fun `a lifecycle the templates catalog does not offer is the house 400 (#579)`() {
+        authenticate()
+        every { themeResolver.resolve(any()) } returns "saas"
+
+        // `discarded` is not offered: a discarded-only template has no page to open.
+        val refused =
+            shouldThrow<ResponseStatusException> {
+                controller.list(ExtendedModelMap(), mockk(), null, null, null, null, "discarded")
+            }
+        refused.statusCode shouldBe HttpStatus.BAD_REQUEST
+        refused.reason shouldBe CatalogLifecycle.BAD_LIFECYCLE
     }
 
     @Test

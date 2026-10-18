@@ -105,7 +105,8 @@ data class OverviewPage(
         ),
         ;
 
-        val catalogHref: String get() = "/${navigation.route}"
+        /** The catalog's URL. #579: the templates catalog IS its family overview; every other family keeps its own route. */
+        val catalogHref: String get() = if (this == TEMPLATES) "/overview/${navigation.route}" else "/${navigation.route}"
 
         /** This family's arm of the caller's view — the lens [FamilyInventory] reads it through. */
         fun lens(view: LensedView): ReadLens =
