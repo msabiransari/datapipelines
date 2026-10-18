@@ -92,7 +92,8 @@ class ShellColumnsBrowserTest : RestTreeBrowserFixture() {
         page.click("#rail-collapse")
         menuWidth() shouldBe 202
         rail() shouldBe listOf("0", false)
-        page.click("#browser-open")
+        page.focus("#browser-open")
+        page.keyboard().press("Enter")
         page.locator("#app-browser").isVisible shouldBe true
         width() shouldBe 300
         page.evaluate("() => document.activeElement.matches('#nav-tree-pipelines input[type=search]')") shouldBe true
@@ -112,8 +113,7 @@ class ShellColumnsBrowserTest : RestTreeBrowserFixture() {
         val documents = mutableListOf<String>()
         page.onRequest { request ->
             if (request.resourceType() == "document") documents += request.url()
-            if (request.method() == "GET" && request.headers()["hx-request"] == "true" &&
-                request.url().substringBefore('?').endsWith("/templates")
+            if (request.method() == "GET" && request.headers()["hx-request"] == "true"
             ) {
                 boosted += request.url()
             }
@@ -130,6 +130,7 @@ class ShellColumnsBrowserTest : RestTreeBrowserFixture() {
         mainWidth() shouldBe 1440 - 202 - 300
         page.evaluate("ws => localStorage.getItem('dp-browser-hidden:' + ws)", workspace) shouldBe null
         boosted.size shouldBe 1
+        boosted.single().substringBefore('?').endsWith("/templates") shouldBe true
         documents shouldBe emptyList()
 
         page.click("#browser-hide")

@@ -3,7 +3,7 @@
 **Status:** v1.157
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
-**Last updated:** 2026-10-17 (#554); 2026-10-16 (#551 merge follow-up; #551; #555; #552; #553; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
+**Last updated:** 2026-10-17 (#578; #554); 2026-10-16 (#551 merge follow-up; #551; #555; #552; #553; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
 
 ---
 
@@ -207,7 +207,7 @@ refetch. Initialization requests only the root and leaves all folders closed. A 
 (`data-nav-tree-reveal`) shows the browser and puts focus in its search; the top bar's chevron-right
 (`#browser-open`, named "Browse <Family>") at the browser's edge reopens a hidden browser on desktop.
 On a phone the same button uses a folder glyph to open the Browse resources drawer. Clicking a family
-menu destination, including the active family, shows a hidden browser and clears the saved Hide without
+menu destination on desktop, including the active family, shows a hidden browser and clears the saved Hide without
 moving focus; a non-family destination preserves the preference. **Hide** and the menu's collapse are
 independent controls: icon mode never closes the browser and Hide never changes the page.
 Expanding a folder automatically pages its immediate children, including folders and
@@ -225,7 +225,8 @@ a desktop family menu click also shows a hidden browser and clears its saved Hid
 leaf — it is marked current when present; (5) a non-family page hides the browser and returning restores
 the in-document state; (6) back/forward restores page, family and current leaf through the existing history
 integration (`historyRestore` re-syncs the column); (7) collapse and Hide are independent, and the
-desktop chevron-right / phone folder opener carries the family's name; (8) a workspace or account switch is a fresh document, so no prior
+desktop chevron-right / phone folder opener carries the family's name; (8) a workspace or account switch
+is a fresh document, so no prior
 workspace's rows, count or selection can show. All, Recent and Pinned (§7) are not built: the browser
 shows All and the search (Recent/Pinned are #557's ruling, built after this).
 
