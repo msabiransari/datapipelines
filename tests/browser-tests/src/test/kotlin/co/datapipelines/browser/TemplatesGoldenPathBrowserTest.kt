@@ -210,8 +210,9 @@ class TemplatesGoldenPathBrowserTest : BrowserSuite() {
         }
         page.locator(".ds-empty-title").first().innerText() shouldContain "No templates match: With releases"
 
+        // The include always sends the select, so "All" arrives as an EMPTY lifecycle, never an absent one.
         page.waitForResponse(
-            { r -> r.url().contains("/partials/templates") && !r.url().contains("lifecycle=") },
+            { r -> r.url().contains("/partials/templates") && !Regex("[?&]lifecycle=[^&]").containsMatchIn(r.url()) },
         ) {
             page.selectOption("#template-filter-lifecycle", "")
         }

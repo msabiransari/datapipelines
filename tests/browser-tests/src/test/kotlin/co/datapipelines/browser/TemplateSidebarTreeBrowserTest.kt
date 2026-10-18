@@ -279,8 +279,11 @@ class TemplateSidebarTreeBrowserTest : BrowserSuite() {
         // Hide hands focus to the folder button; the catalog's Browse folders shows the browser again
         // and focuses the active family's search.
         page.click(".app-nav-link[data-nav-section='/templates']")
-        // #579: the Templates item now lands on the family overview.
+        // #579: the Templates item now lands on the family overview; Browse folders is the catalog's,
+        // so View all takes the reader there (a boosted hop, no tree request).
         page.waitForSelector(".app-overview[data-overview='templates']")
+        page.click("[data-overview-view-all]")
+        page.waitForSelector("#template-list-wrapper")
         page.click("#browser-hide")
         assertOpen(null)
         page.evaluate("() => document.activeElement?.id") shouldBe "browser-open"
