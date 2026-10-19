@@ -1070,7 +1070,11 @@ button.app-busy::after {
 }
 
 /* The screen-reader-only text the browser's count carries ("9 pipelines" read, "9"
-   seen). The same declarations as the compact menu's labels above. */
+   seen). The same declarations as the compact menu's labels above. One rule, two
+   names (#608): .u-sr-only is the u-* name an author reaches for in a template's
+   class attribute, .app-visually-hidden the shell's original — an alias inside the
+   SAME selector, never a second rule, so the two cannot drift. */
+.u-sr-only,
 .app-visually-hidden {
   position: absolute;
   width: 1px;
@@ -2778,15 +2782,22 @@ button.app-busy::after {
 
 /* spacing — the gap scale, never a raw length */
 .u-m0 { margin: 0; }
+.u-mb-0 { margin-bottom: 0; }
 .u-mb-xs { margin-bottom: var(--gap-xs); }
 .u-mb-sm { margin-bottom: var(--gap-sm); }
 .u-mb-md { margin-bottom: var(--gap-md); }
 .u-mb-lg { margin-bottom: var(--gap-lg); }
 .u-mb-xl { margin-bottom: var(--gap-xl); }
+.u-mt-0 { margin-top: 0; }
 .u-mt-xs { margin-top: var(--gap-xs); }
 .u-mt-sm { margin-top: var(--gap-sm); }
 .u-mt-md { margin-top: var(--gap-md); }
 .u-mt-lg { margin-top: var(--gap-lg); }
+/* Per-side horizontal steps (#608): the detail page's wrapped badge row and the
+   invitations table's inline badge — `.u-m0` would take margins the element's other
+   sides still owe. Tokens only, like the vertical scale above. */
+.u-mr-md { margin-right: var(--gap-md); }
+.u-ml-xs { margin-left: var(--gap-xs); }
 .u-p-sm { padding: var(--gap-sm); }
 .u-p-md { padding: var(--gap-md); }
 .u-p-lg { padding: var(--gap-lg); }

@@ -1,5 +1,6 @@
 package co.datapipelines.browser
 
+import com.microsoft.playwright.Locator
 import com.microsoft.playwright.Page
 import com.microsoft.playwright.PlaywrightException
 import com.microsoft.playwright.Request
@@ -254,6 +255,71 @@ class DashboardWorkspaceBrowserTest : DashboardBrowserSuite() {
         page.click("#dp-dialog [data-lifecycle-close]")
         page.waitForTimeout(250.0)
         page.locator("#dp-dialog .app-modal").count() shouldBe 0
+    }
+
+    @Test
+    @Order(7)
+    fun `#608 - the Keys tab's sr-only Edit header renders nothing a pointer can hit`() {
+        startTrace()
+        // The Keys tab floors at dashboard.key.bind (a workspace admin's surface): ready()'s
+        // seeded admin is the surface's reader, and the fixtures below ride its session.
+        val root = ready("dp608")
+        val board = seedHungBoard(root)
+
+        // One `dashboard` key bound to the board's root folder: the Keys tab's one row —
+        // without it the tab renders its empty state and the header this case measures
+        // never renders. Attributed to the board's own creator (the columns are NOT NULL
+        // FKs); the `$root` prefix covers `$root/boards/hung` by the model's startsWith rule.
+        sql(
+            """
+            INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id, kind, role)
+            SELECT 'dpk_608' || d.created_by::text, d.created_by, d.created_by,
+                   'lane 608 probe', 'h', d.workspace_id, 'dashboard', 'dashboard_viewer'
+              FROM dashboards d
+             WHERE d.id = '$board'
+            """.trimIndent(),
+        )
+        sql(
+            """
+            INSERT INTO dashboard_key_bindings (name_prefix, api_key_id, workspace_id, created_by)
+            SELECT '$root', 'dpk_608' || d.created_by::text, d.workspace_id, d.created_by
+              FROM dashboards d
+             WHERE d.id = '$board'
+            """.trimIndent(),
+        )
+
+        page.navigate("$baseUrl/dashboards/$board?tab=keys")
+        page.waitForSelector("#dp-pane-keys:not([hidden]) .ds-table")
+        // The Edit header's span, found by STRUCTURE so the case measures the element the
+        // author meant whatever its class. The house table's sort decoration (data-table.js)
+        // moves the th's own children INSIDE button.dt-sort > span and adds its resizer as a
+        // direct child of the th — the authored span is the label span's own child.
+        // Screenshot before the assertions, so a red run still leaves the "before" picture.
+        val headerSpan = page.locator("#dp-pane-keys .ds-table thead tr th:last-child .dt-sort > span > span")
+        headerSpan.waitFor()
+        headerSpan.scrollIntoViewIfNeeded()
+        val shot = Paths.get("build", "reports", "608-dashboard-keys-header-row.png")
+        headerSpan.screenshot(Locator.ScreenshotOptions().setPath(shot))
+
+        // Geometry FIRST (the base's undefined class is red here: visible text, a text-sized
+        // box), then the class pin and the accessible text.
+        val reading =
+            headerSpan.evaluate(
+                """el => {
+                  const r = el.getBoundingClientRect();
+                  const cell = el.closest('th').getBoundingClientRect();
+                  const hit = document.elementFromPoint(cell.left + cell.width / 2, cell.top + cell.height / 2);
+                  return { w: r.width, h: r.height,
+                           hitInSpan: hit !== null && (hit === el || el.contains(hit)) };
+                }""",
+            ) as Map<*, *>
+        withClue("sr-only box reading $reading (w/h must be 1x1 or smaller, nothing of the span under the pointer)") {
+            ((reading["w"] as Number).toDouble() <= 1.0) shouldBe true
+            ((reading["h"] as Number).toDouble() <= 1.0) shouldBe true
+            (reading["hitInSpan"] as Boolean) shouldBe false
+        }
+        headerSpan.getAttribute("class") shouldContain "u-sr-only"
+        headerSpan.textContent().isNotBlank() shouldBe true
     }
 
     @Test
