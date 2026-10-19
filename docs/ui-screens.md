@@ -1,6 +1,6 @@
 # UI Screens Inventory
 
-**Status:** v1.172
+**Status:** v1.173
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
 **Last updated:** 2026-10-19 (#509; #608; #614 + #611; #612; #615); 2026-10-18 (#583; #573; #607; #606; #565; #582; #581; #580; #579); 2026-10-17 (#556; #578; #554); 2026-10-16 (#551 merge follow-up; #551; #555; #552; #553; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
@@ -254,6 +254,22 @@ use buttons. The common renderer owns roving focus, arrow navigation, Home/End a
 separate from current-page selection, and the focus ring answers keyboard focus alone, drawn on the
 focused row's line and never around the subtree its item contains (#516) — a mouse click leaves the
 selected-row tint. Labels use text sinks and fixed vendored lucide icons.
+
+**The row (#604).** The browser column sits on the record's browser surface: `--surface-overlay`, one step
+above the page. A row is a card there — the activate (`.dp-tree-activate`) paints the 12px padding
+(`--space-3`), the 8px radius (`--radius-md`) and the tints: hover `--surface-hover`, selection
+`--surface-selected` with the title in primary ink (`--text-primary`) and the metadata in secondary
+(`--text-secondary`) — the record's primary-ink selection, not the link blue the other trees keep. The
+name is its own region, `span.dp-tree-title` at the **resource name** role (`--app-text-name`, 12px on
+1.55 leading) wrapping at `overflow-wrap: anywhere` — a long unbroken name included, never clipped or
+line-clamped. The badges live in a trailing `span.dp-tree-meta` — the same column as the title, 8px
+(`--space-2`) under its last line, flex-wrapped, always present in the DOM so the title's box never
+changes when a badge appears or leaves, and carrying no margin at all when no badge is visible. The row's
+DOM contract is kept: the control stays the line's first child (folders' is a button, leaves' an anchor
+whose `title` is the full path), the icon region leads it, and every `aria` attribute is untouched. Rows
+sit 4px (`--space-1`) apart, and the #516 keyboard ring follows the card's radius on the browser's rows.
+`BrowserResourceRowBrowserTest` measures the row — surface token, padding, radius, title role, the
+metadata line's geometry, the 4px rhythm, hover and selection colours, and the wrap — off the real page.
 
 **Width (#554).** The menu's two widths are fixed; the browser's is the reader's. Its default follows the
 band — 320px at 1600px and wider, 300px from 1101 to 1599px, 270px from 761 to 1100px — and the
@@ -554,6 +570,7 @@ Spacing has no role tokens: the record's 4/8/12/16/20/24/32/40/48 scale is the d
 | Caption, eyebrow (`.ds-caption`, `.app-eyebrow`) | 10px, uppercase, 0.12em |
 | Notices and states (`.ds-toast`, `.app-alert`, `.app-inline-refusal`, `.app-empty`, `.ds-empty-description`) | 13px; an empty state's title 14px |
 | Coarse pointer | every button, input and select ≥44px high; a small or icon button ≥44×44 — the HIT REGION grows, never the type or the glyph |
+| Resource row (`.app-browser .dp-tree-activate`) | 12px/18.6px title that wraps, a metadata line 8px below, 12px padding, 8px icon gap, 8px radius, 4px between rows; selected: tint + primary-ink title, secondary metadata |
 
 **House exceptions (ruled).** Where the house departs from the application-shell record on purpose, the departure is listed here with its reason and its measurement; nothing else in this section departs from the record.
 
@@ -2720,6 +2737,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-19 | v1.173 | #604 the browser's rows on the record's resource row | **§3.4, §3.3:** the browser column sits on the overlay surface and a row is the record's card — the activate paints 12px padding and the 8px radius with the hover and selection tints (selection is primary ink over `--surface-selected`, not the link blue), the name is its own wrapping 12px `.dp-tree-title` at the resource-name role, the badges live in a trailing always-present `.dp-tree-meta` 8px under the title (no margin when nothing shows), and rows sit 4px apart; the row's DOM contract (control first on the line, `title` = full path, every `aria` attribute) is kept and the #516 ring follows the card's radius. The renderer's regions and `BrowserResourceRowBrowserTest`'s measurements carry the change. |
 | 2026-10-19 | v1.172 | #509 danger text token — renumbered at merge after #583's v1.167, then after #608's v1.171 | **§3.5:** danger TEXT reads one app token, `--app-danger-ink`: the design system's `--text-danger` in dark (the #502 chip's 3.52:1 becomes 8.94:1), and in light that red at 3% lower oklch lightness (owner ruling 2026-10-19). With the unadjusted red, light and saas miss 4.5:1 on the inset and hover surfaces and ocean misses on its chip tint too; worst light case is now ocean at 4.65. Twenty text sites move, seven of them in `pipeline-editor.css` (fallback-spelled reads the inventory grep missed); borders and fills keep `--accent-danger`, and the vendored white `--accent-danger-text` is untouched. `DangerInkContrastBrowserTest` and `DangerInkSourceAuditTest` (new). No route, permission or role changed. |
 | 2026-10-19 | v1.171 | #608 the six undefined `u-*` utility classes resolve, and the existence guard (renumbered at merge after #614's v1.170) | **§3.1 item 3:** the guard sentence — `UtilityClassExistenceAuditTest` sweeps every app template's `class`/`th:class`/`th:classappend` value and every first-party script's string literal for `u-*` names no served stylesheet defines, and fails the build naming the file and line (the sweep's floors: ≥ 100 sites, the used and defined counts printed, an empty known-debt allowlist). The thirteen sites that named the six undefined classes now resolve: the hidden-text helper is one rule with two names (`.u-sr-only, .app-visually-hidden`), the template-versions header renames its lone `u-visually-hidden` to the canonical `u-sr-only`, and the margin block gains `.u-mt-0`/`.u-mb-0` and `.u-mr-md`/`.u-ml-xs` on the gap tokens. Browser witnesses in `TemplateWorkspaceBrowserTest` and `DashboardWorkspaceBrowserTest` measure the sr-only headers 1×1 with nothing of the span under the pointer. |
 | 2026-10-18 | v1.170 | #614 status pill on the frame's content edge; #611 the stale §4.4 width bullet (#573 follow-ups) — renumbered at merge after #583's v1.167, then after #612's v1.169 | **§3.6 gutter paragraph:** the status pill's desktop and anonymous offsets also add `--app-frame-inset` — a new shell geometry role beside `--app-frame-max`, the 1500px frame's centring offset in its track: `max(0px, (100vw − menu − browser column − 1500px) / 2)`, zeroed by `:root:has(.app-main > .app-canvas)` and, in the anonymous shell, taken over the whole window. Before it the pill sat on the TRACK's content edge on every page, so on a framed page wider than 1500 it floated left of the content (at 2200 on Settings: pill 242, content 491 expanded; 104 vs 422 compact; signed out on an error page 40 vs 390). Now it equals `<main>`'s left plus its padding on framed pages, and is unchanged on a canvas (the editor at 2200: 562 = 202 + 320 + 40) and wherever the frame does not bind (234 at 1512). The phone offset stands. `MainFrameBrowserTest` gains four cases (framed at 2200 expanded and compact, the editor at 2200, signed out at 2200, Settings at 1512), reading the pill raised by the shell's own `showStatusPill`. **§4.4:** the "Full-bleed pages (065)" bullet described mechanisms deleted in 076 (`fullBleed`, `app-main-bleed`, the `--app-content-max` cap on `<main>`) as live and said `EditorLayoutRenderTest` pinned "both directions"; it becomes **Page width (065 → 076 → #573)**: the editor renders the shared `.app-container.app-main` and opts out of the frame only by `app-canvas` on `.pe-root`; the test pins the deleted pair's absence and the shared `<main>` on the editor and the pipelines list. **§3.1 item 1:** "`--app-content-max` … stay deleted" corrected — the name is live since #502, as `.pe-doc`'s measure, and no longer caps `<main>`. No route, permission, role or markup changed. |
