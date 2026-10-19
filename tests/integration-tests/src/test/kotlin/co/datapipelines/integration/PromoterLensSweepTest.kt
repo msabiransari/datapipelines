@@ -240,10 +240,12 @@ class PromoterLensSweepTest {
     }
 
     /**
-     * #556 — the Pipelines overview's three surfaces (the counts and bars, Recently updated, the
+     * #556 — the Pipelines overview's three surfaces (the charts, Recently updated, the
      * lifecycle-filtered catalog) are the admitted set: `lp/newer`'s pending DRAFT is hidden, so it
      * classifies as released only, the With drafts filter is empty, and no hidden name reaches the
      * page. The viewer control ([viewerOverviewSeesEverything]) proves the draft is a row, not absent.
+     * #598a: the charts are the total, the lifecycle bar's four parts and the five maturity rows —
+     * through the lens three Live pipelines with one release each, and no draft anywhere.
      */
     private fun overviewIsTheNewerSet(auth: (RequestSpecification) -> RequestSpecification) {
         withClue("#556: the promoter's Pipelines overview counts, lists and filters only the admitted versions") {
@@ -251,13 +253,21 @@ class PromoterLensSweepTest {
             page.status shouldBe HTTP_OK
             overviewNumbers(page.body) shouldBe
                 mapOf(
-                    "objects" to 3,
-                    "with-drafts" to 0,
-                    "with-releases" to 3,
-                    "discarded" to 0,
-                    "draft" to 0,
-                    "released" to 3,
-                    "released-with-draft" to 0,
+                    "total" to 3,
+                    "in-development" to 0,
+                    "live" to 3,
+                    "live-changes" to 0,
+                    "retired" to 0,
+                    "r0:no-draft" to 0,
+                    "r0:draft-open" to 0,
+                    "r1:no-draft" to 3,
+                    "r1:draft-open" to 0,
+                    "r2-3:no-draft" to 0,
+                    "r2-3:draft-open" to 0,
+                    "r4-9:no-draft" to 0,
+                    "r4-9:draft-open" to 0,
+                    "r10:no-draft" to 0,
+                    "r10:draft-open" to 0,
                 )
             val recent = page.body.substringAfter("data-overview-recent", "").substringBefore("</section>")
             VISIBLE_PIPELINES.forEach { recent.contains(it) shouldBe true }
@@ -309,13 +319,21 @@ class PromoterLensSweepTest {
         withClue("#556: the viewer's overview counts the draft the promoter's does not") {
             overviewNumbers(call("/overview/pipelines", auth).body) shouldBe
                 mapOf(
-                    "objects" to 6,
-                    "with-drafts" to 2,
-                    "with-releases" to 5,
-                    "discarded" to 0,
-                    "draft" to 1,
-                    "released" to 4,
-                    "released-with-draft" to 1,
+                    "total" to 6,
+                    "in-development" to 1,
+                    "live" to 4,
+                    "live-changes" to 1,
+                    "retired" to 0,
+                    "r0:no-draft" to 0,
+                    "r0:draft-open" to 1,
+                    "r1:no-draft" to 4,
+                    "r1:draft-open" to 1,
+                    "r2-3:no-draft" to 0,
+                    "r2-3:draft-open" to 0,
+                    "r4-9:no-draft" to 0,
+                    "r4-9:draft-open" to 0,
+                    "r10:no-draft" to 0,
+                    "r10:draft-open" to 0,
                 )
             val withDrafts = call("/partials/pipelines?lifecycle=with-drafts", auth).body
             listOf("$P/draft_only", "$P/newer").forEach { withDrafts.contains(it) shouldBe true }
@@ -363,12 +381,22 @@ class PromoterLensSweepTest {
         }
     }
 
-    /** The overview's four counts and the bars' values, by key (the discarded bar's key is its count's). */
+    /**
+     * The overview's four counts and the bars' values, by key (the discarded bar's key is its count's);
+     * #598a: and the stacked charts' — the total line as `total`, then every hidden-table cell, the
+     * lifecycle row's by part (`live`) and a maturity row's as `row:part` (`r1:no-draft`).
+     */
     private fun overviewNumbers(html: String): Map<String, Int> =
         OVERVIEW_COUNT.findAll(html).associate { it.groupValues[1] to it.groupValues[2].toInt() } +
             OVERVIEW_BAR.findAll(html).filter { it.groupValues[1] != "discarded" }.associate {
                 it.groupValues[1] to
                     it.groupValues[2].toInt()
+            } + STACKED_TOTAL.findAll(html).associate { "total" to it.groupValues[1].toInt() } +
+            STACKED_ROW.findAll(html).flatMap { row ->
+                STACKED_CELL.findAll(row.groupValues[2]).map { cell ->
+                    val key = if (row.groupValues[1] == "all") cell.groupValues[1] else "${row.groupValues[1]}:${cell.groupValues[1]}"
+                    key to cell.groupValues[2].toInt()
+                }
             }
 
     /**
@@ -914,6 +942,11 @@ class PromoterLensSweepTest {
                 """data-bar="([a-z-]+)" data-tone="[a-z]+">.*?<span class="app-overview-bar-v">(\d+)</span>""",
                 RegexOption.DOT_MATCHES_ALL,
             )
+
+        /** #598a — the stacked charts' total line, one hidden-table row, and one part's cell in it. */
+        private val STACKED_TOTAL = Regex("""data-stacked-total="lifecycle"[^>]*>(\d+) """)
+        private val STACKED_ROW = Regex("""<tr data-row="([a-z0-9-]+)"[^>]*>(.*?)</tr>""", RegexOption.DOT_MATCHES_ALL)
+        private val STACKED_CELL = Regex("""data-part="([a-z-]+)"[^>]*>(\d+)</td>""")
 
         /**
          * Floors, not targets — the 2026-09-21 walk: 57 promoter-reachable GET routes, 57

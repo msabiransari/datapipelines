@@ -1,11 +1,14 @@
 package co.datapipelines.browser
 
+import com.microsoft.playwright.Page
 import io.kotest.assertions.withClue
 import io.kotest.matchers.doubles.shouldBeGreaterThan
+import io.kotest.matchers.doubles.shouldBeLessThanOrEqual
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldStartWith
 import org.junit.jupiter.api.Test
+import java.nio.file.Paths
 
 /**
  * #556 — the Pipelines overview in real Chromium: the menu's Pipelines item lands on
@@ -13,6 +16,10 @@ import org.junit.jupiter.api.Test
  * chart and Recently updated are the workspace's; Copy prompt puts the textarea's CURRENT text on
  * the clipboard and makes no request, a refused clipboard selects the text and says how to finish,
  * and the prompt names the workspace the menu shows after a switch.
+ *
+ * #598a: the inventory is two stacked charts (lifecycle, maturity) with no count card; the first
+ * case reads their parts, legend and hidden table and takes the three viewport screenshots into
+ * build/reports/598a-overview.
  *
  * The clipboard is stubbed per case (`navigator.clipboard.writeText` resolving or rejecting): the
  * subject is the page's handling of either answer, not Chromium's permission prompt. Every request
@@ -41,7 +48,20 @@ class OverviewBrowserTest : RestTreeBrowserFixture() {
         page.waitForFunction("() => window.DatapipelinesSidebarTrees.get('pipelines')?.state.levels.get(null)?.complete")
     }
 
-    private fun count(key: String): String = page.locator("[data-count='$key'] .app-overview-count-v").innerText().trim()
+    /** #598a: the Pipelines inventory is the lifecycle chart's total line, e.g. "2 pipelines". */
+    private fun total(): String = page.locator("[data-stacked-total='lifecycle']").innerText().trim()
+
+    private fun lifecyclePart(key: String) = page.locator("[data-stacked='lifecycle'] rect[data-part='$key']")
+
+    private fun screenshot(name: String, width: Int, height: Int) {
+        page.setViewportSize(width, height)
+        page.reload()
+        page.waitForSelector("[data-stacked-chart='lifecycle']")
+        page.evaluate("() => document.fonts.ready")
+        val dir = Paths.get("build", "reports", "598a-overview").also { it.toFile().mkdirs() }
+        page.locator("[data-overview-inventory]").scrollIntoViewIfNeeded()
+        page.screenshot(Page.ScreenshotOptions().setPath(dir.resolve("$name.png")))
+    }
 
     @Test
     fun `the Pipelines item lands on the overview with its browser tree, inventory, chart and recent list`() {
@@ -54,19 +74,44 @@ class OverviewBrowserTest : RestTreeBrowserFixture() {
         page.locator(".app-nav-link.active").getAttribute("data-nav-section") shouldBe "/pipelines"
         page.locator("#app-crumbs .app-crumb-page").innerText().trim() shouldBe "Pipelines"
         page.locator("#app-browser").isVisible shouldBe true
-        count("objects") shouldBe "2"
-        count("with-releases") shouldBe "2"
-        count("with-drafts") shouldBe "0"
-        page.locator("[data-bar='released'] .app-overview-bar-v").innerText().trim() shouldBe "2"
-        page.locator("[data-bar='released'] rect").getAttribute("width") shouldBe "100.0"
-        page.locator("[data-bar='draft'] rect").getAttribute("width") shouldBe "0.0"
-        val chart = page.locator("[data-overview-chart]").boundingBox()
-        println("556-overview chart height=${chart.height} width=${chart.width}")
+        page.locator("[data-count]").count() shouldBe 0
+        total() shouldBe "2 pipelines"
+        lifecyclePart("live").getAttribute("x") shouldBe "0"
+        lifecyclePart("live").getAttribute("width") shouldBe "100.0"
+        listOf("in-development", "live-changes", "retired").forEach { lifecyclePart(it).getAttribute("width") shouldBe "0" }
+        page.locator("[data-legend='live'] .app-overview-legend-v").innerText().trim() shouldBe "2"
+        page.locator("[data-legend='live'] a").getAttribute("href") shouldContain "/pipelines"
+        withClue("Retired has no page: its legend entry is not a link") {
+            page.locator("[data-legend='retired'] a").count() shouldBe 0
+        }
+        withClue("seedPipeline releases once and opens no draft: both sit in the 1-release bin, no draft") {
+            page.locator("[data-chart-table='maturity'] tr[data-row='r1'] td[data-part='no-draft']").textContent().trim() shouldBe "2"
+            page.locator("[data-stacked='maturity'] [data-row='r1'] rect[data-part='no-draft']").getAttribute("width") shouldBe "100.0"
+        }
+        val chart = page.locator("[data-stacked-chart='lifecycle']").boundingBox()
+        val card = page.locator("[data-overview-inventory]").boundingBox()
+        println("598a-overview lifecycle height=${chart.height} width=${chart.width} card height=${card.height}")
         chart.height shouldBeGreaterThan 0.0
+        chart.height shouldBeLessThanOrEqual card.height
         withClue("Recently updated is newest first: acme/two was released after acme/one") {
             page.locator("[data-overview-recent] li a").allInnerTexts() shouldBe listOf("acme/two", "acme/one")
         }
         page.locator("[data-overview-recent] time").first().getAttribute("datetime") shouldStartWith "20"
+
+        withClue("a created, never released pipeline is In development and sits in the 0-release bin with its draft") {
+            api("POST", "/api/v1/pipelines", pipelineBody("acme/three"))
+            page.reload()
+            total() shouldBe "3 pipelines"
+            lifecyclePart("in-development").getAttribute("x") shouldBe "0"
+            lifecyclePart("in-development").getAttribute("width") shouldBe "33.3"
+            lifecyclePart("live").getAttribute("x") shouldBe "33.3"
+            lifecyclePart("live").getAttribute("width") shouldBe "66.7"
+            page.locator("[data-chart-table='maturity'] tr[data-row='r0'] td[data-part='draft-open']").textContent().trim() shouldBe "1"
+        }
+        screenshot("overview-1512", WIDE, WIDE_H)
+        screenshot("overview-900", MID, MID)
+        screenshot("overview-390", PHONE, PHONE_H)
+        page.setViewportSize(WIDE, WIDE_H)
         page.locator("[data-overview-view-all]").click()
         page.waitForURL("**/pipelines")
         page.waitForSelector("#pipeline-list-wrapper")
@@ -120,14 +165,22 @@ class OverviewBrowserTest : RestTreeBrowserFixture() {
         readyTree()
         seedPipeline("acme/one")
         openOverview()
-        count("objects") shouldBe "1"
+        total() shouldBe "1 pipeline"
 
         val second = "second-" + generatedPassword("ws").lowercase()
         createWorkspace(second)
         openOverview()
-        count("objects") shouldBe "0"
+        total() shouldBe "0 pipelines"
         page.locator("#overview-prompt").inputValue() shouldStartWith "In workspace $second, build a draft pipeline"
         page.locator("[data-overview-context] b").innerText().trim() shouldBe second
         page.locator("[data-overview-recent-empty]").isVisible shouldBe true
+    }
+
+    private companion object {
+        const val WIDE = 1512
+        const val WIDE_H = 900
+        const val MID = 900
+        const val PHONE = 390
+        const val PHONE_H = 844
     }
 }

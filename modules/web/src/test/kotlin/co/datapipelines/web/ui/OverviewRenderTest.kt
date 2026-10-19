@@ -1,11 +1,15 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.pipeline.ChartInventory
 import co.datapipelines.pipeline.Inventory
+import co.datapipelines.pipeline.MaturityBin
+import co.datapipelines.pipeline.ReleaseBin
 import co.datapipelines.pipeline.SearchNeedle
 import co.datapipelines.web.ui.site.REPORT_PROBLEM_URL
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.collections.shouldContainExactly
+import io.kotest.matchers.doubles.plusOrMinus
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
@@ -32,6 +36,10 @@ import java.util.UUID
  * and the hidden table read the same [Inventory]; an unknown inventory shows its reason and no
  * number; the Pipelines guide substitutes the workspace through `th:text`; a family without a
  * guide renders the framework and nothing else (amendment 1: no placeholder prose).
+ *
+ * #598a: the Pipelines home carries the stacked charts instead (the total, the lifecycle bar and
+ * the maturity chart, `OverviewStacked`), so its cases build a [ChartsResult]; the four-count
+ * and four-bar cases run on the four siblings, which keep that card until #599.
  */
 class OverviewRenderTest {
     private val engine =
@@ -45,9 +53,9 @@ class OverviewRenderTest {
             )
         }
 
-    /** Amendment 1: the structural case runs on every family, one fixture each. */
+    /** Amendment 1: the structural case runs on every family that carries the four counts (#598a: not Pipelines). */
     @ParameterizedTest
-    @EnumSource(OverviewPage.Family::class)
+    @EnumSource(OverviewPage.Family::class, names = ["PIPELINES"], mode = EnumSource.Mode.EXCLUDE)
     fun `one inventory feeds the bars, the counts and the table`(family: OverviewPage.Family) {
         val doc = render(page(InventoryResult.Available(Inventory(1, 1, 1, 1)), family = family))
 
@@ -72,7 +80,7 @@ class OverviewRenderTest {
 
     @Test
     fun `bar widths are shares of the tallest bar and a zero is a zero-width rect beside its 0`() {
-        val doc = render(page(Inventory(draftOnly = 4, releasedOnly = 2, releasedWithDraft = 0, discardedOnly = 1)))
+        val doc = render(page(Inventory(draftOnly = 4, releasedOnly = 2, releasedWithDraft = 0, discardedOnly = 1), family = STANDARD))
 
         val bars = doc.select("[data-overview-chart] [data-bar]")
         bars.map { it.selectFirst("rect")!!.attr("width") } shouldContainExactly listOf("100.0", "50.0", "0.0", "25.0")
@@ -83,7 +91,7 @@ class OverviewRenderTest {
 
     @Test
     fun `an empty family draws an all-zero chart, not a divide by zero`() {
-        val doc = render(page(Inventory(0, 0, 0, 0)))
+        val doc = render(page(Inventory(0, 0, 0, 0), family = STANDARD))
 
         doc.select("[data-overview-chart] rect").map { it.attr("width") } shouldContainExactly listOf("0", "0", "0", "0")
         doc.select("[data-overview-inventory] [data-count] dd.app-overview-count-v").map { it.text() } shouldContainExactly
@@ -98,7 +106,7 @@ class OverviewRenderTest {
 
         val area = doc.selectFirst("[data-overview-inventory]").shouldNotBeNull()
         area.selectFirst("[data-overview-unavailable]").shouldNotBeNull().text() shouldContain "Inventory could not be read."
-        area.select("[data-overview-chart], [data-count], [data-overview-table]").shouldBeEmpty()
+        area.select("[data-overview-chart], [data-count], [data-overview-table], [data-stacked], [data-stacked-total]").shouldBeEmpty()
         area.text() shouldNotContain "0"
         Regex("""\d""").containsMatchIn(area.text()) shouldBe false
     }
@@ -217,17 +225,124 @@ class OverviewRenderTest {
         doc.selectFirst("[data-overview-review]").shouldBeNull()
     }
 
+    /** #598a — the Pipelines card: the total, two stacked charts in order, and none of the four counts or bars. */
     @Test
-    fun `the pipelines links filter the catalog and the discarded bar stays unlinked`() {
+    fun `the pipelines panel is the total, the lifecycle bar and the maturity chart, with no count`() {
+        val doc = render(page(Inventory(2, 3, 1, 1)))
+        val area = doc.selectFirst("[data-overview-inventory]").shouldNotBeNull()
+
+        area.select("[data-count], [data-overview-chart], dl.app-overview-counts").shouldBeEmpty()
+        area.select("[data-stacked]").map { it.attr("data-stacked") } shouldContainExactly listOf("lifecycle", "maturity")
+        area.select("[data-stacked-total]").single().text() shouldBe "7 pipelines"
+        area.select("h3").map { it.text() } shouldContainExactly listOf("Pipelines by lifecycle", "Pipelines by number of releases")
+        area.select("[data-stacked]").map { it.attr("aria-label") } shouldContainExactly
+            listOf("Pipelines by lifecycle", "Pipelines by number of releases")
+        area.select("[data-overview-table]").map { it.selectFirst("caption")!!.text() } shouldContainExactly
+            listOf("Pipelines by lifecycle", "Pipelines by number of releases")
+        area.select("[data-chart-table=lifecycle] thead th").map { it.text() } shouldContainExactly
+            listOf("Lifecycle", "In development", "Live", "Live, changes in progress", "Retired", "Pipelines")
+        area.select("[data-chart-table=maturity] thead th").map { it.text() } shouldContainExactly
+            listOf("Releases", "No draft", "Draft open", "Pipelines")
+        area.select("[style]").shouldBeEmpty()
+    }
+
+    /**
+     * #598a / #593 — the lifecycle bar's four parts tile 0–100 in order and sum to the total, and
+     * each number is the SAME number in the rect's sentence, the legend, the hidden table and the
+     * model — a template reading any of them from elsewhere disagrees here.
+     */
+    @Test
+    fun `the lifecycle parts tile the bar and the legend, the table and the model agree`() {
+        val inventory = Inventory(draftOnly = 2, releasedOnly = 3, releasedWithDraft = 1, discardedOnly = 1)
+        val page = page(inventory)
+        val model = page.inventory!!.stacked.first { it.key == "lifecycle" }
+        val doc = render(page)
+
+        val rects = doc.select("[data-stacked=lifecycle] [data-row=all] rect")
+        rects.map { it.attr("data-part") } shouldContainExactly listOf("in-development", "live", "live-changes", "retired")
+        rects.map { it.attr("data-tone") } shouldContainExactly listOf("draft", "released", "mixed", "discarded")
+        rects.map { it.attr("x") } shouldContainExactly listOf("0", "28.6", "71.4", "85.7")
+        rects.map { it.attr("width") } shouldContainExactly listOf("28.6", "42.8", "14.3", "14.3")
+        tiles(rects.map { it.attr("x") to it.attr("width") }) shouldBe 100.0
+        rects.map { it.selectFirst("title")!!.text() } shouldContainExactly
+            listOf("In development: 2 pipelines", "Live: 3 pipelines", "Live, changes in progress: 1 pipeline", "Retired: 1 pipeline")
+
+        val legend =
+            doc
+                .select("[data-stacked-chart=lifecycle] [data-legend]")
+                .associate { it.attr("data-legend") to it.selectFirst(".app-overview-legend-v")!!.text() }
+        val table = doc.select("[data-chart-table=lifecycle] tbody td[data-part]").associate { it.attr("data-part") to it.text() }
+        val modelled = model.rows.single().parts.associate { it.key to it.value.toString() }
+        legend shouldBe mapOf("in-development" to "2", "live" to "3", "live-changes" to "1", "retired" to "1")
+        table shouldBe legend
+        modelled shouldBe legend
+        doc.select("[data-chart-table=lifecycle] tbody td[data-row-total]").single().text() shouldBe "7"
+        legend.values.sumOf { it.toLong() } shouldBe inventory.objects
+    }
+
+    @Test
+    fun `the three live parts link the filtered catalog, Retired stays unlinked, and the sentence relates the total`() {
         val doc = render(page(Inventory(1, 1, 1, 1)))
 
-        doc.select("[data-overview-chart] [data-bar] a").map { it.attr("href") } shouldContainExactly
+        doc.select("[data-stacked-chart=lifecycle] [data-legend] a").map { it.attr("href") } shouldContainExactly
             listOf("/pipelines?lifecycle=draft", "/pipelines?lifecycle=released", "/pipelines?lifecycle=released-with-draft")
-        doc.selectFirst("[data-bar=discarded] a").shouldBeNull()
-        doc.select("[data-overview-inventory] [data-count] a").map { it.attr("href") } shouldContainExactly
-            listOf("/pipelines?lifecycle=with-drafts", "/pipelines?lifecycle=with-releases")
+        doc.selectFirst("[data-legend=retired]")!!.select("a").shouldBeEmpty()
+        doc.select("[data-stacked-chart=maturity] a, [data-stacked] a").shouldBeEmpty()
+        doc.select("[data-stacked-chart=lifecycle] .app-card-note").single().text() shouldBe
+            "The resource browser and View all count the three live parts; retired pipelines have no page."
         doc.selectFirst("[data-overview-view-all]")!!.attr("href") shouldBe "/pipelines"
         doc.selectFirst("[data-overview-review]")!!.attr("href") shouldBe "/pipelines?lifecycle=with-drafts"
+    }
+
+    /** #598a — five rows by number of releases; every row's total is its two parts and the rows sum to the lifecycle total. */
+    @Test
+    fun `the maturity rows split no draft and draft open and sum to the lifecycle total`() {
+        val bins =
+            listOf(
+                bin(ReleaseBin.ZERO, 2, 2),
+                bin(ReleaseBin.ONE, 2, 2),
+                bin(ReleaseBin.TWO_TO_THREE, 0, 1),
+                bin(ReleaseBin.FOUR_TO_NINE, 0, 1),
+                bin(ReleaseBin.TEN_PLUS, 1, 0),
+            )
+        val page = pipelines(ChartInventory(Inventory(2, 4, 3, 2), bins))
+        val model = page.inventory!!.stacked.first { it.key == "maturity" }
+        val doc = render(page)
+
+        val rows = doc.select("[data-stacked=maturity] [data-row]")
+        rows.map { it.attr("data-row") } shouldContainExactly listOf("r0", "r1", "r2-3", "r4-9", "r10")
+        rows.map { it.selectFirst(".app-overview-stack-name")!!.text() } shouldContainExactly
+            listOf("0 releases", "1 release", "2–3 releases", "4–9 releases", "10+ releases")
+        rows.map { it.selectFirst(".app-overview-stack-v")!!.text() } shouldContainExactly
+            listOf("4 (2 with drafts)", "4 (2 with drafts)", "1 (0 with drafts)", "1 (0 with drafts)", "1 (1 with a draft)")
+        rows.map { row -> row.select("rect").map { it.attr("data-part") } }.distinct().single() shouldContainExactly
+            listOf("no-draft", "draft-open")
+        rows.map { it.attr("data-row") } shouldContainExactly model.rows.map { it.key }
+        model.rows.map { it.width } shouldContainExactly listOf("100.0", "100.0", "25.0", "25.0", "25.0")
+        rows[0].select("rect").map { it.attr("width") } shouldContainExactly listOf("50.0", "50.0")
+        rows[2].select("rect").map { it.attr("x") to it.attr("width") } shouldContainExactly listOf("0" to "25.0", "25.0" to "0")
+        rows.zip(model.rows).forEach { (row, modelled) ->
+            tiles(row.select("rect").map { it.attr("x") to it.attr("width") }) shouldBe modelled.width.toDouble()
+        }
+        doc.select("[data-chart-table=maturity] tbody td[data-row-total]").sumOf { it.text().toLong() } shouldBe 11L
+        val legend = doc.select("[data-stacked-chart=maturity] [data-legend]")
+        legend.map { it.attr("data-legend") to it.attr("data-tone") } shouldContainExactly
+            listOf("no-draft" to "released", "draft-open" to "draft")
+        doc.select("[data-stacked-chart=maturity] .app-overview-legend-v").shouldBeEmpty()
+        doc.select("[data-stacked-chart=maturity] .app-card-note").single().text() shouldBe
+            "A release since discarded is not counted; a retired pipeline has 0."
+    }
+
+    @Test
+    fun `an empty pipelines workspace draws all-zero stacked charts, not a divide by zero`() {
+        val doc = render(pipelines(ChartInventory.EMPTY))
+
+        doc.select("[data-stacked] rect").map { it.attr("width") }.distinct() shouldContainExactly listOf("0")
+        doc.select("[data-stacked] rect").map { it.attr("x") }.distinct() shouldContainExactly listOf("0")
+        doc.select("[data-stacked-total]").single().text() shouldBe "0 pipelines"
+        doc.select("[data-overview-table] tbody td").map { it.text() }.distinct() shouldContainExactly listOf("0")
+        doc.select("[data-stacked-chart=lifecycle] .app-overview-legend-v").map { it.text() } shouldContainExactly
+            listOf("0", "0", "0", "0")
     }
 
     @Test
@@ -313,7 +428,8 @@ class OverviewRenderTest {
 
     @Test
     fun `a lensed caller reads admitted inventory`() {
-        val doc = render(OverviewPage.of(OverviewPage.Family.PIPELINES, true, InventoryResult.Available(Inventory(1, 0, 0, 0)), null, NOW))
+        val charts = ChartsResult.Available(charts(Inventory(0, 1, 0, 0)))
+        val doc = render(OverviewPage.of(OverviewPage.Family.PIPELINES, true, charts, null, NOW))
 
         doc.selectFirst("#overview-inventory-h")!!.text() shouldBe "Admitted inventory"
         doc.selectFirst("[data-overview-context]")!!.text() shouldContain "only what your promotion view shows"
@@ -322,13 +438,58 @@ class OverviewRenderTest {
     private fun page(
         inventory: Inventory,
         recent: RecentResult? = RecentResult.Available(emptyList()),
-    ): OverviewPage = page(InventoryResult.Available(inventory), recent)
+        family: OverviewPage.Family = OverviewPage.Family.PIPELINES,
+    ): OverviewPage = page(InventoryResult.Available(inventory), recent, family)
 
+    /** One inventory result for any family: a #598a chart family reads it as its chart group ([charts]). */
     private fun page(
         inventory: InventoryResult,
         recent: RecentResult? = RecentResult.Available(emptyList()),
         family: OverviewPage.Family = OverviewPage.Family.PIPELINES,
-    ): OverviewPage = OverviewPage.of(family, false, inventory, recent, NOW)
+    ): OverviewPage =
+        when (family.charts) {
+            OverviewStacked.ChartSet.STANDARD -> {
+                OverviewPage.of(family, false, inventory, recent, NOW)
+            }
+
+            OverviewStacked.ChartSet.LIFECYCLE -> {
+                val charts =
+                    when (inventory) {
+                        is InventoryResult.Available -> ChartsResult.Available(charts(inventory.inventory))
+                        is InventoryResult.Unavailable -> ChartsResult.Unavailable(inventory.reason)
+                    }
+                OverviewPage.of(family, false, charts, recent, NOW)
+            }
+        }
+
+    private fun pipelines(charts: ChartInventory): OverviewPage =
+        OverviewPage.of(OverviewPage.Family.PIPELINES, false, ChartsResult.Available(charts), RecentResult.Available(emptyList()), NOW)
+
+    /** A consistent chart group for [inventory]: never released objects in bin 0, every other in bin 1. */
+    private fun charts(inventory: Inventory): ChartInventory =
+        ChartInventory(
+            inventory,
+            ReleaseBin.entries.map { releases ->
+                when (releases) {
+                    ReleaseBin.ZERO -> bin(releases, inventory.draftOnly, inventory.discardedOnly)
+                    ReleaseBin.ONE -> bin(releases, inventory.releasedWithDraft, inventory.releasedOnly)
+                    else -> bin(releases, 0, 0)
+                }
+            },
+        )
+
+    private fun bin(
+        releases: ReleaseBin,
+        draftOpen: Long,
+        noDraft: Long,
+    ): MaturityBin = MaturityBin(releases, draftOpen, noDraft)
+
+    /** Where the last of [parts] ends, after checking each starts where the one before it ended. */
+    private fun tiles(parts: List<Pair<String, String>>): Double =
+        parts.fold(0.0) { end, (x, width) ->
+            x.toDouble() shouldBe (end plusOrMinus EPSILON)
+            end + width.toDouble()
+        }.let { Math.round(it * TENTHS) / TENTHS }
 
     /** A datasources-style bar (#583): tone `mixed`, share-of-tallest width, optional catalog link. */
     private fun datasourceBar(
@@ -368,5 +529,8 @@ class OverviewRenderTest {
 
     private companion object {
         val NOW: Instant = Instant.parse("2026-10-17T12:00:00Z")
+        val STANDARD = OverviewPage.Family.TEMPLATES
+        const val EPSILON = 0.001
+        const val TENTHS = 10.0
     }
 }
