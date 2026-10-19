@@ -1,10 +1,10 @@
 # Scheduler Specification
 
-**Status:** v1.7 (slices 1–3 and slice 4 part a of #9 — notification settings saved; delivery and the application credential pending)
+**Status:** v1.8 (slices 1–3 and slice 4 part a of #9 — notification settings saved; delivery and the application credential pending)
 **Owner:** datapipelines.co core
 **Depends on:** [REST API §20](rest-api.md#20-schedules), [Auth](auth.md), [DAG Executor](dag-executor.md), [Metadata DB §4.22–§4.25](metadata-db.md#422-schedules), [Configuration §3.29](configuration.md#329-scheduler-9)
 **Design record:** [scheduler design revision](superpowers/specs/2026-09-22-scheduler-design-revision.md) (ratified 2026-09-25) — the why; this page is the what
-**Last updated:** 2026-10-03
+**Last updated:** 2026-10-19
 
 ---
 
@@ -198,7 +198,7 @@ Metrics ([Observability §4.1](observability.md#41-metric-naming)): `datapipelin
 
 ### 8.4 The page
 
-People manage schedules on the **Schedules** page (`/schedules`, in the rail's Operate group — [UI Screens §4.20](ui-screens.md#420-schedules), slice 2). It adds nothing to this spec: every read and every write it makes is a call to [REST §20](rest-api.md#20-schedules) with the person's session, so what the page can do is exactly what §20 and [Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative) allow — every member reads, authors and admins write, a hidden button is never the authority. What it shows is this spec made visible: the next five occurrences as §3's function computes them, a blocked schedule's reason (§5.2) beside **Unblock**, and a run's history with its trail and — for a reader who may read executions — the execution's own messages merged in time order (the design revision's R10). Its preview of a pattern is §20.3, the same function the dispatcher uses. Elsewhere in the UI the same truth is pre-read before the fact: the pipelines explorer's **discard dialog lists the schedules that run the pipeline** (the Usage tab's by-target read, [UI Screens §4.3d](ui-screens.md#43d-lifecycle-verbs--the-two-workspaces-102-the-explorers-legs-retired-by-401-and-398), #273) — a discard succeeds, and each listed schedule then blocks at its next run per §5.2 (`pointer_null`, `target_not_found`) until it is repointed or deleted.
+People manage schedules on the **Schedules** page (`/schedules`, in the rail's Operate group — [UI Screens §4.20](ui-screens.md#420-schedules), slice 2). The rail's Schedules item lands on the **Schedules home** (`/overview/schedules`, [UI Screens §4.20a](ui-screens.md#420a-schedules-home-584), #584) — the workspace's schedules counted by condition and by how each one's latest run ended, what fires next and what changed last, all from one read of the same §20.1 list through the reader's lens — and its View all opens this page. It adds nothing to this spec: every read and every write it makes is a call to [REST §20](rest-api.md#20-schedules) with the person's session, so what the page can do is exactly what §20 and [Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative) allow — every member reads, authors and admins write, a hidden button is never the authority. What it shows is this spec made visible: the next five occurrences as §3's function computes them, a blocked schedule's reason (§5.2) beside **Unblock**, and a run's history with its trail and — for a reader who may read executions — the execution's own messages merged in time order (the design revision's R10). Its preview of a pattern is §20.3, the same function the dispatcher uses. Elsewhere in the UI the same truth is pre-read before the fact: the pipelines explorer's **discard dialog lists the schedules that run the pipeline** (the Usage tab's by-target read, [UI Screens §4.3d](ui-screens.md#43d-lifecycle-verbs--the-two-workspaces-102-the-explorers-legs-retired-by-401-and-398), #273) — a discard succeeds, and each listed schedule then blocks at its next run per §5.2 (`pointer_null`, `target_not_found`) until it is repointed or deleted.
 
 ---
 
@@ -216,6 +216,7 @@ People manage schedules on the **Schedules** page (`/schedules`, in the rail's O
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-19 | v1.8 | #584 | §8.4: the rail's Schedules item lands on the Schedules home (`/overview/schedules`, UI Screens §4.20a); the explorer at `/schedules` is its View all. No behaviour of the scheduler changes. |
 | 2026-10-03 | v1.7 | 442a (#442) | Saved schedule notification settings: recipients and five event choices, validated and shown by role; omitted PUT settings preserved; mail remains off pending part b. |
 | 2026-09-30 | v1.6 | lane 336 (#336 D6) | §5's tables: `unknown` gains the `outcome_unreadable` reason (an ABORTED row whose `error_json` — where the sweeper's `instance_lost` marker lives — is unreadable; blocks, because "not instance_lost" cannot be concluded), and `aborted` states the unreadable-payload case (state `aborted`, no reason — the record proves the abort; `unknown` would block an outcome that IS known). The executor logs `scheduler.outcome_evidence_unreadable` (observability §3.4E). Reasons are strings, not a closed enum (enums §24); no migration — the V38 CHECK constrains `state`, never `reason`. |
 | 2026-09-28 | v1.5 | 301 (#273) | §8.4: the pipelines discard dialog pre-reads §5.2's consequence before the fact — it lists the schedules whose target names the pipeline (the Usage tab's by-target read, UI Screens §4.3d), because the discard succeeds and each of them then blocks (`pointer_null` / `target_not_found`) at its next run. No scheduler code, route or query changed. |
