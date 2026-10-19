@@ -10,7 +10,9 @@
        adapter; related families and help from the guide. Every number on the page is read from
        `o.inventory` and `o.recent`, the values the page's controller built, so a chart cannot
        disagree with its totals. #583 generalized the frame: the panel's charts and the recent
-       card's sections are lists — the five lifecycle families build one of each. */-->
+       card's sections are lists — the five lifecycle families build one of each. #598a: a panel
+       may instead carry stacked charts (Pipelines: the total, lifecycle and maturity), and a
+       panel without counts renders no counts list. */-->
   <div class="app-overview" th:with="o=${overview}" th:attr="data-overview=${o.family}">
     <template data-page-assets th:if="${o.guided}">
       <script type="module" th:src="@{/js/overview.mjs}"></script>
@@ -41,7 +43,7 @@
           <b>The inventory is unavailable.</b> <span th:text="${o.unavailable}">Inventory could not be read.</span>
         </p>
         <th:block th:if="${o.inventory != null}" th:with="inv=${o.inventory}">
-          <dl class="app-overview-counts">
+          <dl class="app-overview-counts" th:unless="${#lists.isEmpty(inv.counts)}">
             <div class="app-overview-count" th:each="c : ${inv.counts}" th:attr="data-count=${c.key}">
               <dt class="ds-caption">
                 <a th:if="${c.href != null}" hx-boost="true" th:href="@{${c.href}}" th:text="${c.label}">With drafts</a>
@@ -85,6 +87,56 @@
               </div>
             </div>
           </th:block>
+          <!--/* #598a: the panel's stacked charts (OverviewStacked) — the Pipelines home's
+               lifecycle bar and maturity chart, one loop with the bar charts' discipline. Each:
+               the total line when the model has one, the caption as a heading (and the list's
+               label and the table's caption), one SVG per row whose rects tile the row's width
+               (x and width are attributes; the CSP admits no style) with each part's sentence
+               as its <title>, the row's numbers beside it, a legend naming every series (its
+               count and its filtered catalog when the chart has one per series — never colour
+               alone), the note, and the hidden table: one row per bar, each part's value and
+               the total. Every number from the model. */-->
+          <section class="app-overview-stacked-chart" th:each="s : ${inv.stacked}" th:attr="data-stacked-chart=${s.key}">
+            <p class="app-overview-stacked-total" th:if="${s.totalLabel != null}" th:attr="data-stacked-total=${s.key}"
+               th:text="${s.totalLabel}">7 pipelines</p>
+            <h3 class="app-overview-sub" th:text="${s.caption}">Pipelines by lifecycle</h3>
+            <ul class="app-overview-stacked" th:attr="aria-label=${s.caption}, data-stacked=${s.key}">
+              <li class="app-overview-stack" th:each="r : ${s.rows}" th:attr="data-row=${r.key}">
+                <span class="app-overview-stack-name">
+                  <a th:if="${r.href != null}" hx-boost="true" th:href="@{${r.href}}" th:text="${r.name}">All pipelines</a>
+                  <th:block th:if="${r.href == null}" th:text="${r.name}">All pipelines</th:block>
+                </span>
+                <svg class="app-overview-stack-track" viewBox="0 0 100 1" preserveAspectRatio="none"
+                     role="img" th:attr="aria-label=${r.label}"><rect class="app-overview-stack-fill" th:each="p : ${r.parts}"
+                     y="0" height="1" th:attr="x=${p.x}, width=${p.width}, data-part=${p.key}, data-tone=${p.tone}"><title
+                     th:text="${p.label}">In development: 2 pipelines</title></rect></svg>
+                <span class="app-overview-stack-v"><b th:text="${r.total}">7</b><th:block th:if="${r.detail != null}"> <span
+                      class="app-overview-stack-detail" th:text="${r.detail}">(2 with drafts)</span></th:block></span>
+              </li>
+            </ul>
+            <ul class="app-overview-legend">
+              <li th:each="l : ${s.legend}" th:attr="data-legend=${l.key}, data-tone=${l.tone}">
+                <span class="app-overview-legend-swatch" aria-hidden="true"></span>
+                <a th:if="${l.href != null}" hx-boost="true" th:href="@{${l.href}}" th:text="${l.name}">Live</a>
+                <th:block th:if="${l.href == null}" th:text="${l.name}">Retired</th:block>
+                <span class="app-overview-legend-v" th:if="${l.value != null}" th:text="${l.value}">3</span>
+              </li>
+            </ul>
+            <p class="app-card-note" th:if="${s.note != null}" th:text="${s.note}">Chart note</p>
+            <div class="dt-frame app-visually-hidden">
+              <div class="dt-viewport" tabindex="-1">
+                <table class="ds-table" th:attr="data-chart-table=${s.key}" data-overview-table>
+                  <caption th:text="${s.caption}">Pipelines by lifecycle</caption>
+                  <thead><tr><th scope="col" th:each="h : ${s.headings}" th:text="${h}">Lifecycle</th></tr></thead>
+                  <tbody>
+                    <tr th:each="r : ${s.rows}" th:attr="data-row=${r.key}"><th scope="row" th:text="${r.name}">All pipelines</th><td
+                        th:each="p : ${r.parts}" th:attr="data-part=${p.key}" th:text="${p.value}">0</td><td
+                        data-row-total th:text="${r.total}">0</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </section>
         </th:block>
       </div>
     </section>

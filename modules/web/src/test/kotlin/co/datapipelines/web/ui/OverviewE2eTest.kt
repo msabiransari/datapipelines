@@ -152,6 +152,30 @@ class OverviewE2eTest {
         }
     }
 
+    /**
+     * #598a — the Pipelines home's chart group (`FamilyInventory.chartsFor`, one statement) and the
+     * four-bucket inventory read the same lifecycle, bucket for bucket, unlensed and through the
+     * narrowed lens; every object sits in one release bin. So each lifecycle part's link opens a
+     * catalog whose total is the part's number (the equality cases above).
+     */
+    @Test
+    fun `the chart group's lifecycle is the inventory's, unlensed and narrowed`() {
+        val narrowed = ReadLens.Only(setOf("a/draft", "b/released", "c/both_hidden_draft", "d/discarded", "absent/name"))
+        listOf(ReadLens.Everything, narrowed).forEach { lens ->
+            val charts = (inventory.chartsFor(NavigationFamily.PIPELINES, workspace, view(lens)) as ChartsResult.Available).charts
+            println("event=598a.overview.charts lens=${if (lens == narrowed) "narrowed" else "everything"} $charts")
+            charts.lifecycle shouldBe counted(lens)
+            charts.maturity.sumOf { it.total } shouldBe charts.lifecycle.objects
+            CatalogLifecycle.PIPELINES.forEach { bucket ->
+                withClue(bucket) {
+                    service.page(workspace, lens, null, 0, PAGE, bucket).total.toLong() shouldBe bucket.countIn(charts.lifecycle)
+                }
+            }
+        }
+        val unlensed = (inventory.chartsFor(NavigationFamily.PIPELINES, workspace, LensedView.EVERYTHING) as ChartsResult.Available).charts
+        unlensed.maturity.map { it.draftOpen to it.noDraft } shouldBe listOf(2L to 2L, 2L to 2L, 0L to 1L, 0L to 0L, 0L to 0L)
+    }
+
     private data class Row(
         val bucket: LifecycleBucket,
         val listed: Long,

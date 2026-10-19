@@ -77,14 +77,8 @@ object InventorySource {
             .query(
                 sql(family, narrowed = names != null),
                 mapOf("workspace" to workspaceId, "names" to names),
-            ) { rs, _ ->
-                Inventory(
-                    draftOnly = rs.getLong("draft_only"),
-                    releasedOnly = rs.getLong("released_only"),
-                    releasedWithDraft = rs.getLong("released_with_draft"),
-                    discardedOnly = rs.getLong("discarded_only"),
-                )
-            }.single()
+            ) { rs, _ -> lifecycle(rs) }
+            .single()
     }
 
     /**
@@ -119,6 +113,19 @@ object InventorySource {
     internal fun sql(
         family: NavigationFamily,
         narrowed: Boolean,
+    ): String = "${admitted(family, narrowed)}\nSELECT $LIFECYCLE_COUNTS\n  FROM admitted"
+
+    /**
+     * #598a — the `admitted` CTE every inventory statement starts from: one row per object of the
+     * workspace, its three flags computed over the versions admitted to the caller (a [narrowed]
+     * lens: the bound names' RELEASED rows only). [perObject] adds further per-object aggregates
+     * over the SAME admitted rows ([ChartInventorySource]'s release count), so the lifecycle and
+     * every chart beside it read one definition of an object and of what is admitted to it.
+     */
+    internal fun admitted(
+        family: NavigationFamily,
+        narrowed: Boolean,
+        perObject: String = "",
     ): String {
         val versions = versionsTable(family)
         val admitted = if (narrowed) "AND s.name IN (:names) AND v.$RELEASED_VERSION" else ""
@@ -126,17 +133,30 @@ object InventorySource {
             WITH admitted AS (
                 SELECT bool_or(v.status = 'DRAFT') AS d,
                        bool_or(v.status = 'RELEASED') AS r,
-                       bool_or(v.status = 'DISCARDED') AS x
+                       bool_or(v.status = 'DISCARDED') AS x$perObject
                   FROM ${family.table} s
                   JOIN $versions v ON v.${family.foreignKey} = s.id
                  WHERE s.workspace_id = :workspace $admitted
                  GROUP BY s.id
             )
-            SELECT count(*) FILTER (WHERE ${LifecycleBucket.DRAFT_ONLY.predicate}) AS draft_only,
-                   count(*) FILTER (WHERE ${LifecycleBucket.RELEASED_ONLY.predicate}) AS released_only,
-                   count(*) FILTER (WHERE ${LifecycleBucket.RELEASED_WITH_DRAFT.predicate}) AS released_with_draft,
-                   count(*) FILTER (WHERE ${LifecycleBucket.DISCARDED_ONLY.predicate}) AS discarded_only
-              FROM admitted
             """.trimIndent()
     }
+
+    /** #598a — the four exclusive buckets A–D as `admitted`'s count columns, each its bucket's own predicate. */
+    internal val LIFECYCLE_COUNTS =
+        listOf(
+            LifecycleBucket.DRAFT_ONLY to "draft_only",
+            LifecycleBucket.RELEASED_ONLY to "released_only",
+            LifecycleBucket.RELEASED_WITH_DRAFT to "released_with_draft",
+            LifecycleBucket.DISCARDED_ONLY to "discarded_only",
+        ).joinToString(",\n       ") { (bucket, column) -> "count(*) FILTER (WHERE ${bucket.predicate}) AS $column" }
+
+    /** Reads the four lifecycle columns [LIFECYCLE_COUNTS] names from the current row. */
+    internal fun lifecycle(rs: java.sql.ResultSet): Inventory =
+        Inventory(
+            draftOnly = rs.getLong("draft_only"),
+            releasedOnly = rs.getLong("released_only"),
+            releasedWithDraft = rs.getLong("released_with_draft"),
+            discardedOnly = rs.getLong("discarded_only"),
+        )
 }

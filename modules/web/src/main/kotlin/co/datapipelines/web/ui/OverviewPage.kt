@@ -34,10 +34,15 @@ data class OverviewPage(
     val recent: RecentPanel?,
     val guided: Boolean,
 ) {
-    /** The summary counts and the charts, every number of a chart from the one model its page built. */
+    /**
+     * The summary counts and the charts, every number of a chart from the one model its page built.
+     * #598a: [stacked] holds the stacked-bar charts (`OverviewStacked`) — a
+     * [OverviewStacked.ChartSet.LIFECYCLE] family carries those alone; every other panel none.
+     */
     data class InventoryPanel(
         val counts: List<Count>,
         val charts: List<Chart>,
+        val stacked: List<StackedChart> = emptyList(),
     )
 
     /**
@@ -117,7 +122,11 @@ data class OverviewPage(
         val hasDraft: Boolean,
     )
 
-    /** The family facts an overview names. Parameter sets' route is `parameter-sets`. */
+    /**
+     * The family facts an overview names. Parameter sets' route is `parameter-sets`. [charts] is
+     * the inventory card the family carries (#598a: Pipelines the stacked charts; the four
+     * siblings the four counts and bars until #599).
+     */
     enum class Family(
         val navigation: NavigationFamily,
         val title: String,
@@ -125,8 +134,17 @@ data class OverviewPage(
         val plural: String,
         val offered: List<LifecycleBucket>,
         val guided: Boolean,
+        val charts: OverviewStacked.ChartSet = OverviewStacked.ChartSet.STANDARD,
     ) {
-        PIPELINES(NavigationFamily.PIPELINES, "Pipelines", "pipeline", "pipelines", CatalogLifecycle.PIPELINES, guided = true),
+        PIPELINES(
+            NavigationFamily.PIPELINES,
+            "Pipelines",
+            "pipeline",
+            "pipelines",
+            CatalogLifecycle.PIPELINES,
+            guided = true,
+            charts = OverviewStacked.ChartSet.LIFECYCLE,
+        ),
         TEMPLATES(NavigationFamily.TEMPLATES, "Templates", "template", "templates", CatalogLifecycle.TEMPLATES, guided = true),
         DASHBOARDS(NavigationFamily.DASHBOARDS, "Dashboards", "dashboard", "dashboards", CatalogLifecycle.DASHBOARDS, guided = true),
         VISUALIZATIONS(
@@ -166,22 +184,61 @@ data class OverviewPage(
     }
 
     companion object {
-        /** The page for [family] from one inventory read and one recent read, at [now]. */
+        /** The page for a [OverviewStacked.ChartSet.STANDARD] [family] from one inventory read and one recent read, at [now]. */
         fun of(
             family: Family,
             lensed: Boolean,
             inventory: InventoryResult,
             recent: RecentResult?,
             now: Instant,
+        ): OverviewPage {
+            require(family.charts == OverviewStacked.ChartSet.STANDARD) { "$family reads its charts, not the four counts" }
+            return page(
+                family,
+                lensed,
+                (inventory as? InventoryResult.Available)?.let { panel(family, it.inventory) },
+                (inventory as? InventoryResult.Unavailable)?.reason,
+                recent?.let { recentPanel(family, it, now) },
+            )
+        }
+
+        /**
+         * #598a — the page for a [OverviewStacked.ChartSet.LIFECYCLE] [family] from one chart read
+         * (the lifecycle and maturity charts, one snapshot) and one recent read, at [now]. An
+         * unknown chart group is the frame's unavailable sentence, never a zero.
+         */
+        fun of(
+            family: Family,
+            lensed: Boolean,
+            charts: ChartsResult,
+            recent: RecentResult?,
+            now: Instant,
+        ): OverviewPage {
+            require(family.charts == OverviewStacked.ChartSet.LIFECYCLE) { "$family carries the four counts, not the charts" }
+            return page(
+                family,
+                lensed,
+                (charts as? ChartsResult.Available)?.let { OverviewStacked.panel(family, it.charts) },
+                (charts as? ChartsResult.Unavailable)?.reason,
+                recent?.let { recentPanel(family, it, now) },
+            )
+        }
+
+        private fun page(
+            family: Family,
+            lensed: Boolean,
+            inventory: InventoryPanel?,
+            unavailable: String?,
+            recent: RecentPanel?,
         ): OverviewPage =
             OverviewPage(
                 family = family.navigation.route,
                 title = family.title,
                 catalogHref = family.catalogHref,
                 lensed = lensed,
-                inventory = (inventory as? InventoryResult.Available)?.let { panel(family, it.inventory) },
-                unavailable = (inventory as? InventoryResult.Unavailable)?.reason,
-                recent = recent?.let { recentPanel(family, it, now) },
+                inventory = inventory,
+                unavailable = unavailable,
+                recent = recent,
                 guided = family.guided,
             )
 

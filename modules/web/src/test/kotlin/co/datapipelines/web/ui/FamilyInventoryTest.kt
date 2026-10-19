@@ -2,6 +2,7 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.application.lens.LensedView
 import co.datapipelines.parameters.ParameterSetRepository
+import co.datapipelines.pipeline.ChartInventory
 import co.datapipelines.pipeline.Inventory
 import co.datapipelines.pipeline.NavigationFamily
 import co.datapipelines.pipeline.PipelineRepository
@@ -86,5 +87,29 @@ class FamilyInventoryTest {
         service.forFamily(NavigationFamily.VISUALIZATIONS, workspace, view) shouldBe
             InventoryResult.Unavailable("Inventory could not be read.")
         verify { listOf(dashboards, visualizations) wasNot Called }
+    }
+
+    /** #598a — the chart group keeps forFamily's rules: the caller's own lens, fail closed, never zeros. */
+    @Test
+    fun `the pipelines charts read the pipelines lens once and a failure is unavailable, never zeros`() {
+        val lens = ReadLens.Only(setOf("pipeline"))
+        val view = LensedView(lens, ReadLens.Everything, parameterSets = ReadLens.Everything)
+        every { pipelines.charts(workspace, lens) } returns ChartInventory.EMPTY
+        service.chartsFor(NavigationFamily.PIPELINES, workspace, view) shouldBe ChartsResult.Available(ChartInventory.EMPTY)
+        verify(exactly = 1) { pipelines.charts(workspace, lens) }
+
+        every { pipelines.charts(workspace, ReadLens.Everything) } throws DataAccessResourceFailureException("read failed")
+        service.chartsFor(NavigationFamily.PIPELINES, workspace, LensedView.EVERYTHING) shouldBe
+            ChartsResult.Unavailable("Inventory could not be read.")
+    }
+
+    @Test
+    fun `an unavailable view and an uncharted family read nothing`() {
+        val unavailable = LensedView(ReadLens.Everything, ReadLens.Everything, LensedView.Unavailable("target", "unreachable"))
+        NavigationFamily.entries.forEach { service.chartsFor(it, workspace, unavailable) shouldBe ChartsResult.Unavailable("unreachable") }
+        NavigationFamily.entries.filter { it != NavigationFamily.PIPELINES }.forEach {
+            service.chartsFor(it, workspace, LensedView.EVERYTHING) shouldBe ChartsResult.Unavailable(FamilyInventory.NOT_CHARTED)
+        }
+        verify { listOf(pipelines, templates, dashboards, visualizations, sets) wasNot Called }
     }
 }
