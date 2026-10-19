@@ -647,6 +647,38 @@ class ShellRenderTest {
         href("Visualizations") shouldBe "/overview/visualizations"
         href("Parameter Sets") shouldBe "/overview/parameter-sets"
         href("Datasources") shouldBe "/overview/datasources"
+        href("API") shouldBe "/overview/api-console"
+    }
+
+    /**
+     * #585: the API item lands on the API home and lights on it AND on the console (its View
+     * all) — and like the datasources overview it is not a browserFamily, so the browser stays
+     * hidden. Not vacuous: the Pipelines overview, rendered by the same helper, shows it.
+     */
+    @Test
+    fun `the API home and the console light the API item and keep the browser hidden`() {
+        val render = { path: String ->
+            engine.process(
+                "pipelines/list",
+                webContext().apply {
+                    fillList()
+                    setVariable("currentPath", path)
+                    setVariable("crumbGroup", AppNav.crumbFor(path)?.first)
+                    setVariable("crumbPage", AppNav.crumbFor(path)?.second)
+                },
+            )
+        }
+        listOf("/overview/api-console", "/api-console").forEach { path ->
+            val html = render(path)
+            val active = Regex("""<a [^>]*class="app-nav-link active"[^>]*>""").findAll(html).map { it.value }.toList()
+            active.size shouldBe 1
+            active.single() shouldContain "data-nav-label=\"API\""
+            active.single() shouldContain "aria-current=\"page\""
+            html.substringAfter("<aside class=\"app-browser\"").substringBefore(">") shouldContain "hidden"
+            html.substringAfter("<button type=\"button\" id=\"browser-open\"").substringBefore(">") shouldContain "hidden"
+        }
+        AppNav.crumbFor("/overview/api-console")?.second shouldBe "API"
+        render("/overview/pipelines").substringAfter("<aside class=\"app-browser\"").substringBefore(">") shouldNotContain "hidden"
     }
 
     /**
