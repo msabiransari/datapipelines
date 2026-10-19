@@ -252,23 +252,7 @@ class PromoterLensSweepTest {
             val page = call("/overview/pipelines", auth)
             page.status shouldBe HTTP_OK
             overviewNumbers(page.body) shouldBe
-                mapOf(
-                    "total" to 3,
-                    "in-development" to 0,
-                    "live" to 3,
-                    "live-changes" to 0,
-                    "retired" to 0,
-                    "r0:no-draft" to 0,
-                    "r0:draft-open" to 0,
-                    "r1:no-draft" to 3,
-                    "r1:draft-open" to 0,
-                    "r2-3:no-draft" to 0,
-                    "r2-3:draft-open" to 0,
-                    "r4-9:no-draft" to 0,
-                    "r4-9:draft-open" to 0,
-                    "r10:no-draft" to 0,
-                    "r10:draft-open" to 0,
-                )
+                pipelineCharts("total" to 3, "live" to 3, "r1:no-draft" to 3)
             val recent = page.body.substringAfter("data-overview-recent", "").substringBefore("</section>")
             VISIBLE_PIPELINES.forEach { recent.contains(it) shouldBe true }
             recent.contains("ds-badge-warning") shouldBe false
@@ -318,22 +302,14 @@ class PromoterLensSweepTest {
     private fun viewerOverviewSeesEverything(auth: (RequestSpecification) -> RequestSpecification) {
         withClue("#556: the viewer's overview counts the draft the promoter's does not") {
             overviewNumbers(call("/overview/pipelines", auth).body) shouldBe
-                mapOf(
+                pipelineCharts(
                     "total" to 6,
                     "in-development" to 1,
                     "live" to 4,
                     "live-changes" to 1,
-                    "retired" to 0,
-                    "r0:no-draft" to 0,
                     "r0:draft-open" to 1,
                     "r1:no-draft" to 4,
                     "r1:draft-open" to 1,
-                    "r2-3:no-draft" to 0,
-                    "r2-3:draft-open" to 0,
-                    "r4-9:no-draft" to 0,
-                    "r4-9:draft-open" to 0,
-                    "r10:no-draft" to 0,
-                    "r10:draft-open" to 0,
                 )
             val withDrafts = call("/partials/pipelines?lifecycle=with-drafts", auth).body
             listOf("$P/draft_only", "$P/newer").forEach { withDrafts.contains(it) shouldBe true }
@@ -380,6 +356,16 @@ class PromoterLensSweepTest {
             }
         }
     }
+
+    /**
+     * #598a — the Pipelines overview's numbers as `overviewNumbers` reads them: the total, the four lifecycle parts and
+     * every maturity cell ("bin:part"), each 0 unless named, so a cell the page adds or drops is a difference.
+     */
+    private fun pipelineCharts(vararg nonZero: Pair<String, Int>): Map<String, Int> =
+        (
+            listOf("total", "in-development", "live", "live-changes", "retired") +
+                listOf("r0", "r1", "r2-3", "r4-9", "r10").flatMap { bin -> listOf("$bin:no-draft", "$bin:draft-open") }
+        ).associateWith { 0 } + nonZero
 
     /**
      * The overview's four counts and the bars' values, by key (the discarded bar's key is its count's);

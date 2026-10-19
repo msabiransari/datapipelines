@@ -53,7 +53,11 @@ class OverviewBrowserTest : RestTreeBrowserFixture() {
 
     private fun lifecyclePart(key: String) = page.locator("[data-stacked='lifecycle'] rect[data-part='$key']")
 
-    private fun screenshot(name: String, width: Int, height: Int) {
+    private fun screenshot(
+        name: String,
+        width: Int,
+        height: Int,
+    ) {
         page.setViewportSize(width, height)
         page.reload()
         page.waitForSelector("[data-stacked-chart='lifecycle']")

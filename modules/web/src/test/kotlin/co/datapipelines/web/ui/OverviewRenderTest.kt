@@ -272,7 +272,11 @@ class OverviewRenderTest {
                 .select("[data-stacked-chart=lifecycle] [data-legend]")
                 .associate { it.attr("data-legend") to it.selectFirst(".app-overview-legend-v")!!.text() }
         val table = doc.select("[data-chart-table=lifecycle] tbody td[data-part]").associate { it.attr("data-part") to it.text() }
-        val modelled = model.rows.single().parts.associate { it.key to it.value.toString() }
+        val modelled =
+            model.rows
+                .single()
+                .parts
+                .associate { it.key to it.value.toString() }
         legend shouldBe mapOf("in-development" to "2", "live" to "3", "live-changes" to "1", "retired" to "1")
         table shouldBe legend
         modelled shouldBe legend
@@ -486,10 +490,11 @@ class OverviewRenderTest {
 
     /** Where the last of [parts] ends, after checking each starts where the one before it ended. */
     private fun tiles(parts: List<Pair<String, String>>): Double =
-        parts.fold(0.0) { end, (x, width) ->
-            x.toDouble() shouldBe (end plusOrMinus EPSILON)
-            end + width.toDouble()
-        }.let { Math.round(it * TENTHS) / TENTHS }
+        parts
+            .fold(0.0) { end, (x, width) ->
+                x.toDouble() shouldBe (end plusOrMinus EPSILON)
+                end + width.toDouble()
+            }.let { Math.round(it * TENTHS) / TENTHS }
 
     /** A datasources-style bar (#583): tone `mixed`, share-of-tallest width, optional catalog link. */
     private fun datasourceBar(
