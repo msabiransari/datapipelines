@@ -14,6 +14,8 @@ import org.junit.jupiter.api.TestInstance
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.jdbc.datasource.DriverManagerDataSource
 import java.time.Instant
+import java.time.OffsetDateTime
+import java.time.ZoneOffset
 import java.util.UUID
 
 /**
@@ -314,6 +316,120 @@ class DatasourceRepositoryIntegrationTest {
 
         repository.recordTestOutcome("gone", DatasourceTestOutcome(Instant.EPOCH, ok = true)) shouldBe false
         repository.updateCredential("gone", encryptor.encrypt("other", "gone")) shouldBe false
+    }
+
+    // --------------------------------------------- #583: the overview's two aggregate reads
+
+    /**
+     * The overview's counts read the SAME predicate as the catalog (`findAllVisible`): grants
+     * only, live rows only, every dialect in one statement — and the three test outcomes
+     * partition each dialect's total, "never probed" its own bucket. An ungranted workspace
+     * sees nothing at all, not zeros.
+     */
+    @Test
+    fun `visibleCounts partitions the granted set by dialect and outcome, invisible rows excluded`() {
+        val workspace = insertWorkspace("alpha")
+        val other = insertWorkspace("beta")
+
+        seed("granted_ok", Dialect.POSTGRES, workspace, tested = true)
+        seed("granted_failed", Dialect.POSTGRES, workspace, tested = false)
+        seed("granted_never", Dialect.H2, workspace, tested = null)
+        // Granted to ANOTHER workspace only: invisible here, not a zero.
+        seed("elsewhere", Dialect.POSTGRES, other, tested = true)
+        // Granted here but since soft-deleted: invisible.
+        seed("gone", Dialect.H2, workspace, tested = true)
+        repository.softDelete("gone") shouldBe true
+
+        repository.visibleCounts(workspace) shouldBe
+            listOf(
+                DatasourceDialectCounts(Dialect.H2, total = 1, testedOk = 0, testedFailed = 0, neverTested = 1),
+                DatasourceDialectCounts(Dialect.POSTGRES, total = 2, testedOk = 1, testedFailed = 1, neverTested = 0),
+            )
+        repository.visibleCounts(other) shouldBe
+            listOf(DatasourceDialectCounts(Dialect.POSTGRES, total = 1, testedOk = 1, testedFailed = 0, neverTested = 0))
+        repository.visibleCounts(insertWorkspace("empty")) shouldBe emptyList()
+    }
+
+    /**
+     * "Recently added to this workspace" reads the GRANT rows: newest `granted_at` first, name
+     * order breaking a same-instant tie, capped at [limit] — a soft-deleted datasource and a
+     * grant to another workspace both drop off.
+     */
+    @Test
+    fun `recentGrants reads the newest grants, live rows only, this workspace only, capped`() {
+        val workspace = insertWorkspace("alpha")
+        val other = insertWorkspace("beta")
+        val base = Instant.parse("2026-10-18T05:00:00Z")
+
+        seed("d1", Dialect.POSTGRES, workspace, tested = true, granted = false)
+        seed("d2", Dialect.H2, workspace, tested = true, granted = false)
+        seed("d3", Dialect.H2, workspace, tested = true, granted = false)
+        seed("d4", Dialect.POSTGRES, workspace, tested = true, granted = false)
+        seed("gone", Dialect.POSTGRES, workspace, tested = true, granted = false)
+        seed("elsewhere", Dialect.POSTGRES, other, tested = true)
+        repository.softDelete("gone") shouldBe true
+
+        grant("d1", workspace, base.plusSeconds(300))
+        grant("d4", workspace, base.plusSeconds(300)) // ties with d1; name order breaks it
+        grant("d2", workspace, base.plusSeconds(200))
+        grant("d3", workspace, base.plusSeconds(100))
+        grant("gone", workspace, base.plusSeconds(400)) // newest overall, but deleted
+        grant("elsewhere", workspace, base.plusSeconds(40)) // also granted HERE, as the oldest grant
+
+        repository.recentGrants(workspace).map { it.name } shouldBe listOf("d1", "d4", "d2", "d3", "elsewhere")
+        repository.recentGrants(workspace).first().let { it.name to it.grantedAt } shouldBe ("d1" to base.plusSeconds(300))
+        repository.recentGrants(workspace, limit = 2).map { it.name } shouldBe listOf("d1", "d4")
+    }
+
+    /** One live datasource, granted to [workspace] unless [granted] is false, with an optional recorded test outcome. */
+    private fun seed(
+        name: String,
+        dialect: Dialect,
+        workspace: UUID,
+        tested: Boolean?,
+        granted: Boolean = true,
+    ) {
+        val fixture = if (dialect == Dialect.POSTGRES) Fixtures.postgres(name = name) else Fixtures.h2(name = name)
+        repository.create(fixture, encryptor.encrypt("p", name), owner)
+        if (tested != null) {
+            repository.recordTestOutcome(name, DatasourceTestOutcome(Instant.parse("2026-10-18T04:00:00Z"), ok = tested))
+        }
+        if (granted) {
+            grant(name, workspace, Instant.parse("2026-10-18T05:00:00Z"))
+        }
+    }
+
+    private fun insertWorkspace(name: String): UUID =
+        checkNotNull(
+            jdbc.queryForObject(
+                """
+                INSERT INTO workspaces (name, display_name, created_by)
+                VALUES (:name, :name, :createdBy)
+                RETURNING id
+                """.trimIndent(),
+                mapOf("name" to name, "createdBy" to owner),
+                UUID::class.java,
+            ),
+        )
+
+    private fun grant(
+        name: String,
+        workspaceId: UUID,
+        grantedAt: Instant,
+    ) {
+        jdbc.update(
+            """
+            INSERT INTO datasource_workspaces (datasource_name, workspace_id, granted_by, granted_at)
+            VALUES (:name, :workspace, :grantedBy, :grantedAt)
+            """.trimIndent(),
+            mapOf(
+                "name" to name,
+                "workspace" to workspaceId,
+                "grantedBy" to owner,
+                // A TIMESTAMPTZ bind needs an OffsetDateTime; a raw Instant cannot be typed (measured).
+                "grantedAt" to OffsetDateTime.ofInstant(grantedAt, ZoneOffset.UTC),
+            ),
+        )
     }
 
     /** The definition columns of one row, credential included — the "nothing moved" unit. */
