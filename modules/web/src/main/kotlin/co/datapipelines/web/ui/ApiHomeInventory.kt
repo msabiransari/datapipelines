@@ -7,7 +7,6 @@ import co.datapipelines.auth.ApiKey
 import co.datapipelines.auth.ApiKeyKind
 import co.datapipelines.auth.ApiKeyRepository
 import co.datapipelines.auth.AuthenticatedPrincipal
-import org.springframework.stereotype.Component
 import java.time.Instant
 import java.util.UUID
 
@@ -24,7 +23,6 @@ import java.util.UUID
  * Nothing here selects a credential: the key rows are the repository's metadata (kind, name,
  * flags, times) and no value of them but those reaches the page.
  */
-@Component
 class ApiHomeReads(
     private val publishing: EndpointPublishService,
     private val pipelineNames: PipelineNames,

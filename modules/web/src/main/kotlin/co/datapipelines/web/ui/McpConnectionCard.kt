@@ -3,7 +3,6 @@ package co.datapipelines.web.ui
 import co.datapipelines.auth.ApiKeyCredential
 import co.datapipelines.auth.AuthProperties
 import co.datapipelines.mcp.McpToolCatalog
-import org.springframework.stereotype.Component
 import org.springframework.ui.Model
 
 /**
@@ -16,7 +15,6 @@ import org.springframework.ui.Model
  * configuration — none of it is user input, and the key in the config is always the PLACEHOLDER,
  * never a real one.
  */
-@Component
 class McpConnectionCard(
     private val authProperties: AuthProperties,
 ) {
