@@ -543,7 +543,7 @@ a.tpl-result {
    (WCAG 1.4.1): "Discard" and "Delete" are the words; this is the second signal, not the
    only one. */
 .tplx-danger {
-  color: var(--accent-danger);
+  color: var(--app-danger-ink);
 }
 
 .tplx-detail-body {

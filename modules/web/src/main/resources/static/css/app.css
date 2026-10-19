@@ -2351,7 +2351,7 @@ button.app-busy::after {
 
 .app-chip-bad {
   background: var(--accent-danger-bg);
-  color: var(--accent-danger);
+  color: var(--app-danger-ink);
 }
 
 .app-chip-run {
@@ -2738,7 +2738,7 @@ button.app-busy::after {
 .u-secondary { color: var(--text-secondary); }
 .u-muted { color: var(--text-muted); }
 .u-primary { color: var(--text-primary); }
-.u-danger { color: var(--accent-danger); }
+.u-danger { color: var(--app-danger-ink); }
 .u-success { color: var(--accent-success); }
 .u-warning { color: var(--accent-warning); }
 
@@ -2746,7 +2746,7 @@ button.app-busy::after {
    Kotlin. As classes they need the hover state spelled out: `.ds-button-ghost:hover` (0,2,0)
    would otherwise repaint them `--text-primary`, which the inline style used to win against
    by being inline. Same colour, same states, no attribute. */
-.ds-button-ghost.u-danger:hover { color: var(--accent-danger); }
+.ds-button-ghost.u-danger:hover { color: var(--app-danger-ink); }
 .ds-button-ghost.u-success:hover { color: var(--accent-success); }
 .ds-button-ghost.u-warning:hover { color: var(--accent-warning); }
 
@@ -4119,7 +4119,7 @@ pre.tf-pane-input {
 }
 
 .tf-outcome-refused {
-  color: var(--accent-danger);
+  color: var(--app-danger-ink);
 }
 
 .tf-refusals,
@@ -4169,7 +4169,7 @@ pre.tf-pane-input {
 
 .tf-case-fail > .tf-case-head .tf-mark,
 .tf-inv-fail > .tf-mark {
-  color: var(--accent-danger);
+  color: var(--app-danger-ink);
 }
 
 .tf-case-facts {

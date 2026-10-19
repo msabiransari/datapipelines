@@ -954,7 +954,7 @@
 }
 
 .pe-card-failed .pe-card-foot {
-  color: var(--accent-danger, #dc2626);
+  color: var(--app-danger-ink);
 }
 
 /* The run numbers never wrap: the footer is laid out for ONE line (`523 rows · 634 ms`,
@@ -1158,7 +1158,7 @@
 }
 
 .pe-port-failed .pe-port-line {
-  color: var(--accent-danger, #dc2626);
+  color: var(--app-danger-ink);
 }
 
 .pe-port-aborted {
@@ -1281,7 +1281,7 @@
 }
 
 .pe-card-cancel .pe-marker-word {
-  color: var(--accent-danger, #dc2626);
+  color: var(--app-danger-ink);
 }
 
 /* End's outcome fills. */
@@ -1316,7 +1316,7 @@
 }
 
 .pe-card-failed .pe-marker-word {
-  color: var(--accent-danger, #dc2626);
+  color: var(--app-danger-ink);
 }
 
 .pe-card-aborted .pe-marker-word {
@@ -1701,7 +1701,7 @@ html.dp-splitting-y * {
 
 .pe-dock-count-err {
   background: var(--accent-danger-bg);
-  color: var(--accent-danger, #dc2626);
+  color: var(--app-danger-ink);
 }
 
 .pe-dock-count-ok {
@@ -1948,7 +1948,7 @@ html.dp-splitting-y * {
   font-family: var(--font-mono, monospace);
   font-size: var(--text-xs, 0.75rem);
   word-break: break-all;
-  color: var(--accent-danger, #dc2626);
+  color: var(--app-danger-ink);
 }
 
 .pe-error-corr {
@@ -2232,7 +2232,7 @@ html.dp-splitting-y * {
 
 .pe-ev-pipeline_failed .pe-ev-n,
 .pe-ev-node_failed .pe-ev-n {
-  color: var(--accent-danger, #dc2626);
+  color: var(--app-danger-ink);
 }
 
 .pe-ev-d {
@@ -2284,7 +2284,7 @@ html.dp-splitting-y * {
   font-size: var(--app-text-heading);
   font-weight: var(--weight-semibold, 600);
   margin: 0;
-  color: var(--text-danger, #dc2626);
+  color: var(--app-danger-ink);
 }
 
 .pe-modal-header button {
