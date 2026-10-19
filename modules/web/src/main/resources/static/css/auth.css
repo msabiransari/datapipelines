@@ -138,7 +138,7 @@
 .app-login-toggle { min-height: var(--app-auth-control); align-self: stretch; display: flex; align-items: center; gap: var(--space-2); font-size: var(--app-text-badge); color: var(--text-secondary); padding-inline: var(--space-3); background: transparent; border: 0; border-radius: var(--radius-md); cursor: pointer; }
 .app-login-toggle[hidden] { display: none; }
 .app-login-toggle:hover { color: var(--text-primary); }
-.app-login-field-error { color: var(--text-danger); font-size: var(--app-text-badge); margin: var(--space-2) 0 0; }
+.app-login-field-error { color: var(--app-danger-ink); font-size: var(--app-text-badge); margin: var(--space-2) 0 0; }
 .app-login-access { margin: var(--space-6) 0 0; text-align: center; font-size: var(--app-text-support); color: var(--text-secondary); line-height: var(--leading-relaxed); }
 .app-login-self-hosted { border-top: var(--space-px) solid var(--app-line-decorative); margin-top: var(--space-8); padding-top: var(--space-5); display: flex; align-items: flex-start; gap: var(--space-2); font-size: var(--app-text-badge); line-height: var(--leading-relaxed); color: var(--text-muted); }
 .app-login-self-hosted .ds-icon { flex-shrink: 0; margin-top: var(--space-0-5); }
