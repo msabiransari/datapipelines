@@ -128,7 +128,7 @@
 }
 
 .te-context-rows .context-row .ds-button {
-  color: var(--accent-danger);
+  color: var(--app-danger-ink);
   /* #243 — the remove control is the row's only way out; it never yields width. */
   flex: none;
 }
@@ -219,6 +219,6 @@
 
 .te-preview-pane .te-render-error {
   margin: 0;
-  color: var(--accent-danger);
+  color: var(--app-danger-ink);
   font-size: var(--text-sm);
 }

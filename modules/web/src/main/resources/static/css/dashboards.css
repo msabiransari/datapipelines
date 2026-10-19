@@ -92,7 +92,7 @@ fieldset.dp-dashboard-parameter > .dp-dashboard-parameter-error {
    instead of overflowing it. */
 .dp-dashboard-parameter-error {
   font-size: var(--app-text-support);
-  color: var(--accent-danger);
+  color: var(--app-danger-ink);
   line-height: var(--leading-normal);
 }
 
@@ -795,7 +795,7 @@ fieldset.dp-dashboard-parameter > .dp-dashboard-parameter-error {
 .dp-dashboard-card--error .dp-dashboard-card-message,
 .dp-dashboard-card--abort .dp-dashboard-card-message,
 .dp-dashboard-card--has-issue .dp-dashboard-card-message {
-  color: var(--text-danger);
+  color: var(--app-danger-ink);
 }
 
 .dp-dashboard-card--busy .dp-dashboard-card-message {
