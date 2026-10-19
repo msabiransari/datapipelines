@@ -324,13 +324,23 @@
   /* #502 — the danger chip tint: the success/warning/info `--accent-*-bg` trio's missing
      sibling. The vendored design system ships no `--accent-danger-bg` and is never edited
      here, so the token is defined as a tint of `--accent-danger` on `--surface-default`,
-     the same shape as `--type-transform-bg` above. 4% is the strongest tint whose LIGHT
-     rendering still carries `--accent-danger` text at the 4.5:1 floor (a near-white tint,
-     4.54:1; at 6% it is 4.41:1). Dark renders a near-surface dark red at 3.60:1 — the
-     accent itself tops out at 3.67:1 on the dark `--surface-default`, so no N of this mix
-     reaches 4.5 there; the gap is reported on #502 rather than papered over with a
-     literal. */
+     the same shape as `--type-transform-bg` above. 4% stays: a near-white tint in light,
+     a near-surface dark red in dark. The chip's TEXT is no longer `--accent-danger` (3.52:1
+     on this tint in dark, the gap #502 reported) but `--app-danger-ink` below, which clears
+     4.5:1 on it on every vendored theme (#509). */
   --accent-danger-bg: color-mix(in srgb, var(--accent-danger) 4%, var(--surface-default));
+
+  /* #509 — the danger INK: the colour of danger TEXT, never a fill. `--accent-danger` is the
+     solid danger button's slab (under the vendored white `--accent-danger-text`, which this
+     is not) and reads 2.74–3.89:1 as text on the dark surfaces. The design system's own text
+     role, `--text-danger`, is a light red in dark (6.98:1 at worst, on `--surface-hover`). In
+     light it is the same red as the accent on every vendored theme, and three themes miss
+     the 4.5:1 floor with it (light 4.34 and saas 4.39 on the inset and hover surfaces; ocean
+     4.09 there and 4.42 on the chip tint), so the light half is that red at 3% lower oklch
+     lightness, hue and chroma kept (owner ruling on #509, 2026-10-19). `light-dark()`
+     follows each theme's own `color-scheme`, `auto` included. Measured on every theme by
+     DangerInkContrastBrowserTest; DangerInkSourceAuditTest keeps every text site on it. */
+  --app-danger-ink: light-dark(oklch(from var(--text-danger) calc(l - 0.03) c h), var(--text-danger));
 
   /* #502 — the focus RING's width, the length half of the design system's focus state:
      primitives.css builds its ring as a 2px box-shadow band around `--focus-ring`
