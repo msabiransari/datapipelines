@@ -923,6 +923,10 @@ button.app-busy::after {
   --app-main-pad: var(--space-8);
   /* <main>'s maximum OUTER width, its padding included (record §4); `app-canvas` opts out. */
   --app-frame-max: 1500px;
+  /* #614: the framed <main>'s centring offset in its track — 0 wherever the track is 1500 or
+     less, half the rest beyond it; a canvas page zeroes it, the anonymous shell's track is the
+     window. A fixed element that lines up with the content edge (the status pill) adds it. */
+  --app-frame-inset: max(0px, (100vw - var(--app-menu-width) - var(--app-browser-col) - var(--app-frame-max)) / 2);
   --app-browser-min: 240px;
   --app-browser-max: 480px;
   --app-drawer-max: 360px;
@@ -949,6 +953,14 @@ button.app-busy::after {
 :root.browser-hidden,
 :root:has(#app-browser[hidden]) {
   --app-browser-col: 0px;
+}
+
+:root:has(.app-main > .app-canvas) {
+  --app-frame-inset: 0px;
+}
+
+:root:has(.app-shell-anon) {
+  --app-frame-inset: max(0px, (100vw - var(--app-frame-max)) / 2);
 }
 
 @media (min-width: 1600px) {
@@ -3534,11 +3546,12 @@ button.app-busy::after {
 /* The status pill. Fixed under the top bar on the CONTENT side — #554: past the menu AND
    the browser, both read off the :root geometry (the browser's column is 0px when it is
    hidden), so collapse, Hide and a non-family page all move it with no rule of their own;
-   and `hidden` when off — see the layout. */
+   #614: plus the frame's centring offset, so it starts at the content's edge on a framed
+   page wider than 1500 and at the track's on a canvas; and `hidden` when off — see the layout. */
 .app-status-pill {
   position: fixed;
   top: calc(var(--app-header-h) + var(--gap-md));
-  left: calc(var(--app-menu-width) + var(--app-browser-col) + var(--app-main-pad));
+  left: calc(var(--app-menu-width) + var(--app-browser-col) + var(--app-frame-inset) + var(--app-main-pad));
   z-index: var(--z-fixed);
   display: flex;
   align-items: center;
@@ -3557,9 +3570,9 @@ button.app-busy::after {
 
 /* The anonymous shell (the public docs, the error pages) has no menu at all, and its
    `#app-main` still boosts — so without this the pill would appear 202px from the left of
-   a page with nothing there. */
+   a page with nothing there. Its frame centres in the whole window (the inset above). */
 :root:has(.app-shell-anon) .app-status-pill {
-  left: var(--app-main-pad);
+  left: calc(var(--app-frame-inset) + var(--app-main-pad));
 }
 
 .app-status-pill-spinner {
