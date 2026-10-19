@@ -366,15 +366,17 @@ class ExplorerPaneGeometryBrowserTest : SchedulesBrowserSuite() {
         val root = ready("geof")
         seedPane(root)
 
+        // #584: the rail's Schedules item lands on the Schedules home, which has no explorer;
+        // the boosted swap INTO the explorer is the home's View all.
         page.setViewportSize(1440, 900)
-        page.navigate("$baseUrl/dashboard")
+        page.navigate("$baseUrl/overview/schedules")
         page.evaluate(
             "() => { window.localStorage.setItem('dp-rail', '0'); }",
         )
         page.waitForLoadState(LoadState.NETWORKIDLE)
-        val link = "a[data-nav-section='/schedules']"
+        val link = "a[data-overview-view-all][href='/schedules']"
         waitBoosted(link)
-        val label = "boosted first frame /schedules rail-collapsed=false"
+        val label = "boosted first frame /schedules (the home's View all) rail-collapsed=false"
         page.evaluate(armHeadCheck, label)
         page.click(link)
         page.waitForSelector(".tplx-tree")

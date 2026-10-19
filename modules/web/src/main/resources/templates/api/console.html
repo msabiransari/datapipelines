@@ -150,27 +150,16 @@
     <div class="app-grid-stack">
 
       <!-- ------------------------------------------------------------- mcp server -->
-      <div class="ds-card">
-        <div class="app-card-h app-card-h-flush">
-          <h2 class="ds-title">MCP server</h2>
-          <span class="app-chip app-chip-ok"><i class="ds-status"></i><span th:text="${mcpToolCount} + ' tools'">28 tools</span></span>
-        </div>
-        <div class="app-card-b app-card-b-flush">
-          <!-- The tool count is McpToolCatalog.NAMES.size at request time, never a literal —
-               the same expression the marketing site renders, for the same reason: a number
-               that can drift from `tools/list` is worse than no number. -->
-          <pre class="app-code" th:text="${mcpConfigJson}">{}</pre>
-          <div class="app-note">
-            <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#info"></use></svg>
-            <!-- 179 (D16): the key this card's config wants is the one in the TOP BAR —
-                 minted at sign-in, copied from the chip. The other kinds are confined by the
-                 transport: an endpoint key reaches only the paths it is bound to, a server
-                 key only this deployment's promotion routes. -->
-            <span>Your <b>user</b> key reaches <span class="ds-mono">/mcp</span> — it is in the top bar, minted
-              when you signed in. An API key is confined to the endpoints it is associated with, and a
-              server key to this deployment's promotion routes.</span>
-          </div>
-        </div>
+      <!-- #585: the card is the shared partials/mcp-connection fragment (the API home renders
+           the same one); this page passes its own note. -->
+      <div th:replace="~{partials/mcp-connection :: card(~{api/console :: consoleMcpNote})}">
+        <!-- 179 (D16): the key this card's config wants is the one in the TOP BAR —
+             minted at sign-in, copied from the chip. The other kinds are confined by the
+             transport: an endpoint key reaches only the paths it is bound to, a server
+             key only this deployment's promotion routes. -->
+        <span th:ref="consoleMcpNote">Your <b>user</b> key reaches <span class="ds-mono">/mcp</span> — it is in the top bar, minted
+          when you signed in. An API key is confined to the endpoints it is associated with, and a
+          server key to this deployment's promotion routes.</span>
       </div>
 
     </div>
