@@ -1,9 +1,9 @@
 # UI Screens Inventory
 
-**Status:** v1.176
+**Status:** v1.177
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
-**Last updated:** 2026-10-19 (#619; #585; #584; #613; #509; #608; #614 + #611; #612; #615); 2026-10-18 (#583; #573; #607; #606; #565; #582; #581; #580; #579); 2026-10-17 (#556; #578; #554); 2026-10-16 (#551 merge follow-up; #551; #555; #552; #553; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
+**Last updated:** 2026-10-19 (#598a; #619; #585; #584; #613; #509; #608; #614 + #611; #612; #615); 2026-10-18 (#583; #573; #607; #606; #565; #582; #581; #580; #579); 2026-10-17 (#556; #578; #554); 2026-10-16 (#551 merge follow-up; #551; #555; #552; #553; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
 ---
 
 ## 1. Purpose
@@ -2586,7 +2586,8 @@ Datasources item links `/overview/datasources` since #583.
 the counts are the admitted inventory) and **View all** (the catalog). Then the **Inventory** card
 ("Admitted inventory" through a lens): four counts — Objects, With drafts, With releases, Discarded
 only, each with a one-line help — and four bars: Draft only, Released only, Released with draft
-changes, Discarded only. For a guided family (all six as built — Pipelines and Templates since #579, Dashboards #580, Visualizations #581, Parameter Sets #582, Datasources #583; `overview/guide-<family>.html`), **What
+changes, Discarded only. The Pipelines card carries neither since #598a: its total line and two stacked
+charts replace them (**The Pipelines charts**, below). For a guided family (all six as built — Pipelines and Templates since #579, Dashboards #580, Visualizations #581, Parameter Sets #582, Datasources #583; `overview/guide-<family>.html`), **What
 pipelines are for**, **Create with your agent**, and side by side **Continue your work** and **Related
 resources and help** follow. An unguided overview shows the inventory card and nothing else — no
 placeholder prose, no script.
@@ -2600,13 +2601,32 @@ its totals. A bar's width is its value relative to the tallest, 0–100, written
 `width` attribute (the CSP admits no style); a zero is a zero-width bar beside its "0", never a
 visible minimum. A visually hidden table repeats the four rows for assistive technology.
 
+**The Pipelines charts (#598a).** The same snapshot, extended by each admitted pipeline's count of
+RELEASED versions, feeds the Pipelines card from ONE statement (`ChartInventorySource`, built on
+`InventorySource`'s own `admitted` CTE and its four lifecycle columns): a total line ("12 pipelines"),
+then **Pipelines by lifecycle** — one stacked bar whose four parts sum to the total, in the owner's
+words: In development (draft only), Live (released only), Live, changes in progress (released with
+draft changes) and Retired (discarded only) — and **Pipelines by number of releases** — five rows (0,
+1, 2–3, 4–9, 10+ releases), each split into No draft and Draft open, the longest row full width. A
+release since discarded is not counted (only RELEASED rows are), so a retired pipeline has 0. Every
+pipeline sits in exactly one bin, so both charts total the same; `ChartInventory` refuses a value whose
+bins disagree with the lifecycle total, and the card then reads unavailable. A part is a `rect`
+positioned by its `x` and `width` attributes, tiled in tenths so the parts meet exactly and end at the
+row's width, with a `<title>`; each row's SVG is labelled with every part's count; a legend names every
+series (the lifecycle legend with its count); each chart has its own visually hidden table (a row
+heading, one column per part, the total). The chart's words are its own: the catalog filter keeps
+`CatalogLifecycle.label`'s. Activity over time is #598b; the other families' cards are unchanged.
+
 **Links.** For Pipelines, With drafts, With releases and the Draft only, Released only and Released
 with draft changes bars link the catalog filtered to that bucket (`/pipelines?lifecycle=…`, §4.3);
 Objects links nothing (View all is the unfiltered catalog) and Discarded only stays unlinked, since a
 discarded-only pipeline has no workspace page. An unguided family links no count or bar until its
 catalog offers the filter; Templates offers it since #579 and links like Pipelines. The Datasources
 overview links differently, as its model allows: each By-dialect bar links `/datasources?dialect=`
-(the catalog's existing filter) and the health bars stay unlinked (§4.5d).
+(the catalog's existing filter) and the health bars stay unlinked (§4.5d). Since #598a the Pipelines
+card's In development, Live and Live, changes in progress parts and legend entries link
+`/pipelines?lifecycle=draft`, `released` and `released-with-draft`; Retired stays unlinked and the
+releases chart links nothing.
 
 **Create with your agent (Pipelines).** Three steps and a starter prompt in an editable textarea, the
 workspace name the menu shows substituted server-side and the bracketed parts left for the reader. The
@@ -2625,7 +2645,9 @@ drafts.
 
 **Through a promoter's lens** every surface reads the same admitted set: the admitted names' RELEASED
 versions only. The counts and bars, the recent list (ordered by release time alone, so a hidden draft's
-write moves nothing) and the filtered catalog all omit a hidden draft (`PromoterLensSweepTest`). The
+write moves nothing) and the filtered catalog all omit a hidden draft (`PromoterLensSweepTest`); the
+Pipelines charts count the admitted names' RELEASED versions alone, so a hidden draft moves no part and
+no releases bin (the sweep reads every part and cell). The
 narrowed inventory admits an object with ANY released version, while the lensed catalogs keep their
 current-pointer rule; the two can differ for an object whose current pointer is not a released version
 (#563). Neither rule changes here.
@@ -2637,18 +2659,21 @@ line and, in an empty workspace, a note pointing at the starter prompt. A real z
 **Storage:** none — no browser key, cookie or server preference.
 
 Guards: `OverviewRenderTest` (one inventory feeds counts, bars and table; widths; unavailable without a
-digit; links; escaping; unguided families bare), `ShellRenderTest` (the family paths and the Datasources overview light their item,
+digit; links; escaping; unguided families bare; the Pipelines card's two stacked charts, legend = table =
+model), `ChartInventorySourceTest` and `ChartInventorySourceIntegrationTest` (the statement's text and
+binds; counts against a Kotlin oracle, unlensed and narrowed), `OverviewStackedTest` (random rows tile
+exactly), `ShellRenderTest` (the family paths and the Datasources overview light their item,
 crumb and panel), `FamilyRecentE2eTest`, `OverviewE2eTest` (each catalog lifecycle count equals the
 inventory's, unlensed and narrowed), `PromoterLensSweepTest`, `overview.test.mjs` and
 `OverviewBrowserTest` (copy resolves and refuses with zero requests; the menu lands on the overview with
-its tree; a workspace switch).
+its tree and its charts; a workspace switch).
 
 **Families as built.** Each family's row lands with the lane that builds its home page; a family without a row is
 served (inventory only) and its menu item still links the catalog.
 
 | Family | Menu item links the overview since | Guide | Recently updated | Catalog `lifecycle` filter |
 |---|---|---|---|---|
-| Pipelines | #556 | `overview/guide-pipelines.html` | `PipelineRepository.recent` | `/pipelines?lifecycle=` — every bucket but `discarded` (§4.3) |
+| Pipelines | #556 | `overview/guide-pipelines.html` | `PipelineRepository.recent` | `/pipelines?lifecycle=` — every bucket but `discarded` (§4.3); since #598a the card is the lifecycle stacked bar and the releases chart (`PipelineRepository.charts`, one statement), the activity chart is #598b |
 | Templates | #579 | `overview/guide-templates.html` — related: Pipelines, MCP server reference | `TemplateRepository.recent`, the same `RecentSource` rule; each entry links `/templates/<name>`, every segment URL-encoded (the tree's form) | `/templates?lifecycle=` — every bucket but `discarded` (§4.6); a bucket read places an object by its latest version (`TemplateRepository.listWhere`); `OverviewTemplatesE2eTest` pins each count equal to the inventory's, unlensed and through a narrowed lens |
 | Dashboards | #580 | `overview/guide-dashboards.html` — related: Pipelines, Visualizations, Parameter Sets, MCP server reference | `DashboardRepository.recent`, the same `RecentSource` rule | `/dashboards?lifecycle=` — every bucket but `discarded` (§4.21); `OverviewDashboardsE2eTest` pins each count equal to the inventory's, unlensed and through the promoter's real lens; `OverviewDashboardsRenderTest`, `OverviewDashboardsBrowserTest` |
 | Visualizations | #581 | `overview/guide-visualizations.html` — related: Pipelines, Dashboards, MCP server reference | `VisualizationRepository.recent`, the same `RecentSource` rule; through a narrowed lens, admitted RELEASED versions and their release time alone | `/visualizations?lifecycle=` — every bucket but `discarded` (§4.24); `OverviewVisualizationsE2eTest` pins each count equal to the inventory's, unlensed and through a narrowed lens |
@@ -2822,6 +2847,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-19 | v1.177 | #598a the Pipelines charts | **§4.25:** the Pipelines card's four counts and four bars give way to a total line and two stacked charts from ONE statement — Pipelines by lifecycle (In development, Live, Live, changes in progress, Retired; the three live parts link the filtered catalog) and Pipelines by number of releases (0, 1, 2–3, 4–9, 10+, each split No draft / Draft open; only RELEASED rows count); both total the same, each with its hidden table; the promoter's lens; the guards; the Pipelines row of **Families as built**. The other families' cards are unchanged. |
 | 2026-10-19 | v1.176 | #619 login companion design — renumbered at merge after #509's v1.172, then after #585's v1.175 | **§4.1:** the record §13 two-column login, 360px form, bundled Noto Sans, dark/light and form-first phone layout; the DAG ceremony retired; `auth.css` new; `login.js` progressively enhances password visibility and inline validation; `eye`/`eye-off` vendored (46 glyphs). Authentication, CSRF and redirects preserved. |
 | 2026-10-19 | v1.175 | #585 the API home — renumbered at merge after #509's v1.172, then after #584's v1.174 | **§4.18a (new):** `GET /overview/api-console` — Endpoints, Serving a release, Serving a draft and Your keys / Workspace keys tiles; Endpoints by state and Keys by kind (live only) charts; Recently published and Recently created keys; How a program gets access; a publish starter prompt that stops at publishing; the shared MCP card. Each of the two reads fails on its own. **§4.18:** the console is the home's View all; its MCP card is one shared fragment. **§4.25:** the API row of the **Families as built** table. |
 | 2026-10-19 | v1.174 | #584 the Schedules home — renumbered at merge after #509's v1.172, then after #613's v1.173 | **§4.20a (new):** `GET /overview/schedules` on the §4.25 frame — four tiles (Schedules, Enabled, Paused, Blocked), By condition and Last run (five buckets, each schedule once by its newest run), Up next and Recently changed linking the explorer's leaf, a person's How to create one with no agent section; every number from one `ScheduleService.summary` over §20.1's own list through the reader's lens, an over-cap workspace unavailable rather than short. **§4.20:** the menu's Schedules item lands on the home; the explorer is its View all. **§4.25 Families as built:** the Schedules row. |
