@@ -136,7 +136,60 @@ class MenuScaleBrowserTest : RestTreeBrowserFixture() {
         }
     }
 
+    @Test
+    fun `selected label and icon meet contrast floors across every bundled theme`() {
+        readyTree()
+        page.navigate("$baseUrl/pipelines")
+        page.waitForSelector(".app-nav-link[aria-current='page']")
+        val results =
+            page.evaluate(
+                """async () => {
+                  const themes = ['auto','dark','forest','healthcare','light','minimal','ocean','professional','saas'];
+                  const row = document.querySelector('.app-nav-link[aria-current="page"]');
+                  const link = document.getElementById('theme-link');
+                  const luminance = colour => {
+                    const c = colour.match(/[\d.]+/g).slice(0,3).map(Number).map(v => v/255)
+                      .map(v => v <= 0.03928 ? v/12.92 : Math.pow((v+0.055)/1.055,2.4));
+                    return c[0]*0.2126 + c[1]*0.7152 + c[2]*0.0722;
+                  };
+                  const contrast = (a,b) => (Math.max(luminance(a),luminance(b))+0.05) /
+                    (Math.min(luminance(a),luminance(b))+0.05);
+                  const results = [];
+                  for (const theme of themes) {
+                    await new Promise((resolve,reject) => {
+                      link.onload = resolve; link.onerror = reject;
+                      link.href = '/vendor/design-system/themes/' + theme + '.css';
+                    });
+                    document.documentElement.dataset.theme = theme;
+                    // A transition's interpolated colour is not the theme's final ink.
+                    await Promise.all(row.getAnimations().map(animation => animation.finished));
+                    const cs = getComputedStyle(row), icon = getComputedStyle(row.querySelector('svg'));
+                    results.push({theme, label: contrast(cs.color, cs.backgroundColor),
+                      icon: contrast(icon.color, cs.backgroundColor)});
+                  }
+                  link.onload = null; link.onerror = null;
+                  return results;
+                }""",
+            ) as List<*>
+        results.size shouldBe THEME_COUNT
+        assertSoftly {
+            results.forEach { item ->
+                val result = item as Map<*, *>
+                println("605-contrast|$result")
+                withClue("${result["theme"]} selected label") {
+                    (result["label"] as Number).toDouble() shouldBeGreaterThanOrEqual TEXT_CONTRAST
+                }
+                withClue("${result["theme"]} selected icon") {
+                    (result["icon"] as Number).toDouble() shouldBeGreaterThanOrEqual ICON_CONTRAST
+                }
+            }
+        }
+    }
+
     private companion object {
+        const val THEME_COUNT = 9
+        const val TEXT_CONTRAST = 4.5
+        const val ICON_CONTRAST = 3.0
         const val DESKTOP_W = 1512
         const val DESKTOP_H = 982
         const val PHONE_W = 390

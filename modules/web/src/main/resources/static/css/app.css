@@ -1304,19 +1304,26 @@ button.app-busy::after {
 /* The active item. ui-screens.md §2.8 is normative here: `surface-selected` is
    the token the design system's contrast audit sizes FOR a selected row, and it
    reaches only 1.5:1 — "a tint alone cannot reach 3:1 without turning grey" —
-   so selection also carries a 3px `border-focus` bar. The mock paints the tint
-   and the brand text only; the bar is the accessible half of the same signal
-   and is the one deliberate addition to it. */
+   so selection also carries a 3px `border-focus` bar. The record uses primary
+   text for the label and the accent for its icon; the bar is the accessible
+   half of the selection signal. */
 .app-nav-link.active,
 .app-nav-link[aria-current="page"] {
   background: var(--brand-soft);
-  color: var(--brand);
+  color: var(--text-primary);
   border-left-color: var(--border-focus);
 }
 
 .app-nav-link.active svg,
 .app-nav-link[aria-current="page"] svg {
-  color: var(--brand);
+  color: var(--text-link);
+}
+
+/* Minimal's selected surface and both normal inks are black (1:1). Preserve
+   its monochrome palette and tint with the inverted ink (21:1) instead. */
+:root[data-theme="minimal"] :is(.app-nav-link.active, .app-nav-link[aria-current="page"]),
+:root[data-theme="minimal"] :is(.app-nav-link.active, .app-nav-link[aria-current="page"]) svg {
+  color: var(--text-inverted);
 }
 
 @media (min-width: 761px) {
