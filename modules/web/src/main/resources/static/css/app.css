@@ -115,12 +115,14 @@
   --app-text-badge: 0.6875rem;         /* 11px — status badges, a table's header */
   --app-text-meta: 0.625rem;           /* 10px — short metadata and group captions ONLY */
   --app-tracking-caption: 0.12em;      /* 1.2px at 10 — an uppercase caption's tracking */
+  --app-weight-emphasis: 650;         /* Record §5: navigation captions and brand wordmark */
   --app-text-entry-phone: 1rem;        /* 16px — text entry below the phone breakpoint (no zoom-on-focus) */
 
   /* Record §6 Decorative line / prototype --line: nonessential edges only. */
   --app-line-decorative: color-mix(in srgb, var(--border-subtle) 40%, var(--surface-default));
 
   /* Control and shape roles. */
+  --app-nav-indicator-w: 3px;         /* §2.8: selected navigation tint also needs this focus-coloured bar */
   --app-control-h: var(--space-9);     /* 36px — a button, input or select, minimum */
   --app-tab-h: 2.75rem;                /* 44px — a tab: 12px padding + 18px line + 2px rule */
   --app-tab-gap: var(--space-6);       /* 24px between tabs; a tab has no inline padding, so its underline is its label's width */
@@ -1245,7 +1247,7 @@ button.app-busy::after {
      here any more, so nothing in the menu can grow). */
   overflow-y: auto;
   overflow-x: hidden;
-  padding: var(--gap-xs) var(--gap-sm);
+  padding: var(--gap-xs) var(--space-3);
   display: grid;
   gap: var(--space-0-5);
   align-content: start;
@@ -1264,30 +1266,37 @@ button.app-busy::after {
 }
 
 .app-nav-section {
-  font-size: var(--text-xs);
-  letter-spacing: var(--tracking-wide);
+  font-size: var(--app-text-meta);
+  letter-spacing: var(--app-tracking-caption);
   text-transform: uppercase;
   color: var(--text-muted);
-  font-weight: var(--weight-semibold);
-  padding: var(--gap-sm) var(--gap-sm) var(--space-1);
+  font-weight: var(--app-weight-emphasis);
+  padding: var(--gap-sm) var(--space-3) var(--space-1);
   white-space: nowrap;
+}
+
+/* Low specificity keeps the compact caption's screen-reader-only padding at zero. */
+:where(.app-nav-group:not(:first-child)) .app-nav-section {
+  padding-top: var(--space-6);
 }
 
 .app-nav-link {
   display: flex;
   align-items: center;
-  gap: var(--gap-sm);
-  padding: var(--space-1-5) var(--gap-sm);
-  border-radius: var(--radius-base);
+  gap: var(--space-3);
+  min-height: var(--app-control-h);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
   color: var(--text-secondary);
   text-decoration: none;
-  font-weight: var(--weight-medium);
-  font-size: var(--text-sm);
+  font-weight: var(--weight-normal);
+  font-size: var(--app-text-ui);
+  line-height: var(--app-leading-ui);
   white-space: nowrap;
   overflow: hidden;
   /* The selected item's 3px accent bar (below) is drawn as a border so the row
      never shifts when it becomes active. */
-  border-left: var(--focus-ring-offset, 3px) solid transparent;
+  border-left: var(--app-nav-indicator-w) solid transparent;
 }
 
 .app-nav-link svg {
