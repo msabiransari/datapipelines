@@ -1,9 +1,9 @@
 # Deployment & Packaging Specification
 
-**Status:** v1.44
+**Status:** v1.45
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
-**Last updated:** 2026-10-16
+**Last updated:** 2026-10-19
 
 ---
 
@@ -338,19 +338,21 @@ manifest in the same commit).
 the colorbar's fill reset wrote `.attr('style', '')`, an inline-style attribute the enforced CSP refuses, and now removes
 the attribute — #525). The second patch, `patches/0002-heatmap-pixelated-hint-via-cssom.patch`, sets the default heatmap
 image’s `image-rendering` fallbacks through the CSSOM in their original order, ending in `pixelated` (#531).
+The build is path-independent since `patches/0003-inline-css-id-independent-of-clone-directory.patch`
+(#571): the inline-CSS plugin hashed the clone's absolute path (#530); the in-tree plugin hashes the
+root-relative CSS path under the historical directory as a constant salt, keeping the committed bytes unchanged.
+The salt is historical; the next Plotly upgrade may keep or drop it, since the pins move then anyway.
 To rebuild any bundle — a trace added, a security fix adopted — run exactly this and commit the
-OUTPUTS with their new hashes. The clone directory is part of the recipe: **the minified output depends on the clone's
-absolute path** (#530) — three directories gave three different hashes — so build in exactly
-`/tmp/dp-plotly-4.1.1/plotly.js`; with that path, the #531 rebuild uses Node 24.21.0 + npm 11.19.0 + `npm ci`
+OUTPUTS with their new hashes. The #531 rebuild used Node 24.21.0 + npm 11.19.0 + `npm ci`
 (the earlier #525 build also matched Node 22.23.3 + `npm ci` and Node 24.21.0 + `npm i`).
 
 ```sh
-mkdir -p /tmp/dp-plotly-4.1.1 && cd /tmp/dp-plotly-4.1.1
+cd "$(mktemp -d)"
 git clone --depth 1 --branch v4.1.1 https://github.com/plotly/plotly.js.git plotly.js
 cd plotly.js
-# the numbered vendor patches, applied in order; a new patch is a new file in this directory
+# the numbered vendor patches 0001–0003, applied in order; a new patch is a new file here
 git apply <repo>/modules/web/src/main/resources/static/vendor/plotly/patches/*.patch
-npm ci
+npm ci --no-audit --no-fund
 # the 2D bundle (the default): scatter, bar, pie, histogram, box, heatmap
 npm run custom-bundle -- --traces scatter,bar,pie,histogram,box,heatmap --strict --out 2d
 # the 3D bundle (dashboards with a 3D trace): the six above + scatter3d, surface, mesh3d
@@ -360,7 +362,10 @@ cp dist/plotly-2d.min.js dist/plotly-3d.min.js  <repo>/modules/web/src/main/reso
 
 A patch is `git format-patch -1` against the tagged source with preceding patches applied, so `git apply` takes the
 numbered series on a pristine clone; never hand-edit the
-minified text. Build twice and `cmp` the outputs before copying them in (the build is deterministic at a fixed path).
+minified text. Run `scripts/verify-plotly-bundles.sh` (exit 0) before copying a rebuild in; the lander runs it
+on any diff under `static/vendor/plotly/` or to the manifest's plotly entry. The verifier rebuilds in a fresh
+temporary directory and compares both bundles: exit 0 means a match, 1 a byte mismatch, 2 a failed rebuild.
+It is not part of the gate, pregate or CI. Remove the manual recipe's temporary clone after use.
 
 `plotly.css` is the npm package's own `dist/plotly.css` — the release build's strict-CSP sheet, the
 same rules the bundle would inject at runtime. It is part of the CSP DESIGN-AROUND ([Dashboards
@@ -1187,6 +1192,7 @@ operator.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-19 | v1.45 | #571 path-independent Plotly rebuilds | **§6.2A:** patch 0003 salts root-relative inline-CSS paths with the historical build directory, preserving every committed byte from any clone directory. The recipe uses a temporary directory; `scripts/verify-plotly-bundles.sh` rebuilds and compares both bundles for the lander on Plotly vendor or manifest-entry diffs, with distinct match, mismatch and rebuild-failure exits. |
 | 2026-10-16 | v1.44 | #538 audit manifest sizes | **§6.2A:** the vendored Plotly audit now compares all three raw byte lengths and both gzip counts with the manifest, and pins zlib deflate level 9 with gzip framing and mtime 0 in each bundle's size string. Size-only and method-only drift fail the build. |
 | 2026-10-15 | v1.43 | #531 the default heatmap keeps crisp cells under the CSP | **§6.2A:** a second numbered Plotly source patch sets the heatmap’s `image-rendering` fallbacks through the CSSOM instead of a style attribute; both custom bundles are rebuilt at the fixed path and their hashes and sizes move together in the manifest. The unminified comparison contains only the heatmap import and write changes; minified identifier allocation also changes. |
 | 2026-10-14 | v1.42 | #525 the Plotly recipe carries a vendor patch and a fixed build directory | **§6.2:** the Plotly rebuild gains `git apply` of `static/vendor/plotly/patches/*.patch` (the colorbar fill reset removes its `style` attribute instead of writing an empty one — two source lines, +4 bytes per bundle) and `npm ci`; the clone directory is fixed at `/tmp/dp-plotly-4.1.1/plotly.js` because the minified output depends on the clone's absolute path (#530; the 2026-09-30 build did not record its directory and is not reproducible, so both bundles were rebuilt, not patched in place). Sizes and hashes are in the vendor manifest; `VendoredPlotlyAuditTest` pins the bytes. #525 merge follow-up (2026-10-15): §6.2 names the marker each host pre-places as the empty `template` (#456) that the runtime's fallback also creates (#526), not a `style` element; the manifest's plotly `note` says the same. |

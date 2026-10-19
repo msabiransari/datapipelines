@@ -1,0 +1,71 @@
+From e9aa30e53f88dda6496d582e5d3bf3f1851605c2 Mon Sep 17 00:00:00 2001
+From: Muhammad Sabir <msabiransari@gmail.com>
+Date: Sun, 18 Oct 2026 21:43:42 -0400
+Subject: [PATCH] build: make inline CSS ids independent of the clone directory
+
+Hash the root-relative CSS path under the historical build directory as a constant salt. Preserve the existing emitted text and ids so both datapipelines bundles retain every byte.
+---
+ esbuild-config.js          |  2 +-
+ tasks/inline_css_plugin.js | 38 ++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 39 insertions(+), 1 deletion(-)
+ create mode 100644 tasks/inline_css_plugin.js
+
+diff --git a/esbuild-config.js b/esbuild-config.js
+index 64a4897..71127c0 100644
+--- a/esbuild-config.js
++++ b/esbuild-config.js
+@@ -1,6 +1,6 @@
+ const { environmentPlugin } = require('esbuild-plugin-environment');
+ const { glsl } = require('esbuild-plugin-glsl');
+-const InlineCSSPlugin = require('esbuild-plugin-inline-css');
++const InlineCSSPlugin = require('./tasks/inline_css_plugin.js');
+ const path = require('path');
+ const constants = require('./tasks/util/constants.js');
+ 
+diff --git a/tasks/inline_css_plugin.js b/tasks/inline_css_plugin.js
+new file mode 100644
+index 0000000..9d58961
+--- /dev/null
++++ b/tasks/inline_css_plugin.js
+@@ -0,0 +1,38 @@
++const crypto = require('crypto');
++const fs = require('fs');
++const path = require('path');
++const constants = require('./util/constants.js');
++
++/**
++ * esbuild plugin that inlines a CSS file as a module injecting a <style> element,
++ * byte-for-byte the output of esbuild-plugin-inline-css@0.0.1 except for the element id:
++ * that plugin hashes the file's ABSOLUTE path, so the bundle's bytes depend on where the
++ * clone lives. Hash the root-relative path under the historical build directory instead.
++ * That directory is a constant salt preserving the committed bundles' bytes; it is never
++ * read or written. The root-relative input makes the actual clone location irrelevant.
++ */
++function inlineCSSPlugin() {
++    return {
++        name: 'inline-css-historical-salt-id',
++        setup(build) {
++            build.onLoad({ filter: /\.(css)$/ }, async (args) => {
++                const saltedPath = '/tmp/dp-plotly-4.1.1/plotly.js/' + path.relative(constants.pathToRoot, args.path).split(path.sep).join('/');
++                const styleID = crypto.createHash('sha256').update(saltedPath).digest('hex');
++                const sourceCSS = await fs.promises.readFile(args.path, 'utf-8');
++                return {
++                    contents: `(function(){
++        if (!document.getElementById('${styleID}')) {
++            var e = document.createElement('style');
++            e.id = '${styleID}';
++            e.textContent = \`${sourceCSS}\`;
++            document.head.appendChild(e);
++        }
++    })();`,
++                    loader: 'js'
++                };
++            });
++        }
++    };
++}
++
++module.exports = inlineCSSPlugin;
+-- 
+2.53.0
+
