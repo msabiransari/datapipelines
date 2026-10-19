@@ -132,15 +132,12 @@ class AuthLayoutRenderTest {
 
         html shouldContain "/vendor/design-system/themes/saas.css"
         html shouldContain "/css/app.css"
+        html shouldContain "/css/auth.css"
         html.contains("data-theme=\"saas\"") shouldBe true
     }
 
     @Test
-    fun `the sign-in ceremony is the product's own canvas - a token-styled DAG stage beside the panel, provider first`() {
-        // 2026-09-08 redesign: the editor's dot-grid ground and a four-engine DAG as an inline
-        // SVG (no canvas, no script, no inline style — every colour is a class the stylesheet
-        // resolves through tokens), the panel beside it, the identity provider as the primary
-        // action with the local form under an "or with email" divider.
+    fun `the sign-in page is the record section 13 companion design`() {
         val html =
             engine.process(
                 "login",
@@ -151,29 +148,37 @@ class AuthLayoutRenderTest {
             )
 
         assertAll(
-            { html shouldContain "class=\"app-auth-split\"" },
-            { html shouldContain "app-auth-stage" },
-            { html shouldContain "app-auth-story" },
-            { html shouldContain "class=\"app-auth-dag\"" },
-            { html shouldContain "Parquet on S3" },
-            // The story ends where the data goes: an API a customer calls and a dashboard a team reads.
-            { html shouldContain "/api/finance/v1/revenue" },
-            { html shouldContain "app-auth-screen-api" },
-            { html shouldContain "Revenue by customer" },
-            { html shouldContain "app-auth-screen-dash" },
-            // The first act: the person who asks and the agent that builds, outside the box.
-            { html shouldContain "app-auth-person" },
-            { html shouldContain "app-auth-agent" },
-            { html shouldContain "datapipelines · workspace" },
+            { html shouldContain "app-login-story" },
+            { html shouldContain "app-login-form" },
+            { html shouldContain "Built with your agent" },
+            { html shouldContain "Monthly revenue by customer" },
+            { html shouldContain "lucide-sprite.svg#database" },
+            { html shouldContain "lucide-sprite.svg#code" },
+            { html shouldContain "lucide-sprite.svg#chart-line" },
             { html shouldContain "Continue with Google" },
             { html shouldContain "or with email" },
+            { html shouldContain "id=\"login-password-toggle\"" },
+            { html shouldContain "/js/login.js" },
             { html shouldNotContain "style=\"" },
             { html shouldNotContain "<canvas" },
-            // The layout loads htmx and toast.js by src; the ceremony adds no inline script.
             { html shouldNotContain "<script>" },
-            // Provider first, then the email form — the order the panel reads in.
+            { html shouldNotContain listOf("app-auth", "dag").joinToString("-") },
             { html.indexOf("Continue with Google") shouldBeLessThan html.indexOf("login-email") },
         )
+        val oidcOnly =
+            engine.process(
+                "login",
+                webContext().apply {
+                    fillLogin()
+                    setVariable("localEnabled", false)
+                    setVariable("providers", listOf(mapOf("registrationId" to "google", "displayName" to "Google")))
+                },
+            )
+        oidcOnly shouldContain "Continue with Google"
+        oidcOnly shouldNotContain "/js/login.js"
+        oidcOnly shouldNotContain "id=\"login-password-toggle\""
+        oidcOnly shouldNotContain "id=\"login-email\""
+        oidcOnly shouldNotContain "or with email"
     }
 
     private fun WebContext.fillLogin(authenticated: Boolean = false) {

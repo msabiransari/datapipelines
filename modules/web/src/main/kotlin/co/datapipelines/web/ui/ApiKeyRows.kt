@@ -58,14 +58,7 @@ class ApiKeyRows(
 
         /** The UI name (keys v2 A19): `mcp` reads "MCP key", `endpoint` reads "API key", `dashboard` (L5) "Dashboard key". */
         val kindLabel: String
-            get() =
-                when (kind) {
-                    ApiKeyKind.MCP.wire -> "MCP key"
-                    ApiKeyKind.ENDPOINT.wire -> "API key"
-                    ApiKeyKind.SERVER.wire -> "Server key"
-                    ApiKeyKind.DASHBOARD.wire -> "Dashboard key"
-                    else -> kind
-                }
+            get() = ApiKeyKind.fromWireOrNull(kind)?.let { kindLabel(it) } ?: kind
     }
 
     /**
@@ -114,7 +107,7 @@ class ApiKeyRows(
             isRevoked = key.isRevoked,
             // An expired key is dead exactly as a revoked one is (§7.3 step 5), and the table
             // says so rather than showing a live-looking row with a past date in it.
-            isExpired = key.expiresAt?.isBefore(now) ?: false,
+            isExpired = isExpired(key, now),
             copyable = key.hasSealedSecret,
         )
 
@@ -127,6 +120,24 @@ class ApiKeyRows(
         }
 
     companion object {
+        /** A kind's UI name (keys v2 A19) — the table's and the API home's one wording (#585). */
+        fun kindLabel(kind: ApiKeyKind): String =
+            when (kind) {
+                ApiKeyKind.MCP -> "MCP key"
+                ApiKeyKind.ENDPOINT -> "API key"
+                ApiKeyKind.SERVER -> "Server key"
+                ApiKeyKind.DASHBOARD -> "Dashboard key"
+            }
+
+        /**
+         * Past its expiry at [now] — the table's and the API home's one definition (#585), so a
+         * key the Keys page shows as expired is never counted live on the home.
+         */
+        fun isExpired(
+            key: ApiKey,
+            now: Instant,
+        ): Boolean = key.expiresAt?.isBefore(now) ?: false
+
         /** `dpk_` plus eight characters — the D16 top-bar prefix length, shared by the table. */
         const val PREFIX_CHARS = 12
 

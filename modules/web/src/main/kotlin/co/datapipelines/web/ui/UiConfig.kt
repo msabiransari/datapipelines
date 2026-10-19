@@ -114,6 +114,19 @@ class UiConfig {
         parameterSets: co.datapipelines.parameters.ParameterSetRepository,
     ): FamilyRecent = FamilyRecent(pipelines, templates, dashboards, visualizations, parameterSets)
 
+    /** #585: the API home's two reads — the console's endpoints behind the lens, the Keys page's keys. */
+    @Bean
+    fun apiHomeReads(
+        publishing: co.datapipelines.application.endpoints.EndpointPublishService,
+        pipelineNames: PipelineNames,
+        apiKeys: co.datapipelines.auth.ApiKeyRepository,
+        lens: co.datapipelines.application.lens.PromoterLens,
+    ): ApiHomeReads = ApiHomeReads(publishing, pipelineNames, apiKeys, lens)
+
+    /** #585: the MCP connection card's model, stamped by the API console and the API home alike. */
+    @Bean
+    fun mcpConnectionCard(authProperties: co.datapipelines.auth.AuthProperties): McpConnectionCard = McpConnectionCard(authProperties)
+
     /** 106: the version/execution actor lookup both explorer details render. */
     @Bean
     fun actorNames(jdbc: org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate): ActorNames = ActorNames(jdbc)

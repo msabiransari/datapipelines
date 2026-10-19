@@ -22,8 +22,8 @@ class LoginGoldenPathBrowserTest : BrowserSuite() {
         startTrace()
         page.navigate("$baseUrl/login")
 
-        // 2026-09-08 redesign: the h1 is the task ("Sign in to your workspace"); the brand is the tile.
-        page.locator("h1").first().innerText() shouldContain "Sign in to your workspace"
+        // 2026-09-08 redesign: the h1 is the task ("Sign in"); the brand is the tile.
+        page.locator("h1").first().innerText() shouldContain "Sign in"
         page.locator("#login-email").isVisible shouldBe true
         page.locator("#login-password").isVisible shouldBe true
         // Local-only deployment: no provider buttons, no divider.
@@ -164,7 +164,7 @@ class LoginGoldenPathBrowserTest : BrowserSuite() {
         page.locator("#app-main").count() shouldBe 0
         page.locator(".app-rail").count() shouldBe 0
         page.locator(".app-auth-brand").isVisible shouldBe true
-        page.locator(".app-card-auth").isVisible shouldBe true
+        page.locator(".app-login-form").isVisible shouldBe true
         val scrolls =
             page.evaluate("() => document.documentElement.scrollHeight > window.innerHeight + 1") as Boolean
         scrolls shouldBe false

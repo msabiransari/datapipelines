@@ -266,28 +266,13 @@ class ApiKeysAdminController(
             else -> principal.workspaceRole?.let { RolePermissions.of(it) } ?: emptySet()
         }
 
-    /**
-     * The keys this caller SEES (keys v2 A15): with `api_key.read`, the whole workspace's keys
-     * of every kind; without it, the `mcp` keys they created themselves — the robot members
-     * they are responsible for. Revoked keys stay VISIBLE (their `is_revoked` is a fact an
-     * operator checks).
-     */
     private companion object {
         private const val MAX_ECHOED_ROLE_CHARS = 32
     }
 
     private fun rows(principal: AuthenticatedPrincipal): List<ApiKeyRows.Row> {
         val workspaceId = principal.requireWorkspace().id
-        val all = apiKeyRepository.findByWorkspace(workspaceId)
-        val visible =
-            if (principal.holds(Permission.API_KEY_READ)) {
-                all
-            } else {
-                all.filter {
-                    it.kind == ApiKeyKind.MCP &&
-                        it.createdBy == principal.userId
-                }
-            }
+        val visible = keysVisibleTo(principal, apiKeyRepository.findByWorkspace(workspaceId))
         return keyRows.of(visible, Instant.now(), userLabels(workspaceId))
     }
 
@@ -364,3 +349,20 @@ class ApiKeysAdminController(
         SecurityContextHolder.getContext().authentication?.principal as? AuthenticatedPrincipal
             ?: error("No authenticated principal")
 }
+
+/**
+ * The keys [principal] SEES among [all] — the workspace's keys (keys v2 A15): with `api_key.read`,
+ * every key of every kind; without it, the `mcp` keys they created themselves — the robot members
+ * they are responsible for. Revoked keys stay VISIBLE (their `is_revoked` is a fact an operator
+ * checks). ONE rule for the Keys page and the API home's key counts (#585), so the two cannot
+ * disagree about what a caller may count.
+ */
+internal fun keysVisibleTo(
+    principal: AuthenticatedPrincipal,
+    all: List<ApiKey>,
+): List<ApiKey> =
+    if (principal.holds(Permission.API_KEY_READ)) {
+        all
+    } else {
+        all.filter { it.kind == ApiKeyKind.MCP && it.createdBy == principal.userId }
+    }

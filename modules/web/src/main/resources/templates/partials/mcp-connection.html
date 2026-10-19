@@ -1,0 +1,21 @@
+<!--/* 079 §C, shared since #585 — the MCP connection card, ONE fragment for the API console
+     (api/console.html) and the API home (overview/guide-api-console.html), so the config a reader
+     pastes and the tool count beside it cannot drift between the two pages. The values are
+     McpConnectionCard's: the config carries the key PLACEHOLDER, never a real key, and the tool
+     count is McpToolCatalog.NAMES.size at request time, never a literal — the same expression the
+     marketing site renders, for the same reason: a number that can drift from `tools/list` is
+     worse than no number. `note` is the caller's sentence under the config: each page says what
+     key the config wants in its own words. */-->
+<div xmlns:th="http://www.thymeleaf.org" class="ds-card" th:fragment="card(note)" data-mcp-connection>
+  <div class="app-card-h app-card-h-flush">
+    <h2 class="ds-title">MCP server</h2>
+    <span class="app-chip app-chip-ok"><i class="ds-status"></i><span th:text="${mcpToolCount} + ' tools'">28 tools</span></span>
+  </div>
+  <div class="app-card-b app-card-b-flush">
+    <pre class="app-code" th:text="${mcpConfigJson}">{}</pre>
+    <div class="app-note">
+      <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#info"></use></svg>
+      <th:block th:replace="${note}"></th:block>
+    </div>
+  </div>
+</div>
