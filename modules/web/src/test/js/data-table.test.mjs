@@ -19,6 +19,46 @@ const T = require(path.join(here, "../../main/resources/static/js/data-table.js"
 const sortTexts = (texts, type, dir) =>
   T.sortEntries(texts.map((t, i) => ({ key: T.sortKey(t, type), index: i, t })), dir).map((e) => e.t);
 
+const headerText = (textContent) => ({ nodeType: 3, textContent });
+const headerElement = (textContent, ...classes) => ({
+  nodeType: 1, textContent, classList: { contains: (name) => classes.includes(name) },
+});
+const header = (childNodes, sort = null) => ({
+  childNodes,
+  textContent: childNodes.map((node) => node.textContent).join(""),
+  getAttribute: (name) => name === "data-sort" ? sort : null,
+});
+
+test("#617: screen-reader-only Actions, Edit and Details headers are not sortable", () => {
+  for (const label of ["Actions", "Edit", "Details"]) {
+    assert.equal(T.isSortableHeader(header([headerElement(label, "u-sr-only")])), false, label);
+  }
+});
+
+test("#617: visible text with a screen-reader hint remains sortable without the hidden text", () => {
+  const th = header([headerText("Name "), headerElement("required", "u-sr-only"), headerElement("label")]);
+  assert.equal(T.visibleHeaderText(th), "Name label");
+  assert.equal(T.isSortableHeader(th), true);
+});
+
+test("#617: data-sort off still excludes a visible Actions header", () => {
+  assert.equal(T.isSortableHeader(header([headerText("Actions")], "off")), false);
+});
+
+test("#617: empty and whitespace-only headers are not sortable", () => {
+  for (const nodes of [[], [headerText(" \n ")]]) {
+    assert.equal(T.isSortableHeader(header(nodes)), false);
+  }
+});
+
+test("#617: every visually hidden utility and the resizer contribute no header text", () => {
+  for (const cls of ["u-sr-only", "app-visually-hidden", "sr-only", "ps-visually-hidden", "dt-resizer"]) {
+    const th = header([headerElement("hidden", cls)]);
+    assert.equal(T.visibleHeaderText(th), "", cls);
+    assert.equal(T.isSortableHeader(th), false, cls);
+  }
+});
+
 test("a cell with no value is empty or a lone dash of any width", () => {
   for (const t of ["", "  ", "—", "–", "-", null, undefined]) assert.equal(T.isNullText(t), true, JSON.stringify(t));
   for (const t of ["0", "-1", "—x", "none"]) assert.equal(T.isNullText(t), false, t);
