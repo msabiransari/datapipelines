@@ -7,7 +7,8 @@ import org.junit.jupiter.api.Test
 /**
  * #492 — the filters presentation follows the board region while the viewport stays fixed. #554: the
  * region is narrowed by the resource browser's separator (240–480 in 16 px steps) at a 1470 px
- * viewport, where 202 + 400 leaves main 868 and the region exactly 820.
+ * viewport, where 202 + 384 leaves main 884 and, less `--app-main-pad` (32 px in this band since
+ * #573) on both sides, the region exactly 820.
  */
 class DashboardFiltersBreakpointBrowserTest : DashboardBrowserSuite() {
     @Test
@@ -111,7 +112,7 @@ class DashboardFiltersBreakpointBrowserTest : DashboardBrowserSuite() {
     private companion object {
         const val VIEWPORT = 1470
 
-        /** Ten 16 px steps from the 240 floor: a 400 px browser, main 1470 - 202 - 400 = 868, the region 820. */
-        const val TO_820 = 10
+        /** Nine 16 px steps from the 240 floor: a 384 px browser, main 1470 - 202 - 384 = 884, the region 884 - 2 × 32 = 820 (#573). */
+        const val TO_820 = 9
     }
 }

@@ -19,9 +19,14 @@ import org.thymeleaf.web.servlet.JakartaServletWebApplication
  * `--app-content-max: 1600px` and the pipeline editor alone opted out via a
  * `fullBleed` model attribute (065 §A). Measured on the owner's ~3000px window
  * (2026-09-05): four content widths across eleven screens. The opt-in became
- * the rule — EVERY screen's `<main>` is the same full-bleed shell now, reading
- * content sits in `.app-reading` inside it, and `fullBleed`/`.app-main-bleed`/
- * `--app-content-max` are gone.
+ * the rule — EVERY screen's `<main>` is the same shell now, reading content sits
+ * in `.app-reading` inside it, and `fullBleed`/`.app-main-bleed`/`--app-content-max`
+ * are gone.
+ *
+ * #573 framed that shared `<main>` again (at most `--app-frame-max`, padded by band
+ * through `--app-main-pad`), and a canvas page keeps the whole track by carrying
+ * `app-canvas` on its ROOT element, which `.app-main:has(> .app-canvas)` reads. The
+ * opt-out is a child's class, never a different `<main>`, so the invariant below holds.
  *
  * So the pair below inverts 065's: the editor page and the pipelines list must
  * render the SAME `<main>` — the invariant is that no page can opt into a
@@ -44,7 +49,7 @@ class EditorLayoutRenderTest {
         }
 
     @Test
-    fun `the editor page renders the same full-bleed main as every other page`() {
+    fun `the editor page renders the same shared main as every other page`() {
         val html = engine.process("pipelines/editor", webContext().apply { fillEditor() })
 
         html shouldContain "class=\"app-container app-main\""
@@ -52,7 +57,7 @@ class EditorLayoutRenderTest {
     }
 
     @Test
-    fun `the pipelines list page renders the same full-bleed main`() {
+    fun `the pipelines list page renders the same shared main`() {
         val html = engine.process("pipelines/list", webContext().apply { fillList() })
 
         html shouldContain "class=\"app-container app-main\""

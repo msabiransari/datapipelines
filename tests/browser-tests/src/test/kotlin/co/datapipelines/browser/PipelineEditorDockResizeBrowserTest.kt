@@ -149,13 +149,136 @@ class PipelineEditorDockResizeBrowserTest : BrowserSuite() {
 
     private fun shotDir(): Path = Paths.get("build", "reports", "104-screenshots").also { it.toFile().mkdirs() }
 
-    private fun ready(): String {
+    /**
+     * The drag cases run at the 1512x982 reference, where the dock STARTS open (#615): at
+     * 1440x900 the canvas with the dock open is under `--pe-dock-auto-collapse-below`, so the
+     * dock now starts collapsed there — the short-window cases below pin that.
+     */
+    private fun ready(
+        width: Int = REFERENCE_W,
+        height: Int = REFERENCE_H,
+        remembered: Int? = null,
+    ): String {
         loginReadyUser()
         val name = "dock/resize/" + generatedPassword("p").take(8).lowercase()
         seedPipeline(name) shouldBe 201
-        page.setViewportSize(1440, 900)
+        if (remembered != null) page.evaluate("v => localStorage.setItem('dp.pane.editor-dock', String(v))", remembered)
+        page.setViewportSize(width, height)
         openEditorFor(name)
         return name
+    }
+
+    /** #615: the view controls' whole column is inside the canvas, and the Fit button is what a click there hits. */
+    @Suppress("UNCHECKED_CAST")
+    private fun controls(): Map<String, Any?> =
+        page.evaluate(
+            """() => {
+              const c = document.getElementById('cy-canvas').getBoundingClientRect();
+              const k = document.querySelector('.pe-graph-controls').getBoundingClientRect();
+              const b = document.querySelector(".pe-graph-controls button[aria-label='Fit graph to view']").getBoundingClientRect();
+              const hit = document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2);
+              return {
+                inside: k.top >= c.top - 1 && k.bottom <= c.bottom + 1,
+                fitHit: !!(hit && hit.closest('.pe-graph-controls')),
+                collapsed: document.querySelector('.pe-dock').classList.contains('pe-dock-collapsed'),
+                controls: [Math.round(k.top), Math.round(k.bottom)], canvas: [Math.round(c.top), Math.round(c.bottom)],
+              };
+            }""",
+        ) as Map<String, Any?>
+
+    @Test
+    fun `on a short window the dock starts collapsed and every view control is inside the canvas`() {
+        startTrace()
+        ready(1280, 720)
+        for ((w, h) in listOf(1280 to 720, 1440 to 900)) {
+            page.setViewportSize(w, h)
+            page.navigate(editorUrl)
+            page.locator(".pe-card").first().waitFor()
+            val k = controls()
+            val r = read()
+            println("615-start ${w}x$h $k $r")
+            withClue("the dock did not start collapsed at ${w}x$h: $k") { k["collapsed"] shouldBe true }
+            withClue("a view control left the canvas at ${w}x$h: $k") { k["inside"] shouldBe true }
+            withClue("the Fit button is covered at ${w}x$h: $k") { k["fitHit"] shouldBe true }
+            r.d("canvasH") shouldBeGreaterThanOrEqual CANVAS_FLOOR
+        }
+        // The click a person makes — the one that timed out under the heading before #615.
+        page.locator(".pe-graph-controls button[aria-label='Fit graph to view']").click()
+    }
+
+    @Test
+    fun `opening the dock on a short window leaves the canvas its floor`() {
+        startTrace()
+        ready(1280, 720)
+        controls()["collapsed"] shouldBe true
+        page.click("#pe-dock-tab-details")
+        page.waitForFunction("() => !document.querySelector('.pe-dock').classList.contains('pe-dock-collapsed')")
+        page.waitForTimeout(400.0) // the collapse transition (0.2s) settles
+        val r = read()
+        val k = controls()
+        println("615-open-short $r $k")
+        withClue("the canvas went under its floor when the dock opened: $r") { r.d("canvasH") shouldBeGreaterThanOrEqual CANVAS_FLOOR - 1 }
+        withClue("the dock did not give way on a short window: $r") { r.d("paneH") shouldBeLessThanOrEqual DEFAULT_PANE - 1 }
+        withClue("the pane is not usable: $r") { r.d("paneH") shouldBeGreaterThanOrEqual 100.0 }
+        withClue("a view control left the canvas with the dock open: $k") { k["inside"] shouldBe true }
+        withClue("the Fit button is covered with the dock open: $k") { k["fitHit"] shouldBe true }
+        // A keyboard step starts from the row the person SEES: with the property still at 232
+        // and the row capped, a step from the property would land above the row and move nothing.
+        page.locator("[data-splitter='editor-dock']").focus()
+        page.keyboard().press("ArrowDown")
+        page.waitForTimeout(150.0)
+        val stepped = read()
+        withClue("ArrowDown did not shrink the visible pane by one step: $r -> $stepped") {
+            (r.d("paneH") - stepped.d("paneH")) shouldBeGreaterThanOrEqual 15.0
+            (r.d("paneH") - stepped.d("paneH")) shouldBeLessThanOrEqual 17.0
+        }
+        page.locator(".pe-graph-controls button[aria-label='Fit graph to view']").click()
+    }
+
+    @Test
+    fun `at the 1512x982 reference the dock starts open at its default`() {
+        startTrace()
+        ready()
+        val k = controls()
+        val r = read()
+        println("615-reference $k $r")
+        k["collapsed"] shouldBe false
+        r.d("paneH") shouldBeGreaterThanOrEqual DEFAULT_PANE - 1
+        r.d("paneH") shouldBeLessThanOrEqual DEFAULT_PANE + 1
+        k["inside"] shouldBe true
+    }
+
+    @Test
+    fun `an untouched dock follows the window, and a gesture makes the state the person's`() {
+        startTrace()
+        ready(1280, 720)
+        controls()["collapsed"] shouldBe true
+        // Grown before anyone touched the dock: the default re-decides (#615's watch).
+        page.setViewportSize(REFERENCE_W, REFERENCE_H)
+        page.waitForFunction("() => !document.querySelector('.pe-dock').classList.contains('pe-dock-collapsed')")
+        page.setViewportSize(1280, 720)
+        page.waitForFunction("() => document.querySelector('.pe-dock').classList.contains('pe-dock-collapsed')")
+        // A tab click is a gesture: from here the window no longer moves the dock.
+        page.click("#pe-dock-tab-details")
+        page.waitForFunction("() => !document.querySelector('.pe-dock').classList.contains('pe-dock-collapsed')")
+        page.setViewportSize(1440, 900)
+        page.setViewportSize(1280, 720)
+        page.waitForTimeout(400.0) // two resize-observer turns and the 0.2s transition
+        withClue("the window moved a dock the person had opened: ${controls()}") { controls()["collapsed"] shouldBe false }
+        controls()["inside"] shouldBe true
+    }
+
+    @Test
+    fun `a remembered pane height keeps the dock open on a short window`() {
+        startTrace()
+        ready(1280, 720, remembered = 200)
+        val k = controls()
+        val r = read()
+        println("615-remembered $k $r")
+        withClue("the person's own height did not keep the dock open: $k") { k["collapsed"] shouldBe false }
+        withClue("the canvas went under its floor: $r") { r.d("canvasH") shouldBeGreaterThanOrEqual CANVAS_FLOOR - 1 }
+        k["inside"] shouldBe true
+        k["fitHit"] shouldBe true
     }
 
     @Test
@@ -344,6 +467,10 @@ class PipelineEditorDockResizeBrowserTest : BrowserSuite() {
 
         /** `--pe-dock-min-h`, and the strip of canvas the dock may never eat (`--pe-dock-canvas-floor`). */
         const val DOCK_MIN = 120.0
-        const val CANVAS_FLOOR = 160.0
+        const val CANVAS_FLOOR = 180.0
+
+        /** The 1512x982 reference viewport, where the dock starts open. */
+        const val REFERENCE_W = 1512
+        const val REFERENCE_H = 982
     }
 }

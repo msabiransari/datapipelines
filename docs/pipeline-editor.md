@@ -1,9 +1,9 @@
 # Pipeline Editor UI Specification
 
-**Status:** v1.28 (revised — see Change Log)
+**Status:** v1.29 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Contract](pipeline-contract.md), [REST API + SSE](rest-api.md), [Type System](type-system.md), [Enums](enums.md), [Auth](auth.md), [Configuration](configuration.md), [@acme/design-tokens Design System](https://github.com/msabir/design-system-starter)
-**Last updated:** 2026-10-11
+**Last updated:** 2026-10-19
 
 ---
 
@@ -412,7 +412,8 @@ The three panes' dimensions, all in one place:
 | `.pe-root` height | `calc(100dvh - var(--header-height) - var(--space-px) - (var(--gap-lg) * 2))`, floor 540px | unchanged since 041/059 |
 | Left sidebar | — | withdrawn by #349 (the owner's workspace ruling): the graph owns the available width; the description and the declared parameters live in the Overview and Parameters tabs |
 | Canvas | `1fr` — the layout is a **two**-track grid (sidebar + stage); the inspector's third track died with the 065 overlay, and the overlay itself died with 080 | `.pe-body` |
-| Dock, open | the mock's geometry: a 38px tab strip over a 232px pane (`--pe-dock-tabs-h` / `--pe-dock-pane-h`) | `.pe-dock` |
+| Dock, open | a tab strip (`--pe-dock-tabs-h`, the shell's `--app-tab-h` since #565) over a 232px pane (`--pe-dock-pane-h`); the pane row is `minmax(0, …)` and gives way before the canvas goes under `--pe-dock-canvas-floor` (180px, #615) | `.pe-dock` |
+| Dock, at start | collapsed when the canvas with the dock open would be under `--pe-dock-auto-collapse-below` (320px) and no pane height is remembered; open otherwise. The default re-decides as `.pe-panes` resizes until anything moves the dock (#615, owner ruling 2026-10-19; `dock.js` `defaultState`) | `init.js` `applyDockDefault`, `watchDockDefault` |
 | Dock, collapsed | the tab strip's own height — one row, tokens only | `.pe-dock-collapsed` |
 | Node card | `--pe-card-w: 236px` wide; `--pe-card-h: 148px` is a **`min-height`**, not a height (082 addendum) — the card grows to its content and `syncCardHeights()` hands each measured height to Cytoscape. Both step to **272 / 170 with the card type scale +1px** once the STAGE is ≥ 1200px wide (082 §A) | §5.3 |
 
@@ -2036,6 +2037,7 @@ Themes shipped by the design system — `saas` (modern indigo, devtool-oriented)
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-19 | v1.29 | #615 editor canvas on a short window | **§4.3 Layout dimensions**: the open dock's pane row gives way to the canvas floor (180px, from 160); a new **Dock, at start** row — collapsed under 320px of canvas unless a pane height is remembered, and a start-up collapse opens on a run's first results. ui-screens §4.4 v1.168 carries the reasoning. |
 | 2026-10-15 | v1.28 | #433 the template link names the workspace | **§8.2**: "Open template →" and the SQL section's reference link the canonical workspace `/templates/{name}` directly (segments as path, each encoded) instead of the `/templates/editor?name=` compatibility 302; the dangling "§9.6" pointer (this document has no §9.6) now points at UI Screens §4.7. No version pin — unchanged behaviour, the link opens the current resolution. The 302 stays for old bookmarks with its tests. Tests: `PipelineNodeSqlRenderTest`, `TemplateTreeRenderTest`, `template-ref-text.test.mjs` (the `selectedTemplateHref` getter). |
 | 2026-10-11 | v1.27 | #494 one page-script loader | **§3.2**: the editor's catalog becomes `<template id="pe-runtime-scripts" data-page-assets="on-mount">` and loads through the shell's ONE loader, `page-assets.mjs` (fetched while a navigation prepares, executed once the page is in place, once per document across pages that share a source); `runtime.js` is no longer a loader or a bare tag but the catalog's last entry and `data-page-mount`, called once per catalog node (arrival, swap, cached restore) after the page's re-created bare tags have executed, keeping its activation, generation counter, before-save cleanup and `PEPipelineRuntime` identity. A cached restore now replays no editor script. Tests: `page-assets.test.mjs` (order, once per document, allow-list, singleton gate moved from `runtime-activation.test.mjs`), `PersistentChartNavigationBrowserTest` (per-source evaluation counts across all six pages). |
 | 2026-10-06 | v1.26 | #460 reusable REST navigation | §4.1: persistent artifact entry, closed-root initialization, rail continuity and observer ownership through cached restoration. **Supersedes the #149 full-document editor-entry rule** (ui-screens v1.85): the workspace now arrives through prepared main-content navigation, and `pipeline-editor/runtime.js` loads the editor's modules in order and activates the component after the swap (`data-pe-runtime-epoch` is the readiness signal the browser witnesses wait on). |
