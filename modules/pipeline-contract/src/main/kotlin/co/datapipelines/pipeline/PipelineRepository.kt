@@ -141,6 +141,14 @@ class PipelineRepository(
         co.datapipelines.pipeline.InventorySource
             .aggregate(jdbc, co.datapipelines.pipeline.NavigationFamily.PIPELINES, workspaceId, lens)
 
+    /** #598a — the overview's lifecycle and maturity charts from one statement, under the same workspace and lens. */
+    fun charts(
+        workspaceId: UUID,
+        lens: co.datapipelines.pipeline.ReadLens,
+    ): co.datapipelines.pipeline.ChartInventory =
+        co.datapipelines.pipeline.ChartInventorySource
+            .aggregate(jdbc, co.datapipelines.pipeline.NavigationFamily.PIPELINES, workspaceId, lens)
+
     /** #556 — the overview's Recently updated list under the caller's workspace and version lens. */
     fun recent(
         workspaceId: UUID,
