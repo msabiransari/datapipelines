@@ -88,6 +88,28 @@ class ScheduleRunRepository(
             rowMapper,
         )
 
+    /**
+     * #584 — the state of each of [scheduleIds]' NEWEST run (`created_at`, then id), in one
+     * statement over `idx_schedule_runs_schedule`; a schedule with no run is absent from the map.
+     * Workspace-scoped like every REST read; the ids are a bound list, never interpolated.
+     */
+    fun latestStates(
+        workspaceId: UUID,
+        scheduleIds: Collection<UUID>,
+    ): Map<UUID, RunState> {
+        if (scheduleIds.isEmpty()) return emptyMap()
+        return jdbc
+            .query(
+                """
+                SELECT DISTINCT ON (schedule_id) schedule_id, state FROM schedule_runs
+                WHERE workspace_id = :ws AND schedule_id IN (:ids)
+                ORDER BY schedule_id, created_at DESC, id DESC
+                """.trimIndent(),
+                mapOf("ws" to workspaceId, "ids" to scheduleIds),
+            ) { rs, _ -> rs.getObject("schedule_id", UUID::class.java) to RunState.fromWire(rs.getString("state")) }
+            .toMap()
+    }
+
     /** True when the schedule holds its single active slot (record §3). Read under the schedule's lock. */
     fun hasActive(scheduleId: UUID): Boolean =
         jdbc.queryForObject(
