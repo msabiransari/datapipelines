@@ -647,6 +647,7 @@ class ShellRenderTest {
         href("Visualizations") shouldBe "/overview/visualizations"
         href("Parameter Sets") shouldBe "/overview/parameter-sets"
         href("Datasources") shouldBe "/overview/datasources"
+        href("Schedules") shouldBe "/overview/schedules"
     }
 
     /**
@@ -676,6 +677,40 @@ class ShellRenderTest {
 
         html.substringAfter("<aside class=\"app-browser\"").substringBefore(">") shouldContain "hidden"
         html.substringAfter("<button type=\"button\" id=\"browser-open\"").substringBefore(">") shouldContain "hidden"
+    }
+
+    /**
+     * #584: the Schedules home lights the Schedules item through the layout's one overview rule
+     * (`navPath`), and — not a browserFamily either — keeps the browser and its opener hidden.
+     * Not vacuous: the Pipelines overview, rendered by the same template here, shows them.
+     */
+    @Test
+    fun `the schedules overview lights its item and keeps the browser hidden`() {
+        fun render(path: String): String =
+            engine.process(
+                "pipelines/list",
+                webContext().apply {
+                    fillList()
+                    setVariable("currentPath", path)
+                    setVariable("crumbGroup", AppNav.crumbFor(path)?.first)
+                    setVariable("crumbPage", AppNav.crumbFor(path)?.second)
+                },
+            )
+        val path = "/overview/schedules"
+        val html = render(path)
+        val active = Regex("""<a [^>]*class="app-nav-link active"[^>]*>""").findAll(html).map { it.value }.toList()
+        active.size shouldBe 1
+        active.single() shouldContain "data-nav-label=\"Schedules\""
+        active.single() shouldContain "aria-current=\"page\""
+        AppNav.crumbFor(path)?.second shouldBe "Schedules"
+        html.substringAfter("<aside class=\"app-browser\"").substringBefore(">") shouldContain "hidden"
+        html.substringAfter("<button type=\"button\" id=\"browser-open\"").substringBefore(">") shouldContain "hidden"
+
+        val pipelines = render("/overview/pipelines")
+        pipelines.substringAfter("<aside class=\"app-browser\"").substringBefore(">") shouldNotContain "hidden"
+        // The explorer itself still lights the same item.
+        Regex("""<a [^>]*class="app-nav-link active"[^>]*>""").findAll(render("/schedules")).single().value shouldContain
+            "data-nav-label=\"Schedules\""
     }
 
     /** #554 (record §3 rule 5): off the five families the browser and its folder button render hidden. */
