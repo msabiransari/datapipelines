@@ -324,13 +324,23 @@
   /* #502 — the danger chip tint: the success/warning/info `--accent-*-bg` trio's missing
      sibling. The vendored design system ships no `--accent-danger-bg` and is never edited
      here, so the token is defined as a tint of `--accent-danger` on `--surface-default`,
-     the same shape as `--type-transform-bg` above. 4% is the strongest tint whose LIGHT
-     rendering still carries `--accent-danger` text at the 4.5:1 floor (a near-white tint,
-     4.54:1; at 6% it is 4.41:1). Dark renders a near-surface dark red at 3.60:1 — the
-     accent itself tops out at 3.67:1 on the dark `--surface-default`, so no N of this mix
-     reaches 4.5 there; the gap is reported on #502 rather than papered over with a
-     literal. */
+     the same shape as `--type-transform-bg` above. 4% stays: a near-white tint in light,
+     a near-surface dark red in dark. The chip's TEXT is no longer `--accent-danger` (3.52:1
+     on this tint in dark, the gap #502 reported) but `--app-danger-ink` below, which clears
+     4.5:1 on it on every vendored theme (#509). */
   --accent-danger-bg: color-mix(in srgb, var(--accent-danger) 4%, var(--surface-default));
+
+  /* #509 — the danger INK: the colour of danger TEXT, never a fill. `--accent-danger` is the
+     solid danger button's slab (under the vendored white `--accent-danger-text`, which this
+     is not) and reads 2.74–3.89:1 as text on the dark surfaces. The design system's own text
+     role, `--text-danger`, is a light red in dark (6.98:1 at worst, on `--surface-hover`). In
+     light it is the same red as the accent on every vendored theme, and three themes miss
+     the 4.5:1 floor with it (light 4.34 and saas 4.39 on the inset and hover surfaces; ocean
+     4.09 there and 4.42 on the chip tint), so the light half is that red at 3% lower oklch
+     lightness, hue and chroma kept (owner ruling on #509, 2026-10-19). `light-dark()`
+     follows each theme's own `color-scheme`, `auto` included. Measured on every theme by
+     DangerInkContrastBrowserTest; DangerInkSourceAuditTest keeps every text site on it. */
+  --app-danger-ink: light-dark(oklch(from var(--text-danger) calc(l - 0.03) c h), var(--text-danger));
 
   /* #502 — the focus RING's width, the length half of the design system's focus state:
      primitives.css builds its ring as a 2px box-shadow band around `--focus-ring`
@@ -923,6 +933,10 @@ button.app-busy::after {
   --app-main-pad: var(--space-8);
   /* <main>'s maximum OUTER width, its padding included (record §4); `app-canvas` opts out. */
   --app-frame-max: 1500px;
+  /* #614: the framed <main>'s centring offset in its track — 0 wherever the track is 1500 or
+     less, half the rest beyond it; a canvas page zeroes it, the anonymous shell's track is the
+     window. A fixed element that lines up with the content edge (the status pill) adds it. */
+  --app-frame-inset: max(0px, (100vw - var(--app-menu-width) - var(--app-browser-col) - var(--app-frame-max)) / 2);
   --app-browser-min: 240px;
   --app-browser-max: 480px;
   --app-drawer-max: 360px;
@@ -949,6 +963,14 @@ button.app-busy::after {
 :root.browser-hidden,
 :root:has(#app-browser[hidden]) {
   --app-browser-col: 0px;
+}
+
+:root:has(.app-main > .app-canvas) {
+  --app-frame-inset: 0px;
+}
+
+:root:has(.app-shell-anon) {
+  --app-frame-inset: max(0px, (100vw - var(--app-frame-max)) / 2);
 }
 
 @media (min-width: 1600px) {
@@ -1058,7 +1080,11 @@ button.app-busy::after {
 }
 
 /* The screen-reader-only text the browser's count carries ("9 pipelines" read, "9"
-   seen). The same declarations as the compact menu's labels above. */
+   seen). The same declarations as the compact menu's labels above. One rule, two
+   names (#608): .u-sr-only is the u-* name an author reaches for in a template's
+   class attribute, .app-visually-hidden the shell's original — an alias inside the
+   SAME selector, never a second rule, so the two cannot drift. */
+.u-sr-only,
 .app-visually-hidden {
   position: absolute;
   width: 1px;
@@ -2341,7 +2367,7 @@ button.app-busy::after {
 
 .app-chip-bad {
   background: var(--accent-danger-bg);
-  color: var(--accent-danger);
+  color: var(--app-danger-ink);
 }
 
 .app-chip-run {
@@ -2728,7 +2754,7 @@ button.app-busy::after {
 .u-secondary { color: var(--text-secondary); }
 .u-muted { color: var(--text-muted); }
 .u-primary { color: var(--text-primary); }
-.u-danger { color: var(--accent-danger); }
+.u-danger { color: var(--app-danger-ink); }
 .u-success { color: var(--accent-success); }
 .u-warning { color: var(--accent-warning); }
 
@@ -2736,7 +2762,7 @@ button.app-busy::after {
    Kotlin. As classes they need the hover state spelled out: `.ds-button-ghost:hover` (0,2,0)
    would otherwise repaint them `--text-primary`, which the inline style used to win against
    by being inline. Same colour, same states, no attribute. */
-.ds-button-ghost.u-danger:hover { color: var(--accent-danger); }
+.ds-button-ghost.u-danger:hover { color: var(--app-danger-ink); }
 .ds-button-ghost.u-success:hover { color: var(--accent-success); }
 .ds-button-ghost.u-warning:hover { color: var(--accent-warning); }
 
@@ -2766,15 +2792,22 @@ button.app-busy::after {
 
 /* spacing — the gap scale, never a raw length */
 .u-m0 { margin: 0; }
+.u-mb-0 { margin-bottom: 0; }
 .u-mb-xs { margin-bottom: var(--gap-xs); }
 .u-mb-sm { margin-bottom: var(--gap-sm); }
 .u-mb-md { margin-bottom: var(--gap-md); }
 .u-mb-lg { margin-bottom: var(--gap-lg); }
 .u-mb-xl { margin-bottom: var(--gap-xl); }
+.u-mt-0 { margin-top: 0; }
 .u-mt-xs { margin-top: var(--gap-xs); }
 .u-mt-sm { margin-top: var(--gap-sm); }
 .u-mt-md { margin-top: var(--gap-md); }
 .u-mt-lg { margin-top: var(--gap-lg); }
+/* Per-side horizontal steps (#608): the detail page's wrapped badge row and the
+   invitations table's inline badge — `.u-m0` would take margins the element's other
+   sides still owe. Tokens only, like the vertical scale above. */
+.u-mr-md { margin-right: var(--gap-md); }
+.u-ml-xs { margin-left: var(--gap-xs); }
 .u-p-sm { padding: var(--gap-sm); }
 .u-p-md { padding: var(--gap-md); }
 .u-p-lg { padding: var(--gap-lg); }
@@ -3534,11 +3567,12 @@ button.app-busy::after {
 /* The status pill. Fixed under the top bar on the CONTENT side — #554: past the menu AND
    the browser, both read off the :root geometry (the browser's column is 0px when it is
    hidden), so collapse, Hide and a non-family page all move it with no rule of their own;
-   and `hidden` when off — see the layout. */
+   #614: plus the frame's centring offset, so it starts at the content's edge on a framed
+   page wider than 1500 and at the track's on a canvas; and `hidden` when off — see the layout. */
 .app-status-pill {
   position: fixed;
   top: calc(var(--app-header-h) + var(--gap-md));
-  left: calc(var(--app-menu-width) + var(--app-browser-col) + var(--app-main-pad));
+  left: calc(var(--app-menu-width) + var(--app-browser-col) + var(--app-frame-inset) + var(--app-main-pad));
   z-index: var(--z-fixed);
   display: flex;
   align-items: center;
@@ -3557,9 +3591,9 @@ button.app-busy::after {
 
 /* The anonymous shell (the public docs, the error pages) has no menu at all, and its
    `#app-main` still boosts — so without this the pill would appear 202px from the left of
-   a page with nothing there. */
+   a page with nothing there. Its frame centres in the whole window (the inset above). */
 :root:has(.app-shell-anon) .app-status-pill {
-  left: var(--app-main-pad);
+  left: calc(var(--app-frame-inset) + var(--app-main-pad));
 }
 
 .app-status-pill-spinner {
@@ -4109,7 +4143,7 @@ pre.tf-pane-input {
 }
 
 .tf-outcome-refused {
-  color: var(--accent-danger);
+  color: var(--app-danger-ink);
 }
 
 .tf-refusals,
@@ -4159,7 +4193,7 @@ pre.tf-pane-input {
 
 .tf-case-fail > .tf-case-head .tf-mark,
 .tf-inv-fail > .tf-mark {
-  color: var(--accent-danger);
+  color: var(--app-danger-ink);
 }
 
 .tf-case-facts {

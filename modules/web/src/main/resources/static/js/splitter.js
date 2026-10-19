@@ -393,7 +393,10 @@
      measured back by the browser suites, so a change on one side that is not made on the
      other goes red rather than quiet. */
   var DOCK_MIN = 120;
-  var DOCK_CANVAS_FLOOR = 160;
+  /* #615 (owner ruling 2026-10-19): 180, from 160 — the graph's view controls are a
+     159px column 16px above the canvas's bottom edge, so a canvas shorter than this
+     pushed the top button (Fit) out of the stage and under the heading. */
+  var DOCK_CANVAS_FLOOR = 180;
   var TREE_MIN = 260;
   var TREE_MAX_SHARE = 0.4;
 
@@ -415,8 +418,22 @@
     var paneHeight = function () {
       var raw = window.getComputedStyle(root()).getPropertyValue("--pe-dock-pane-h");
       var px = parseFloat(raw);
-      if (isFinite(px) && px >= 0) return px;
+      if (isFinite(px) && px >= 0) return Math.min(px, renderedPane(px));
       return Math.max(0, measure(dock, "y") - measure(tabs, "y"));
+    };
+    /*
+     * #615 — on a short window the pane row is `minmax(0, --pe-dock-pane-h)` and the
+     * canvas keeps its floor, so an OPEN dock can be shorter than its property says. A
+     * drag, a keyboard step and aria-valuenow start from the row the person SEES: the
+     * grid's resolved last track (the computed `grid-template-rows` of a grid container
+     * is its used track sizes). Collapsed, the row is 0 by design and the property stays
+     * the answer — it is what expand restores.
+     */
+    var renderedPane = function (fallback) {
+      if (dock.classList.contains("pe-dock-collapsed")) return fallback;
+      var tracks = window.getComputedStyle(dock).gridTemplateRows.split(" ");
+      var last = parseFloat(tracks[tracks.length - 1]);
+      return isFinite(last) && last >= 0 ? last : fallback;
     };
     return bind({
       handle: handle,
@@ -491,6 +508,7 @@
   }
 
   var api = {
+    readStored: readStored,
     sizeFor: sizeFor,
     stepFor: stepFor,
     parseStored: parseStored,

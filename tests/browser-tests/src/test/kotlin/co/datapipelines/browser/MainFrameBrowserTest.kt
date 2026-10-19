@@ -55,6 +55,29 @@ class MainFrameBrowserTest : DashboardBrowserSuite() {
         values.forEach { (key, value) -> readings["$prefix.$key"] = value.toDouble() }
     }
 
+    /**
+     * #614 — the status pill's painted left edge beside the content edge it should share: <main>'s left plus its
+     * padding. The pill is raised by the shell's OWN `showStatusPill` (what a held navigation does after 150ms), so
+     * the box is rendered, not a `hidden` element's computed style; [shotName] photographs it before it is hidden.
+     */
+    private fun readPill(
+        prefix: String,
+        shotName: String? = null,
+    ) {
+        page.evaluate("() => window.DpShell.showStatusPill(document)")
+        settle()
+        val left =
+            page.evaluate(
+                """() => { const p = document.getElementById('app-status-pill');
+                  return p.getClientRects().length > 0 ? p.getBoundingClientRect().left : -1; }""",
+            ) as Number
+        if (shotName != null) shot(shotName)
+        page.evaluate("() => window.DpShell.hideStatusPill(document)")
+        readMain(prefix)
+        readings["$prefix.pill"] = left.toDouble()
+        readings["$prefix.contentEdge"] = reading("$prefix.left") + reading("$prefix.padLeft")
+    }
+
     private fun printReadings(case: String) {
         readings.forEach { (label, value) -> println("573-measure|$case|$label|$value") }
     }
@@ -262,11 +285,90 @@ class MainFrameBrowserTest : DashboardBrowserSuite() {
     }
 
     /**
+     * #614 — on a framed page the pill sits on the frame's content edge, not the track's: at 2200 the frame is
+     * centred, so the old `menu + browser + pad` offset put the pill 249px (expanded) left of the content.
+     */
+    @Test
+    fun `the status pill sits on the frame's content edge at 2200 - expanded and compact menu`() {
+        ready("mfpill")
+        page.setViewportSize(FRAME_W, FRAME_H)
+        page.navigate("$baseUrl/settings")
+        page.locator(".app-main .ds-headline").first().waitFor()
+        settle()
+        readPill("expanded", shotName = "614-settings-2200-pill")
+        page.click("#rail-collapse")
+        settle()
+        readPill("compact")
+        printReadings("pill-2200")
+        assertSoftly {
+            for ((state, rail) in listOf("expanded" to 202.0, "compact" to 64.0)) {
+                near("$state.pill", reading("$state.contentEdge"), 1.0)
+                // Non-vacuity: the frame binds here, so the content edge is past the track's.
+                withClue("$state.contentEdge") { reading("$state.contentEdge") shouldBeGreaterThan rail + 40.0 + 1.0 }
+            }
+        }
+    }
+
+    /** #614 — a canvas keeps the whole track, so its pill stays on the track's content edge: menu + browser + pad. */
+    @Test
+    fun `on a canvas the status pill sits on the track's content edge at 2200`() {
+        val root = ready("mfpillcanvas")
+        page.setViewportSize(FRAME_W, FRAME_H)
+        val pipeline = createDraftPipeline("$root/pill/probe")
+        page.navigate("$baseUrl/pipelines/$pipeline")
+        page.waitForSelector(".pe-root")
+        settle()
+        readPill("editor", shotName = "614-editor-2200-pill")
+        val browserWidth = page.evaluate("() => document.getElementById('app-browser').getBoundingClientRect().width")
+        readings["editor.browser"] = (browserWidth as Number).toDouble()
+        printReadings("pill-canvas-2200")
+        assertSoftly {
+            near("editor.canvas", 1.0)
+            withClue("editor.browser") { reading("editor.browser") shouldBeGreaterThan 0.0 }
+            near("editor.pill", 202.0 + reading("editor.browser") + 40.0, 1.0)
+            near("editor.pill", reading("editor.contentEdge"), 1.0)
+        }
+    }
+
+    /**
+     * #614 — the anonymous shell (signed out: no menu, no browser) frames <main> in the whole window; the pill follows.
+     * Its pages are the error pages: the public docs render in the site's chrome, an unknown doc in this shell.
+     */
+    @Test
+    fun `signed out the status pill sits on the frame's content edge at 2200`() {
+        page.setViewportSize(FRAME_W, FRAME_H)
+        page.navigate("$baseUrl/docs/no-such-doc-614").status() shouldBe 404
+        page.locator(".app-shell-anon .app-main").first().waitFor()
+        settle()
+        readPill("anon", shotName = "614-docs-anon-2200-pill")
+        printReadings("pill-anon-2200")
+        assertSoftly {
+            near("anon.rail", 0.0)
+            near("anon.pill", reading("anon.contentEdge"), 1.0)
+        }
+    }
+
+    /** #614 — where the frame does not bind (a track of 1500 or less) the pill does not move: 202 + 32 at 1512. */
+    @Test
+    fun `at 1512 the status pill keeps its offset`() {
+        ready("mfpillref")
+        page.setViewportSize(REFERENCE_W, REFERENCE_H)
+        page.navigate("$baseUrl/settings")
+        page.locator(".app-main .ds-headline").first().waitFor()
+        settle()
+        readPill("settings")
+        printReadings("pill-1512")
+        assertSoftly {
+            near("settings.pill", 234.0, 1.0)
+            near("settings.pill", reading("settings.contentEdge"), 1.0)
+        }
+    }
+
+    /**
      * The canvases' height calcs subtract the band twice (`--app-main-pad`): each canvas root fills <main>'s inner
      * height, less at most the 1px the calcs keep for the header's border. The editor and the template workspace
-     * therefore never scroll <main>. The board's root fills it too, but its content does not yet shrink into
-     * it (`.dp-ws-root` keeps its natural height: 31px past the fold at the base, before #573 — a follow-up), so its
-     * overflow is printed, not asserted.
+     * therefore never scroll <main>. The board's flex chain shrinks its panes into that height too (#612),
+     * keeping the activity dock visible without scrolling <main>.
      */
     @Test
     fun `every full-height canvas fills main's inner height at the 1512 band`() {
@@ -297,6 +399,7 @@ class MainFrameBrowserTest : DashboardBrowserSuite() {
             }
             near("editor.mainOverflowY", 0.0)
             near("template.mainOverflowY", 0.0)
+            near("board.mainOverflowY", 0.0)
         }
     }
 

@@ -92,7 +92,7 @@ fieldset.dp-dashboard-parameter > .dp-dashboard-parameter-error {
    instead of overflowing it. */
 .dp-dashboard-parameter-error {
   font-size: var(--app-text-support);
-  color: var(--accent-danger);
+  color: var(--app-danger-ink);
   line-height: var(--leading-normal);
 }
 
@@ -180,6 +180,10 @@ fieldset.dp-dashboard-parameter > .dp-dashboard-parameter-error {
   display: flex;
   flex-direction: column;
   min-height: 0;
+}
+
+.dp-workspace:has(.dp-ws-pane[data-dp-pane="board"]:not([hidden])) .dp-ws-pane[data-dp-pane="board"] {
+  flex: 1 1 auto;
 }
 
 .dp-board-page {
@@ -531,6 +535,19 @@ fieldset.dp-dashboard-parameter > .dp-dashboard-parameter-error {
   font-weight: var(--weight-medium);
 }
 
+/* Only the visible Board tab constrains the workspace height. Carry that constraint
+   through the root and pane container; the other tabs keep their ordinary flow. */
+.dp-workspace:has(.dp-ws-pane[data-dp-pane="board"]:not([hidden])) .dp-ws-root {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.dp-workspace:has(.dp-ws-pane[data-dp-pane="board"]:not([hidden])) .dp-ws-panes {
+  flex: 1 1 auto;
+}
+
 .dp-ws-panes {
   display: flex;
   flex-direction: column;
@@ -778,7 +795,7 @@ fieldset.dp-dashboard-parameter > .dp-dashboard-parameter-error {
 .dp-dashboard-card--error .dp-dashboard-card-message,
 .dp-dashboard-card--abort .dp-dashboard-card-message,
 .dp-dashboard-card--has-issue .dp-dashboard-card-message {
-  color: var(--text-danger);
+  color: var(--app-danger-ink);
 }
 
 .dp-dashboard-card--busy .dp-dashboard-card-message {

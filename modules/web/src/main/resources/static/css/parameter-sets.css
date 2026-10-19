@@ -80,7 +80,7 @@
 .ps-form-error {
   border: 1px solid var(--border-danger);
   border-radius: var(--radius-md);
-  color: var(--text-danger);
+  color: var(--app-danger-ink);
   padding: var(--space-3);
   margin-bottom: var(--space-3);
 }

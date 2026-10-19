@@ -381,14 +381,15 @@ class ReusableRestTreeBrowserTest : BrowserSuite() {
         val gutter =
             page.evaluate(
                 """() => {
-                  const probe = document.createElement('div'); probe.style.setProperty('padding-left', 'var(--gap-md)');
+                  const probe = document.createElement('div'); probe.style.setProperty('padding-left', 'var(--app-main-pad)');
                   document.body.append(probe); const expected = parseFloat(getComputedStyle(probe).paddingLeft); probe.remove();
                   const main = getComputedStyle(document.getElementById('app-main'));
                   return [expected, parseFloat(main.paddingLeft), parseFloat(main.paddingRight)];
                 }""",
             ) as List<*>
         println("465-phone-gutter expected/left/right=$gutter")
-        ((gutter[0] as Number).toDouble() > 0) shouldBe true
+        // #573: the phone gutter is the band token, 20px at 760 and below (it was --gap-md, 16).
+        (gutter[0] as Number).toDouble() shouldBe 20.0
         (gutter[1] as Number).toDouble() shouldBe (gutter[0] as Number).toDouble()
         (gutter[2] as Number).toDouble() shouldBe (gutter[0] as Number).toDouble()
         width("app-main") shouldBe 390
