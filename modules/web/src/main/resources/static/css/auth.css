@@ -1,0 +1,186 @@
+/* #619 — approved companion login, record §13 and the 2026-10-16 prototype.
+   Ceremony-only geometry; colours, type, spacing and motion use the design system. */
+:root {
+  /* Record/prototype: independent 88px ceremony header. */
+  --app-auth-header: 5.5rem;
+  /* Record/prototype: 72px page footer. */
+  --app-auth-footer: 4.5rem;
+  /* Record/prototype: 40px desktop story heading. */
+  --app-auth-hero: 2.5rem;
+  /* Record/prototype: 44px minimum touch control. */
+  --app-auth-control: 2.75rem;
+  /* Record/prototype: 360px sign-in content at the reference viewport. */
+  --app-auth-form: 22.5rem;
+  /* Record/prototype: 380px phone / wide-desktop form maximum. */
+  --app-auth-form-phone: 23.75rem;
+  /* Record/prototype: 500px story content maximum. */
+  --app-auth-story: 31.25rem;
+  /* Record/prototype: 1440px page maximum. */
+  --app-auth-page: 90rem;
+  /* Record/prototype: desktop story / sign-in split. */
+  --app-auth-story-share: 54%;
+  --app-auth-form-share: 46%;
+  /* Record/prototype: desktop 48px gutters. */
+  --app-auth-gutter: var(--space-12);
+  /* Record/prototype: 14px dotted preview ground. */
+  --app-auth-dot-cell: 0.875rem;
+  /* Record/prototype: subpixel illustrative grid dots. */
+  --app-auth-dot-radius: 0.04375rem;
+}
+
+.app-auth-body { background: var(--surface-page); color: var(--text-primary); }
+.app-auth {
+  min-height: 100dvh;
+  display: grid;
+  grid-template-rows: var(--app-auth-header) 1fr var(--app-auth-footer);
+}
+.app-auth-header, .app-auth-footer {
+  width: 100%;
+  max-width: var(--app-auth-page);
+  margin-inline: auto;
+  padding-inline: var(--app-auth-gutter);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-6);
+}
+.app-auth-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-weight: var(--weight-bold);
+  font-size: var(--text-base);
+  letter-spacing: var(--tracking-tight);
+  color: var(--text-primary);
+  text-decoration: none;
+}
+.app-auth-docs {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--app-text-support);
+  color: var(--text-secondary);
+  text-decoration: none;
+}
+.app-auth-docs:hover { color: var(--text-primary); }
+.app-auth-main { display: flex; align-items: center; justify-content: center; min-height: 0; }
+.app-auth-main .app-center { min-height: 0; width: 100%; padding: var(--space-6); }
+.app-auth-footer { color: var(--text-muted); font-size: var(--app-text-badge); }
+
+.app-login {
+  width: 100%;
+  max-width: var(--app-auth-page);
+  align-self: stretch;
+  margin-inline: auto;
+  display: grid;
+  grid-template-columns: var(--app-auth-story-share) var(--app-auth-form-share);
+  min-width: 0;
+}
+.app-login-story {
+  background: var(--surface-default);
+  border-right: var(--space-px) solid var(--app-line-decorative);
+  display: flex;
+  align-items: center;
+  padding: var(--space-12) var(--app-auth-gutter) var(--space-16);
+  min-width: 0;
+}
+.app-login-story-inner { max-width: var(--app-auth-story); width: 100%; margin-inline: auto; }
+.app-login-story .app-eyebrow { display: flex; align-items: center; gap: var(--space-2); margin: 0 0 var(--space-5); }
+.app-login-story .app-eyebrow::before { content: ""; width: var(--space-5); height: var(--space-0-5); background: var(--brand); flex-shrink: 0; }
+.app-login-story h2 {
+  font-size: var(--app-auth-hero);
+  line-height: var(--leading-tight);
+  letter-spacing: var(--tracking-tight);
+  font-weight: var(--weight-bold);
+  margin: 0 0 var(--space-5);
+}
+.app-login-story h2 span { color: var(--brand); }
+.app-login-intro { font-size: var(--text-sm); line-height: var(--leading-relaxed); color: var(--text-secondary); margin: 0 0 var(--space-10); }
+.app-login-preview { background: var(--surface-page); border: var(--space-px) solid var(--border-default); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); overflow: hidden; }
+.app-login-preview-bar { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-3) var(--space-4); border-bottom: var(--space-px) solid var(--app-line-decorative); font-size: var(--app-text-badge); color: var(--text-secondary); }
+.app-login-preview-label { display: flex; align-items: center; gap: var(--space-2); }
+.app-login-preview-label .ds-icon { color: var(--brand); }
+.app-login-example { font-size: var(--app-text-meta); color: var(--text-muted); }
+.app-login-preview-body { padding: var(--space-5); }
+.app-login-preview-title { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.app-login-preview-title b { font-size: var(--app-text-support); }
+.app-login-status { font-size: var(--app-text-meta); color: var(--accent-success); background: var(--accent-success-bg); border-radius: var(--radius-sm); padding: var(--space-1) var(--space-2); white-space: nowrap; }
+.app-login-preview-subtitle { color: var(--text-muted); font-family: var(--font-mono); font-size: var(--app-text-badge); margin: var(--space-1) 0 var(--space-5); overflow-wrap: anywhere; }
+.app-login-steps { display: grid; grid-template-columns: 1fr var(--space-6) 1fr var(--space-6) 1fr; align-items: center; padding-block: var(--space-6); background-image: radial-gradient(var(--grid-dot) var(--app-auth-dot-radius), transparent var(--app-auth-dot-radius)); background-size: var(--app-auth-dot-cell) var(--app-auth-dot-cell); }
+.app-login-step { background: var(--surface-raised); border: var(--space-px) solid var(--border-default); border-radius: var(--radius-md); padding: var(--space-3); min-width: 0; }
+.app-login-step .ds-icon { color: var(--brand); display: block; margin-bottom: var(--space-3); }
+.app-login-step b { display: block; font-size: var(--app-text-badge); font-weight: var(--weight-normal); }
+.app-login-step small { display: block; font-size: var(--app-text-meta); color: var(--text-muted); margin-top: var(--space-1); }
+.app-login-connector { height: var(--space-px); background: var(--border-default); position: relative; }
+.app-login-connector::after { content: ""; position: absolute; right: 0; top: calc(0px - var(--space-1)); width: var(--space-2); height: var(--space-2); border-top: var(--space-px) solid var(--border-default); border-right: var(--space-px) solid var(--border-default); transform: rotate(45deg); }
+.app-login-result { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding-top: var(--space-4); margin-top: var(--space-2); border-top: var(--space-px) solid var(--app-line-decorative); font-size: var(--app-text-badge); color: var(--text-muted); }
+.app-login-result span { display: flex; gap: var(--space-2); align-items: center; }
+.app-login-result .ds-icon { color: var(--accent-success); }
+.app-login-caption { margin: var(--space-5) 0 0; color: var(--text-secondary); font-size: var(--app-text-support); line-height: var(--leading-relaxed); }
+.app-login-caption strong { color: var(--text-primary); font-weight: var(--weight-bold); }
+.app-login-signin { padding: var(--space-12) var(--app-auth-gutter) var(--space-16); display: flex; align-items: center; min-width: 0; }
+.app-login-form { width: 100%; max-width: var(--app-auth-form); margin-inline: auto; font-size: var(--app-text-ui); }
+.app-login-form > .app-eyebrow { margin: 0 0 var(--space-3); }
+.app-login-form h1 { font-size: var(--text-3xl); font-weight: var(--weight-bold); line-height: var(--leading-tight); letter-spacing: var(--tracking-tight); margin: 0 0 var(--space-3); }
+.app-login-welcome { font-size: var(--app-text-ui); color: var(--text-secondary); margin: 0 0 var(--space-8); }
+.app-login-form .ds-button { min-height: var(--app-auth-control); width: 100%; display: flex; align-items: center; justify-content: center; gap: var(--space-3); border-radius: var(--radius-md); font-size: var(--app-text-ui); }
+.app-login-provider { background: var(--surface-inset); border: var(--space-px) solid var(--border-default); box-shadow: var(--shadow-xs); margin-bottom: var(--space-2); color: var(--text-primary); text-decoration: none; }
+.app-login-provider:hover { background: var(--surface-hover); border-color: var(--border-focus); }
+.app-login-separator { display: flex; align-items: center; gap: var(--space-4); margin-block: var(--space-6); color: var(--text-muted); font-size: var(--app-text-badge); }
+.app-login-separator::before, .app-login-separator::after { content: ""; height: var(--space-px); background: var(--border-subtle); flex: 1; }
+.app-login-field { margin-bottom: var(--space-5); }
+.app-login-field label { display: block; font-size: var(--app-text-ui); margin-bottom: var(--space-2); color: var(--text-primary); }
+.app-login-input-wrap { display: flex; align-items: center; min-height: var(--app-auth-control); border: var(--space-px) solid var(--border-default); border-radius: var(--radius-md); background: var(--surface-inset); }
+.app-login-input-wrap:focus-within { border-color: var(--border-focus); box-shadow: var(--focus-ring); }
+.app-login-input-wrap.invalid { border-color: var(--border-danger); }
+.app-login-form .ds-input { min-height: var(--app-auth-control); width: 100%; min-width: 0; border: 0; background: transparent; box-shadow: none; outline: none; padding: var(--space-3); font-size: var(--app-text-ui); border-radius: var(--radius-md); }
+.app-login-form .ds-input:focus { border: 0; box-shadow: none; outline: none; }
+.app-login-toggle { min-height: var(--app-auth-control); align-self: stretch; display: flex; align-items: center; gap: var(--space-2); font-size: var(--app-text-badge); color: var(--text-secondary); padding-inline: var(--space-3); background: transparent; border: 0; border-radius: var(--radius-md); cursor: pointer; }
+.app-login-toggle[hidden] { display: none; }
+.app-login-toggle:hover { color: var(--text-primary); }
+.app-login-field-error { color: var(--app-danger-ink); font-size: var(--app-text-badge); margin: var(--space-2) 0 0; }
+.app-login-access { margin: var(--space-6) 0 0; text-align: center; font-size: var(--app-text-support); color: var(--text-secondary); line-height: var(--leading-relaxed); }
+.app-login-self-hosted { border-top: var(--space-px) solid var(--app-line-decorative); margin-top: var(--space-8); padding-top: var(--space-5); display: flex; align-items: flex-start; gap: var(--space-2); font-size: var(--app-text-badge); line-height: var(--leading-relaxed); color: var(--text-muted); }
+.app-login-self-hosted .ds-icon { flex-shrink: 0; margin-top: var(--space-0-5); }
+
+@media (min-width: 1700px) {
+  :root {
+    /* Record/prototype: 44px hero and 530px story on wide desktops. */
+    --app-auth-hero: 2.75rem;
+    --app-auth-story: 33.125rem;
+    --app-auth-form: var(--app-auth-form-phone);
+  }
+  .app-login-story, .app-login-signin { padding-block: var(--space-16) var(--space-24); }
+}
+@media (max-width: 1050px) {
+  :root { --app-auth-hero: var(--space-8); --app-auth-gutter: var(--space-8); }
+  .app-login-steps { grid-template-columns: 1fr var(--space-3) 1fr var(--space-3) 1fr; }
+  .app-login-step { padding: var(--space-2); }
+  .app-login-intro { font-size: var(--app-text-ui); }
+}
+@media (max-width: 800px) {
+  .app-auth { grid-template-rows: var(--app-auth-header) 1fr auto; }
+  .app-auth-header, .app-auth-footer { padding-inline: var(--space-6); }
+  .app-login { grid-template-columns: 1fr; }
+  .app-login-story { display: none; }
+  .app-login-signin { padding: var(--space-8) var(--space-6) var(--space-12); }
+  .app-login-form { max-width: var(--app-auth-form-phone); }
+  .app-login-form .ds-input { font-size: var(--text-base); }
+  .app-auth-brand { font-size: var(--text-sm); }
+  .app-auth-docs { display: none; }
+  .app-auth-footer { padding-block: var(--space-6); gap: var(--space-3); flex-wrap: wrap; }
+}
+@media (max-height: 760px) and (min-width: 801px) {
+  :root {
+    /* Record/prototype: 72px header, 52px footer and 34px hero on short windows. */
+    --app-auth-header: 4.5rem;
+    --app-auth-footer: 3.25rem;
+    --app-auth-hero: 2.125rem;
+  }
+  .app-login-story, .app-login-signin { padding-block: var(--space-5) var(--space-6); }
+  .app-login-intro, .app-login-welcome { margin-bottom: var(--space-6); }
+  .app-login-steps { padding-block: var(--space-4); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-auth *, .app-auth *::before, .app-auth *::after { transition: none !important; animation: none !important; }
+}
