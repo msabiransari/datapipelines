@@ -45,7 +45,8 @@ class OverviewApiBrowserTest : RestTreeBrowserFixture() {
         // A fresh workspace: every tile a zero, the two recent sections their empty lines, and
         // the three steps still there — the page teaches before there is anything to count.
         listOf("endpoints", "release", "draft", "keys").forEach { key -> count(key) shouldBe "0" }
-        page.locator("[data-count='keys'] dt").innerText().trim() shouldBe "Workspace keys"
+        // textContent, not innerText: the tile's .ds-caption uppercases the label on screen.
+        page.locator("[data-count='keys'] dt").textContent().trim() shouldBe "Workspace keys"
         val main = page.locator("main").innerText()
         main shouldContain "Nothing is published yet."
         main shouldContain "No keys yet."
@@ -102,10 +103,18 @@ class OverviewApiBrowserTest : RestTreeBrowserFixture() {
     private fun shots() {
         val dir = Paths.get("build", "browser-evidence")
         Files.createDirectories(dir)
+        // A fresh load at each width (a live resize keeps the wider layout's menu state), then the
+        // top, the access steps and the MCP card: <main> scrolls inside the frame, so a full-page
+        // shot would show only the first screen.
         SHOT_SIZES.forEach { (width, height) ->
             page.setViewportSize(width, height)
-            page.evaluate("() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))")
-            page.screenshot(Page.ScreenshotOptions().setPath(dir.resolve("585-api-home-$width.png")).setFullPage(true))
+            page.reload()
+            page.waitForSelector(".app-overview[data-overview='api-console']")
+            listOf("top" to null, "access" to "[data-overview-access]", "mcp" to "[data-mcp-connection]").forEach { (part, anchor) ->
+                anchor?.let { page.locator(it).scrollIntoViewIfNeeded() }
+                page.evaluate("() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))")
+                page.screenshot(Page.ScreenshotOptions().setPath(dir.resolve("585-api-home-$width-$part.png")))
+            }
         }
         // Back to the fixture's viewport (readyTree's) for the rest of the case.
         page.setViewportSize(FIXTURE_WIDTH, FIXTURE_HEIGHT)
