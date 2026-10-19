@@ -259,7 +259,7 @@ class DashboardWorkspaceBrowserTest : DashboardBrowserSuite() {
 
     @Test
     @Order(7)
-    fun `#608 - the Keys tab's sr-only Edit header renders nothing a pointer can hit`() {
+    fun `#608 #617 - the Keys tab's sr-only Edit header renders nothing a pointer can hit`() {
         startTrace()
         // The Keys tab floors at dashboard.key.bind (a workspace admin's surface): ready()'s
         // seeded admin is the surface's reader, and the fixtures below ride its session.
@@ -290,16 +290,16 @@ class DashboardWorkspaceBrowserTest : DashboardBrowserSuite() {
 
         page.navigate("$baseUrl/dashboards/$board?tab=keys")
         page.waitForSelector("#dp-pane-keys:not([hidden]) .ds-table")
-        // The Edit header's span, found by STRUCTURE so the case measures the element the
-        // author meant whatever its class. The house table's sort decoration (data-table.js)
-        // moves the th's own children INSIDE button.dt-sort > span and adds its resizer as a
-        // direct child of the th — the authored span is the label span's own child.
-        // Screenshot before the assertions, so a red run still leaves the "before" picture.
-        val headerSpan = page.locator("#dp-pane-keys .ds-table thead tr th:last-child .dt-sort > span > span")
+        val header = page.locator("#dp-pane-keys .ds-table thead tr th:last-child")
+        header.textContent().trim() shouldBe "Edit"
+        page.locator("#dp-pane-keys .ds-table thead .dt-sort").first().waitFor()
+        withClue("#617 Edit header has no .dt-sort") { header.locator(".dt-sort").count() shouldBe 0 }
+        header.getAttribute("aria-sort") shouldBe null
+        val headerSpan = page.locator("#dp-pane-keys .ds-table thead tr th:last-child > span").first()
         headerSpan.waitFor()
         headerSpan.scrollIntoViewIfNeeded()
-        val shot = Paths.get("build", "reports", "608-dashboard-keys-header-row.png")
-        headerSpan.screenshot(Locator.ScreenshotOptions().setPath(shot))
+        val shot = Paths.get("build", "reports", "617-dashboard-keys-header-row.png")
+        page.locator("#dp-pane-keys .ds-table thead").screenshot(Locator.ScreenshotOptions().setPath(shot))
 
         // Geometry FIRST (the base's undefined class is red here: visible text, a text-sized
         // box), then the class pin and the accessible text.
@@ -320,6 +320,12 @@ class DashboardWorkspaceBrowserTest : DashboardBrowserSuite() {
         }
         headerSpan.getAttribute("class") shouldContain "u-sr-only"
         headerSpan.textContent().isNotBlank() shouldBe true
+        headerSpan.textContent() shouldBe "Edit"
+        val firstRow = page.locator("#dp-pane-keys .ds-table tbody tr").first()
+        val before = firstRow.innerText()
+        header.click()
+        firstRow.innerText() shouldBe before
+        header.getAttribute("aria-sort") shouldBe null
     }
 
     @Test
