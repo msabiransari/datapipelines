@@ -1,9 +1,9 @@
 # UI Screens Inventory
 
-**Status:** v1.174
+**Status:** v1.175
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
-**Last updated:** 2026-10-19 (#584; #613; #509; #608; #614 + #611; #612; #615); 2026-10-18 (#583; #573; #607; #606; #565; #582; #581; #580; #579); 2026-10-17 (#556; #578; #554); 2026-10-16 (#551 merge follow-up; #551; #555; #552; #553; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
+**Last updated:** 2026-10-19 (#585; #584; #613; #509; #608; #614 + #611; #612; #615); 2026-10-18 (#583; #573; #607; #606; #565; #582; #581; #580; #579); 2026-10-17 (#556; #578; #554); 2026-10-16 (#551 merge follow-up; #551; #555; #552; #553; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
 ---
 
 ## 1. Purpose
@@ -1963,9 +1963,9 @@ Each row shows the pipeline's version here and on the target (`absent` when the 
 
 | Attribute | Value |
 |---|---|
-| URL | `GET /api-console` |
+| URL | `GET /api-console` — the API home's **View all** (§4.18a); the menu's API item lands on `/overview/api-console` since #585 and lights on both |
 | Auth required | Yes — `read` (`endpoint.read`), the same permission `EndpointsController.list` declares |
-| Purpose | Everything a program uses to talk to this workspace, in one place: published endpoints, the API keys associated with each, the MCP connection |
+| Purpose | The API family's full listing: published endpoints, the API keys associated with each, the legacy paths and the MCP connection. The family's home — counts, charts, the newest endpoints and keys, and how a program gets access — is §4.18a; this page keeps its URL and its table |
 | Design primitives | `.ds-card`, the data table (§3.7), `.app-chip`, `.app-code`, `.app-empty` |
 | JS | None |
 | htmx | None — since 179 the page is a read-only inventory. The key verbs moved to `/api-keys` (§4.19) |
@@ -2019,6 +2019,81 @@ Two cards.
    config next to a live API key. Unset, the card shows the `{host}/mcp` placeholder the
    marketing site already uses rather than guessing. The key the config wants is created on
    the Keys page (§4.19 — keys v2 A15 retired the top-bar chip and the login mint).
+
+Since #585 the card is ONE fragment, `partials/mcp-connection.html` (`card(note)`), stamped by
+`McpConnectionCard` and shared with the API home (§4.18a): the config, the placeholder and the
+tool count cannot drift between the two pages; each page passes its own sentence under the
+config.
+
+### 4.18a API home (#585)
+
+| Attribute | Value |
+|---|---|
+| URL | `GET /overview/api-console` — the API menu item's destination; **View all** leads to `/api-console` (§4.18) |
+| Auth required | Yes — any member (`endpoint.read`; [Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative) names the route in the `endpoint.read` row's Surfaces cell). GET only; nothing on the page writes |
+| Purpose | The API family's home: how many paths are published and what they serve, which keys the reader can see by kind, the newest of each, how a program gets access, and the MCP connection |
+| Design primitives | the §4.25 frame (`overview/family.html`'s loops, the `.app-overview-*` rules, design tokens only); the MCP card is the console's fragment (`.ds-card`, `.app-chip`, `.app-code`) |
+| JS | `overview.mjs` (Copy prompt), through the page-assets template (§3.0); no other script |
+| htmx | none of its own — every link is a boosted navigation |
+
+**Two reads, each failing on its own.** The endpoint numbers are the console's own reads —
+`EndpointPublishService.list` and `listLegacy`, behind the promoter lens, so a promoter's numbers
+are the admitted pipelines' endpoints and the frame says "Admitted inventory". The key numbers
+are the Keys page's narrowing (`keysVisibleTo`: the whole workspace with `api_key.read`,
+otherwise the reader's own `mcp` keys). The keys read is NOT lensed. A failed endpoints read is
+the frame's unavailable inventory (no tile, no number, the sentence "The endpoints could not be
+read."); a failed keys read drops only the keys tile, empties only the keys chart (caption "Keys
+by kind — unavailable") and says so in Recently created keys. The endpoints card still answers.
+
+**Inventory.** Four tiles: **Endpoints** (every published path, legacy ones included — the four
+state bars added together; links the console), **Serving a release**, **Serving a draft**, and
+**Your keys** — or **Workspace keys** for a reader holding `api_key.read` — counting every key the
+Keys page lists for that reader, live, expired and revoked (links `/api-keys`). Two charts:
+**Endpoints by state** — serving a release, serving a draft (the pointer names a draft, D63),
+nothing to serve (no pointer), legacy path (a stored path the grammar refuses, #274), each bar
+linking the console. **Keys by kind** — LIVE keys only, one bar per `ApiKeyKind` (a zero is a
+zero), each linking the Keys page, its note naming what it did not count ("Not counted: N
+expired, M revoked."). A key is revoked before it is expired: one key, one bucket. There is no
+calls chart: call counts are not recorded anywhere in the system (#603 holds it), and the guide
+says so.
+
+**Recently published / Recently created keys.** Up to five each, `created_at` newest first. An
+endpoint entry reads `/api<path> · <pipeline> · v<n>[ · draft]` or `· nothing to serve` and
+links the console. Legacy rows are not listed, and a legacy row's `retired_reason` never
+renders here. A key entry reads `<name> · <kind> · live|expired|revoked` and links the Keys
+page. A key's id, prefix, hash or sealed copy never reaches the model, so no `dpk_` appears on
+the page beyond the config's placeholder. `RecentItem` carries one name, so the secondary facts
+ride in it. There is no Review drafts.
+
+**Guide.** `overview/guide-api-console.html`: **What the API is for**; **How a program gets
+access** — three steps naming who does each: publish (an agent's `endpoints_create`, or a
+program's `POST /api/v1/endpoints`; there is no form in the app), create and associate a key (a
+workspace admin on the Keys page, with a Manage API keys link for a workspace or super admin;
+no agent mints a key), call it (`GET /api/<category>/<version>/<path>` with the key header).
+Then **Publish an endpoint with your agent**: an editable starter prompt that follows the
+skill's endpoints flow and stops at publishing. It never asks the agent to create, associate or
+copy a key. The shared MCP card follows, with no Copy button: `overview.mjs` copies a
+textarea, and the config is a `<pre>`. Related: Pipelines, Dashboards, and the REST, MCP and
+Claude Code references.
+
+**Not a browser family.** Like Datasources (§4.5d), the API is not a `browserFamily`: the browser
+and its opener stay hidden; the rail's API item lights on `/api-console` and
+`/overview/api-console` alike (the layout's `startsWith` rule) and the crumb names API.
+
+**States.** An empty workspace renders four "0" tiles, zero-width bars, "Nothing is published
+yet. The three steps above say how." and "No keys yet. A key is created by a person on the Keys
+page." The three steps are always shown.
+
+Guards: `OverviewApiInventoryTest` (the buckets, every kind, live/expired/revoked once, the Keys
+page's narrowing by role), `OverviewApiControllerTest` (tiles, charts, recent entries, the
+independent failures, no key id or hash in the model), `OverviewApiRenderTest` (the guide, the
+prompt's words, the shared card's placeholder and catalog size, exactly one `dpk_`, the manage
+link by role, the unavailable and empty states), `OverviewApiE2eTest` (real database and lens:
+for viewer, author, promoter and workspace admin the tiles equal the console's rows and the Keys
+page's rows; a second workspace leaks nothing), `ShellRenderTest` (the item lights on both paths,
+the browser hidden), `OverviewApiBrowserTest` (the rail lands here; a key counted by name, its
+value nowhere; the chip equals the console's; Copy prompt with zero requests; screenshots at
+1512, 900 and 390), `AppShellBrowserTest` (rail → home → View all → console).
 
 ---
 
@@ -2580,6 +2655,7 @@ served (inventory only) and its menu item still links the catalog.
 | Parameter Sets | #582 | `overview/guide-parameter-sets.html` — what parameter sets are for, a starter prompt that drafts a set and checks it by evaluating; related: Templates, Dashboards | `ParameterSetRepository.recent`, the same `RecentSource` rule; each entry links `/parameter-sets/<id>` | `/parameter-sets?lifecycle=` — every bucket but `discarded` (§4.23); guards `OverviewParameterSetsRenderTest`, `OverviewParameterSetsE2eTest`, `OverviewParameterSetsBrowserTest` |
 | Datasources (#583) | #583 | `overview/guide-datasources.html` — what datasources are for, a register-first starter prompt; related: Pipelines, Templates, Dashboards, MCP server reference | `DatasourceRepository.recentGrants` — GRANTS, not modifications: `granted_at` newest first, name ASC tie-break, each entry linking `/datasources/<name>`, no lifecycle badge | no `?lifecycle=` filter — the By-dialect bars link the catalog's `?dialect=` filter and the health bars stay unlinked; NOT a browser family (the browser never opens); guards `DatasourceOverviewControllerTest`, `OverviewDatasourcesRenderTest`, `DatasourceRepositoryIntegrationTest`, `WorkspaceSurfacesE2eTest`, `OverviewDatasourcesBrowserTest` |
 | Schedules (#584) | #584 | `overview/guide-schedules.html` — what schedules are for, How to create one (a person's steps, New schedule for an authoring role); NO agent section or starter prompt; related: Pipelines, Executions (a role that reads them), REST reference | `ScheduleService.summary` — Up next (enabled and unblocked, soonest first) and Recently changed (`updated_at`, newest first), each linking `/schedules?id=<id>`, no lifecycle badge | no `?lifecycle=` filter — a schedule has no lifecycle; the By-condition and Last-run bars stay unlinked; NOT a browser family; guards `OverviewSchedulesControllerTest`, `OverviewSchedulesRenderTest`, `ScheduleSummaryIntegrationTest`, `OverviewSchedulesE2eTest`, `OverviewSchedulesBrowserTest` (§4.20a) |
+| API (#585) | #585 | `overview/guide-api-console.html` — what the API is for, How a program gets access (publish / key / call, who does each), a publish starter prompt that never handles a key, the shared MCP card; related: Pipelines, Dashboards, REST/MCP/Claude Code references | two sections, not `RecentSource`: Recently published (`EndpointPublishService.list`, lensed, valid rows only, links `/api-console`) and Recently created keys (the Keys page's narrowing, by name, links `/api-keys`) | no `?lifecycle=` filter — the state bars link the console, the kind bars `/api-keys`; NOT a browser family; guards `OverviewApiInventoryTest`, `OverviewApiControllerTest`, `OverviewApiRenderTest`, `OverviewApiE2eTest`, `OverviewApiBrowserTest` (§4.18a) |
 
 ## 5. htmx Usage Pattern
 
@@ -2746,6 +2822,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-19 | v1.175 | #585 the API home — renumbered at merge after #509's v1.172, then after #584's v1.174 | **§4.18a (new):** `GET /overview/api-console` — Endpoints, Serving a release, Serving a draft and Your keys / Workspace keys tiles; Endpoints by state and Keys by kind (live only) charts; Recently published and Recently created keys; How a program gets access; a publish starter prompt that stops at publishing; the shared MCP card. Each of the two reads fails on its own. **§4.18:** the console is the home's View all; its MCP card is one shared fragment. **§4.25:** the API row of the **Families as built** table. |
 | 2026-10-19 | v1.174 | #584 the Schedules home — renumbered at merge after #509's v1.172, then after #613's v1.173 | **§4.20a (new):** `GET /overview/schedules` on the §4.25 frame — four tiles (Schedules, Enabled, Paused, Blocked), By condition and Last run (five buckets, each schedule once by its newest run), Up next and Recently changed linking the explorer's leaf, a person's How to create one with no agent section; every number from one `ScheduleService.summary` over §20.1's own list through the reader's lens, an over-cap workspace unavailable rather than short. **§4.20:** the menu's Schedules item lands on the home; the explorer is its View all. **§4.25 Families as built:** the Schedules row. |
 | 2026-10-19 | v1.173 | #613 the phone top bar pads `--app-main-pad`; the wide-window heading-edge sentence (owner rulings 2026-10-19) — renumbered at merge after #509's v1.172 | **§3.6:** the ≤ 760 px row's Topbar cell names the bar's side padding — `--app-main-pad`, 20px, the bar and `<main>` share a left edge (#613) — and the Main gutter cell now reads "the top bar pads the same token (#613)" where it named the bar's own `--gap-md` before; one sentence under the table records ruling 1's second half: the desktop bar's 24px `--gap-lg` is NOT banded, measured identical at the 1512 and 1600 bands while `<main>` moves 32 → 40. **§3.1 item 1:** the record-only wide-window sentence — on a window wider than the frame-bind width (≈1702px, menu expanded, browser hidden) a canvas page's heading and a framed page's heading no longer share a left edge, by design (record §4); the tests measure 1512, where they match. **v1.166's row annotated** where it named the phone bar's own `--gap-md` (banded since this version). `MainFrameBrowserTest` +3 cases — the bar at 390 (one content left edge with `<main>`, first child on the edge), the bar above 760 (24 at both bands), the anonymous bar at 390 (the error-page shell) — red 2/12 on the old code (bar.padLeft 16, bar.contentLeft − main.contentLeft −4, anon.padLeft 16), green 12/0 at the tip. |
 | 2026-10-19 | v1.172 | #509 danger text token — renumbered at merge after #583's v1.167, then after #608's v1.171 | **§3.5:** danger TEXT reads one app token, `--app-danger-ink`: the design system's `--text-danger` in dark (the #502 chip's 3.52:1 becomes 8.94:1), and in light that red at 3% lower oklch lightness (owner ruling 2026-10-19). With the unadjusted red, light and saas miss 4.5:1 on the inset and hover surfaces and ocean misses on its chip tint too; worst light case is now ocean at 4.65. Twenty text sites move, seven of them in `pipeline-editor.css` (fallback-spelled reads the inventory grep missed); borders and fills keep `--accent-danger`, and the vendored white `--accent-danger-text` is untouched. `DangerInkContrastBrowserTest` and `DangerInkSourceAuditTest` (new). No route, permission or role changed. |
