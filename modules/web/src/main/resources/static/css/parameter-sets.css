@@ -47,7 +47,7 @@
 
 .ps-card {
   background: var(--surface-raised);
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--border-default);
   border-radius: var(--radius-lg);
   padding: var(--space-4);
   min-width: 0;
