@@ -279,7 +279,6 @@
           <span class="app-ws-avatar" aria-hidden="true"
                 th:text="${#strings.toUpperCase(#strings.substring(activeWorkspace, 0, activeWorkspace.length() >= 2 ? 2 : 1))}">TS</span>
           <span class="app-ws-text app-rail-label">
-            <small class="app-workspace-label">workspace</small>
             <!-- 114 §C.4 — the role you hold HERE, next to the name of where "here" is. It
                  is a property of the (workspace, person) pair, so it belongs beside the
                  switcher and nowhere else; `data-role` is what the tests read. A super
