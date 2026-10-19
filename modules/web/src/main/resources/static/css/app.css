@@ -4350,3 +4350,75 @@ pre.tf-pane-input {
   .app-overview-bar { grid-template-columns: minmax(0, 1fr) auto; row-gap: var(--gap-xs); }
   .app-overview-bar-track { grid-column: 1 / -1; grid-row: 2; }
 }
+/* #598a — the Pipelines home's stacked charts (OverviewStacked; ui-screens §4.25): the total line,
+   then per chart its caption, the rows (name / track / numbers, the bar rows' grid), a legend
+   naming every series with a swatch, and the note. Each row is one SVG whose rects tile the
+   row's width as attributes (the CSP admits no style), painted by the same four lifecycle tokens
+   as the bars above — no new colour, never danger red on a draft. Rows keep the bar chart's row
+   height (a quarter of the 192px band), so the lifecycle chart with its legend stays inside the
+   record's quiet 160–220px and the five maturity rows read at the same rhythm. On a phone the
+   numbers wrap under the track, as the bars do. */
+.app-overview-stacked-chart { min-width: 0; }
+.app-overview-stacked-chart + .app-overview-stacked-chart { margin-top: var(--gap-lg); }
+.app-overview-stacked-total {
+  margin: 0 0 var(--gap-xs);
+  font-size: var(--text-xl);
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
+}
+.app-overview-stacked {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-auto-rows: minmax(calc(var(--overview-chart-h) / 4), auto);
+  align-items: center;
+}
+.app-overview-stack {
+  display: grid;
+  grid-template-columns: minmax(8rem, 14rem) minmax(0, 1fr) minmax(3rem, auto);
+  align-items: center;
+  gap: var(--gap-sm);
+  min-width: 0;
+}
+.app-overview-stack-name { font-size: var(--app-text-ui); }
+.app-overview-stack-track {
+  display: block;
+  width: 100%;
+  height: var(--space-3);
+  background: var(--chart-grid);
+  border-radius: var(--app-radius-badge);
+}
+.app-overview-stacked[data-stacked="lifecycle"] .app-overview-stack-track { height: var(--space-4); }
+.app-overview-stack-v { text-align: end; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.app-overview-stack-v b { font-weight: var(--weight-semibold); }
+.app-overview-stack-detail { color: var(--text-muted); font-size: var(--app-text-support); }
+.app-overview-stack-fill[data-tone="draft"] { fill: var(--overview-draft); }
+.app-overview-stack-fill[data-tone="released"] { fill: var(--overview-released); }
+.app-overview-stack-fill[data-tone="mixed"] { fill: var(--overview-mixed); }
+.app-overview-stack-fill[data-tone="discarded"] { fill: var(--overview-discarded); }
+.app-overview-legend {
+  list-style: none;
+  margin: var(--gap-xs) 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap-xs) var(--gap-md);
+  font-size: var(--app-text-support);
+}
+.app-overview-legend li { display: inline-flex; align-items: center; gap: var(--gap-xs); min-width: 0; }
+.app-overview-legend-swatch {
+  flex: none;
+  width: var(--space-3);
+  height: var(--space-3);
+  border-radius: var(--app-radius-badge);
+}
+.app-overview-legend-v { font-variant-numeric: tabular-nums; font-weight: var(--weight-semibold); }
+.app-overview-legend [data-tone="draft"] .app-overview-legend-swatch { background: var(--overview-draft); }
+.app-overview-legend [data-tone="released"] .app-overview-legend-swatch { background: var(--overview-released); }
+.app-overview-legend [data-tone="mixed"] .app-overview-legend-swatch { background: var(--overview-mixed); }
+.app-overview-legend [data-tone="discarded"] .app-overview-legend-swatch { background: var(--overview-discarded); }
+@media (max-width: 760.98px) {
+  .app-overview-stack { grid-template-columns: minmax(0, 1fr) auto; row-gap: var(--gap-xs); }
+  .app-overview-stack-track { grid-column: 1 / -1; grid-row: 2; }
+}
