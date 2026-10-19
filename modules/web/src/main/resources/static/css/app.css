@@ -3838,7 +3838,8 @@ button.app-busy::after {
       "main";
   }
 
-  /* #573: the record §4 phone band — <main> pads 20 (the top bar keeps its own 16 below). */
+  /* #573: the record §4 phone band — <main> AND the top bar pad 20 — #613 (c): the bar shares
+     the content's left edge. */
   :root {
     --app-main-pad: var(--space-5);
   }
@@ -3849,7 +3850,7 @@ button.app-busy::after {
   }
 
   .app-topbar {
-    padding-inline: var(--gap-md);
+    padding-inline: var(--app-main-pad);
   }
 
   /* --- the drawer --- */

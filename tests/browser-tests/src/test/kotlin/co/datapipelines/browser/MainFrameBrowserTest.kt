@@ -21,6 +21,7 @@ import java.nio.file.Paths
  * carries `app-canvas` (the editors, the explorer, the board, the execution result), which keeps
  * the whole track. And no full-height canvas overflows <main>: their height calcs subtract the
  * same token, which is what a band change would otherwise break by twice the difference.
+ * #613 — the phone top bar pads the same band token (one left edge with <main>); above 760 it keeps its 24.
  *
  * Every reading is printed (`573-measure|case|label|value`, the handback's base/tip table) and
  * asserted softly, so a red names every number that moved.
@@ -50,6 +51,27 @@ class MainFrameBrowserTest : DashboardBrowserSuite() {
                            innerHeight: m.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom),
                            canvasHeight: document.querySelector('.app-main > .app-canvas')?.getBoundingClientRect().height ?? 0,
                            canvas: document.querySelector('.app-main > .app-canvas') ? 1 : 0 };
+                }""",
+            ) as Map<String, Number>
+        values.forEach { (key, value) -> readings["$prefix.$key"] = value.toDouble() }
+    }
+
+    /**
+     * The top bar's computed side padding, its box's left edge and its first visible child's left
+     * edge (`#rail-open` at 390, the brand on the anonymous bar) — #613's readings.
+     */
+    @Suppress("UNCHECKED_CAST")
+    private fun readBar(prefix: String) {
+        val values =
+            page.evaluate(
+                """() => {
+                  const bar = document.querySelector('.app-topbar');
+                  const cs = getComputedStyle(bar);
+                  const r = bar.getBoundingClientRect();
+                  const first = Array.from(bar.children).find(e => e.getClientRects().length > 0);
+                  return { padLeft: parseFloat(cs.paddingLeft), padRight: parseFloat(cs.paddingRight),
+                           left: r.left,
+                           firstChildLeft: first ? first.getBoundingClientRect().left : -1 };
                 }""",
             ) as Map<String, Number>
         values.forEach { (key, value) -> readings["$prefix.$key"] = value.toDouble() }
@@ -154,6 +176,69 @@ class MainFrameBrowserTest : DashboardBrowserSuite() {
     @Test
     fun `at 760 and below main pads 20 on all four sides and the page never scrolls sideways`() {
         band("band-390", PHONE_W, PHONE_H, 20.0)
+    }
+
+    /** #613 (c): the phone bar pads the band token, so the bar and <main> share a content left edge. */
+    @Test
+    fun `at 390 the top bar pads 20 and shares main's left edge`() {
+        ready("mftop")
+        page.setViewportSize(PHONE_W, PHONE_H)
+        page.navigate("$baseUrl/pipelines")
+        page.waitForSelector(".app-main .app-page-h h1")
+        settle()
+        readMain("main")
+        readBar("bar")
+        readings["main.contentLeft"] = reading("main.left") + reading("main.padLeft")
+        readings["bar.contentLeft"] = reading("bar.left") + reading("bar.padLeft")
+        readings["bar.contentLeft - main.contentLeft"] = readings["bar.contentLeft"]!! - readings["main.contentLeft"]!!
+        printReadings("bar-390")
+        shot("613-pipelines-390-bar")
+        assertSoftly {
+            near("bar.padLeft", 20.0)
+            near("bar.padRight", 20.0)
+            near("bar.contentLeft - main.contentLeft", 0.0)
+            near("bar.firstChildLeft", readings["bar.contentLeft"]!!)
+        }
+    }
+
+    /** #613 ruling 1's second half: the desktop bar is NOT banded — 24px at every width above 760. */
+    @Test
+    fun `above 760 the top bar keeps 24 while main follows its band`() {
+        band("bar-1512", REFERENCE_W, REFERENCE_H, 32.0)
+        readings.clear() // band() printed <main>'s readings; the top bar's print alone under this case
+        readBar("bar")
+        printReadings("bar-1512-topbar")
+        near("bar.padLeft", 24.0)
+        // The same live session (a second ready() would 302 /login past the form), one band up:
+        // <main> moves to 40, the bar stays 24.
+        page.setViewportSize(WIDE_BAND_W, BAND_H)
+        page.navigate("$baseUrl/pipelines")
+        page.waitForSelector(".app-main .app-page-h h1")
+        settle()
+        readMain("main")
+        readBar("bar")
+        printReadings("bar-1600-topbar")
+        assertSoftly {
+            near("main.padLeft", 40.0)
+            near("bar.padLeft", 24.0)
+        }
+    }
+
+    /**
+     * #613: the anonymous shell's bar shares `.app-topbar`, so it moves with the declaration. Its
+     * pages are the error pages (the auth layout carries no top bar — 090 §C): the 614-signed-out
+     * case's idiom, an unknown doc slug answered 404 in the anonymous shell. A fresh context that
+     * never signs in IS anonymous.
+     */
+    @Test
+    fun `the anonymous bar at 390 pads 20 too`() {
+        page.setViewportSize(PHONE_W, PHONE_H)
+        page.navigate("$baseUrl/docs/no-such-doc-613").status() shouldBe 404
+        page.waitForSelector(".app-topbar-anon")
+        settle()
+        readBar("anon")
+        printReadings("anon-390")
+        near("anon.padLeft", 20.0)
     }
 
     /** ui-screens §3.4's old Known note measured these six screens overflowing a 390px document; none may. */
