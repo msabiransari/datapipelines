@@ -1,9 +1,9 @@
 # UI Screens Inventory
 
-**Status:** v1.180
+**Status:** v1.181
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
-**Last updated:** 2026-10-19 (#617; #609; #598a; #605; #619; #585; #584; #613; #509; #608; #614 + #611; #612; #615); 2026-10-18 (#583; #573; #607; #606; #565; #582; #581; #580; #579); 2026-10-17 (#556; #578; #554); 2026-10-16 (#551 merge follow-up; #551; #555; #552; #553; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
+**Last updated:** 2026-10-19 (#598a merge follow-up; #617; #609; #598a; #605; #619; #585; #584; #613; #509; #608; #614 + #611; #612; #615); 2026-10-18 (#583; #573; #607; #606; #565; #582; #581; #580; #579); 2026-10-17 (#556; #578; #554); 2026-10-16 (#551 merge follow-up; #551; #555; #552; #553; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
 ---
 
 ## 1. Purpose
@@ -2625,12 +2625,17 @@ row's width, with a `<title>`; each row's SVG is labelled with every part's coun
 series (the lifecycle legend with its count); each chart has its own visually hidden table (a row
 heading, one column per part, the total). The chart's words are its own: the catalog filter keeps
 `CatalogLifecycle.label`'s. Activity over time is #598b; the other families' cards are unchanged.
+Under the lifecycle chart the card says why its total can exceed the resource browser's header count:
+"The resource browser and View all count the three live parts; retired pipelines have no page." The
+header counts draft only, released only and released with draft changes (`FamilyRecentE2eTest`), and
+Retired is the discarded-only bucket (#593; `OverviewRenderTest` pins the sentence).
 
-**Links.** For Pipelines, With drafts, With releases and the Draft only, Released only and Released
-with draft changes bars link the catalog filtered to that bucket (`/pipelines?lifecycle=…`, §4.3);
+**Links.** On the four-count card (the Pipelines card's until #598a), With drafts, With releases and
+the Draft only, Released only and Released with draft changes bars link the catalog filtered to that
+bucket (`/<family>?lifecycle=…`, §4.3);
 Objects links nothing (View all is the unfiltered catalog) and Discarded only stays unlinked, since a
 discarded-only pipeline has no workspace page. An unguided family links no count or bar until its
-catalog offers the filter; Templates offers it since #579 and links like Pipelines. The Datasources
+catalog offers the filter; Templates offers it since #579 and links that way. The Datasources
 overview links differently, as its model allows: each By-dialect bar links `/datasources?dialect=`
 (the catalog's existing filter) and the health bars stay unlinked (§4.5d). Since #598a the Pipelines
 card's In development, Live and Live, changes in progress parts and legend entries link
@@ -2856,6 +2861,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-19 | v1.181 | #598a merge follow-up: §4.25 records #593's count sentence | **§4.25:** the Pipelines charts paragraph quotes the card's note on why its total can exceed the resource browser's header count (the header counts the three live parts; Retired is discarded only, with no page) — #593's acceptance asked the counting model to say what the page says; the Links paragraph's four-count sentence now names the Pipelines card's as until #598a. |
 | 2026-10-19 | v1.180 | #617 screen-reader-only headers — renumbered at merge after #609's v1.179 | **§3.7:** sort controls require visible header text; screen-reader-only labels and resize handles do not qualify. Explicit `data-sort="off"` remains. Node decision tests and the template Versions/dashboard Keys browser witnesses pin the rule. |
 | 2026-10-19 | v1.179 | #609 shared-component edge roles — renumbered at merge after #598a's v1.178 | **§3.1 item 5:** the shared components' edges take #606's three roles. Seven boundaries move from `--border-subtle` to `--border-default`: the dashboard filters pane and dock, the parameter card, the editor's minimap, view controls and dock top, and the version-row menu. The release dialog's switch and check rows read `--border-subtle` directly instead of the `--border-faint` alias (same colour). Seven edges stay separators. `ComponentBoundariesBrowserTest` is the sweep. Its four vendored-pair exceptions are tracked by #628. **§4.4:** the dock's top border is named a boundary. |
 | 2026-10-19 | v1.178 | #598a the Pipelines charts — renumbered at merge after #605's v1.177 | **§4.25:** the Pipelines card's four counts and four bars give way to a total line and two stacked charts from ONE statement — Pipelines by lifecycle (In development, Live, Live, changes in progress, Retired; the three live parts link the filtered catalog) and Pipelines by number of releases (0, 1, 2–3, 4–9, 10+, each split No draft / Draft open; only RELEASED rows count); both total the same, each with its hidden table; the promoter's lens; the guards; the Pipelines row of **Families as built**. The other families' cards are unchanged. |
