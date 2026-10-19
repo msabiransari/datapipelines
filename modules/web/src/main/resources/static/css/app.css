@@ -1107,8 +1107,8 @@ button.app-busy::after {
   padding-inline: var(--gap-md);
   border-bottom: 0;
   white-space: nowrap;
-  font-weight: var(--weight-bold);
-  font-size: var(--text-lg);
+  font-weight: var(--app-weight-emphasis);
+  font-size: var(--app-text-heading);
   letter-spacing: var(--tracking-tight);
   color: var(--text-primary);
   text-decoration: none;
@@ -1214,7 +1214,6 @@ button.app-busy::after {
   margin-left: auto;
   color: var(--text-muted);
 }
-
 
 /* The real control sits invisibly over its card: a <select> that is present to
    the accessibility tree and to Playwright, styled away so the card shows. It
