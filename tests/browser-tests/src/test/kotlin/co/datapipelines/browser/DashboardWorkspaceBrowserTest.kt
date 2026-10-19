@@ -8,6 +8,7 @@ import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldNotBeEmpty
+import io.kotest.matchers.doubles.shouldBeLessThanOrEqual
 import io.kotest.matchers.ints.shouldBeGreaterThan
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -19,6 +20,8 @@ import org.junit.jupiter.api.TestMethodOrder
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
 import java.net.URI
+import java.nio.file.Files
+import java.nio.file.Paths
 import java.util.function.Consumer
 
 /**
@@ -30,6 +33,43 @@ import java.util.function.Consumer
  */
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
 class DashboardWorkspaceBrowserTest : DashboardBrowserSuite() {
+    @ParameterizedTest
+    @ValueSource(ints = [1512, 2200])
+    fun `#612 - the Board tab fits main and keeps its activity dock visible`(width: Int) {
+        startTrace()
+        val root = ready("dp612")
+        val board = seedBoardWithGrid(root)
+        page.setViewportSize(width, if (width == 1512) 982 else 1000)
+        page.navigate("$baseUrl/dashboards/$board")
+        page.waitForFunction("() => window.__dpPage && window.__dpPage.ready === true")
+        page.locator("#dp-board .dp-dashboard-card").first().waitFor()
+        page.evaluate("() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))")
+        val readings =
+            page.evaluate(
+                """() => {
+                  const main = document.getElementById('app-main');
+                  const dock = document.getElementById('dp-board-dock').getBoundingClientRect();
+                  return { overflow: main.scrollHeight - main.clientHeight,
+                    dockBottom: dock.bottom, dockHeight: dock.height,
+                    mainBottom: main.getBoundingClientRect().bottom };
+                }""",
+            ) as Map<*, *>
+        println("612-measure|$width|$readings")
+        val shots = Paths.get("build", "browser-evidence")
+        Files.createDirectories(shots)
+        page.screenshot(Page.ScreenshotOptions().setPath(shots.resolve("612-board-$width.png")))
+        withClue("Board at $width: $readings") {
+            (readings["overflow"] as Number).toInt() shouldBe 0
+            (readings["dockHeight"] as Number).toInt() shouldBeGreaterThan 0
+            (readings["dockBottom"] as Number).toDouble() shouldBeLessThanOrEqual
+                (readings["mainBottom"] as Number).toDouble()
+        }
+        page.click("#dp-tab-versions")
+        page.waitForSelector("#dp-pane-versions:not([hidden]) table")
+        page.locator("#dp-pane-versions").isVisible shouldBe true
+        page.locator("#dp-pane-board").getAttribute("hidden") shouldBe "hidden"
+    }
+
     @Test
     @Order(1)
     fun `the tab strip swaps panes in page, re-fits the hidden board, and carries the tab in the URL`() {
