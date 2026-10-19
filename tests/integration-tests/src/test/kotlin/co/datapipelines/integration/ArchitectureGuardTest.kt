@@ -414,6 +414,10 @@ class ArchitectureGuardTest {
                 "DatasourceGrantsController → DatasourceGrantRepository",
                 "DatasourceGrantsPartialController → DatasourceGrantRepository",
                 "DatasourcePartialController → DatasourceGrantRepository",
+                // #583 — the datasources overview's two reads (visibleCounts, recentGrants) through the SAME
+                // reviewed shape as the DatasourcePartialController pairs: workspace-scoped in their SQL
+                // (the workspace id comes from the session principal, never from the request), and read-only.
+                "DatasourceOverviewController → DatasourceRepository",
                 "EndpointsController → ApiKeyRepository",
                 "EndpointsController → EndpointKeyBindingRepository",
                 "EndpointsController → PipelineRepository",

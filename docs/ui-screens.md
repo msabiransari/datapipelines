@@ -1,9 +1,9 @@
 # UI Screens Inventory
 
-**Status:** v1.167
+**Status:** v1.168
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
-**Last updated:** 2026-10-19 (#509); 2026-10-18 (#573; #607; #606; #565; #582; #581; #580; #579); 2026-10-17 (#556; #578; #554); 2026-10-16 (#551 merge follow-up; #551; #555; #552; #553; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
+**Last updated:** 2026-10-19 (#509); 2026-10-18 (#583; #573; #607; #606; #565; #582; #581; #580; #579); 2026-10-17 (#556; #578; #554); 2026-10-16 (#551 merge follow-up; #551; #555; #552; #553; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
 ---
 
 ## 1. Purpose
@@ -200,7 +200,7 @@ tree's search/clear/refresh toolbar; the tree; a footer with **View all <family>
 **Reset resource browser width**. The five panels keep their `#nav-tree-<family>` ids and
 `data-nav-tree="<family>"`; one is visible. The column is shown on a family page only — the active family
 is derived from the path (`familyForPath`; a family's overview `/overview/<family>` is that family's, #556), never stored — and `hidden` elsewhere, its width returned to
-main. Each family's tree mounts lazily the first time it is shown and stays mounted for the life of the
+main. The Datasources overview is the deliberate non-family (#583): no `browserFamily` covers it, so the column stays hidden there and the rail's Datasources item lights through the layout's own two-prefix rule (§4.5d). Each family's tree mounts lazily the first time it is shown and stays mounted for the life of the
 document, so switching family and returning finds its query, open folders and scroll as they were, with no
 refetch. Initialization requests only the root and leaves all folders closed. A catalog's **Browse folders**
 (`data-nav-tree-reveal`) shows the browser and puts focus in its search; the top bar's chevron-right
@@ -217,8 +217,8 @@ re-renders only its own level, never the whole panel. Complete valid levels rema
 DOM rows, focus and scroll during navigation.
 
 The eight selection rules of the record (§3), as built: (1) the family link leads to the family's
-**overview** (§4.25) once its page is written — Pipelines since #556 (`/overview/pipelines`); Templates,
-Dashboards, Visualizations and Parameter Sets keep their catalog link until #579–#582 — and View all stays
+**overview** (§4.25) — as built, all six do: the five tree families since #556/#579–#582 and the Datasources
+item since #583 (`/overview/datasources`) — and View all stays
 the explicit catalog action;
 a desktop family menu click also shows a hidden browser and clears its saved Hide;
 (2) a leaf opens its existing workspace URL and is marked current, the family's browser state kept;
@@ -1162,13 +1162,13 @@ Fully specified in [Pipeline Editor spec](pipeline-editor.md). Only the rows tha
 | Attribute | Value |
 |---|---|
 | URL | `GET /datasources` |
-| Auth required | Yes (`read` to browse; `author` to test a connection; workspace-bound create behind the `member-datasources-enabled` gate, global create/manage `admin` — workspaces D8) |
+| Auth required | Yes (`read` to browse; `datasource.test` to test a connection; workspace-bound create behind the `member-datasources-enabled` gate, global create/manage `admin` — workspaces D8) |
 | Purpose | Browse, test, register, EDIT and DELETE datasource connections in the active workspace |
 | Design primitives | the data table (§3.7), `.ds-badge`, `.ds-button`, `.ds-modal` |
 | JS | `static/js/toast.js` (layout-global: arms every `.ds-toast` appended to `#toast` — auto-dismiss + close) |
 | htmx | Yes — test connection button (`hx-post="/partials/datasources/{name}/test"`, `hx-target="#toast"`, `hx-swap="beforeend"` — the result is a §5.1 Notifications toast, never a row swap), search + dialect filter + pager (`hx-get="/partials/datasources"` into `#datasource-list-wrapper`, `outerHTML` — the fragment root carries the id, so the swap target survives every refresh; the pager is the shared §5 fragment; a standing filter that matches nothing offers **Clear filters**, which resets the search AND the dialect and re-fetches the list bare — a dialect-only miss with an empty box is this state too, never "No datasources yet" (#510) — §5.1, #432), register modal (`hx-post` on `/partials/datasources`, `#register-result` target — success is §5.1 Shape A: the success node closes the modal, the refreshed list and the toast ride along out-of-band, no `HX-Redirect` and no page reload). **A table partial travels as a whole `<table>` on any out-of-band path**: a `<tbody>` (or `<tr>`, `<td>`…) carrying `hx-swap-oob` nested in a `<div>` is silently DISCARDED by the browser's HTML fragment parser — table-only tags outside table context are dropped tokens, so the swap "succeeds" with empty content and no error anywhere (030 F-1; §4.10's keys table is the reference shape) |
 
-Content: table of the ACTIVE workspace's datasources (name + `readonly` badge, dialect badge, workspace column — `global` or the bound name, URL, username, **last test**). Per-row "Test" button (`author` scope) → connection result as a §5.1 Notifications toast; the table itself is never re-rendered mid-interaction. "Register Datasource" button → modal form with: name, display name, dialect dropdown, JDBC URL, username, password, description, and two checkboxes — `readonly` (always settable, [Datasources §5.7](datasources.md#57-readonly-datasources-flag-semantics-and-enforcement-layers)) and `global` (**admin-only; visible-disabled for everyone else**, workspaces D8: unchecked binds to the active workspace). The register action applies the SAME D8 rules as REST §9.1 (`DatasourceWorkspaceRules` — one component, two surfaces) and crosses the same registry save boundary. A register REFUSAL stays inline in the modal (the screen-local `htmx:responseError` path — the modal must not close over an error, so it deliberately carries no `HX-Retarget`).
+Content: table of the ACTIVE workspace's datasources (name + `readonly` badge, dialect badge, workspace column — `global` or the bound name, URL, username, **last test**). Per-row "Test" button (`datasource.test` scope) → connection result as a §5.1 Notifications toast; the table itself is never re-rendered mid-interaction. "Register Datasource" button → modal form with: name, display name, dialect dropdown, JDBC URL, username, password, description, and two checkboxes — `readonly` (always settable, [Datasources §5.7](datasources.md#57-readonly-datasources-flag-semantics-and-enforcement-layers)) and `global` (**admin-only; visible-disabled for everyone else**, workspaces D8: unchecked binds to the active workspace). The register action applies the SAME D8 rules as REST §9.1 (`DatasourceWorkspaceRules` — one component, two surfaces) and crosses the same registry save boundary. A register REFUSAL stays inline in the modal (the screen-local `htmx:responseError` path — the modal must not close over an error, so it deliberately carries no `HX-Retarget`).
 
 **The Tables column (162, #156).** Every row carries a link to the detail page — "Lake tables" for a LAKE datasource (its registered catalog, [§4.5c](#45c-datasource-detail--a-read-only-tables-view-162-156)), "Tables" for every other dialect (its live schemas → tables → columns, same section). It is `data-read`, not `data-verb` — a viewer's row renders it exactly like every other row, the same [Datasource learned facts](#45b-datasource-learned-facts-118) precedent.
 
@@ -1178,7 +1178,7 @@ The listing is workspace-scoped exactly like REST §9.2 (`listVisible`: active-b
 
 **The Connection pool section (094).** The register modal and the edit dialog each carry a `<details>` labelled **"Connection pool — defaults"**, collapsed. Expanded it renders the eight tunable HikariCP keys ([Datasources §5](datasources.md#5-connection-pool-configuration)) — each with its unit, a one-line meaning, and a help line naming the layer the prefilled default came from ("Default 10 — HikariCP's own", "Default 2 — this server's"). `readOnly` is rendered DISABLED, mirroring the datasource's own `readonly` flag: it is §5.6-refused as a pool property, so a free field would be an input whose every value the validator rejects. Refused keys are never rendered at all. **A field left at its default is not persisted**, so a later change to a product default still reaches datasources created through this form. The dialect select re-fetches the section (`hx-get="/partials/datasources/pool-fields"`, `hx-target="#ds-pool-fields"`, `outerHTML`) because the effective default is the DIALECT's to decide. Out-of-range values are refused server-side and render inline like any other save refusal.
 
-**Edit (094).** A per-row **Edit** action (`author`) fetches the dialog into the screen's single empty `#ds-dialog` container. The `name` and `dialect` are shown disabled — the name is immutable and re-pointing a live datasource at a different driver would silently take every pipeline that references it by name along. A blank secret KEEPS the stored credential (the stored one is never rendered back, [Datasources §7.1](datasources.md#71-encryption-at-rest)). The `global` checkbox is admin-only and carries a hidden companion field, because an unchecked HTML checkbox posts nothing and an admin must be able to un-global a datasource. Same D8 rules and same `registry.save` boundary as REST §9.4.
+**Edit (094).** A per-row **Edit** action (`datasource.manage` — ws admin) fetches the dialog into the screen's single empty `#ds-dialog` container. The `name` and `dialect` are shown disabled — the name is immutable and re-pointing a live datasource at a different driver would silently take every pipeline that references it by name along. A blank secret KEEPS the stored credential (the stored one is never rendered back, [Datasources §7.1](datasources.md#71-encryption-at-rest)). The `global` checkbox is admin-only and carries a hidden companion field, because an unchecked HTML checkbox posts nothing and an admin must be able to un-global a datasource. Same D8 rules and same `registry.save` boundary as REST §9.4.
 
 **Delete (094).** A per-row **Delete** action opens a dialog that asks the USAGE question FIRST, from the same any-version scan the REST `409 datasource.in_use` uses ([Datasources §6.2](datasources.md#62-in-use-check-on-delete)):
 
@@ -1262,6 +1262,27 @@ Until this round the detail route served only LAKE; every other dialect's row ha
 **A failed introspection** (an unreachable datasource, a driver that cannot report its current schema for an unqualified columns read) renders the catalogued §13 code and message INLINE, in the level that failed — never a blank pane, never a stack trace, and never a toast: a toast is for an ACTION that failed, and this is a read the person is already looking at.
 
 **Rendered for.** Read-only by construction on every dialect: no `data-verb` anywhere in the tree, the same role floor as the list itself (a viewer may open it). The list's **Tables**/**Lake tables** button is `data-read`, exactly like the Facts button above. An invisible or unknown datasource name redirects to the listing, on every route this section adds.
+
+### 4.5d Datasources overview (#583)
+
+| Attribute | Value |
+|---|---|
+| URL | `GET /overview/datasources` |
+| Auth required | Yes — any member (`datasource.read`; [Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative) names the route in the `datasource.read` row's Surfaces cell): a datasource has no lens, so every member reads the same granted set. GET only; nothing on the page writes |
+| Purpose | The Datasources home page: what the active workspace's admitted set holds, its connection health, its dialects, and where it was added last |
+| Design primitives | the §4.25 frame (`overview/family.html`'s loops, the `.app-overview-*` rules, design tokens only), `.ds-badge` for the last-test badges |
+| JS | `overview.mjs` (Copy prompt), through the page-assets template (§3.0); no other script |
+| htmx | none of its own — every link is a boosted navigation |
+
+**Inventory.** One count tile — the visible set (`listVisible`: active-bound + granted + global, repository-level, §4.5) — and two charts. **Connection health** buckets each admitted datasource by its last test outcome: ok, failed, never tested; the bars are unlinked (a bucket is not a filter — the list's search covers last-test state, §4.5) and "never tested" is a bucket, never a blank (the §4.5 Last-test rule). **By dialect** renders one bar per dialect PRESENT, each linking the catalog's existing `?dialect=` filter (the register-row precedent, #186); a dialect nobody holds renders no bar at all.
+
+**Recently added to this workspace** lists up to five GRANTS of the active workspace (`datasource_workspaces.granted_at`, newest first, name ASC as tie-break), each a link to the datasource's detail page. There is no lifecycle badge — a datasource has no draft/release lifecycle — and no "Review drafts": the section's only action is each entry's link. An entry is granted, not modified: the timestamp is the grant's.
+
+**Not a browser family.** The overview is NOT a `browserFamily`: the resource browser and its opener stay hidden (§3.4), because there is no datasources tree — the page is an ordinary section page like the catalog. The rail's Datasources item still lights and the crumb names Datasources: its active rule covers both `/datasources` and `/overview/datasources` inline in the layout, and `AppNav.matches` already reads the overview path as the section's. The menu item links the overview like the five tree families (§4.25 rule 1 as built).
+
+**States.** An empty workspace — the first-run state — renders a "0" tile, zero-width health bars, an EMPTY dialect chart (no bar, no 500: the widths are shares of the tallest of an empty set, taken as zero) and the section note "No datasources have been added to this workspace yet." A read that fails says so with no number (§4.25's rule). The guide (`overview/guide-datasources.html`) follows the guided frame: what datasources are for, a register-first starter prompt with the register-is-human note, and related families.
+
+Guards: `DatasourceOverviewControllerTest` (the model: tile, charts, buckets, recent, fail-closed reads, the empty workspace), `OverviewDatasourcesRenderTest` (the loops: widths, links, escaping, the guide, the empty notes), `DatasourceRepositoryIntegrationTest` (the partition, ordering and workspace scoping in SQL), `WorkspaceSurfacesE2eTest` (the wire: exactly the admitted set's numbers, another workspace's rows absent), `OverviewDatasourcesBrowserTest` (modal-seeded rows through the real probe; the item lands on the overview; the browser stays closed; Copy prompt with zero requests).
 
 ### 4.6 Templates — the catalog page and the resource browser (#398, #554)
 
@@ -2441,25 +2462,31 @@ violations, the promoter's page issuing no lifecycle request, the 2d and 3d bund
 
 | Attribute | Value |
 |---|---|
-| URL | `GET /overview/pipelines`, `/overview/templates`, `/overview/dashboards`, `/overview/visualizations`, `/overview/parameter-sets` — five literal routes, no path variable, no query |
-| Auth required | Yes — each family's own read permission (`pipeline.read`, `template.read`, `dashboard.read`, `visualization.read`, `parameter_set.read`; [Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative) names each route in its row's Surfaces cell); every role, a promoter through the lens. GET only; nothing on the page writes |
+| URL | `GET /overview/pipelines`, `/overview/templates`, `/overview/dashboards`, `/overview/visualizations`, `/overview/parameter-sets` — five literal routes, no path variable, no query; the Datasources overview joins them since #583 as `GET /overview/datasources` (§4.5d) |
+| Auth required | Yes — each family's own read permission (`pipeline.read`, `template.read`, `dashboard.read`, `visualization.read`, `parameter_set.read`, and the Datasources overview's `datasource.read`; [Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative) names each route in its row's Surfaces cell); every role, a promoter through the lens (Datasources has no lens). GET only; nothing on the page writes |
 | Purpose | A family's home page: what the workspace holds in that family, by lifecycle, and — for a family whose guide is written — what the family is for, how to start one with an agent, and where work left off |
 | Design primitives | `.app-page-h`, `.ds-card` (`.app-card-h`/`.app-card-b`), `.ds-button`, `.ds-badge`, `.ds-textarea`; the house data-table frame (§3.7) around the visually hidden table; the `.app-overview-*` rules in `app.css`, design tokens only |
 | JS | `overview.mjs` (Copy prompt), on a guided overview only, through the page-assets template (§3.0); no other script |
 | htmx | none of its own — every link is a boosted navigation |
 
 One template, `overview/family.html`, renders all five over one model (`OverviewController`,
-`OverviewPage`). The shell treats `/overview/<family>` as that family's in all four path rules (the
+`OverviewPage`); the Datasources overview (#583) reuses the SAME template and `OverviewPage` loops over
+its own controller (`DatasourceOverviewController`, §4.5d) — a datasource has no `OverviewPage.Family`:
+no tree, no lifecycle buckets, and the browser never opens for it. The shell treats `/overview/<family>`
+as that family's in all four path rules (the
 layout's `navPath`/`browserFamily`, `AppNav.matches`, `shell.js` `isActiveSection`, `familyForPath`):
 the family's menu item is active, the crumb names it and its resource browser panel opens (§3.4).
+The Datasources overview is the deliberate exception — no `browserFamily`, so its browser never opens
+while its item lights through the layout's own two-prefix rule (§4.5d).
 Since #556 the Pipelines menu item links `/overview/pipelines`; Templates is a menu destination
-since #579, and the other three stay linked from Pipelines' related list until #580–#582.
+since #579, and the other three stay linked from Pipelines' related list until #580–#582; the
+Datasources item links `/overview/datasources` since #583.
 
 **Hierarchy.** The family title, the workspace line ("In workspace <name>."; a promoter's adds that
 the counts are the admitted inventory) and **View all** (the catalog). Then the **Inventory** card
 ("Admitted inventory" through a lens): four counts — Objects, With drafts, With releases, Discarded
 only, each with a one-line help — and four bars: Draft only, Released only, Released with draft
-changes, Discarded only. For a guided family (Pipelines, and Templates since #579; `overview/guide-<family>.html`), **What
+changes, Discarded only. For a guided family (all six as built — Pipelines and Templates since #579, Dashboards #580, Visualizations #581, Parameter Sets #582, Datasources #583; `overview/guide-<family>.html`), **What
 pipelines are for**, **Create with your agent**, and side by side **Continue your work** and **Related
 resources and help** follow. An unguided overview shows the inventory card and nothing else — no
 placeholder prose, no script.
@@ -2477,7 +2504,9 @@ visible minimum. A visually hidden table repeats the four rows for assistive tec
 with draft changes bars link the catalog filtered to that bucket (`/pipelines?lifecycle=…`, §4.3);
 Objects links nothing (View all is the unfiltered catalog) and Discarded only stays unlinked, since a
 discarded-only pipeline has no workspace page. An unguided family links no count or bar until its
-catalog offers the filter; Templates offers it since #579 and links like Pipelines.
+catalog offers the filter; Templates offers it since #579 and links like Pipelines. The Datasources
+overview links differently, as its model allows: each By-dialect bar links `/datasources?dialect=`
+(the catalog's existing filter) and the health bars stay unlinked (§4.5d).
 
 **Create with your agent (Pipelines).** Three steps and a starter prompt in an editable textarea, the
 workspace name the menu shows substituted server-side and the bracketed parts left for the reader. The
@@ -2508,7 +2537,7 @@ line and, in an empty workspace, a note pointing at the starter prompt. A real z
 **Storage:** none — no browser key, cookie or server preference.
 
 Guards: `OverviewRenderTest` (one inventory feeds counts, bars and table; widths; unavailable without a
-digit; links; escaping; unguided families bare), `ShellRenderTest` (all five paths light their item,
+digit; links; escaping; unguided families bare), `ShellRenderTest` (the family paths and the Datasources overview light their item,
 crumb and panel), `FamilyRecentE2eTest`, `OverviewE2eTest` (each catalog lifecycle count equals the
 inventory's, unlensed and narrowed), `PromoterLensSweepTest`, `overview.test.mjs` and
 `OverviewBrowserTest` (copy resolves and refuses with zero requests; the menu lands on the overview with
@@ -2524,6 +2553,7 @@ served (inventory only) and its menu item still links the catalog.
 | Dashboards | #580 | `overview/guide-dashboards.html` — related: Pipelines, Visualizations, Parameter Sets, MCP server reference | `DashboardRepository.recent`, the same `RecentSource` rule | `/dashboards?lifecycle=` — every bucket but `discarded` (§4.21); `OverviewDashboardsE2eTest` pins each count equal to the inventory's, unlensed and through the promoter's real lens; `OverviewDashboardsRenderTest`, `OverviewDashboardsBrowserTest` |
 | Visualizations | #581 | `overview/guide-visualizations.html` — related: Pipelines, Dashboards, MCP server reference | `VisualizationRepository.recent`, the same `RecentSource` rule; through a narrowed lens, admitted RELEASED versions and their release time alone | `/visualizations?lifecycle=` — every bucket but `discarded` (§4.24); `OverviewVisualizationsE2eTest` pins each count equal to the inventory's, unlensed and through a narrowed lens |
 | Parameter Sets | #582 | `overview/guide-parameter-sets.html` — what parameter sets are for, a starter prompt that drafts a set and checks it by evaluating; related: Templates, Dashboards | `ParameterSetRepository.recent`, the same `RecentSource` rule; each entry links `/parameter-sets/<id>` | `/parameter-sets?lifecycle=` — every bucket but `discarded` (§4.23); guards `OverviewParameterSetsRenderTest`, `OverviewParameterSetsE2eTest`, `OverviewParameterSetsBrowserTest` |
+| Datasources (#583) | #583 | `overview/guide-datasources.html` — what datasources are for, a register-first starter prompt; related: Pipelines, Templates, Dashboards, MCP server reference | `DatasourceRepository.recentGrants` — GRANTS, not modifications: `granted_at` newest first, name ASC tie-break, each entry linking `/datasources/<name>`, no lifecycle badge | no `?lifecycle=` filter — the By-dialect bars link the catalog's `?dialect=` filter and the health bars stay unlinked; NOT a browser family (the browser never opens); guards `DatasourceOverviewControllerTest`, `OverviewDatasourcesRenderTest`, `DatasourceRepositoryIntegrationTest`, `WorkspaceSurfacesE2eTest`, `OverviewDatasourcesBrowserTest` |
 
 ## 5. htmx Usage Pattern
 
@@ -2690,7 +2720,8 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
-| 2026-10-19 | v1.167 | #509 danger text token | **§3.5:** danger TEXT reads one app token, `--app-danger-ink`: the design system's `--text-danger` in dark (the #502 chip's 3.52:1 becomes 8.94:1), and in light that red at 3% lower oklch lightness (owner ruling 2026-10-19). With the unadjusted red, light and saas miss 4.5:1 on the inset and hover surfaces and ocean misses on its chip tint too; worst light case is now ocean at 4.65. Twenty text sites move, seven of them in `pipeline-editor.css` (fallback-spelled reads the inventory grep missed); borders and fills keep `--accent-danger`, and the vendored white `--accent-danger-text` is untouched. `DangerInkContrastBrowserTest` and `DangerInkSourceAuditTest` (new). No route, permission or role changed. |
+| 2026-10-19 | v1.168 | #509 danger text token — renumbered at merge after #583's v1.167 | **§3.5:** danger TEXT reads one app token, `--app-danger-ink`: the design system's `--text-danger` in dark (the #502 chip's 3.52:1 becomes 8.94:1), and in light that red at 3% lower oklch lightness (owner ruling 2026-10-19). With the unadjusted red, light and saas miss 4.5:1 on the inset and hover surfaces and ocean misses on its chip tint too; worst light case is now ocean at 4.65. Twenty text sites move, seven of them in `pipeline-editor.css` (fallback-spelled reads the inventory grep missed); borders and fills keep `--accent-danger`, and the vendored white `--accent-danger-text` is untouched. `DangerInkContrastBrowserTest` and `DangerInkSourceAuditTest` (new). No route, permission or role changed. |
+| 2026-10-18 | v1.167 | #583 the Datasources overview — renumbered at merge after #565's v1.163, then after #573's v1.166 | **§4.5d (new):** the Datasources overview — one visible-set tile, Connection health (ok/failed/never tested, unlinked bars), By dialect (bars linking `/datasources?dialect=`), Recently added to this workspace (grants, newest first, no lifecycle badge); a guided page (register-first starter prompt); NOT a browser family — the browser and its opener stay hidden and the rail item lights through the layout's two-prefix rule. **§4.5:** the Test button and Auth cell name `datasource.test` and the Edit action `datasource.manage` (the §7.6 scope tokens, replacing the stale `author` wording). **§4.25:** the URL and Auth rows admit the sixth route and `datasource.read`; the shell path-rules paragraph and rule (1) record the deliberate non-family exception; the guided-families sentence and the Families-as-built table gain the Datasources row (grants-ordered Recent, no lifecycle filter); `ShellRenderTest`'s guard wording covers the overview. |
 | 2026-10-18 | v1.166 | #573 main padding by band and the 1500px frame (#554 follow-up, record §4) — renumbered at merge after #607's v1.165 | **§3.1 item 1 rewritten:** `<main>` pads all four sides through one role token, `--app-main-pad` — 40px from 1600, 32 from 1101 to 1599, 24 from 761 to 1100, 20 at 760 and below (`--space-10/8/6/5`; it was one `--gap-lg` gutter, 24, and 16 on a phone) — and is a frame of at most 1500px outer width, padding included (`--app-frame-max`), centred in its track; at the 1512 reference it is 1010px wide and 946 inside its padding, so it binds only on wider windows and non-family pages (2200 on Settings: 1998 → 1500, left 451 expanded, 382 compact). The one opt-out is `app-canvas` on a page's root (`.app-main:has(> .app-canvas)`), carried by the pipeline editor, the template workspace, the schedules explorer, the dashboard board and the execution result page; catalogs, overviews, settings, admin, keys, the API page and the parameter-set and visualization workspaces stay framed. **§3.6:** the Main gutter column names the token and its four values (the Topbar column is unchanged; the top bar keeps `--gap-md` on a phone), and a rule under the table names every geometry that reads the token — the five full-height calcs and the status pill's three offsets — and the one `--gap-lg` that only looks like it (`.tplx-splitter`, the explorer's column gap). **The lander's residue (2026-10-17):** the 390px Known note re-measured (0px on all six screens, before and after) and rewritten; "sidebar tree" → the resource browser in §4.3 (two), §4.3e's read row, §4.7 and §5.1; the §4.21 Tabs row's "rail resizing" → resizing the resource browser. `MainFrameBrowserTest` measures the bands, the reference, the frame, the opt-outs, each canvas's fill of `<main>` and the six phone screens. |
 | 2026-10-18 | v1.165 | #607 pipeline workspace heading (#558 slice 1) — renumbered at merge after #606's v1.164 | **§4.4:** a **Heading composition** bullet — the pipeline workspace's top area is the shared resource heading (context line at the Support role, the ONE wrapping 24px `h1.ds-headline` page title, the version/status line, the actions in `.app-page-actions`, then the tabs), the draft state said once (the selector's viewed row drops its suffix), the measured alignment with `/overview/pipelines` and the exemplar sentence for the other workspaces; the **Phone widths** bullet rewritten to the owner's ruling (at 760px and below the band is the page: `.pe-root` is not laid out; rotate behaviour; the template workspace keeps 110 until its slice). **§3.3:** the Heading row no longer names a workspace's top-bar name as a 14px use. |
 | 2026-10-18 | v1.164 | #606 shell surfaces | **§2.8, §3.4, §3.5:** plain page ground, page-coloured top bar, three edge roles; the backdrop and redundant brand/avatar outlines removed, required boundaries retained at 3:1, separators at 2:1, decorative rules at the approved prototype’s weight. Browser measurements cover layout bands and every vendored theme. |

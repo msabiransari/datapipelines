@@ -1,0 +1,70 @@
+<!--/* #583 — the Datasources overview's guide (shell design §8), shaped as guide-parameter-sets.html:
+     `overview/family.html` includes `intro` after the inventory and `related` beside Continue your
+     work. The one deliberate difference from the four authoring guides: registering a datasource
+     hands a live credential to the workspace, and no credential travels through an agent (094 §7.6
+     — there is no create tool), so the agent card's verb is EXPLORE and VERIFY, never register.
+     The starter prompt follows skill/datasources.md's can-do list — list, read, test, schemas,
+     tables, columns, preview rows, bounded read-only sql_probe — and stops at reporting. The
+     health chart's caveat (one latest recorded test per datasource, whoever ran it) is the
+     inventory card's, not repeated here. Copying sends nothing (overview.mjs). */-->
+<th:block xmlns:th="http://www.thymeleaf.org" th:fragment="intro">
+  <section class="ds-card" aria-labelledby="overview-intro-h" data-overview-intro>
+    <div class="app-card-h"><h2 class="ds-title" id="overview-intro-h">What datasources are for</h2></div>
+    <div class="app-card-b app-overview-prose">
+      <p>
+        Datasources are the registered database connections everything else reads through — pipelines,
+        dashboards, templates' data-backed choices. A datasource is registered once with its connection
+        facts and credential, tested, and then granted to the workspaces that need it. What this page
+        counts is what your workspace can see.
+      </p>
+    </div>
+  </section>
+
+  <section class="ds-card" aria-labelledby="overview-agent-h" data-overview-prompt>
+    <div class="app-card-h"><h2 class="ds-title" id="overview-agent-h">Explore a datasource with your agent</h2></div>
+    <div class="app-card-b app-overview-prose">
+      <ol class="app-overview-steps">
+        <li>Register the datasource here in the workspace if it does not exist yet — a person does that,
+          because registering means handing over a credential. Test the connection from its page.</li>
+        <li>Ask a connected agent to explore what the datasource holds: its schemas, tables and columns,
+          a few preview rows, and whether a bounded read-only query answers your question better.</li>
+        <li>Read the report it returns and build on what it verified. The agent reads; changes to the
+          datasource itself stay in the workspace's hands.</li>
+      </ol>
+      <label class="app-overview-label" for="overview-prompt">Starter prompt — edit the bracketed parts before you copy it</label>
+      <textarea id="overview-prompt" class="ds-textarea app-overview-prompt" rows="7" spellcheck="false"
+                aria-describedby="overview-prompt-note"
+                th:text="|In workspace ${activeWorkspace ?: '[workspace]'}, explore the datasource [name] and tell me what I can build on it. List the datasources I can see, read [name]'s connection facts, and test its connection. Map its schemas and tables, then for [table] read a few preview rows and check the columns I need ([columns]) with their types. If a question is easier answered directly, use one bounded read-only SQL probe — never more than that. Report the connection test outcome, the tables and columns you found, and anything that would stop a pipeline from reading this datasource. Do not register or change anything: that is done here by a person.|">In workspace [workspace], explore the datasource [name] and tell me what I can build on it.</textarea>
+      <div class="app-overview-copy">
+        <button type="button" class="ds-button ds-button-primary ds-button-sm"
+                data-overview-copy data-copy-label="Copy prompt" aria-controls="overview-prompt">Copy prompt</button>
+        <span class="app-card-note" role="status" data-overview-copy-status></span>
+      </div>
+      <p class="app-card-note" id="overview-prompt-note">
+        Copying puts the text on your clipboard and nothing else: it sends no request and grants no access.
+        <th:block th:if="${canAuthor == true}">Your agent works with the permissions of its own API key.</th:block>
+        <th:block th:unless="${canAuthor == true}">Your role here does not read row data, so copy the request
+          for a collaborator who can.</th:block>
+      </p>
+    </div>
+  </section>
+</th:block>
+
+<th:block xmlns:th="http://www.thymeleaf.org" th:fragment="related">
+  <section class="ds-card" aria-labelledby="overview-related-h" data-overview-related>
+    <div class="app-card-h"><h2 class="ds-title" id="overview-related-h">Related resources and help</h2></div>
+    <div class="app-card-b app-overview-prose">
+      <ul class="app-overview-related">
+        <li><a hx-boost="true" th:href="@{/overview/pipelines}">Pipelines</a> read through a datasource's
+          connection when they run.</li>
+        <li><a hx-boost="true" th:href="@{/overview/templates}">Templates</a> offer choices that come from a
+          datasource's data.</li>
+        <li><a hx-boost="true" th:href="@{/overview/dashboards}">Dashboards</a> refresh through the pipelines
+          those datasources feed.</li>
+      </ul>
+      <p class="app-card-note">Registering or editing a datasource is done by a person with the workspace's
+        credentials — no agent or tool registers one.</p>
+      <p><a th:href="@{/docs/mcp-server}">MCP server reference</a></p>
+    </div>
+  </section>
+</th:block>
