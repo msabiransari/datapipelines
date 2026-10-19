@@ -27,8 +27,8 @@ import java.nio.file.Paths
  * `partials/brand-mark.html` exists so the outlined-tile mark is authored ONCE; this asserts
  * that fact rather than assuming it, by rendering the app rail (authenticated), the app's
  * signed-out top bar, the public site's header AND footer (through `SitePageRenderer`,
- * which calls the real `SiteController`), the login page (its card brand AND the auth
- * layout's brand link) and the forced-password gate (the auth layout alone), and comparing
+ * which calls the real `SiteController`), the login page (the auth layout's header
+ * brand link) and the forced-password gate (the auth layout alone), and comparing
  * every resulting `<svg>` body — not the opening tag, which legitimately carries a different
  * `class` per call site, but everything between it and `</svg>`. A future edit that inlines a
  * diverging copy at any of the sites turns this red, NAMING the surface; a future edit to the
@@ -63,7 +63,7 @@ class BrandMarkParityRenderTest {
                 "app rail" to engine.process("error/404", webContext().apply { fillChrome(authenticated = true) }),
                 "signed-out top bar" to engine.process("error/404", webContext().apply { fillChrome(authenticated = false) }),
                 "site header and footer" to SitePageRenderer.render(SitePages.HOME),
-                "login page (auth layout brand link + sign-in card)" to engine.process("login", webContext().apply { fillLogin() }),
+                "login page (auth layout header brand)" to engine.process("login", webContext().apply { fillLogin() }),
                 "forced-password gate (auth layout brand link)" to
                     engine.process("settings/password-forced", webContext().apply { fillPassword() }),
             )
@@ -71,12 +71,12 @@ class BrandMarkParityRenderTest {
 
         // Non-vacuity: each surface carries exactly the copies its markup places — a selector
         // or fragment regression that stopped matching would otherwise compare empty lists and
-        // pass. The login page carries two (the auth layout's brand link and the card's own
-        // brand); the forced-password gate carries the layout's alone.
+        // pass. Since #619 the login page and forced-password gate each carry only the
+        // auth layout's header brand.
         withClue("app rail") { marks.getValue("app rail") shouldHaveSize 1 }
         withClue("signed-out top bar") { marks.getValue("signed-out top bar") shouldHaveSize 1 }
         withClue("site header and footer") { marks.getValue("site header and footer") shouldHaveSize 2 }
-        withClue("login page") { marks.getValue("login page (auth layout brand link + sign-in card)") shouldHaveSize 2 }
+        withClue("login page") { marks.getValue("login page (auth layout header brand)") shouldHaveSize 1 }
         withClue("forced-password gate") { marks.getValue("forced-password gate (auth layout brand link)") shouldHaveSize 1 }
 
         // The rail is the reference; every other surface's every copy must be byte-identical
