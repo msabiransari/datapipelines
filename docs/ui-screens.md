@@ -1,9 +1,9 @@
 # UI Screens Inventory
 
-**Status:** v1.172
+**Status:** v1.173
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
-**Last updated:** 2026-10-19 (#509; #608; #614 + #611; #612; #615); 2026-10-18 (#583; #573; #607; #606; #565; #582; #581; #580; #579); 2026-10-17 (#556; #578; #554); 2026-10-16 (#551 merge follow-up; #551; #555; #552; #553; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
+**Last updated:** 2026-10-19 (#605; #509; #608; #614 + #611; #612; #615); 2026-10-18 (#583; #573; #607; #606; #565; #582; #581; #580; #579); 2026-10-17 (#556; #578; #554); 2026-10-16 (#551 merge follow-up; #551; #555; #552; #553; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
 ---
 
 ## 1. Purpose
@@ -193,6 +193,8 @@ compact menu keeps its group spacing and drops the uppercase group labels; each 
 hidden (still its accessible name) and ONE `#app-nav-tip` tooltip, shown by `shell.js` beside the hovered
 or keyboard-focused item, names it for sighted readers.
 
+**Type and spacing (#605):** primary navigation uses `--app-text-ui` (13px), `--app-leading-ui` (1.5), weight 400, minimum 36px rows (`--app-control-h`), 8px/12px padding, a 12px icon gap and 8px radius, with 12px menu gutters. Group captions use `--app-text-meta` (10px), uppercase `--app-tracking-caption` (1.2px) and `--app-weight-emphasis` (650), starting after 24px. The wordmark uses the 14px heading size and the same 650 weight; retained `--tracking-tight` computes to −0.35px (the record rounds to −0.4px). The selected label is `--text-primary`, its icon `--text-link`, with the selected tint and `--border-focus` bar; Minimal uses `--text-inverted` for both inks because its normal inks and selected surface are black. The dedicated `--app-nav-indicator-w` enforces the normative 3px bar (the old focus-offset token rendered 2px); label x is 55px = 12px gutter + 3px bar + 12px padding + 16px icon + 12px gap. The workspace switcher uses 12px padding/gap, a 32px avatar and 8px radius; the redundant “workspace” caption is removed, and the operable select retains its accessible name and role badge. The collapse control uses the row metrics; top-bar controls use UI text and contextual/secondary text uses Support. `MenuScaleBrowserTest` measures expanded 1512×982, compact and 390px drawer layouts and checks selected-label/icon contrast in every bundled theme.
+
 **The resource browser (#554; formerly the in-rail accordion of #460/#478).** Pipelines, Templates,
 Dashboards, Visualizations and Parameter Sets share the reusable REST search-and-tree, hosted in their
 own column: a 58px header (`--app-header-h`) with the family title, the admitted count and **Hide**; the
@@ -329,7 +331,8 @@ foreign responses refuse admission, and a changed view clears cached levels befo
   would render at 202px and snap to 64px on every navigation (and a hidden or resized browser
   would jump) — which is why it is its own blocking file rather than part of `shell.js`. Since
   #554 it also stamps the browser's preferred width and Hide (the storage table above).
-- **The active item** is `--brand-soft` background, `--brand` text and icon, **plus a 3px
+- **The active item** is `--brand-soft` background, `--text-primary` label and `--text-link` icon
+  (Minimal uses `--text-inverted` for both), **plus a 3px
   `--border-focus` left bar**. The bar is not decoration: §2.8 is normative that
   `surface-selected` reaches only 1.5:1 and a tint alone cannot carry selection. The mock
   paints the tint only; the bar is the accessible half of the same signal.
@@ -520,10 +523,12 @@ stylesheet or template starts naming a font host over the network. The marketing
 | Page title, phone | `--app-text-title-phone` | 1.3125 | 21 | 1.35 (28.35px) | the same title at 760px and below (the phone band since #554) |
 | Badge | `--app-text-badge` | 0.6875 | 11 | weight 500, sentence case | status badges and chips, version chips, a table's column labels, counts on tabs |
 | Meta | `--app-text-meta` | 0.625 | 10 | `--app-tracking-caption` 0.12em when uppercase | short metadata and group captions ONLY — never a name, a value, an error or a paragraph. Two ways in: an uppercase group caption is `.ds-caption` (or `.app-eyebrow`); a short inline annotation beside a name — "(v3 released)", "· has a key" — is `.u-text-meta`, sentence case, no tracking (#565, owner 2026-10-18) |
+| Emphasis weight | `--app-weight-emphasis` | — | — | 650 | navigation group captions and the brand wordmark (record §5) |
 | Phone text entry | `--app-text-entry-phone` | 1 | 16 | — | text inputs, selects and textareas at 760px and below, so a phone browser does not zoom the page on focus |
 
 | Shape role | Token | Value | For |
 |---|---|---|---|
+| Navigation indicator | `--app-nav-indicator-w` | 3px | selected navigation row, paired with the tint (§2.8) |
 | Control height | `--app-control-h` | `--space-9`, 36px | a button, input or select — a minimum; a wrapping label grows it |
 | Tab height | `--app-tab-h` | 2.75rem, 44px | a tab: 12px padding, an 18px line, the 2px underline |
 | Tab gap | `--app-tab-gap` | `--space-6`, 24px | between two tabs of a strip; a tab has no inline padding, so its underline is its label's width |
@@ -554,6 +559,8 @@ Spacing has no role tokens: the record's 4/8/12/16/20/24/32/40/48 scale is the d
 | Caption, eyebrow (`.ds-caption`, `.app-eyebrow`) | 10px, uppercase, 0.12em |
 | Notices and states (`.ds-toast`, `.app-alert`, `.app-inline-refusal`, `.app-empty`, `.ds-empty-description`) | 13px; an empty state's title 14px |
 | Coarse pointer | every button, input and select ≥44px high; a small or icon button ≥44×44 — the HIT REGION grows, never the type or the glyph |
+| Primary navigation row (`.app-nav-link`) | 13px/400, 1.5 leading; ≥36px; 8px/12px padding; 12px icon gap; 8px radius; 12px menu gutters; primary selected label and accent icon (Minimal: inverted ink), tint plus 3px indicator |
+| Workspace switcher (`.app-ws`) | 12px padding/gap, 32px avatar, 8px radius; UI workspace name, 11px role badge, no redundant caption; transparent select remains operable |
 
 **House exceptions (ruled).** Where the house departs from the application-shell record on purpose, the departure is listed here with its reason and its measurement; nothing else in this section departs from the record.
 
@@ -2720,6 +2727,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-19 | v1.173 | #605 menu typography | **§3.4/§3.3:** recorded menu rows, captions, wordmark, switcher and top-bar type roles; shared 650 emphasis weight; dedicated normative 3px indicator; selected primary/accent inks with accessible inverted ink for Minimal. Browser measurements and all-theme selected-ink contrast. |
 | 2026-10-19 | v1.172 | #509 danger text token — renumbered at merge after #583's v1.167, then after #608's v1.171 | **§3.5:** danger TEXT reads one app token, `--app-danger-ink`: the design system's `--text-danger` in dark (the #502 chip's 3.52:1 becomes 8.94:1), and in light that red at 3% lower oklch lightness (owner ruling 2026-10-19). With the unadjusted red, light and saas miss 4.5:1 on the inset and hover surfaces and ocean misses on its chip tint too; worst light case is now ocean at 4.65. Twenty text sites move, seven of them in `pipeline-editor.css` (fallback-spelled reads the inventory grep missed); borders and fills keep `--accent-danger`, and the vendored white `--accent-danger-text` is untouched. `DangerInkContrastBrowserTest` and `DangerInkSourceAuditTest` (new). No route, permission or role changed. |
 | 2026-10-19 | v1.171 | #608 the six undefined `u-*` utility classes resolve, and the existence guard (renumbered at merge after #614's v1.170) | **§3.1 item 3:** the guard sentence — `UtilityClassExistenceAuditTest` sweeps every app template's `class`/`th:class`/`th:classappend` value and every first-party script's string literal for `u-*` names no served stylesheet defines, and fails the build naming the file and line (the sweep's floors: ≥ 100 sites, the used and defined counts printed, an empty known-debt allowlist). The thirteen sites that named the six undefined classes now resolve: the hidden-text helper is one rule with two names (`.u-sr-only, .app-visually-hidden`), the template-versions header renames its lone `u-visually-hidden` to the canonical `u-sr-only`, and the margin block gains `.u-mt-0`/`.u-mb-0` and `.u-mr-md`/`.u-ml-xs` on the gap tokens. Browser witnesses in `TemplateWorkspaceBrowserTest` and `DashboardWorkspaceBrowserTest` measure the sr-only headers 1×1 with nothing of the span under the pointer. |
 | 2026-10-18 | v1.170 | #614 status pill on the frame's content edge; #611 the stale §4.4 width bullet (#573 follow-ups) — renumbered at merge after #583's v1.167, then after #612's v1.169 | **§3.6 gutter paragraph:** the status pill's desktop and anonymous offsets also add `--app-frame-inset` — a new shell geometry role beside `--app-frame-max`, the 1500px frame's centring offset in its track: `max(0px, (100vw − menu − browser column − 1500px) / 2)`, zeroed by `:root:has(.app-main > .app-canvas)` and, in the anonymous shell, taken over the whole window. Before it the pill sat on the TRACK's content edge on every page, so on a framed page wider than 1500 it floated left of the content (at 2200 on Settings: pill 242, content 491 expanded; 104 vs 422 compact; signed out on an error page 40 vs 390). Now it equals `<main>`'s left plus its padding on framed pages, and is unchanged on a canvas (the editor at 2200: 562 = 202 + 320 + 40) and wherever the frame does not bind (234 at 1512). The phone offset stands. `MainFrameBrowserTest` gains four cases (framed at 2200 expanded and compact, the editor at 2200, signed out at 2200, Settings at 1512), reading the pill raised by the shell's own `showStatusPill`. **§4.4:** the "Full-bleed pages (065)" bullet described mechanisms deleted in 076 (`fullBleed`, `app-main-bleed`, the `--app-content-max` cap on `<main>`) as live and said `EditorLayoutRenderTest` pinned "both directions"; it becomes **Page width (065 → 076 → #573)**: the editor renders the shared `.app-container.app-main` and opts out of the frame only by `app-canvas` on `.pe-root`; the test pins the deleted pair's absence and the shared `<main>` on the editor and the pipelines list. **§3.1 item 1:** "`--app-content-max` … stay deleted" corrected — the name is live since #502, as `.pe-doc`'s measure, and no longer caps `<main>`. No route, permission, role or markup changed. |
