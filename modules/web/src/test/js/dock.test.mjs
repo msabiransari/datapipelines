@@ -264,3 +264,113 @@ test("each failure entry carries its summary label and its lazily built view", (
     delete globalThis.window;
   }
 });
+
+// #615 (owner ruling 2026-10-19) — the state the dock STARTS in. Short window: collapsed when
+// opening it at its default would leave the canvas under the threshold; a remembered pane
+// height is the person's answer and keeps it open; unmeasurable input keeps the old default.
+function loadApi() {
+  delete require.cache[require.resolve(dockPath)];
+  return require(dockPath);
+}
+
+test("defaultState: collapsed below the threshold, open at or above it", () => {
+  const { defaultState } = loadApi();
+  assert.equal(defaultState(103, 320, null), "collapsed", "1280x720: ~103px of canvas with the dock open");
+  assert.equal(defaultState(283, 320, null), "collapsed", "1440x900: ~283px");
+  assert.equal(defaultState(319.9, 320, null), "collapsed");
+  assert.equal(defaultState(320, 320, null), "open", "the threshold itself is enough");
+  assert.equal(defaultState(384, 320, null), "open", "1512x982: ~384px");
+});
+
+test("defaultState: a remembered pane height keeps the dock open, however short the window", () => {
+  const { defaultState } = loadApi();
+  assert.equal(defaultState(103, 320, 232), "open");
+  assert.equal(defaultState(103, 320, 0), "open", "any remembered value counts, not only a truthy one");
+  assert.equal(defaultState(103, 320, undefined), "collapsed", "undefined is no memory, like null");
+});
+
+test("defaultState: an input the page could not measure keeps the old default, open", () => {
+  const { defaultState } = loadApi();
+  for (const bad of [NaN, Infinity, undefined, null, "103"]) {
+    assert.equal(defaultState(bad, 320, null), "open", `canvas ${String(bad)}`);
+    assert.equal(defaultState(103, bad, null), "open", `threshold ${String(bad)}`);
+  }
+});
+
+test("collapse() is the start-up transition: it collapses and is idempotent; a tab or node still opens", () => {
+  const d = loadDock();
+  assert.equal(d.collapse(), "collapsed");
+  assert.equal(d.collapse(), "collapsed");
+  d.selectResults();
+  assert.equal(d.state, "open");
+  const n = loadDock();
+  n.collapse();
+  n.selectNode("a");
+  assert.equal(n.state, "open");
+});
+
+test("#615: the start-up collapse is inert once anything has moved the dock — it is measured after paint", () => {
+  for (const [what, move] of [
+    ["a tab", (d) => d.selectEvents()],
+    ["a node", (d) => d.selectNode("a")],
+    ["the chevron", (d) => d.toggleCollapse()],
+    ["a run starting", (d) => d.executeStarted()],
+    ["a failure", (d) => d.nodeFailed("a", { code: "x", message: "m" })],
+    ["results", (d) => d.dataReady(1)],
+  ]) {
+    const d = loadDock();
+    move(d);
+    const before = d.state;
+    assert.equal(d.collapse(), before, `after ${what} the default does not move the dock`);
+    assert.equal(d.autoCollapsed, false, `after ${what}`);
+  }
+  assert.equal(loadDock().touched, false, "a fresh dock is untouched");
+});
+
+test("#615: a run's first results open a dock the START-UP default collapsed — a person's collapse stays", () => {
+  const auto = loadDock();
+  auto.collapse();
+  auto.executeStarted();
+  assert.equal(auto.state, "collapsed", "starting a run moves nothing");
+  auto.dataReady(12);
+  assert.equal(auto.state, "open", "nobody chose this collapse: the results open it");
+  assert.equal(auto.tab, "results");
+  assert.equal(auto.autoCollapsed, false);
+
+  const chosen = loadDock();
+  chosen.collapse();
+  chosen.toggleCollapse(); // the person opens it ...
+  chosen.toggleCollapse(); // ... and collapses it again: now the state is theirs
+  chosen.dataReady(12);
+  assert.equal(chosen.state, "collapsed", "065: a collapse the person made is kept through results");
+
+  for (const gesture of ["selectResults", "selectDetails"]) {
+    const d = loadDock();
+    d.collapse();
+    d[gesture]();
+    d.toggleCollapse();
+    d.dataReady(3);
+    assert.equal(d.state, "collapsed", `after ${gesture} the state is the person's`);
+  }
+  const n = loadDock();
+  n.collapse();
+  n.selectNode("a");
+  assert.equal(n.autoCollapsed, false, "a node selection is a gesture too");
+});
+
+test("#615: openDefault undoes only a collapse the default made, and only while untouched", () => {
+  const d = loadDock();
+  assert.equal(d.openDefault(), "open", "nothing to undo on a fresh dock");
+  d.collapse();
+  assert.equal(d.openDefault(), "open", "the window grew: the default opens it");
+  assert.equal(d.autoCollapsed, false);
+
+  const chosen = loadDock();
+  chosen.toggleCollapse(); // the person collapsed it
+  assert.equal(chosen.openDefault(), "collapsed", "a collapse the person made is theirs");
+
+  const later = loadDock();
+  later.collapse();
+  later.executeStarted(); // a run started: touched, still collapsed until results
+  assert.equal(later.openDefault(), "collapsed", "once touched, only the results open it");
+});

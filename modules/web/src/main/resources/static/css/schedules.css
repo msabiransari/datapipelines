@@ -16,8 +16,9 @@
   align-self: center;
 }
 
-/* The blocked callout: the danger ACCENT on a quiet surface, not the solid danger slab — it
-   carries a sentence, a code, a time and a button, all of which must stay readable. */
+/* The blocked callout: the danger ACCENT as its edge on a quiet surface, not the solid danger
+   slab — it carries a sentence, a code, a time and a button, all of which must stay readable.
+   Its first line is danger TEXT, so it reads `--app-danger-ink` (#509), not the accent. */
 .sch-blocked {
   display: grid;
   gap: var(--gap-xs);
@@ -27,7 +28,7 @@
 }
 
 .sch-blocked > p:first-child {
-  color: var(--accent-danger);
+  color: var(--app-danger-ink);
 }
 
 /* A button that reads as a link (it opens a dialog, it navigates nowhere). */

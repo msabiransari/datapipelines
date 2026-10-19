@@ -1,5 +1,6 @@
 package co.datapipelines.browser
 
+import com.microsoft.playwright.Locator
 import com.microsoft.playwright.Page
 import com.microsoft.playwright.options.ScreenshotCaret
 import io.kotest.assertions.withClue
@@ -364,6 +365,53 @@ class TemplateWorkspaceBrowserTest : BrowserSuite() {
         viewedVersion() shouldBe "3"
         page.locator(".tw-vchip").innerText() shouldContain "draft"
         page.locator("#templateBody").waitFor()
+        consoleErrors shouldBe emptyList()
+    }
+
+    @Test
+    fun `#608 - the Versions tab's sr-only Actions header renders nothing a pointer can hit`() {
+        startTrace()
+        loginReadyUser("tlwsr")
+        val name = "test/ws_sr_${generatedPassword("n").take(6).lowercase()}.sql"
+        seedThreeVersions(name)
+
+        page.navigate("$baseUrl/templates/$name?tab=versions")
+        page.waitForSelector(".tw-root")
+        page.waitForSelector("#tw-pane-versions:not([hidden]) [data-version-row]")
+        // Screenshot before the assertions, so a red run still leaves
+        // the "before" picture for the handback.
+        // The Actions header's span, found by STRUCTURE so the case measures the element the
+        // author meant whatever its class. The house table's sort decoration (data-table.js)
+        // moves the th's own children INSIDE button.dt-sort > span and adds its resizer as a
+        // direct child of the th — the authored span is the label span's own child.
+        val headerSpan = page.locator("#tw-pane-versions .ds-table thead tr th:last-child .dt-sort > span > span")
+        headerSpan.waitFor()
+        headerSpan.scrollIntoViewIfNeeded()
+        val shot = Paths.get("build", "reports", "608-template-versions-header-row.png")
+        headerSpan.screenshot(Locator.ScreenshotOptions().setPath(shot))
+
+        // The box is 1x1 or smaller and nothing of the span sits under the pointer at the
+        // header cell's centre — the geometry the helper exists for, asserted FIRST so the
+        // base's undefined class is red HERE (visible text, a text-sized box), not on a
+        // naming technicality.
+        val reading =
+            headerSpan.evaluate(
+                """el => {
+                  const r = el.getBoundingClientRect();
+                  const cell = el.closest('th').getBoundingClientRect();
+                  const hit = document.elementFromPoint(cell.left + cell.width / 2, cell.top + cell.height / 2);
+                  return { w: r.width, h: r.height,
+                           hitInSpan: hit !== null && (hit === el || el.contains(hit)) };
+                }""",
+            ) as Map<*, *>
+        withClue("sr-only box reading $reading (w/h must be 1x1 or smaller, nothing of the span under the pointer)") {
+            ((reading["w"] as Number).toDouble() <= 1.0) shouldBe true
+            ((reading["h"] as Number).toDouble() <= 1.0) shouldBe true
+            (reading["hitInSpan"] as Boolean) shouldBe false
+        }
+        // The class is the house helper and the text survives for a screen reader.
+        headerSpan.getAttribute("class") shouldContain "u-sr-only"
+        headerSpan.textContent().isNotBlank() shouldBe true
         consoleErrors shouldBe emptyList()
     }
 
