@@ -39,9 +39,19 @@
   --pe-dock-tabs-h: var(--app-tab-h);
   --pe-dock-pane-h: 232px;
   /* The strip of canvas the dock may never eat into (104 §B's ceiling) and the dock's own
-     floor, declared here so the stylesheet and splitter.js name the same two numbers. */
+     floor, declared here so the stylesheet and splitter.js name the same two numbers.
+     #615 (owner ruling 2026-10-19): the canvas floor is 180, from 160 — room for the view
+     controls' column (159px, 16px off the bottom edge, 4px clear of the top) — and it is ENFORCED here, not only
+     by the drag: `.pe-body` never goes below it and the dock's pane row gives way instead,
+     so the dock opens only as tall as fits on a short window. */
   --pe-dock-min-h: 120px;
-  --pe-dock-canvas-floor: 160px;
+  --pe-dock-canvas-floor: 180px;
+  /* #615 — below this much canvas (measured with the dock open at its default) the dock
+     STARTS collapsed; a pane height the person chose keeps it open. Read by init.js and
+     decided by dock.js's defaultState: the controls' column plus room to drag the dock
+     open by 150px above the floor. PX ONLY, like --pe-dock-pane-h: init.js parseFloats
+     both, and a custom property reads back unconverted (a rem value would read as rems). */
+  --pe-dock-auto-collapse-below: 320px;
   /* SQL highlight accents (032) — token references only; hex lives in the fallback slot. */
   --pe-sql-keyword: var(--type-dql, #0369a1);
   --pe-sql-string: var(--accent-warning, #a16207);
@@ -343,7 +353,8 @@
   display: flex;
   flex-direction: column;
   flex: 1;
-  min-height: 0;
+  /* #615: the canvas floor holds against the dock (see --pe-dock-canvas-floor). */
+  min-height: var(--pe-dock-canvas-floor);
   overflow: hidden;
   position: relative;
 }
@@ -1549,8 +1560,10 @@
      before a run, the hidden panes) leaves the grid entirely, and without the pins
      every sibling would shift up a row (the tabs wearing the pane's 232px, the pane
      clipped to the tabs' 38px — measured on the lane instance). */
-  grid-template-rows: auto var(--pe-dock-tabs-h) var(--pe-dock-pane-h);
-  flex: 0 0 auto;
+  /* #615: the pane row is `minmax(0, …)` and the dock may shrink, so when the canvas is
+     at its floor the pane takes what is left rather than pushing the canvas below it. */
+  grid-template-rows: auto var(--pe-dock-tabs-h) minmax(0, var(--pe-dock-pane-h));
+  flex: 0 1 auto;
   min-height: 0;
   background: var(--surface-default, #fff);
   border-top: 1px solid var(--border-subtle, #b2b7bf);

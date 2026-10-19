@@ -67,6 +67,13 @@ class PipelineWorkspaceLayoutBrowserTest : BrowserSuite() {
             name,
         ) as Int
 
+    /** #615: at 1440x900 the dock STARTS collapsed (the canvas would be under 320px); a tab click opens it, as a person would. */
+    private fun openDock() {
+        page.click("#pe-dock-tab-details")
+        page.waitForFunction("() => !document.querySelector('.pe-dock').classList.contains('pe-dock-collapsed')")
+        page.waitForTimeout(300.0) // the 0.2s row transition
+    }
+
     private fun openWorkspaceFor(name: String) {
         page.navigate("$baseUrl/pipelines?q=$name")
         // #350: the catalog row IS the link into the workspace (the detail pane and its Open are gone).
@@ -113,6 +120,7 @@ class PipelineWorkspaceLayoutBrowserTest : BrowserSuite() {
         seedPipeline(name) shouldBe 201
         page.setViewportSize(1440, 900)
         openWorkspaceFor(name)
+        openDock()
 
         val handleBefore = page.locator("[data-splitter='editor-dock']").boundingBox()
         val before = page.evaluate("() => document.querySelector('.pe-dock').getBoundingClientRect().height") as Number
@@ -139,6 +147,7 @@ class PipelineWorkspaceLayoutBrowserTest : BrowserSuite() {
         seedPipeline(name) shouldBe 201
         page.setViewportSize(1440, 900)
         openWorkspaceFor(name)
+        openDock()
 
         // Collapse the dock...
         page.locator("button[aria-label='Collapse dock']").click()

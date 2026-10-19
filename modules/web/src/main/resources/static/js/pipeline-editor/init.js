@@ -225,6 +225,65 @@
       resultPanelInstance: null,
       sqlReloadTimer: null,
 
+      /**
+       * #615 (owner ruling 2026-10-19) — the dock's start-up state on a short window. The
+       * canvas it WOULD get with the dock open is the workspace's pane area less the dock's
+       * open height (tab strip + pane property + its 1px top border), measured on
+       * `.pe-panes` so the answer is the same whichever tab the page opened on. dock.js's
+       * defaultState decides; a remembered pane height (splitter.js) keeps the dock open.
+       */
+      applyDockDefault: function () {
+        if (typeof document.querySelector !== "function" || !window.PEDock || !window.PEDock.defaultState) return;
+        var panes = document.querySelector(".pe-panes");
+        var rootEl = document.querySelector(".pe-root");
+        if (!panes || !rootEl || typeof window.getComputedStyle !== "function") return;
+        var css = window.getComputedStyle(rootEl);
+        var px = function (name) {
+          return parseFloat(css.getPropertyValue(name));
+        };
+        // The tab strip is MEASURED: its token is rem (`--app-tab-h: 2.75rem`), and a custom
+        // property reads back unconverted — parseFloat saw 2.75, not 44, and 1440x900 stayed open.
+        var tabs = document.querySelector(".pe-dock-tabs");
+        if (!tabs) return;
+        var canvasIfOpen = panes.getBoundingClientRect().height - tabs.getBoundingClientRect().height - px("--pe-dock-pane-h") - 1;
+        var remembered = window.DpSplitter && window.DpSplitter.readStored ? window.DpSplitter.readStored(window.DpSplitter.KEYS.editorDock) : null;
+        if (window.PEDock.defaultState(canvasIfOpen, px("--pe-dock-auto-collapse-below"), remembered) === window.PEDock.COLLAPSED) {
+          this.dock.collapse();
+        } else {
+          this.dock.openDefault();
+        }
+      },
+
+      /**
+       * #615 — the default follows the panes until the dock is the person's. One measurement
+       * at init is not the answer: the heading above settles AFTER it (measured 1440x900:
+       * .pe-panes 609.5px at init, 560 once painted), so an untouched dock re-decides on every
+       * resize of `.pe-panes` — the window, the heading wrapping, the rail. The first gesture
+       * or run (dock.touched) ends the watch. The dock's own state never resizes `.pe-panes`.
+       */
+      watchDockDefault: function () {
+        var self = this;
+        if (typeof ResizeObserver === "undefined" || typeof document.querySelector !== "function") return;
+        var panes = document.querySelector(".pe-panes");
+        if (!panes) return;
+        self.stopDockDefaultWatch();
+        self._dockDefaultWatch = new ResizeObserver(function () {
+          if (self.dock.touched) {
+            self.stopDockDefaultWatch();
+            return;
+          }
+          self.applyDockDefault();
+        });
+        self._dockDefaultWatch.observe(panes);
+      },
+
+      stopDockDefaultWatch: function () {
+        if (this._dockDefaultWatch) {
+          this._dockDefaultWatch.disconnect();
+          this._dockDefaultWatch = null;
+        }
+      },
+
       init: function () {
         var self = this;
         var el = document.getElementById("pipeline-data");
@@ -240,6 +299,10 @@
           self.paramKeys = Object.keys(self.parameters);
           // The data script sits in <head>, so the root is looked up, not walked up to.
           self.canExecute = self.canExecuteFrom(typeof document.querySelector === "function" ? document.querySelector(".pe-root") : null);
+          // #615 — before the graph's first render, so its first fit sees the canvas it gets;
+          // then the default follows the panes until the dock is the person's.
+          self.applyDockDefault();
+          self.watchDockDefault();
 
           var overrides = {};
           self.paramKeys.forEach(function (k) {
@@ -380,6 +443,7 @@
           self.resultPanel.ttlInterval = null;
         }
         self.stopRunClock("idle");
+        self.stopDockDefaultWatch();
         if (self.graph && self.graph.stopStageWatch) self.graph.stopStageWatch();
         if (self.cy) {
           self.cy.destroy();

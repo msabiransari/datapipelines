@@ -55,6 +55,13 @@
       resultsRows: null,
       /* The node the Details tab is showing (null → the pane's empty state). */
       detailsNodeId: null,
+      /* #615: true while the dock is collapsed by the START-UP default, not by the person.
+         Their first gesture on the dock makes the state theirs; a run's first results
+         open a dock nobody chose to collapse. */
+      autoCollapsed: false,
+      /* #615: true once anything has moved the dock — a gesture, a run. The start-up default
+         is a default: once the dock has moved, collapse() must not undo what came first. */
+      touched: false,
 
       /* --- transitions (the table, and nothing else) ----------------------------
        * The template reads `state`, `tab`, `errors.length` and `resultsRows`
@@ -70,6 +77,8 @@
         this.detailsNodeId = nodeId;
         this.tab = DETAILS;
         this.state = OPEN;
+        this.autoCollapsed = false;
+        this.touched = true;
         return this.state;
       },
 
@@ -83,19 +92,26 @@
       executeStarted: function () {
         this.errors = [];
         this.resultsStale = this.hasResults;
+        this.touched = true;
         return this.state;
       },
 
       /**
        * data_ready: the Results badge takes the row count and the tab follows the
        * data — unless a failure the user has not read yet owns the tab. A collapsed
-       * dock stays collapsed (065: the STATE is the user's).
+       * dock stays collapsed (065: the STATE is the user's) — except one the start-up
+       * default collapsed (#615): nobody chose that, so the first results open it.
        */
       dataReady: function (rowCount) {
         this.hasResults = true;
         this.resultsStale = false;
         this.resultsRows = rowCount === undefined ? null : rowCount;
+        this.touched = true;
         if (this.errors.length === 0) this.tab = RESULTS;
+        if (this.autoCollapsed) {
+          this.state = OPEN;
+          this.autoCollapsed = false;
+        }
         return this.state;
       },
 
@@ -140,13 +156,35 @@
         if (first) {
           this.state = OPEN;
           this.tab = ERRORS;
+          this.autoCollapsed = false;
         }
+        this.touched = true;
+        return this.state;
+      },
+
+      /** #615 — the start-up default on a short window (`defaultState` below); not a user gesture,
+          so it is inert once anything has touched the dock. */
+      collapse: function () {
+        if (this.touched) return this.state;
+        this.state = COLLAPSED;
+        this.autoCollapsed = true;
+        return this.state;
+      },
+
+      /** #615 — the start-up default turned back to open (the window grew before anyone touched
+          the dock): undoes only a collapse the default made. */
+      openDefault: function () {
+        if (this.touched || !this.autoCollapsed) return this.state;
+        this.state = OPEN;
+        this.autoCollapsed = false;
         return this.state;
       },
 
       /** The chevron. One control, two directions — 065's minimise/restore pair. */
       toggleCollapse: function () {
         this.state = this.state === OPEN ? COLLAPSED : OPEN;
+        this.autoCollapsed = false;
+        this.touched = true;
         return this.state;
       },
 
@@ -155,6 +193,8 @@
         if (TABS.indexOf(tab) === -1) return this.state;
         this.state = OPEN;
         this.tab = tab;
+        this.autoCollapsed = false;
+        this.touched = true;
         return this.state;
       },
 
@@ -226,8 +266,25 @@
     };
   }
 
+  /**
+   * #615 — the state the dock STARTS in (owner ruling 2026-10-19). On a short window the
+   * dock starts collapsed: when opening it at its default height would leave the graph
+   * canvas under `collapseBelow` px (pipeline-editor.css `--pe-dock-auto-collapse-below`),
+   * the canvas keeps the height and the results wait for a tab, a run or a node. A pane
+   * height the person chose (`remembered`, splitter.js's stored size) is their answer and
+   * keeps the dock open. An input the page could not measure keeps the old default, open.
+   * PURE: init.js measures, this decides.
+   */
+  function defaultState(canvasIfOpen, collapseBelow, remembered) {
+    if (remembered !== null && remembered !== undefined) return OPEN;
+    if (typeof canvasIfOpen !== "number" || !isFinite(canvasIfOpen)) return OPEN;
+    if (typeof collapseBelow !== "number" || !isFinite(collapseBelow)) return OPEN;
+    return canvasIfOpen < collapseBelow ? COLLAPSED : OPEN;
+  }
+
   var api = {
     createDock: createDock,
+    defaultState: defaultState,
     OPEN: OPEN,
     COLLAPSED: COLLAPSED,
     DETAILS: DETAILS,
