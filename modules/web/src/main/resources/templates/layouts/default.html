@@ -379,11 +379,13 @@
           <!-- 079 §C / T139: the API section. The owner's "I don't see any API menu"
                was literally true — published endpoints, keys and the MCP connection
                had no screen at all. /api-console, not /api/**: that prefix is the
-               REST surface (/api/v1 and the published /api/<category> tree). -->
-          <a th:href="@{/api-console}" class="app-nav-link" data-nav-section="/api-console"
+               REST surface (/api/v1 and the published /api/<category> tree). #585: the item
+               lands on the API home, /overview/api-console, and navPath lights it on both the
+               home and the console (its View all); it is not a browserFamily. -->
+          <a th:href="@{/overview/api-console}" class="app-nav-link" data-nav-section="/api-console"
              data-nav-group="Operate" data-nav-label="API"
-             th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/api-console')} ? 'active' : null"
-             th:attr="aria-current=${currentPath != null and #strings.startsWith(currentPath, '/api-console')} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#activity"></use></svg><span class="app-rail-label">API</span></a>
+             th:classappend="${navPath != null and #strings.startsWith(navPath, '/api-console')} ? 'active' : null"
+             th:attr="aria-current=${navPath != null and #strings.startsWith(navPath, '/api-console')} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#activity"></use></svg><span class="app-rail-label">API</span></a>
           <!-- versioning §10.1 D8: promotion is a human action, and this link is the only way to
                reach it — there is no MCP tool and no schedule. -->
           <!-- Owner rule 13 (2026-09-20): the PAGE is readable by author, promoter and admins
