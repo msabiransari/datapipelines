@@ -59,6 +59,7 @@
         th:href="@{/vendor/fonts/jetbrains-mono/JetBrainsMono-Regular.woff2}">
 
   <link th:href="@{/css/app.css}" rel="stylesheet">
+  <link th:href="@{/css/auth.css}" rel="stylesheet">
 
   <link rel="icon" href="/favicon.ico" sizes="48x48">
   <link rel="icon" type="image/png" sizes="32x32" th:href="@{/site/brand/favicon-32.png}">
@@ -74,18 +75,20 @@
   <div id="toast" class="ds-toast-stack app-toast-stack" aria-live="polite"></div>
 
   <div class="app-auth">
-    <!--/* The brand is a LINK to the public site, not to /dashboard: from here the visitor
-         either completes the ceremony or leaves, and /dashboard is exactly the place they
-         have not been let into yet. Same mark and tile as the rail's brand (079). */-->
-    <a class="app-auth-brand" th:href="@{/}">
-      <span class="app-brand-tile" aria-hidden="true"><th:block th:replace="~{partials/brand-mark :: mark('app-brand-mark')}"></th:block></span><span>datapipelines</span>
-    </a>
-
-    <!--/* A <main> WITHOUT the id: `#app-main` is the boosted swap target and nothing on a
-         ceremony screen may be one. The landmark itself is a11y, and stays. */-->
+    <header class="app-auth-header">
+      <a class="app-auth-brand" th:href="@{/}">
+        <span class="app-brand-tile" aria-hidden="true"><th:block th:replace="~{partials/brand-mark :: mark('app-brand-mark')}"></th:block></span><span>datapipelines</span>
+      </a>
+      <nav aria-label="Page options">
+        <a class="app-auth-docs" th:href="@{/docs}">Documentation <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#arrow-right"/></svg></a>
+      </nav>
+    </header>
     <main class="app-auth-main">
       <th:block th:replace="${content}"/>
     </main>
+    <footer class="app-auth-footer">
+      <span>datapipelines <span aria-hidden="true">/</span> Data workflows, from question to delivery.</span>
+    </footer>
   </div>
 
   <script th:src="@{/vendor/htmx/htmx.min.js}"></script>
