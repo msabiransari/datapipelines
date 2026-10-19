@@ -29,7 +29,14 @@ class DangerInkSourceAuditTest {
         resolver
             .getResources("classpath:static/css/*.css")
             .filter { it.filename != null }
-            .associate { it.filename!! to it.inputStream.readBytes().decodeToString().withoutBlockComments() }
+            .associate { resource ->
+                val name = requireNotNull(resource.filename)
+                name to
+                    resource.inputStream
+                        .readBytes()
+                        .decodeToString()
+                        .withoutBlockComments()
+            }
 
     private fun String.withoutBlockComments(): String = replace(Regex("/\\*.*?\\*/", RegexOption.DOT_MATCHES_ALL), " ")
 

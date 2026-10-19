@@ -74,15 +74,8 @@ class DangerInkContrastBrowserTest : BrowserSuite() {
 
     private fun shotDir(): Path = Paths.get("build", "reports", "509-danger-ink").also { it.toFile().mkdirs() }
 
-    @Test
-    fun `danger text keeps the 4_5 to 1 floor on every surface of every vendored theme`() {
-        startTrace()
-        ready()
-        page.setViewportSize(1440, 900)
-        page.emulateMedia(Page.EmulateMediaOptions().setColorScheme(ColorScheme.LIGHT))
-
-        // The page carries both real sites: a live key's ghost Delete (.u-danger) and a
-        // deleted key's Fail chip (.app-chip-bad "deleted").
+    /** The two real sites on one page: a live key's ghost Delete and a deleted key's Fail chip. */
+    private fun seedSites(): Pair<Locator, Locator> {
         page.navigate("$baseUrl/api-keys")
         page.waitForURL("**/api-keys")
         mint("ink-live")
@@ -98,9 +91,15 @@ class DangerInkContrastBrowserTest : BrowserSuite() {
         val button = rowFor("ink-live").locator("button.u-danger[data-verb='key-revoke']")
         chip.waitFor()
         button.waitFor()
+        return chip to button
+    }
 
-        // DERIVED FROM THE RUNNING APP (ShellFeelBrowserTest's idiom): the modes and palettes
-        // the top bar offers, so a tenth vendored theme joins the sweep by itself.
+    /**
+     * DERIVED FROM THE RUNNING APP (ShellFeelBrowserTest's idiom): the modes and palettes the
+     * top bar offers, so a tenth vendored theme joins the sweep by itself — plus `auto` again
+     * under an emulated dark preference, the only way its dark half renders.
+     */
+    private fun sweep(): List<Pair<String, ColorScheme>> {
         @Suppress("UNCHECKED_CAST")
         val offered =
             (
@@ -110,51 +109,71 @@ class DangerInkContrastBrowserTest : BrowserSuite() {
                 ) as List<*>
             ).map { it as String }
         offered shouldContainAll listOf("light", "dark", "auto")
-        val sweep = offered.map { it to ColorScheme.LIGHT } + ("auto" to ColorScheme.DARK)
+        return offered.map { it to ColorScheme.LIGHT } + ("auto" to ColorScheme.DARK)
+    }
 
-        val measured =
-            sweep.map { (theme, scheme) ->
-                val label = if (scheme == ColorScheme.DARK) "$theme(dark)" else theme
-                page.emulateMedia(Page.EmulateMediaOptions().setColorScheme(scheme))
-                page.evaluate(SWAP_THEME, theme) shouldBe true
-                page.mouse().move(0.0, 0.0)
-                @Suppress("UNCHECKED_CAST")
-                val rest = page.evaluate(MEASURE, false) as Map<String, Any>
-                button.hover()
-                @Suppress("UNCHECKED_CAST")
-                val hover = page.evaluate(MEASURE, true) as Map<String, Any>
-                page.mouse().move(0.0, 0.0)
-                chip.screenshot(Locator.ScreenshotOptions().setPath(shotDir().resolve("$label-chip.png")))
-                button.screenshot(Locator.ScreenshotOptions().setPath(shotDir().resolve("$label-delete.png")))
-                label to (rest + mapOf("hover" to hover))
-            }
+    /** One theme: swap it in, measure at rest, hover the Delete and measure again, photograph both sites. */
+    @Suppress("UNCHECKED_CAST")
+    private fun measure(
+        theme: String,
+        scheme: ColorScheme,
+        chip: Locator,
+        button: Locator,
+    ): Pair<String, Map<String, Any>> {
+        val label = if (scheme == ColorScheme.DARK) "$theme(dark)" else theme
+        page.emulateMedia(Page.EmulateMediaOptions().setColorScheme(scheme))
+        page.evaluate(SWAP_THEME, theme) shouldBe true
+        page.mouse().move(0.0, 0.0)
+        val rest = page.evaluate(MEASURE, false) as Map<String, Any>
+        button.hover()
+        val hover = page.evaluate(MEASURE, true) as Map<String, Any>
+        page.mouse().move(0.0, 0.0)
+        chip.screenshot(Locator.ScreenshotOptions().setPath(shotDir().resolve("$label-chip.png")))
+        button.screenshot(Locator.ScreenshotOptions().setPath(shotDir().resolve("$label-delete.png")))
+        return label to (rest + mapOf("hover" to hover))
+    }
+
+    /** One theme's report lines and its failures: the text floor, the unchanged borders, the consumers, the vendored white. */
+    @Suppress("UNCHECKED_CAST")
+    private fun judge(
+        label: String,
+        m: Map<String, Any>,
+        lines: MutableList<String>,
+        failures: MutableList<String>,
+    ) {
+        val pairs = (m["pairs"] as List<Map<String, Any>>) + ((m["hover"] as Map<String, Any>)["pairs"] as List<Map<String, Any>>)
+        pairs.forEach { p ->
+            val ratio = (p["ratio"] as Number).toDouble()
+            val row = "$label  ${p["site"]}  ${"%.2f".format(ratio)}:1  ink=${p["text"]} on ${p["background"]}"
+            lines += row
+            if (ratio < TEXT_FLOOR) failures += row
+        }
+        val borders = m["borders"] as Map<String, String>
+        lines += "$label  borders ${borders.entries.joinToString(" ")} accent=${m["accent"]}"
+        borders.forEach { (site, colour) ->
+            if (colour != m["accent"]) failures += "$label: border $site paints $colour, not --accent-danger ${m["accent"]}"
+        }
+        (m["consumers"] as Map<String, String>).forEach { (site, colour) ->
+            if (colour != m["ink"]) failures += "$label: $site paints $colour, not --app-danger-ink ${m["ink"]}"
+        }
+        if (m["onRed"] != m["onRedDeclared"]) {
+            failures += "$label: --accent-danger-text is ${m["onRed"]}, the theme declares ${m["onRedDeclared"]}"
+        }
+    }
+
+    @Test
+    fun `danger text keeps the 4_5 to 1 floor on every surface of every vendored theme`() {
+        startTrace()
+        ready()
+        page.setViewportSize(1440, 900)
+        page.emulateMedia(Page.EmulateMediaOptions().setColorScheme(ColorScheme.LIGHT))
+        val (chip, button) = seedSites()
+
+        val measured = sweep().map { (theme, scheme) -> measure(theme, scheme, chip, button) }
 
         val failures = mutableListOf<String>()
         val lines = mutableListOf("#509 danger ink — theme × site, WCAG contrast (floor $TEXT_FLOOR:1)")
-        measured.forEach { (label, m) ->
-            @Suppress("UNCHECKED_CAST")
-            val pairs = (m["pairs"] as List<Map<String, Any>>) + ((m["hover"] as Map<String, Any>)["pairs"] as List<Map<String, Any>>)
-            pairs.forEach { p ->
-                val ratio = (p["ratio"] as Number).toDouble()
-                val row = "$label  ${p["site"]}  ${"%.2f".format(ratio)}:1  ink=${p["text"]} on ${p["background"]}"
-                lines += row
-                if (ratio < TEXT_FLOOR) failures += row
-            }
-            @Suppress("UNCHECKED_CAST")
-            val borders = m["borders"] as Map<String, String>
-            lines += "$label  borders ${borders.entries.joinToString(" ")} accent=${m["accent"]}"
-            borders.forEach { (site, colour) ->
-                if (colour != m["accent"]) failures += "$label: border $site paints $colour, not --accent-danger ${m["accent"]}"
-            }
-            @Suppress("UNCHECKED_CAST")
-            val consumers = m["consumers"] as Map<String, String>
-            consumers.forEach { (site, colour) ->
-                if (colour != m["ink"]) failures += "$label: $site paints $colour, not --app-danger-ink ${m["ink"]}"
-            }
-            if (m["onRed"] != m["onRedDeclared"]) {
-                failures += "$label: --accent-danger-text is ${m["onRed"]}, the theme declares ${m["onRedDeclared"]}"
-            }
-        }
+        measured.forEach { (label, m) -> judge(label, m, lines, failures) }
         val report = lines.joinToString("\n")
         shotDir().resolve("matrix.txt").toFile().writeText(report + "\n")
         println(report)
