@@ -11,7 +11,8 @@ import org.junit.jupiter.api.Test
  * #498 and #499 - the parameters pane's error row and option rows in a real browser, measured.
  *
  * #498: a failing parameter's row speaks the design system's field error - the danger ink on the
- * sentence, the catalogued code after it as a muted mono chip, the row's design-system control
+ * sentence (#509: the --app-danger-ink text role), the catalogued code after it as a muted mono
+ * chip, the row's design-system control
  * wearing the vendored error border while in error - in both themes, on the board's filters panel
  * and on the parameter-set page's live form (one adapter renders both, dashboards.css loads on
  * every product page).
@@ -64,7 +65,7 @@ class DashboardParametersPaneBrowserTest : ParameterSetBrowserSuite() {
           const borderDanger = getComputedStyle(probe).borderTopColor;
           // Read every var-resolved ink while the probe is STILL ATTACHED — a detached
           // element's computed style is the empty string, not a colour.
-          const accentDanger = inkOf('var(--accent-danger)');
+          const dangerInk = inkOf('var(--app-danger-ink)');
           const textMuted = inkOf('var(--text-muted)');
           const textPrimary = inkOf('var(--text-primary)');
           probe.remove();
@@ -86,7 +87,7 @@ class DashboardParametersPaneBrowserTest : ParameterSetBrowserSuite() {
             codeColor: code ? getComputedStyle(code).color : null,
             inputBorder: input ? getComputedStyle(input).borderTopColor : null,
             fontSize: getComputedStyle(err).fontSize,
-            accentDanger: accentDanger,
+            dangerInk: dangerInk,
             textMuted: textMuted,
             textPrimary: textPrimary,
             textXs: textXs,
@@ -152,7 +153,7 @@ class DashboardParametersPaneBrowserTest : ParameterSetBrowserSuite() {
     /** The voice assertions the board and the parameter-set page share, per theme. */
     private fun assertErrorVoice(measured: Map<String, Any?>) {
         (measured["role"] as String) shouldBe "alert"
-        (measured["errColor"] as String) shouldBe (measured["accentDanger"] as String)
+        (measured["errColor"] as String) shouldBe (measured["dangerInk"] as String)
         (measured["errColor"] as String) shouldNotBe (measured["textPrimary"] as String)
         (measured["fontSize"] as String) shouldBe (measured["textXs"] as String)
         (measured["codeColor"] as String) shouldBe (measured["textMuted"] as String)
