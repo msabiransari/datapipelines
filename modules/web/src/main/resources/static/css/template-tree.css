@@ -961,7 +961,7 @@ a.tpl-result {
   flex-direction: column;
   min-width: 12rem;
   padding: var(--gap-xs, 4px);
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--border-default);
   border-radius: var(--radius-base);
   background: var(--surface-raised);
   box-shadow: var(--shadow-md, 0 4px 16px color-mix(in srgb, var(--text-primary) 12%, transparent));
@@ -998,7 +998,7 @@ a.tpl-result {
   align-items: center;
   gap: var(--gap-sm, 8px);
   padding: var(--gap-xs, 4px) var(--gap-sm, 8px);
-  border: 1px solid var(--border-faint, var(--border-subtle));
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius-base);
   font-size: var(--app-text-ui);
 }
@@ -1027,7 +1027,7 @@ a.tpl-result {
   flex-wrap: wrap;
   gap: var(--gap-xs, 4px) var(--gap-sm, 8px);
   padding: var(--gap-xs, 4px) var(--gap-sm, 8px);
-  border: 1px solid var(--border-faint, var(--border-subtle));
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius-base);
 }
 

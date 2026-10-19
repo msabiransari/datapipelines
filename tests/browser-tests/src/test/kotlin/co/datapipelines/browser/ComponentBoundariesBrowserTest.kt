@@ -427,9 +427,22 @@ class ComponentBoundariesBrowserTest : VisualizationBrowserSuite() {
         const val MIN_THEMES = 9
         const val EDITOR_WIDTH = 1440
         const val EDITOR_HEIGHT = 900
+        const val TOKEN_PAIRS_ISSUE = 628
 
-        /** Filled from the base measurement (A.1); each entry names its follow-up issue. */
-        val GAPS = emptyList<Gap>()
+        /** The light themes whose page is darker than their default surface (minimal's is one colour). */
+        val DARKER_PAGE = setOf("light", "auto", "forest", "healthcare", "ocean", "professional", "saas")
+
+        /**
+         * Vendored pairs measured below their floor after #609's re-tokening (#628: the design system audits surface-default
+         * only). Every boundary that fails here fails on its OUTSIDE surface; the separators on inset fail on their inside.
+         */
+        val GAPS =
+            listOf(
+                Gap(BOUNDARY, "--surface-page", DARKER_PAGE, TOKEN_PAIRS_ISSUE),
+                Gap(BOUNDARY, "--surface-hover", DARKER_PAGE + setOf("dark", "auto(dark)"), TOKEN_PAIRS_ISSUE),
+                Gap(SEPARATOR, "--surface-page", DARKER_PAGE, TOKEN_PAIRS_ISSUE),
+                Gap(SEPARATOR, "--surface-inset", DARKER_PAGE + "minimal", TOKEN_PAIRS_ISSUE),
+            )
 
         /** ShellSurfacesBrowserTest's swap: REPLACE the theme link and wait for its own load. */
         val SWAP_THEME =
