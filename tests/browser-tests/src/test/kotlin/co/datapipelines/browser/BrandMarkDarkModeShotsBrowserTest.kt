@@ -25,9 +25,9 @@ import java.nio.file.Paths
  * The login page (161, #161 — "the login dialog still has the old logo") is photographed the
  * same way: anonymously, so in the deployment's default theme (`ThemeResolver` falls back to
  * `ui.theme` when there is no signed-in preference to read), and BEFORE the sign-in below,
- * because a signed-in visitor is redirected off `/login` (090 §C). Its card carries the card's
- * own brand AND the auth layout's brand link; both are asserted, and the card is captured
- * first so a regression leaves its picture behind.
+ * because a signed-in visitor is redirected off `/login` (090 §C). The companion design
+ * (#619) carries one brand in the header; its geometry is asserted and captured first
+ * so a regression leaves its picture behind.
  *
  * Files land in `build/reports/163-screenshots/` as `163-<state>.png` (`161-login-card.png`
  * for the login leg).
@@ -38,8 +38,8 @@ class BrandMarkDarkModeShotsBrowserTest : DashboardBrowserSuite() {
         startTrace()
         page.setViewportSize(1440, 900)
         page.navigate("$baseUrl/login")
-        page.locator(".app-auth-card").first().waitFor()
-        page.waitForFunction("() => getComputedStyle(document.querySelector('.app-auth-card')).opacity === '1'")
+        page.locator(".app-auth-brand").first().waitFor()
+        page.waitForFunction("() => getComputedStyle(document.querySelector('.app-auth-brand')).opacity === '1'")
         paletteShot("login")
 
         val root = ready("palette552")
@@ -93,11 +93,10 @@ class BrandMarkDarkModeShotsBrowserTest : DashboardBrowserSuite() {
     fun `the login card, the app rail in dark mode and the site header all show the outlined mark`() {
         startTrace()
         page.navigate("$baseUrl/login")
-        val card = page.locator(".app-auth-card").first()
+        val card = page.locator(".app-auth-brand").first()
         card.waitFor()
         page.waitForFunction("() => document.fonts.ready.then(() => document.fonts.status === 'loaded')")
         card.screenshot(Locator.ScreenshotOptions().setPath(shotDir().resolve("161-login-card.png")))
-        assertD1Geometry(page.locator(".app-auth-card-brand .app-brand-tile").first().innerHTML())
         assertD1Geometry(page.locator(".app-auth-brand .app-brand-tile").first().innerHTML())
 
         val user =

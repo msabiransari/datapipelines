@@ -631,8 +631,14 @@ class AppShellBrowserTest : BrowserSuite() {
         startTrace()
         signedIn("api")
 
-        page.locator("nav.app-nav a[href='/api-console']").first().click()
-        page.waitForURL("**/api-console")
+        // #585: the rail lands on the API home; the console is its View all.
+        page.locator("nav.app-nav a[href='/overview/api-console']").first().click()
+        page.waitForURL("**/overview/api-console")
+        page.locator("h1").first().innerText() shouldBe "API"
+        page.content() shouldContain "MCP server"
+        page.locator("[data-overview-view-all]").click()
+        // A predicate, not the glob: "**/api-console" already matches the home's own URL.
+        page.waitForURL { it.endsWith("/api-console") && !it.contains("/overview/") }
         page.locator("h1").first().innerText() shouldBe "API"
         page.content() shouldContain "Published endpoints"
         page.content() shouldContain "MCP server"

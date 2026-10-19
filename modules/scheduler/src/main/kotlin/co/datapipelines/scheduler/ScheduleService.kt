@@ -437,6 +437,22 @@ class ScheduleService(
         return RunDetail(run, runs.trail(runId))
     }
 
+    /**
+     * #584 — the Schedules home's snapshot: [list] itself, unprefixed, at the workspace cap + 1, so
+     * the counts are over exactly the set §20.1 shows [viewer] (the promoter's admitted ones), never
+     * [countLive]'s unlensed total; then each listed schedule's latest run state in one read. A
+     * workspace past its cap (the cap lowered after the fact) answers `complete = false`.
+     */
+    fun summary(
+        workspaceId: UUID,
+        viewer: TargetViewer,
+    ): ScheduleSummary {
+        val cap = properties.maxSchedulesPerWorkspace
+        val read = list(workspaceId, null, cap + 1, 0, viewer)
+        val admitted = read.take(cap)
+        return ScheduleSummary.of(admitted, runs.latestStates(workspaceId, admitted.map { it.id }), complete = read.size <= cap)
+    }
+
     /** Live schedules in [workspaceId] — the workspace delete's content count. */
     fun countLive(workspaceId: UUID): Int = schedules.countLive(workspaceId)
 

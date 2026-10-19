@@ -63,7 +63,7 @@
     "package": "lucide-static",
     "version": "1.39.0",
     "file": "vendor/icons/lucide-sprite.svg",
-    "sha256": "7275773502543228a9dea04377c357017495148839f85cbdff8e30f5df3d95d8",
+    "sha256": "6ce082c7ac2be4b1f2365a9efbf2d253280519e8d2a41f1b1c1c81b85e68f34b",
     "source": "https://unpkg.com/lucide-static@1.39.0/icons/{name}.svg",
     "license": "ISC",
     "subset": [
@@ -110,7 +110,9 @@
       "bug",
       "calendar-clock",
       "sliders-horizontal",
-      "chart-line"
+      "chart-line",
+      "eye",
+      "eye-off"
     ],
     "note": "059 — subset ONLY (glyphs assembled into one sprite, symbol ids left of the mapping); stroke=currentColor so tokens colour them. No vendor logos (trademarks). 085 §B: the sprite now covers EVERY icon the app references — the nav, the actions and the tree glyphs were ad-hoc inline copies at mixed weights until now; IconSpriteAuditTest keeps referenced, vendored and this subset list equal. db/table/boxes/workflow are the 059 legacy ids (db = lucide's database; its subset_sha256 is database.svg's). The upstream LICENSE is vendored verbatim as LICENSE.lucide (ISC, with the Feather-derived MIT appendix).",
     "license_file": "vendor/icons/LICENSE.lucide",
@@ -158,7 +160,9 @@
       "bug": "111a60d1747fcc7671bf7afdd8334ba815fe1d99b7d764fdb72caed8611e20d9",
       "calendar-clock": "991bc4e6b93a534eb406346a342ffc0b7ea3dc70ed74476fc9255fa157ace17a",
       "sliders-horizontal": "3553f5e026f5bdf7e512e57ae54a672ced42df62d1dd2b8de0fc1a898d56e7d5",
-      "chart-line": "3b83d3bc804083413091262ea77af17a4a0ce2d9dddfe87b0ddfa9a8a4155983"
+      "chart-line": "3b83d3bc804083413091262ea77af17a4a0ce2d9dddfe87b0ddfa9a8a4155983",
+      "eye": "5db18e2f562787f3652e4071f5b7011e7b54971a881b39f8f377ba70ae0e2c4b",
+      "eye-off": "81900df1dcf8644102427a5a02eff61c3c1f48a67266ed6f192bf9d7e537b493"
     }
   },
   "plotly": {

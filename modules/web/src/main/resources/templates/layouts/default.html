@@ -279,7 +279,6 @@
           <span class="app-ws-avatar" aria-hidden="true"
                 th:text="${#strings.toUpperCase(#strings.substring(activeWorkspace, 0, activeWorkspace.length() >= 2 ? 2 : 1))}">TS</span>
           <span class="app-ws-text app-rail-label">
-            <small class="app-workspace-label">workspace</small>
             <!-- 114 §C.4 — the role you hold HERE, next to the name of where "here" is. It
                  is a property of the (workspace, person) pair, so it belongs beside the
                  switcher and nowhere else; `data-role` is what the tests read. A super
@@ -371,19 +370,23 @@
              th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/executions')} ? 'active' : null"
              th:attr="aria-current=${currentPath != null and #strings.startsWith(currentPath, '/executions')} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#clock"></use></svg><span class="app-rail-label">Executions</span></a>
           <!-- #9 slice 2 (ui-screens §4.20): every member reads schedules — the promoter through
-               the lens — so the item is drawn for every role, like Pipelines. -->
-          <a th:href="@{/schedules}" class="app-nav-link" data-nav-section="/schedules"
+               the lens — so the item is drawn for every role, like Pipelines. #584: it links the
+               Schedules home and lights on both it and the explorer through `navPath` (the
+               overview root taken off); not a browserFamily — the browser stays hidden. -->
+          <a th:href="@{/overview/schedules}" class="app-nav-link" data-nav-section="/schedules"
              data-nav-group="Operate" data-nav-label="Schedules"
-             th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/schedules')} ? 'active' : null"
-             th:attr="aria-current=${currentPath != null and #strings.startsWith(currentPath, '/schedules')} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#calendar-clock"></use></svg><span class="app-rail-label">Schedules</span></a>
+             th:classappend="${navPath != null and #strings.startsWith(navPath, '/schedules')} ? 'active' : null"
+             th:attr="aria-current=${navPath != null and #strings.startsWith(navPath, '/schedules')} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#calendar-clock"></use></svg><span class="app-rail-label">Schedules</span></a>
           <!-- 079 §C / T139: the API section. The owner's "I don't see any API menu"
                was literally true — published endpoints, keys and the MCP connection
                had no screen at all. /api-console, not /api/**: that prefix is the
-               REST surface (/api/v1 and the published /api/<category> tree). -->
-          <a th:href="@{/api-console}" class="app-nav-link" data-nav-section="/api-console"
+               REST surface (/api/v1 and the published /api/<category> tree). #585: the item
+               lands on the API home, /overview/api-console, and navPath lights it on both the
+               home and the console (its View all); it is not a browserFamily. -->
+          <a th:href="@{/overview/api-console}" class="app-nav-link" data-nav-section="/api-console"
              data-nav-group="Operate" data-nav-label="API"
-             th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/api-console')} ? 'active' : null"
-             th:attr="aria-current=${currentPath != null and #strings.startsWith(currentPath, '/api-console')} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#activity"></use></svg><span class="app-rail-label">API</span></a>
+             th:classappend="${navPath != null and #strings.startsWith(navPath, '/api-console')} ? 'active' : null"
+             th:attr="aria-current=${navPath != null and #strings.startsWith(navPath, '/api-console')} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#activity"></use></svg><span class="app-rail-label">API</span></a>
           <!-- versioning §10.1 D8: promotion is a human action, and this link is the only way to
                reach it — there is no MCP tool and no schedule. -->
           <!-- Owner rule 13 (2026-09-20): the PAGE is readable by author, promoter and admins

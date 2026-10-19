@@ -2,126 +2,39 @@
 <html xmlns:th="http://www.thymeleaf.org"
       th:replace="~{layouts/auth :: page(~{::content})}">
 <th:block th:fragment="content">
-  <!--/* The sign-in ceremony is the product's own visual language, not a stock card: the
-       editor's dot-grid ground with a live four-engine DAG drawn in the editor's card style
-       (an inline SVG styled entirely by tokens — no canvas, no colour resolution, no script),
-       and the sign-in panel floating beside it like an inspector. The DAG is a FICTIONAL finance
-       flow, four hops deep, so a business reader sees the story — sources cleaned, converted,
-       joined, rolled up, then served to an API their customers call and the dashboard their
-       team watches. It is an illustration, not a screenshot; the two ends are what the product
-       does today (published endpoints) and what any BI tool does over them. Geometry is
-       computed (box 176×54, ports at mid-height), not hand-drawn. Below 900px the stage is
-       hidden and the panel stands alone. */-->
-  <div class="app-auth-split">
-    <section class="app-auth-stage" aria-hidden="true">
-      <svg class="app-auth-dag" viewBox="0 0 972 614" focusable="false">
-          <rect class="app-auth-box" x="20" y="170" width="932" height="424" rx="16"/>
-          <text class="app-auth-box-label" x="934" y="192" text-anchor="end">datapipelines · workspace</text>
-          <rect class="app-auth-chip" x="307.0" y="134.0" width="34" height="18" rx="9"/><text class="app-auth-chip-text" x="324.0" y="146.0" text-anchor="middle">MCP</text>
-        <g class="app-auth-dag-rails">
-          <path class="app-auth-rail" d="M218 227 C 238 227, 238 257, 258 257"/>
-          <path class="app-auth-rail" d="M218 327 C 238 327, 238 357, 258 357"/>
-          <path class="app-auth-rail" d="M434 257 C 454 257, 454 292, 474 292"/>
-          <path class="app-auth-rail" d="M434 357 C 454 357, 454 292, 474 292"/>
-          <path class="app-auth-rail" d="M650 292 C 562 292, 562 457, 474 457"/>
-          <path class="app-auth-rail" d="M218 427 C 346 427, 346 457, 474 457"/>
-          <path class="app-auth-rail" d="M218 527 C 346 527, 346 457, 474 457"/>
-          <path class="app-auth-rail" d="M650 457 C 670 457, 670 292, 690 292"/>
-          <path class="app-auth-rail" d="M810 352 C 810 370, 810 370, 810 388"/>
-          <path class="app-auth-rail" d="M196 61 C 216 61, 216 62, 236 62"/>
-          <path class="app-auth-rail" d="M324 116 C 324 143, 324 143, 324 170"/>
-        </g>
-        <g class="app-auth-dag-edges">
-          <path class="app-auth-edge" d="M218 227 C 238 227, 238 257, 258 257"/>
-          <path class="app-auth-edge" d="M218 327 C 238 327, 238 357, 258 357"/>
-          <path class="app-auth-edge" d="M434 257 C 454 257, 454 292, 474 292"/>
-          <path class="app-auth-edge" d="M434 357 C 454 357, 454 292, 474 292"/>
-          <path class="app-auth-edge" d="M650 292 C 562 292, 562 457, 474 457"/>
-          <path class="app-auth-edge" d="M218 427 C 346 427, 346 457, 474 457"/>
-          <path class="app-auth-edge" d="M218 527 C 346 527, 346 457, 474 457"/>
-          <path class="app-auth-edge" d="M650 457 C 670 457, 670 292, 690 292"/>
-          <path class="app-auth-edge" d="M810 352 C 810 370, 810 370, 810 388"/>
-          <path class="app-auth-edge" d="M196 61 C 216 61, 216 62, 236 62"/>
-          <path class="app-auth-edge" d="M324 116 C 324 143, 324 143, 324 170"/>
-        </g>
-        <g class="app-auth-dag-nodes">
-          <g class="app-auth-person" transform="translate(20 30)">
-            <rect class="app-auth-node-box" width="176" height="62" rx="10"/>
-            <circle class="app-auth-person-head" cx="30" cy="24" r="8"/>
-            <path class="app-auth-person-body" d="M14 50 C 14 38, 46 38, 46 50"/>
-            <text class="app-auth-node-name" x="58" y="26">You</text>
-            <text class="app-auth-node-meta" x="58" y="44">ask in plain English</text>
-          </g>
-          <g class="app-auth-agent" transform="translate(236 8)">
-            <rect class="app-auth-screen-box" width="176" height="108" rx="10"/>
-            <rect class="app-auth-screen-bar" x="0.5" y="0.5" width="175" height="26" rx="9.5"/>
-            <rect class="app-auth-screen-bar" x="0.5" y="14" width="175" height="13"/>
-            <text class="app-auth-screen-title" x="12" y="17.5">your agent</text>
-            <text class="app-auth-screen-meta" x="164" y="17.5" text-anchor="end">over MCP</text>
-            <text class="app-auth-code" x="12" y="46"><tspan class="app-auth-code-num">›</tspan> revenue by customer, in USD,</text>
-            <text class="app-auth-code" x="12" y="60">  from the ledger — monthly</text>
-            <rect class="app-auth-chip" x="12" y="76" width="56" height="16" rx="8"/><text class="app-auth-chip-text" x="40" y="87" text-anchor="middle">Claude Code</text>
-            <rect class="app-auth-chip" x="74" y="76" width="40" height="16" rx="8"/><text class="app-auth-chip-text" x="94" y="87" text-anchor="middle">Cursor</text>
-            <rect class="app-auth-chip" x="120" y="76" width="44" height="16" rx="8"/><text class="app-auth-chip-text" x="142" y="87" text-anchor="middle">Copilot</text>
-          </g>
-          <g class="app-auth-node" transform="translate(42 200)"><rect class="app-auth-node-box" width="176" height="54" rx="10"/><text class="app-auth-node-name" x="14" y="23">ledger_entries</text><text class="app-auth-node-meta" x="14" y="41">Postgres · DQL</text><circle class="app-auth-node-dot" cx="164" cy="14" r="3"/></g>
-          <g class="app-auth-node" transform="translate(42 300)"><rect class="app-auth-node-box" width="176" height="54" rx="10"/><text class="app-auth-node-name" x="14" y="23">fx_rates</text><text class="app-auth-node-meta" x="14" y="41">Parquet on S3 · LAKE</text><circle class="app-auth-node-dot" cx="164" cy="14" r="3"/></g>
-          <g class="app-auth-node" transform="translate(42 400)"><rect class="app-auth-node-box" width="176" height="54" rx="10"/><text class="app-auth-node-name" x="14" y="23">customers</text><text class="app-auth-node-meta" x="14" y="41">MySQL · DQL</text><circle class="app-auth-node-dot" cx="164" cy="14" r="3"/></g>
-          <g class="app-auth-node app-auth-node-calc" transform="translate(42 500)"><rect class="app-auth-node-box" width="176" height="54" rx="10"/><text class="app-auth-node-name" x="14" y="23">fiscal_month</text><text class="app-auth-node-meta" x="14" y="41">CALCULATOR · period_start</text><circle class="app-auth-node-dot" cx="164" cy="14" r="3"/></g>
-          <g class="app-auth-node app-auth-node-step" transform="translate(258 230)"><rect class="app-auth-node-box" width="176" height="54" rx="10"/><text class="app-auth-node-name" x="14" y="23">clean_ledger</text><text class="app-auth-node-meta" x="14" y="41">tempdb · filter + cast</text><circle class="app-auth-node-dot" cx="164" cy="14" r="3"/></g>
-          <g class="app-auth-node app-auth-node-step" transform="translate(258 330)"><rect class="app-auth-node-box" width="176" height="54" rx="10"/><text class="app-auth-node-name" x="14" y="23">latest_fx</text><text class="app-auth-node-meta" x="14" y="41">tempdb · dedupe by day</text><circle class="app-auth-node-dot" cx="164" cy="14" r="3"/></g>
-          <g class="app-auth-node app-auth-node-step" transform="translate(474 265)"><rect class="app-auth-node-box" width="176" height="54" rx="10"/><text class="app-auth-node-name" x="14" y="23">to_usd</text><text class="app-auth-node-meta" x="14" y="41">tempdb · join × rate</text><circle class="app-auth-node-dot" cx="164" cy="14" r="3"/></g>
-          <g class="app-auth-node app-auth-node-step" transform="translate(474 430)"><rect class="app-auth-node-box" width="176" height="54" rx="10"/><text class="app-auth-node-name" x="14" y="23">revenue_by_customer</text><text class="app-auth-node-meta" x="14" y="41">tempdb · join + roll up</text><circle class="app-auth-node-dot" cx="164" cy="14" r="3"/></g>
-          <g class="app-auth-screen app-auth-screen-api" transform="translate(690 232)">
-            <rect class="app-auth-screen-box" width="240" height="120" rx="10"/>
-            <rect class="app-auth-screen-bar" x="0.5" y="0.5" width="239" height="26" rx="9.5"/>
-            <rect class="app-auth-screen-bar" x="0.5" y="14" width="239" height="13"/>
-            <rect class="app-auth-pill" x="12" y="7" width="30" height="13" rx="4"/>
-            <text class="app-auth-pill-text" x="27" y="16.5" text-anchor="middle">GET</text>
-            <text class="app-auth-screen-path" x="48" y="17">/api/finance/v1/revenue</text>
-            <rect class="app-auth-ok" x="182" y="7" width="46" height="13" rx="4"/>
-            <text class="app-auth-ok-text" x="205" y="16.5" text-anchor="middle">200 · 42ms</text>
-            <text class="app-auth-code" x="12" y="46">[&#123; "customer": "acme-freight",</text>
-            <text class="app-auth-code" x="12" y="62">   "month": "2026-08",</text>
-            <text class="app-auth-code" x="12" y="78">   "revenue_usd": <tspan class="app-auth-code-num">128400.50</tspan> &#125;,</text>
-            <text class="app-auth-code" x="12" y="94"> &#123; "customer": "northwind",</text>
-            <text class="app-auth-code app-auth-code-dim" x="12" y="110">   … 41 more rows ]</text>
-          </g>
-          <g class="app-auth-screen app-auth-screen-dash" transform="translate(690 388)">
-            <rect class="app-auth-screen-box" width="240" height="178" rx="10"/>
-            <rect class="app-auth-screen-bar" x="0.5" y="0.5" width="239" height="26" rx="9.5"/>
-            <rect class="app-auth-screen-bar" x="0.5" y="14" width="239" height="13"/>
-            <text class="app-auth-screen-title" x="12" y="17.5">Revenue by customer</text>
-            <text class="app-auth-screen-meta" x="228" y="17.5" text-anchor="end">embedded in your app</text>
-            <text class="app-auth-kpi-label" x="14" y="48">REVENUE, USD</text>
-            <text class="app-auth-kpi" x="14" y="72">$1.28M</text>
-            <text class="app-auth-kpi-delta" x="14" y="88">▲ 12% vs Jul</text>
-            <polyline class="app-auth-spark" points="14,154 30,144 46,148 62,132 78,136 94,118 104,122"/>
-            <text class="app-auth-kpi-label" x="124" y="90">TOP CUSTOMERS</text>
-            <line class="app-auth-axis" x1="120" y1="162.5" x2="240" y2="162.5"/>
-            <rect class="app-auth-bar" x="124" y="132" width="16" height="30" rx="3"/><rect class="app-auth-bar" x="148" y="116" width="16" height="46" rx="3"/><rect class="app-auth-bar" x="172" y="124" width="16" height="38" rx="3"/><rect class="app-auth-bar" x="196" y="100" width="16" height="62" rx="3"/><rect class="app-auth-bar app-auth-bar-hi" x="220" y="76" width="16" height="86" rx="3"/>
-          </g>
-        </g>
-      </svg>
-    </section>
-
-    <div class="app-auth-panel">
-      <div class="app-auth-story">
-        <p class="app-auth-eyebrow">Agent-native data pipelines</p>
-        <h2 class="app-auth-stage-title">From ledgers to the API, every hop in the open.</h2>
-        <ol class="app-auth-steps">
-          <li><b>Describe.</b> Your agent reads your schemas and builds the pipeline over MCP.</li>
-          <li><b>Run.</b> Clean, convert, join and roll up across your engines — each hop a node you can read.</li>
-          <li><b>Serve.</b> A human releases it; then it answers an API your customers call and powers the dashboard it built, embedded in your app.</li>
-        </ol>
-      </div>
-      <div class="ds-card app-card-auth app-auth-card ds-animate-slide-up">
-        <div class="app-auth-card-brand">
-          <span class="app-brand-tile" aria-hidden="true"><th:block th:replace="~{partials/brand-mark :: mark('app-brand-mark')}"></th:block></span>
+  <!--/* #619 — record §13 companion design. The workflow is illustrative, never workspace data. */-->
+  <div class="app-login">
+    <section class="app-login-story" aria-labelledby="login-story-title">
+      <div class="app-login-story-inner">
+        <p class="app-eyebrow">From your data to your application</p>
+        <h2 id="login-story-title">Data pipelines.<br><span>Built with your agent.</span></h2>
+        <p class="app-login-intro">Turn a question into a repeatable workflow. Build with your agent, inspect every step, and release when you're ready.</p>
+        <div class="app-login-preview" aria-label="Illustrative pipeline preview">
+          <div class="app-login-preview-bar">
+            <span class="app-login-preview-label"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#workflow"/></svg> Pipelines</span>
+            <span class="app-login-example">ILLUSTRATIVE WORKFLOW</span>
+          </div>
+          <div class="app-login-preview-body">
+            <div class="app-login-preview-title"><b>Monthly revenue by customer</b><span class="app-login-status">Released</span></div>
+            <p class="app-login-preview-subtitle">finance / revenue_by_customer</p>
+            <div class="app-login-steps">
+              <div class="app-login-step"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#database"/></svg><b>Connect</b><small>Source data</small></div>
+              <div class="app-login-connector" aria-hidden="true"></div>
+              <div class="app-login-step"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#code"/></svg><b>Transform</b><small>Reusable logic</small></div>
+              <div class="app-login-connector" aria-hidden="true"></div>
+              <div class="app-login-step"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#chart-line"/></svg><b>Deliver</b><small>APIs &amp; dashboards</small></div>
+            </div>
+            <div class="app-login-result"><span><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#table"/></svg> Results you can inspect</span><span>Versions you can trace</span></div>
+          </div>
         </div>
-        <h1 class="app-auth-title">Sign in to your workspace</h1>
-        <p class="app-auth-sub">Pipelines, templates and datasources live in a workspace. Sign in to yours.</p>
-
+        <p class="app-login-caption"><strong>Your agent builds. You stay in control.</strong><br>Review drafts, verify results, and manage releases in one workspace.</p>
+      </div>
+    </section>
+    <div class="app-login-signin">
+      <section class="app-login-form" aria-labelledby="login-title">
+        <p class="app-eyebrow">Your workspace</p>
+        <h1 id="login-title">Sign in</h1>
+        <p class="app-login-welcome">Continue to your pipelines, data and dashboards.</p>
       <th:block th:if="${error}">
         <div th:if="${#strings.equals(error, 'expired')}" class="app-alert app-alert-warning u-mb-md">
           Your login session has expired. Please try again.
@@ -146,45 +59,45 @@
         </div>
       </th:block>
 
-      <!-- Local password form (auth.md §5A) — rendered only when local accounts are
-           enabled; an OIDC-only deployment renders exactly what it always has. One
-           form, then a divider, then the provider buttons — never tabs.
-           076 §B: /login and the OIDC redirects are full navigations, never boosted. -->
-      <!--/* 098 §D: NO hand-written CSRF hidden input here. `th:action` on a `method="post"`
-           form asks Spring's RequestDataValueProcessor for the extra hidden fields, and Spring
-           Security's CsrfRequestDataValueProcessor supplies the token one — so the hand-written
-           one made the shipped page carry TWO. Two with the same value are harmless; two with
-           different values would not be, and nothing said which the browser would send.
-           The automatic one is the load-bearing half: replace `th:action` with a plain
-           `action="/login"` and the form carries no token at all, which the double-submit
-           filter refuses 403. `AuthLayoutRenderTest` pins the count at 1.
-           A PARSER comment, not an HTML one: an ordinary <!-- --> is passed through to the
-           response, and this one would then be counted by the very grep it describes. */-->
-      <th:block th:each="provider : ${providers}">
-        <a th:href="@{/oauth2/authorization/{id}(id=${provider.registrationId})}"
-           class="ds-button ds-button-primary u-block u-full u-mb-sm u-center u-no-underline app-auth-provider"
-           hx-boost="false"
-           th:text="'Continue with ' + ${provider.displayName}">Continue with Provider</a>
-      </th:block>
-      <div th:if="${localEnabled} and ${!#lists.isEmpty(providers)}"
-           class="u-row u-my-md u-secondary u-text-sm">
-        <span class="u-grow u-divider-top"></span>
-        <span>or with email</span>
-        <span class="u-grow u-divider-top"></span>
-      </div>
-      <form th:if="${localEnabled}" method="post" th:action="@{/login}" class="u-left app-auth-form" hx-boost="false">
-        <label for="login-email" class="u-block u-text-sm u-secondary u-mb-xs">Email</label>
-        <input id="login-email" type="email" name="email" class="ds-input u-full u-mb-sm"
-               required autocomplete="username" />
-        <label for="login-password" class="u-block u-text-sm u-secondary u-mb-xs">Password</label>
-        <input id="login-password" type="password" name="password" class="ds-input u-full u-mb-md"
-               required autocomplete="current-password" />
-        <button type="submit" class="ds-button ds-button-secondary u-block u-full">Sign in with email</button>
-      </form>
 
-        <p class="app-auth-foot">Self-hosted. Your data stays in your databases; only the SQL and its result pass through here.</p>
-      </div>
+        <th:block th:each="provider : ${providers}">
+          <a th:href="@{/oauth2/authorization/{id}(id=${provider.registrationId})}"
+             class="ds-button app-login-provider" hx-boost="false"
+             th:text="'Continue with ' + ${provider.displayName}">Continue with Provider</a>
+        </th:block>
+        <div th:if="${localEnabled} and ${!#lists.isEmpty(providers)}" class="app-login-separator">or with email</div>
+        <!--/* th:action supplies exactly one automatic CSRF hidden input (098 §D).
+             Both sign-in methods are full navigations; provider links precede the local form. */-->
+        <form th:if="${localEnabled}" method="post" th:action="@{/login}" hx-boost="false">
+          <div class="app-login-field">
+            <label for="login-email">Email address</label>
+            <div class="app-login-input-wrap">
+              <input id="login-email" type="email" name="email" class="ds-input"
+                     required autocomplete="username" inputmode="email" aria-describedby="login-email-error" />
+            </div>
+            <p class="app-login-field-error" id="login-email-error" aria-live="polite" hidden></p>
+          </div>
+          <div class="app-login-field">
+            <label for="login-password">Password</label>
+            <div class="app-login-input-wrap">
+              <input id="login-password" type="password" name="password" class="ds-input"
+                     required autocomplete="current-password" aria-describedby="login-password-error" />
+              <button type="button" class="app-login-toggle" id="login-password-toggle"
+                      aria-pressed="false" aria-label="Show password" hidden
+                      data-show-icon="/vendor/icons/lucide-sprite.svg#eye"
+                      data-hide-icon="/vendor/icons/lucide-sprite.svg#eye-off">
+                <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#eye"/></svg><span>Show</span>
+              </button>
+            </div>
+            <p class="app-login-field-error" id="login-password-error" aria-live="polite" hidden></p>
+          </div>
+          <button type="submit" class="ds-button ds-button-primary">Sign in <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#arrow-right"/></svg></button>
+        </form>
+        <p class="app-login-access">Need access to a workspace? Ask the person who manages this installation.</p>
+        <p class="app-login-self-hosted"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#database"/></svg><span>Self-hosted. Connected to your databases. Managed by your organisation.</span></p>
+      </section>
     </div>
   </div>
+  <script th:if="${localEnabled}" th:src="@{/js/login.js}"></script>
 </th:block>
 </html>

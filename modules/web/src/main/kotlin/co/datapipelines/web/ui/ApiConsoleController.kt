@@ -3,13 +3,10 @@ package co.datapipelines.web.ui
 import co.datapipelines.application.endpoints.EndpointKeyBindingRepository
 import co.datapipelines.application.endpoints.EndpointPath
 import co.datapipelines.application.endpoints.EndpointPublishService
-import co.datapipelines.auth.ApiKeyCredential
 import co.datapipelines.auth.ApiKeyKind
 import co.datapipelines.auth.ApiKeyRepository
-import co.datapipelines.auth.AuthProperties
 import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
-import co.datapipelines.mcp.McpToolCatalog
 import co.datapipelines.web.api.currentPrincipal
 import co.datapipelines.web.config.EndpointsProperties
 import jakarta.servlet.http.HttpServletRequest
@@ -57,7 +54,8 @@ class ApiConsoleController(
     private val apiKeys: ApiKeyRepository,
     private val pipelineNames: PipelineNames,
     private val endpointsProperties: EndpointsProperties,
-    private val authProperties: AuthProperties,
+    /** The MCP card's values — shared with the API home (#585) so the two cards cannot drift. */
+    private val mcpConnection: McpConnectionCard,
     private val themeResolver: ThemeResolver,
 ) {
     @GetMapping("/api-console")
@@ -117,51 +115,10 @@ class ApiConsoleController(
             legacyEndpoints.map(LegacyEndpointRow::of),
         )
 
-        model.addAttribute("mcpUrl", mcpUrl())
-        model.addAttribute("mcpHeader", ApiKeyCredential.HEADER)
-        model.addAttribute("keyPrefix", ApiKeyCredential.KEY_PREFIX)
-        // Built HERE, not in the template: a multi-line block assembled out of Thymeleaf
-        // string literals would depend on how that dialect treats a backslash escape, and
-        // the answer would be discovered by a reader seeing a literal "\n" on the screen.
-        // Every value in it is a constant of the system (the header name, the key prefix,
-        // the MCP path) or configuration — none of it is user input, and `th:text` escapes
-        // the whole thing on the way out regardless.
-        model.addAttribute("mcpConfigJson", mcpConfigJson())
-        // NEVER a literal: the count is what `tools/list` will actually return, and the
-        // marketing site renders the same expression (SiteController) for the same reason.
-        model.addAttribute("mcpToolCount", McpToolCatalog.NAMES.size)
+        mcpConnection.stamp(model)
         RoleModel.stamp(model, principal)
         model.addAttribute("activeTheme", themeResolver.resolve(request))
         return "api/console"
-    }
-
-    /**
-     * The MCP URL the connection JSON shows.
-     *
-     * `datapipelines.auth.base-url` is the deployment's declared external origin and is the
-     * ONLY safe source: `OidcConfig` documents why a request-derived origin is refused — a
-     * hostile `Host`/`X-Forwarded-Host` would otherwise pick the URL, and here that URL is
-     * one a reader is invited to paste into an agent's config alongside a live API key.
-     * Unset, the card renders the same `{host}/mcp` placeholder the marketing site uses
-     * rather than guessing.
-     */
-    private fun mcpConfigJson(): String =
-        """
-        {
-          "datapipelines": {
-            "url": "${mcpUrl()}",
-            "headers": { "${ApiKeyCredential.HEADER}": "${ApiKeyCredential.KEY_PREFIX}…" }
-          }
-        }
-        """.trimIndent()
-
-    private fun mcpUrl(): String {
-        val base =
-            authProperties.baseUrl
-                ?.trim()
-                ?.trimEnd('/')
-                ?.takeIf { it.isNotEmpty() }
-        return (base ?: HOST_PLACEHOLDER) + ApiKeyCredential.MCP_PATH
     }
 
     /**
@@ -225,9 +182,6 @@ class ApiConsoleController(
     private companion object {
         /** `PublishedEndpointController.ROOT`, restated as the display prefix. */
         const val PUBLISHED_PREFIX = "/api"
-
-        /** What `site/add-mcp-server.html` already shows when the origin is not configured. */
-        const val HOST_PLACEHOLDER = "{host}"
 
         /** A pipeline deleted out from under a published endpoint — shown, never crashed on. */
         const val DELETED_PIPELINE = "(deleted pipeline)"
