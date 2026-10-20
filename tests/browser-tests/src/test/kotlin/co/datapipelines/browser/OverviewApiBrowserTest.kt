@@ -62,7 +62,7 @@ class OverviewApiBrowserTest : RestTreeBrowserFixture() {
         openHome()
         count("keys") shouldBe "1"
         page.locator("[data-chart='key-kind'] [data-bar='mcp'] .app-overview-bar-v").innerText() shouldBe "1"
-        page.locator("[data-overview-recent] li a").allInnerTexts() shouldBe listOf("$name · MCP key · live")
+        page.locator("[data-overview-recent] .app-overview-recent li a").allInnerTexts() shouldBe listOf("$name · MCP key · live")
         val html = page.content()
         html shouldNotContain secret
         html shouldNotContain secret.substringBefore('.')
@@ -79,6 +79,7 @@ class OverviewApiBrowserTest : RestTreeBrowserFixture() {
         startTrace()
         readyTree()
         openHome()
+        page.click("[data-overview-agent]")
         val prompt = page.locator("#overview-prompt")
         prompt.inputValue() shouldNotContain "key"
         prompt.fill(prompt.inputValue().replace("[pipeline]", "example/served"))

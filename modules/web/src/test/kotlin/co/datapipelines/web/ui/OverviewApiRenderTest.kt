@@ -112,12 +112,12 @@ class OverviewApiRenderTest {
         doc.select("[data-chart-table=key-kind] thead th").map { it.text() } shouldContainExactly listOf("Kind", "Live keys")
         doc.select("[data-overview-chart][data-chart=endpoint-state] a").map { it.attr("href") }.toSet() shouldBe setOf("/api-console")
         doc.select("[data-overview-chart][data-chart=key-kind] a").map { it.attr("href") }.toSet() shouldBe setOf("/api-keys")
-        doc.select("[data-overview-inventory] .app-card-note").joinToString(" ") { it.text() } shouldContain
+        doc.select("[data-overview-inventory] [data-overview-note]").joinToString(" ") { it.text() } shouldContain
             "Not counted: 1 expired, 1 revoked."
         doc.selectFirst("[data-overview-review]").shouldBeNull()
-        doc.select("[data-overview-recent] h3").map { it.text() } shouldContainExactly
+        doc.select("[data-overview-recent] .app-overview-recent-section h3").map { it.text() } shouldContainExactly
             listOf("Recently published", "Recently created keys")
-        doc.select("[data-overview-recent] li a").map { it.text() } shouldContainExactly
+        doc.select("[data-overview-recent] .app-overview-recent li a").map { it.text() } shouldContainExactly
             listOf(
                 "/api/nyc/v1/newest · Revenue · v2 · draft",
                 "/api/nyc/v1/oldest · Mobility · v3",
@@ -175,9 +175,10 @@ class OverviewApiRenderTest {
 
         doc.select("[data-overview-inventory] [data-count]").map { it.attr("data-count") } shouldContainExactly
             listOf("endpoints", "release", "draft")
-        doc.selectFirst("[data-overview-chart][data-chart=key-kind]")!!.attr("aria-label") shouldBe "Keys by kind — unavailable"
+        val keyKind = doc.selectFirst("[data-overview-chart][data-chart=key-kind]")!!.attr("aria-labelledby")
+        doc.getElementById(keyKind)!!.text() shouldBe "Keys by kind — unavailable"
         doc.select("[data-overview-chart][data-chart=key-kind] li").shouldBeEmpty()
-        doc.select("[data-overview-inventory] .app-card-note").joinToString(" ") { it.text() } shouldContain
+        doc.select("[data-overview-inventory] [data-overview-note]").joinToString(" ") { it.text() } shouldContain
             "The keys could not be read, so no key is counted here."
         doc.selectFirst("[data-overview-recent]")!!.text() shouldContain "The keys could not be read."
     }

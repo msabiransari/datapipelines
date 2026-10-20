@@ -54,7 +54,8 @@ class OverviewVisualizationsBrowserTest : VisualizationBrowserSuite() {
         println("581-overview chart height=${chart.height} width=${chart.width}")
         chart.height shouldBeGreaterThan 0.0
         withClue("Recently updated is newest first: the second draft was created after the first") {
-            page.locator("[data-overview-recent] li a").allInnerTexts() shouldBe listOf("acme/charts/two", "acme/charts/one")
+            page.locator("[data-overview-recent] .app-overview-recent li a").allInnerTexts() shouldBe
+                listOf("acme/charts/two", "acme/charts/one")
         }
         page.locator("[data-overview-recent] time").first().getAttribute("datetime") shouldStartWith "20"
         page.locator("[data-overview-view-all]").click()
@@ -80,6 +81,7 @@ class OverviewVisualizationsBrowserTest : VisualizationBrowserSuite() {
         startTrace()
         ready("viz-overview")
         openOverview()
+        page.click("[data-overview-agent]")
         val prompt = page.locator("#overview-prompt")
         prompt.inputValue() shouldContain "In workspace viz-overview"
         prompt.fill(prompt.inputValue().replace("[question]", "which borough grew fastest?"))
@@ -102,6 +104,7 @@ class OverviewVisualizationsBrowserTest : VisualizationBrowserSuite() {
         startTrace()
         ready("viz-overview")
         openOverview()
+        page.click("[data-overview-agent]")
         stubClipboard(refuse = true)
         val requests = mutableListOf<String>()
         page.onRequest { requests += "${it.method()} ${it.url()}" }

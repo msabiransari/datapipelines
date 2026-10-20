@@ -55,7 +55,7 @@ class OverviewDatasourcesRenderTest {
         doc.selectFirst("h1")!!.text() shouldBe "Datasources"
         doc.selectFirst("[data-overview-intro]")!!.text() shouldContain
             "Datasources are the registered database connections everything else reads through"
-        doc.select("[data-overview-prompt] .app-overview-steps li").size shouldBe 3
+        doc.select("[data-overview-quickstart] .app-overview-steps li").size shouldBe 3
         // Escaped on the wire: a workspace name is text, never markup (th:text, not th:utext).
         html shouldNotContain "<b>acme</b>"
         val prompt = doc.selectFirst("textarea#overview-prompt").shouldNotBeNull()
@@ -90,7 +90,7 @@ class OverviewDatasourcesRenderTest {
             listOf("/datasources?dialect=POSTGRES", "/datasources?dialect=H2")
         doc.select("[data-overview-chart][data-chart=dialect] rect").map { it.attr("width") } shouldContainExactly
             listOf("100.0", "33.3")
-        doc.select("[data-overview-inventory] .app-card-note").joinToString(" ") { it.text() } shouldContain
+        doc.select("[data-overview-inventory] [data-overview-note]").joinToString(" ") { it.text() } shouldContain
             "Each datasource carries its latest recorded test"
         doc.select("[data-chart-table=dialect] tbody td").map { it.text() } shouldContainExactly listOf("3", "1")
         doc.selectFirst("[data-overview-review]").shouldBeNull()
@@ -99,7 +99,7 @@ class OverviewDatasourcesRenderTest {
     @Test
     fun `the recent section links the datasources an empty list says so`() {
         val withEntries = render(page(recent = RecentPanel(review = null, sections = listOf(section(entries())))))
-        withEntries.select("[data-overview-recent] li a").map { it.attr("href") } shouldContainExactly
+        withEntries.select("[data-overview-recent] .app-overview-recent li a").map { it.attr("href") } shouldContainExactly
             listOf("/datasources/dw-sales", "/datasources/dw-usage")
         withEntries.select("[data-overview-recent] .ds-badge").shouldBeEmpty()
 

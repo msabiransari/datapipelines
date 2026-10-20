@@ -3829,163 +3829,406 @@ pre.tf-pane-input {
 .dp-tree-item[aria-selected="true"] > .dp-tree-line { background: var(--surface-selected); color: var(--text-link); }
 .dp-tree-status { padding: var(--gap-xs); color: var(--text-muted); }
 
-/* #556 — the family overviews (templates/overview/family.html; ui-screens §4.25, shell design §8).
-   One column of cards at the 16px gap; the inventory spans the frame, Continue your work and
-   Related share a row from 1101px. The chart is four labelled rows inside a 192px band (the
-   record's 160–220px) that may grow when phone labels wrap; the bars are SVG rects whose width
-   is an attribute (the CSP admits no style), painted by the lifecycle's token: draft only
-   warning, released only success, released with draft changes the info series (#627: never the brand — on light
-   it is the body text, on forest, healthcare, ocean and saas the link colour, in the dark half near-white), discarded muted — never danger red on an ordinary draft. */
+/* #556 — the family overviews (templates/overview/family.html; ui-screens §4.25, shell design §8),
+   re-cut by #home-frame on the approved 2026-10-20 direction (store notes/2026-10-20-home-pages-
+   direction.md §2: tokens only, the house type scale, the house breakpoints). Regions in order: the
+   heading, the summary strip (four equal cells and a foot), the analytics grid (1.6fr / 1fr), the
+   work grid (1fr / 1.2fr), the guide's extra card, and the page's one <dialog>. From 1100.98px down
+   the two grids are one column and the strip stays four across; on the phone band the strip is
+   2 × 2 and the week names thin to every third and the last. Charts are SVG rects whose geometry is
+   an ATTRIBUTE (the CSP admits no style), painted by the lifecycle's token: draft warning, released
+   success, released with draft changes the info series (#627: never the brand — on light it is the
+   body text, on forest, healthcare, ocean and saas the link colour, in the dark half near-white),
+   retired muted — never danger red on an ordinary draft. Nothing here moves, so
+   prefers-reduced-motion has nothing to stop. */
 :root {
-  --overview-chart-h: calc(var(--space-12) * 4); /* 192px */
+  --overview-chart-h: calc(var(--space-12) * 4); /* 192px: the activity plot, and a bars chart's floor */
   --overview-draft: var(--chart-series-3);
   --overview-released: var(--chart-series-2);
   --overview-mixed: var(--chart-series-1);
   --overview-discarded: var(--chart-muted);
 }
 .app-overview { display: grid; gap: var(--gap-md); min-width: 0; }
-.app-overview > .app-page-h { margin-bottom: 0; }
-.app-overview-counts {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
-  gap: var(--gap-md);
-  margin: 0 0 var(--gap-md);
+
+/* The heading: eyebrow (icon, Workspace, the name as a chip), the title, the guide's subtitle, then
+   View all with its badge and the primary action. */
+.app-overview-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--gap-lg); min-width: 0; }
+.app-overview-heading-text { min-width: 0; }
+.app-overview-eyebrow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--gap-xs);
+  margin: 0 0 var(--gap-xs);
+  font-size: var(--app-text-support);
+  color: var(--text-muted);
 }
-.app-overview-count { min-width: 0; }
-.app-overview-count dd { margin: 0; }
-.app-overview-count-v {
-  font-size: var(--text-xl);
-  font-weight: var(--weight-semibold);
+.app-overview-eyebrow .ds-icon { color: var(--text-link); }
+.app-overview-chip {
+  padding: 0 var(--space-2);
+  border: var(--space-px) solid var(--border-default);
+  border-radius: var(--app-radius-badge);
+  color: var(--text-secondary);
+  font-weight: var(--weight-medium);
+  overflow-wrap: anywhere;
+}
+.app-overview-title { margin: 0; }
+.app-overview-subtitle,
+.app-overview-lens { margin: var(--gap-xs) 0 0; color: var(--text-secondary); font-size: var(--app-text-ui); }
+.app-overview-lens { color: var(--text-muted); font-size: var(--app-text-support); }
+.app-overview-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--gap-sm); flex: none; }
+.app-overview-badge {
+  padding: 0 var(--space-1);
+  border-radius: var(--app-radius-badge);
+  background: var(--chart-grid);
+  color: var(--text-secondary);
+  font-size: var(--app-text-badge);
   font-variant-numeric: tabular-nums;
 }
-.app-overview-count-help { font-size: var(--app-text-support); color: var(--text-muted); }
-.app-overview-chart {
-  list-style: none;
+
+/* Shared: a status dot in its tone, a text button, an icon button, a panel's heading row. */
+.app-overview-dot {
+  display: inline-block;
+  flex: none;
+  width: var(--space-2);
+  height: var(--space-2);
+  border-radius: var(--radius-full);
+  background: var(--overview-discarded);
+}
+.app-overview-dot[data-tone="draft"], [data-tone="draft"] > .app-overview-dot { background: var(--overview-draft); }
+.app-overview-dot[data-tone="released"], [data-tone="released"] > .app-overview-dot { background: var(--overview-released); }
+.app-overview-dot[data-tone="mixed"], [data-tone="mixed"] > .app-overview-dot { background: var(--overview-mixed); }
+.app-overview-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gap-xs);
+  padding: var(--space-1) 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-link);
+  font: inherit;
+  font-size: var(--app-text-ui);
+  text-decoration: none;
+  cursor: pointer;
+}
+.app-overview-link:hover { text-decoration: underline; }
+.app-overview-icon-button {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  padding: var(--space-1);
+  border: 0;
+  border-radius: var(--app-radius-control);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.app-overview-icon-button:hover { background: var(--surface-hover); color: var(--text-primary); }
+.app-overview-panel-h { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--gap-sm); margin: 0 0 var(--gap-md); }
+.app-overview-panel-title,
+.app-overview-quickstart-title { margin: 0; font-size: var(--app-text-heading); font-weight: var(--weight-semibold); }
+.app-overview-panel-sub { margin: var(--space-1) 0 0; color: var(--text-muted); font-size: var(--app-text-support); }
+.app-overview-unavailable { margin: 0; color: var(--text-muted); }
+
+/* The summary strip: equal cells (however many metrics a family has), hairline dividers, the foot
+   on the inset surface. */
+.app-overview-inventory { display: grid; gap: var(--gap-md); min-width: 0; }
+.app-overview-summary { padding: 0; overflow: hidden; }
+.app-overview-summary > .app-overview-unavailable { padding: var(--space-5); }
+.app-overview-counts { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); margin: 0; }
+.app-overview-count { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; padding: var(--space-5); }
+.app-overview-count + .app-overview-count { border-inline-start: var(--space-px) solid var(--border-faint); }
+.app-overview-count dd { margin: 0; }
+.app-overview-count-k { display: flex; align-items: center; gap: var(--gap-xs); color: var(--text-secondary); font-size: var(--app-text-ui); }
+.app-overview-count-v {
+  font-size: var(--text-2xl);
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
+  line-height: var(--leading-tight);
+}
+.app-overview-count-help,
+.app-overview-count-lens { color: var(--text-muted); font-size: var(--app-text-support); }
+.app-overview-foot {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--gap-xs) var(--gap-lg);
+  padding: var(--space-2) var(--space-5);
+  border-top: var(--space-px) solid var(--border-faint);
+  background: var(--surface-inset);
+  color: var(--text-muted);
+  font-size: var(--app-text-support);
+}
+.app-overview-foot-item { display: inline-flex; align-items: center; gap: var(--gap-xs); }
+.app-overview-foot .app-overview-count-v { color: var(--text-secondary); font-size: inherit; line-height: inherit; }
+.app-overview-foot .app-overview-link { margin-inline-start: auto; font-size: inherit; }
+
+/* The analytics grid. A lone panel spans the row. */
+.app-overview-analytics { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: var(--gap-md); min-width: 0; }
+.app-overview-analytics > :only-child { grid-column: 1 / -1; }
+.app-overview-panel { display: flex; flex-direction: column; min-width: 0; }
+.app-overview-period {
+  flex: none;
+  padding: var(--space-1) var(--space-2);
+  border: var(--space-px) solid var(--border-faint);
+  border-radius: var(--app-radius-badge);
+  background: var(--surface-inset);
+  color: var(--text-secondary);
+  font-size: var(--app-text-support);
+  white-space: nowrap;
+}
+.app-overview-panel-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--gap-sm);
+  margin-top: auto;
+  padding-top: var(--gap-sm);
+  color: var(--text-muted);
+  font-size: var(--app-text-support);
+}
+.app-overview-panel-foot > span { display: inline-flex; align-items: center; gap: var(--gap-xs); }
+.app-overview-panel-foot .app-overview-link { font-size: inherit; }
+
+/* Columns: the headline and legend, the axis (max / half / 0 beside three dashed gridlines), and
+   one SVG per week the plot's full height, its rects stacked bottom up (released, then created). */
+.app-overview-headline { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--gap-sm); margin: 0 0 var(--gap-sm); }
+.app-overview-headline > strong { font-size: var(--text-2xl); font-weight: var(--weight-semibold); font-variant-numeric: tabular-nums; }
+.app-overview-headline > strong > span { color: var(--text-muted); font-size: var(--app-text-ui); font-weight: var(--weight-normal); }
+.app-overview-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap-xs) var(--gap-md);
   margin: 0;
   padding: 0;
+  list-style: none;
+  color: var(--text-secondary);
+  font-size: var(--app-text-support);
+  font-variant-numeric: tabular-nums;
+}
+.app-overview-legend li { display: inline-flex; align-items: center; gap: var(--gap-xs); }
+.app-overview-plot { display: flex; gap: var(--gap-sm); min-width: 0; }
+.app-overview-axis {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  justify-content: space-between;
+  min-width: var(--space-4);
+  height: var(--overview-chart-h);
+  color: var(--text-muted);
+  font-size: var(--app-text-meta);
+  font-variant-numeric: tabular-nums;
+  line-height: 0;
+  text-align: end;
+}
+.app-overview-plot-area { position: relative; flex: 1; min-width: 0; }
+.app-overview-gridlines {
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  height: var(--overview-chart-h);
+  pointer-events: none;
+}
+.app-overview-gridlines span { border-top: var(--space-px) dashed var(--border-faint); }
+.app-overview-columns {
+  position: relative;
   display: grid;
-  grid-auto-rows: 1fr;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: var(--gap-sm);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.app-overview-column { display: flex; flex-direction: column; align-items: center; min-width: 0; }
+.app-overview-column-track { display: block; width: 100%; height: var(--overview-chart-h); }
+.app-overview-column-fill[data-tone="draft"] { fill: var(--overview-draft); }
+.app-overview-column-fill[data-tone="released"] { fill: var(--overview-released); }
+.app-overview-column-name { margin-top: var(--space-1); color: var(--text-muted); font-size: var(--app-text-meta); white-space: nowrap; }
+.app-overview-column[data-current] .app-overview-column-name { color: var(--text-primary); font-weight: var(--weight-semibold); }
+
+/* Bars: name · track · value at ONE pitch in every chart on the page (#620), the chart at least the
+   192px floor so a one-chart card holds steady; a zero row is muted on a hairline. */
+.app-overview-chart {
+  display: grid;
+  grid-auto-rows: var(--space-10);
+  align-content: start;
   align-items: center;
   min-height: var(--overview-chart-h);
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 .app-overview-bar {
   display: grid;
-  grid-template-columns: minmax(8rem, 14rem) minmax(0, 1fr) minmax(3rem, auto);
+  grid-template-columns: minmax(6rem, 12rem) minmax(0, 1fr) minmax(2rem, auto);
   align-items: center;
   gap: var(--gap-sm);
+  min-width: 0;
+  font-size: var(--app-text-ui);
 }
-.app-overview-bar-name { font-size: var(--app-text-ui); }
 .app-overview-bar-track {
   display: block;
   width: 100%;
-  height: var(--space-3);
+  height: var(--space-2);
+  border-radius: var(--radius-full);
   background: var(--chart-grid);
-  border-radius: var(--app-radius-badge);
 }
-.app-overview-bar-v { text-align: end; font-variant-numeric: tabular-nums; font-weight: var(--weight-semibold); }
+.app-overview-bar-v { font-variant-numeric: tabular-nums; font-weight: var(--weight-semibold); text-align: end; }
+.app-overview-bar.is-zero { color: var(--text-muted); }
+.app-overview-bar.is-zero .app-overview-bar-track { height: var(--space-px); border-radius: 0; background: var(--border-faint); }
 .app-overview-bar[data-tone="draft"] .app-overview-bar-fill { fill: var(--overview-draft); }
 .app-overview-bar[data-tone="released"] .app-overview-bar-fill { fill: var(--overview-released); }
 .app-overview-bar[data-tone="mixed"] .app-overview-bar-fill { fill: var(--overview-mixed); }
 .app-overview-bar[data-tone="discarded"] .app-overview-bar-fill { fill: var(--overview-discarded); }
-.app-overview-unavailable { margin: 0; color: var(--text-muted); }
-.app-overview-prose p { margin: 0 0 var(--gap-sm); max-width: 70ch; }
-.app-overview-prose p:last-child { margin-bottom: 0; }
-.app-overview-steps { margin: 0 0 var(--gap-md); padding-inline-start: var(--space-5); max-width: 70ch; }
-.app-overview-steps li + li { margin-top: var(--gap-xs); }
-.app-overview-label,
-.app-overview-sub {
+.app-overview-note {
+  display: flex;
+  gap: var(--gap-xs);
+  margin-top: var(--gap-md);
+  padding-top: var(--gap-md);
+  border-top: var(--space-px) solid var(--border-faint);
+  color: var(--text-muted);
+  font-size: var(--app-text-support);
+}
+.app-overview-note p { margin: 0; }
+
+/* The work grid: Continue your work (task rows, the recent sections, the related links) beside
+   Quick start on the brand tint. A lone card spans the row. */
+.app-overview-work { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: var(--gap-md); min-width: 0; }
+.app-overview-work > :only-child { grid-column: 1 / -1; }
+.app-overview-continue,
+.app-overview-quickstart { min-width: 0; }
+.app-overview-tasks { margin: 0; padding: 0; list-style: none; }
+.app-overview-tasks li + li { border-top: var(--space-px) solid var(--border-faint); }
+.app-overview-task { display: flex; align-items: center; gap: var(--gap-sm); min-width: 0; padding: var(--space-3) 0; color: inherit; text-decoration: none; }
+.app-overview-task:hover b { text-decoration: underline; }
+.app-overview-task-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: var(--space-8);
+  height: var(--space-8);
+  border-radius: var(--app-radius-control);
+}
+.app-overview-task-icon[data-tone="draft"] { background: var(--accent-warning-bg); color: var(--app-warning-ink); }
+.app-overview-task-icon[data-tone="released"] { background: var(--accent-success-bg); color: var(--app-success-ink); }
+.app-overview-task-text { display: grid; gap: var(--space-1); min-width: 0; }
+.app-overview-task-text b { font-weight: var(--weight-medium); }
+.app-overview-task-text small { color: var(--text-muted); font-size: var(--app-text-support); }
+.app-overview-task-arrow { margin-inline-start: auto; color: var(--text-muted); }
+/* #620: each recent section after what precedes it opens on the --gap-md space. */
+.app-overview-tasks + .app-overview-recent-section,
+.app-overview-recent-section + .app-overview-recent-section { margin-top: var(--gap-md); }
+.app-overview-sub,
+.app-overview-label {
   display: block;
   margin: 0 0 var(--gap-xs);
   font-size: var(--app-text-support);
   font-weight: var(--weight-semibold);
 }
-.app-overview-prompt { width: 100%; resize: vertical; font-size: var(--app-text-ui); }
-.app-overview-copy { display: flex; align-items: center; flex-wrap: wrap; gap: var(--gap-sm); margin: var(--gap-sm) 0; }
 .app-overview-recent,
-.app-overview-related { list-style: none; margin: var(--gap-sm) 0 0; padding: 0; display: grid; gap: var(--gap-sm); }
+.app-overview-related { display: grid; gap: var(--gap-sm); margin: var(--gap-sm) 0 0; padding: 0; list-style: none; }
 .app-overview-recent li { display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--gap-sm); min-width: 0; }
 .app-overview-recent a { min-width: 0; overflow-wrap: anywhere; font-size: var(--app-text-name); }
 .app-overview-recent time { color: var(--text-muted); font-size: var(--app-text-support); }
 .app-overview-related { margin-bottom: var(--gap-sm); }
-.app-overview-pair { display: grid; gap: var(--gap-md); min-width: 0; }
-@media (min-width: 1101px) {
-  .app-overview-pair { grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr)); }
-}
-@media (max-width: 760.98px) {
-  .app-overview-bar { grid-template-columns: minmax(0, 1fr) auto; row-gap: var(--gap-xs); }
-  .app-overview-bar-track { grid-column: 1 / -1; grid-row: 2; }
-}
-/* #598a — the Pipelines home's stacked charts (OverviewStacked; ui-screens §4.25): the total line,
-   then per chart its caption, the rows (name / track / numbers, the bar rows' grid), a legend
-   naming every series with a swatch, and the note. Each row is one SVG whose rects tile the
-   row's width as attributes (the CSP admits no style), painted by the same four lifecycle tokens
-   as the bars above — no new colour, never danger red on a draft. Rows keep the bar chart's row
-   height (a quarter of the 192px band), so the lifecycle chart with its legend stays inside the
-   record's quiet 160–220px and the five maturity rows read at the same rhythm. #598b: the activity
-   chart's twelve weekly rows take half that pitch (--space-6), so a quarter of history stands near
-   300px instead of 576px. On a phone the numbers wrap under the track, as the bars do. */
-.app-overview-stacked-chart { min-width: 0; }
-.app-overview-stacked-chart + .app-overview-stacked-chart { margin-top: var(--gap-lg); }
-.app-overview-stacked-total {
-  margin: 0 0 var(--gap-xs);
-  font-size: var(--text-xl);
-  font-weight: var(--weight-semibold);
-  font-variant-numeric: tabular-nums;
-}
-.app-overview-stacked {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  grid-auto-rows: minmax(calc(var(--overview-chart-h) / 4), auto);
-  align-items: center;
-}
-.app-overview-stack {
-  display: grid;
-  grid-template-columns: minmax(8rem, 14rem) minmax(0, 1fr) minmax(3rem, auto);
-  align-items: center;
-  gap: var(--gap-sm);
-  min-width: 0;
-}
-.app-overview-stack-name { font-size: var(--app-text-ui); }
-.app-overview-stack-track {
-  display: block;
-  width: 100%;
-  height: var(--space-3);
-  background: var(--chart-grid);
-  border-radius: var(--app-radius-badge);
-}
-.app-overview-stacked[data-stacked="lifecycle"] .app-overview-stack-track { height: var(--space-4); }
-.app-overview-stacked[data-stacked="activity"] { grid-auto-rows: minmax(var(--space-6), auto); }
-.app-overview-stack-v { text-align: end; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.app-overview-stack-v b { font-weight: var(--weight-semibold); }
-.app-overview-stack-detail { color: var(--text-muted); font-size: var(--app-text-support); }
-.app-overview-stack-fill[data-tone="draft"] { fill: var(--overview-draft); }
-.app-overview-stack-fill[data-tone="released"] { fill: var(--overview-released); }
-.app-overview-stack-fill[data-tone="mixed"] { fill: var(--overview-mixed); }
-.app-overview-stack-fill[data-tone="discarded"] { fill: var(--overview-discarded); }
-.app-overview-legend {
-  list-style: none;
-  margin: var(--gap-xs) 0 0;
-  padding: 0;
+.app-overview-resources { margin-top: var(--gap-md); padding-top: var(--gap-md); border-top: var(--space-px) solid var(--border-faint); }
+.app-overview-resources-row { display: flex; align-items: center; flex-wrap: wrap; gap: var(--gap-xs) var(--gap-md); font-size: var(--app-text-support); }
+.app-overview-resources-row .app-overview-link { font-size: inherit; }
+.app-overview-resources-k { color: var(--text-muted); }
+.app-overview-quickstart { background: var(--brand-soft); }
+.app-overview-kicker {
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--gap-xs) var(--gap-md);
+  align-items: center;
+  gap: var(--gap-xs);
+  margin: 0 0 var(--gap-sm);
+  color: var(--text-link);
+  font-size: var(--app-text-support);
+  font-weight: var(--weight-medium);
+}
+.app-overview-quickstart > .app-overview-panel-sub { max-width: 60ch; }
+.app-overview-quickstart-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--gap-md); }
+.app-overview-prose p { margin: 0 0 var(--gap-sm); max-width: 70ch; }
+.app-overview-prose p:last-child { margin-bottom: 0; }
+.app-overview-steps { margin: var(--gap-md) 0; padding-inline-start: var(--space-5); max-width: 70ch; }
+.app-overview-steps li + li { margin-top: var(--gap-xs); }
+/* The Pipelines quick start's three steps: a numbered row, each a word and a line. */
+.app-overview-steps-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--gap-sm);
+  padding: 0;
+  list-style: none;
+  counter-reset: overview-step;
+}
+.app-overview-steps-row li { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: var(--gap-xs); margin: 0; counter-increment: overview-step; }
+.app-overview-steps-row li + li { margin-top: 0; }
+.app-overview-steps-row li::before {
+  content: counter(overview-step);
+  display: grid;
+  place-items: center;
+  grid-row: span 2;
+  width: var(--space-5);
+  height: var(--space-5);
+  border: var(--space-px) solid var(--border-default);
+  border-radius: var(--radius-full);
+  background: var(--surface-default);
+  color: var(--text-secondary);
   font-size: var(--app-text-support);
 }
-.app-overview-legend li { display: inline-flex; align-items: center; gap: var(--gap-xs); min-width: 0; }
-.app-overview-legend-swatch {
-  flex: none;
-  width: var(--space-3);
-  height: var(--space-3);
-  border-radius: var(--app-radius-badge);
+.app-overview-steps-row b { font-size: var(--app-text-ui); font-weight: var(--weight-semibold); }
+.app-overview-steps-row small { color: var(--text-muted); font-size: var(--app-text-support); }
+
+/* The page's one dialog: the house dialog width, the raised surface, the house scrim (owner ruling
+   2026-10-20: `.u-backdrop`'s formula, no new token). The open section only; the prompt's field,
+   textarea and buttons. */
+.app-overview-dialog {
+  width: min(var(--app-dialog-max), calc(100vw - var(--space-8)));
+  max-height: 85vh;
+  padding: var(--space-5);
+  overflow: auto;
+  border: var(--space-px) solid var(--border-default);
+  border-radius: var(--app-radius-panel);
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-lg);
 }
-.app-overview-legend-v { font-variant-numeric: tabular-nums; font-weight: var(--weight-semibold); }
-.app-overview-legend [data-tone="draft"] .app-overview-legend-swatch { background: var(--overview-draft); }
-.app-overview-legend [data-tone="released"] .app-overview-legend-swatch { background: var(--overview-released); }
-.app-overview-legend [data-tone="mixed"] .app-overview-legend-swatch { background: var(--overview-mixed); }
-.app-overview-legend [data-tone="discarded"] .app-overview-legend-swatch { background: var(--overview-discarded); }
+.app-overview-dialog::backdrop { background: color-mix(in srgb, var(--text-primary) 55%, transparent); }
+.app-overview-dialog-h { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--gap-md); margin: 0 0 var(--gap-md); }
+.app-overview-dialog-h .app-overview-kicker { margin-bottom: var(--space-1); }
+.app-overview-dialog-title { margin: 0; font-size: var(--app-text-heading); font-weight: var(--weight-semibold); }
+.app-overview-dialog-section p { margin: 0 0 var(--gap-sm); }
+.app-overview-dialog-section .app-overview-label { margin-top: var(--gap-md); }
+.app-overview-question,
+.app-overview-prompt { width: 100%; font-size: var(--app-text-ui); }
+.app-overview-prompt { resize: vertical; }
+.app-overview-copy { display: flex; align-items: center; flex-wrap: wrap; gap: var(--gap-sm); margin: var(--gap-sm) 0; }
+.app-overview-terms { display: grid; gap: var(--gap-sm); margin: var(--gap-md) 0 0; }
+.app-overview-terms dt { font-weight: var(--weight-semibold); }
+.app-overview-terms dd { margin: 0; color: var(--text-secondary); font-size: var(--app-text-support); }
+.app-overview-term-catalog { display: block; color: var(--text-muted); }
+.app-overview-dialog-table { margin-top: var(--gap-md); }
+
+@media (max-width: 1100.98px) {
+  .app-overview-analytics,
+  .app-overview-work { grid-template-columns: minmax(0, 1fr); }
+}
 @media (max-width: 760.98px) {
-  .app-overview-stack { grid-template-columns: minmax(0, 1fr) auto; row-gap: var(--gap-xs); }
-  .app-overview-stack-track { grid-column: 1 / -1; grid-row: 2; }
+  .app-overview-heading { flex-direction: column; align-items: stretch; }
+  .app-overview-counts { grid-auto-flow: row; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .app-overview-count { padding: var(--space-4); }
+  .app-overview-count:nth-child(odd) { border-inline-start: 0; }
+  .app-overview-count:nth-child(n + 3) { border-top: var(--space-px) solid var(--border-faint); }
+  .app-overview-count-v { font-size: var(--text-xl); }
+  .app-overview-foot { padding: var(--space-3) var(--space-4); }
+  .app-overview-foot .app-overview-link { margin-inline-start: 0; }
+  .app-overview-column:not([data-sparse]) .app-overview-column-name { visibility: hidden; }
+  .app-overview-bar { grid-template-columns: minmax(0, 1fr) auto; row-gap: var(--gap-xs); }
+  .app-overview-bar-track { grid-column: 1 / -1; grid-row: 2; }
+  .app-overview-chart { grid-auto-rows: auto; row-gap: var(--gap-sm); }
+  .app-overview-steps-row { grid-template-columns: minmax(0, 1fr); }
 }

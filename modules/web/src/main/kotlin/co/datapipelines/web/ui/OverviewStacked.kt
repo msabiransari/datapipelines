@@ -11,273 +11,431 @@ import java.util.Locale
 import kotlin.math.roundToLong
 
 /**
- * #598a — one labelled stacked-bar chart of an overview's inventory card (`overview/family.html`,
- * the `stacked` loop): every row a fixed-size bar of 0–100 split into its parts, so the SVG is the
- * same size at 10 or 10,000 objects. [caption] names the chart wherever words go (its heading,
- * the list's label, the hidden table's caption); [totalLabel] is the chart's headline line shown
- * above it — the lifecycle chart's total, the activity chart's actively developed count (#598b) —
- * and null when the chart has none; [total] is the number that line states. [note] is the one
- * sentence under the chart; [headings] the hidden table's columns — the row heading, each part,
- * the total.
+ * #home-frame — one panel of an overview's analytics grid (`overview/family.html`, the `panels`
+ * loop; ui-screens §4.25 Hierarchy). Every panel: [heading] (visible, and the chart's accessible
+ * name), [description] the line under it, [period] an optional chip ("Last 12 weeks"), [explain]
+ * the dialog key its info button opens (null: no button), [footer] the line under the chart, and
+ * [table] the hidden table twin. [kind] is the template's switch.
  */
-data class StackedChart(
-    val key: String,
-    val caption: String,
-    val total: Long,
-    val totalLabel: String?,
-    val rows: List<StackedRow>,
-    val legend: List<Legend>,
-    val note: String?,
-    val headings: List<String>,
-)
+sealed interface Panel {
+    val kind: String
+    val key: String
+    val heading: String
+    val description: String?
+    val period: String?
+    val explain: String?
+    val footer: String?
+    val table: Table
+
+    /**
+     * Horizontal bars: name · track · value. [notes] are the sentences under the bars (the
+     * release-history panel's two computed sentences, a sibling chart's caveat), none when empty.
+     */
+    data class Bars(
+        override val key: String,
+        override val heading: String,
+        override val description: String?,
+        val bars: List<OverviewPage.Bar>,
+        val notes: List<String>,
+        override val table: Table,
+        override val period: String? = null,
+        override val explain: String? = null,
+        override val footer: String? = null,
+    ) : Panel {
+        override val kind: String get() = "bars"
+
+        companion object {
+            /** A sibling's [OverviewPage.Chart] as a bars panel: its caption is the visible heading (#620), its rows the table. */
+            fun of(chart: OverviewPage.Chart): Bars =
+                Bars(
+                    key = chart.key,
+                    heading = chart.caption,
+                    description = null,
+                    bars = chart.bars,
+                    notes = listOfNotNull(chart.note),
+                    table =
+                        Table(
+                            chart.key,
+                            chart.caption,
+                            chart.headings,
+                            chart.bars.map { Row(it.key, it.name, listOf(Cell("value", it.value))) },
+                        ),
+                )
+        }
+    }
+
+    /**
+     * Vertical columns, oldest first: each [Column] stacks its [Stack]s bottom up inside a 0–100
+     * viewBox. [headline] is the period's total, [legend] the series with their sums, [axis] the
+     * labels of the three gridlines top to bottom (max, half, 0), [viewData] the dialog key whose
+     * section receives the [table] twin.
+     */
+    data class Columns(
+        override val key: String,
+        override val heading: String,
+        override val description: String?,
+        override val period: String?,
+        val headline: Long,
+        val unit: String,
+        val legend: List<Legend>,
+        val axis: List<String>,
+        val columns: List<Column>,
+        override val footer: String?,
+        val viewData: String,
+        override val table: Table,
+        override val explain: String? = null,
+    ) : Panel {
+        override val kind: String get() = "columns"
+    }
+
+    /**
+     * One column: [label] is its sentence (the SVG's `<title>`, equal to its table row), [current]
+     * marks the week in progress (its name strong), [sparse] the names the phone band keeps.
+     */
+    data class Column(
+        val key: String,
+        val name: String,
+        val current: Boolean,
+        val sparse: Boolean,
+        val label: String,
+        val stacks: List<Stack>,
+    )
+
+    /** One stacked rect: [y] where it starts and [height] how far it runs, SVG attributes in tenths of the viewBox. */
+    data class Stack(
+        val key: String,
+        val value: Long,
+        val y: String,
+        val height: String,
+        val tone: String,
+    )
+
+    /** One legend entry: a swatch of [tone], the count and the words — never colour alone. */
+    data class Legend(
+        val key: String,
+        val name: String,
+        val tone: String,
+        val value: Long,
+    )
+
+    /** The hidden table twin: [caption] names it, [headings] the columns (the row heading first). */
+    data class Table(
+        val key: String,
+        val caption: String,
+        val headings: List<String>,
+        val rows: List<Row>,
+    )
+
+    data class Row(
+        val key: String,
+        val name: String,
+        val cells: List<Cell>,
+    )
+
+    data class Cell(
+        val key: String,
+        val value: Long,
+    )
+}
 
 /**
- * One bar: [width] its share of the chart's longest row in the 0–100 viewBox (the record's
- * attribute-width rule, `OverviewPage.width`), [parts] tiling exactly that width left to right,
- * [label] the SVG's accessible sentence, [detail] the words beside the total (null: none).
- */
-data class StackedRow(
-    val key: String,
-    val name: String,
-    val total: Long,
-    val width: String,
-    val parts: List<Part>,
-    val label: String,
-    val detail: String?,
-    val href: String?,
-)
-
-/** One segment of a row: [x] where it starts and [width] how far it runs, both SVG attributes. */
-data class Part(
-    val key: String,
-    val name: String,
-    val value: Long,
-    val x: String,
-    val width: String,
-    val tone: String,
-    val label: String,
-    val href: String?,
-)
-
-/** One legend entry: a swatch of [tone], the words, and — when the chart has one per series — the count and its link. */
-data class Legend(
-    val key: String,
-    val name: String,
-    val tone: String,
-    val value: Long?,
-    val href: String?,
-)
-
-/**
- * #598a — the Pipelines home's charts (owner ruling on #598, 2026-10-18), built from ONE
- * [ChartInventory] so none disagrees with the total or with another: [lifecycle] is one row,
- * each object counted once in one of four parts that sum to the total (#593's resolution);
- * [maturity] is five rows by number of releases, each split no draft / draft open; #598b's
- * [activity] is twelve weekly rows of releases and new objects under the actively developed
- * headline. The words are the owner's; the catalog's lifecycle select keeps its own
- * (`CatalogLifecycle.label`).
+ * #598a/#598b, re-cut by #home-frame for the approved 2026-10-20 direction — the Pipelines home's
+ * inventory from ONE [ChartInventory], so no number disagrees with another: [metrics] are the
+ * summary strip (the four exclusive lifecycle groups plus Actively developed, #593's resolution),
+ * [activity] the twelve weekly columns, [maturity] the release-history bars and [releaseNote] the
+ * sentences under them. The words are the owner's; the catalog's lifecycle select keeps its own
+ * (`CatalogLifecycle.label`), and the definitions dialog names both (#626).
  */
 object OverviewStacked {
-    /** Which inventory card a family's overview carries. */
+    /** Which inventory a family's overview carries. */
     enum class ChartSet {
         /** The four counts and the four-bar lifecycle chart (#556) — the four siblings until #599. */
         STANDARD,
 
-        /** The total, the lifecycle stacked bar, the maturity chart and the activity chart (#598). */
+        /** The lifecycle strip, the activity columns and the release history (#598, #home-frame). */
         LIFECYCLE,
     }
 
-    /** The inventory panel for a [ChartSet.LIFECYCLE] family: no counts, no bar charts, the three stacked charts. */
+    /** The inventory panel for a [ChartSet.LIFECYCLE] family: the strip, its foot, the two panels and their dialogs. */
     fun panel(
         family: OverviewPage.Family,
         charts: ChartInventory,
-    ): OverviewPage.InventoryPanel =
-        OverviewPage.InventoryPanel(
+        lensed: Boolean,
+    ): OverviewPage.InventoryPanel {
+        val inventory = charts.lifecycle
+        return OverviewPage.InventoryPanel(
             counts = emptyList(),
             charts = emptyList(),
-            stacked =
+            metrics = metrics(family, charts, lensed),
+            foot = foot(family, inventory, lensed),
+            panels = listOf(activity(family, charts.activity), maturity(family, charts.maturity)),
+            viewAll = live(inventory),
+            explanations =
                 listOf(
-                    lifecycle(family, charts.lifecycle),
-                    maturity(family, charts.maturity),
-                    activity(family, charts.activity),
+                    OverviewWords.definitions(family, inventory, charts.activity.windowDays),
+                    OverviewWords.releases(family, releaseNote(family, charts.maturity)),
+                    OverviewWords.activity(family),
                 ),
-        )
-
-    /** One row of four parts — In development, Live, Live with changes, Retired — that sum to the total. */
-    fun lifecycle(
-        family: OverviewPage.Family,
-        inventory: Inventory,
-    ): StackedChart {
-        val parts =
-            LIFECYCLE_PARTS.map { (key, bucket) -> Segment(key, LIFECYCLE_NAMES.getValue(key), bucket.countIn(inventory)) }
-        val row =
-            row(family::count, "all", "All ${family.plural}", parts, tallest = inventory.objects, detail = null) { segment ->
-                val bucket = LIFECYCLE_PARTS.toMap().getValue(segment.key)
-                PartStyle(TONES.getValue(bucket), "${segment.name}: ${family.count(segment.value)}", family.filtered(bucket))
-            }
-        return StackedChart(
-            key = "lifecycle",
-            caption = "${family.title} by lifecycle",
-            total = inventory.objects,
-            totalLabel = family.count(inventory.objects),
-            rows = listOf(row),
-            legend = row.parts.map { Legend(it.key, it.name, it.tone, it.value, it.href) },
-            note = "The resource browser and View all count the three live parts; retired ${family.plural} have no page.",
-            headings = listOf("Lifecycle") + row.parts.map { it.name } + family.title,
         )
     }
 
-    /** Five rows, one per [ReleaseBin], each split no draft then draft open; no row links (the catalog has no such filter). */
+    /** The objects the resource browser and View all count: every group but Retired (#593). */
+    fun live(inventory: Inventory): Long = inventory.objects - inventory.discardedOnly
+
+    /** Total, Live, In development, Actively developed — the first three from the same [Inventory] the foot reads. */
+    fun metrics(
+        family: OverviewPage.Family,
+        charts: ChartInventory,
+        lensed: Boolean,
+    ): List<OverviewPage.Metric> {
+        val inventory = charts.lifecycle
+        val days = charts.activity.windowDays
+        return listOf(
+            OverviewPage.Metric("total", "Total ${family.plural}", inventory.objects, "Across this workspace", null, lensed = lensed),
+            bucket(family, "live", LifecycleBucket.RELEASED_ONLY, inventory, "Released, with no open changes", lensed),
+            bucket(family, "in-development", LifecycleBucket.DRAFT_ONLY, inventory, "Awaiting their first release", lensed),
+            OverviewPage.Metric(
+                "actively-developed",
+                "Actively developed",
+                charts.activity.activelyDeveloped,
+                "Draft edited in the last ${OverviewWords.days(days)}",
+                null,
+                lensed = lensed,
+            ),
+        )
+    }
+
+    /** Live with changes (linked) and Retired (unlinked: a retired object has no page, its title says so). */
+    fun foot(
+        family: OverviewPage.Family,
+        inventory: Inventory,
+        lensed: Boolean,
+    ): List<OverviewPage.Metric> =
+        listOf(
+            bucket(family, "live-changes", LifecycleBucket.RELEASED_WITH_DRAFT, inventory, note = null, lensed = lensed),
+            OverviewPage.Metric(
+                "retired",
+                LIFECYCLE_NAMES.getValue(LifecycleBucket.DISCARDED_ONLY),
+                inventory.discardedOnly,
+                note = null,
+                href = null,
+                tone = TONES.getValue(LifecycleBucket.DISCARDED_ONLY),
+                lensed = lensed,
+                title = "Retired ${family.plural} have no page.",
+            ),
+        )
+
+    private fun bucket(
+        family: OverviewPage.Family,
+        key: String,
+        bucket: LifecycleBucket,
+        inventory: Inventory,
+        note: String?,
+        lensed: Boolean,
+    ): OverviewPage.Metric =
+        OverviewPage.Metric(
+            key,
+            LIFECYCLE_NAMES.getValue(bucket),
+            bucket.countIn(inventory),
+            note,
+            family.filtered(bucket),
+            tone = TONES.getValue(bucket),
+            lensed = lensed,
+        )
+
+    /** Five rows, one per [ReleaseBin]; No releases in the draft tone, the rest released; no row links (no such filter). */
     fun maturity(
         family: OverviewPage.Family,
         bins: List<MaturityBin>,
-    ): StackedChart {
+    ): Panel.Bars {
         val tallest = bins.maxOfOrNull { it.total } ?: 0L
+        val caption = "${family.title} by number of releases"
+        val bars =
+            bins.map { bin ->
+                val name = binName(bin.releases)
+                OverviewPage.Bar(
+                    key = binKey(bin.releases),
+                    name = name,
+                    value = bin.total,
+                    width = OverviewPage.width(bin.total, tallest),
+                    tone = if (bin.releases == ReleaseBin.ZERO) DRAFT else RELEASED,
+                    label = "$name: ${family.count(bin.total)}",
+                    href = null,
+                )
+            }
         val rows =
             bins.map { bin ->
-                val name = "${bin.releases.label} ${if (bin.releases == ReleaseBin.ONE) "release" else "releases"}"
-                val parts = listOf(Segment(NO_DRAFT, "No draft", bin.noDraft), Segment(DRAFT_OPEN, "Draft open", bin.draftOpen))
-                val drafts = if (bin.draftOpen == 1L) "1 with a draft" else "${bin.draftOpen} with drafts"
-                row(family::count, bin.releases.column.replace('_', '-'), name, parts, tallest, detail = "($drafts)") { segment ->
-                    val label = "$name, ${segment.name.lowercase()}: ${family.count(segment.value)}"
-                    PartStyle(MATURITY_TONES.getValue(segment.key), label, href = null)
-                }
+                Panel.Row(
+                    binKey(bin.releases),
+                    binName(bin.releases),
+                    listOf(Panel.Cell(NO_DRAFT, bin.noDraft), Panel.Cell(DRAFT_OPEN, bin.draftOpen), Panel.Cell(TOTAL, bin.total)),
+                )
             }
-        return StackedChart(
+        return Panel.Bars(
             key = "maturity",
-            caption = "${family.title} by number of releases",
-            total = bins.sumOf { it.total },
-            totalLabel = null,
-            rows = rows,
-            legend =
-                listOf(
-                    Legend(NO_DRAFT, "No draft", MATURITY_TONES.getValue(NO_DRAFT), value = null, href = null),
-                    Legend(DRAFT_OPEN, "Draft open", MATURITY_TONES.getValue(DRAFT_OPEN), value = null, href = null),
-                ),
-            note = "A release since discarded is not counted; a retired ${family.singular} has 0.",
-            headings = listOf("Releases") + rows.first().parts.map { it.name } + family.title,
+            heading = "Release history",
+            description = caption,
+            bars = bars,
+            notes = releaseNote(family, bins),
+            table = Panel.Table("maturity", caption, listOf("Releases", "No draft", "Draft open", family.title), rows),
+            explain = OverviewWords.RELEASES,
         )
     }
 
     /**
-     * #598b — twelve rows, one per UTC week, OLDEST first so time reads left to right down the
-     * card; each row stacks the week's releases then its new objects (a new object is a draft,
-     * so it takes the draft tone) into one bar of events, the busiest week full width. No row
-     * links (the catalog has no week filter). The headline is the actively developed count — a
-     * count at the moment of the read, since a draft keeps only its last write.
+     * The release-history panel's two sentences, from the bins alone: the unreleased bin's drafts,
+     * then the released bins' open changes — each worded for none, one, some and all, so the three
+     * numbers it states are the bins' sums.
+     */
+    fun releaseNote(
+        family: OverviewPage.Family,
+        bins: List<MaturityBin>,
+    ): List<String> {
+        if (bins.sumOf { it.total } == 0L) return listOf("No ${family.plural} yet.")
+        val unreleased = bins.filter { it.releases == ReleaseBin.ZERO }
+        val released = bins.filter { it.releases != ReleaseBin.ZERO }
+        return listOf(
+            OverviewWords.share(unreleased.sumOf { it.draftOpen }, unreleased.sumOf { it.total }, "unreleased", family, "a draft")
+                ?: "Every ${family.singular} has at least one release.",
+            OverviewWords.share(released.sumOf { it.draftOpen }, released.sumOf { it.total }, "released", family, "open changes")
+                ?: "No ${family.singular} has been released yet.",
+        )
+    }
+
+    /**
+     * #598b — twelve columns, one per UTC week, OLDEST first; each stacks the week's releases
+     * (bottom) then its new objects (top; a new object is a draft, so it takes the draft tone)
+     * into one column of events, the busiest week full height. A count at the moment of the read:
+     * the window rules live in the activity dialog's sentence.
      */
     fun activity(
         family: OverviewPage.Family,
         activity: Activity,
-    ): StackedChart {
+    ): Panel.Columns {
         val busiest = activity.weeks.maxOf { it.events }
-        val newest = activity.weeks.last().weekStart
-        val rows =
-            activity.weeks.map { week ->
+        val last = activity.weeks.lastIndex
+        val columns =
+            activity.weeks.mapIndexed { index, week ->
                 val name = WEEK_NAME.format(week.weekStart)
-                val parts = listOf(Segment(RELEASED, "Released", week.released), Segment(CREATED, "Created", week.created))
-                val detail = if (week.weekStart == newest) "(this week so far)" else null
-                row(::events, "week-${week.weekStart}", name, parts, busiest, detail) { segment ->
-                    PartStyle(ACTIVITY_TONES.getValue(segment.key), "$name, ${segment.name.lowercase()}: ${segment.value}", href = null)
-                }
+                val current = index == last
+                Panel.Column(
+                    key = "week-${week.weekStart}",
+                    name = name,
+                    current = current,
+                    sparse = (last - index) % PHONE_EVERY == 0,
+                    label = weekLabel(name, week.created, week.released, current),
+                    stacks = stacks(week.released, week.created, busiest),
+                )
             }
-        return StackedChart(
+        val rows =
+            activity.weeks.mapIndexed { index, week ->
+                val name = WEEK_NAME.format(week.weekStart) + if (index == last) " (so far)" else ""
+                Panel.Row(
+                    "week-${week.weekStart}",
+                    name,
+                    listOf(Panel.Cell(CREATED, week.created), Panel.Cell(RELEASED, week.released), Panel.Cell(TOTAL, week.events)),
+                )
+            }
+        val thisWeek = activity.weeks.last().events
+        return Panel.Columns(
             key = "activity",
-            caption = "${family.title} activity, last ${Activity.WEEKS} weeks",
-            total = activity.activelyDeveloped,
-            totalLabel = "${family.count(activity.activelyDeveloped)} actively developed",
-            rows = rows,
+            heading = "Development activity",
+            description = "Creation and release events over time",
+            period = "Last ${Activity.WEEKS} weeks",
+            headline = activity.weeks.sumOf { it.events },
+            unit = if (activity.weeks.sumOf { it.events } == 1L) "event" else "events",
             legend =
                 listOf(
-                    Legend(RELEASED, "Released", ACTIVITY_TONES.getValue(RELEASED), activity.weeks.sumOf { it.released }, href = null),
-                    Legend(CREATED, "Created", ACTIVITY_TONES.getValue(CREATED), activity.weeks.sumOf { it.created }, href = null),
+                    Panel.Legend(CREATED, "created", DRAFT, activity.weeks.sumOf { it.created }),
+                    Panel.Legend(RELEASED, "released", RELEASED, activity.weeks.sumOf { it.released }),
                 ),
-            note =
-                "Weeks start on Monday (UTC). A release since discarded is not counted. Actively developed: a draft written " +
-                    "in the last ${activity.windowDays} days — a draft keeps only its last write, so this is a count today, " +
-                    "not a history.",
-            headings = listOf("Week", "Released", "Created", "Events"),
+            axis = axis(busiest),
+            columns = columns,
+            footer = if (thisWeek == 0L) "No events this week" else "${events(thisWeek)} this week so far",
+            viewData = OverviewWords.ACTIVITY,
+            table =
+                Panel.Table(
+                    "activity",
+                    "${family.title} activity, last ${Activity.WEEKS} weeks",
+                    listOf("Week of", "Created", "Released", "Events"),
+                    rows,
+                ),
         )
     }
 
-    /**
-     * The row's arithmetic: its width is its total's share of [tallest] (`OverviewPage.width`), and
-     * its parts tile exactly that width — each part runs from the rounded running sum before it to
-     * the rounded running sum through it, in tenths, so the last part ends at the row's width with
-     * no gap or overlap however the shares round. An all-zero row is all "0", never a divide by zero.
-     * No row links today (the catalog has no release-count filter); [StackedRow.href] is the frame's.
-     * [count] words the row's total in its accessible label: objects for the inventory charts,
-     * events for the activity chart.
-     */
-    private fun row(
-        count: (Long) -> String,
-        key: String,
+    /** "Week of 14 Sep: 14 created, 10 released" — the column's title, read beside its table row. */
+    fun weekLabel(
         name: String,
-        segments: List<Segment>,
-        tallest: Long,
-        detail: String?,
-        style: (Segment) -> PartStyle,
-    ): StackedRow {
-        val total = segments.sumOf { it.value }
-        val width = OverviewPage.width(total, tallest)
-        val tenths = (width.toDouble() * TENTHS).roundToLong()
+        created: Long,
+        released: Long,
+        current: Boolean,
+    ): String = "Week of $name: $created created, $released released" + if (current) ", this week so far" else ""
+
+    /**
+     * The column's arithmetic: its height is its events' share of [busiest] (`OverviewPage.width`),
+     * and its two stacks tile exactly that height from the bottom — each runs from the rounded
+     * running sum before it to the rounded running sum through it, in tenths, so the top stack ends
+     * at the column's height with no gap or overlap however the shares round. A quiet week is two
+     * zero-height rects at the baseline, never a divide by zero.
+     */
+    private fun stacks(
+        released: Long,
+        created: Long,
+        busiest: Long,
+    ): List<Panel.Stack> {
+        val total = released + created
+        val tenths = (OverviewPage.width(total, busiest).toDouble() * TENTHS).roundToLong()
         val bounds =
-            segments
-                .runningFold(0L) { sum, segment -> sum + segment.value }
-                .map { through -> if (total == 0L) 0L else (tenths * through.toDouble() / total).roundToLong() }
-        val parts =
-            segments.mapIndexed { index, segment ->
-                val (tone, label, link) = style(segment)
-                val x = format(bounds[index])
-                Part(segment.key, segment.name, segment.value, x, format(bounds[index + 1] - bounds[index]), tone, label, link)
-            }
-        val summary = segments.joinToString("; ") { "${it.name} ${it.value}" }
-        return StackedRow(key, name, total, width, parts, "$name: ${count(total)}; $summary", detail, href = null)
+            listOf(0L, released, total).map { through -> if (total == 0L) 0L else (tenths * through.toDouble() / total).roundToLong() }
+        val series = listOf(Triple(RELEASED, released, RELEASED), Triple(CREATED, created, DRAFT))
+        return series.mapIndexed { index, (key, value, tone) ->
+            Panel.Stack(key, value, format(FULL - bounds[index + 1]), format(bounds[index + 1] - bounds[index]), tone)
+        }
     }
 
-    /** "1 event", "3 events" — an activity row counts releases and new objects together. */
-    private fun events(value: Long): String = "$value ${if (value == 1L) "event" else "events"}"
+    /** The gridlines' labels top to bottom; a quiet quarter labels the baseline only. */
+    private fun axis(busiest: Long): List<String> =
+        if (busiest == 0L) {
+            listOf("", "", "0")
+        } else {
+            listOf(busiest.toString(), if (busiest % 2 == 0L) (busiest / 2).toString() else "${busiest / 2}.5", "0")
+        }
+
+    private fun binName(bin: ReleaseBin): String =
+        when (bin) {
+            ReleaseBin.ZERO -> "No releases"
+            ReleaseBin.ONE -> "1 release"
+            else -> "${bin.label} releases"
+        }
+
+    private fun binKey(bin: ReleaseBin): String = bin.column.replace('_', '-')
+
+    /** "1 event", "3 events" — an activity column counts releases and new objects together. */
+    fun events(value: Long): String = "$value ${if (value == 1L) "event" else "events"}"
 
     /** Tenths of the viewBox as an attribute value: "0" for nothing, otherwise one decimal. */
     private fun format(tenths: Long): String = if (tenths == 0L) "0" else String.format(Locale.ROOT, "%.1f", tenths / TENTHS)
 
-    private data class Segment(
-        val key: String,
-        val name: String,
-        val value: Long,
-    )
-
-    private data class PartStyle(
-        val tone: String,
-        val label: String,
-        val href: String?,
-    )
-
     private const val TENTHS = 10.0
+    private const val FULL = 1_000L
+    private const val PHONE_EVERY = 3
     private const val NO_DRAFT = "no-draft"
     private const val DRAFT_OPEN = "draft-open"
+    private const val TOTAL = "total"
     private const val RELEASED = "released"
     private const val CREATED = "created"
+    private const val DRAFT = "draft"
 
-    /** An activity row's name: the week's UTC Monday as "6 Oct", in the root locale so no server locale renames it. */
+    /** A column's name: the week's UTC Monday as "6 Oct", in the root locale so no server locale renames it. */
     private val WEEK_NAME = DateTimeFormatter.ofPattern("d MMM", Locale.ROOT)
 
-    /** The lifecycle parts left to right: the inventory's exclusive buckets A–D (shell design §8). */
-    private val LIFECYCLE_PARTS =
-        listOf(
-            "in-development" to LifecycleBucket.DRAFT_ONLY,
-            "live" to LifecycleBucket.RELEASED_ONLY,
-            "live-changes" to LifecycleBucket.RELEASED_WITH_DRAFT,
-            "retired" to LifecycleBucket.DISCARDED_ONLY,
-        )
-
-    /** The owner's words for the four parts (#598); the catalog's select keeps `CatalogLifecycle.label`'s. */
-    private val LIFECYCLE_NAMES =
+    /** The owner's words for the four groups (#598); the catalog's select keeps `CatalogLifecycle.label`'s (#626). */
+    val LIFECYCLE_NAMES =
         mapOf(
-            "in-development" to "In development",
-            "live" to "Live",
-            "live-changes" to "Live, changes in progress",
-            "retired" to "Retired",
+            LifecycleBucket.DRAFT_ONLY to "In development",
+            LifecycleBucket.RELEASED_ONLY to "Live",
+            LifecycleBucket.RELEASED_WITH_DRAFT to "Live with changes",
+            LifecycleBucket.DISCARDED_ONLY to "Retired",
         )
 
     /** Warning, success, accent and muted, as the bars of #556 (shell design §8: no danger red on a draft). */
@@ -288,10 +446,4 @@ object OverviewStacked {
             LifecycleBucket.RELEASED_WITH_DRAFT to "mixed",
             LifecycleBucket.DISCARDED_ONLY to "discarded",
         )
-
-    /** A maturity bin's settled share in the released tone, its open drafts in the draft tone. */
-    private val MATURITY_TONES = mapOf(NO_DRAFT to "released", DRAFT_OPEN to "draft")
-
-    /** A week's releases in the released tone, its new objects in the draft tone (a new object is a draft, #V18). */
-    private val ACTIVITY_TONES = mapOf(RELEASED to "released", CREATED to "draft")
 }

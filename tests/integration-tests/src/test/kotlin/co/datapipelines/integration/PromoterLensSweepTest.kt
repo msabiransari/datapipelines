@@ -244,10 +244,11 @@ class PromoterLensSweepTest {
      * lifecycle-filtered catalog) are the admitted set: `lp/newer`'s pending DRAFT is hidden, so it
      * classifies as released only, the With drafts filter is empty, and no hidden name reaches the
      * page. The viewer control ([viewerOverviewSeesEverything]) proves the draft is a row, not absent.
-     * #598a: the charts are the total, the lifecycle bar's four parts and the five maturity rows —
+     * #598a: the charts are the total, the four lifecycle groups and the five maturity rows —
      * through the lens three Live pipelines with one release each, and no draft anywhere. #598b:
      * the activity chart counts those three releases and three new pipelines, and nobody is
-     * actively developing — no DRAFT is admitted, so the headline is 0.
+     * actively developing — no DRAFT is admitted, so that metric is 0. #home-frame: the numbers
+     * are the summary strip's and its foot's, and the hidden tables' cells.
      */
     private fun overviewIsTheNewerSet(auth: (RequestSpecification) -> RequestSpecification) {
         withClue("#556: the promoter's Pipelines overview counts, lists and filters only the admitted versions") {
@@ -255,8 +256,7 @@ class PromoterLensSweepTest {
             page.status shouldBe HTTP_OK
             overviewNumbers(page.body) shouldBe
                 pipelineCharts("total" to 3, "live" to 3, "r1:no-draft" to 3, "activity:released" to 3, "activity:created" to 3)
-            page.body.contains("data-stacked-chart=\"activity\"") shouldBe true
-            page.body.contains(">0 pipelines actively developed<") shouldBe true
+            page.body.contains("data-chart-table=\"activity\"") shouldBe true
             val recent = page.body.substringAfter("data-overview-recent", "").substringBefore("</section>")
             VISIBLE_PIPELINES.forEach { recent.contains(it) shouldBe true }
             recent.contains("ds-badge-warning") shouldBe false
@@ -378,30 +378,31 @@ class PromoterLensSweepTest {
 
     /**
      * The overview's four counts and the bars' values, by key (the discarded bar's key is its count's);
-     * #598a: and the stacked charts' — the total line as `total`, then every hidden-table cell, the
-     * lifecycle row's by part (`live`) and a maturity row's as `row:part` (`r1:no-draft`); #598b: the
-     * actively developed headline as `active` and the week rows' cells summed by part (`activity:created`).
+     * #598a: and the charts' hidden-table cells, a maturity row's as `row:part` (`r1:no-draft`); #598b:
+     * the week rows' cells summed by part (`activity:created`). #home-frame: the Pipelines strip and
+     * its foot are counts too (`total`, `live`, …; Actively developed as `active`), only the four
+     * lifecycle bars are read as bars, and the derived cells are skipped: a row's `total` is its parts'
+     * sum and a bars table's `value` repeats its bar, both pinned by `OverviewRenderTest`.
      */
     private fun overviewNumbers(html: String): Map<String, Int> {
         val cells =
             STACKED_ROW.findAll(html).flatMap { row ->
-                STACKED_CELL.findAll(row.groupValues[2]).map { cell ->
+                STACKED_CELL.findAll(row.groupValues[2]).filter { it.groupValues[1] !in DERIVED_CELLS }.map { cell ->
                     val key =
                         when {
-                            row.groupValues[1] == "all" -> cell.groupValues[1]
                             row.groupValues[1].startsWith("week-") -> "activity:${cell.groupValues[1]}"
                             else -> "${row.groupValues[1]}:${cell.groupValues[1]}"
                         }
                     key to cell.groupValues[2].toInt()
                 }
             }
-        return OVERVIEW_COUNT.findAll(html).associate { it.groupValues[1] to it.groupValues[2].toInt() } +
+        return OVERVIEW_COUNT.findAll(html).associate {
+            (if (it.groupValues[1] == "actively-developed") "active" else it.groupValues[1]) to it.groupValues[2].toInt()
+        } +
             OVERVIEW_BAR.findAll(html).filter { it.groupValues[1] != "discarded" }.associate {
                 it.groupValues[1] to
                     it.groupValues[2].toInt()
-            } + STACKED_TOTAL.findAll(html).associate { "total" to it.groupValues[1].toInt() } +
-            STACKED_ACTIVE.findAll(html).associate { "active" to it.groupValues[1].toInt() } +
-            cells.groupBy({ it.first }, { it.second }).mapValues { (_, values) -> values.sum() }
+            } + cells.groupBy({ it.first }, { it.second }).mapValues { (_, values) -> values.sum() }
     }
 
     /**
@@ -939,20 +940,24 @@ class PromoterLensSweepTest {
         private val BROWSER_COUNT = Regex("class=\"app-browser-count\" data-browser-family=\"([a-z-]+)\"[^>]*><span>(\\d+)</span>")
         private val TREE_FAMILIES = setOf("pipelines", "templates")
 
-        /** #556 — one overview count (`data-count`) and one chart bar (`data-bar`) with its number. */
+        /**
+         * #556 — one overview count (`data-count`) and one lifecycle bar (`data-bar`) with its number;
+         * #home-frame: a count is a strip cell (`dd`) or a foot cell (`b`, Retired's carries a title).
+         */
         private val OVERVIEW_COUNT =
-            Regex("""data-count="([a-z-]+)">.*?<dd class="app-overview-count-v">(\d+)</dd>""", RegexOption.DOT_MATCHES_ALL)
+            Regex(
+                """data-count="([a-z-]+)"[^>]*>.*?<(?:dd|b) class="app-overview-count-v">(\d+)</(?:dd|b)>""",
+                RegexOption.DOT_MATCHES_ALL,
+            )
         private val OVERVIEW_BAR =
             Regex(
-                """data-bar="([a-z-]+)" data-tone="[a-z]+">.*?<span class="app-overview-bar-v">(\d+)</span>""",
+                """data-bar="(draft|released|released-with-draft|discarded)" data-tone="[a-z]+">.*?""" +
+                    """<span class="app-overview-bar-v">(\d+)</span>""",
                 RegexOption.DOT_MATCHES_ALL,
             )
 
-        /** #598a — the stacked charts' total line, one hidden-table row, and one part's cell in it. */
-        private val STACKED_TOTAL = Regex("""data-stacked-total="lifecycle"[^>]*>(\d+) """)
-
-        /** #598b — the activity chart's headline, "N pipelines actively developed". */
-        private val STACKED_ACTIVE = Regex("""data-stacked-total="activity"[^>]*>(\d+) """)
+        /** #598a — one hidden-table row and one part's cell in it; #home-frame: the cells no chart states on its own. */
+        private val DERIVED_CELLS = setOf("total", "value")
         private val STACKED_ROW = Regex("""<tr data-row="([a-z0-9-]+)"[^>]*>(.*?)</tr>""", RegexOption.DOT_MATCHES_ALL)
         private val STACKED_CELL = Regex("""data-part="([a-z-]+)"[^>]*>(\d+)</td>""")
 

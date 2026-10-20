@@ -19,6 +19,12 @@ import kotlin.math.sqrt
  * and the empty track across every offered theme, including both auto schemes.
  * The matrix is written before assertions so a failing candidate retains every measured pair.
  *
+ * #home-frame: the v2 Pipelines home carries the four tones as the strip's dots (In development,
+ * Live) and the foot's (Live with changes, Retired); the activity columns paint created and
+ * released, the release-history bars No releases and the released bins. Every site of a tone must
+ * read one colour (strip dot = legend dot = column fill = bar fill), and the columns' and bars'
+ * two tones are judged against the bar track, the panel and the text as well.
+ *
  * The 0.08 floor stays unchanged. Exactly these vendored palette gaps are measured and tracked;
  * a listed row that starts passing is red, so an exception cannot outlive its reason (#609's discipline).
  *
@@ -30,9 +36,13 @@ import kotlin.math.sqrt
  * | minimal | live-changes/live | 0 | #631 |
  * | minimal | live-changes/link | 0 | #631 |
  * | minimal | live-changes/text | 0 | #631 |
+ * | minimal | in-development/text | 0 | #631 |
+ * | minimal | live/text | 0 | #631 |
  *
  * Professional's info and link roles are both indigo. Minimal intentionally paints warning,
- * success and info black; its discarded and track pairs pass and are never excepted.
+ * success and info black; its discarded, track and panel pairs pass and are never excepted.
+ * The last two rows came with #home-frame's text pairs and were recorded on the owner's ruling
+ * (2026-10-20): the same cause as #631's other rows, so the same issue.
  */
 class OverviewToneBrowserTest : RestTreeBrowserFixture() {
     private data class Gap(
@@ -70,14 +80,17 @@ class OverviewToneBrowserTest : RestTreeBrowserFixture() {
         lines: MutableList<String>,
         failures: MutableList<String>,
     ) {
-        PARTS.forEach { part ->
-            if (colours.getValue(part) != colours.getValue("fill-$part")) {
-                failures += "$theme $part swatch=${colours.getValue(part)} != fill=${colours.getValue("fill-$part")}"
+        SITES.forEach { (part, sites) ->
+            sites.forEach { site ->
+                if (colours.getValue(part) != colours.getValue("$site-$part")) {
+                    failures += "$theme $part dot=${colours.getValue(part)} != $site=${colours.getValue("$site-$part")}"
+                }
             }
         }
         val pairs =
             listOf("in-development" to "live", "in-development" to "retired", "live" to "retired") +
-                listOf("in-development", "live", "retired", "link", "text", "track").map { "live-changes" to it }
+                listOf("in-development", "live", "retired", "link", "text", "track").map { "live-changes" to it } +
+                listOf("in-development", "live").flatMap { tone -> listOf("track", "panel", "text").map { tone to it } }
         pairs.forEach { (first, second) ->
             val a = colours.getValue(first)
             val b = colours.getValue(second)
@@ -126,7 +139,7 @@ class OverviewToneBrowserTest : RestTreeBrowserFixture() {
         seedPipeline("tone627/two")
         page.setViewportSize(1512, 900)
         page.navigate("$baseUrl/overview/pipelines")
-        page.waitForSelector("[data-stacked='lifecycle']")
+        page.waitForSelector("[data-overview-columns]")
         val themes = sweep()
         val lines = mutableListOf<String>()
         val failures = mutableListOf<String>()
@@ -154,7 +167,9 @@ class OverviewToneBrowserTest : RestTreeBrowserFixture() {
     private companion object {
         const val FLOOR = 0.08
         const val MIN_SWEEP = 10
-        val PARTS = listOf("in-development", "live", "live-changes", "retired")
+
+        /** The tones painted beyond the strip's dot: the legend dot, the column fill and the bar fill. */
+        val SITES = mapOf("in-development" to listOf("legend", "fill", "bar"), "live" to listOf("legend", "fill", "bar"))
         val GAPS =
             listOf(
                 Gap(setOf("professional", "auto"), "live-changes/link", 0.073491, 633),
@@ -163,6 +178,8 @@ class OverviewToneBrowserTest : RestTreeBrowserFixture() {
                 Gap(setOf("minimal"), "live-changes/live", 0.0, 631),
                 Gap(setOf("minimal"), "live-changes/link", 0.0, 631),
                 Gap(setOf("minimal"), "live-changes/text", 0.0, 631),
+                Gap(setOf("minimal"), "in-development/text", 0.0, 631),
+                Gap(setOf("minimal"), "live/text", 0.0, 631),
             )
 
         fun distance(
@@ -204,14 +221,23 @@ class OverviewToneBrowserTest : RestTreeBrowserFixture() {
         val MEASURE =
             """
             async () => {
-              const parts = ['in-development', 'live', 'live-changes', 'retired'];
-              const sites = Object.fromEntries(parts.flatMap(p => [
-                [p, [document.querySelector('[data-legend="' + p + '"] .app-overview-legend-swatch'), 'backgroundColor']],
-                ['fill-' + p, [document.querySelector('[data-stacked="lifecycle"] rect[data-part="' + p + '"]'), 'fill']]
-              ]));
-              sites.link = [document.querySelector('[data-legend="live"] a'), 'color'];
-              sites.text = [document.body, 'color'];
-              sites.track = [document.querySelector('[data-stacked="lifecycle"] .app-overview-stack-track'), 'backgroundColor'];
+              const dot = (key) => document.querySelector('[data-count="' + key + '"] .app-overview-dot');
+              const sites = {
+                'in-development': [dot('in-development'), 'backgroundColor'],
+                'live': [dot('live'), 'backgroundColor'],
+                'live-changes': [dot('live-changes'), 'backgroundColor'],
+                'retired': [dot('retired'), 'backgroundColor'],
+                'legend-in-development': [document.querySelector('[data-legend="created"] .app-overview-dot'), 'backgroundColor'],
+                'legend-live': [document.querySelector('[data-legend="released"] .app-overview-dot'), 'backgroundColor'],
+                'fill-in-development': [document.querySelector('[data-overview-columns] rect[data-part="created"]'), 'fill'],
+                'fill-live': [document.querySelector('[data-overview-columns] rect[data-part="released"]'), 'fill'],
+                'bar-in-development': [document.querySelector('.app-overview-bar[data-tone="draft"] .app-overview-bar-fill'), 'fill'],
+                'bar-live': [document.querySelector('.app-overview-bar[data-tone="released"] .app-overview-bar-fill'), 'fill'],
+                'link': [document.querySelector('[data-count="live"] a'), 'color'],
+                'text': [document.body, 'color'],
+                'track': [document.querySelector('.app-overview-bar:not(.is-zero) .app-overview-bar-track'), 'backgroundColor'],
+                'panel': [document.querySelector('.app-overview-panel'), 'backgroundColor'],
+              };
               const canvas = document.createElement('canvas');
               canvas.width = canvas.height = 1;
               const ctx = canvas.getContext('2d', {willReadFrequently: true});
