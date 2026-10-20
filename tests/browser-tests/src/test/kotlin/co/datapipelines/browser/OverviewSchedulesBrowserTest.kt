@@ -3,6 +3,7 @@ package co.datapipelines.browser
 import co.datapipelines.browser.ScheduleFixtures.createSchedule
 import co.datapipelines.browser.ScheduleFixtures.releasedPipeline
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
 
 /**
@@ -11,7 +12,8 @@ import org.junit.jupiter.api.Test
  * with the resource browser closed — Schedules is not a tree family. A fresh workspace reads
  * zeros, the two empty notes and an author's New schedule; one schedule later, the page counts it
  * and its Up next row opens the explorer's detail for that schedule. #home-ops: on the v2 frame a
- * panel's info button opens its dialog section, and the task row leads to the explorer.
+ * panel's info button opens its dialog section, the task row leads to the explorer, and a viewer
+ * sees no New schedule, only who creates schedules.
  */
 class OverviewSchedulesBrowserTest : SchedulesBrowserSuite() {
     private fun openOverview() {
@@ -88,5 +90,26 @@ class OverviewSchedulesBrowserTest : SchedulesBrowserSuite() {
         upNext.click()
         page.waitForURL("**/schedules?id=$id")
         detail().waitFor()
+    }
+
+    @Test
+    fun `a viewer lands on the home with no New schedule and reads who creates schedules`() {
+        startTrace()
+        // The viewer is a member of `default`; the home reads that workspace.
+        val viewer =
+            seedLocalUser(
+                uniqueEmail("schov-viewer-" + suffix()),
+                generatedPassword("pw"),
+                mustChange = false,
+                isAdmin = false,
+                role = "viewer",
+            )
+        login(viewer.email, viewer.oneTimePassword)
+        page.waitForURL("**/dashboard")
+        openOverview()
+        // Absent, not hidden: the canAuthor guard renders no link at all.
+        page.locator("[data-overview-new-schedule]").count() shouldBe 0
+        page.locator("[data-overview-create-note]").innerText() shouldContain "an author or a workspace admin"
+        page.locator("[data-overview-recent] [data-task='next'] a").getAttribute("href") shouldBe "/schedules"
     }
 }
