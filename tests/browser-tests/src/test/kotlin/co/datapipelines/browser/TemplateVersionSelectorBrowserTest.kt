@@ -109,47 +109,65 @@ class TemplateVersionSelectorBrowserTest : BrowserSuite() {
         return label to (rest + mapOf("hoverRatio" to hovered.toDouble()))
     }
 
-    /** One theme's line and its failures against assertions (1)–(5) of the brief. */
-    @Suppress("UNCHECKED_CAST")
+    /** Assertions (1) and (2): the bar is the indicator token in `--border-focus`; every selected text reaches the floor. */
+    private fun judgeInk(
+        m: Map<String, Any>,
+        fail: (String) -> Unit,
+    ) {
+        val sel = m.sub("selected")
+        val tokens = m.sub("tokens")
+        val indicator = tokens.num("indicator")
+        if (indicator != BAR) fail("--app-nav-indicator-w resolves to ${indicator}px, not ${BAR}px")
+        if (sel.num("barWidth") != indicator) fail("(1) selected bar ${sel.num("barWidth")}px, not the indicator's ${indicator}px")
+        if (sel["barColour"] != tokens["focus"]) fail("(1) selected bar ${sel["barColour"]}, not --border-focus ${tokens["focus"]}")
+        if (m.num("ratio") < TEXT_CONTRAST) fail("(2) selected text %.2f:1 < $TEXT_CONTRAST".format(m.num("ratio")))
+        if (m.num("hoverRatio") < TEXT_CONTRAST) fail("(2) hovered selected text %.2f:1 < $TEXT_CONTRAST".format(m.num("hoverRatio")))
+        val suffixRatio = m.num("suffixRatio")
+        if (suffixRatio < 0) fail("(2) the viewed current release carries no `· current` suffix to measure")
+        if (suffixRatio in 0.0..<TEXT_CONTRAST) fail("(2) selected suffix text %.2f:1 < $TEXT_CONTRAST".format(suffixRatio))
+    }
+
+    /** Assertions (3)–(5): nothing shifts, the unselected bar is reserved and transparent, one viewed row. */
+    private fun judgeGeometry(
+        m: Map<String, Any>,
+        fail: (String) -> Unit,
+    ) {
+        val sel = m.sub("selected")
+        val sib = m.sub("sibling")
+        val lifted = m.sub("lifted")
+        val indicator = m.sub("tokens").num("indicator")
+        for (key in listOf("width", "height")) {
+            if (abs(sel.num(key) - lifted.num(key)) > GEOMETRY_TOLERANCE) {
+                fail("(3) selected $key ${sel.num(key)} != the same link unselected ${lifted.num(key)}")
+            }
+        }
+        if (abs(sel.num("height") - sib.num("height")) > GEOMETRY_TOLERANCE) {
+            fail("(3) selected height ${sel.num("height")} != sibling ${sib.num("height")}")
+        }
+        if (sib.num("barWidth") != indicator) fail("(3) the unselected sibling reserves ${sib.num("barWidth")}px, not ${indicator}px")
+        if (sib["barColourRaw"] != TRANSPARENT) fail("(4) unselected bar is ${sib["barColourRaw"]}, not $TRANSPARENT")
+        if (m.num("current") != 1.0 || m["viewed"] != VIEWED) fail("(5) aria-current on ${m["current"]} link(s), viewed ${m["viewed"]}")
+    }
+
+    /** One theme's `625-selection|…` line; its failures go to [failures]. */
     private fun judge(
         label: String,
         m: Map<String, Any>,
         failures: MutableList<String>,
     ): String {
-        val sel = m["selected"] as Map<String, Any>
-        val sib = m["sibling"] as Map<String, Any>
-        val lifted = m["lifted"] as Map<String, Any>
-        val tokens = m["tokens"] as Map<String, Any>
-        fun num(map: Map<String, Any>, key: String) = (map[key] as Number).toDouble()
-        val indicator = num(tokens, "indicator")
-        val ratio = num(m, "ratio")
-        val hoverRatio = num(m, "hoverRatio")
-        fun fail(what: String) = failures.add("$label: $what")
-        if (indicator != BAR) fail("--app-nav-indicator-w resolves to ${indicator}px, not ${BAR}px")
-        if (num(sel, "barWidth") != indicator) fail("(1) selected bar ${num(sel, "barWidth")}px, not the indicator's ${indicator}px")
-        if (sel["barColour"] != tokens["focus"]) fail("(1) selected bar ${sel["barColour"]}, not --border-focus ${tokens["focus"]}")
-        if (ratio < TEXT_CONTRAST) fail("(2) selected text %.2f:1 < $TEXT_CONTRAST".format(ratio))
-        if (hoverRatio < TEXT_CONTRAST) fail("(2) hovered selected text %.2f:1 < $TEXT_CONTRAST".format(hoverRatio))
-        val suffixRatio = num(m, "suffixRatio")
-        if (suffixRatio < 0) fail("(2) the viewed current release carries no `· current` suffix to measure")
-        if (suffixRatio in 0.0..<TEXT_CONTRAST) fail("(2) selected suffix text %.2f:1 < $TEXT_CONTRAST".format(suffixRatio))
-        for (key in listOf("width", "height")) {
-            if (abs(num(sel, key) - num(lifted, key)) > GEOMETRY_TOLERANCE) {
-                fail("(3) selected $key ${num(sel, key)} != the same link unselected ${num(lifted, key)}")
-            }
-        }
-        if (abs(num(sel, "height") - num(sib, "height")) > GEOMETRY_TOLERANCE) {
-            fail("(3) selected height ${num(sel, "height")} != sibling ${num(sib, "height")}")
-        }
-        if (num(sib, "barWidth") != indicator) fail("(3) the unselected sibling reserves ${num(sib, "barWidth")}px, not ${indicator}px")
-        if (sib["barColourRaw"] != TRANSPARENT) fail("(4) unselected bar is ${sib["barColourRaw"]}, not $TRANSPARENT")
-        if (num(m, "current") != 1.0 || m["viewed"] != VIEWED) fail("(5) aria-current on ${m["current"]} link(s), viewed ${m["viewed"]}")
-        return "625-selection|$label|bar=${num(sel, "barWidth")}px/${indicator}px colour=${sel["barColour"]} focus=${tokens["focus"]}" +
-            "|ink=${sel["ink"]} bg=${sel["background"]} brandSoft=${tokens["brandSoft"]} selectedSurface=${tokens["surfaceSelected"]}" +
-            "|primary=${tokens["primary"]} inverted=${tokens["inverted"]}" +
-            "|ratio=%.2f hover=%.2f suffix=%.2f".format(ratio, hoverRatio, suffixRatio) +
-            "|box=${num(sel, "width")}x${num(sel, "height")} lifted=${num(lifted, "width")}x${num(lifted, "height")}" +
-            "|sibling v${sib["version"]} bar=${num(sib, "barWidth")}px ${sib["barColourRaw"]} h=${num(sib, "height")}" +
+        val fail: (String) -> Unit = { failures += "$label: $it" }
+        judgeInk(m, fail)
+        judgeGeometry(m, fail)
+        val sel = m.sub("selected")
+        val sib = m.sub("sibling")
+        val lifted = m.sub("lifted")
+        val tokens = m.sub("tokens")
+        return "625-selection|$label|bar=${sel.num("barWidth")}px/${tokens.num("indicator")}px colour=${sel["barColour"]}" +
+            " focus=${tokens["focus"]}|ink=${sel["ink"]} bg=${sel["background"]} brandSoft=${tokens["brandSoft"]}" +
+            " selectedSurface=${tokens["surfaceSelected"]}|primary=${tokens["primary"]} inverted=${tokens["inverted"]}" +
+            "|ratio=%.2f hover=%.2f suffix=%.2f".format(m.num("ratio"), m.num("hoverRatio"), m.num("suffixRatio")) +
+            "|box=${sel.num("width")}x${sel.num("height")} lifted=${lifted.num("width")}x${lifted.num("height")}" +
+            "|sibling v${sib["version"]} bar=${sib.num("barWidth")}px ${sib["barColourRaw"]} h=${sib.num("height")}" +
             "|current=${m["current"]} viewed=v${m["viewed"]}"
     }
 
@@ -227,39 +245,39 @@ class TemplateVersionSelectorBrowserTest : BrowserSuite() {
         /** Shared helpers: settle a link's transitions, canvas-resolve colours, composite, WCAG ratio. */
         val HELPERS =
             """
-              const settle = async el => {
-                const running = () => el.getAnimations().filter(a => a instanceof CSSTransition && a.playState === 'running');
-                const deadline = performance.now() + 3000;
-                while (running().length && performance.now() < deadline) await new Promise(r => setTimeout(r, 25));
-                if (running().length) throw new Error('transition still running on ' + el.className);
-              };
-              const canvas = document.createElement('canvas');
-              canvas.width = canvas.height = 1;
-              const ctx = canvas.getContext('2d', { willReadFrequently: true });
-              const rgba = c => { ctx.clearRect(0, 0, 1, 1); ctx.fillStyle = '#000'; ctx.fillStyle = c;
-                ctx.fillRect(0, 0, 1, 1); const d = ctx.getImageData(0, 0, 1, 1).data; return [d[0], d[1], d[2], d[3] / 255]; };
-              const css = a => 'rgb(' + a[0] + ', ' + a[1] + ', ' + a[2] + ')';
-              const paint = el => {
-                const layers = [];
-                for (let node = el; node; node = node.parentElement) {
-                  const bg = getComputedStyle(node).backgroundColor, c = rgba(bg);
-                  if (c[3] > 0) layers.push(bg);
-                  if (c[3] === 1) break;
-                }
-                if (!layers.length || rgba(layers[layers.length - 1])[3] !== 1) {
-                  throw new Error('no opaque ancestor behind ' + el.className);
-                }
-                ctx.clearRect(0, 0, 1, 1);
-                for (let i = layers.length - 1; i >= 0; i--) { ctx.fillStyle = layers[i]; ctx.fillRect(0, 0, 1, 1); }
-                const d = ctx.getImageData(0, 0, 1, 1).data;
-                return [d[0], d[1], d[2], 1];
-              };
-              const lum = c => { const f = v => { const s = v / 255;
-                  return s <= 0.04045 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4); };
-                return 0.2126 * f(c[0]) + 0.7152 * f(c[1]) + 0.0722 * f(c[2]); };
-              const ratio = (a, b) => { const l1 = lum(a), l2 = lum(b);
-                return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05); };
-              const sel = document.querySelector('.tw-version-link[aria-current="true"]');
+            const settle = async el => {
+              const running = () => el.getAnimations().filter(a => a instanceof CSSTransition && a.playState === 'running');
+              const deadline = performance.now() + 3000;
+              while (running().length && performance.now() < deadline) await new Promise(r => setTimeout(r, 25));
+              if (running().length) throw new Error('transition still running on ' + el.className);
+            };
+            const canvas = document.createElement('canvas');
+            canvas.width = canvas.height = 1;
+            const ctx = canvas.getContext('2d', { willReadFrequently: true });
+            const rgba = c => { ctx.clearRect(0, 0, 1, 1); ctx.fillStyle = '#000'; ctx.fillStyle = c;
+              ctx.fillRect(0, 0, 1, 1); const d = ctx.getImageData(0, 0, 1, 1).data; return [d[0], d[1], d[2], d[3] / 255]; };
+            const css = a => 'rgb(' + a[0] + ', ' + a[1] + ', ' + a[2] + ')';
+            const paint = el => {
+              const layers = [];
+              for (let node = el; node; node = node.parentElement) {
+                const bg = getComputedStyle(node).backgroundColor, c = rgba(bg);
+                if (c[3] > 0) layers.push(bg);
+                if (c[3] === 1) break;
+              }
+              if (!layers.length || rgba(layers[layers.length - 1])[3] !== 1) {
+                throw new Error('no opaque ancestor behind ' + el.className);
+              }
+              ctx.clearRect(0, 0, 1, 1);
+              for (let i = layers.length - 1; i >= 0; i--) { ctx.fillStyle = layers[i]; ctx.fillRect(0, 0, 1, 1); }
+              const d = ctx.getImageData(0, 0, 1, 1).data;
+              return [d[0], d[1], d[2], 1];
+            };
+            const lum = c => { const f = v => { const s = v / 255;
+                return s <= 0.04045 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4); };
+              return 0.2126 * f(c[0]) + 0.7152 * f(c[1]) + 0.0722 * f(c[2]); };
+            const ratio = (a, b) => { const l1 = lum(a), l2 = lum(b);
+              return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05); };
+            const sel = document.querySelector('.tw-version-link[aria-current="true"]');
             """.trimIndent()
 
         /** The hovered viewed link's text contrast against what the browser paints behind it. */
@@ -314,3 +332,8 @@ class TemplateVersionSelectorBrowserTest : BrowserSuite() {
             """.trimIndent()
     }
 }
+
+private fun Map<String, Any>.num(key: String): Double = (getValue(key) as Number).toDouble()
+
+@Suppress("UNCHECKED_CAST")
+private fun Map<String, Any>.sub(key: String): Map<String, Any> = getValue(key) as Map<String, Any>
