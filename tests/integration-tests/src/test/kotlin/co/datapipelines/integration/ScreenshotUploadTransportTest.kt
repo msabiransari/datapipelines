@@ -79,7 +79,7 @@ class ScreenshotUploadTransportTest {
     }
 
     @Test
-    fun `560 a declaration above the drain bound closes after a bounded read - the 413 was on the wire, the client still writing meets the reset`() {
+    fun `560 a declaration above the drain bound closes after a bounded read - the 413 on the wire, the writer meets the reset`() {
         forcedClose(LARGE_BODY)
     }
 
