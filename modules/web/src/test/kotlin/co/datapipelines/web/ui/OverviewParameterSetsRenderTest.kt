@@ -2,6 +2,7 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.application.lens.LensedView
 import co.datapipelines.parameters.ParameterSetRepository
+import co.datapipelines.pipeline.Activity
 import co.datapipelines.pipeline.Inventory
 import co.datapipelines.pipeline.NavigationFamily
 import co.datapipelines.pipeline.SearchNeedle
@@ -31,10 +32,10 @@ import java.util.UUID
 
 /**
  * #582 — the Parameter Sets overview (`overview/family.html` with `overview/guide-parameter-sets.html`)
- * pinned at the RENDER, beside #556's family-agnostic [OverviewRenderTest]: the counts and bars drill
- * into `/parameter-sets?lifecycle=<wire>` except the discarded bar (the catalog does not offer
- * `discarded`: a discarded-only set has no page); Review drafts is `?lifecycle=with-drafts`; the
- * guide's introduction, starter prompt and related links render, the prompt naming the workspace
+ * pinned at the RENDER, beside #556's family-agnostic [OverviewRenderTest]: since #599 the strip's
+ * live groups drill into `/parameter-sets?lifecycle=<wire>` and Retired stays unlinked (the catalog
+ * does not offer `discarded`: a discarded-only set has no page); the task rows open the draft and
+ * released filters; the guide's introduction, starter prompt and related links render, the prompt naming the workspace
  * through `th:text`; a failing parameter-set read shows its reason and no digit; an empty workspace
  * shows zeros, the empty line and the prompt.
  */
@@ -51,20 +52,20 @@ class OverviewParameterSetsRenderTest {
         }
 
     @Test
-    fun `the counts and bars filter the parameter-sets catalog and the discarded bar stays unlinked`() {
+    fun `the strip filters the parameter-sets catalog and Retired stays unlinked`() {
         val doc = render(page(Inventory(1, 1, 1, 1)))
 
-        doc.select("[data-overview-chart] [data-bar] a").map { it.attr("href") } shouldContainExactly
+        doc.select("[data-overview-inventory] [data-count] a").map { it.attr("href") } shouldContainExactly
             listOf(
-                "/parameter-sets?lifecycle=draft",
                 "/parameter-sets?lifecycle=released",
+                "/parameter-sets?lifecycle=draft",
                 "/parameter-sets?lifecycle=released-with-draft",
             )
-        doc.selectFirst("[data-bar=discarded] a").shouldBeNull()
-        doc.select("[data-overview-inventory] [data-count] a").map { it.attr("href") } shouldContainExactly
-            listOf("/parameter-sets?lifecycle=with-drafts", "/parameter-sets?lifecycle=with-releases")
+        doc.selectFirst("[data-count=retired] a").shouldBeNull()
         doc.selectFirst("[data-overview-view-all]")!!.attr("href") shouldBe "/parameter-sets"
-        doc.selectFirst("[data-overview-review]")!!.attr("href") shouldBe "/parameter-sets?lifecycle=with-drafts"
+        doc.select("[data-task] a").map { it.attr("href") } shouldContainExactly
+            listOf("/parameter-sets?lifecycle=draft", "/parameter-sets?lifecycle=released")
+        doc.selectFirst("[data-overview-review]").shouldBeNull()
         doc.selectFirst("h1")!!.text() shouldBe "Parameter Sets"
     }
 
@@ -117,7 +118,7 @@ class OverviewParameterSetsRenderTest {
 
         doc.selectFirst("[data-overview-intro]").shouldNotBeNull().text() shouldContain
             "Parameter sets define reusable inputs and how their values are evaluated together."
-        doc.selectFirst("[data-overview-intro]")!!.attr("data-title") shouldBe "What parameter sets are for"
+        doc.selectFirst("[data-overview-intro]")!!.attr("data-title") shouldBe "Create, evaluate, then release"
         doc.select("[data-overview-quickstart] ol li").size shouldBe 3
         doc.select("[data-overview-related] a").map { it.attr("href") } shouldContainExactly
             listOf("/overview/templates", "/overview/dashboards", "/docs/mcp-server")
@@ -146,7 +147,7 @@ class OverviewParameterSetsRenderTest {
                 ),
             )
 
-        val row = doc.selectFirst("[data-overview-recent] li").shouldNotBeNull()
+        val row = doc.selectFirst("[data-overview-recent] .app-overview-recent li").shouldNotBeNull()
         row.selectFirst("a")!!.attr("href") shouldBe "/parameter-sets/$id"
         row.selectFirst("a")!!.text() shouldBe "acme/filters/geo"
         row.selectFirst("time")!!.attr("datetime") shouldBe NOW.minusSeconds(60).toString()
@@ -155,26 +156,27 @@ class OverviewParameterSetsRenderTest {
 
     /**
      * The Unavailable state through the production [FamilyInventory] over a [ParameterSetRepository]
-     * whose read throws: the reason, no chart, no count and no digit; the same stub answering renders
-     * the counts — the pair is the falsification.
+     * whose chart read throws: the reason, no panel, no count and no digit; the same stub answering
+     * renders the strip — the pair is the falsification.
      */
     @Test
     fun `a failing parameter-set read shows the reason and no digit, and the same stub answering shows the counts`() {
         val sets = mockk<ParameterSetRepository>()
         val inventory = FamilyInventory(mockk(), mockk(), mockk(), mockk(), sets)
         val workspace = UUID.randomUUID()
-        every { sets.inventory(workspace, any()) } throws DataAccessResourceFailureException("injected")
+        every { sets.charts(workspace, any(), any(), any()) } throws DataAccessResourceFailureException("injected")
 
-        val failed = inventory.forFamily(NavigationFamily.PARAMETER_SETS, workspace, LensedView.EVERYTHING)
-        failed shouldBe InventoryResult.Unavailable("Inventory could not be read.")
+        val failed = inventory.chartsFor(NavigationFamily.PARAMETER_SETS, workspace, LensedView.EVERYTHING, NOW, ACTIVE_DAYS)
+        failed shouldBe ChartsResult.Unavailable("Inventory could not be read.")
         val area = render(page(failed)).selectFirst("[data-overview-inventory]").shouldNotBeNull()
         area.selectFirst("[data-overview-unavailable]").shouldNotBeNull().text() shouldContain "Inventory could not be read."
-        area.select("[data-overview-chart], [data-count], [data-overview-table]").shouldBeEmpty()
+        area.select("[data-overview-panel], [data-count], [data-overview-table]").shouldBeEmpty()
         Regex("""\d""").containsMatchIn(area.text()) shouldBe false
 
-        every { sets.inventory(workspace, any()) } returns Inventory(2, 1, 0, 0)
-        val read = render(page(inventory.forFamily(NavigationFamily.PARAMETER_SETS, workspace, LensedView.EVERYTHING)))
-        read.selectFirst("[data-count=objects] dd")!!.text() shouldBe "3"
+        every { sets.charts(workspace, any(), any(), any()) } returns
+            OverviewRenderSupport.chartsOf(Inventory(2, 1, 0, 0), Activity.empty(NOW, ACTIVE_DAYS))
+        val read = render(page(inventory.chartsFor(NavigationFamily.PARAMETER_SETS, workspace, LensedView.EVERYTHING, NOW, ACTIVE_DAYS)))
+        read.selectFirst("[data-count=total] .app-overview-count-v")!!.text() shouldBe "3"
         read.select("[data-overview-unavailable]").shouldBeEmpty()
     }
 
@@ -182,8 +184,8 @@ class OverviewParameterSetsRenderTest {
     fun `an empty workspace shows zeros, the empty line and the starter prompt`() {
         val doc = render(page(Inventory(0, 0, 0, 0)))
 
-        doc.select("[data-overview-inventory] [data-count] dd.app-overview-count-v").map { it.text() } shouldContainExactly
-            listOf("0", "0", "0", "0")
+        doc.select("[data-overview-inventory] [data-count] .app-overview-count-v").map { it.text() }.distinct() shouldContainExactly
+            listOf("0")
         doc.selectFirst("[data-overview-recent-empty]").shouldNotBeNull()
         doc.select("[data-overview-recent] .app-overview-recent li").shouldBeEmpty()
         doc.selectFirst("textarea#overview-prompt").shouldNotBeNull()
@@ -197,7 +199,25 @@ class OverviewParameterSetsRenderTest {
     private fun page(
         inventory: InventoryResult,
         recent: RecentResult? = RecentResult.Available(emptyList()),
-    ): OverviewPage = OverviewPage.of(OverviewPage.Family.PARAMETER_SETS, false, inventory, recent, NOW)
+    ): OverviewPage =
+        page(
+            when (inventory) {
+                is InventoryResult.Available -> {
+                    ChartsResult.Available(OverviewRenderSupport.chartsOf(inventory.inventory, Activity.empty(NOW, ACTIVE_DAYS)))
+                }
+
+                is InventoryResult.Unavailable -> {
+                    ChartsResult.Unavailable(inventory.reason)
+                }
+            },
+            recent,
+        )
+
+    /** #599: the lifecycle home reads one chart group. */
+    private fun page(
+        charts: ChartsResult,
+        recent: RecentResult? = RecentResult.Available(emptyList()),
+    ): OverviewPage = OverviewPage.of(OverviewPage.Family.PARAMETER_SETS, false, charts, recent, NOW)
 
     private fun render(
         page: OverviewPage,
@@ -234,5 +254,6 @@ class OverviewParameterSetsRenderTest {
 
     private companion object {
         val NOW: Instant = Instant.parse("2026-10-18T05:00:00Z")
+        const val ACTIVE_DAYS = OverviewRenderSupport.ACTIVE_DAYS
     }
 }

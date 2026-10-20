@@ -1,21 +1,25 @@
-<!--/* #579 — the Templates overview's guide (shell design §8), shaped like guide-pipelines.html:
-     What this is for, Create with your agent, and the related families. `overview/family.html`
-     includes (since #home-frame) `quickstart` in the Quick start card, `prompt` and `howitworks` as
-     dialog sections, and `related` at the foot of Continue your work. The introduction
-     is the record's, checked against the template specification (docs/templates.md v1.21) and the
-     agent guide (skill/templates.md). The starter prompt follows that guide's workflow: create or
-     reuse (step 1 Write — templates_list before creating, dialect declared), render with
-     representative inputs (step 2), iterate on the draft (step 3). Templates are pinned by
-     pipelines alone here (TemplateUsageService), so the related list names Pipelines and invents
-     no other consumer. The workspace name is the one the menu shows; the bracketed placeholders
-     are the reader's to fill. Copying sends nothing (overview.mjs). */-->
+<!--/* #579 — the Templates overview's guide (shell design §8). The introduction is the record's, checked
+     against the template specification (docs/templates.md) and the agent guide (skill/templates.md);
+     the starter prompt follows that guide's workflow: create or reuse (templates_list before
+     creating, dialect declared), render with representative inputs, iterate on the draft. Templates
+     are pinned by pipelines alone here (TemplateUsageService), so the related links name Pipelines
+     and invent no other consumer.
+     #599 re-cut it into the v2 fragments `overview/family.html` includes (guide-pipelines.html's
+     shape): `subtitle` under the title, `quickstart` in the Quick start card (headline, sentence and
+     three short steps condensed from the long ones), `prompt` and `howitworks` as dialog sections
+     (each its own data-dialog-section root, its data-title the dialog's title; the long steps, the
+     relationships and the note moved into How it works), `related` at the foot of Continue your
+     work. The prompt fragment is unchanged. The workspace name is the one the menu shows; the
+     bracketed placeholders are the reader's to fill. Copying sends nothing (overview.mjs). */-->
+<p xmlns:th="http://www.thymeleaf.org" th:fragment="subtitle" class="app-overview-subtitle">Reuse query and transformation logic across requests. Understand what’s live and what’s next.</p>
+
 <th:block xmlns:th="http://www.thymeleaf.org" th:fragment="quickstart">
-  <h2 class="app-overview-quickstart-title" id="overview-quickstart-h">Create with your agent</h2>
-  <ol class="app-overview-steps">
-    <li>Describe the query or transformation, the inputs it should accept and the dialect it targets.</li>
-    <li>Ask a connected agent to build the template as a draft and render it with representative inputs.</li>
-    <li>Open the draft it returns, read its description and rendered output, and try it with your own
-      inputs. Someone allowed to release templates releases it from its workspace when it is ready.</li>
+  <h2 class="app-overview-quickstart-title" id="overview-quickstart-h">From a query to a reusable template.</h2>
+  <p class="app-overview-panel-sub">Write the logic once with parameters, so the same template answers different requests.</p>
+  <ol class="app-overview-steps app-overview-steps-row">
+    <li><b>Describe</b><small>The query, its inputs and its dialect.</small></li>
+    <li><b>Build</b><small>Your agent creates a draft and renders it.</small></li>
+    <li><b>Review</b><small>Try it with your own inputs. Release when ready.</small></li>
   </ol>
 </th:block>
 
@@ -39,16 +43,18 @@
 </div>
 
 <div xmlns:th="http://www.thymeleaf.org" th:fragment="howitworks" class="app-overview-dialog-section app-overview-prose"
-     data-dialog-section="howitworks" data-title="What templates are for" data-overview-intro hidden>
+     data-dialog-section="howitworks" data-title="Create, render, then release" data-overview-intro hidden>
   <p>
     Templates hold reusable query or transformation logic that other resources can use. Parameters
     let the same logic answer different requests without duplicating it. For example, aggregate
     trips by zone for a selected period.
   </p>
-</div>
-
-<div xmlns:th="http://www.thymeleaf.org" th:fragment="related" class="app-overview-resources app-overview-prose" data-overview-related>
-  <h3 class="app-overview-sub" id="overview-related-h">Related resources and help</h3>
+  <ol class="app-overview-steps">
+    <li>Describe the query or transformation, the inputs it should accept and the dialect it targets.</li>
+    <li>Ask a connected agent to build the template as a draft and render it with representative inputs.</li>
+    <li>Open the draft it returns, read its description and rendered output, and try it with your own
+      inputs. Someone allowed to release templates releases it from its workspace when it is ready.</li>
+  </ol>
   <ul class="app-overview-related">
     <li><a hx-boost="true" th:href="@{/overview/pipelines}">Pipelines</a> pin a template in their nodes
       by id and version.</li>
@@ -56,4 +62,11 @@
   <p class="app-card-note">A release keeps rendering the same SQL even while the template's next draft
     is being edited: a change is a new version, never a silent edit.</p>
   <p><a th:href="@{/docs/mcp-server}">MCP server reference</a></p>
+</div>
+
+<div xmlns:th="http://www.thymeleaf.org" th:fragment="related" class="app-overview-resources app-overview-resources-row" data-overview-related>
+  <span class="app-overview-resources-k">Build on your results</span>
+  <a class="app-overview-link" hx-boost="true" th:href="@{/overview/pipelines}">Pipelines <svg class="ds-icon ds-icon-xs"
+     aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#arrow-right"></use></svg></a>
+  <a class="app-overview-link" th:href="@{/docs/mcp-server}">MCP server reference</a>
 </div>
