@@ -3,11 +3,13 @@ package co.datapipelines.executor
 import ch.qos.logback.classic.Level
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
+import co.datapipelines.persistence.ScheduledJob
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.every
 import io.mockk.mockk
 import org.junit.jupiter.api.BeforeAll
@@ -104,6 +106,23 @@ class ExecutionEventRetentionTest {
             )
 
         failing.retainOnce() shouldBe 0
+    }
+
+    /** #326: every failed tick is counted under `job=event_retention`; a successful one is not. */
+    @Test
+    fun `a failed tick is counted under job=event_retention, a successful one is not`() {
+        val registry = SimpleMeterRegistry()
+        val events =
+            mockk<ExecutionEventRepository> {
+                every { deleteOlderThan(any()) } returns 4 andThenThrows DataAccessResourceFailureException("cancelled")
+            }
+        val retention = ExecutionEventRetention(events, Duration.ofDays(7), registry)
+        val failedTicks = { registry.counter(ScheduledJob.FAILED_TICK_METER, ScheduledJob.JOB_TAG, "event_retention").count() }
+
+        retention.retainOnce() shouldBe 4
+        failedTicks() shouldBe 0.0
+        retention.retainOnce() shouldBe 0
+        failedTicks() shouldBe 1.0
     }
 
     /**

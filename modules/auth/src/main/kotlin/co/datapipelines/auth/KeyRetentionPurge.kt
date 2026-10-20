@@ -29,6 +29,17 @@ import org.springframework.transaction.annotation.Transactional
  * The purge disables nothing and defers nothing: it deletes only rows the declared FKs no
  * longer reference, inside one metadata transaction, so a purge that races a concurrent write
  * is simply serialized by the constraints it refuses to bypass.
+ *
+ * ## Bounded by the template it is given (#326)
+ *
+ * The application builds this purge over a [jdbc] whose every statement carries a JDBC
+ * `queryTimeout` (`RetentionSchedulingConfiguration`, the retention cadence's
+ * `RETENTION_STATEMENT_TIMEOUT_SECONDS`): the FK list read and both DELETEs. [purgeOnce] is ONE
+ * transaction, so a statement cancelled at the bound (SQLState `57014`) rolls back the WHOLE purge —
+ * a cancel in the identity DELETE takes the key DELETE before it with it. Nothing is half-purged; the
+ * next hourly tick retries from the same predicate. The exception is the retention tick's to log and
+ * count (`event=retention.step_failed step=keys`, `job=keys_purge`): this class has no catch of its
+ * own, because a catch inside the transaction would commit what a failed statement left.
  */
 open class KeyRetentionPurge(
     private val jdbc: NamedParameterJdbcTemplate,

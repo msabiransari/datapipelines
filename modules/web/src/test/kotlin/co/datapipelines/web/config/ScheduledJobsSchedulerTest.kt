@@ -4,7 +4,6 @@ import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
 import co.datapipelines.auth.AuditProperties
-import co.datapipelines.auth.KeyRetentionPurge
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.pooling.ReapOutcome
 import co.datapipelines.executor.CancellationFlags
@@ -36,6 +35,7 @@ import org.springframework.context.ApplicationListener
 import org.springframework.context.SmartLifecycle
 import org.springframework.context.annotation.AnnotationConfigApplicationContext
 import org.springframework.context.event.ContextClosedEvent
+import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.scheduling.annotation.ScheduledAnnotationBeanPostProcessor
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler
@@ -43,11 +43,13 @@ import org.springframework.scheduling.config.ScheduledTaskRegistrar
 import org.springframework.scheduling.config.TaskManagementConfigUtils
 import org.springframework.scheduling.config.TaskSchedulerRouter
 import org.springframework.test.util.ReflectionTestUtils
+import java.sql.SQLException
 import java.time.OffsetDateTime
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
 import java.util.function.Supplier
+import javax.sql.DataSource
 
 /**
  * #316 — the `@Scheduled` jobs run on a scheduler of their own, never on the SSE log streamer's
@@ -216,6 +218,11 @@ class ScheduledJobsSchedulerTest {
         val jdbc = mockk<NamedParameterJdbcTemplate>()
         every { jdbc.queryForObject(any<String>(), any<Map<String, *>>(), OffsetDateTime::class.java) } returns OffsetDateTime.now()
         every { jdbc.update(any<String>(), any<Map<String, *>>()) } returns 0
+        // #326 — the audit retention and the keys purge are built over a BOUNDED template on this template's
+        // DataSource (RetentionSchedulingConfiguration). The slice's refuses every connection, so those two steps
+        // fail fast and are logged; the slice is about the thread every job ticks on, not their SQL.
+        val noDatabase = mockk<DataSource> { every { connection } throws SQLException("the scheduling slice has no database") }
+        every { jdbc.jdbcTemplate } returns JdbcTemplate(noDatabase)
         val cancellations = InMemoryCancellationRegistry()
         val writer = BatchingWriter("audit", BatchingConfig(), NoopSink)
         return AnnotationConfigApplicationContext().apply {
@@ -231,7 +238,6 @@ class ScheduledJobsSchedulerTest {
             registerBean(ExecutionEventRepository::class.java, Supplier { events })
             registerBean(NamedParameterJdbcTemplate::class.java, Supplier { jdbc })
             registerBean(AuditProperties::class.java, Supplier { AuditProperties() })
-            registerBean(KeyRetentionPurge::class.java, Supplier { mockk<KeyRetentionPurge>(relaxed = true) })
             // The SSE log executor, built by the production method: the bean Spring fell back to.
             registerBean(
                 SSE_LOG_BEAN,

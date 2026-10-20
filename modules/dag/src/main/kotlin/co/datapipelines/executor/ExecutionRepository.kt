@@ -3,7 +3,6 @@ package co.datapipelines.executor
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.ColumnSchema
 import org.slf4j.LoggerFactory
-import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.RowMapper
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import java.sql.ResultSet
@@ -187,29 +186,31 @@ class ExecutionRepository(
      * #311 — `datapipelines.executor.lifecycle-write-timeout-seconds`: a JDBC `queryTimeout` on
      * exactly the two lifecycle statements ([create], [complete]), the tier that cancels a
      * statement at the driver when the database answers slowly and frees its thread. The bound
-     * rides a dedicated `JdbcTemplate` on the same DataSource so no other statement in this
-     * repository inherits it — the reads and the sweep stay unbounded. 0 (every direct
-     * construction, tests) means unbounded. A server that never answers cannot be reached by a
-     * statement timeout at all (measured: pgjdbc's cancel cannot be delivered to a paused
-     * Postgres); that case is the CALLER-side bound in `WebEventEmitter`, which reads the same
+     * rides a dedicated `JdbcTemplate` on the same DataSource ([BoundedJdbc]) so no other statement
+     * in this repository inherits it — the reads stay unbounded, and the sweep has its own bound
+     * ([sweepStatementTimeoutSeconds]). 0 (every direct construction, tests) means unbounded. A
+     * server that never answers cannot be reached by a statement timeout at all (measured: pgjdbc's
+     * cancel cannot be delivered to a paused Postgres); that case is the CALLER-side bound in `WebEventEmitter`, which reads the same
      * key through `ExecutorConfig`.
      */
     lifecycleWriteTimeoutSeconds: Int = 0,
+    /**
+     * #326 — the crash sweep's statement bound ([sweepStaleRunning], the only statement on it): a
+     * code constant beside the sweep's cadence in `web` (`StaleExecutionSweepScheduler`), never a
+     * key. The sweep runs on the one thread every `@Scheduled` job shares (`dp-scheduled`, #316), so
+     * an `UPDATE` queued behind an operator's lock would otherwise hold that thread for the lock's
+     * whole life. A cancel rolls the `UPDATE` back whole (one statement) and the next tick retries the
+     * same predicate. 0 (every direct construction, tests) means unbounded.
+     */
+    sweepStatementTimeoutSeconds: Int = 0,
 ) {
     private val log = LoggerFactory.getLogger(ExecutionRepository::class.java)
 
     private val lifecycleJdbc: NamedParameterJdbcTemplate =
-        if (lifecycleWriteTimeoutSeconds > 0) {
-            val dataSource =
-                requireNotNull(jdbc.jdbcTemplate.dataSource) {
-                    "lifecycleWriteTimeoutSeconds requires a DataSource-backed NamedParameterJdbcTemplate"
-                }
-            NamedParameterJdbcTemplate(
-                JdbcTemplate(dataSource).apply { queryTimeout = lifecycleWriteTimeoutSeconds },
-            )
-        } else {
-            jdbc
-        }
+        BoundedJdbc.bounded(jdbc, lifecycleWriteTimeoutSeconds, "lifecycleWriteTimeoutSeconds")
+
+    private val sweepJdbc: NamedParameterJdbcTemplate =
+        BoundedJdbc.bounded(jdbc, sweepStatementTimeoutSeconds, "sweepStatementTimeoutSeconds")
 
     /** Inserts the `RUNNING` row at execution start. */
     fun create(record: ExecutionRecord): ExecutionRecord {
@@ -647,13 +648,16 @@ class ExecutionRepository(
      * judged by the stamp, unstamped rows by their age, and the sweep is safe across the version
      * boundary in both directions.
      *
+     * The one statement on the sweep's bound (#326, [sweepStatementTimeoutSeconds]): cancelled at the
+     * bound it surfaces as the caller's `DataAccessException` with SQLState `57014`, nothing swept.
+     *
      * @return the number of rows swept.
      */
     fun sweepStaleRunning(
         olderThan: Instant,
         heartbeatOlderThan: Instant,
     ): Int =
-        jdbc.update(
+        sweepJdbc.update(
             """
             UPDATE pipeline_executions
                SET status = 'ABORTED',
