@@ -1,9 +1,9 @@
 # UI Screens Inventory
 
-**Status:** v1.182
+**Status:** v1.183
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
-**Last updated:** 2026-10-20 (#627); 2026-10-19 (#598a merge follow-up; #617; #609; #598a; #605; #619; #585; #584; #613; #509; #608; #614 + #611; #612; #615); 2026-10-18 (#583; #573; #607; #606; #565; #582; #581; #580; #579); 2026-10-17 (#556; #578; #554); 2026-10-16 (#551 merge follow-up; #551; #555; #552; #553; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
+**Last updated:** 2026-10-20 (#627; #598b); 2026-10-19 (#598a merge follow-up; #617; #609; #598a; #605; #619; #585; #584; #613; #509; #608; #614 + #611; #612; #615); 2026-10-18 (#583; #573; #607; #606; #565; #582; #581; #580; #579); 2026-10-17 (#556; #578; #554); 2026-10-16 (#551 merge follow-up; #551; #555; #552; #553; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
 ---
 
 ## 1. Purpose
@@ -2629,11 +2629,33 @@ positioned by its `x` and `width` attributes, tiled in tenths so the parts meet 
 row's width, with a `<title>`; each row's SVG is labelled with every part's count; a legend names every
 series (the lifecycle legend with its count); each chart has its own visually hidden table (a row
 heading, one column per part, the total). The chart's words are its own: the catalog filter keeps
-`CatalogLifecycle.label`'s. Activity over time is #598b; the other families' cards are unchanged.
+`CatalogLifecycle.label`'s. The other families' cards are unchanged.
 Under the lifecycle chart the card says why its total can exceed the resource browser's header count:
 "The resource browser and View all count the three live parts; retired pipelines have no page." The
 header counts draft only, released only and released with draft changes (`FamilyRecentE2eTest`), and
 Retired is the discarded-only bucket (#593; `OverviewRenderTest` pins the sentence).
+
+**The activity chart (#598b).** The same statement also counts the third chart, **Pipelines activity,
+last 12 weeks**, against the request's one clock reading (`:now`) and the configured window. The twelve
+rows are UTC calendar weeks, Monday 00:00Z to Sunday, bucketed on `AT TIME ZONE 'UTC'` so the database
+session's time zone never moves a boundary; they read oldest first, each named by its Monday ("6 Oct"),
+and the newest — the week holding `:now` — says "(this week so far)". Each row stacks the week's
+**Released** (admitted RELEASED versions by `released_at`; a release since discarded is not counted, the
+releases chart's rule) and **Created** (admitted pipelines by `created_at`, in the draft tone: a new
+pipeline is a draft) into one bar of events; the busiest week is full width and a quiet quarter is all
+zero-width bars beside their "0". The legend carries the twelve-week sums, unlinked (the catalog has no
+week filter). Above the chart a headline reads "N pipelines actively developed": admitted pipelines
+holding an admitted DRAFT last written (`COALESCE(updated_at, created_at)`) at or after `:now` minus
+`datapipelines.ui.actively-developed-days` days (configuration §3.10, default 14, inclusive at the
+edge). A draft keeps only its last write, so this is a count today, not a history, and per-week draft
+edits are not shown (the owner's ruling on #598); through a promoter's lens no DRAFT is admitted, so it
+reads 0. `ChartInventory` refuses an actively developed count above the pipelines holding a draft, or
+more created in the weeks than pipelines in total, and the card then reads unavailable. The note says
+"Weeks start on Monday (UTC). A release since discarded is not counted. Actively developed: a draft
+written in the last N days — a draft keeps only its last write, so this is a count today, not a
+history." with the configured N. The hidden table's columns are Week, Released, Created, Events. The
+rows stand at half the inventory pitch (`--space-6`, 24px), so the twelve rows measure 288px at 1512
+(`OverviewBrowserTest` prints it).
 
 **Links.** On the four-count card (the Pipelines card's until #598a), With drafts, With releases and
 the Draft only, Released only and Released with draft changes bars link the catalog filtered to that
@@ -2666,7 +2688,8 @@ drafts.
 versions only. The counts and bars, the recent list (ordered by release time alone, so a hidden draft's
 write moves nothing) and the filtered catalog all omit a hidden draft (`PromoterLensSweepTest`); the
 Pipelines charts count the admitted names' RELEASED versions alone, so a hidden draft moves no part and
-no releases bin (the sweep reads every part and cell). The
+no releases bin (the sweep reads every part and cell), and the activity chart counts only admitted
+releases and admitted pipelines, with nobody actively developed (#598b). The
 narrowed inventory admits an object with ANY released version, while the lensed catalogs keep their
 current-pointer rule; the two can differ for an object whose current pointer is not a released version
 (#563). Neither rule changes here.
@@ -2678,8 +2701,8 @@ line and, in an empty workspace, a note pointing at the starter prompt. A real z
 **Storage:** none — no browser key, cookie or server preference.
 
 Guards: `OverviewRenderTest` (one inventory feeds counts, bars and table; widths; unavailable without a
-digit; links; escaping; unguided families bare; the Pipelines card's two stacked charts, legend = table =
-model), `ChartInventorySourceTest` and `ChartInventorySourceIntegrationTest` (the statement's text and
+digit; links; escaping; unguided families bare; the Pipelines card's three stacked charts, legend = table =
+model; #598b's twelve Monday-keyed weeks and the configured window in the note), `ChartInventorySourceTest` and `ChartInventorySourceIntegrationTest` (the statement's text and
 binds; counts against a Kotlin oracle, unlensed and narrowed), `OverviewStackedTest` (random rows tile
 exactly), `ShellRenderTest` (the family paths and the Datasources overview light their item,
 crumb and panel), `FamilyRecentE2eTest`, `OverviewE2eTest` (each catalog lifecycle count equals the
@@ -2692,7 +2715,7 @@ served (inventory only) and its menu item still links the catalog.
 
 | Family | Menu item links the overview since | Guide | Recently updated | Catalog `lifecycle` filter |
 |---|---|---|---|---|
-| Pipelines | #556 | `overview/guide-pipelines.html` | `PipelineRepository.recent` | `/pipelines?lifecycle=` — every bucket but `discarded` (§4.3); since #598a the card is the lifecycle stacked bar and the releases chart (`PipelineRepository.charts`, one statement), the activity chart is #598b |
+| Pipelines | #556 | `overview/guide-pipelines.html` | `PipelineRepository.recent` | `/pipelines?lifecycle=` — every bucket but `discarded` (§4.3); since #598a the card is the lifecycle stacked bar and the releases chart (`PipelineRepository.charts`, one statement), and the activity chart (#598b) |
 | Templates | #579 | `overview/guide-templates.html` — related: Pipelines, MCP server reference | `TemplateRepository.recent`, the same `RecentSource` rule; each entry links `/templates/<name>`, every segment URL-encoded (the tree's form) | `/templates?lifecycle=` — every bucket but `discarded` (§4.6); a bucket read places an object by its latest version (`TemplateRepository.listWhere`); `OverviewTemplatesE2eTest` pins each count equal to the inventory's, unlensed and through a narrowed lens |
 | Dashboards | #580 | `overview/guide-dashboards.html` — related: Pipelines, Visualizations, Parameter Sets, MCP server reference | `DashboardRepository.recent`, the same `RecentSource` rule | `/dashboards?lifecycle=` — every bucket but `discarded` (§4.21); `OverviewDashboardsE2eTest` pins each count equal to the inventory's, unlensed and through the promoter's real lens; `OverviewDashboardsRenderTest`, `OverviewDashboardsBrowserTest` |
 | Visualizations | #581 | `overview/guide-visualizations.html` — related: Pipelines, Dashboards, MCP server reference | `VisualizationRepository.recent`, the same `RecentSource` rule; through a narrowed lens, admitted RELEASED versions and their release time alone | `/visualizations?lifecycle=` — every bucket but `discarded` (§4.24); `OverviewVisualizationsE2eTest` pins each count equal to the inventory's, unlensed and through a narrowed lens |
@@ -2866,7 +2889,8 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
-| 2026-10-20 | v1.182 | #627 overview mixed tone | **§4.25:** bars, stacked parts and legend swatches share four lifecycle tones; mixed reads the info series (`--chart-series-1`) rather than the brand. `OverviewToneBrowserTest` measures all nine themes and both auto schemes at the unchanged OKLab distance floor of 0.08, with measured, stale-checking palette gaps for professional (#633) and minimal (#631). |
+| 2026-10-20 | v1.183 | #627 overview mixed tone | **§4.25:** bars, stacked parts and legend swatches share four lifecycle tones; mixed reads the info series (`--chart-series-1`) rather than the brand. `OverviewToneBrowserTest` measures all nine themes and both auto schemes at the unchanged OKLab distance floor of 0.08, with measured, stale-checking palette gaps for professional (#633) and minimal (#631). |
+| 2026-10-20 | v1.182 | #598b Pipelines activity chart | **§4.25:** the Pipelines card's third chart, **Pipelines activity, last 12 weeks**, from the same statement: twelve UTC weeks (Monday-first, oldest first, the newest "this week so far"), each stacking Released (admitted RELEASED versions by `released_at`) and Created (admitted pipelines by `created_at`) into a bar of events, the busiest week full width; the headline "N pipelines actively developed" (an admitted draft last written within `datapipelines.ui.actively-developed-days`, default 14, inclusive; a count today, no per-week draft history; 0 through a promoter's lens); the note; the hidden table's Week, Released, Created, Events; rows at half the inventory pitch (`--space-6`). The lens paragraph, the guards and the Pipelines row of Families as built name it. |
 | 2026-10-19 | v1.181 | #598a merge follow-up: §4.25 records #593's count sentence | **§4.25:** the Pipelines charts paragraph quotes the card's note on why its total can exceed the resource browser's header count (the header counts the three live parts; Retired is discarded only, with no page) — #593's acceptance asked the counting model to say what the page says; the Links paragraph's four-count sentence now names the Pipelines card's as until #598a. |
 | 2026-10-19 | v1.180 | #617 screen-reader-only headers — renumbered at merge after #609's v1.179 | **§3.7:** sort controls require visible header text; screen-reader-only labels and resize handles do not qualify. Explicit `data-sort="off"` remains. Node decision tests and the template Versions/dashboard Keys browser witnesses pin the rule. |
 | 2026-10-19 | v1.179 | #609 shared-component edge roles — renumbered at merge after #598a's v1.178 | **§3.1 item 5:** the shared components' edges take #606's three roles. Seven boundaries move from `--border-subtle` to `--border-default`: the dashboard filters pane and dock, the parameter card, the editor's minimap, view controls and dock top, and the version-row menu. The release dialog's switch and check rows read `--border-subtle` directly instead of the `--border-faint` alias (same colour). Seven edges stay separators. `ComponentBoundariesBrowserTest` is the sweep. Its four vendored-pair exceptions are tracked by #628. **§4.4:** the dock's top border is named a boundary. |

@@ -10,6 +10,7 @@ import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.visualization.DashboardRepository
 import co.datapipelines.visualization.VisualizationRepository
 import org.slf4j.LoggerFactory
+import java.time.Instant
 import java.util.UUID
 
 /** Unknown inventory is distinct from a successfully read empty workspace. */
@@ -82,17 +83,21 @@ class FamilyInventory(
      * lens's included) is [ChartsResult.Unavailable], never zeros. Only Pipelines builds these
      * charts this round; any other family answers [NOT_CHARTED] without a read and nothing calls
      * it for one (`OverviewPage.Family.charts`), until #599 wires the four siblings' repositories.
+     * #598b: the activity chart is counted at [now], actively developed over the last [activeDays]
+     * days (`datapipelines.ui.actively-developed-days`); both reach the statement unchanged.
      */
     @Suppress("TooGenericExceptionCaught") // the same read boundary as forFamily's
     fun chartsFor(
         family: NavigationFamily,
         workspaceId: UUID,
         view: LensedView,
+        now: Instant,
+        activeDays: Int,
     ): ChartsResult {
         view.unavailable?.let { return ChartsResult.Unavailable(it.reason) }
         if (family != NavigationFamily.PIPELINES) return ChartsResult.Unavailable(NOT_CHARTED)
         return try {
-            ChartsResult.Available(pipelines.charts(workspaceId, view.pipelines))
+            ChartsResult.Available(pipelines.charts(workspaceId, view.pipelines, now, activeDays))
         } catch (failure: Exception) {
             log.warn("charts unavailable for workspace {} family {}: {}", workspaceId, family, failure.toString())
             ChartsResult.Unavailable(UNREADABLE)

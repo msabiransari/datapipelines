@@ -2,6 +2,7 @@ package co.datapipelines.browser
 
 import com.microsoft.playwright.Locator
 import com.microsoft.playwright.Page
+import com.microsoft.playwright.TimeoutError
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
@@ -56,7 +57,7 @@ class BrandMarkDarkModeShotsBrowserTest : DashboardBrowserSuite() {
         paletteShot("compact")
         page.setViewportSize(1440, 900)
         page.navigate("$baseUrl/dashboards/$board")
-        page.waitForFunction("() => window.__dpPage && window.__dpPage.ready === true")
+        awaitBoardReady()
         page.locator("#dp-board [data-dp-viz='slowchart'] .plotly .main-svg").first().waitFor()
         page.waitForFunction(
             """
@@ -77,6 +78,19 @@ class BrandMarkDarkModeShotsBrowserTest : DashboardBrowserSuite() {
         measurements["indicator"] shouldBe "rgb(126, 144, 238)"
         measurements["boundary"] shouldBe "rgb(104, 115, 134)"
         measurements["violations"] shouldBe emptyList<String>()
+    }
+
+    /**
+     * #629: on CI this wait once ran out its whole bound with nothing to say why. A timeout now
+     * names what the page held: whether the mount ran, its error and code, and each visual's
+     * `data-dp-state` (CI attempt 1 of run 39348253765 timed out here; alone it takes seconds).
+     */
+    private fun awaitBoardReady() {
+        try {
+            page.waitForFunction("() => window.__dpPage && window.__dpPage.ready === true")
+        } catch (e: TimeoutError) {
+            throw AssertionError("the board never reported ready: ${page.evaluate(BOARD_STATE_SCRIPT)} url=${page.url()}", e)
+        }
     }
 
     private fun paletteShot(name: String) {
@@ -140,6 +154,23 @@ class BrandMarkDarkModeShotsBrowserTest : DashboardBrowserSuite() {
     private fun shotDir(): Path = Paths.get("build", "reports", "163-screenshots").also { it.toFile().mkdirs() }
 
     private companion object {
+        /** Mount and per-visual state only: no cookie, token or result row. */
+        val BOARD_STATE_SCRIPT =
+            """
+            () => {
+              const p = window.__dpPage;
+              const board = document.getElementById('dp-board');
+              return JSON.stringify({
+                readyState: document.readyState,
+                mounted: !!(board && board.__dpPageMounted),
+                runtime: !!window.DatapipelinesDashboard,
+                page: p ? { ready: p.ready, error: p.error ? String(p.error) : null, code: p.code } : null,
+                visuals: [...document.querySelectorAll('#dp-board [data-dp-state]')]
+                  .map(e => (e.closest('[data-dp-viz]')?.dataset.dpViz ?? '?') + '=' + e.dataset.dpState),
+              });
+            }
+            """.trimIndent()
+
         val PALETTE_MEASUREMENT_SCRIPT =
             """
             () => {

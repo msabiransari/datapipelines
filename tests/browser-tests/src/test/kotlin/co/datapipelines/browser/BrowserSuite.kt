@@ -10,6 +10,7 @@ import com.microsoft.playwright.Playwright
 import com.microsoft.playwright.PlaywrightException
 import com.microsoft.playwright.Request
 import com.microsoft.playwright.Response
+import com.microsoft.playwright.TimeoutError
 import com.microsoft.playwright.Tracing
 import de.mkammerer.argon2.Argon2Factory
 import org.junit.jupiter.api.AfterAll
@@ -244,7 +245,15 @@ abstract class BrowserSuite {
         page.onRequestFailed(failed)
         page.onFrameNavigated(navigated)
         try {
+            // #629: the switch is submitted by shell.js's delegated change listener; select only
+            // once its init ran, so a change can never fire into a page with no listener.
+            page.waitForFunction(
+                "() => window.__dpShellInit === true",
+                null,
+                Page.WaitForFunctionOptions().setTimeout(FIRST_RENDER_TIMEOUT_MS),
+            )
             page.selectOption("#workspace-switcher", arrayOf(name), Page.SelectOptionOptions().setForce(true))
+            awaitSwitchRequest(page, outcome)
             // Observe the POST itself: an abort has no response and must fail immediately;
             // an absent request must be distinguishable from a response redirecting elsewhere.
             page.waitForCondition { outcome.failure != null || (outcome.response != null && outcome.navigationUrl != null) }
@@ -264,6 +273,49 @@ abstract class BrowserSuite {
         }
     }
 
+    /**
+     * #629: on CI the change once produced no POST for the whole 90 s bound (request=none, the
+     * page still on /workspaces). Wait a short bound for the request; without one, print what
+     * the page held and re-dispatch the change ONCE through the product's own listener, so the
+     * next red names its state instead of a bare timeout. The switch is idempotent, so a slow
+     * first submit followed by the re-dispatch posts the same workspace twice.
+     */
+    private fun awaitSwitchRequest(
+        page: Page,
+        outcome: WorkspaceSwitchOutcome,
+    ) {
+        try {
+            page.waitForCondition(
+                { outcome.request != null || outcome.failure != null },
+                Page.WaitForConditionOptions().setTimeout(SWITCH_REQUEST_TIMEOUT_MS),
+            )
+        } catch (_: TimeoutError) {
+            outcome.pageState = switcherState(page)
+            println("WARN #629 no switch POST after ${SWITCH_REQUEST_TIMEOUT_MS}ms; re-dispatching change once: ${outcome.pageState}")
+            page.evaluate(
+                "() => document.getElementById('workspace-switcher').dispatchEvent(new Event('change', { bubbles: true }))",
+            )
+        }
+    }
+
+    /** The switcher's own state, read for a diagnostic: no cookie, token or body. */
+    private fun switcherState(page: Page): String =
+        page
+            .evaluate(
+                """
+                () => {
+                  const select = document.getElementById('workspace-switcher');
+                  return JSON.stringify({
+                    readyState: document.readyState,
+                    shellInit: window.__dpShellInit === true,
+                    value: select ? select.value : null,
+                    options: select ? select.options.length : null,
+                    formAction: select && select.form ? select.form.getAttribute('action') : null,
+                  });
+                }
+                """.trimIndent(),
+            ).toString()
+
     /** Only the switch's transport metadata; never cookies, headers containing tokens or bodies. */
     private class WorkspaceSwitchOutcome(
         private val url: String,
@@ -272,6 +324,7 @@ abstract class BrowserSuite {
         var response: Response? = null
         var failure: String? = null
         var navigationUrl: String? = null
+        var pageState: String? = null
 
         fun matches(request: Request): Boolean = request.url() == url && request.method() == "POST"
 
@@ -289,7 +342,8 @@ abstract class BrowserSuite {
                 "request=${request?.method() ?: "none"} $url, " +
                 "status=${response?.status() ?: "none"}, " +
                 "Location=${response?.headerValue("location") ?: "none"}, " +
-                "failure=${failure ?: "none"}, finalUrl=${page.url()}"
+                "failure=${failure ?: "none"}, finalUrl=${page.url()}, " +
+                "pageState=${pageState ?: "not read (the POST arrived in time)"}"
     }
 
     /** A logged-out session — a fresh context+page pair the test must [Session.close]. */
@@ -457,6 +511,9 @@ abstract class BrowserSuite {
          * because a loaded local gate and a 2-vCPU runner are the same condition for these.
          */
         const val FIRST_RENDER_TIMEOUT_MS = 90_000.0
+
+        /** #629: how long a selected workspace may go without its switch POST before one re-dispatch. */
+        private const val SWITCH_REQUEST_TIMEOUT_MS = 15_000.0
 
         private const val SECRET_BYTES = 32
         private const val BASE32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
