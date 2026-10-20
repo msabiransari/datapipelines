@@ -1,6 +1,6 @@
 # UI Screens Inventory
 
-**Status:** v1.193
+**Status:** v1.194
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
 **Last updated:** 2026-10-20 (#634; #635; #622 merge follow-up; #622; #599; #604; #home-ops; #home-frame; #610; #618; #627; #625; #598b); 2026-10-19 (#598a merge follow-up; #617; #609; #598a; #605; #619; #585; #584; #613; #509; #608; #614 + #611; #612; #615); 2026-10-18 (#583; #573; #607; #606; #565; #582; #581; #580; #579); 2026-10-17 (#556; #578; #554); 2026-10-16 (#551 merge follow-up; #551; #555; #552; #553; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
@@ -270,7 +270,9 @@ changes when a badge appears or leaves, and carrying no margin at all when no ba
 DOM contract is kept: the control stays the line's first child (folders' is a button, leaves' an anchor
 whose `title` is the full path), the icon region leads it, and every `aria` attribute is untouched. Rows
 sit 4px (`--space-1`) apart, and the #516 keyboard ring stays on the row's line, which takes the card's
-radius while focused on the browser's rows.
+radius while focused on the browser's rows. Because badges wrap beneath the title, a leaf's status
+markers stay inside the panel at any browser width regardless of the name's length; the panel never
+scrolls sideways for a name (#541).
 `BrowserResourceRowBrowserTest` measures the row — surface token, padding, radius, title role, the
 metadata line's geometry, the 4px rhythm, hover and selection colours, and the wrap — off the real page.
 
@@ -1396,7 +1398,7 @@ enters its workspace through prepared main-content navigation and is marked `ari
 when loaded. User width is authoritative; only the browser's Hide and its preferred width persist (§3.4's storage table).
 A leaf whose listed version reads `needs_review` (REST §24's flag, #533) carries the catalog
 row's **needs review** marker — the same warning badge, `data-needs-review` and title — after
-its version and draft badges; the tree keeps complete levels, so a drift that changed a fact and
+its version and draft badges, inside the panel's view however long the name (#541); the tree keeps complete levels, so a drift that changed a fact and
 not the template shows on the panel's Refresh.
 Guards: `TemplateSidebarTreeBrowserTest`, `ReusableRestTreeBrowserTest`, `ShellRenderTest`,
 `TransformImplementsBrowserTest` (the marker).
@@ -3081,6 +3083,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-20 | v1.194 | #541 status badges stay in view | **§3.4, §4.6a:** wrapping badges remain inside the browser regardless of name length, without horizontal scrolling. `BrowserResourceRowBrowserTest` measures version/draft boxes and overflow at depths two and three in both themes; the Implements browser case measures the needs-review marker's box without scrolling it into view. |
 | 2026-10-20 | v1.193 | #634 SQL highlight inks; answers #635 — renumbered at merge after #622's v1.191 and its follow-up v1.192 | **§3.5:** SQL status hues read the existing status inks. The three editor sheets drop literal colour fallbacks; `EditorCssTokenAuditTest` guards literals and declared tokens, the status source audits see aliases, and `SqlHighlightContrastBrowserTest` measures both panes on every theme. |
 | 2026-10-20 | v1.192 | #622 merge follow-up | **§4.18a:** the API home's MCP card paragraph and its JS row said the card has no Copy button and the page loads no script but `overview.mjs`; since #622 the card's fragment loads `mcp-connection.mjs` and its Copy config button copies the placeholder config (§4.18). Found by lane 622b. |
 | 2026-10-20 | v1.191 | #622 MCP config Copy button — renumbered at merge after #home-ops's v1.188, then after #599's v1.190 | **§4.18:** the shared card copies its placeholder config on the console and API home, announces “Config copied to the clipboard.”, sends no request and grants no access; a refused or absent clipboard selects the config for manual copying. One shared text copier also serves Copy prompt. |

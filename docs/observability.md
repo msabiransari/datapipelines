@@ -1,9 +1,9 @@
 # Observability Specification
 
-**Status:** v1.41 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
+**Status:** v1.42 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
-**Last updated:** 2026-10-08
+**Last updated:** 2026-10-20
 
 ---
 
@@ -379,7 +379,7 @@ Tag sets below are the complete, normative set for each metric — adding a tag 
 | `datapipelines.executions.total` | counter | `status` (success/failed/aborted), `pipeline_id` | Execution count |
 | `datapipelines.executions.aborted` | counter | `reason` (`client_disconnect`/`cancelled`/`shutdown`) | Aborted executions by trigger — the three D7 paths ([dag-executor §15.3](dag-executor.md#153-monitoring), [enums `ExecutionStatus`](enums.md)) |
 | `datapipelines.executions.duration` | timer | `pipeline_id` | Execution wall-clock duration |
-| `datapipelines.executions.concurrent` | gauge | (none) | Currently-running executions |
+| `datapipelines.executions.concurrent` | gauge | (none) | Currently-running executions; bound by the execution-slot bean, once per instance |
 | `datapipelines.executions.lifecycle_write_failed` | counter | (none) | (#311) The terminal UPDATE of `pipeline_executions` failed, outlived its bound, or matched no row (the RUNNING insert abandoned or never landed — #325) (`datapipelines.executor.lifecycle-write-timeout-seconds`, [Configuration §3.2](configuration.md#32-executor)): the row is left RUNNING for the stale sweep to reap, so this counter is how an operator tells an unrecorded outcome apart from silence. The companion WARN names the execution id. The RUNNING insert's failure is deliberately NOT counted here — for scheduled runs it is the fail-closed refusal the scheduler records (`record_unwritable`), for interactive ones a WARN — the counter exists because a terminal row that stays RUNNING otherwise looks exactly like a dead instance |
 | `datapipelines.executions.progress_write_failed` | counter | (none) | (#336) A live heartbeat or progress write failed while the execution runs — the row's `heartbeat_at` and `node_stats_json` lag the live work, and another instance's stale sweep reads the stale heartbeat as instance loss ([Metadata DB §8.3](metadata-db.md#83-stale-execution-sweep)). Counts every refusal; the WARN is once per execution per outage (§3.4K), so between the transition lines the counter is the only evidence. No tags: one closed condition |
 | `datapipelines.nodes.duration` | timer | `pipeline_id`, `node_id`, `source` | Per-node duration |
@@ -651,6 +651,7 @@ This is a construction rule, not a filter — the redacting encoder covers logs,
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-20 | v1.42 | #569 | The concurrency gauge is bound by the execution-slot bean, once per instance. Executor construction does not register it; rebinding the same pool is a no-op and a different pool fails fast. |
 | 2026-10-17 | v1.41 | 562 (#562) a client disconnect is not an uncaught exception | **§8.1** gains the rule: a client that went away mid-response is recognised at both `Throwable` backstops — one DEBUG line with method, URI and class, no stack trace, no response written, not counted. Exactly two exceptions count, in the cause chain: `AsyncRequestNotUsableException` and `ClientAbortException`. A broken-pipe or connection-reset `IOException` counts only inside one of them; any other I/O failure, `EOFException` included, keeps its ERROR line and 500. Until now each disconnect logged `500 … unhandled …` at ERROR with a stack for a 500 no client could receive. Every other exception's ERROR line is unchanged. |
 | 2026-10-08 | v1.40 | #443 event-catalogue parity | §3.4 adds 37 rows to complete the seven remaining catalogued namespaces; all twelve are enforced with count floors. Audit retention and execution shutdown receive additive §3.4N/O tables. Computed event fields are refused except the two exact, count-pinned legacy audit-row formats; production logs and §3.4G FailureShape/SQLSTATE prose are unchanged. |
 | 2026-10-06 | v1.39 | #446 bounded driver SQLSTATE (2026-10-06T03:09:15Z) | §3.4G defines the one-to-five ASCII letter/digit shape, fixed `invalid` replacement and preserved `none` fallback. Valid states pass unchanged; rejected driver values are never logged. |

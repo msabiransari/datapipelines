@@ -133,6 +133,52 @@ class BrowserResourceRowBrowserTest : RestTreeBrowserFixture() {
         withClue(label) { (readings[label] as String) shouldBe "rgba(0, 0, 0, 0)" }
     }
 
+    /** #541: visible badges and both horizontal scroll boundaries, without scrolling. */
+    @Test
+    fun `long depth two and three leaves keep every badge inside the default browser in both themes`() {
+        startTrace()
+        readyTree()
+        val paths = listOf("row/" + "x".repeat(64), "row/deep/" + "x".repeat(64))
+        seedPipeline(paths.first())
+        api("POST", "/api/v1/pipelines", pipelineBody(paths.last()))
+        openTree()
+        expand("row")
+        expand("row/deep")
+        paths.forEach { page.waitForSelector(leaf(it) + " .dp-tree-version:not([hidden])") }
+        page.waitForSelector(leaf(paths.last()) + " .dp-tree-draft:not([hidden])")
+        val back = page.locator("html").getAttribute("data-theme") ?: "dark"
+        for (theme in listOf("light", "dark")) {
+            ensureTheme(theme)
+            for (path in paths) {
+                val metrics =
+                    page.evaluate(
+                        """([panel, path]) => {
+                          const browser = document.querySelector('#app-browser'), tree = document.querySelector(panel);
+                          const rect = el => { const r = el.getBoundingClientRect();
+                            return {left:r.left, right:r.right, top:r.top, bottom:r.bottom}; };
+                          const p = rect(browser), scroll = tree.querySelector('.dp-tree-scroll');
+                          const badges = [...tree.querySelectorAll('a[title="' + path + '"] .ds-badge:not([hidden])')]
+                            .map(el => ({text:el.textContent, ...rect(el)}));
+                          return {panel:p, badges, panelScroll:browser.scrollWidth, panelClient:browser.clientWidth,
+                            treeScroll:scroll.scrollWidth, treeClient:scroll.clientWidth,
+                            inside:badges.length > 0 && badges.every(r => r.left >= p.left - 0.5 && r.right <= p.right + 0.5
+                              && r.top >= p.top - 0.5 && r.bottom <= p.bottom + 0.5),
+                            noOverflow:browser.scrollWidth <= browser.clientWidth && scroll.scrollWidth <= scroll.clientWidth};
+                        }""",
+                        listOf(panel, path),
+                    ) as Map<*, *>
+                println("541-measure|$theme|$path|$metrics")
+                assertSoftly {
+                    withClue("$theme $path badge bounds: $metrics") { metrics["inside"] shouldBe true }
+                    withClue("$theme $path scrollWidth <= clientWidth: $metrics") { metrics["noOverflow"] shouldBe true }
+                }
+            }
+            Files.createDirectories(Paths.get("build/browser-evidence"))
+            page.screenshot(Page.ScreenshotOptions().setPath(Paths.get("build/browser-evidence/541-badges-$theme.png")))
+        }
+        ensureTheme(back)
+    }
+
     /** The resting state: geometry, the overlay surface, hover on a sibling, the long name wraps. */
     @Test
     fun `a row is 12px padding, 8px radius, a wrapping 12px title over a badge line, 4px from its neighbour, on the overlay surface`() {
