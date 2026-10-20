@@ -5,6 +5,7 @@ import io.kotest.assertions.assertSoftly
 import io.kotest.assertions.withClue
 import io.kotest.matchers.doubles.shouldBeBetween
 import io.kotest.matchers.doubles.shouldBeGreaterThan
+import io.kotest.matchers.doubles.shouldBeGreaterThanOrEqual
 import io.kotest.matchers.doubles.shouldBeLessThanOrEqual
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
@@ -22,10 +23,17 @@ import java.nio.file.Paths
  * the whole track. And no full-height canvas overflows <main>: their height calcs subtract the
  * same token, which is what a band change would otherwise break by twice the difference.
  * #613 — the phone top bar pads the same band token (one left edge with <main>); above 760 it keeps its 24.
+ * #610 — the phone bar's breadcrumb: at 760px and below the bar shows none of it (the frozen
+ * prototype's rule) and every control keeps its ≥48px box on one line at the 320px floor width.
  *
  * Every reading is printed (`573-measure|case|label|value`, the handback's base/tip table) and
  * asserted softly, so a red names every number that moved.
+ *
+ * `LargeClass` is suppressed with the house reason (DashboardBrowserSuite): the phone-bar cases
+ * share this class's readings map, `readBarFit`, `settle` and `shot` with the frame and pill
+ * cases — a split would fork the measurement harness for no reader's benefit.
  */
+@Suppress("LargeClass")
 class MainFrameBrowserTest : DashboardBrowserSuite() {
     private val readings = linkedMapOf<String, Double?>()
 
@@ -100,8 +108,73 @@ class MainFrameBrowserTest : DashboardBrowserSuite() {
         values.forEach { (key, value) -> readings["$prefix.$key"] = value.toDouble() }
     }
 
+    /**
+     * #610 — the phone bar's fit, one reading set per page: how many children the bar displays,
+     * whether the breadcrumb is in it at all (`crumbsDisplayed`), whether its leaf clips
+     * (`crumbClipped`, the A.0 ellipsis read), whether the crumb group is displayed (the band
+     * guard: leaf-only at 761, group back at 1101), whether everything sits on one line
+     * (`oneLine`, the vertical-centre spread), the smallest control box (`minControlW/H` — the
+     * record's ≥48px touch floor over the four controls), the gap between the bar's content
+     * right edge and the avatar's right edge (`rightEdgeGap` — the right group must stay pinned
+     * to the edge once the crumbs' `margin-right: auto` stops doing it), and the document's
+     * horizontal overflow (the house readMain shape, `clientWidth`, not `innerWidth`, so a
+     * vertical scrollbar's width can never masquerade as horizontal overflow).
+     */
+    @Suppress("UNCHECKED_CAST")
+    private fun readBarFit(prefix: String) {
+        val values =
+            page.evaluate(
+                """() => {
+                  const bar = document.querySelector('.app-topbar');
+                  const doc = document.documentElement;
+                  const kids = Array.from(bar.children).filter(e => e.getClientRects().length > 0);
+                  const centers = kids.map(e => { const r = e.getBoundingClientRect(); return (r.top + r.bottom) / 2; });
+                  const controlBoxes = ['rail-open', 'mode-toggle', 'app-avatar', 'browser-open']
+                    .map(id => document.getElementById(id))
+                    .filter(e => e && e.getClientRects().length > 0)
+                    .map(e => e.getBoundingClientRect());
+                  const cs = getComputedStyle(bar);
+                  const contentRight = bar.getBoundingClientRect().right - parseFloat(cs.paddingRight);
+                  const avatar = document.getElementById('app-avatar');
+                  const crumbs = document.getElementById('app-crumbs');
+                  const group = crumbs ? crumbs.querySelector('.app-crumb-group') : null;
+                  const leaf = crumbs ? crumbs.querySelector('.app-crumb-page') : null;
+                  const crumbsDisplayed = crumbs !== null && getComputedStyle(crumbs).display !== 'none';
+                  return { count: kids.length,
+                           crumbsDisplayed: crumbsDisplayed ? 1 : 0,
+                           crumbClipped: crumbsDisplayed && leaf ? (leaf.scrollWidth > leaf.clientWidth ? 1 : 0) : 0,
+                           crumbGroupDisplayed: group && group.getClientRects().length > 0 ? 1 : 0,
+                           oneLine: Math.max(...centers) - Math.min(...centers),
+                           minControlW: Math.min(...controlBoxes.map(r => r.width)),
+                           minControlH: Math.min(...controlBoxes.map(r => r.height)),
+                           rightEdgeGap: avatar && avatar.getClientRects().length > 0
+                             ? contentRight - avatar.getBoundingClientRect().right : -1,
+                           docOverflowX: doc.scrollWidth - doc.clientWidth };
+                }""",
+            ) as Map<String, Number>
+        values.forEach { (key, value) -> readings["$prefix.$key"] = value.toDouble() }
+    }
+
     private fun printReadings(case: String) {
         readings.forEach { (label, value) -> println("573-measure|$case|$label|$value") }
+    }
+
+    /** #610 — the anonymous bar's horizontal fit and the brand's one-line spread (the tile vs the wordmark, NOT the logo SVG's own internals). */
+    @Suppress("UNCHECKED_CAST")
+    private fun readAnonBar(prefix: String) {
+        val values =
+            page.evaluate(
+                """() => {
+                  const bar = document.querySelector('.app-topbar-anon');
+                  const doc = document.documentElement;
+                  const centers = Array.from(bar.querySelectorAll('.app-brand > *'))
+                    .filter(e => e.getClientRects().length > 0)
+                    .map(e => { const r = e.getBoundingClientRect(); return (r.top + r.bottom) / 2; });
+                  return { docOverflowX: doc.scrollWidth - doc.clientWidth,
+                           brandOneLine: Math.max(...centers) - Math.min(...centers) };
+                }""",
+            ) as Map<String, Number>
+        values.forEach { (key, value) -> readings["$prefix.$key"] = value.toDouble() }
     }
 
     private fun near(
@@ -262,6 +335,105 @@ class MainFrameBrowserTest : DashboardBrowserSuite() {
         readBar("anon")
         printReadings("anon-390")
         near("anon.padLeft", 20.0)
+    }
+
+    /**
+     * #610 — one phone-band walk over the record's three bar pages (a family page, the longest
+     * leaf, the off-rail crumb with `#browser-open` hidden): each page's bar is read and then
+     * asserted softly. Red at the base: the crumbs sit IN the phone bar and the leaf clips at
+     * 320 (A.0: "Pipelines" 79px in 56, "Visualizations" 121px in 56). Green once the phone band
+     * drops the breadcrumb — the fix's contract.
+     */
+    private fun phoneBarWalk(
+        width: Int,
+        height: Int,
+        case: String,
+    ) {
+        ready("mf610")
+        page.setViewportSize(width, height)
+        for (screen in listOf("pipelines", "overview/visualizations", "settings")) {
+            page.navigate("$baseUrl/$screen")
+            page.waitForSelector("#app-crumbs .app-crumb-page")
+            settle()
+            readBarFit("bar.$screen")
+            printReadings("$case-$screen")
+            shot("610-$screen-$width-bar")
+            assertSoftly {
+                withClue(screen) {
+                    reading("bar.$screen.crumbsDisplayed") shouldBe 0.0
+                    reading("bar.$screen.crumbClipped") shouldBe 0.0
+                    reading("bar.$screen.oneLine").shouldBeLessThanOrEqual(1.0)
+                    reading("bar.$screen.minControlW").shouldBeGreaterThanOrEqual(48.0)
+                    reading("bar.$screen.minControlH").shouldBeGreaterThanOrEqual(48.0)
+                    near("bar.$screen.rightEdgeGap", 0.0)
+                    near("bar.$screen.docOverflowX", 0.0)
+                }
+            }
+        }
+    }
+
+    /** #610 — at the record's floor width (320, the #607 shape) the bar shows no breadcrumb and every control keeps its box on one line. */
+    @Test
+    fun `at 320 the top bar holds every control on one line and shows no breadcrumb`() {
+        phoneBarWalk(NARROW_W, NARROW_H, "610-320")
+    }
+
+    /** #610 — 390, the phone reference: the same contract one band past the floor width. */
+    @Test
+    fun `at 390 likewise the top bar holds every control on one line and shows no breadcrumb`() {
+        phoneBarWalk(PHONE_W, PHONE_H, "610-390")
+    }
+
+    /**
+     * #610's band guard — the hide must stay inside the phone band: at 761 the breadcrumb is
+     * back, leaf-only (110's rule, the ≤1100 block untouched); at 1101 the group joins it.
+     * Green at the base AND after the fix, in both directions of the gate log.
+     */
+    @Test
+    fun `at 761 the leaf-only breadcrumb is back and at 1101 the group joins it`() {
+        ready("mf610band")
+        page.setViewportSize(CRUMB_LEAF_W, CRUMB_BAND_H)
+        page.navigate("$baseUrl/pipelines")
+        page.waitForSelector("#app-crumbs .app-crumb-page")
+        settle()
+        readBarFit("bar.761")
+        printReadings("610-761")
+        shot("610-pipelines-761-bar")
+        assertSoftly {
+            reading("bar.761.crumbsDisplayed") shouldBe 1.0
+            reading("bar.761.crumbGroupDisplayed") shouldBe 0.0
+        }
+        page.setViewportSize(CRUMB_GROUP_W, CRUMB_BAND_H)
+        settle()
+        readBarFit("bar.1101")
+        printReadings("610-1101")
+        shot("610-pipelines-1101-bar")
+        assertSoftly {
+            reading("bar.1101.crumbsDisplayed") shouldBe 1.0
+            reading("bar.1101.crumbGroupDisplayed") shouldBe 1.0
+        }
+    }
+
+    /**
+     * #610 — the anonymous bar (the default layout signed out, `.app-topbar-anon`) at the floor
+     * width: the brand's tile and wordmark on one line (their centres within 1px — the logo
+     * SVG's own internals are geometry, not line boxes) and no sideways scroll. A fresh context
+     * that never signs in IS anonymous; the auth layout carries no top bar at all (090 §C), so
+     * the page is the unknown-doc 404 — the 613 case's shape, one width lower.
+     */
+    @Test
+    fun `the anonymous bar at 320 keeps the brand on one line`() {
+        page.setViewportSize(NARROW_W, NARROW_H)
+        page.navigate("$baseUrl/docs/no-such-doc-610").status() shouldBe 404
+        page.waitForSelector(".app-topbar-anon")
+        settle()
+        readAnonBar("anon")
+        printReadings("610-anon-320")
+        shot("610-login-320-bar")
+        assertSoftly {
+            near("anon.docOverflowX", 0.0)
+            reading("anon.brandOneLine").shouldBeLessThanOrEqual(1.0)
+        }
     }
 
     /** ui-screens §3.4's old Known note measured these six screens overflowing a 390px document; none may. */
@@ -497,6 +669,11 @@ class MainFrameBrowserTest : DashboardBrowserSuite() {
         const val TABLET_H = 800
         const val PHONE_W = 390
         const val PHONE_H = 844
+        const val NARROW_W = 320
+        const val NARROW_H = 568
+        const val CRUMB_LEAF_W = 761
+        const val CRUMB_GROUP_W = 1101
+        const val CRUMB_BAND_H = 900
         const val FRAME_W = 2200
         const val FRAME_H = 1000
         const val FRAME_MAX = 1500.0
