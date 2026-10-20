@@ -10,58 +10,52 @@
      control walks the default priority). "A human releases it; no tool releases anything." The
      record's "[pipeline or dashboard use case]" names no pipeline: a dashboard is the one consumer
      (it builds its pipelines' inputs from the evaluated values). Copying sends nothing (overview.mjs). */-->
-<th:block xmlns:th="http://www.thymeleaf.org" th:fragment="intro">
-  <section class="ds-card" aria-labelledby="overview-intro-h" data-overview-intro>
-    <div class="app-card-h"><h2 class="ds-title" id="overview-intro-h">What parameter sets are for</h2></div>
-    <div class="app-card-b app-overview-prose">
-      <p>
-        Parameter sets define reusable inputs and how their values are evaluated together. They give related
-        views consistent choices and dependent controls. For example, choose a year and then offer only the
-        periods available within that year.
-      </p>
-    </div>
-  </section>
-
-  <section class="ds-card" aria-labelledby="overview-agent-h" data-overview-prompt>
-    <div class="app-card-h"><h2 class="ds-title" id="overview-agent-h">Create with your agent</h2></div>
-    <div class="app-card-b app-overview-prose">
-      <ol class="app-overview-steps">
-        <li>Describe the inputs, their defaults and how one choice should narrow another.</li>
-        <li>Ask a connected agent to build the parameter set as a draft and check it by evaluating representative choices.</li>
-        <li>Open the draft it returns, read its controls and their dependencies, and try them with your own
-          choices. Someone allowed to release parameter sets releases it from its workspace when it is ready.</li>
-      </ol>
-      <label class="app-overview-label" for="overview-prompt">Starter prompt — edit the bracketed parts before you copy it</label>
-      <textarea id="overview-prompt" class="ds-textarea app-overview-prompt" rows="7" spellcheck="false"
-                aria-describedby="overview-prompt-note"
-                th:text="|In workspace ${activeWorkspace ?: '[workspace]'}, create a draft parameter set for [use case, such as the dashboard it will drive]. I need [inputs], with defaults [defaults] and dependencies [how one choice affects another]. Read the current parameter guide, define each control's type and valid choices, and reuse suitable existing templates for options that come from data. Choose an existing folder with me if the destination is unclear, and ask me how any multi-select control should render before you create it. Verify the draft by evaluating it: a first render, representative choices, and empty or invalid ones. Explain the dependency order and any unresolved assumptions. Return the draft's name and id, the templates it depends on and the evaluation evidence. Leave release to me.|">In workspace [workspace], create a draft parameter set for [use case].</textarea>
-      <div class="app-overview-copy">
-        <button type="button" class="ds-button ds-button-primary ds-button-sm"
-                data-overview-copy data-copy-label="Copy prompt" aria-controls="overview-prompt">Copy prompt</button>
-        <span class="app-card-note" role="status" data-overview-copy-status></span>
-      </div>
-      <p class="app-card-note" id="overview-prompt-note">
-        Copying puts the text on your clipboard and nothing else: it sends no request and grants no access.
-        <th:block th:if="${canAuthor == true}">Your agent works with the permissions of its own API key.</th:block>
-        <th:block th:unless="${canAuthor == true}">Your role here does not author parameter sets, so copy the request
-          for a collaborator who can.</th:block>
-      </p>
-    </div>
-  </section>
+<th:block xmlns:th="http://www.thymeleaf.org" th:fragment="quickstart">
+  <h2 class="app-overview-quickstart-title" id="overview-quickstart-h">Create with your agent</h2>
+  <ol class="app-overview-steps">
+    <li>Describe the inputs, their defaults and how one choice should narrow another.</li>
+    <li>Ask a connected agent to build the parameter set as a draft and check it by evaluating representative choices.</li>
+    <li>Open the draft it returns, read its controls and their dependencies, and try them with your own
+      choices. Someone allowed to release parameter sets releases it from its workspace when it is ready.</li>
+  </ol>
 </th:block>
 
-<th:block xmlns:th="http://www.thymeleaf.org" th:fragment="related">
-  <section class="ds-card" aria-labelledby="overview-related-h" data-overview-related>
-    <div class="app-card-h"><h2 class="ds-title" id="overview-related-h">Related resources and help</h2></div>
-    <div class="app-card-b app-overview-prose">
-      <ul class="app-overview-related">
-        <li><a hx-boost="true" th:href="@{/overview/templates}">Templates</a> supply a control's choices when they
-          come from data: a selector is a pinned template.</li>
-        <li><a hx-boost="true" th:href="@{/overview/dashboards}">Dashboards</a> pin a released parameter set, show
-          its controls and pass the evaluated values to their source pipelines.</li>
-      </ul>
-      <p class="app-card-note">A set's controls can also be hard-coded choices; not every set needs a template.</p>
-      <p><a th:href="@{/docs/mcp-server}">MCP server reference</a></p>
-    </div>
-  </section>
-</th:block>
+<div xmlns:th="http://www.thymeleaf.org" th:fragment="prompt" class="app-overview-dialog-section app-overview-prose"
+     data-dialog-section="prompt" data-title="Create with your agent" data-overview-prompt hidden>
+  <label class="app-overview-label" for="overview-prompt">Starter prompt — edit the bracketed parts before you copy it</label>
+  <textarea id="overview-prompt" class="ds-textarea app-overview-prompt" rows="7" spellcheck="false"
+            aria-describedby="overview-prompt-note"
+            th:text="|In workspace ${activeWorkspace ?: '[workspace]'}, create a draft parameter set for [use case, such as the dashboard it will drive]. I need [inputs], with defaults [defaults] and dependencies [how one choice affects another]. Read the current parameter guide, define each control's type and valid choices, and reuse suitable existing templates for options that come from data. Choose an existing folder with me if the destination is unclear, and ask me how any multi-select control should render before you create it. Verify the draft by evaluating it: a first render, representative choices, and empty or invalid ones. Explain the dependency order and any unresolved assumptions. Return the draft's name and id, the templates it depends on and the evaluation evidence. Leave release to me.|">In workspace [workspace], create a draft parameter set for [use case].</textarea>
+  <div class="app-overview-copy">
+    <button type="button" class="ds-button ds-button-primary ds-button-sm"
+            data-overview-copy data-copy-label="Copy prompt" aria-controls="overview-prompt">Copy prompt</button>
+    <span class="app-card-note" role="status" data-overview-copy-status></span>
+  </div>
+  <p class="app-card-note" id="overview-prompt-note">
+    Copying puts the text on your clipboard and nothing else: it sends no request and grants no access.
+    <th:block th:if="${canAuthor == true}">Your agent works with the permissions of its own API key.</th:block>
+    <th:block th:unless="${canAuthor == true}">Your role here does not author parameter sets, so copy the request
+      for a collaborator who can.</th:block>
+  </p>
+</div>
+
+<div xmlns:th="http://www.thymeleaf.org" th:fragment="howitworks" class="app-overview-dialog-section app-overview-prose"
+     data-dialog-section="howitworks" data-title="What parameter sets are for" data-overview-intro hidden>
+  <p>
+    Parameter sets define reusable inputs and how their values are evaluated together. They give related
+    views consistent choices and dependent controls. For example, choose a year and then offer only the
+    periods available within that year.
+  </p>
+</div>
+
+<div xmlns:th="http://www.thymeleaf.org" th:fragment="related" class="app-overview-resources app-overview-prose" data-overview-related>
+  <h3 class="app-overview-sub" id="overview-related-h">Related resources and help</h3>
+  <ul class="app-overview-related">
+    <li><a hx-boost="true" th:href="@{/overview/templates}">Templates</a> supply a control's choices when they
+      come from data: a selector is a pinned template.</li>
+    <li><a hx-boost="true" th:href="@{/overview/dashboards}">Dashboards</a> pin a released parameter set, show
+      its controls and pass the evaluated values to their source pipelines.</li>
+  </ul>
+  <p class="app-card-note">A set's controls can also be hard-coded choices; not every set needs a template.</p>
+  <p><a th:href="@{/docs/mcp-server}">MCP server reference</a></p>
+</div>

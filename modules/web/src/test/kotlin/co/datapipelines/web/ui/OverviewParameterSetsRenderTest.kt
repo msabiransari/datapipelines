@@ -117,8 +117,8 @@ class OverviewParameterSetsRenderTest {
 
         doc.selectFirst("[data-overview-intro]").shouldNotBeNull().text() shouldContain
             "Parameter sets define reusable inputs and how their values are evaluated together."
-        doc.selectFirst("#overview-intro-h")!!.text() shouldBe "What parameter sets are for"
-        doc.select("[data-overview-prompt] ol li").size shouldBe 3
+        doc.selectFirst("[data-overview-intro]")!!.attr("data-title") shouldBe "What parameter sets are for"
+        doc.select("[data-overview-quickstart] ol li").size shouldBe 3
         doc.select("[data-overview-related] a").map { it.attr("href") } shouldContainExactly
             listOf("/overview/templates", "/overview/dashboards", "/docs/mcp-server")
         doc.selectFirst("[data-overview-related] a[href='/docs/mcp-server']")!!.text() shouldBe "MCP server reference"
@@ -185,7 +185,7 @@ class OverviewParameterSetsRenderTest {
         doc.select("[data-overview-inventory] [data-count] dd.app-overview-count-v").map { it.text() } shouldContainExactly
             listOf("0", "0", "0", "0")
         doc.selectFirst("[data-overview-recent-empty]").shouldNotBeNull()
-        doc.select("[data-overview-recent] li").shouldBeEmpty()
+        doc.select("[data-overview-recent] .app-overview-recent li").shouldBeEmpty()
         doc.selectFirst("textarea#overview-prompt").shouldNotBeNull()
     }
 

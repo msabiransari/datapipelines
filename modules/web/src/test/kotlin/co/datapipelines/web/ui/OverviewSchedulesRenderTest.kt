@@ -89,7 +89,8 @@ class OverviewSchedulesRenderTest {
 
         doc.select("[data-overview-inventory] [data-count] dd.app-overview-count-v").map { it.text() } shouldContainExactly
             listOf("4", "2", "1", "1")
-        doc.select("[data-overview-chart]").map { it.attr("aria-label") } shouldContainExactly listOf("By condition", "Last run")
+        doc.select("[data-overview-chart]").map { doc.getElementById(it.attr("aria-labelledby"))!!.text() } shouldContainExactly
+            listOf("By condition", "Last run")
         doc.select("[data-overview-chart][data-chart=condition] [data-bar]").map { it.attr("data-bar") } shouldContainExactly
             listOf("enabled", "paused", "blocked")
         doc.select("[data-overview-chart][data-chart=last-run] [data-bar]").map { it.attr("data-bar") } shouldContainExactly
@@ -106,13 +107,14 @@ class OverviewSchedulesRenderTest {
         val html = html(page())
         val doc = Jsoup.parse(html)
 
-        doc.select("[data-overview-recent] h3").map { it.text() } shouldContainExactly listOf("Up next", "Recently changed")
-        doc.select("[data-overview-recent] li a").map { it.attr("href") } shouldContainExactly
+        doc.select("[data-overview-recent] .app-overview-recent-section h3").map { it.text() } shouldContainExactly
+            listOf("Up next", "Recently changed")
+        doc.select("[data-overview-recent] .app-overview-recent li a").map { it.attr("href") } shouldContainExactly
             listOf("/schedules?id=$ID_A", "/schedules?id=$ID_B")
         doc.select("[data-overview-recent] time").map { it.text() } shouldContainExactly listOf("in 3 hours", "2 hours ago")
         doc.select("[data-overview-recent] .ds-badge").shouldBeEmpty()
         html shouldNotContain "<b>x</b>"
-        doc.select("[data-overview-recent] li a").last()!!.text() shouldBe "ops/<b>x</b>"
+        doc.select("[data-overview-recent] .app-overview-recent li a").last()!!.text() shouldBe "ops/<b>x</b>"
     }
 
     @Test

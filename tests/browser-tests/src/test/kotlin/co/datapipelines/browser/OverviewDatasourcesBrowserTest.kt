@@ -106,11 +106,11 @@ class OverviewDatasourcesBrowserTest : RestTreeBrowserFixture() {
 
         // Recently added is grant order, newest first, each entry linking the catalog row —
         // and no lifecycle badge: datasources carry no draft/release lifecycle.
-        page.locator("[data-overview-recent] li a").allInnerTexts() shouldBe
+        page.locator("[data-overview-recent] .app-overview-recent li a").allInnerTexts() shouldBe
             listOf(untested2, untested1, failed, ok)
         page.locator("[data-overview-recent] .ds-badge").count() shouldBe 0
         page
-            .locator("[data-overview-recent] li a")
+            .locator("[data-overview-recent] .app-overview-recent li a")
             .first()
             .getAttribute("href") shouldBe "/datasources/$untested2"
 
@@ -129,6 +129,7 @@ class OverviewDatasourcesBrowserTest : RestTreeBrowserFixture() {
         startTrace()
         readyTree()
         openOverview()
+        page.click("[data-overview-agent]")
         val prompt = page.locator("#overview-prompt")
         prompt.fill(prompt.inputValue().replace("[name]", "example"))
         page.evaluate(
