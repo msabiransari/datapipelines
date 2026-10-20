@@ -3,8 +3,12 @@ package co.datapipelines.integration
 import co.datapipelines.DatapipelinesApplication
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
+import io.kotest.matchers.longs.shouldBeGreaterThanOrEqual
 import io.kotest.matchers.longs.shouldBeLessThan
+import io.kotest.matchers.longs.shouldBeLessThanOrEqual
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import io.kotest.matchers.types.shouldBeInstanceOf
 import io.kotest.matchers.types.shouldBeSameInstanceAs
 import io.micrometer.observation.Observation
@@ -71,6 +75,9 @@ import java.util.function.Supplier
  * - **The replay during a stalled tick** — rest-api §10.3's replay of a finished execution, served
  *   while the sweep's tick waits on a held lock (the brief's "held table lock for 3 s"). Until #316
  *   the tick held `dp-sse-log` and the replay waited for the lock to go.
+ * - **The sweep's statement bound** (#326) — the same held lock, held PAST the sweep's bound: the
+ *   `UPDATE` is cancelled at the bound (`57014` on its failed-tick line) while the lock is still granted,
+ *   and the next tick starts once it goes.
  * - **The shutdown order** — `shutdown.drain_complete` < every writer's `persistence.drained` <
  *   `shutdown.scheduled_jobs_stopped`, off the application's own log.
  *
@@ -165,8 +172,34 @@ class ScheduledJobsSchedulerE2eTest {
         }
     }
 
+    /**
+     * #326: the sweep's `UPDATE` carries a statement bound, so a lock that never goes no longer holds the
+     * tick — and the `dp-scheduled` thread every job shares — for the lock's whole life. The lock is held
+     * PAST the bound: the statement must leave `pg_stat_activity`'s lock waiters at the bound, with the
+     * cancel's SQLState (`57014`) on the failed-tick line, while the lock is provably still granted; once
+     * it goes, the next tick starts on its cadence. At #326's base (no bound) the `UPDATE` is still queued
+     * at bound + slack, and the wait below names it.
+     */
     @Test
     @Order(3)
+    fun `the sweep's statement is cancelled at its bound while the lock is still held, and the next tick runs`(output: CapturedOutput) {
+        val bounded = sweepCancelledWhileHeld(output)
+        // The measurement itself, for the evidence log — a green run should show its numbers too.
+        println("326 sweep statement bound under a held lock: $bounded")
+        withClue("$bounded") {
+            bounded.queuedToGoneMs shouldBeGreaterThanOrEqual TimeUnit.SECONDS.toMillis(SWEEP_BOUND_SECONDS - 1)
+            bounded.queuedToGoneMs shouldBeLessThanOrEqual TimeUnit.SECONDS.toMillis(SWEEP_BOUND_SECONDS + BOUND_SLACK_SECONDS)
+            // Cancelled while the lock was still granted — the bound, not a release, ended the statement.
+            bounded.lockGrantedAtCancel shouldBe true
+            bounded.failedLine shouldContain "sql_state=$CANCEL_SQL_STATE"
+            // #321's rule holds on the cancel's line: the class and the SQLState, never the statement's text.
+            bounded.failedLine shouldNotContain "UPDATE pipeline_executions"
+            bounded.nextTickStarted shouldBe true
+        }
+    }
+
+    @Test
+    @Order(4)
     fun `on close the jobs' scheduler stops after the execution drain and every writer's drain`(output: CapturedOutput) {
         app.close()
         val log = output.out
@@ -225,6 +258,102 @@ class ScheduledJobsSchedulerE2eTest {
             StalledReplay(elapsedMs, ids, servedWhileHeld, waitingAtRelease.get())
         }
 
+    private data class BoundedSweep(
+        val queuedToGoneMs: Long,
+        val heldMs: Long,
+        val lockGrantedAtCancel: Boolean,
+        val failedLine: String,
+        val nextTickStarted: Boolean,
+    )
+
+    /**
+     * Holds the same `SHARE` lock as [replayWhileTheSweepWaits], waits for the sweep's `UPDATE` to queue,
+     * then keeps holding while it waits — up to the bound plus [BOUND_SLACK_SECONDS] — for the statement to
+     * leave the lock waiters AND the failed-tick line to carry `57014`. Only then is the lock let go, and the
+     * sweep's next tick awaited ([SWEEP_CADENCE_SECONDS] after the cancelled one ended, `fixedDelay`).
+     */
+    private fun sweepCancelledWhileHeld(output: CapturedOutput): BoundedSweep {
+        val recorder = app.getBean(TickRecorder::class.java)
+        val logFrom = output.out.length
+        return connection().use { lock ->
+            lock.autoCommit = false
+            lock.createStatement().use { it.execute("LOCK TABLE pipeline_executions IN SHARE MODE") }
+            val heldAt = System.nanoTime()
+            connection().use { watcher ->
+                awaitCondition("the sweep's UPDATE waiting on the lock", SWEEP_WAIT_SECONDS) { sweepWaiting(watcher) }
+                val queuedAt = System.nanoTime()
+                val goneAt = awaitCancelWhileHeld(watcher, output, logFrom)
+                val granted = shareLockGranted(watcher)
+                val ticksAtCancel = recorder.countOf(SWEEP)
+                lock.rollback()
+                val heldMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - heldAt)
+                val nextTick =
+                    runCatching {
+                        awaitCondition("the sweep's next tick after the lock went", SWEEP_CADENCE_SECONDS + BOUND_SLACK_SECONDS) {
+                            recorder.countOf(SWEEP) > ticksAtCancel
+                        }
+                    }.isSuccess
+                BoundedSweep(
+                    queuedToGoneMs = TimeUnit.NANOSECONDS.toMillis(goneAt - queuedAt),
+                    heldMs = heldMs,
+                    lockGrantedAtCancel = granted,
+                    failedLine = requireNotNull(sweepFailedLine(output, logFrom)),
+                    nextTickStarted = nextTick,
+                )
+            }
+        }
+    }
+
+    /**
+     * Waits, up to the bound plus [BOUND_SLACK_SECONDS], for the queued `UPDATE` to leave the lock waiters
+     * AND the `57014` line to be logged; returns when the statement was first seen gone. A red run's
+     * message says which of the two never happened.
+     */
+    private fun awaitCancelWhileHeld(
+        watcher: Connection,
+        output: CapturedOutput,
+        logFrom: Int,
+    ): Long {
+        var goneAt = 0L
+        try {
+            awaitCondition(
+                "the sweep's UPDATE cancelled at its bound (gone from the lock waiters, sql_state=$CANCEL_SQL_STATE logged) " +
+                    "while the lock is still held",
+                SWEEP_BOUND_SECONDS + BOUND_SLACK_SECONDS,
+            ) {
+                if (goneAt == 0L && !sweepWaiting(watcher)) goneAt = System.nanoTime()
+                goneAt != 0L && sweepFailedLine(output, logFrom) != null
+            }
+        } catch (e: IllegalStateException) {
+            val statement = if (sweepWaiting(watcher)) "was STILL waiting on the lock" else "had gone"
+            val line = if (sweepFailedLine(output, logFrom) == null) "never logged" else "logged"
+            throw IllegalStateException("${e.message}; at the deadline the UPDATE $statement and the $CANCEL_SQL_STATE line was $line", e)
+        }
+        return goneAt
+    }
+
+    /** The application's own failed-sweep line carrying the cancel's SQLState, logged after [from]. */
+    private fun sweepFailedLine(
+        output: CapturedOutput,
+        from: Int,
+    ): String? =
+        output.out
+            .substring(from)
+            .lineSequence()
+            .firstOrNull { it.contains("event=execution.sweep_failed") && it.contains("sql_state=$CANCEL_SQL_STATE") }
+
+    private fun shareLockGranted(connection: Connection): Boolean =
+        connection
+            .prepareStatement(
+                "SELECT count(*) FROM pg_locks l JOIN pg_class c ON c.oid = l.relation " +
+                    "WHERE c.relname = 'pipeline_executions' AND l.mode = 'ShareLock' AND l.granted",
+            ).use { statement ->
+                statement.executeQuery().use { rows ->
+                    rows.next()
+                    rows.getInt(1) > 0
+                }
+            }
+
     private fun sweepWaiting(connection: Connection): Boolean =
         connection
             .prepareStatement(
@@ -252,6 +381,8 @@ class ScheduledJobsSchedulerE2eTest {
         fun threadsOf(job: String): Set<String> = ticks.filter { it.first == job }.map { it.second }.toSet()
 
         fun jobs(): Set<String> = ticks.map { it.first }.toSet()
+
+        fun countOf(job: String): Int = ticks.count { it.first == job }
     }
 
     /** The recorder as a bean, so Boot registers it with the observation registry before the first tick. */
@@ -461,6 +592,18 @@ class ScheduledJobsSchedulerE2eTest {
         const val REPLAY_BOUND_MS = 1_500L
         const val REPLAY_TIMEOUT_SECONDS = 30L
         const val SWEEP_WAIT_SECONDS = 30L
+
+        /** #326's sweep statement bound — the issue's number, a literal; never read back from the class under test. */
+        const val SWEEP_BOUND_SECONDS = 10L
+
+        /** The sweep's cadence (`fixedDelay`, 15 s) — when the tick after a cancelled one starts. */
+        const val SWEEP_CADENCE_SECONDS = 15L
+
+        /** A loaded box's margin on either wait above. */
+        const val BOUND_SLACK_SECONDS = 5L
+
+        /** `query_canceled` — what Postgres reports for a statement cancelled at its JDBC `queryTimeout`. */
+        const val CANCEL_SQL_STATE = "57014"
         const val AWAIT_SECONDS = 20L
         const val POLL_MS = 50L
         val RUN_ID: String = Integer.toHexString(SecureRandom().nextInt(0x10000))

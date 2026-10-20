@@ -59,10 +59,18 @@ class EngineConfiguration {
     fun executionRepository(
         jdbc: NamedParameterJdbcTemplate,
         executor: ExecutorProperties,
-    ): ExecutionRepository = ExecutionRepository(jdbc, executor.lifecycleWriteTimeoutSeconds)
+    ): ExecutionRepository =
+        ExecutionRepository(
+            jdbc,
+            executor.lifecycleWriteTimeoutSeconds,
+            // #326 — the crash sweep's statement bound, a constant beside its cadence (never a key).
+            sweepStatementTimeoutSeconds = StaleExecutionSweepScheduler.SWEEP_STATEMENT_TIMEOUT_SECONDS,
+        )
 
+    /** #326 — the retention DELETE carries the hourly tick's statement bound; appends and reads stay unbounded. */
     @Bean
-    fun executionEventRepository(jdbc: NamedParameterJdbcTemplate): ExecutionEventRepository = ExecutionEventRepository(jdbc)
+    fun executionEventRepository(jdbc: NamedParameterJdbcTemplate): ExecutionEventRepository =
+        ExecutionEventRepository(jdbc, ExecutionEventRetentionScheduler.RETENTION_STATEMENT_TIMEOUT_SECONDS)
 
     @Bean
     fun resultConfig(properties: ResultProperties): ResultConfig =

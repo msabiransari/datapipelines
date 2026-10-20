@@ -210,14 +210,6 @@ class AuthConfiguration {
             secretSealer.getIfAvailable(),
         )
 
-    /**
-     * Keys v2 A17/B5 — the retention sweep's last step: revoked keys and their identities,
-     * deleted once nothing references them. The FK-deriving purge is a bean so the sweep's
-     * scheduler (`RetentionSchedulingConfiguration`) calls it after the event retention.
-     */
-    @Bean
-    fun keyRetentionPurge(jdbc: NamedParameterJdbcTemplate): KeyRetentionPurge = KeyRetentionPurge(jdbc)
-
     @Bean
     fun authErrorWriter(objectMapper: ObjectMapper): AuthErrorWriter = AuthErrorWriter(objectMapper)
 
