@@ -11,7 +11,7 @@ import kotlin.text.RegexOption.IGNORE_CASE
  * TRANSFORM survives ONLY in the senses this file's allowlist names.
  *
  * The scan walks every tracked text source under the repository root (never `build/`, never
- * `.git/`) and fails on any line containing `transform` that neither
+ * `.git/` or `.pregate-logs/`) and fails on any line containing `transform` that neither
  *
  *   - matches one of the GLOBAL exemptions (the same line shape everywhere in the tree), nor
  *   - lives in a file matched by a [PATH_EXEMPTIONS] entry whose per-line regex admits it.
@@ -110,7 +110,7 @@ class ScriptVocabularyGuardTest {
     private fun scanTargets(): List<File> {
         val extensions =
             setOf("kt", "kts", "java", "md", "html", "js", "mjs", "json", "yml", "yaml", "sql", "properties", "toml", "sh", "txt", "xml")
-        val excludedDirs = setOf("build", ".git", ".claude", "node_modules", "out", "target")
+        val excludedDirs = setOf("build", ".git", ".claude", ".pregate-logs", "node_modules", "out", "target")
         return repoRoot()
             .walkTopDown()
             .onEnter { dir -> dir.name !in excludedDirs }
