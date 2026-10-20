@@ -1,36 +1,26 @@
-<!--/* #585 — the API home's guide (ui-screens.md §4.18a; shell design §8), shaped as
-     guide-datasources.html: `overview/family.html` includes (since #home-frame) `quickstart` (how a
-     program gets access) in the Quick start card, `prompt` and `howitworks` as dialog sections,
-     `extra` (the MCP card) full width under the work grid, and `related` at the foot of Continue
-     your work. What a program needs is three things, and the page says
-     who does each: a published endpoint (an agent CAN do this — endpoints_create — or a program's
-     POST; there is no form for it in the app), a key (a PERSON on /api-keys: there is no
-     key-minting tool, on purpose — skill/endpoints.md), and the connection (the MCP card, the
-     console's own fragment, for an agent; a GET with the key header for an application). The
-     starter prompt follows skill/endpoints.md's flow and stops at publishing: it never asks the
-     agent to create, associate or copy a credential. The MCP card carries no Copy here:
-     overview.mjs copies a [data-overview-prompt] root's TEXTAREA, and the config is the shared
-     card's <pre>. Copying sends nothing (overview.mjs). */-->
+<!--/* #585 — the API home's guide (ui-screens.md §4.18a; shell design §8); #home-ops wrote its v2
+     fragments (`overview/family.html` includes them): `subtitle` under the title, `quickstart` in
+     the Quick start card (the headline, one sentence and three short steps, as guide-pipelines.html),
+     `prompt` and `howitworks` as dialog sections, `extra` (the MCP card) full width under the work
+     grid, and `related` at the foot of Continue your work. What a program needs is three things, and
+     How it works says who does each: a published endpoint (an agent CAN do this — endpoints_create —
+     or a program's POST; there is no form for it in the app), a key (a PERSON on /api-keys: there is
+     no key-minting tool, on purpose — skill/endpoints.md), and the connection (the MCP card, the
+     console's own fragment, for an agent; a GET with the key header for an application). The starter
+     prompt follows skill/endpoints.md's flow and stops at publishing: it never asks the agent to
+     create, associate or copy a credential. The MCP card carries no Copy here: overview.mjs copies a
+     [data-overview-prompt] root's TEXTAREA, and the config is the shared card's <pre>. Copying sends
+     nothing (overview.mjs). */-->
+<p xmlns:th="http://www.thymeleaf.org" th:fragment="subtitle" class="app-overview-subtitle">Released pipelines served at stable URLs. See what each path runs now, and which keys can call it.</p>
+
 <th:block xmlns:th="http://www.thymeleaf.org" th:fragment="quickstart">
-  <h2 class="app-overview-quickstart-title" id="overview-quickstart-h">How a program gets access</h2>
-  <div data-overview-access>
-    <ol class="app-overview-steps">
-      <li><b>Publish a path.</b> A released, read-only pipeline is published at a path by your agent
-        (<span class="ds-mono">endpoints_create</span>) or by a program calling
-        <span class="ds-mono">POST /api/v1/endpoints</span> — authors and admins only. There is no form for it in
-        the app.</li>
-      <li><b>Create and associate a key.</b> A workspace admin creates an API key on the Keys page and
-        associates it with the path; no agent can create one.
-        <a th:if="${canAdminWorkspace == true or isSuperAdmin == true}" th:href="@{/api-keys}"
-           data-overview-manage-keys>Manage API keys</a>
-        <th:block th:unless="${canAdminWorkspace == true or isSuperAdmin == true}">Ask a workspace admin for
-          this step.</th:block></li>
-      <li><b>Call it.</b> An application sends
-        <span class="ds-mono">GET /api/&lt;category&gt;/&lt;version&gt;/&lt;path&gt;</span> with the key in the
-        <span class="ds-mono" th:text="${mcpHeader}">DP-API-Key</span> header. An agent connects with the
-        MCP server card below.</li>
-    </ol>
-  </div>
+  <h2 class="app-overview-quickstart-title" id="overview-quickstart-h">Publish an endpoint with your agent</h2>
+  <p class="app-overview-panel-sub">Your agent publishes the path; a workspace admin grants a key; your application calls it.</p>
+  <ol class="app-overview-steps app-overview-steps-row">
+    <li><b>Publish</b><small>Your agent serves a released pipeline.</small></li>
+    <li><b>Grant</b><small>An admin associates a key with the path.</small></li>
+    <li><b>Call</b><small>Your application sends one GET.</small></li>
+  </ol>
 </th:block>
 
 <div xmlns:th="http://www.thymeleaf.org" th:fragment="prompt" class="app-overview-dialog-section app-overview-prose"
@@ -60,13 +50,36 @@
 </div>
 
 <div xmlns:th="http://www.thymeleaf.org" th:fragment="howitworks" class="app-overview-dialog-section app-overview-prose"
-     data-dialog-section="howitworks" data-title="What the API is for" data-overview-intro hidden>
+     data-dialog-section="howitworks" data-title="How a program gets access" data-overview-intro hidden>
   <p>
     A released, read-only pipeline can be published at a stable URL under
     <span class="ds-mono">/api/&lt;category&gt;/&lt;version&gt;/…</span>, so an application fetches its rows
     with one GET. Every call carries a key in the <span class="ds-mono" th:text="${mcpHeader}">DP-API-Key</span>
     header, and an API key reaches only the paths it is associated with. Agents connect through the MCP
     server instead, with a key of their own.
+  </p>
+  <div data-overview-access>
+    <ol class="app-overview-steps">
+      <li><b>Publish a path.</b> A released, read-only pipeline is published at a path by your agent
+        (<span class="ds-mono">endpoints_create</span>) or by a program calling
+        <span class="ds-mono">POST /api/v1/endpoints</span> — authors and admins only. There is no form for it in
+        the app.</li>
+      <li><b>Create and associate a key.</b> A workspace admin creates an API key on the Keys page and
+        associates it with the path; no agent can create one.
+        <a th:if="${canAdminWorkspace == true or isSuperAdmin == true}" th:href="@{/api-keys}"
+           data-overview-manage-keys>Manage API keys</a>
+        <th:block th:unless="${canAdminWorkspace == true or isSuperAdmin == true}">Ask a workspace admin for
+          this step.</th:block></li>
+      <li><b>Call it.</b> An application sends
+        <span class="ds-mono">GET /api/&lt;category&gt;/&lt;version&gt;/&lt;path&gt;</span> with the key in the
+        <span class="ds-mono" th:text="${mcpHeader}">DP-API-Key</span> header. An agent connects with the
+        MCP server card below.</li>
+    </ol>
+  </div>
+  <p class="app-card-note">Call counts are not recorded anywhere in this system, so this page shows none.</p>
+  <p>
+    <a th:href="@{/docs/rest-api}">REST API reference</a> ·
+    <a th:href="@{/add-mcp-server-to-claude-code}">Connect Claude Code</a>
   </p>
 </div>
 
@@ -79,18 +92,13 @@
 </div>
 </th:block>
 
-<div xmlns:th="http://www.thymeleaf.org" th:fragment="related" class="app-overview-resources app-overview-prose" data-overview-related>
-  <h3 class="app-overview-sub" id="overview-related-h">Related resources and help</h3>
-  <ul class="app-overview-related">
-    <li><a hx-boost="true" th:href="@{/overview/pipelines}">Pipelines</a> are what an endpoint serves — a
-      released, read-only one.</li>
-    <li><a hx-boost="true" th:href="@{/overview/dashboards}">Dashboards</a> are shared through dashboard keys,
-      created on the same Keys page.</li>
-  </ul>
-  <p class="app-card-note">Call counts are not recorded anywhere in this system, so this page shows none.</p>
-  <p>
-    <a th:href="@{/docs/rest-api}">REST API reference</a> ·
-    <a th:href="@{/docs/mcp-server}">MCP server reference</a> ·
-    <a th:href="@{/add-mcp-server-to-claude-code}">Connect Claude Code</a>
-  </p>
+<div xmlns:th="http://www.thymeleaf.org" th:fragment="related" class="app-overview-resources app-overview-resources-row" data-overview-related>
+  <span class="app-overview-resources-k">What keys reach</span>
+  <a class="app-overview-link" hx-boost="true" th:href="@{/overview/pipelines}">Pipelines <svg class="ds-icon ds-icon-xs"
+     aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#arrow-right"></use></svg></a>
+  <a class="app-overview-link" hx-boost="true" th:href="@{/overview/dashboards}">Dashboards <svg class="ds-icon ds-icon-xs"
+     aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#arrow-right"></use></svg></a>
+  <a class="app-overview-link" th:href="@{/docs/rest-api}">REST API reference</a>
+  <a class="app-overview-link" th:href="@{/docs/mcp-server}">MCP server reference</a>
+  <a class="app-overview-link" th:href="@{/add-mcp-server-to-claude-code}">Connect Claude Code</a>
 </div>

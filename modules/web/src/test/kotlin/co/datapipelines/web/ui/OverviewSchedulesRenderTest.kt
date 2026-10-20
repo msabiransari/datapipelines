@@ -1,6 +1,13 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.auth.AuthMethod
+import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.WorkspaceContext
+import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.pipeline.SearchNeedle
+import co.datapipelines.scheduler.LastRunOutcome
+import co.datapipelines.scheduler.ScheduleService
+import co.datapipelines.scheduler.ScheduleSummary
 import co.datapipelines.web.ui.OverviewPage.Bar
 import co.datapipelines.web.ui.OverviewPage.Chart
 import co.datapipelines.web.ui.OverviewPage.Count
@@ -16,17 +23,24 @@ import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
+import io.mockk.every
+import io.mockk.mockk
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
+import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.springframework.mock.web.MockHttpServletRequest
 import org.springframework.mock.web.MockHttpServletResponse
 import org.springframework.mock.web.MockServletContext
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
+import org.springframework.security.core.context.SecurityContextHolder
+import org.springframework.ui.ExtendedModelMap
 import org.thymeleaf.context.WebContext
 import org.thymeleaf.spring6.SpringTemplateEngine
 import org.thymeleaf.templateresolver.ClassLoaderTemplateResolver
 import org.thymeleaf.web.servlet.JakartaServletWebApplication
 import java.time.Instant
+import java.util.UUID
 
 /**
  * #584 — the Schedules home at the RENDER (`overview/family.html` + `overview/guide-schedules.html`):
@@ -46,6 +60,72 @@ class OverviewSchedulesRenderTest {
                 },
             )
         }
+
+    @AfterEach
+    fun clearContext() {
+        SecurityContextHolder.clearContext()
+    }
+
+    /**
+     * #home-ops — the page the CONTROLLER builds, rendered: four metrics whose notes are the tiles'
+     * help sentences and whose dots are their condition bars' tones, the View all badge equal to
+     * the total, the two panels with descriptions and info dialogs, the See what runs next row
+     * above Up next and Recently changed, and the guide's v2 words.
+     */
+    @Test
+    fun `the controller's page renders the v2 regions - metrics, panels with dialogs, the task row, the quick start`() {
+        val doc = Jsoup.parse(controllerHtml(WorkspaceRole.AUTHOR, blocked = 1))
+
+        doc.select("[data-overview-summary] [data-count]").map { it.attr("data-count") } shouldContainExactly
+            listOf("schedules", "enabled", "paused", "blocked")
+        doc.select("[data-overview-summary] .app-overview-count-help").map { it.text() } shouldContainExactly
+            listOf(
+                "Each live schedule once: enabled, paused and blocked added together.",
+                "Firing on their pattern.",
+                "Kept, but not firing until resumed.",
+                "Stopped by a failure until someone unblocks them.",
+            )
+        doc.select("[data-count=schedules] .app-overview-dot").shouldBeEmpty()
+        listOf("enabled", "paused", "blocked").forEach { key ->
+            doc.selectFirst("[data-count=$key] .app-overview-dot")!!.attr("data-tone") shouldBe
+                doc.selectFirst("[data-chart=condition] [data-bar=$key]")!!.attr("data-tone")
+        }
+        doc.selectFirst("[data-overview-view-all-count]")!!.text() shouldBe "4"
+        doc.select("[data-overview-panel] .app-overview-panel-sub").map { it.text() } shouldContainExactly
+            listOf("Every live schedule once, by the condition the explorer shows.", "Each schedule once, by how its latest run ended.")
+        doc.select("[data-overview-panel] [data-open]").map { it.attr("data-open") } shouldContainExactly listOf("condition", "last-run")
+        doc.selectFirst("[data-dialog-section=condition]")!!.text() shouldContain "blocked wins"
+        doc.selectFirst("[data-dialog-section=last-run]")!!.text() shouldContain "Not a history"
+        doc.select("[data-overview-recent] [data-task]").map { it.attr("data-task") } shouldContainExactly listOf("next")
+        val task = doc.selectFirst("[data-task=next] a").shouldNotBeNull()
+        task.attr("href") shouldBe "/schedules"
+        task.selectFirst("b")!!.text() shouldBe "See what runs next"
+        doc.select("[data-overview-recent] .app-overview-recent-section h3").map { it.text() } shouldContainExactly
+            listOf("Up next", "Recently changed")
+        doc.selectFirst(".app-overview-subtitle").shouldNotBeNull()
+        doc.select("[data-overview-create] .app-overview-steps li b").map { it.text() } shouldContainExactly
+            listOf("Pick the pipeline.", "Set when it runs.", "Choose who is told.")
+        doc.selectFirst(".app-overview-actions [data-overview-new-schedule]").shouldNotBeNull()
+    }
+
+    /** No explorer filter selects the blocked schedules, so no Unblock row is offered for them (§4.20a). */
+    @Test
+    fun `a blocked schedule adds no row the explorer cannot filter for`() {
+        val doc = Jsoup.parse(controllerHtml(WorkspaceRole.AUTHOR, blocked = 2))
+        doc.select("[data-overview-recent] [data-task]").map { it.attr("data-task") } shouldContainExactly listOf("next")
+        doc.select("[data-overview-recent] a[href*=blocked]").shouldBeEmpty()
+    }
+
+    /** The New schedule action is the canAuthor set's: a viewer and a promoter read the steps and no button. */
+    @Test
+    fun `the controller's page offers New schedule to an author and never to a viewer`() {
+        Jsoup.parse(controllerHtml(WorkspaceRole.AUTHOR)).select("[data-overview-new-schedule]").size shouldBe 1
+        listOf(WorkspaceRole.VIEWER, WorkspaceRole.PROMOTER).forEach { role ->
+            val doc = Jsoup.parse(controllerHtml(role))
+            doc.select("[data-overview-new-schedule]").shouldBeEmpty()
+            doc.select("[data-overview-create] .app-overview-steps li").size shouldBe 3
+        }
+    }
 
     @Test
     fun `the guide is a person's how-to - no agent card, no starter prompt, no copy button`() {
@@ -178,10 +258,45 @@ class OverviewSchedulesRenderTest {
         canReadExecutions: Boolean = true,
     ): Document = Jsoup.parse(html(page, canAuthor, canReadExecutions))
 
+    /** The controller's model over [ScheduleService.summary] answering four schedules, rendered with its own attributes. */
+    private fun controllerHtml(
+        role: WorkspaceRole,
+        blocked: Int = 1,
+    ): String {
+        val workspaceId = UUID.randomUUID()
+        SecurityContextHolder.getContext().authentication =
+            UsernamePasswordAuthenticationToken(
+                AuthenticatedPrincipal(
+                    UUID.randomUUID(),
+                    "a@b.c",
+                    "A",
+                    AuthMethod.OIDC,
+                    workspace = WorkspaceContext(workspaceId, "acme", role),
+                ),
+                null,
+            )
+        val service = mockk<ScheduleService>()
+        every { service.summary(workspaceId, any()) } returns
+            ScheduleSummary(
+                complete = true,
+                total = 3 + blocked,
+                enabled = 2,
+                paused = 1,
+                blocked = blocked,
+                lastRun = LastRunOutcome.entries.associateWith { if (it == LastRunOutcome.NEVER_RAN) 3 + blocked else 0 },
+                upNext = emptyList(),
+                recentlyChanged = emptyList(),
+            )
+        val model = ExtendedModelMap()
+        ScheduleOverviewController(service, mockk { every { resolve(any()) } returns "saas" }).overview(model, MockHttpServletRequest())
+        return html(model[OverviewController.MODEL] as OverviewPage, extra = model)
+    }
+
     private fun html(
         page: OverviewPage,
         canAuthor: Boolean = true,
         canReadExecutions: Boolean = true,
+        extra: Map<String, Any?> = emptyMap(),
     ): String {
         val path = ScheduleOverviewController.PATH
         val context =
@@ -201,6 +316,7 @@ class OverviewSchedulesRenderTest {
         context.setVariable("crumbPage", AppNav.crumbFor(path)?.second)
         context.setVariable("searchMaxLength", SearchNeedle.MAX_LENGTH)
         context.setVariable("reportProblemUrl", REPORT_PROBLEM_URL)
+        extra.forEach { (name, value) -> context.setVariable(name, value) }
         context.setVariable(OverviewController.MODEL, page)
         return engine.process(OverviewController.VIEW, context)
     }
