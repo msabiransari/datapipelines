@@ -142,18 +142,18 @@
 }
 
 /* D4 — the preview output IS rendered SQL, so it gets the shared dependency-free
-   tokenizer (js/pipeline-editor/sql-highlight.js, 032). The kind→accent mapping
-   mirrors pipeline-editor.css exactly so both screens read alike; it is scoped
-   here because that sheet loads only on the pipeline editor. The EDITABLE
+   tokenizer (js/pipeline-editor/sql-highlight.js, 032). Status hues read their
+   text inks (#634); all highlight roles use tokens without literal fallbacks.
+   These aliases are scoped here because pipeline-editor.css loads only on the pipeline editor. The EDITABLE
    textarea above is deliberately NOT highlighted (041 D5 — an overlay or
    contenteditable surface is its own round). */
 .te-preview-pane {
-  --te-sql-keyword: var(--accent-primary, #2563eb);
-  --te-sql-string: var(--accent-success, #16a34a);
-  --te-sql-comment: var(--text-muted, #9ca3af);
-  --te-sql-number: var(--accent-warning, #92400e);
-  --te-sql-parameter: var(--accent-info, #1e40af);
-  --te-sql-punct: var(--text-secondary, #6b7280);
+  --te-sql-keyword: var(--accent-primary);
+  --te-sql-string: var(--app-success-ink);
+  --te-sql-comment: var(--text-muted);
+  --te-sql-number: var(--app-warning-ink);
+  --te-sql-parameter: var(--accent-info);
+  --te-sql-punct: var(--text-secondary);
 }
 
 .te-preview-pane .pe-sql-tok-keyword {
