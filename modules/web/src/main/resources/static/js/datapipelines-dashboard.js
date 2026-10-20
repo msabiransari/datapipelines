@@ -56,6 +56,11 @@
   var MOUNTED_ATTRIBUTE = "data-datapipelines-dashboard";
   var STYLE_ELEMENT_ID = "plotly.js-style-global";
 
+  /** The occurrence states a parameter change marks stale (#542); error and abort keep their issue voice. */
+  function carriesStaleMark(state) {
+    return state === "in-progress" || state === "success" || state === "ready" || state === "no-data";
+  }
+
   /** The adapter functions §10.3 requires — initialisation rejects an adapter missing any of them. */
   var REQUIRED_ADAPTER_FUNCTIONS = [
     "mountLayout",
@@ -286,6 +291,9 @@
     // dashboard configuration behind it. `_generation` numbers every attempt so a superseded one is nameable.
     this._parametersOnly = false;
     this._generation = 0;
+    // #550 — numbers the commits that mark occurrences stale; a refresh records the number it was sent
+    // under, so the freshness gate can tell a refresh for an older selection from one for the current.
+    this._selectionGeneration = 0;
     this._refreshes = {};
     this._streams = {};
     this._occurrences = {};
@@ -1232,7 +1240,14 @@
     }
     var names = scope === "all" ? Object.keys(known) : targets;
     var refreshId = this._env.uuid();
-    this._refreshes[refreshId] = { id: refreshId, targets: names, ended: false, abortAcked: false, abortRequested: false };
+    this._refreshes[refreshId] = {
+      id: refreshId,
+      targets: names,
+      ended: false,
+      abortAcked: false,
+      abortRequested: false,
+      selectionGeneration: this._selectionGeneration,
+    };
     this._claimOccurrences(refreshId, names);
 
     var body = {
@@ -1279,6 +1294,17 @@
     return !!occurrence && occurrence.owner === refreshId;
   };
 
+  /**
+   * #550 — the second freshness condition, on top of ownership: a refresh is current for an occurrence
+   * unless a commit marked the occurrence after the refresh was sent. An older selection's refresh may
+   * still render its result, but its statuses never clear the mark.
+   */
+  DashboardInstance.prototype._current = function (name, refreshId) {
+    var occurrence = this._occurrences[name];
+    var refresh = this._refreshes[refreshId];
+    return !(occurrence && refresh && refresh.selectionGeneration < occurrence.markedAt);
+  };
+
   DashboardInstance.prototype._renderOccurrenceStatuses = function (names, status) {
     for (var i = 0; i < names.length; i++) this._renderOccurrenceStatus(names[i], status);
   };
@@ -1286,12 +1312,14 @@
   DashboardInstance.prototype._renderOccurrenceStatus = function (name, status) {
     var occurrence = this._occurrences[name];
     if (!occurrence) return;
+    // #550 — every frame handler renders through here, so this is the one place the rule lives.
+    var stale = status.stale === true || (carriesStaleMark(status.state) && !this._current(name, status.refreshId));
     occurrence.status = status.state;
-    occurrence.stale = status.stale === true;
+    occurrence.stale = stale;
     try {
       this._adapter.renderStatus({ name: name, type: "visualization" }, {
         state: status.state,
-        stale: status.stale === true,
+        stale: stale,
         reason: status.reason || null,
       });
     } catch (e) {
@@ -1311,7 +1339,7 @@
     // recorded — this must not double-report it.
     if (status.state === "success") {
       this._streamEvent({ scope: "dashboard", event: "visualization_rendered", name: name, refresh_id: status.refreshId || null, applied: true });
-    } else if (status.state === "ready" && status.stale === true) {
+    } else if (status.state === "ready" && stale) {
       this._streamEvent({ scope: "dashboard", event: "visualization_stale", name: name, refresh_id: status.refreshId || null, applied: true });
     }
   };
@@ -1835,13 +1863,17 @@
         else affected[member] = true;
       }
     }
+    var generation = ++this._selectionGeneration;
     var names = Object.keys(this._occurrences);
     for (var i = 0; i < names.length; i++) {
       if (scoped && !affected[names[i]]) continue;
       var occurrence = this._occurrences[names[i]];
+      // #550 — recorded whatever the state: an abort chip that a running refresh later restores to
+      // success is showing the old selection's data too.
+      occurrence.markedAt = generation;
       // An empty result is about the old selection too. Ready cards need no request owner;
       // error/abort keep their issue voice rather than acquiring a parameter-change mark.
-      if (occurrence.status === "in-progress" || occurrence.status === "success" || occurrence.status === "ready" || occurrence.status === "no-data") {
+      if (carriesStaleMark(occurrence.status)) {
         occurrence.stale = true;
         try {
           this._adapter.renderStatus({ name: names[i], type: "visualization" }, {

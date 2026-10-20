@@ -36,7 +36,9 @@ class ExecutorHarness(
 ) : Closeable {
     val emitter = RecordingEmitter()
     val flags = InMemoryCancellationFlags()
-    val slots = executionSlots ?: ExecutionSlots(config.maxConcurrentExecutionsPerUser, config.maxConcurrentExecutionsPerInstance)
+    val slots =
+        executionSlots ?: ExecutionSlots(config.maxConcurrentExecutionsPerUser, config.maxConcurrentExecutionsPerInstance)
+            .also { metrics.bindConcurrency(it) }
 
     /** Deliberately small: a bounded pool is what the deadlock test needs to be honest. */
     private val dispatcher = ExecutorDispatcher.forConfig(config, maxThreads = DISPATCHER_THREADS)
