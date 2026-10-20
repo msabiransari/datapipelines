@@ -34,7 +34,9 @@ import java.util.UUID
  * rows — the same reads, so the numbers cannot drift. The expected values are spelled out too, so
  * a narrowing that both pages lost together is still red: the viewer sees no key (it created
  * none — the Keys page's `mcp_key.own` view), the promoter sees only the admitted pipeline's two
- * endpoints, the workspace admin sees all five keys.
+ * endpoints, the workspace admin sees all five keys. #home-ops (#621): through the same real lens
+ * the promoter's three endpoint metrics carry the frame's lens note and the keys metric does not,
+ * under the heading "Inventory"; a viewer's page carries no lens note.
  *
  * ## Falsifying it
  * Drop the `API_KEY_READ` branch of `keysVisibleTo` (everyone sees every key) and the viewer's
@@ -90,6 +92,13 @@ class OverviewApiE2eTest {
         withClue("the promoter's home and console never name the endpoint over the hidden pipeline") {
             page("/overview/api-console", PROMOTER) shouldNotContain HIDDEN_ENDPOINT
             page("/api-console", PROMOTER) shouldNotContain HIDDEN_ENDPOINT
+        }
+        withClue("#621 through the real lens: the promoter's three endpoint metrics say admitted, the keys metric does not") {
+            val home = page("/overview/api-console", PROMOTER)
+            home shouldContain "id=\"overview-inventory-h\">Inventory<"
+            LENS_NOTE.findAll(home).count() shouldBe LENSED_METRICS
+            KEYS_METRIC.find(home)!!.value shouldNotContain "app-overview-count-lens"
+            LENS_NOTE.findAll(page("/overview/api-console", VIEWER)).count() shouldBe 0
         }
         withClue("the workspace admin's keys chart says what it did not count") {
             page("/overview/api-console", WORKSPACE_ADMIN) shouldContain "Not counted: 0 expired, 1 revoked."
@@ -172,6 +181,9 @@ class OverviewApiE2eTest {
         private val GET_METHOD = Regex("<span class=\"app-method\">GET</span>")
         private val LEGACY_CHIP = Regex("</i>Legacy</span>")
         private val KEY_ROW = Regex("<span class=\"app-name\">")
+        private val LENS_NOTE = Regex("class=\"app-overview-count-lens\"")
+        private val KEYS_METRIC = Regex("data-count=\"keys\">[\\s\\S]*?</div>")
+        private const val LENSED_METRICS = 3
 
         /** A seeded key: its creator, kind, role and whether it is revoked; the workspace's unless [workspace] says otherwise. */
         private class Key(
