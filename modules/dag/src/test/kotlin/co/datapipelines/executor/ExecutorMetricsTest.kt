@@ -1,15 +1,24 @@
 package co.datapipelines.executor
 
+import ch.qos.logback.classic.Level
+import ch.qos.logback.classic.Logger
+import ch.qos.logback.classic.spi.ILoggingEvent
+import ch.qos.logback.core.read.ListAppender
 import co.datapipelines.pipeline.NodeOutput
 import co.datapipelines.pipeline.NodeSource
 import co.datapipelines.pipeline.NodeType
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.doubles.shouldBeGreaterThan
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
+import io.mockk.every
+import io.mockk.spyk
+import io.mockk.verify
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Test
+import org.slf4j.LoggerFactory
 import java.time.Duration
 import java.util.UUID
 import java.util.concurrent.TimeUnit
@@ -25,6 +34,80 @@ import java.util.concurrent.TimeUnit
  * `nodes.rows_out`.
  */
 class ExecutorMetricsTest {
+    @Test
+    fun `rebinding the shared slots emits no duplicate gauge warning`() {
+        SimpleMeterRegistry().let { registry ->
+            val metrics = ExecutorMetrics(registry)
+            val slots = ExecutionSlots(2, 2)
+            val logger = LoggerFactory.getLogger("io.micrometer.core.instrument.MeterRegistry") as Logger
+            val logs = ListAppender<ILoggingEvent>().apply { start() }
+            val previousLevel = logger.level
+            logger.level = Level.DEBUG
+            logger.addAppender(logs)
+            try {
+                metrics.bindConcurrency(slots)
+                metrics.bindConcurrency(slots)
+                registry.find(ExecutorMetrics.EXECUTIONS_CONCURRENT).gauges().size shouldBe 1
+                val duplicates =
+                    logs.list.filter {
+                        it.formattedMessage.contains("already registered") &&
+                            it.formattedMessage.contains(ExecutorMetrics.EXECUTIONS_CONCURRENT)
+                    }
+                duplicates.map { it.formattedMessage } shouldBe emptyList()
+            } finally {
+                logger.detachAppender(logs)
+                logger.level = previousLevel
+                logs.stop()
+            }
+        }
+    }
+
+    @Test
+    fun `a different slot pool is rejected without replacing the gauge`() {
+        SimpleMeterRegistry().let { registry ->
+            val metrics = ExecutorMetrics(registry)
+            val slots = ExecutionSlots(2, 2)
+            metrics.bindConcurrency(slots)
+            shouldThrow<IllegalStateException> { metrics.bindConcurrency(ExecutionSlots(2, 2)) }
+            val gauge = registry.find(ExecutorMetrics.EXECUTIONS_CONCURRENT).gauge().shouldNotBeNull()
+            gauge.value() shouldBe 0.0
+            slots.acquire(UUID.randomUUID()).use { gauge.value() shouldBe 1.0 }
+            gauge.value() shouldBe 0.0
+            gauge.id.tags shouldBe emptyList()
+        }
+    }
+
+    @Test
+    fun `executors observe the owner's shared slot gauge without binding it`() {
+        runBlocking {
+            SimpleMeterRegistry().let { registry ->
+                val metrics = spyk(ExecutorMetrics(registry))
+                val slots = ExecutionSlots(2, 2)
+                metrics.bindConcurrency(slots)
+                val gauge = registry.find(ExecutorMetrics.EXECUTIONS_CONCURRENT).gauge().shouldNotBeNull()
+                val engine = Fixtures.templateEngine("SELECT 1").first
+                val observed = mutableListOf<Double>()
+                every { engine.render(any(), any(), any()) } answers {
+                    observed.add(gauge.value())
+                    "SELECT 1"
+                }
+                ExecutorHarness(engine, metrics = metrics, executionSlots = slots).use { first ->
+                    ExecutorHarness(engine, metrics = metrics, executionSlots = slots).use { second ->
+                        val request = Fixtures.request(Fixtures.pipeline(listOf(Fixtures.node("n"))))
+                        slots.acquire(UUID.randomUUID()).use {
+                            first.executor.execute(request).status shouldBe ExecutionStatus.SUCCESS
+                            second.executor.execute(request).status shouldBe ExecutionStatus.SUCCESS
+                            gauge.value() shouldBe 1.0
+                        }
+                    }
+                }
+                observed shouldBe listOf(2.0, 2.0)
+                gauge.value() shouldBe 0.0
+                verify(exactly = 1) { metrics.bindConcurrency(slots) }
+            }
+        }
+    }
+
     @Test
     fun `result_writes uses the catalogued outcome values, not success`() {
         val registry = SimpleMeterRegistry()
