@@ -3821,13 +3821,13 @@ pre.tf-pane-input {
    Related share a row from 1101px. The chart is four labelled rows inside a 192px band (the
    record's 160–220px) that may grow when phone labels wrap; the bars are SVG rects whose width
    is an attribute (the CSP admits no style), painted by the lifecycle's token: draft only
-   warning, released only success, released with draft changes the accent, discarded muted —
-   never danger red on an ordinary draft. */
+   warning, released only success, released with draft changes the info series (#627: never the brand — on light
+   it is the body text, on forest, healthcare, ocean and saas the link colour, in the dark half near-white), discarded muted — never danger red on an ordinary draft. */
 :root {
   --overview-chart-h: calc(var(--space-12) * 4); /* 192px */
   --overview-draft: var(--chart-series-3);
   --overview-released: var(--chart-series-2);
-  --overview-mixed: var(--brand);
+  --overview-mixed: var(--chart-series-1);
   --overview-discarded: var(--chart-muted);
 }
 .app-overview { display: grid; gap: var(--gap-md); min-width: 0; }

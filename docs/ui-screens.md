@@ -1,9 +1,9 @@
 # UI Screens Inventory
 
-**Status:** v1.181
+**Status:** v1.182
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
-**Last updated:** 2026-10-19 (#598a merge follow-up; #617; #609; #598a; #605; #619; #585; #584; #613; #509; #608; #614 + #611; #612; #615); 2026-10-18 (#583; #573; #607; #606; #565; #582; #581; #580; #579); 2026-10-17 (#556; #578; #554); 2026-10-16 (#551 merge follow-up; #551; #555; #552; #553; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
+**Last updated:** 2026-10-20 (#627); 2026-10-19 (#598a merge follow-up; #617; #609; #598a; #605; #619; #585; #584; #613; #509; #608; #614 + #611; #612; #615); 2026-10-18 (#583; #573; #607; #606; #565; #582; #581; #580; #579); 2026-10-17 (#556; #578; #554); 2026-10-16 (#551 merge follow-up; #551; #555; #552; #553; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
 ---
 
 ## 1. Purpose
@@ -2608,7 +2608,12 @@ plus released with draft changes, so those two overlap by design and say so. Eve
 counts, bars, bar labels and the table — is read from that one value, so the chart cannot disagree with
 its totals. A bar's width is its value relative to the tallest, 0–100, written as the SVG `rect`'s
 `width` attribute (the CSP admits no style); a zero is a zero-width bar beside its "0", never a
-visible minimum. A visually hidden table repeats the four rows for assistive technology.
+visible minimum. Bars, parts and legend swatches are painted by four tones — draft the warning series,
+released the success series, released with draft changes the info series (`--chart-series-1`; #627 —
+never the brand), discarded the muted series — and never by colour alone: every part carries its words
+and count. Two measured gaps are listed in the sweep, not hidden: on professional the info series sits
+0.073 from the link (#633); minimal paints the three series one black (#631).
+A visually hidden table repeats the four rows for assistive technology.
 
 **The Pipelines charts (#598a).** The same snapshot, extended by each admitted pipeline's count of
 RELEASED versions, feeds the Pipelines card from ONE statement (`ChartInventorySource`, built on
@@ -2861,6 +2866,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-20 | v1.182 | #627 overview mixed tone | **§4.25:** bars, stacked parts and legend swatches share four lifecycle tones; mixed reads the info series (`--chart-series-1`) rather than the brand. `OverviewToneBrowserTest` measures all nine themes and both auto schemes at the unchanged OKLab distance floor of 0.08, with measured, stale-checking palette gaps for professional (#633) and minimal (#631). |
 | 2026-10-19 | v1.181 | #598a merge follow-up: §4.25 records #593's count sentence | **§4.25:** the Pipelines charts paragraph quotes the card's note on why its total can exceed the resource browser's header count (the header counts the three live parts; Retired is discarded only, with no page) — #593's acceptance asked the counting model to say what the page says; the Links paragraph's four-count sentence now names the Pipelines card's as until #598a. |
 | 2026-10-19 | v1.180 | #617 screen-reader-only headers — renumbered at merge after #609's v1.179 | **§3.7:** sort controls require visible header text; screen-reader-only labels and resize handles do not qualify. Explicit `data-sort="off"` remains. Node decision tests and the template Versions/dashboard Keys browser witnesses pin the rule. |
 | 2026-10-19 | v1.179 | #609 shared-component edge roles — renumbered at merge after #598a's v1.178 | **§3.1 item 5:** the shared components' edges take #606's three roles. Seven boundaries move from `--border-subtle` to `--border-default`: the dashboard filters pane and dock, the parameter card, the editor's minimap, view controls and dock top, and the version-row menu. The release dialog's switch and check rows read `--border-subtle` directly instead of the `--border-faint` alias (same colour). Seven edges stay separators. `ComponentBoundariesBrowserTest` is the sweep. Its four vendored-pair exceptions are tracked by #628. **§4.4:** the dock's top border is named a boundary. |
