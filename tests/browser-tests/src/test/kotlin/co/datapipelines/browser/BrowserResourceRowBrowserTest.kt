@@ -168,8 +168,10 @@ class BrowserResourceRowBrowserTest : RestTreeBrowserFixture() {
                         listOf(panel, path),
                     ) as Map<*, *>
                 println("541-measure|$theme|$path|$metrics")
-                withClue("$theme $path badge bounds: $metrics") { metrics["inside"] shouldBe true }
-                withClue("$theme $path scrollWidth <= clientWidth: $metrics") { metrics["noOverflow"] shouldBe true }
+                assertSoftly {
+                    withClue("$theme $path badge bounds: $metrics") { metrics["inside"] shouldBe true }
+                    withClue("$theme $path scrollWidth <= clientWidth: $metrics") { metrics["noOverflow"] shouldBe true }
+                }
             }
             Files.createDirectories(Paths.get("build/browser-evidence"))
             page.screenshot(Page.ScreenshotOptions().setPath(Paths.get("build/browser-evidence/541-badges-$theme.png")))
