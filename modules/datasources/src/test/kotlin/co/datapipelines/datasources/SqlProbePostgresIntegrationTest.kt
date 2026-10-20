@@ -109,11 +109,11 @@ class SqlProbePostgresIntegrationTest {
 
     /**
      * #265 F2 — the probe had NO test binding a TIMESTAMP, and the house rule
-     * ([ReadOnlyStatementLease]'s KDoc) says pgjdbc cannot infer a SQL type for the `Instant`
-     * the shared coercion produces for TIMESTAMP: the bind fails with "Can't infer the SQL type"
-     * unless the value is converted to an `OffsetDateTime` at UTC first, exactly as the lease and
-     * the repositories do. This is the reproduction; the conversion lives in the probe's
-     * `toJdbcValue` now.
+     * ([jdbcForm]'s KDoc, one helper for both bind paths since #339) says pgjdbc cannot infer a
+     * SQL type for the `Instant` the shared coercion produces for TIMESTAMP: the bind fails with
+     * "Can't infer the SQL type" unless the value is converted to an `OffsetDateTime` at UTC first,
+     * exactly as the lease and the repositories do. This is the reproduction; the probe's
+     * `toJdbcValue` applies the conversion through that helper.
      */
     @Test
     fun `a TIMESTAMP parameter binds against a timestamptz column through the lease's jdbc-form rule`() {
