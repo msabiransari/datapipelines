@@ -1,9 +1,9 @@
 # UI Screens Inventory
 
-**Status:** v1.194
+**Status:** v1.195
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
-**Last updated:** 2026-10-20 (#634; #635; #622 merge follow-up; #622; #599; #604; #home-ops; #home-frame; #610; #618; #627; #625; #598b); 2026-10-19 (#598a merge follow-up; #617; #609; #598a; #605; #619; #585; #584; #613; #509; #608; #614 + #611; #612; #615); 2026-10-18 (#583; #573; #607; #606; #565; #582; #581; #580; #579); 2026-10-17 (#556; #578; #554); 2026-10-16 (#551 merge follow-up; #551; #555; #552; #553; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
+**Last updated:** 2026-10-20 (#588; #541; #634; #635; #622 merge follow-up; #622; #599; #604; #home-ops; #home-frame; #610; #618; #627; #625; #598b); 2026-10-19 (#598a merge follow-up; #617; #609; #598a; #605; #619; #585; #584; #613; #509; #608; #614 + #611; #612; #615); 2026-10-18 (#583; #573; #607; #606; #565; #582; #581; #580; #579); 2026-10-17 (#556; #578; #554); 2026-10-16 (#551 merge follow-up; #551; #555; #552; #553; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
 ---
 
 ## 1. Purpose
@@ -374,7 +374,7 @@ foreign responses refuse admission, and a changed view clears cached levels befo
   retired; `IconSpriteAuditTest` enforces referenced = vendored = manifest-subset in both
   directions, so the app cannot drift back into two icon sources. The server-rendered tree
   rows (085 §A) draw from the same sprite: a rotating chevron-right, folder/folder-open on
-  folders, the family's glyph on leaves (`table`, `calendar-clock`); the sidebar's REST tree
+  folders, the family's glyph on leaves (`table`, `calendar-clock`); the resource browser's REST tree
   draws `chevron-right` and `file` (`tree/render.mjs`), and the `file-code` leaf glyph left the
   sprite with the server-rendered sidebar levels (#466). A leaf row keeps the chevron SLOT, empty, so its glyph and
   label sit level with a sibling folder's — one indent right of its parent's, at every depth
@@ -765,7 +765,7 @@ Content:
 |---|---|
 | URL | `GET /pipelines` (`?q=` — the deep link every "find this pipeline" link uses: the search palette's "All pipelines matching", datasource delete, the node-SQL and Details child links, the schedules detail, the workspace's phone note; `?lifecycle=` — #556's filter, the overview's drill-down) |
 | Auth required | Yes (`read`) |
-| Purpose | The **catalog**: one flat, server-paged list of full paths — every pipeline the caller may read (newest first, the service's own page) or the matches of `q` — each row a link into the pipeline's workspace (§4.4). The folder TREE is the sidebar's (§3.4). Since #556 the menu's Pipelines item lands on the overview (§4.25); the catalog is its **View all**, the browser footer's, and the target of the overview's linked counts and bars |
+| Purpose | The **catalog**: one flat, server-paged list of full paths — every pipeline the caller may read (newest first, the service's own page) or the matches of `q` — each row a link into the pipeline's workspace (§4.4). The folder TREE is the resource browser's (§3.4). Since #556 the menu's Pipelines item lands on the overview (§4.25); the catalog is its **View all**, the browser footer's, and the target of the overview's linked counts and bars |
 | Design primitives | `.ds-input`, `.ds-badge`, `.ds-button`, `.ds-empty`; the rows are `template-tree.css`'s `.tpl-results` / `a.tpl-result` |
 | JS | none of its own — `tree/sidebar.mjs` owns **Browse folders** (`data-nav-tree-reveal`), which shows the resource browser's Pipelines tree (the Browse resources drawer at 760px and below) and puts focus in its search; since #554 it leaves the menu's collapse alone |
 | htmx | the search input (`#pipeline-filter-q`, `input changed delay:300ms, search`, `hx-sync="this:replace"`) and the shared §5 pager re-fetch ONLY the list into its stable root `#pipeline-list-wrapper` (`GET /partials/pipelines`, `outerHTML`); the sidebar uses REST tree/search (§3.4) |
@@ -774,7 +774,7 @@ Content:
 workspace spec retains (§3.2: "#350 removes the redundant tree panel from the landing page") — a
 flat list, not a second tree and not a detail pane: a pipeline is read, run and managed in ONE
 place, its workspace. Since 067 pipeline names are **folder paths**
-([Template Hierarchy §14](template-hierarchy-design.md)); the folders are browsed in the sidebar.
+([Template Hierarchy §14](template-hierarchy-design.md)); the folders are browsed in the resource browser.
 
 - **The lifecycle filter (#556).** A select beside the search (`#pipeline-filter-lifecycle`, "All
   lifecycles" first) narrows the list to one of the inventory's buckets: `draft` (draft only),
@@ -1325,7 +1325,7 @@ Guards: `DatasourceOverviewControllerTest` (the model: tile, charts, buckets, re
 |---|---|
 | URL | `GET /templates` (`?q=` — the deep link every "find this template" link uses; the search covers id/path, display name, description and the dialect badge's wire value, the §5.1 Search rule) |
 | Auth required | Yes (`read` to browse; `author` to create — the create button is role-gated per [§4.3e](#43e-role-visibility--every-verb-and-the-role-boolean-that-renders-it-114-normative)) |
-| Purpose | The **catalog**: one flat, server-paged list of full paths — every template the caller may read when `q` is empty, or the matches of `q` — with the dialect and type filters, and (an author's) the create modal. Each row links into the template workspace (§4.7). The folder TREE is the sidebar's (§3.4). The menu's Templates item lands on `/overview/templates` (§4.25, #579), whose View all, linked metrics (since #599 the summary strip's and its foot's) and Review your drafts lead here — the metrics and the row with `?lifecycle=` (the five offered buckets; `discarded` and unknown values are the house 400) |
+| Purpose | The **catalog**: one flat, server-paged list of full paths — every template the caller may read when `q` is empty, or the matches of `q` — with the dialect and type filters, and (an author's) the create modal. Each row links into the template workspace (§4.7). The folder TREE is the resource browser's (§3.4). The menu's Templates item lands on `/overview/templates` (§4.25, #579), whose View all, linked metrics (since #599 the summary strip's and its foot's) and Review your drafts lead here — the metrics and the row with `?lifecycle=` (the five offered buckets; `discarded` and unknown values are the house 400) |
 | Design primitives | `.ds-input`, `.ds-badge`, `.ds-button`, `.ds-empty`; the rows are `template-tree.css`'s `.tpl-results` / `a.tpl-result`; the create modal is `.u-backdrop` + `.ds-card` |
 | JS | the create modal's lifecycle (`/js/template-create-modal.js`: open/close, inline refusal, dialect-conditional-on-type, the transform blocks); none of its own otherwise — `tree/sidebar.mjs` owns **Browse folders** (`data-nav-tree-reveal`), which shows the resource browser's Templates tree and puts focus in its search |
 | htmx | the search input and the two filter selects re-fetch ONLY the list into its stable root `#template-list-wrapper` (`GET /partials/templates`, `outerHTML`); the sidebar uses REST tree/search (§3.4) |
@@ -1335,7 +1335,7 @@ the page keeps the catalog the pipelines ruling retained (§4.3's owner ruling, 
 templates) — a flat list, not a second tree and not a detail pane: a template is read,
 rendered, evaluated and version-managed in ONE place, its workspace (§4.7). Since 067 template
 names are **folder paths** ([Template Hierarchy §14](template-hierarchy-design.md)); the
-folders are browsed in the sidebar.
+folders are browsed in the resource browser.
 
 - **Separate catalog and tree transport.** `GET /partials/templates` (`template.read`, the lens)
   serves the catalog's flat list — the only presentation it has: the server-rendered `scope=nav`
@@ -1353,7 +1353,7 @@ folders are browsed in the sidebar.
   a retired or superseded fact is MARKED on read, never blocked).
 - **The filters (`dialect`, `type`) are the CATALOG's** (exact matches on the version row; the
   dialect match is repository-level `ILIKE`, so a `sqlite` query finds templates whose names
-  never mention it). The sidebar's tree carries its search alone — the filters narrow the
+  never mention it). The resource browser's tree carries its search alone — the filters narrow the
   catalog's list and the tree's folders are the unfiltered lens's answer (§3.4's rule: the browser
   searches, the page filters).
 - **No lifecycle verbs.** The catalog renders no verb: Release, Edit, the purges, discard and
@@ -2409,12 +2409,12 @@ capability page — its public route admits nothing of the workspace.
 | Purpose | Find a parameter set and open its workspace. Since #582 the menu's Parameter Sets item leads to `/overview/parameter-sets` (§4.25), whose linked metrics and Review your drafts link here filtered (since #599 the summary strip's); View all — the overview's and the resource browser's — lands here unfiltered |
 | Design primitives | The house list: `.ds-empty` for the empty state, the shared §5 pager; `parameter-sets.css` (`ps-*`), head-loaded (§3.0 is normative) |
 | JS | None of its own |
-| htmx | The route's rows are the same read the sidebar's tree is built from; a row preserves the rail through main-content navigation |
+| htmx | The route's rows are the same read the resource browser's tree is built from; a row preserves the rail through main-content navigation |
 
 Content: a flat, server-paged list (25 rows per page) of every set the lens admits — folder-path name,
 display name and the version chip — or, under `?q=`, the matches: a case-insensitive substring of the
 name, the display name or the description (#415), `ParameterSetService.search`'s answer, the same lensed
-read the sidebar's branch searches with. It is the page `/parameter-sets` always meant to be (owner ruling
+read the resource browser's branch searches with. It is the page `/parameter-sets` always meant to be (owner ruling
 2026-10-02 for the artifact families: the page is a CATALOG, the tree lives in the rail, §3.4). The SPA
 search control re-fetches ONLY the list fragment into the stable `#parameter-set-list-wrapper` root
 (§4.3's contract: the control is never re-rendered, so focus and value survive); `?q=` stays the deep
@@ -3083,6 +3083,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-20 | v1.195 | #588 the five family catalogs' intro sentence names the resource browser — renumbered at merge after #541's v1.194 | **§4.3, §4.6, §4.21, §4.23, §4.24:** the four family catalogs' visible intro sentence (pipelines, templates, dashboards, visualizations) says "Browse the folders in the resource browser's <Family> tree" — the Parameter Sets sentence's one wording since #554 moved the trees out of the rail; each page's comment says the tree lives in the resource browser's panel. **§4.3, §4.6:** the Purpose rows' "folder TREE" and the two owner-ruling paragraphs' last sentence (dates and meaning kept, the control's name changed) and §4.6's filter bullet name the resource browser; **§4.23:** the catalog's two tree reads do; **§3.4:** the icons paragraph's REST-tree sentence does. Guards: `CatalogIntroRenderTest` renders each of the five pages and pins the visible text — no "sidebar", the resource-browser sentence present. |
 | 2026-10-20 | v1.194 | #541 status badges stay in view | **§3.4, §4.6a:** wrapping badges remain inside the browser regardless of name length, without horizontal scrolling. `BrowserResourceRowBrowserTest` measures version/draft boxes and overflow at depths two and three in both themes; the Implements browser case measures the needs-review marker's box without scrolling it into view. |
 | 2026-10-20 | v1.193 | #634 SQL highlight inks; answers #635 — renumbered at merge after #622's v1.191 and its follow-up v1.192 | **§3.5:** SQL status hues read the existing status inks. The three editor sheets drop literal colour fallbacks; `EditorCssTokenAuditTest` guards literals and declared tokens, the status source audits see aliases, and `SqlHighlightContrastBrowserTest` measures both panes on every theme. |
 | 2026-10-20 | v1.192 | #622 merge follow-up | **§4.18a:** the API home's MCP card paragraph and its JS row said the card has no Copy button and the page loads no script but `overview.mjs`; since #622 the card's fragment loads `mcp-connection.mjs` and its Copy config button copies the placeholder config (§4.18). Found by lane 622b. |
