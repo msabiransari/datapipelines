@@ -1,10 +1,14 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.pipeline.Activity
 import co.datapipelines.pipeline.Inventory
 import co.datapipelines.pipeline.MaturityBin
 import co.datapipelines.pipeline.ReleaseBin
+import co.datapipelines.pipeline.WeekActivity
+import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
+import java.time.Instant
 import kotlin.math.roundToLong
 import kotlin.random.Random
 
@@ -12,6 +16,7 @@ import kotlin.random.Random
  * #598a — the stacked charts' arithmetic over random inventories: every row's parts start where
  * the one before ended and end exactly at the row's width (in tenths, no gap, no overlap however
  * the shares round), every width is a share of the longest row, and both charts total the same.
+ * #598b adds the activity chart's twelve weekly rows: the busiest week is full width.
  */
 class OverviewStackedTest {
     private val family = OverviewPage.Family.PIPELINES
@@ -50,6 +55,32 @@ class OverviewStackedTest {
         }
     }
 
+    @Test
+    fun `random activity weeks tile their own width, the busiest is 100, and an all-zero quarter is all 0`() {
+        val random = Random(SEED)
+        val mondays = Activity.weekStarts(NOW)
+        repeat(RUNS) { run ->
+            // Every tenth run is a quiet quarter, so the all-zero branch is exercised, not hoped for.
+            val quiet = run % QUIET_EVERY == 0
+            val weeks = mondays.map { WeekActivity(it, if (quiet) 0 else next(random), if (quiet) 0 else next(random)) }
+            val active = next(random)
+            val chart = OverviewStacked.activity(family, Activity(weeks, active, WINDOW_DAYS))
+            val busiest = weeks.maxOf { it.events }
+
+            chart.rows.map { it.key } shouldContainExactly mondays.map { "week-$it" }
+            chart.rows.zip(weeks).forEach { (row, week) ->
+                row.width shouldBe OverviewPage.width(week.events, busiest)
+                tile(row) shouldBe tenths(row.width)
+                row.parts.map { it.value } shouldBe listOf(week.released, week.created)
+                row.total shouldBe week.events
+            }
+            if (busiest > 0) chart.rows.maxOf { tenths(it.width) } shouldBe FULL
+            if (busiest == 0L) chart.rows.flatMap { it.parts.map { part -> part.width } + it.width }.distinct() shouldBe listOf("0")
+            chart.legend.map { it.value } shouldBe listOf(weeks.sumOf { it.released }, weeks.sumOf { it.created })
+            chart.total shouldBe active
+        }
+    }
+
     /** Where the row's last part ends, in tenths, after checking each part starts where the previous ended. */
     private fun tile(row: StackedRow): Long =
         row.parts.fold(0L) { end, part ->
@@ -69,5 +100,8 @@ class OverviewStackedTest {
         const val LARGE = 100_000L
         const val TEN = 10.0
         const val FULL = 1_000L
+        const val QUIET_EVERY = 10
+        const val WINDOW_DAYS = 14
+        val NOW: Instant = Instant.parse("2026-10-17T12:00:00Z")
     }
 }

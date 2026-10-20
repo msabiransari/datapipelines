@@ -3908,8 +3908,9 @@ pre.tf-pane-input {
    row's width as attributes (the CSP admits no style), painted by the same four lifecycle tokens
    as the bars above — no new colour, never danger red on a draft. Rows keep the bar chart's row
    height (a quarter of the 192px band), so the lifecycle chart with its legend stays inside the
-   record's quiet 160–220px and the five maturity rows read at the same rhythm. On a phone the
-   numbers wrap under the track, as the bars do. */
+   record's quiet 160–220px and the five maturity rows read at the same rhythm. #598b: the activity
+   chart's twelve weekly rows take half that pitch (--space-6), so a quarter of history stands near
+   300px instead of 576px. On a phone the numbers wrap under the track, as the bars do. */
 .app-overview-stacked-chart { min-width: 0; }
 .app-overview-stacked-chart + .app-overview-stacked-chart { margin-top: var(--gap-lg); }
 .app-overview-stacked-total {
@@ -3942,6 +3943,7 @@ pre.tf-pane-input {
   border-radius: var(--app-radius-badge);
 }
 .app-overview-stacked[data-stacked="lifecycle"] .app-overview-stack-track { height: var(--space-4); }
+.app-overview-stacked[data-stacked="activity"] { grid-auto-rows: minmax(var(--space-6), auto); }
 .app-overview-stack-v { text-align: end; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .app-overview-stack-v b { font-weight: var(--weight-semibold); }
 .app-overview-stack-detail { color: var(--text-muted); font-size: var(--app-text-support); }

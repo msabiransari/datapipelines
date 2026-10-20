@@ -30,6 +30,7 @@ internal object ConfigSnapshots {
             jwtSecret = secret(32),
             dbEncryptionKey = secret(32),
             uiTheme = "saas",
+            uiActivelyDevelopedDays = "14",
             oidcProviders =
                 listOf(
                     OidcProviderSnapshot(

@@ -1,8 +1,10 @@
 package co.datapipelines.browser
 
+import com.microsoft.playwright.Locator
 import com.microsoft.playwright.Page
 import io.kotest.assertions.withClue
 import io.kotest.matchers.doubles.shouldBeGreaterThan
+import io.kotest.matchers.doubles.shouldBeLessThan
 import io.kotest.matchers.doubles.shouldBeLessThanOrEqual
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -17,9 +19,11 @@ import java.nio.file.Paths
  * the clipboard and makes no request, a refused clipboard selects the text and says how to finish,
  * and the prompt names the workspace the menu shows after a switch.
  *
- * #598a: the inventory is two stacked charts (lifecycle, maturity) with no count card; the first
- * case reads their parts, legend and hidden table and takes the three viewport screenshots into
- * build/reports/598a-overview.
+ * #598a: the inventory is stacked charts (lifecycle, maturity) with no count card; the first
+ * case reads their parts, legend and hidden table. #598b adds the activity chart — twelve weekly
+ * rows under the actively developed headline at half the row pitch — and the first case takes
+ * the three viewport screenshots, and one of the activity chart at each, into
+ * build/reports/598b-overview.
  *
  * The clipboard is stubbed per case (`navigator.clipboard.writeText` resolving or rejecting): the
  * subject is the page's handling of either answer, not Chromium's permission prompt. Every request
@@ -62,9 +66,49 @@ class OverviewBrowserTest : RestTreeBrowserFixture() {
         page.reload()
         page.waitForSelector("[data-stacked-chart='lifecycle']")
         page.evaluate("() => document.fonts.ready")
-        val dir = Paths.get("build", "reports", "598a-overview").also { it.toFile().mkdirs() }
+        val dir = Paths.get("build", "reports", "598b-overview").also { it.toFile().mkdirs() }
         page.locator("[data-overview-inventory]").scrollIntoViewIfNeeded()
         page.screenshot(Page.ScreenshotOptions().setPath(dir.resolve("$name.png")))
+        page.locator("[data-stacked-chart='activity']").screenshot(Locator.ScreenshotOptions().setPath(dir.resolve("$name-activity.png")))
+    }
+
+    /** #598b: the activity chart's newest row — the week the suite runs in, the last of the twelve. */
+    private fun newestWeek() = page.locator("[data-stacked='activity'] [data-row^='week-']:last-child")
+
+    private fun activityHeadline(): String = page.locator("[data-stacked-total='activity']").innerText().trim()
+
+    /**
+     * #598b (A.4): measured at the 1512 viewport and printed for the record. The rule sets the rows'
+     * pitch, so the rows are the bound (twelve at 24px = 288px); the whole section — headline,
+     * caption, rows, legend and the two-line note, 403px when measured — stands shorter than the
+     * twelve rows alone would at the inventory's 48px pitch.
+     */
+    private fun activityStandsAtHalfPitch() {
+        withClue("#598b: the activity chart's twelve rows stand at half the inventory pitch at 1512") {
+            val activity = page.locator("[data-stacked-chart='activity']").boundingBox()
+            val rows = page.locator("[data-stacked='activity']").boundingBox()
+            println("598b-overview activity height=${activity.height} rows height=${rows.height} width=${activity.width}")
+            rows.height shouldBeLessThanOrEqual ACTIVITY_ROWS_MAX_H
+            activity.height shouldBeLessThan TWELVE_ROWS_AT_INVENTORY_PITCH_H
+        }
+    }
+
+    /** #598b: the third chart after two `seedPipeline`s — each created and released this week, neither with a draft. */
+    private fun twoSeededAreThisWeeksActivity() {
+        withClue("#598b: two pipelines created and released this week are 2 + 2 events, the busiest week, at full width") {
+            page.locator("[data-stacked-chart]").count() shouldBe 3
+            page.locator("[data-stacked-chart]").nth(2).getAttribute("data-stacked-chart") shouldBe "activity"
+            newestWeek().locator("rect[data-part='released']").getAttribute("x") shouldBe "0"
+            newestWeek().locator("rect[data-part='released']").getAttribute("width") shouldBe "50.0"
+            newestWeek().locator("rect[data-part='created']").getAttribute("x") shouldBe "50.0"
+            newestWeek().locator("rect[data-part='created']").getAttribute("width") shouldBe "50.0"
+            newestWeek().locator(".app-overview-stack-v b").innerText().trim() shouldBe "4"
+            newestWeek().locator(".app-overview-stack-detail").innerText().trim() shouldBe "(this week so far)"
+            page.locator("[data-chart-table='activity'] tbody tr").count() shouldBe 12
+        }
+        withClue("#598b: seedPipeline releases and opens no draft, so nobody is actively developing") {
+            activityHeadline() shouldBe "0 pipelines actively developed"
+        }
     }
 
     @Test
@@ -97,6 +141,7 @@ class OverviewBrowserTest : RestTreeBrowserFixture() {
         println("598a-overview lifecycle height=${chart.height} width=${chart.width} card height=${card.height}")
         chart.height shouldBeGreaterThan 0.0
         chart.height shouldBeLessThanOrEqual card.height
+        twoSeededAreThisWeeksActivity()
         withClue("Recently updated is newest first: acme/two was released after acme/one") {
             page.locator("[data-overview-recent] li a").allInnerTexts() shouldBe listOf("acme/two", "acme/one")
         }
@@ -112,10 +157,16 @@ class OverviewBrowserTest : RestTreeBrowserFixture() {
             lifecyclePart("live").getAttribute("width") shouldBe "66.7"
             page.locator("[data-chart-table='maturity'] tr[data-row='r0'] td[data-part='draft-open']").textContent().trim() shouldBe "1"
         }
+        withClue("#598b: its draft was written just now, so it is actively developed, and it is this week's third new pipeline") {
+            activityHeadline() shouldBe "1 pipeline actively developed"
+            newestWeek().locator(".app-overview-stack-v b").innerText().trim() shouldBe "5"
+            page.locator("[data-chart-table='activity'] tbody tr:last-child td[data-part='created']").textContent().trim() shouldBe "3"
+        }
         screenshot("overview-1512", WIDE, WIDE_H)
         screenshot("overview-900", MID, MID)
         screenshot("overview-390", PHONE, PHONE_H)
         page.setViewportSize(WIDE, WIDE_H)
+        activityStandsAtHalfPitch()
         page.locator("[data-overview-view-all]").click()
         page.waitForURL("**/pipelines")
         page.waitForSelector("#pipeline-list-wrapper")
@@ -186,5 +237,11 @@ class OverviewBrowserTest : RestTreeBrowserFixture() {
         const val MID = 900
         const val PHONE = 390
         const val PHONE_H = 844
+
+        /** #598b: twelve rows at the activity chart's 24px pitch stand 288px; this allows a row-sized slack. */
+        const val ACTIVITY_ROWS_MAX_H = 300.0
+
+        /** #598b: twelve rows at the inventory's 48px pitch (a quarter of the 192px band). */
+        const val TWELVE_ROWS_AT_INVENTORY_PITCH_H = 576.0
     }
 }
