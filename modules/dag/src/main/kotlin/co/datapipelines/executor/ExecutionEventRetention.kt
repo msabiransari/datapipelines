@@ -1,6 +1,9 @@
 package co.datapipelines.executor
 
 import co.datapipelines.persistence.FailureShape
+import co.datapipelines.persistence.ScheduledJob
+import io.micrometer.core.instrument.Counter
+import io.micrometer.core.instrument.MeterRegistry
 import org.slf4j.LoggerFactory
 import org.springframework.dao.DataAccessException
 import java.time.Duration
@@ -22,12 +25,25 @@ import java.time.Instant
  *
  * ## Failure handling
  * A metadata-DB fault fails the tick, never the scheduler: logged, retried next tick — same
- * reasoning as the sweeper's.
+ * reasoning as the sweeper's. The DELETE carries a statement bound (#326, [ExecutionEventRepository]'s
+ * `statementTimeoutSeconds`): a cancel at the bound is one of these faults (`sql_state=57014`), and
+ * every failed tick is counted ([ScheduledJob.FAILED_TICK_METER], `job=event_retention`).
  */
 class ExecutionEventRetention(
     private val events: ExecutionEventRepository,
     private val retention: Duration,
+    /** The failed-tick counter's registry; null (every direct construction, tests) counts nothing. */
+    metrics: MeterRegistry? = null,
 ) {
+    private val failedTicks: Counter? =
+        metrics?.let { registry ->
+            Counter
+                .builder(ScheduledJob.FAILED_TICK_METER)
+                .description(ScheduledJob.FAILED_TICK_DESCRIPTION)
+                .tag(ScheduledJob.JOB_TAG, ScheduledJob.EVENT_RETENTION.tag)
+                .register(registry)
+        }
+
     init {
         require(!retention.isNegative && !retention.isZero) { "retention must be positive, was $retention" }
     }
@@ -52,6 +68,7 @@ class ExecutionEventRetention(
                     FailureShape.cause(e),
                     FailureShape.sqlState(e),
                 )
+                failedTicks?.increment()
                 return 0
             }
         if (purged > 0) {

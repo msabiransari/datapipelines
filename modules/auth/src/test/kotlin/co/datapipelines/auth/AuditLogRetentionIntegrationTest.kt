@@ -3,6 +3,7 @@ package co.datapipelines.auth
 import ch.qos.logback.classic.Level
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
+import co.datapipelines.persistence.ScheduledJob
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.ints.shouldBeGreaterThan
@@ -173,6 +174,20 @@ class AuditLogRetentionIntegrationTest {
         val warn = lines.single { it.level == Level.WARN }
         warn.formattedMessage shouldContain "event=audit.retention_failed purged=200 batches=2"
         failing.handedOut.get() shouldBeGreaterThan 3
+    }
+
+    /** #326: a failed tick is one `job=audit_retention` increment; a drained one is none. */
+    @Test
+    fun `a failed tick is counted under job=audit_retention, a drained one is not`() {
+        val registry = SimpleMeterRegistry()
+        val failedTicks = { registry.counter(ScheduledJob.FAILED_TICK_METER, ScheduledJob.JOB_TAG, "audit_retention").count() }
+
+        retention(registry = registry).purgeOnce().stop shouldBe AuditLogRetention.Stop.DRAINED
+        failedTicks() shouldBe 0.0
+        // The cutoff read's connection fails: the tick fails before its first batch.
+        retention(jdbc = NamedParameterJdbcTemplate(FailingAfter(connections = 0)), registry = registry).purgeOnce().stop shouldBe
+            AuditLogRetention.Stop.FAILED
+        failedTicks() shouldBe 1.0
     }
 
     @Test

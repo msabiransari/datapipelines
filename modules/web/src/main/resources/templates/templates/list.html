@@ -2,8 +2,8 @@
 <html xmlns:th="http://www.thymeleaf.org"
       th:replace="~{layouts/default :: page(~{::content})}">
 <th:block th:fragment="content">
-  <!-- #398 — the templates CATALOG (ui-screens.md §4.6, in §4.3's shape). The folder tree moved
-       into the global sidebar, beneath Templates (§3.4); a leaf there opens the template's
+  <!-- #398 — the templates CATALOG (ui-screens.md §4.6, in §4.3's shape). The folder tree lives
+       in the resource browser's Templates panel (#554); a leaf there opens the template's
        workspace. What stays here is the catalog: one flat, server-paged list of full paths —
        every template the caller may read, or the matches of the search — with the dialect and
        type filters beside the search, and (an author's) the create modal. There is no second
@@ -14,8 +14,9 @@
     <div>
       <h1 class="ds-headline">Templates</h1>
       <p class="app-page-sub">Reusable SQL and transforms that pipelines pin by version. A
-        template's folder is the first segment of its name. Browse the folders in the sidebar's
-        Templates tree, or search the whole catalog here; a template opens in its workspace.</p>
+        template's folder is the first segment of its name. Browse the folders in the resource
+        browser's Templates tree, or search the whole catalog here; a template opens in its
+        workspace.</p>
     </div>
     <div class="app-page-actions">
       <!-- The resource browser's other door (js/tree/sidebar.mjs, #554): shows the browser —
@@ -30,7 +31,8 @@
 
   <!-- Search, dialect, type and lifecycle address each other by ID (hx-include): a name-based
        include would also sweep up the create modal's own name="dialect" and name="type" inputs
-       (§4.6). The filters are the CATALOG's — the sidebar's tree carries its search alone (§3.4). -->
+       (§4.6). The filters are the CATALOG's — the resource browser's tree carries its search
+       alone (§3.4). -->
   <!-- `.ds-input` is `width: 100%`, so a bare select in a flex row grows without bound; the
        selects are sized by their content and only the search box flexes. -->
   <div class="u-row-md u-wrap u-mb-md app-catalog-search">
