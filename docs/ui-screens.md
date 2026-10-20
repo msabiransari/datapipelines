@@ -1,9 +1,9 @@
 # UI Screens Inventory
 
-**Status:** v1.183
+**Status:** v1.184
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
-**Last updated:** 2026-10-20 (#625; #598b); 2026-10-19 (#598a merge follow-up; #617; #609; #598a; #605; #619; #585; #584; #613; #509; #608; #614 + #611; #612; #615); 2026-10-18 (#583; #573; #607; #606; #565; #582; #581; #580; #579); 2026-10-17 (#556; #578; #554); 2026-10-16 (#551 merge follow-up; #551; #555; #552; #553; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
+**Last updated:** 2026-10-20 (#627; #625; #598b); 2026-10-19 (#598a merge follow-up; #617; #609; #598a; #605; #619; #585; #584; #613; #509; #608; #614 + #611; #612; #615); 2026-10-18 (#583; #573; #607; #606; #565; #582; #581; #580; #579); 2026-10-17 (#556; #578; #554); 2026-10-16 (#551 merge follow-up; #551; #555; #552; #553; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
 ---
 
 ## 1. Purpose
@@ -2608,7 +2608,12 @@ plus released with draft changes, so those two overlap by design and say so. Eve
 counts, bars, bar labels and the table — is read from that one value, so the chart cannot disagree with
 its totals. A bar's width is its value relative to the tallest, 0–100, written as the SVG `rect`'s
 `width` attribute (the CSP admits no style); a zero is a zero-width bar beside its "0", never a
-visible minimum. A visually hidden table repeats the four rows for assistive technology.
+visible minimum. Bars, parts and legend swatches are painted by four tones — draft the warning series,
+released the success series, released with draft changes the info series (`--chart-series-1`; #627 —
+never the brand), discarded the muted series — and never by colour alone: every part carries its words
+and count. Two measured gaps are listed in the sweep, not hidden: on professional the info series sits
+0.073 from the link (#633); minimal paints the three series one black (#631).
+A visually hidden table repeats the four rows for assistive technology.
 
 **The Pipelines charts (#598a).** The same snapshot, extended by each admitted pipeline's count of
 RELEASED versions, feeds the Pipelines card from ONE statement (`ChartInventorySource`, built on
@@ -2884,6 +2889,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-20 | v1.184 | #627 overview mixed tone — renumbered at merge after #625's v1.183 | **§4.25:** bars, stacked parts and legend swatches share four lifecycle tones; mixed reads the info series (`--chart-series-1`) rather than the brand. `OverviewToneBrowserTest` measures all nine themes and both auto schemes at the unchanged OKLab distance floor of 0.08, with measured, stale-checking palette gaps for professional (#633) and minimal (#631). |
 | 2026-10-20 | v1.183 | #625 template version selector selection — renumbered at merge after #598b's v1.182 | **§4.7:** the version selector's viewed row takes the menu's selection expression (§3.1): `--brand-soft` tint, `--text-primary` ink (Minimal `--text-inverted`), the 3px `--border-focus` bar from `--app-nav-indicator-w` instead of the 2px `--focus-ring-offset`, reserved transparent on every row; the viewed row's `· current` suffix inherits the label's ink (owner, 2026-10-20 — muted on the tint measured 2.96–3.83:1). `TemplateVersionSelectorBrowserTest` measures bar, ink, contrast and geometry on nine themes plus auto's dark half. |
 | 2026-10-20 | v1.182 | #598b Pipelines activity chart | **§4.25:** the Pipelines card's third chart, **Pipelines activity, last 12 weeks**, from the same statement: twelve UTC weeks (Monday-first, oldest first, the newest "this week so far"), each stacking Released (admitted RELEASED versions by `released_at`) and Created (admitted pipelines by `created_at`) into a bar of events, the busiest week full width; the headline "N pipelines actively developed" (an admitted draft last written within `datapipelines.ui.actively-developed-days`, default 14, inclusive; a count today, no per-week draft history; 0 through a promoter's lens); the note; the hidden table's Week, Released, Created, Events; rows at half the inventory pitch (`--space-6`). The lens paragraph, the guards and the Pipelines row of Families as built name it. |
 | 2026-10-19 | v1.181 | #598a merge follow-up: §4.25 records #593's count sentence | **§4.25:** the Pipelines charts paragraph quotes the card's note on why its total can exceed the resource browser's header count (the header counts the three live parts; Retired is discarded only, with no page) — #593's acceptance asked the counting model to say what the page says; the Links paragraph's four-count sentence now names the Pipelines card's as until #598a. |
