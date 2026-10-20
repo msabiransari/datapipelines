@@ -156,7 +156,7 @@ class BrowserResourceRowBrowserTest : RestTreeBrowserFixture() {
                           const browser = document.querySelector('#app-browser'), tree = document.querySelector(panel);
                           const rect = el => { const r = el.getBoundingClientRect();
                             return {left:r.left, right:r.right, top:r.top, bottom:r.bottom}; };
-                          const p = rect(browser), scroll = tree.querySelector('.dp-tree-rows');
+                          const p = rect(browser), scroll = tree.querySelector('.dp-tree-scroll');
                           const badges = [...tree.querySelectorAll('a[title="' + path + '"] .ds-badge:not([hidden])')]
                             .map(el => ({text:el.textContent, ...rect(el)}));
                           return {panel:p, badges, panelScroll:browser.scrollWidth, panelClient:browser.clientWidth,
