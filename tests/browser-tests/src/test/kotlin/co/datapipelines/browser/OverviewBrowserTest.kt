@@ -4,6 +4,7 @@ import com.microsoft.playwright.Locator
 import com.microsoft.playwright.Page
 import io.kotest.assertions.withClue
 import io.kotest.matchers.doubles.shouldBeGreaterThan
+import io.kotest.matchers.doubles.shouldBeLessThan
 import io.kotest.matchers.doubles.shouldBeLessThanOrEqual
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -75,6 +76,22 @@ class OverviewBrowserTest : RestTreeBrowserFixture() {
     private fun newestWeek() = page.locator("[data-stacked='activity'] [data-row^='week-']:last-child")
 
     private fun activityHeadline(): String = page.locator("[data-stacked-total='activity']").innerText().trim()
+
+    /**
+     * #598b (A.4): measured at the 1512 viewport and printed for the record. The rule sets the rows'
+     * pitch, so the rows are the bound (twelve at 24px = 288px); the whole section — headline,
+     * caption, rows, legend and the two-line note, 403px when measured — stands shorter than the
+     * twelve rows alone would at the inventory's 48px pitch.
+     */
+    private fun activityStandsAtHalfPitch() {
+        withClue("#598b: the activity chart's twelve rows stand at half the inventory pitch at 1512") {
+            val activity = page.locator("[data-stacked-chart='activity']").boundingBox()
+            val rows = page.locator("[data-stacked='activity']").boundingBox()
+            println("598b-overview activity height=${activity.height} rows height=${rows.height} width=${activity.width}")
+            rows.height shouldBeLessThanOrEqual ACTIVITY_ROWS_MAX_H
+            activity.height shouldBeLessThan TWELVE_ROWS_AT_INVENTORY_PITCH_H
+        }
+    }
 
     /** #598b: the third chart after two `seedPipeline`s — each created and released this week, neither with a draft. */
     private fun twoSeededAreThisWeeksActivity() {
@@ -149,6 +166,7 @@ class OverviewBrowserTest : RestTreeBrowserFixture() {
         screenshot("overview-900", MID, MID)
         screenshot("overview-390", PHONE, PHONE_H)
         page.setViewportSize(WIDE, WIDE_H)
+        activityStandsAtHalfPitch()
         page.locator("[data-overview-view-all]").click()
         page.waitForURL("**/pipelines")
         page.waitForSelector("#pipeline-list-wrapper")
@@ -219,5 +237,11 @@ class OverviewBrowserTest : RestTreeBrowserFixture() {
         const val MID = 900
         const val PHONE = 390
         const val PHONE_H = 844
+
+        /** #598b: twelve rows at the activity chart's 24px pitch stand 288px; this allows a row-sized slack. */
+        const val ACTIVITY_ROWS_MAX_H = 300.0
+
+        /** #598b: twelve rows at the inventory's 48px pitch (a quarter of the 192px band). */
+        const val TWELVE_ROWS_AT_INVENTORY_PITCH_H = 576.0
     }
 }
