@@ -1,6 +1,6 @@
 # Design: TRANSFORM nodes — JSONata and JavaScript as template types, one node type, one contract, tested like code
 
-**Status:** v0.6 (2026-09-28, #272): §4.5 gains the owner's ruling — the evaluation pool's abandonment is the transform engine's sandbox bound, the between-steps hooks a runaway guard — and the Reserved names row (a body may not bind a `__` name; `$eval` checked the same way); the 7a note's "`$eval` cannot parse bind expressions" corrected. v0.5 (2026-09-26, #260): §4.5's Depth row corrected — the engine counts depth with its own evaluate entry/exit hooks (the library `Timebox` skipped `isParallelCall` frames, leaking one unit per item on set-level shapes); tail-recursive lambdas are trampolined and stay a wall-clock case. v0.4 (2026-09-24) restated every authorization row in the vocabulary of the permissions-and-keys record (`2026-09-23-permissions-and-keys-design.md`, RATIFIED 2026-09-23, #215), which lands BEFORE the remaining transform lanes (owner, 2026-09-24); v0.3 RATIFIED for dispatch (2026-09-23) on the owner's nine rulings R1–R9 (§0.1).
+**Status:** v0.7 (2026-10-20, #8 round-two readiness): §4.4 re-verified against the current GraalVM guides and Maven Central — the pin is 25.4.4.1.1, the untrusted policy needs six options §4.4 did not list, the isolate is spawned explicitly, a Context that trips a limit is dead; new §4.6 (the spike that opens round two, eleven ways the round can fail with where each is found, the measurements it must record); D-T16 packaging (the jar carries no isolate — the image fetches its platform's, SHA-256 verified, into a directory a setting names) and D-T17 console output to the application log (owner, 2026-10-20); §12's round-two decisions re-listed; §14 gains lanes 8a/8b. v0.6 (2026-09-28, #272): §4.5 gains the owner's ruling — the evaluation pool's abandonment is the transform engine's sandbox bound, the between-steps hooks a runaway guard — and the Reserved names row (a body may not bind a `__` name; `$eval` checked the same way); the 7a note's "`$eval` cannot parse bind expressions" corrected. v0.5 (2026-09-26, #260): §4.5's Depth row corrected — the engine counts depth with its own evaluate entry/exit hooks (the library `Timebox` skipped `isParallelCall` frames, leaking one unit per item on set-level shapes); tail-recursive lambdas are trampolined and stay a wall-clock case. v0.4 (2026-09-24) restated every authorization row in the vocabulary of the permissions-and-keys record (`2026-09-23-permissions-and-keys-design.md`, RATIFIED 2026-09-23, #215), which lands BEFORE the remaining transform lanes (owner, 2026-09-24); v0.3 RATIFIED for dispatch (2026-09-23) on the owner's nine rulings R1–R9 (§0.1).
 Supersedes v0.2 (2026-09-17) in place; every v0.2 decision stands, and the pre-dispatch review
 of 2026-09-23 (store: `notes/2026-09-23-transform-spec-review.md`) corrected eight statements
 that disagreed with the tree at `be0305b3` (§0.2) and closed nine holes with the owner. GitHub
@@ -17,7 +17,10 @@ prompt cites this record.
 **Provenance of external facts.** The GraalVM sandboxing guide (`graalvm.org/latest`) was
 read on 2026-09-09 and again on 2026-09-17 (§4.4); Maven Central and the
 `dashjoin/jsonata-java` README on 2026-09-09, and the library's `Jsonata.java`, `Timebox.java`
-and `Functions.java` sources on 2026-09-23 (§4.5). Version numbers are recorded as the floor
+and `Functions.java` sources on 2026-09-23 (§4.5). Re-read 2026-10-20 for round two (§4.4, §4.6): the sandboxing
+guide (`security-guide/sandboxing/`), the embedding guide (`reference-manual/embed-languages/`, "Polyglot Isolates"),
+and Maven Central's repository metadata and jar headers (`repo1.maven.org` — never the search index, which lagged two
+release lines that day). Version numbers are recorded as the floor
 the implementer verifies against, never as the pin.
 
 ---
@@ -41,6 +44,8 @@ the implementer verifies against, never as the pin.
 | **D-T13** | **Invariants are JSONata booleans, whatever the template's language.** | Assertions stay data, not code — the instinct behind release checks — so every transform's guarantees render in one place and cannot have side effects. |
 | **D-T14** | **Two implementation rounds: JSONata first with the whole contract machinery; JavaScript second.** | The seam and the conformance suite are proven on the engine with no isolate before the engine with one arrives; the JS round measures serialisation cost on a working system rather than estimating it. |
 | **D-T15** (new v0.3) | **The JSONata engine is fenced like its JavaScript brother and like every other executor resource: its bounds are stated honestly, it runs on its own bounded pool, its inputs and outputs are capped, and a breach suite proves each bound or records its absence (R7, §4.5).** | A sandbox no test has breached is a belief. The library bounds time and depth between steps only; the executor must own what the library cannot. |
+| **D-T16** (new v0.7, owner 2026-10-20) | **The jar carries no isolate; the image fetches the one for its platform.** The GraalJS isolate is a per-platform native artifact (§4.4). The product jar bundles only the polyglot API and the engine code; the Dockerfile fetches the isolate for its `TARGETARCH` from Maven Central at image build, verified against the published SHA-256, into the directory `datapipelines.transform.js.isolate-dir` names (the DuckDB-extension pattern already in the Dockerfile). A non-Docker deployment drops its platform's isolate jar there. Empty or missing → JavaScript disabled, said once at boot (`transform.js.unavailable`); never a silent fallback. Local builds and tests take the host platform's isolate through Gradle; all four platform artifacts are pinned in the verification metadata. | Bundling every platform costs ~123 MB on a 186 MB jar for files no deployment runs; bundling one bakes the platform into the jar and an org building an arm64 image from the published jar gets JavaScript silently off. Docker's own `--platform` is the knob orgs already know. Measured 2026-10-20: linux-amd64 isolate 62 459 905 bytes, linux-aarch64 60 719 533, the jar 186 408 039. |
+| **D-T17** (new v0.7, owner 2026-10-20) | **`console.*` output is logged like the application's own logs** — one structured line per call under the logger `transform.js.console`, tagged with template id and version, node id and execution id, bounded by `sandbox.MaxOutputStreamSize` / `MaxErrorStreamSize`; `console.error`/`warn` at WARN, the rest at INFO. The same captured text is returned in `templates_evaluate` and the test runner's result (`console: [...]`, capped the same way) so an author — who has no server log — sees it where they debug; a pipeline run logs only. | The owner's ruling (2026-10-20): "those are just like java logs". The author-facing copy is the orchestrator's addition, confirmed at the 8a dispatch; a console line can carry row data, so the log line is bounded, marked and subject to the same retention as every other log line. |
 
 ### 0.1 The owner's rulings of 2026-09-23 (R1–R9)
 
@@ -379,35 +384,64 @@ int/long/double by `Utils.convertNumber` — the reason §6 keeps the type syste
 
 ### 4.4 JavaScript — GraalJS polyglot isolate (round two; facts kept here so they are not re-derived)
 
-Read from the GraalVM sandboxing and embedding guides on 2026-09-09, re-read 2026-09-17:
+Read from the GraalVM sandboxing and embedding guides on 2026-09-09, re-read 2026-09-17 and **re-verified
+2026-10-20** (the v0.7 corrections are marked):
 
-- Stock OpenJDK 21 runs GraalJS either in interpreter-only fallback mode or through a
-  **polyglot isolate** (`org.graalvm.polyglot:js-isolate-community`, floor 25.3.4.1;
-  per-platform artifacts `linux-amd64`, `linux-aarch64`, `darwin-aarch64`, `windows-amd64`;
-  glibc — matches the `eclipse-temurin:21-jre` image).
+- Stock OpenJDK 21 runs GraalJS either in interpreter-only mode or through a **polyglot isolate**: a native
+  image of the engine loaded into our process with its own heap, garbage collector, JIT and fault domain. The
+  embedding guide's runtime table lists JDK 21 as a supported host, optimizing "through the polyglot isolate
+  only". **Artifacts (v0.7, read from `repo1.maven.org`):** `org.graalvm.polyglot:polyglot` (the API, a 0.5 MB
+  jar) plus the Community isolate. `org.graalvm.polyglot:js-isolate-community` is a `pom` aggregating four
+  platform poms (`js-isolate-linux-amd64-community`, `-linux-aarch64-`, `-darwin-aarch64-`, `-windows-amd64-`),
+  each of which depends on the binary `org.graalvm.js:js-isolate-<platform>-community` (linux-amd64
+  62 459 905 bytes, linux-aarch64 60 719 533; transitive `org.graalvm.sdk:nativebridge`,
+  `org.graalvm.truffle:truffle-api`). The isolate carries the language; no `js-community` beside it.
+  **Pin 25.4.4.1.1** (released 2026-09-22; 25.3.4.1 is the previous line). glibc — matches the
+  `eclipse-temurin:21-jre` image. Packaging is D-T16.
 - **Sandboxing on Community requires the isolate** (since GraalVM 25.1). Policies
-  `CONSTRAINED → ISOLATED → UNTRUSTED` build on each other; `ISOLATED`/`UNTRUSTED` need the
-  isolate. The decision is **`SandboxPolicy.UNTRUSTED`**, one shared `Engine`, one `Context`
-  per evaluation, `MaxCPUTime` = the node wall clock, `MaxHeapMemory` =
-  `datapipelines.transform.js.max-heap-mb` (default 256), `MaxStatements` as a runaway-loop
-  backstop, `MaxThreads` = 1, stdout/stderr to bounded buffers.
-- **Under `UNTRUSTED`, host entry points are explicit only** (`@HostAccess.Export`), callback
-  time counts toward the CPU limit, and **guest access to host arrays, lists, maps, buffers,
-  iterables and iterators is disallowed**. Consequence (2026-09-17): nothing is exported
-  (D-T4 needs nothing), and every value crossing the boundary is a scalar or a string —
-  the input object goes in as one JSON string per evaluation (`JSON.parse` in the guest),
-  the result comes back as one JSON string (`JSON.stringify` in the guest). One encode and
-  one decode per batch per direction; **measured on a 100 000-row `row`-mode run before the
-  round closes and the number recorded in the handback.** Rich proxy objects across the
-  boundary would require dropping to `ISOLATED` and are not planned.
+  `CONSTRAINED → ISOLATED → UNTRUSTED` build on each other; `ISOLATED`/`UNTRUSTED` need the isolate. The
+  decision is **`SandboxPolicy.UNTRUSTED`**, one shared `Engine`, one `Context` per evaluation. **The isolate
+  is never automatic (v0.7):** the builder calls `spawnIsolate(true)` on a builder with an explicit language
+  list (`Context.newBuilder("js")` / `Engine.newBuilder("js")`); `engine.IsolateMode=external` (a separate OS
+  process) is experimental and not planned.
+- **What `UNTRUSTED` requires (v0.7 — the guide's current list; a missing one refuses to build the Context):**
+  `sandbox.MaxCPUTime` (the node wall clock; checked every `sandbox.MaxCPUTimeCheckInterval`, default 10 ms),
+  `sandbox.MaxHeapMemory` (= `datapipelines.transform.js.max-heap-mb`, default 256 — **a soft limit: the guide
+  says guest code can still cause `OutOfMemory`**), `engine.MaxIsolateMemory` (the isolate's whole heap; every
+  Context sharing the Engine shares it, so it is ≥ `pool-size × max-heap-mb` plus headroom —
+  `datapipelines.transform.js.isolate-memory-mb`), `sandbox.MaxStatements` (the runaway-loop backstop;
+  `MaxStatementsIncludeInternal` identical on every Context of the Engine), `sandbox.MaxThreads = 1`,
+  `sandbox.MaxASTDepth`, `sandbox.MaxOutputStreamSize` and `sandbox.MaxErrorStreamSize` (D-T17's caps),
+  `in`, `out` and `err` redirected, `allowHostAccess(HostAccess.UNTRUSTED)`, `engine.UntrustedCodeMitigation`
+  on. `sandbox.UseLowMemoryTrigger` is unsupported under the policy. `--sandbox.TraceLimits=true` records peak
+  usage for sizing. All of these are config keys under `datapipelines.transform.js.*` (configuration.md's
+  §3.28 table grows; `TransformConfigKeysSpecDriftTest` pins the set).
+- **Under `UNTRUSTED`, host entry points are explicit only** (`@HostAccess.Export`) and **guest access to host
+  arrays, lists, maps, buffers, iterables and iterators is disallowed**. Consequence (2026-09-17, unchanged):
+  nothing is exported (D-T4 needs nothing); the input object goes in as one JSON string per evaluation
+  (`JSON.parse` in the guest), the result comes back as one JSON string (`JSON.stringify` in the guest). One
+  encode and one decode per batch per direction; **measured on a 100 000-row `row`-mode run before the round
+  closes and the number recorded in the handback** (§4.6).
+- **When a limit trips (v0.7):** a `PolyglotException` with `isResourceExhausted()` true (`isCancelled()` too
+  for CPU, statements and output); the Context is cancelled and cannot run guest code again. That matches one
+  Context per evaluation: the engine closes it (try-with-resources) and maps the exception to
+  `pipeline.transform.resource_limit` (detail names the limit) or `pipeline.transform.timeout`. Cancellation
+  from outside is `Context.close(true)` from the pool's caller — so, unlike JSONata, this engine reports
+  `interruptible = true` and the abandonment path is the backstop, not the bound (verified in A.0 before the
+  capability is claimed).
 - **If the isolate cannot load**, the app starts with JavaScript **disabled** and says so once
-  (`transform.js.unavailable` at boot; the node refuses at save with the same code) — never a
-  silent fallback to the non-isolated interpreter, whose sandbox on Community is the weaker
-  `CONSTRAINED`. Whether a documented opt-in knob (`datapipelines.transform.js.allow-fallback-runtime`,
-  default `false`) ships is a round-two decision (§12).
+  (`transform.js.unavailable` at boot; the node and the template refuse at save with the same code) — never a
+  silent fallback to the non-isolated interpreter, whose sandbox on Community is the weaker `CONSTRAINED`.
+  The fallback knob (`datapipelines.transform.js.allow-fallback-runtime`) is **not shipped** (R2-2's lean,
+  decided at the 8a dispatch).
+- **Determinism (v0.7):** the engine installs a guest prelude before the body: `Date.now`, `new Date()` with no
+  argument and `Math.random` read the evaluation's pinned clock/seed (`EvaluationLimits.now`, R2-4 — the JS twin of
+  §4.5's `$now()` rule: unpinned → the call refuses), `Intl`/time zone fixed (`js.timezone=UTC`, locale `en-US`).
+  A guest can in principle undo a prelude, so this is a correctness aid for authors, **not a security
+  boundary** — the boundary is the policy above.
 - The implementer proves each limit and each host-access door with a test that violates it
-  (`while (true)`, `new Array(1e9)`, a `Java.type` reference, a `fetch`) and reads the
-  refusal back. A sandbox no test has breached is a belief.
+  (`while (true)`, `new Array(1e9)`, a `Java.type` reference, a `fetch`, `console.log` past the cap, a
+  `Date.now()` without a pin) and reads the refusal back. A sandbox no test has breached is a belief.
 
 ### 4.5 What the JSONata engine bounds, and what it does not (R7; read 2026-09-23 from the library source)
 
@@ -430,6 +464,40 @@ deep recursion (a recursive lambda), `$eval` nesting, `$now()`, and — since #2
 **refused** (which code), **bounded loss** (the node failed on time; the thread was abandoned
 and replaced; the number of seconds it lived), or **unbounded** (heap) — and the docs table
 above is generated from that record, not written by hand.
+
+---
+
+### 4.6 Round two: the spike, the ways it fails, the measurements (v0.7, 2026-10-20)
+
+**The spike opens the round (lane 8a, A.0).** Before any engine code: the real Spring Boot jar, the isolate
+loaded from the D-T16 directory, one `Context` under `UNTRUSTED` with the full §4.4 option set, `1 + 1`
+evaluated and read back; then `while (true)` refused on time. GraalVM's guide says uber jars are "not
+recommended" and that the class path may need `--add-modules=org.graalvm.polyglot`; nobody on this project
+has run the isolate from a nested jar, and the whole packaging decision rests on it. If the spike fails, the
+alternatives in order are: the external directory on `loader.path` (Spring's `PropertiesLauncher`), then a
+module-path launch in the Dockerfile — each a change to how the app starts, decided with the owner.
+
+**The ways this round fails**, with where each is found and what answers it:
+
+| # | Failure | Found by | Answer |
+|---|---|---|---|
+| 1 | The isolate does not load from our deployment shape (nested jar, class path, `--add-modules`) | A.0, day one | D-T16's directory / launcher change |
+| 2 | JDK 21 and GraalJS 25.4 disagree at runtime (the guide lists JDK 21; nobody here has run it) | A.0 | pin the previous line, or the JDK moves (its own decision) |
+| 3 | A guest failure crashes the JVM (native code in-process; the Dockerfile records a JNA SIGSEGV precedent) | the breach suite's heap and stack cases | the fault-domain claim is measured, not believed; `engine.IsolateMode=external` is the fallback design, not shipped |
+| 4 | Start-up and per-evaluation cost (isolate boot, a Context per batch, two JSON passes per batch) | the measurements below | `datapipelines.transform.js.batch-size` (R2-3) or Context reuse (its own decision) |
+| 5 | Memory on the server: the isolate heap sits beside the JVM heap; `pool-size × max-heap-mb` at defaults is 1 GB | sizing in 8b against the VPS (RAM read from the box, never from memory) | defaults chosen from the measured peak (`--sandbox.TraceLimits`), documented in deployment.md |
+| 6 | The heap limit is soft (the guide says so): a guest can exhaust it before the check | the breach suite's three-way record | the input/output caps stay the real bound; the honest-bounds table says UNBOUNDED where it is |
+| 7 | Determinism leaks (`Date.now`, `Math.random`, zone, locale) make one template mean two things on two servers | the conformance suite's determinism case + the prelude tests | §4.4's prelude; stated as an aid, not a boundary |
+| 8 | Silent number damage: an integer above 2^53 rounds in the guest before the type gate sees it; a plain number returned for `BIGINTEGER`/`BIGDECIMAL` is quietly wrong, not refused | a type-gate case per column type (§6) | `BIGINTEGER`/`BIGDECIMAL` cross as strings both ways (D-T5); the engine refuses a non-string for those columns; one skill sentence |
+| 9 | Dependency plumbing: four platform natives, `truffle-api`/`nativebridge`, lock files and verification metadata from a cold Gradle home, the vulnerability scan, the licence of the Community isolate (not yet read) | the dependency review in 8a | DEVELOPMENT.md §6.2's cold command; the licence read recorded in the handback |
+| 10 | Egress at image build (Maven Central at `docker build`) | a hardened org without egress | D-T16's directory; Maven Central's artifacts are immutable by policy, so a private mirror is an ops choice, not a correctness need (see #8's comments) |
+| 11 | The record itself was thin on the untrusted policy (six required options missing until v0.7) | — | §4.4 as rewritten; the conformance case "the Context builds with exactly the configured set" |
+
+**The measurements the round records** (handback, then `dag-executor.md` §5.3 beside JSONata's table, generated
+not hand-written): isolate load time at boot; Context creation time (p50/p95 over 1 000); the 100 000-row
+`row`-mode run at `result-batch-size` and at two smaller batch sizes (wall, encode/decode share); peak isolate
+heap under `--sandbox.TraceLimits`; the JS breach suite's three-way record (REFUSED / BOUNDED / UNBOUNDED)
+for every §4.4 case; the jar and image sizes before and after.
 
 ---
 
@@ -804,12 +872,15 @@ record is the authority.
 
 **The 2026-09-23 review's B1–B9: all resolved (§0.1).** Nothing blocks dispatch.
 
-**For round two:** R2-1 `console.log` → node warnings capped at `MaxOutputStreamSize`, or
-dropped? (lean: warnings). R2-2 ship the fallback knob, default off, or refuse outright?
-(lean: refuse outright unless a real deployment needs it). R2-3 the measured serialisation
-cost decides whether `row`-mode batches for JS default to `result-batch-size` or a smaller
-`transform.js.batch-size`. R2-4 whether `$now`/`$millis` pinning (§4.5) has a JS twin
-(`Date.now()` under the isolate).
+**For round two (re-listed 2026-10-20, v0.7):** R2-1 `console.*` → **ruled** (D-T17: the application log, and
+the evaluate/test result). R2-2 the fallback knob → lean: refuse outright, not shipped (decided at the 8a
+dispatch). R2-3 the measured serialisation cost decides whether `row`-mode batches for JS default to
+`result-batch-size` or a smaller `datapipelines.transform.js.batch-size` (§4.6's measurements). R2-4 the JS
+clock pin → the §4.4 prelude (`Date.now()`/`new Date()`/`Math.random` under the isolate, unpinned → refuse),
+the twin of §4.5's `$now()` rule. R2-5 packaging → **ruled** (D-T16). R2-6 the number trap (§4.6 row 8) →
+strings both ways for the big types, refused otherwise. R2-7 Context reuse across batches → not in this round;
+only if R2-3's measurement forces it, and then as its own decision (shared state between batches is the
+risk §11 names).
 
 ---
 
@@ -837,12 +908,20 @@ blending → the tempdb join; Ask/Explain Data → the agent; Prep flows → pip
 prompt naming its base at dispatch. Round two (#8, the JavaScript engine) and the parameter engine
 follow the scheduler (R8).
 
+**Round two (#8, v0.7 — one-then-next; L lanes for Claude Code):**
+
+| Lane | Fence | Delivers | Depends on |
+|---|---|---|---|
+| **8a — the engine** | `modules/scripting` (+ the version catalog, lock files, verification metadata), `Dockerfile` and `deploy/` for D-T16, `DEVELOPMENT.md` | A.0 the spike (§4.6); `JavaScriptEngine` on the §4.1 seam with the §4.4 option set and prelude; registration in `ScriptEngineConformanceTest`; `JavaScriptBreachTest` in the `breachTest` source set with its own report; the §4.6 measurements; the D-T16 fetch in the image with SHA-256 verification; the dependency review (licence read, cold-home locks). No product surface: the template still refuses at save. | round one on main (it is) |
+| **8b — the wiring** | `templates` (`TemplateTypeBehaviour.Javascript`), `web` (`TransformConfiguration`, `TemplateValidator`'s default map, `TransformProperties`, the face label), `dag` (`TransformNodeRuns.engineFor`), `app` (`TransformRules`, the config-keys drift test), docs `configuration.md` §3.28 / `dag-executor.md` §5.3 / `templates.md` / `deployment.md`, the skill (`transforms.md`'s "until round two" line) | the engine map gains `JAVASCRIPT` at every site; the boot-time disable path; D-T17 in `templates_evaluate` and the test runner; the config keys with their defaults from 8a's measurements; the E2E of §10.9 run once with a JavaScript body. | 8a merged |
+
 ---
 
 ## Change Log
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-20 | v0.7 | orchestrator, with the owner (round-two readiness, #8) | §4.4 re-verified against the current GraalVM sandboxing and embedding guides and Maven Central: pin 25.4.4.1.1, the artifact layout (aggregator poms over `org.graalvm.js:js-isolate-<platform>-community`), the untrusted policy's full required option set (`engine.MaxIsolateMemory`, `sandbox.MaxASTDepth`, the stream caps, `in`, `HostAccess.UNTRUSTED`), `spawnIsolate(true)` explicit, a tripped Context is dead, cancellation from outside; the determinism prelude. New §4.6: the spike, eleven failure modes with where each is found, the measurements. D-T16 packaging (owner): the jar carries no isolate, the image fetches its `TARGETARCH`'s with SHA-256, a directory setting for non-Docker deployments. D-T17 (owner): `console.*` to the application log, and to the evaluate/test result. §12 round-two decisions re-listed (R2-1, R2-5 ruled). §14 lanes 8a/8b. |
 | 2026-09-09 | v0.1 | orchestrator, after the owner's brainstorm | Initial record: six decisions; engine and sandbox facts verified against graalvm.org and Maven Central; decimal-as-string rule. |
 | 2026-09-17 | v0.2 | orchestrator, after the owner's second brainstorm | Rewritten in place. Pure function only — no tempdb handle, no `emit` (D-T4); one Context namespace, `params`/`context` removed from the input object (D-T10); `meta` block; mode moves to the template's contract; **contract, invariants, tests on the version inside the body hash** (D-T7), a scoped D3 exception (D-T8); no Freemarker on transform bodies (D-T9); rejects + strict (D-T11); exact canonical equality + invariants on every case (D-T12); invariants always JSONata (D-T13); `implements` + `needs_review` drift + discovery (§8); `templates_evaluate` returns invariants; two rounds, JSONata first (D-T14); the `UNTRUSTED` host-collection rule and its JSON-text consequence recorded for round two (§4.4); `values` in the result payload considered and dropped (dashboards are a separate runtime); v0.1's O-1..O-5 resolved. |
 | 2026-09-23 | v0.3 | orchestrator, after the pre-dispatch review and the owner's rulings R1–R9 | Ratified for dispatch. Corrections against the tree at `be0305b3` (§0.2): `LogicalType` vocabulary replaces the invented type table (D-T5, §6); the body hash is the SQL `jsonb_build_object` expression, extended, with export/import carrying the blocks (§2.2); `execute_node` refuses a TRANSFORM (§9.1); `engine` type-conditional, `imports`/`is_library` refused (§2.1); textarea panes (§9.3); one save-time `type_unsupported`; nullability always scanned (§5.1). Rulings: `DECIMAL` rounding at the gate (R1, §5.3); row-mode cases mirror production (R2, §2.2); no JSON result bodies, value mode writes a key only (R3, §3.1, §9.6, §11); object keys readable by TRANSFORM only (R4, §3.1, §7); rejects-on-caller refused (R5); the roles table (R6, §9.4); D-T15 + §4.5 the honest JSONata bounds, the evaluation pool, the caps, the breach suite (R7); build order transforms → scheduler → parameters (R8); `implements` in round one as lane 7e (R9). New §9.2 REST, §9.5 Security, §14 lane split. |
