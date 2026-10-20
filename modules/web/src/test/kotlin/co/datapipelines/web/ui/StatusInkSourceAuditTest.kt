@@ -83,6 +83,25 @@ class StatusInkSourceAuditTest {
         val sheets: Int,
     )
 
+    @ParameterizedTest
+    @ValueSource(strings = ["success", "warning"])
+    fun `no status fill or raw text alias is consumed as text`(role: String) {
+        val aliases =
+            sheets.flatMap { (name, css) ->
+                Regex("""(--[\w-]+)\s*:\s*var\(\s*--(?:accent|text)-$role\s*[,)]""")
+                    .findAll(css)
+                    .filterNot { it.groupValues[1] == "--app-$role-ink" }
+                    .map { it.groupValues[1] to "$name: ${it.value}" }
+                    .toList()
+            }
+        val stray =
+            aliases.flatMap { (alias, declaration) ->
+                hits(Regex("""(?<![-\w])color\s*:\s*var\(\s*${Regex.escape(alias)}\s*[,)]"""))
+                    .map { "$declaration -> $it" }
+            }
+        withClue(stray.joinToString("\n")) { stray shouldBe emptyList() }
+    }
+
     private companion object {
         /** `color:` (never `border-color:` / `background-color:`) reading the role's accent or text role, bare or with a fallback. */
         fun strayText(role: String) = Regex("""(?<![-\w])color\s*:\s*var\(\s*--(?:accent|text)-$role\s*[,)]""")

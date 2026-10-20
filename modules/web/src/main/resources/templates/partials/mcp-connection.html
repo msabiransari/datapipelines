@@ -5,7 +5,8 @@
      count is McpToolCatalog.NAMES.size at request time, never a literal — the same expression the
      marketing site renders, for the same reason: a number that can drift from `tools/list` is
      worse than no number. `note` is the caller's sentence under the config: each page says what
-     key the config wants in its own words. */-->
+     key the config wants in its own words. Copy config copies the pre's placeholder text to the
+     clipboard (or selects it for manual copying), sends no request and grants no access. */-->
 <div xmlns:th="http://www.thymeleaf.org" class="ds-card" th:fragment="card(note)" data-mcp-connection>
   <div class="app-card-h app-card-h-flush">
     <h2 class="ds-title">MCP server</h2>
@@ -13,9 +14,15 @@
   </div>
   <div class="app-card-b app-card-b-flush">
     <pre class="app-code" th:text="${mcpConfigJson}">{}</pre>
+    <div class="app-overview-copy">
+      <button type="button" class="ds-button ds-button-primary ds-button-sm"
+              data-mcp-copy data-copy-label="Copy config">Copy config</button>
+      <span class="app-card-note" role="status" data-mcp-copy-status></span>
+    </div>
     <div class="app-note">
       <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#info"></use></svg>
       <th:block th:replace="${note}"></th:block>
     </div>
   </div>
+  <script type="module" th:src="@{/js/mcp-connection.mjs}"></script>
 </div>

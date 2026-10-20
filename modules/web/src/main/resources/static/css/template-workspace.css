@@ -32,7 +32,7 @@
   display: inline-flex;
   align-items: center;
   gap: var(--gap-xs, 4px);
-  color: var(--text-muted, #64748b);
+  color: var(--text-muted);
   font-size: var(--app-text-ui);
   white-space: nowrap;
 }
@@ -49,7 +49,7 @@
 }
 
 .tw-crumb-path {
-  color: var(--text-muted, #64748b);
+  color: var(--text-muted);
   font-family: var(--font-mono, monospace);
   font-size: var(--app-text-support);
   overflow: hidden;
@@ -70,13 +70,13 @@
   letter-spacing: 0.02em;
   padding: var(--space-0-5) var(--space-2);
   border-radius: var(--app-radius-badge);
-  background: var(--accent-success-bg, #dcfce7);
+  background: var(--accent-success-bg);
   color: var(--app-success-ink);
   white-space: nowrap;
 }
 
 .tw-vchip-draft {
-  background: var(--accent-warning-bg, #fef9c3);
+  background: var(--accent-warning-bg);
   color: var(--app-warning-ink);
 }
 
@@ -145,7 +145,7 @@
   margin-bottom: -1px;
   min-height: var(--app-tab-h);
   padding: var(--space-3) 0;
-  color: var(--text-muted, #64748b);
+  color: var(--text-muted);
   font-size: var(--app-text-support);
   line-height: var(--app-leading-ui);
   font-weight: var(--weight-medium, 500);
@@ -216,7 +216,7 @@
 }
 
 .tw-kv dt {
-  color: var(--text-muted, #64748b);
+  color: var(--text-muted);
   font-size: var(--app-text-support);
 }
 
