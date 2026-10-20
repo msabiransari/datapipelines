@@ -103,7 +103,7 @@
 }
 
 .ps-form-host .dp-dashboard-parameter-reset {
-  color: var(--text-warning);
+  color: var(--app-warning-ink);
 }
 
 .ps-insp-title {

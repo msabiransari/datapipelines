@@ -71,13 +71,13 @@
   padding: var(--space-0-5) var(--space-2);
   border-radius: var(--app-radius-badge);
   background: var(--accent-success-bg, #dcfce7);
-  color: var(--accent-success, #15803d);
+  color: var(--app-success-ink);
   white-space: nowrap;
 }
 
 .tw-vchip-draft {
   background: var(--accent-warning-bg, #fef9c3);
-  color: var(--accent-warning, #a16207);
+  color: var(--app-warning-ink);
 }
 
 /* The version selector: READ navigation over the admitted history. The viewed row carries

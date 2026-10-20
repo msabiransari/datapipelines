@@ -2385,7 +2385,7 @@ button.app-busy::after {
 
 .app-chip-ok {
   background: var(--accent-success-bg);
-  color: var(--accent-success);
+  color: var(--app-success-ink);
 }
 
 .app-chip-bad {
@@ -2400,7 +2400,7 @@ button.app-busy::after {
 
 .app-chip-warn {
   background: var(--accent-warning-bg);
-  color: var(--accent-warning);
+  color: var(--app-warning-ink);
 }
 
 .app-chip-mono {
@@ -2778,16 +2778,16 @@ button.app-busy::after {
 .u-muted { color: var(--text-muted); }
 .u-primary { color: var(--text-primary); }
 .u-danger { color: var(--app-danger-ink); }
-.u-success { color: var(--accent-success); }
-.u-warning { color: var(--accent-warning); }
+.u-success { color: var(--app-success-ink); }
+.u-warning { color: var(--app-warning-ink); }
 
 /* 097 §C — the admin-users row actions carried their colour as an inline `style` written in
    Kotlin. As classes they need the hover state spelled out: `.ds-button-ghost:hover` (0,2,0)
    would otherwise repaint them `--text-primary`, which the inline style used to win against
    by being inline. Same colour, same states, no attribute. */
 .ds-button-ghost.u-danger:hover { color: var(--app-danger-ink); }
-.ds-button-ghost.u-success:hover { color: var(--accent-success); }
-.ds-button-ghost.u-warning:hover { color: var(--accent-warning); }
+.ds-button-ghost.u-success:hover { color: var(--app-success-ink); }
+.ds-button-ghost.u-warning:hover { color: var(--app-warning-ink); }
 
 /* layout */
 .u-row { display: flex; align-items: center; gap: var(--gap-sm); }
@@ -3037,7 +3037,7 @@ button.app-busy::after {
 
 .app-alert-warning {
   background: var(--accent-warning-bg);
-  color: var(--accent-warning);
+  color: var(--app-warning-ink);
 }
 
 .app-alert-danger {
@@ -3704,7 +3704,7 @@ pre.tf-pane-input {
 }
 
 .tf-outcome-ok {
-  color: var(--accent-success);
+  color: var(--app-success-ink);
 }
 
 .tf-outcome-refused {
@@ -3753,7 +3753,7 @@ pre.tf-pane-input {
 
 .tf-case-pass > .tf-case-head .tf-mark,
 .tf-inv-pass > .tf-mark {
-  color: var(--accent-success);
+  color: var(--app-success-ink);
 }
 
 .tf-case-fail > .tf-case-head .tf-mark,
@@ -3807,7 +3807,7 @@ pre.tf-pane-input {
 /* 7d (§8.2) — the node card's needs-review marker rides the kind line (graph.js
    buildCardHtml), so it adds no height to a card the layout already measured. */
 .pe-card-review {
-  color: var(--accent-warning);
+  color: var(--app-warning-ink);
   text-transform: none;
 }
 

@@ -158,13 +158,13 @@
   padding: var(--space-0-5) var(--space-2);
   border-radius: var(--app-radius-badge);
   background: var(--accent-success-bg, #dcfce7);
-  color: var(--accent-success, #15803d);
+  color: var(--app-success-ink);
   white-space: nowrap;
 }
 
 .pe-vchip-draft {
   background: var(--accent-warning-bg, #fef9c3);
-  color: var(--accent-warning, #a16207);
+  color: var(--app-warning-ink);
 }
 
 /* The run status: dot + text; the dot pulses brand while running (stopped under
@@ -270,7 +270,7 @@
 
 .pe-banner.connection-lost {
   background: var(--accent-warning-bg, #fef9c3);
-  color: var(--text-warning, #a16207);
+  color: var(--app-warning-ink);
 }
 
 .pe-banner-dismiss {
@@ -1117,7 +1117,7 @@
 }
 
 .pe-port-waiting .pe-port-line {
-  color: var(--accent-warning, #b45309);
+  color: var(--app-warning-ink);
 }
 
 /* writing — the measured write: the success accent, the flow on the stub, the dot filled. */
@@ -1134,7 +1134,7 @@
 
 .pe-port-writing .pe-port-line,
 .pe-port-finalizing .pe-port-line {
-  color: var(--accent-success, #15803d);
+  color: var(--app-success-ink);
 }
 
 /* finalizing / combined (CTAS — the write is inside the statement): a soft ring pulse on
@@ -1323,7 +1323,7 @@
 }
 
 .pe-card-success .pe-marker-word {
-  color: var(--accent-success, #15803d);
+  color: var(--app-success-ink);
 }
 
 .pe-card-failed .pe-marker-word {
@@ -1331,7 +1331,7 @@
 }
 
 .pe-card-aborted .pe-marker-word {
-  color: var(--accent-warning, #b45309);
+  color: var(--app-warning-ink);
 }
 
 .pe-marker-elapsed {
@@ -1719,7 +1719,7 @@ html.dp-splitting-y * {
 
 .pe-dock-count-ok {
   background: var(--accent-success-bg, #dcfce7);
-  color: var(--accent-success, #15803d);
+  color: var(--app-success-ink);
 }
 
 /* "previous run": the Results tab is still showing a page from an earlier
