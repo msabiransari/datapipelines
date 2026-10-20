@@ -1,6 +1,6 @@
 # Configuration Reference
 
-**Status:** v1.55 (single source of truth for every config key)
+**Status:** v1.56 (single source of truth for every config key)
 **Owner:** datapipelines.co core
 **Last updated:** 2026-10-20
 
@@ -192,6 +192,8 @@ There is deliberately **no fail-open key**. When the limiter's Redis is unreacha
 | `datapipelines.executions.error-detail` | `full` | How much of a failure's detail travels to every surface that carries an error (the SSE `node_failed`/`pipeline_failed` `error` objects, `pipeline_executions.error_json`, the editor's failure panel, MCP). `full` includes the exception chain with stack frames and the rendered SQL in `:name` form; `structured` omits both. Choose `structured` for a deployment whose pipeline authors are not trusted to see driver internals ([DAG executor §8.4](dag-executor.md#84-the-failure-record)) |
 | `datapipelines.executions.event-retention-days` | `7` | How long to keep `execution_events` rows (Postgres, the durable record) past their execution's completion — enforced by the hourly retention job (050/T60, safe for N replicas: one idempotent `DELETE`; `pipeline_executions` rows are never touched). The post-completion Redis event log lives for 1 hour, not configurable |
 | `datapipelines.executions.stale-timeout-minutes` | `60` | Mark RUNNING executions older than this as ABORTED (crash sweep) |
+
+**Not a key: the scheduled jobs' statement bounds (#326).** The stale sweep's UPDATE is cancelled after 10 s and the hourly retention's metadata statements (the `execution_events` DELETE, the audit retention's cutoff read and batches, the keys purge's FK read and two DELETEs) after 25 s — a JDBC `queryTimeout`, failing the tick with SQLState `57014` ([Metadata DB §8.1](metadata-db.md#81-execution-event-cleanup), [§8.3](metadata-db.md#83-stale-execution-sweep)). They are code constants beside the cadences they serve (`SWEEP_STATEMENT_TIMEOUT_SECONDS`, `RETENTION_STATEMENT_TIMEOUT_SECONDS`), as the cadences are, not keys: each is set by its own cadence and the 30 s shutdown phase, not by a deployment.
 
 ### 3.12 Audit
 
@@ -1039,6 +1041,7 @@ Validation runs in `@PostConstruct` of a `ConfigValidator` bean. Failures stop s
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-20 | v1.56 | 326 (#326) the scheduled jobs' statement bounds | **§3.11** gains a "not a key" note: the stale sweep's 10 s and the hourly retention's 25 s statement bounds are code constants beside their cadences, not configuration keys. No key is added, renamed or removed. |
 | 2026-10-20 | v1.55 | 598b (#598) the Pipelines home's activity chart | New **§3.10 row** `datapipelines.ui.actively-developed-days` (default `14`, `DATAPIPELINES_UI_ACTIVELY_DEVELOPED_DAYS`): the window of the Pipelines home's "actively developed" count — a pipeline whose draft was last written within that many days ([UI screens §4.25](ui-screens.md)). §5's template gains the line; **§7** gains the rule (`UiRules.checkUiActivelyDevelopedDays`, registered in `ConfigValidator`; `CHECK_COUNT` 34 → 35): a present value that is not an integer ≥ 1 refuses startup naming the key and the value. `UiConfigKeysSpecDriftTest` pins the `datapipelines.ui.*` keys in this document, `application.yml` and the validator. |
 | 2026-10-16 | v1.54 | 467 (#467) the over-cap screenshot refusal reaches the client | **§3.13's `server.tomcat.max-swallow-size` row** names the screenshot route's own bounded drain (its cap + 2 MiB, fixed; the key is unchanged and does not move it) and the `application.yml` comment says the same. No key, default or validation change |
 | 2026-10-15 | v1.53 | 500 (#500) | Redis has one authority: `RedisClientProperties` binds §3.1 and builds the Lettuce factory in `dag`; the framework bridge is removed from §3.14 and §5. The §7 validator judges that binding. Test registrations use operator keys with explicit passwords, and the defaults guard reads the operator block. Merge follow-up: the binding note states that operators change nothing and that a hand-set `SPRING_DATA_REDIS_*` variable is now ignored. |
