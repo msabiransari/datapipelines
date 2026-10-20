@@ -341,6 +341,9 @@ datapipelines:
 
   ui:
     theme: ${DATAPIPELINES_UI_THEME:dark}
+    # #598: the Pipelines home counts a pipeline as actively developed when its draft was last
+    # written within this many days (an integer >= 1, configuration.md §3.10).
+    actively-developed-days: ${DATAPIPELINES_UI_ACTIVELY_DEVELOPED_DAYS:14}
 
   executions:
     event-retention-days: ${DATAPIPELINES_EXECUTIONS_EVENT_RETENTION_DAYS:7}

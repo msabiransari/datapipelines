@@ -22,7 +22,9 @@ import java.time.Instant
  * One request renders the whole page: the inventory is read ONCE ([FamilyInventory.forFamily], or
  * [FamilyInventory.chartsFor] for a family carrying the #598 charts — one SQL snapshot either way)
  * and so is Recently updated, both under the caller's [PromoterLens] view — a
- * promoter's numbers and list are the admitted ones, never the workspace's. Nothing here writes;
+ * promoter's numbers and list are the admitted ones, never the workspace's. The clock is read
+ * ONCE per request too (#598b): the chart read's weeks and the recent list's ages share it, and
+ * the actively developed window is [UiProperties.activelyDevelopedDays]. Nothing here writes;
  * the page's one interaction, copying the starter prompt, is clipboard-only (`overview.mjs`).
  */
 @Controller
@@ -31,6 +33,7 @@ class OverviewController(
     private val recent: FamilyRecent,
     private val themeResolver: ThemeResolver,
     private val lens: PromoterLens,
+    private val ui: UiProperties,
 ) {
     @GetMapping("/overview/pipelines")
     @RequiredScope(Permission.PIPELINE_READ)
@@ -81,16 +84,18 @@ class OverviewController(
         // A lazy dashboard arm whose derivation failed has already made both reads Unavailable;
         // asking it again must not turn the page into a 500, and an unknown arm reads as lensed.
         val lensed = runCatching { !family.lens(view).isEverything }.getOrDefault(true)
+        val now = Instant.now()
         // #598a: still ONE inventory read per request — the chart group for a family that carries
         // the stacked charts, the four-bucket inventory for every other.
         val page =
             when (family.charts) {
                 OverviewStacked.ChartSet.LIFECYCLE -> {
-                    OverviewPage.of(family, lensed, inventory.chartsFor(family.navigation, workspaceId, view), latest, Instant.now())
+                    val charts = inventory.chartsFor(family.navigation, workspaceId, view, now, ui.activelyDevelopedDays)
+                    OverviewPage.of(family, lensed, charts, latest, now)
                 }
 
                 OverviewStacked.ChartSet.STANDARD -> {
-                    OverviewPage.of(family, lensed, inventory.forFamily(family.navigation, workspaceId, view), latest, Instant.now())
+                    OverviewPage.of(family, lensed, inventory.forFamily(family.navigation, workspaceId, view), latest, now)
                 }
             }
         model.addAttribute(MODEL, page)

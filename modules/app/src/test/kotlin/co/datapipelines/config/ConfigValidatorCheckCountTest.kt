@@ -77,6 +77,8 @@ class ConfigValidatorCheckCountTest {
                 "modules/app/src/main/kotlin/co/datapipelines/config/DashboardRuntimeRules.kt",
                 // #488 — the §3.1 Redis client bounds, split out for the same size reason.
                 "modules/app/src/main/kotlin/co/datapipelines/config/RedisRules.kt",
+                // #598b — the §3.10 actively developed window, split out for the same size reason.
+                "modules/app/src/main/kotlin/co/datapipelines/config/UiRules.kt",
             )
     }
 }
