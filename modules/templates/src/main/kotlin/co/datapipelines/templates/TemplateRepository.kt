@@ -133,6 +133,20 @@ class TemplateRepository(
         co.datapipelines.pipeline.InventorySource
             .aggregate(jdbc, co.datapipelines.pipeline.NavigationFamily.TEMPLATES, workspaceId, lens)
 
+    /**
+     * #599 — the overview's lifecycle, release-history and activity charts from one statement, under the same
+     * workspace and lens as [inventory] (`PipelineRepository.charts`'s shape): the activity counted at [now],
+     * actively developed over the last [activeDays] days.
+     */
+    fun charts(
+        workspaceId: UUID,
+        lens: co.datapipelines.pipeline.ReadLens,
+        now: java.time.Instant,
+        activeDays: Int,
+    ): co.datapipelines.pipeline.ChartInventory =
+        co.datapipelines.pipeline.ChartInventorySource
+            .aggregate(jdbc, co.datapipelines.pipeline.NavigationFamily.TEMPLATES, workspaceId, lens, now, activeDays)
+
     /** #579 — the overview's Recently updated list under the caller's workspace and version lens. */
     fun recent(
         workspaceId: UUID,
