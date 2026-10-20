@@ -160,7 +160,10 @@ class MainFrameBrowserTest : DashboardBrowserSuite() {
         readings.forEach { (label, value) -> println("573-measure|$case|$label|$value") }
     }
 
-    /** #610 — the anonymous bar's horizontal fit and the brand's one-line spread (the tile vs the wordmark, NOT the logo SVG's own internals). */
+    /**
+     * #610 — the anonymous bar's horizontal fit and the brand's one-line spread (the tile vs
+     * the wordmark, NOT the logo SVG's own internals).
+     */
     @Suppress("UNCHECKED_CAST")
     private fun readAnonBar(prefix: String) {
         val values =
