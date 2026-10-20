@@ -4,6 +4,7 @@ import co.datapipelines.mcp.McpToolCatalog
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
+import org.jsoup.Jsoup
 import org.junit.jupiter.api.Test
 import org.springframework.mock.web.MockHttpServletRequest
 import org.springframework.mock.web.MockHttpServletResponse
@@ -28,6 +29,30 @@ import org.thymeleaf.web.servlet.JakartaServletWebApplication
  *  - **The manage link renders for the roles `MANAGE_API_KEYS` admits, and no other.**
  */
 class ApiConsoleRenderTest {
+    @Test
+    fun `the shared MCP card copies only its placeholder config through a same-origin module`() {
+        val card = Jsoup.parse(render { }).select("[data-mcp-connection]")
+        card.size shouldBe 1
+        val buttons = card.select("button[data-mcp-copy]")
+        buttons.size shouldBe 1
+        buttons.text() shouldBe "Copy config"
+        buttons.attr("type") shouldBe "button"
+        buttons.attr("data-copy-label") shouldBe "Copy config"
+        val status = card.select("[data-mcp-copy-status]")
+        status.size shouldBe 1
+        status.text() shouldBe ""
+        status.attr("role") shouldBe "status"
+        val scripts = card.select("script")
+        scripts.size shouldBe 1
+        scripts.attr("type") shouldBe "module"
+        scripts.attr("src") shouldBe "/js/mcp-connection.mjs"
+        scripts.html() shouldBe ""
+        val config = card.select("pre").single().wholeText()
+        config shouldContain "\"DP-API-Key\": \"dpk_…\""
+        Regex("dpk_[^\\\"\\s]*").findAll(config).map { it.value }.toList() shouldBe listOf("dpk_…")
+        card.select("[onclick], [style]").size shouldBe 0
+    }
+
     private val engine =
         SpringTemplateEngine().apply {
             setTemplateResolver(

@@ -1501,6 +1501,169 @@ test("#542 no-data and ownerless ready cards go stale; error and abort keep thei
   assert.deepEqual(adapter.log, []);
 });
 
+// #550: a refresh sent for the selection BEFORE a commit keeps streaming after it. Every stream is
+// held until the test releases it; `select` changes what the host reports as committed.
+async function heldRefreshBoard(options = {}) {
+  const fetchImpl = fakeFetch();
+  const holders = [];
+  const sent = [];
+  fetchImpl.on("/runtime/visualizations", (url, init) => {
+    sent.push(JSON.parse(init.body));
+    const holder = [];
+    holders.push(holder);
+    return fetchImpl.heldStream(null, holder);
+  });
+  const result = await boot({
+    fetch: fetchImpl,
+    ...options,
+    config: configPayload({ parameter_set: { name: "dbr/sets/reporting", version: 1 }, ...options.config }),
+  });
+  let year = 2026;
+  result.adapter.readSelections = () => ({ year });
+  const clock = manualClock();
+  result.instance._env.setTimeout = clock.setTimeout;
+  result.instance._env.clearTimeout = clock.clearTimeout;
+  const data = (refreshId, name) =>
+    fetchImpl.frame("visualization_data", { refresh_id: refreshId, name, type: "visualization", bindings: {}, rows: 1, bytes: 1 });
+  const completed = (refreshId, targets) => fetchImpl.frame("refresh_completed", { refresh_id: refreshId, status: "COMPLETED", targets });
+  const held = (index) => untilRuntime(() => holders.length > index && holders[index].length === 1);
+  return { ...result, holders, sent, clock, data, completed, held, select: (value) => { year = value; } };
+}
+
+const chartStatuses = (adapter) => adapter.log.filter((line) => line.startsWith("status:chart:"));
+
+test("#550 an old-selection refresh renders its data after a leaf commit but never clears the stale mark", async () => {
+  const { instance, adapter, runtime, holders, sent, clock, data, completed, held, select } = await heldRefreshBoard();
+  const old = await instance.refresh({ scope: "targets", targets: ["chart"] });
+  await held(0);
+  assert.equal(sent[0].selections.year, 2026, "the old request carried the old year");
+  select(2025);
+  adapter.commitCb({ name: "year", type: "parameter" });
+  assert.equal(chartStatuses(adapter).at(-1), "status:chart:in-progress:stale");
+  adapter.log.length = 0;
+  holders[0][0](data(old, "chart") + completed(old, { chart: { outcome: "ok" } }));
+  await untilRuntime(() => instance._occurrences.chart.status === "success");
+  assert.ok(adapter.log.includes("renderData:chart"), "the old result is still shown: " + adapter.log.join("|"));
+  assert.deepEqual(chartStatuses(adapter), ["status:chart:in-progress:stale", "status:chart:success:stale"], adapter.log.join("|"));
+  clock.tick(runtime._internal.SUCCESS_SETTLE_MS);
+  assert.equal(chartStatuses(adapter).at(-1), "status:chart:ready:stale");
+  assert.equal(instance._occurrences.chart.stale, true);
+});
+
+test("#550 a renderer acknowledgment resolving after the commit keeps the mark", async () => {
+  const { instance, adapter, holders, data, completed, held, select } = await heldRefreshBoard();
+  let acknowledge = null;
+  instance._occurrences.chart.renderer = { renderData: () => new Promise((resolve) => { acknowledge = resolve; }) };
+  const old = await instance.refresh({ scope: "targets", targets: ["chart"] });
+  await held(0);
+  holders[0][0](data(old, "chart") + completed(old, { chart: { outcome: "ok" } }));
+  await untilRuntime(() => acknowledge !== null && instance._refreshes[old].ended);
+  assert.equal(chartStatuses(adapter).at(-1), "status:chart:in-progress", "the data arrived before the commit, current then");
+  select(2025);
+  adapter.commitCb({ name: "year", type: "parameter" });
+  adapter.log.length = 0;
+  acknowledge("rendered");
+  await untilRuntime(() => instance._occurrences.chart.status === "success");
+  assert.deepEqual(chartStatuses(adapter), ["status:chart:success:stale"], adapter.log.join("|"));
+});
+
+test("#550 a parent re-evaluation that changes a dependent keeps the dependent's older refresh stale", async () => {
+  const parameter = (name, value) => ({ name, state: { value } });
+  const { instance, adapter, fetch: fetchImpl, holders, sent, data, completed, held } = await heldRefreshBoard({
+    parameters: evaluatedState({ parents: ["year"], parameters: [parameter("year", 2026), parameter("city", "EU")] }),
+    config: {
+      groups: [{ name: "parent_group", members: ["year"] }, { name: "city_group", members: ["chart"] }],
+      parameter_scopes: { year: ["parent_group"], city: ["city_group"] },
+    },
+  });
+  const old = await instance.refresh({ scope: "targets", targets: ["chart"] });
+  await held(0);
+  assert.equal(sent[0].selections.city, "EU");
+  fetchImpl.on("/runtime/parameters", () => fetchImpl.envelope(evaluatedState({
+    parameter_revision: 9, parents: ["year"], parameters: [parameter("year", 2025), parameter("city", "US")],
+  })));
+  adapter.commitCb({ name: "year", type: "parameter" });
+  await untilRuntime(() => instance._parameters.parameter_revision === 9 && !instance._lock && instance._occurrences.chart.stale);
+  adapter.log.length = 0;
+  holders[0][0](data(old, "chart") + completed(old, { chart: { outcome: "ok" } }));
+  await untilRuntime(() => instance._occurrences.chart.status === "success");
+  assert.deepEqual(chartStatuses(adapter), ["status:chart:in-progress:stale", "status:chart:success:stale"], adapter.log.join("|"));
+});
+
+test("#550 parameter_scopes: an unaffected occurrence keeps its owner and its old refresh still clears it", async () => {
+  const { instance, adapter, runtime, holders, clock, data, completed, held, select } = await heldRefreshBoard({ config: {
+    groups: [{ name: "chart_group", members: ["chart"] }],
+    parameter_scopes: { year: ["chart_group"] },
+  } });
+  const old = await instance.refresh({ scope: "targets", targets: ["chart", "cells"] });
+  await held(0);
+  select(2025);
+  adapter.commitCb({ name: "year", type: "parameter" });
+  assert.equal(instance._occurrences.cells.owner, old, "the commit leaves ownership alone");
+  assert.equal(instance._occurrences.cells.stale, false, "cells is outside year's scope");
+  adapter.log.length = 0;
+  holders[0][0](data(old, "chart") + data(old, "cells") + completed(old, { chart: { outcome: "ok" }, cells: { outcome: "ok" } }));
+  await untilRuntime(() => instance._occurrences.chart.status === "success" && instance._occurrences.cells.status === "success");
+  assert.ok(adapter.log.includes("status:cells:success"), adapter.log.join("|"));
+  assert.ok(adapter.log.includes("status:chart:success:stale"), adapter.log.join("|"));
+  clock.tick(runtime._internal.SUCCESS_SETTLE_MS);
+  assert.ok(adapter.log.includes("status:cells:ready"), adapter.log.join("|"));
+  assert.ok(adapter.log.includes("status:chart:ready:stale"), adapter.log.join("|"));
+  assert.equal(instance._occurrences.cells.stale, false);
+});
+
+test("#550 a refresh started after the commit is for the new selection and clears the mark", async () => {
+  const { instance, adapter, holders, sent, data, completed, held, select } = await heldRefreshBoard();
+  const old = await instance.refresh({ scope: "targets", targets: ["chart"] });
+  await held(0);
+  select(2025);
+  adapter.commitCb({ name: "year", type: "parameter" });
+  assert.equal(instance._occurrences.chart.stale, true);
+  const fresh = await instance.refresh({ scope: "targets", targets: ["chart"] });
+  await held(1);
+  assert.equal(sent[1].selections.year, 2025, "the new request carries the committed year");
+  adapter.log.length = 0;
+  holders[1][0](data(fresh, "chart") + completed(fresh, { chart: { outcome: "ok" } }));
+  await untilRuntime(() => instance._occurrences.chart.status === "success");
+  assert.deepEqual(chartStatuses(adapter), ["status:chart:in-progress", "status:chart:success"], adapter.log.join("|"));
+  holders[0][0](data(old, "chart") + completed(old, { chart: { outcome: "ok" } }));
+  await untilRuntime(() => instance._refreshes[old].ended);
+  assert.equal(adapter.log.filter((line) => line === "renderData:chart").length, 1, "the old run detaches: " + adapter.log.join("|"));
+  assert.equal(instance._occurrences.chart.stale, false);
+});
+
+test("#550 an abort chip standing at the commit: the old run's ok completion restores success still stale", async () => {
+  const { instance, adapter, holders, completed, held, select } = await heldRefreshBoard();
+  const old = await instance.refresh({ scope: "targets", targets: ["chart"] });
+  await held(0);
+  await instance.abort(old);
+  assert.equal(instance._occurrences.chart.status, "abort");
+  select(2025);
+  adapter.commitCb({ name: "year", type: "parameter" });
+  assert.equal(instance._occurrences.chart.stale, false, "the abort chip keeps its issue voice at the commit (#542)");
+  adapter.log.length = 0;
+  holders[0][0](completed(old, { chart: { outcome: "ok" } }));
+  await untilRuntime(() => instance._occurrences.chart.status === "success");
+  assert.deepEqual(chartStatuses(adapter), ["status:chart:success:stale"], adapter.log.join("|"));
+});
+
+test("#550 an old run's in-progress and no-data status frames keep the mark", async () => {
+  const { instance, adapter, fetch: fetchImpl, holders, completed, held, select } = await heldRefreshBoard();
+  const old = await instance.refresh({ scope: "targets", targets: ["chart"] });
+  await held(0);
+  select(2025);
+  adapter.commitCb({ name: "year", type: "parameter" });
+  adapter.log.length = 0;
+  const status = (state) => fetchImpl.frame("visualization_status", { refresh_id: old, name: "chart", type: "visualization", state });
+  holders[0][0](status("in-progress") + status("no-data") + completed(old, { chart: { outcome: "no-data" } }));
+  await untilRuntime(() => instance._refreshes[old].ended);
+  assert.deepEqual(
+    chartStatuses(adapter),
+    ["status:chart:in-progress:stale", "status:chart:no-data:stale", "status:chart:no-data:stale"],
+    adapter.log.join("|"),
+  );
+});
+
 test("the renderer judgement fails before execution: unknown kind, version mismatch, two bundles, 2d-declared for a 3d board", async () => {
   const cases = [
     { config: configPayload({ visualizations: [{ name: "x", renderer: { kind: "svg", version: "1" }, config: {} }] }), code: "renderer.unsupported" },
