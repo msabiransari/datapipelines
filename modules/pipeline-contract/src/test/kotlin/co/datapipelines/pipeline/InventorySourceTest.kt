@@ -1,8 +1,11 @@
 package co.datapipelines.pipeline
 
+import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldEndWith
 import io.kotest.matchers.string.shouldNotContain
+import io.kotest.matchers.string.shouldStartWith
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.EnumSource
@@ -39,16 +42,19 @@ class InventorySourceTest {
     }
 
     /**
-     * #556 — the catalog's lifecycle condition computes the SAME three flags as the inventory's
-     * statement (the aggregate's text is unchanged, so the flags are spelled twice; this pins the two
-     * spellings equal), over the same admitted versions, and reads the bucket's own predicate.
+     * #556, #592 — the catalog's lifecycle condition and the inventory's `admitted` CTE select the
+     * flags from ONE definition, so this case no longer pins two spellings: it guards the wiring —
+     * the CTE's SELECT list is exactly the list membership selects (a re-inlined spelling goes red),
+     * every name a bucket predicate reads is a column that list declares, membership reads the
+     * same admitted versions (the narrowed lens: RELEASED only) and binds nothing from a request.
      */
     @ParameterizedTest
     @EnumSource(NavigationFamily::class)
     fun `the lifecycle membership reads the inventory's flags and the bucket's predicate`(family: NavigationFamily) {
-        val normalize = { text: String -> text.replace(Regex("\\s+"), " ").trim() }
-        val inventoryFlags = normalize(InventorySource.sql(family, narrowed = false).substringAfter("SELECT ").substringBefore(" FROM "))
+        val inventoryFlags = selectList(InventorySource.sql(family, narrowed = false))
+        val declared = Regex("\\bAS (\\w+)").findAll(inventoryFlags).map { it.groupValues[1] }.toSet()
         LifecycleBucket.entries.forEach { bucket ->
+            (bucket.predicate.split(" ").toSet() - setOf("AND", "NOT")).forEach { declared shouldContain it }
             listOf(false, true).forEach { narrowed ->
                 val condition = InventorySource.membership(family, "t", bucket, narrowed)
                 normalize(condition.substringAfter("SELECT 1 FROM (SELECT ").substringBefore(" FROM ")) shouldBe inventoryFlags
@@ -58,6 +64,17 @@ class InventorySourceTest {
                 condition shouldNotContain ":"
             }
         }
+    }
+
+    /** #592 — a caller's per-object aggregates are appended after the three flags, never in their place. */
+    @ParameterizedTest
+    @EnumSource(NavigationFamily::class)
+    fun `admitted appends the per-object aggregates after the flags`(family: NavigationFamily) {
+        val flags = selectList(InventorySource.admitted(family, narrowed = false))
+        val extended = selectList(InventorySource.admitted(family, narrowed = false, perObject = ", count(*) AS n"))
+        extended shouldStartWith "bool_or(v.status = 'DRAFT') AS d, bool_or(v.status = 'RELEASED') AS r, bool_or(v.status = 'DISCARDED') AS x"
+        extended shouldEndWith ", count(*) AS n"
+        extended shouldBe "$flags, count(*) AS n"
     }
 
     @Test
@@ -88,4 +105,9 @@ class InventorySourceTest {
         }
         Inventory(0, 0, 0, 0).objects shouldBe 0L
     }
+
+    private fun normalize(text: String): String = text.replace(Regex("\\s+"), " ").trim()
+
+    /** The first SELECT list of [sql] — the `admitted` CTE's — whitespace-normalised. */
+    private fun selectList(sql: String): String = normalize(sql.substringAfter("SELECT ").substringBefore(" FROM "))
 }
