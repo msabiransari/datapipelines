@@ -9,9 +9,12 @@ import org.junit.jupiter.api.Test
 /**
  * #582 — the Parameter Sets overview in real Chromium, on #556's framework: the menu's Parameter
  * Sets item lands on `/overview/parameter-sets` with the family's resource browser open beside it
- * and the item active; the inventory and Recently updated are the workspace's; Review drafts opens
- * the catalog filtered to `with-drafts`; Copy prompt puts the textarea's CURRENT text on the
- * clipboard and makes no request, and a refused clipboard selects the text and says how to finish.
+ * and the item active; Copy prompt puts the textarea's CURRENT text on the clipboard and makes no
+ * request, and a refused clipboard selects the text and says how to finish. #599: the page is the v2
+ * lifecycle home — the summary strip and its foot, the twelve weeks' columns and the release-history
+ * bins are the workspace's one released and one draft set; the definitions dialog opens from the foot
+ * and gives focus back; Review your drafts opens the catalog filtered to `draft`; the screenshots land
+ * in build/reports/599-object-family-homes.
  *
  * Sets are made through the real REST routes ([ParameterSetBrowserSuite]); the clipboard is stubbed
  * per case, as in [OverviewBrowserTest]: the subject is the page's handling of either answer.
@@ -39,12 +42,10 @@ class OverviewParameterSetsBrowserTest : ParameterSetBrowserSuite() {
         page.waitForFunction("() => window.DatapipelinesSidebarTrees.get('parameter-sets')?.state.levels.get(null)?.complete")
     }
 
-    private fun count(key: String): String = page.locator("[data-count='$key'] .app-overview-count-v").innerText().trim()
-
     private fun set(path: String): String = setBody(path, "[${constants("kind", listOf("a"))}]", displayName = path.substringAfterLast('/'))
 
     @Test
-    fun `the Parameter Sets item lands on the overview with its browser, inventory, recent list and Review drafts`() {
+    fun `the Parameter Sets item lands on the v2 home with its browser, strip, columns, bins, recent list and drafts row`() {
         startTrace()
         val root = ready("ps582")
         page.setViewportSize(1440, 900)
@@ -57,22 +58,39 @@ class OverviewParameterSetsBrowserTest : ParameterSetBrowserSuite() {
         page.locator("#app-crumbs .app-crumb-page").innerText().trim() shouldBe "Parameter Sets"
         page.locator("#app-browser").isVisible shouldBe true
         page.locator(".app-overview h1").innerText().trim() shouldBe "Parameter Sets"
-        count("objects") shouldBe "2"
-        count("with-releases") shouldBe "1"
-        count("with-drafts") shouldBe "1"
-        page.locator("[data-bar='released'] .app-overview-bar-v").innerText().trim() shouldBe "1"
-        page.locator("[data-bar='draft'] .app-overview-bar-v").innerText().trim() shouldBe "1"
-        page.locator("[data-overview-intro]").innerText() shouldContain "Parameter sets define reusable inputs"
+        OverviewHomeBrowserSupport.metrics(
+            page,
+            "total" to "2",
+            "live" to "1",
+            "in-development" to "1",
+            "actively-developed" to "1",
+            "live-changes" to "0",
+            "retired" to "0",
+        )
+        page.locator("[data-count='live'] a").getAttribute("href") shouldContain "/parameter-sets?lifecycle=released"
+        OverviewHomeBrowserSupport.columnsAndBins(page, created = 2, released = 1, "r0:draft-open" to 1, "r1:no-draft" to 1)
+        withClue("How it works opens the guide's section, the introduction in it") {
+            page.click("[data-open='howitworks']")
+            page.waitForFunction("() => document.querySelector('dialog[data-overview-dialog]').open")
+            page.locator("[data-overview-dialog-title]").innerText().trim() shouldBe "Create, evaluate, then release"
+            page.locator("[data-dialog-section='howitworks']").innerText() shouldContain "Parameter sets define reusable inputs"
+            page.keyboard().press("Escape")
+            page.waitForFunction("() => !document.querySelector('dialog[data-overview-dialog]').open")
+        }
         withClue("Recently updated is newest first: draft_one was created after released_one's release") {
             page.locator("[data-overview-recent] .app-overview-recent li a").allInnerTexts() shouldBe
                 listOf("$root/parameters/draft_one", "$root/parameters/released_one")
         }
         page.locator("[data-overview-recent] time").first().getAttribute("datetime") shouldStartWith "20"
 
-        page.locator("[data-overview-review]").click()
-        page.waitForURL("**/parameter-sets?lifecycle=with-drafts")
+        OverviewHomeBrowserSupport.definitionsRoundTrip(page, total = 2)
+        OverviewHomeBrowserSupport.screenshots(page, "parameter-sets")
+
+        page.locator("[data-task='drafts'] small").innerText().trim() shouldBe "1 parameter set is working toward its first release."
+        page.locator("[data-task='drafts'] a").click()
+        page.waitForURL("**/parameter-sets?lifecycle=draft")
         page.waitForSelector("#parameter-set-list-wrapper .tpl-result")
-        page.locator("#parameter-set-filter-lifecycle").inputValue() shouldBe "with-drafts"
+        page.locator("#parameter-set-filter-lifecycle").inputValue() shouldBe "draft"
         val listed = page.locator("#parameter-set-list-wrapper").innerText()
         listed shouldContain "draft_one"
         listed.contains("released_one") shouldBe false

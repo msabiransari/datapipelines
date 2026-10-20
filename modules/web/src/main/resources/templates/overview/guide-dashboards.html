@@ -1,21 +1,26 @@
-<!--/* #580 — the Dashboards overview's guide (shell design §8), guide-pipelines.html's shape: What this
-     is for, Create with your agent, and the related families. `overview/family.html` includes `intro`
-     after the inventory and `related` beside Continue your work. The introduction is the record's,
+<!--/* #580 — the Dashboards overview's guide (shell design §8). The introduction is the record's,
      checked against docs/dashboards.md ("A dashboard presents pipeline results": pinned pipeline
      sources, visualizations, parameter controls). The starter prompt is the record's and follows the
-     agent guide's authoring loop (skill/dashboards.md): read the sources' schemas (step 2), create
-     the visualization and the dashboard (steps 3-4), validate with dashboards_validate (step 6), test
-     every visualization you wrote (step 7), "Release and import are human verbs" (step 8); no tool
-     refreshes a dashboard (step 6), so live data is the person's check in the UI. The workspace name
-     is the one the menu shows; the bracketed placeholders are the reader's to fill. Copying sends
-     nothing (overview.mjs). */-->
+     agent guide's authoring loop (skill/dashboards.md): read the sources' schemas, create the
+     visualization and the dashboard, validate with dashboards_validate, test every visualization
+     you wrote, "Release and import are human verbs"; no tool refreshes a dashboard, so live data is
+     the person's check in the UI (the how-it-works steps keep that sentence).
+     #599 re-cut it into the v2 fragments `overview/family.html` includes (guide-pipelines.html's
+     shape): `subtitle` under the title, `quickstart` in the Quick start card (headline, sentence and
+     three short steps condensed from the long ones), `prompt` and `howitworks` as dialog sections
+     (each its own data-dialog-section root, its data-title the dialog's title; the long steps, the
+     relationships and the note moved into How it works), `related` at the foot of Continue your
+     work. The prompt fragment is unchanged. The workspace name is the one the menu shows; the
+     bracketed placeholders are the reader's to fill. Copying sends nothing (overview.mjs). */-->
+<p xmlns:th="http://www.thymeleaf.org" th:fragment="subtitle" class="app-overview-subtitle">Bring results, visualizations and controls together in one view. Understand what’s live and what’s next.</p>
+
 <th:block xmlns:th="http://www.thymeleaf.org" th:fragment="quickstart">
-  <h2 class="app-overview-quickstart-title" id="overview-quickstart-h">Create with your agent</h2>
-  <ol class="app-overview-steps">
-    <li>Describe who the dashboard is for, the question it answers, its sources, and the charts and filters you want.</li>
-    <li>Ask a connected agent to build the dashboard as a draft, validate it and test the visualizations it writes.</li>
-    <li>Open the draft it returns, refresh its board to check the live data, and review its sources and
-      visualizations. Someone allowed to release dashboards releases it from its workspace when it is ready.</li>
+  <h2 class="app-overview-quickstart-title" id="overview-quickstart-h">From a question to a dashboard.</h2>
+  <p class="app-overview-panel-sub">Combine pipeline results, visualizations and controls so people can explore a question without rebuilding the analysis.</p>
+  <ol class="app-overview-steps app-overview-steps-row">
+    <li><b>Describe</b><small>The audience, question, sources and filters.</small></li>
+    <li><b>Build</b><small>Your agent creates, validates and tests a draft.</small></li>
+    <li><b>Review</b><small>Refresh the board on live data. Release when ready.</small></li>
   </ol>
 </th:block>
 
@@ -39,16 +44,18 @@
 </div>
 
 <div xmlns:th="http://www.thymeleaf.org" th:fragment="howitworks" class="app-overview-dialog-section app-overview-prose"
-     data-dialog-section="howitworks" data-title="What dashboards are for" data-overview-intro hidden>
+     data-dialog-section="howitworks" data-title="Create, validate, then release" data-overview-intro hidden>
   <p>
     Dashboards bring pipeline results, visualizations and controls together in one view. They help
     people explore a question and compare outcomes without rebuilding the underlying analysis. For
     example, combine trip volume and market-share charts with borough and period filters.
   </p>
-</div>
-
-<div xmlns:th="http://www.thymeleaf.org" th:fragment="related" class="app-overview-resources app-overview-prose" data-overview-related>
-  <h3 class="app-overview-sub" id="overview-related-h">Related resources and help</h3>
+  <ol class="app-overview-steps">
+    <li>Describe who the dashboard is for, the question it answers, its sources, and the charts and filters you want.</li>
+    <li>Ask a connected agent to build the dashboard as a draft, validate it and test the visualizations it writes.</li>
+    <li>Open the draft it returns, refresh its board to check the live data, and review its sources and
+      visualizations. Someone allowed to release dashboards releases it from its workspace when it is ready.</li>
+  </ol>
   <ul class="app-overview-related">
     <li><a hx-boost="true" th:href="@{/overview/pipelines}">Pipelines</a> are a dashboard's sources: it pins
       exact pipeline versions and shows their results.</li>
@@ -60,4 +67,15 @@
   <p class="app-card-note">A common chain is pipelines, then visualizations, then dashboards; not every
     dashboard needs every link.</p>
   <p><a th:href="@{/docs/mcp-server}">MCP server reference</a></p>
+</div>
+
+<div xmlns:th="http://www.thymeleaf.org" th:fragment="related" class="app-overview-resources app-overview-resources-row" data-overview-related>
+  <span class="app-overview-resources-k">Build on your results</span>
+  <a class="app-overview-link" hx-boost="true" th:href="@{/overview/pipelines}">Pipelines <svg class="ds-icon ds-icon-xs"
+     aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#arrow-right"></use></svg></a>
+  <a class="app-overview-link" hx-boost="true" th:href="@{/overview/visualizations}">Visualizations <svg class="ds-icon ds-icon-xs"
+     aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#arrow-right"></use></svg></a>
+  <a class="app-overview-link" hx-boost="true" th:href="@{/overview/parameter-sets}">Parameter Sets <svg class="ds-icon ds-icon-xs"
+     aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#arrow-right"></use></svg></a>
+  <a class="app-overview-link" th:href="@{/docs/mcp-server}">MCP server reference</a>
 </div>
