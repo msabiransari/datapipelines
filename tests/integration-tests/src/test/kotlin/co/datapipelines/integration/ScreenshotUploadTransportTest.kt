@@ -50,11 +50,6 @@ class ScreenshotUploadTransportTest {
     }
 
     @Test
-    fun `large declared upload observes early refusal instead of writing through the closed connection`() {
-        declaredRefusal(LARGE_BODY)
-    }
-
-    @Test
     fun `abandoned gigabyte declaration closes after bounded swallow`() {
         swallowCap() shouldBe SWALLOW_CAP
         Socket("127.0.0.1", port).use { socket ->
@@ -81,6 +76,11 @@ class ScreenshotUploadTransportTest {
     @Test
     fun `467 a declaration at the drain bound closes cleanly after the whole body`() {
         forcedLosingSide(DRAIN_BOUND)
+    }
+
+    @Test
+    fun `560 a declaration above the drain bound closes after a bounded read - the 413 was on the wire, the client still writing meets the reset`() {
+        forcedClose(LARGE_BODY)
     }
 
     /**
@@ -116,6 +116,75 @@ class ScreenshotUploadTransportTest {
         }
     }
 
+    /**
+     * #560: above the drain bound the LARGE upload case no longer samples the natural race — it forces the outcome the
+     * record documents (rest-api §22): the server's 413 is on the wire, the server closes after Tomcat's bounded
+     * swallow, and the client still writing meets the reset. Deterministic by count, not by clock: above the drain
+     * bound the route reads nothing and Tomcat swallows at most 2 MiB, so of a 64 MiB declaration the server reads
+     * only the swallow plus what the kernels buffer (the forced receive buffer, the relay's send buffer); the relay
+     * cannot forward what the server did not read, so at the close its forwarded count is a few MiB against the 64 MiB
+     * declaration and `early` is true by the count alone — the relay resets the client with the response still
+     * withheld, and the JDK client's send throws. The old case asserted the winning side (the 413 read before the
+     * writer met the reset), a race the runner could lose (CI 39053309921); the losing side is the documented one, so
+     * it is the asserted one.
+     */
+    private fun forcedClose(size: Int) {
+        swallowCap() shouldBe SWALLOW_CAP
+        val body = SizedBody(size)
+        withServerReceiveBuffer(FORCED_RECEIVE_BUFFER) {
+            HeldResponseRelay(port).use { relay ->
+                val thrown: IOException?
+                try {
+                    thrown =
+                        try {
+                            val response =
+                                ScreenshotUploadTransport.post(
+                                    relay.port,
+                                    PATH,
+                                    HttpRequest.BodyPublishers.fromPublisher(
+                                        HttpRequest.BodyPublishers.ofInputStream { body },
+                                        size.toLong(),
+                                    ),
+                                )
+                            // A response is not this case's side; the relay's counts below name what moved.
+                            println("event=transport.forced-close.client unexpected status=${response.statusCode}")
+                            null
+                        } catch (error: IOException) {
+                            // "header parser received no bytes" and "Connection reset" are the same documented outcome;
+                            // the message text is not pinned.
+                            println("event=transport.forced-close.client type=${error.javaClass.name} message=${error.message}")
+                            error
+                        }
+                } finally {
+                    relay.await()
+                    println("event=transport.forced-close declared=$size supplied=${body.readBytes} ${relay.events()}")
+                }
+                relay.declared shouldBe size.toLong()
+                // The losing side, decided by the relay's count without a clock: the server closed before the whole
+                // declared body was forwarded, or on a reset — either way the client was reset, response withheld.
+                relay.early shouldBe true
+                // The server DID refuse before it closed: the withheld response is the route's 413, never delivered.
+                relay.heldStatus.startsWith("HTTP/1.1 413") shouldBe true
+                // The code is judged only when the whole envelope survived the close; a truncated one is logged above.
+                if (relay.closeKind == "FIN") {
+                    Regex("\"code\"\\s*:\\s*\"visualization.test.screenshot_too_large\"").containsMatchIn(relay.heldBody) shouldBe true
+                }
+                println("event=transport.forced-close.held close_kind=${relay.closeKind} body=${relay.heldBody.take(400)}")
+                // The read was bounded: the route did NOT drain to the bound — red if DRAIN_BYTES ever covers this size.
+                relay.forwardedAtClose shouldBeLessThan DRAIN_BOUND.toLong()
+                relay.forwardedAtClose shouldBeLessThan size.toLong()
+                println(
+                    "event=transport.forced-close.bound forwarded_at_close=${relay.forwardedAtClose} " +
+                        "drain_bound=$DRAIN_BOUND swallow=$SWALLOW_CAP " +
+                        "receive_buffer=$FORCED_RECEIVE_BUFFER relay_buffer=$BUFFER_SIZE",
+                )
+                // The client's side of the documented outcome: its writer met the reset mid-body, never a response.
+                check(thrown != null) { "the client received a response instead of meeting the reset" }
+                body.readBytes shouldBeLessThan size
+            }
+        }
+    }
+
     private fun declaredRefusal(size: Int) {
         swallowCap() shouldBe SWALLOW_CAP
         val body = SizedBody(size)
@@ -142,7 +211,6 @@ class ScreenshotUploadTransportTest {
                 )
             }
             wire.declared shouldBe size.toLong()
-            if (size == LARGE_BODY) body.readBytes shouldBeLessThan size
             wire.response
                 .lineSequence()
                 .last { it.startsWith("HTTP/1.1 ") }
@@ -232,7 +300,8 @@ class ScreenshotUploadTransportTest {
      * The #467 relay: the request is forwarded through a small send buffer, each chunk counted BEFORE it is written, and
      * the server's response is held until the server closes. A close after the whole declared body and on a FIN
      * delivers the response and half-closes; any other close resets the client without it. Every step is logged with
-     * its offset from the accept, the exchange's capture.
+     * its offset from the accept, the exchange's capture. #560's case additionally reads the withheld response's
+     * status line ([heldStatus]), the close kind ([closeKind]) and the forwarded count at the close ([forwardedAtClose]).
      */
     internal class HeldResponseRelay(
         serverPort: Int,
@@ -256,6 +325,25 @@ class ScreenshotUploadTransportTest {
         var forwardedAtResponse = -1L
             private set
 
+        /** The forwarded count when the server closed — what the relay could not make the server read. */
+        @Volatile
+        var forwardedAtClose = -1L
+            private set
+
+        /** The close as the relay saw it: `FIN` or `RST(<message>)`. */
+        @Volatile
+        var closeKind = ""
+            private set
+
+        /** The withheld response's status line — proof the server refused before it closed (#560). */
+        @Volatile
+        var heldStatus = ""
+            private set
+
+        @Volatile
+        var heldBody = ""
+            private set
+
         private val relay =
             workers.submit {
                 listener.accept().use { client ->
@@ -267,7 +355,10 @@ class ScreenshotUploadTransportTest {
                         val request = workers.submit { forwardRequest(client, server) }
                         val held = ByteArrayOutputStream()
                         val close = readUntilClose(server, held)
+                        closeKind = close
+                        forwardedAtClose = forwarded.get()
                         early = forwarded.get() < declared || close != "FIN"
+                        heldBody = held.toString(Charsets.UTF_8)
                         event("server.close kind=$close held=${held.size()} forwarded=${forwarded.get()} early=$early")
                         if (early) {
                             client.setSoLinger(true, 0)
@@ -293,7 +384,8 @@ class ScreenshotUploadTransportTest {
                 while (count >= 0) {
                     if (held.size() == 0) {
                         forwardedAtResponse = forwarded.get()
-                        event("server.response first_bytes=$count forwarded=$forwardedAtResponse")
+                        heldStatus = String(buffer, 0, count, Charsets.UTF_8).substringBefore("\r\n")
+                        event("server.response first_bytes=$count forwarded=$forwardedAtResponse status=$heldStatus")
                     }
                     held.write(buffer, 0, count)
                     count = input.read(buffer)
