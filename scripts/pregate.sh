@@ -50,7 +50,7 @@ pgres::manifest_init "$MANIFEST" "$RUN_ID" "$BASE" "$PG_MB" "${PG_HEAD:0:8}" || 
 pgres::prune_runs "$LOGDIR" "$RUN_ID" || prune=1
 pgplan::print > "$RUN_DIR/PLAN.txt" || snap=1
 for m in "${PG_DEFERRED[@]}"; do
-  pgres::manifest_stage "$MANIFEST" "2b-${m#tests/}" deferred 0 Gate-A-required || snap=1
+  pgres::manifest_stage "$MANIFEST" "2b-${m#tests/}" deferred 0 "$(pg2b::deferral_reason "$m")" || snap=1
 done
 [ "$snap" -eq 0 ] && [ "$prune" -eq 0 ] || { failed=1; stopped_by=bookkeeping; }
 echo "Pre-gate base=$BASE merge-base=$PG_MB head=$PG_HEAD evidence=$RUN_DIR"

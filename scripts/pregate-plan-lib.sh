@@ -40,6 +40,16 @@ pgplan::build() {
   declare -gA PG_SELECTIONS=()
   mapfile -t PG_MODULES < <(printf '%s\n' "$PG_FILES" | sed -nE 's|^modules/([a-z-]+)/.*|:modules:\1|p' | LC_ALL=C sort -u)
   mapfile -t PG_TEST_MODULES < <(printf '%s\n' "$PG_FILES" | sed -nE 's|^tests/([a-z-]+)/.*|\1|p' | LC_ALL=C sort -u)
+  # Production shell resources must reach stage 2b even without changed test files.
+  local -a layouts=()
+  while IFS= read -r cf; do
+    case "$cf" in
+      modules/web/src/main/resources/templates/layouts/*.html) layouts+=("$ROOT/$cf") ;;
+    esac
+  done <<< "$PG_FILES"
+  if [ "${#layouts[@]}" -gt 0 ]; then
+    mapfile -t PG_TEST_MODULES < <(printf '%s\n' "${PG_TEST_MODULES[@]}" integration-tests | sed '/^$/d' | LC_ALL=C sort -u)
+  fi
   for m in "${PG_MODULES[@]}"; do
     PG_2+=("$m:check" "$m:koverXmlReport")
     PG_ROOTS2+=("modules/${m##*:}")
@@ -50,6 +60,7 @@ pgplan::build() {
     while IFS= read -r cf; do
       [[ "$cf" == tests/"$m"/* ]] && files+=("$ROOT/$cf")
     done <<< "$PG_FILES"
+    if [ "$m" = integration-tests ]; then files+=("${layouts[@]}"); fi
     plan="$(pg2b::plan_module "$m" "$ROOT/tests/$m/build.gradle.kts" "$ROOT/tests/$m/src/test/kotlin" "${files[@]}")" || return 2
     PG_SELECTIONS[$m]="$plan"
     mapfile -t words <<< "$plan"
