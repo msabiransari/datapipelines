@@ -30,7 +30,7 @@ import java.util.UUID
  * zero (the FamilyInventory rule). Nothing here writes; the §7.6 row is `datasource.read`, the
  * lowest operation whose row admits a metadata read (`ReadFloorTest`).
  *
- * #home-ops — on the v2 frame (ui-screens §4.5d): the tile is the strip's one metric (its help the
+ * #639 — on the v2 frame (ui-screens §4.5d): the tile is the strip's one metric (its help the
  * note) and the View all badge, each chart is a bars panel with a description and an info dialog
  * that states §4.5d's counting rule, and Continue your work opens on one task row, Browse
  * datasources, above the grants.
@@ -223,7 +223,7 @@ class DatasourceOverviewController(
         /** The overview path — also the layout's path rule for opening the datasources browser. */
         const val PATH = "/overview/datasources"
 
-        /** Each panel's line under its heading (#home-ops). */
+        /** Each panel's line under its heading (#639). */
         private val DESCRIPTIONS =
             mapOf(
                 "health" to "The last recorded test per datasource, one outcome each.",

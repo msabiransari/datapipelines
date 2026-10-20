@@ -102,7 +102,7 @@ class ApiOverviewController(
 
 /**
  * #585 — the API home's panel and recent card, built from the two reads alone so a chart never
- * disagrees with its tiles. #home-ops: the tiles are the strip's metrics, the charts its panels.
+ * disagrees with its tiles. #639: the tiles are the strip's metrics, the charts its panels.
  */
 internal object ApiHomePage {
     /**

@@ -19,7 +19,7 @@ import kotlin.math.sqrt
  * and the empty track across every offered theme, including both auto schemes.
  * The matrix is written before assertions so a failing candidate retains every measured pair.
  *
- * #home-frame: the v2 Pipelines home carries the four tones as the strip's dots (In development,
+ * #638: the v2 Pipelines home carries the four tones as the strip's dots (In development,
  * Live) and the foot's (Live with changes, Retired); the activity columns paint created and
  * released, the release-history bars No releases and the released bins. Every site of a tone must
  * read one colour (strip dot = legend dot = column fill = bar fill), and the columns' and bars'
@@ -41,7 +41,7 @@ import kotlin.math.sqrt
  *
  * Professional's info and link roles are both indigo. Minimal intentionally paints warning,
  * success and info black; its discarded, track and panel pairs pass and are never excepted.
- * The last two rows came with #home-frame's text pairs and were recorded on the owner's ruling
+ * The last two rows came with #638's text pairs and were recorded on the owner's ruling
  * (2026-10-20): the same cause as #631's other rows, so the same issue.
  */
 class OverviewToneBrowserTest : RestTreeBrowserFixture() {

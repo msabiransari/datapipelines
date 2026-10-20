@@ -11,7 +11,7 @@ import java.util.Locale
 import kotlin.math.roundToLong
 
 /**
- * #home-frame — one panel of an overview's analytics grid (`overview/family.html`, the `panels`
+ * #638 — one panel of an overview's analytics grid (`overview/family.html`, the `panels`
  * loop; ui-screens §4.25 Hierarchy). Every panel: [heading] (visible, and the chart's accessible
  * name), [description] the line under it, [period] an optional chip ("Last 12 weeks"), [explain]
  * the dialog key its info button opens (null: no button), [footer] the line under the chart, and
@@ -139,7 +139,7 @@ sealed interface Panel {
 }
 
 /**
- * #598a/#598b, re-cut by #home-frame for the approved 2026-10-20 direction — the Pipelines home's
+ * #598a/#598b, re-cut by #638 for the approved 2026-10-20 direction — the Pipelines home's
  * inventory from ONE [ChartInventory], so no number disagrees with another: [metrics] are the
  * summary strip (the four exclusive lifecycle groups plus Actively developed, #593's resolution),
  * [activity] the twelve weekly columns, [maturity] the release-history bars and [releaseNote] the
@@ -152,7 +152,7 @@ object OverviewStacked {
         /** The four counts and the four-bar lifecycle chart (#556). No family carries it since #599 (a removal follow-up). */
         STANDARD,
 
-        /** The lifecycle strip, the activity columns and the release history (#598, #home-frame). */
+        /** The lifecycle strip, the activity columns and the release history (#598, #638). */
         LIFECYCLE,
     }
 

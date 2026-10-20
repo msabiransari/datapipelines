@@ -122,7 +122,7 @@ data class KeyCounts(
 }
 
 /**
- * #home-ops — the API home's v2 words (ui-screens §4.18a): each panel's description and info
+ * #639 — the API home's v2 words (ui-screens §4.18a): each panel's description and info
  * dialog (§4.18a's counting rules in the reader's words), and Continue your work's rows — the
  * console always, the Keys page only when the keys read answered (the keys tile's own condition).
  */

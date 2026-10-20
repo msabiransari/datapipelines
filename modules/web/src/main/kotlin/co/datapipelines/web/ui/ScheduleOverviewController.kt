@@ -32,7 +32,7 @@ import java.util.UUID
  * create one" is a person's steps on the explorer. A failed read says so and shows no number, never
  * a zero (the FamilyInventory rule). The §7.6 row is `schedule.read`, the explorer's own.
  *
- * #home-ops — on the v2 frame (ui-screens §4.20a): the four tiles are the strip's metrics (each
+ * #639 — on the v2 frame (ui-screens §4.20a): the four tiles are the strip's metrics (each
  * help its note; enabled, paused and blocked dotted in their By condition bar's tone, so a dot and
  * its bar never disagree), the total is the View all badge, each chart is a bars panel with a
  * description and an info dialog, and Continue your work opens on See what runs next. There is no
@@ -295,7 +295,7 @@ class ScheduleOverviewController(
         const val UP_NEXT = "Up next"
         const val RECENTLY_CHANGED = "Recently changed"
 
-        /** Each panel's line under its heading (#home-ops). */
+        /** Each panel's line under its heading (#639). */
         private val DESCRIPTIONS =
             mapOf(
                 "condition" to "Every live schedule once, by the condition the explorer shows.",

@@ -37,7 +37,7 @@ data class OverviewPage(
     val icon: String = iconFor(family),
 ) {
     /**
-     * #home-frame — the summary strip: the panel's [InventoryPanel.metrics] when it carries them,
+     * #638 — the summary strip: the panel's [InventoryPanel.metrics] when it carries them,
      * otherwise its counts, one metric each (a STANDARD sibling's strip keeps its meaning until
      * #599 / home-ops). Empty when the inventory is unknown: the strip then says so, no digit.
      */
@@ -60,7 +60,7 @@ data class OverviewPage(
     /**
      * The summary, the charts and their dialogs, every number from the one model its page built.
      * [counts] and [charts] are the #556 shape the siblings build; [metrics] and [foot] the
-     * strip (#home-frame), [panels] the analytics grid (by default the charts as bars panels),
+     * strip (#638), [panels] the analytics grid (by default the charts as bars panels),
      * [viewAll] the View all badge (null: no badge) and [explanations] the panels' and strip's
      * dialog sections.
      */
@@ -75,7 +75,7 @@ data class OverviewPage(
     )
 
     /**
-     * #home-frame — one cell of the summary strip (or its foot): [note] the line under the number,
+     * #638 — one cell of the summary strip (or its foot): [note] the line under the number,
      * [href] its filtered catalog (null: unlinked), [tone] the status dot (null: none), [lensed]
      * whether the number passed the promoter lens (#621), [title] the hover sentence (Retired's
      * "have no page"). [value] is null only for a number a sibling cannot state.
@@ -100,7 +100,7 @@ data class OverviewPage(
     }
 
     /**
-     * #home-frame — one dialog section the page's `<dialog>` shows by [key]: [paragraphs] the
+     * #638 — one dialog section the page's `<dialog>` shows by [key]: [paragraphs] the
      * server-written sentences, [terms] an optional definition list, [table] the panel key whose
      * hidden table moves into the section while it is open (null: none).
      */
@@ -121,7 +121,7 @@ data class OverviewPage(
     )
 
     /**
-     * #home-frame — one Continue your work row: a tinted [icon] in [tone], the [title], the
+     * #638 — one Continue your work row: a tinted [icon] in [tone], the [title], the
      * sentence, and the catalog it opens.
      */
     data class TaskRow(
@@ -174,7 +174,7 @@ data class OverviewPage(
     /**
      * Continue your work: the [Link] beside the card's title (null hides it — a family whose
      * catalog offers no draft filter has nothing for it to open, #583) and the sections, each
-     * its own heading, caveat and list. #home-frame: [tasks] are the rows above the sections and
+     * its own heading, caveat and list. #638: [tasks] are the rows above the sections and
      * [description] the line under the card's title.
      */
     data class RecentPanel(
@@ -216,7 +216,7 @@ data class OverviewPage(
     /**
      * The family facts an overview names. Parameter sets' route is `parameter-sets`. [charts] is
      * the inventory card the family carries: since #599 all five are lifecycle homes (#598a/b,
-     * #home-frame: the strip, the activity columns and the release history from one chart read).
+     * #638: the strip, the activity columns and the release history from one chart read).
      */
     enum class Family(
         val navigation: NavigationFamily,
@@ -347,7 +347,7 @@ data class OverviewPage(
         }
 
         /**
-         * #home-frame — Continue your work's two rows for a lifecycle family: the drafts awaiting
+         * #638 — Continue your work's two rows for a lifecycle family: the drafts awaiting
          * their first release ([inventory]'s In development count worded; no number when the
          * inventory is unknown) and the live objects to run. A family whose catalog offers no such
          * filter gets no row for it.
@@ -525,7 +525,7 @@ data class OverviewPage(
 }
 
 /**
- * #home-frame — the dialog sections' and rows' sentences, in the reader's words (ui-screens §4.25,
+ * #638 — the dialog sections' and rows' sentences, in the reader's words (ui-screens §4.25,
  * the counting model), each built from the numbers the page already shows.
  */
 object OverviewWords {
