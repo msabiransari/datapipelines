@@ -197,7 +197,7 @@ class ScriptVocabularyGuardTest {
                     "the visualization/dashboard rows and the runtime stage list (the block)",
                 ),
                 Triple(
-                    Regex("^modules/app/src/main/kotlin/co/datapipelines/config/ConfigValidator\\.kt$"),
+                    Regex("^modules/app/src/main/kotlin/co/datapipelines/config/(?:ConfigValidator|ScriptRules)\\.kt$"),
                     Regex("transform", setOf(IGNORE_CASE)),
                     "the removed-key refusal machinery NAMES the old keys by design (§7, no alias)",
                 ),

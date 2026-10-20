@@ -65,23 +65,9 @@ class ConfigValidator(
          * `DashboardRuntimeRules.checkDashboardRuntimeBounds` (§3.34). 34 since #488 added
          * `RedisRules.checkRedisTimeoutBounds` (§3.1). 35 since #598b added
          * `UiRules.checkUiActivelyDevelopedDays` (§3.10). 36 since the script-node rename added
-         * `checkRemovedTransformKeys` (§3.28 — the removed `datapipelines.transform.*` keys).
+         * `ScriptRules.checkRemovedTransformKeys` (§3.28 — the removed `datapipelines.transform.*` keys).
          */
         internal const val CHECK_COUNT = 36
-
-        /** The nine `datapipelines.transform.*` keys the rename removed (configuration.md §3.28). */
-        internal val REMOVED_TRANSFORM_KEY_SUFFIXES =
-            listOf(
-                "evaluate-timeout-seconds",
-                "suite-timeout-seconds",
-                "pool-size",
-                "pool-queue",
-                "abandon-grace-seconds",
-                "max-input-rows",
-                "max-value-bytes",
-                "max-string-bytes",
-                "max-depth",
-            )
 
         /**
          * `users.provider` values the system writes itself (`UserService.BOOTSTRAP_PROVIDER`,
@@ -142,7 +128,7 @@ class ConfigValidator(
             PostureRules.checkHardenedPosture(snapshot, violations, warnings)
             PostureRules.checkHardenedRedisPassword(snapshot, violations)
             checkRemovedWorkspaceKeys(snapshot, violations)
-            checkRemovedTransformKeys(snapshot, violations)
+            ScriptRules.checkRemovedTransformKeys(snapshot, violations)
             checkBootstrapActorConfigured(snapshot, violations)
             checkReservedProviderNames(snapshot, violations)
             checkPromotionTarget(snapshot, violations)
@@ -497,28 +483,6 @@ class ConfigValidator(
                     "there is no self-service join — a super admin adds members, with their roles. " +
                     "Remove the key."
             }
-        }
-
-        /**
-         * §7 / §3.28 — the keys the TRANSFORM→SCRIPT node-type rename REMOVED, refused BY NAME
-         * (script-node-rename lane, owner ruling 2026-10-20).
-         *
-         * The script knobs moved from `datapipelines.transform.*` to `datapipelines.script.*`
-         * with no alias: the properties class binds the new tree, so a stale `transform` key
-         * would bind NOTHING and the deployment would silently run on defaults — the exact
-         * failure mode `checkRemovedWorkspaceKeys` refuses to allow. Any of the nine keys set
-         * at all is refused, naming the old key and the replacement.
-         */
-        private fun checkRemovedTransformKeys(
-            snapshot: ConfigSnapshot,
-            violations: MutableList<String>,
-        ) {
-            if (!snapshot.transformLegacyKeysSet) return
-            violations +=
-                "datapipelines.transform.* is set but was REMOVED by the TRANSFORM→SCRIPT node-type " +
-                "rename (§3.28): the script knobs now live under datapipelines.script.* and there is " +
-                "no alias — a datapipelines.transform.* key binds nothing. Rename the key(s): " +
-                REMOVED_TRANSFORM_KEY_SUFFIXES.joinToString(", ") { "datapipelines.transform.$it" } + "."
         }
 
         // §7 / §3.18 — the "an examples file nothing will read" check went with the
@@ -894,7 +858,7 @@ class ConfigValidator(
                 // `datapipelines.script.*`, so without this check a stale key would bind
                 // nothing and the deployment would run on defaults silently).
                 transformLegacyKeysSet =
-                    REMOVED_TRANSFORM_KEY_SUFFIXES.any { environment.getProperty("datapipelines.transform.$it") != null },
+                    ScriptRules.REMOVED_TRANSFORM_KEY_SUFFIXES.any { environment.getProperty("datapipelines.transform.$it") != null },
                 bootstrapDatasourcesFile = environment.getProperty("datapipelines.bootstrap.datasources-file"),
                 bootstrapExamplesFile = environment.getProperty("datapipelines.bootstrap.examples-file"),
                 bootstrapDemoApiKey = environment.getProperty("datapipelines.bootstrap.demo-api-key"),
@@ -1229,6 +1193,8 @@ internal data class ConfigSnapshot(
     /** §3.27 (137) — the mail block, its own value so the snapshot builder stays readable. */
     val mail: MailSnapshot = MailSnapshot(),
 ) {
+    // Lists every snapshot field and redacts the secrets, like the snapshot builder.
+    @Suppress("LongMethod")
     override fun toString() =
         "ConfigSnapshot(" +
             "datasourceUrl=$datasourceUrl, " +

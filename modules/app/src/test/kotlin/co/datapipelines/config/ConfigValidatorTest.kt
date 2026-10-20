@@ -203,10 +203,10 @@ class ConfigValidatorTest {
     fun `the refusal names all nine removed transform keys`() {
         val report = ConfigValidator.validate(validSnapshot().copy(transformLegacyKeysSet = true))
 
-        ConfigValidator.REMOVED_TRANSFORM_KEY_SUFFIXES.forEach { suffix ->
+        ScriptRules.REMOVED_TRANSFORM_KEY_SUFFIXES.forEach { suffix ->
             report.violations.single().contains("datapipelines.transform.$suffix") shouldBe true
         }
-        ConfigValidator.REMOVED_TRANSFORM_KEY_SUFFIXES shouldHaveSize 9
+        ScriptRules.REMOVED_TRANSFORM_KEY_SUFFIXES shouldHaveSize 9
     }
 
     @Test

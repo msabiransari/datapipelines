@@ -13,6 +13,42 @@ package co.datapipelines.config
  * companion is the registry, not the home, of the §3.x families.
  */
 internal object ScriptRules {
+    /** The nine `datapipelines.transform.*` keys the rename removed (configuration.md §3.28). */
+    internal val REMOVED_TRANSFORM_KEY_SUFFIXES =
+        listOf(
+            "evaluate-timeout-seconds",
+            "suite-timeout-seconds",
+            "pool-size",
+            "pool-queue",
+            "abandon-grace-seconds",
+            "max-input-rows",
+            "max-value-bytes",
+            "max-string-bytes",
+            "max-depth",
+        )
+
+    /**
+     * §7 / §3.28 — the keys the TRANSFORM→SCRIPT node-type rename REMOVED, refused BY NAME
+     * (script-node-rename lane, owner ruling 2026-10-20).
+     *
+     * The script knobs moved from `datapipelines.transform.*` to `datapipelines.script.*`
+     * with no alias: the properties class binds the new tree, so a stale `transform` key
+     * would bind NOTHING and the deployment would silently run on defaults — the exact
+     * failure mode `checkRemovedWorkspaceKeys` refuses to allow. Any of the nine keys set
+     * at all is refused, naming the old key and the replacement.
+     */
+    fun checkRemovedTransformKeys(
+        snapshot: ConfigSnapshot,
+        violations: MutableList<String>,
+    ) {
+        if (!snapshot.transformLegacyKeysSet) return
+        violations +=
+            "datapipelines.transform.* is set but was REMOVED by the TRANSFORM→SCRIPT node-type " +
+            "rename (§3.28): the script knobs now live under datapipelines.script.* and there is " +
+            "no alias — a datapipelines.transform.* key binds nothing. Rename the key(s): " +
+            REMOVED_TRANSFORM_KEY_SUFFIXES.joinToString(", ") { "datapipelines.transform.$it" } + "."
+    }
+
     fun checkScriptBounds(
         snapshot: ConfigSnapshot,
         violations: MutableList<String>,
