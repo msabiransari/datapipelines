@@ -89,15 +89,34 @@
   flex-wrap: wrap;
 }
 
+/* #625 — the viewed row is the menu's selection expression (app.css
+   `.app-nav-link[aria-current="page"]`, #605; ui-screens §3.1, §2.8): the `--brand-soft`
+   tint, `--text-primary` ink and a `--border-focus` left bar. The bar's width is the
+   navigation indicator token, not `--focus-ring-offset` — that is a 2px focus-ring
+   geometry in every theme, not a selection width. Every link reserves the bar
+   (transparent, over the ghost button's other 1px transparent borders), so a version
+   switch moves nothing. (#502 had replaced undefined tokens with `--surface-selected` /
+   `--accent-primary` and the offset width: 2px, and 1:1 on Minimal.) */
+.tw-version-link {
+  border-left: var(--app-nav-indicator-w) solid transparent;
+}
+
 .tw-version-link[aria-current="true"] {
-  /* #502 — was `--accent-soft`/`--accent`, neither ever defined; the house selected fill
-     is `--surface-selected` with `--brand`'s token `--accent-primary` for the text. §2.8
-     is normative that a `surface-selected` fill carries the accent bar (the house pattern,
-     app.css `.app-nav-link[aria-current]`, same expression), so the bar comes with the fill;
-     drawn as a border over `.ds-button`'s own 1px transparent border, the house way. */
-  background: var(--surface-selected);
-  color: var(--accent-primary);
-  border-left: var(--focus-ring-offset, 3px) solid var(--border-focus);
+  background: var(--brand-soft);
+  color: var(--text-primary);
+  border-left-color: var(--border-focus);
+}
+
+/* The viewed row's own `· current` suffix takes the label's ink: muted text on the
+   selected tint is under 4.5:1 on every theme (owner, #625). */
+.tw-version-link[aria-current="true"] .u-muted {
+  color: inherit;
+}
+
+/* Minimal's selected surface and both normal inks are black (1:1); its monochrome
+   tint takes the inverted ink, as the menu does. */
+:root[data-theme="minimal"] .tw-version-link[aria-current="true"] {
+  color: var(--text-inverted);
 }
 
 .tw-topbar-actions {
