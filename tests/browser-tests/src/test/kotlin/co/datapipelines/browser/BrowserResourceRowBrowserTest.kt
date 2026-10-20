@@ -30,10 +30,7 @@ class BrowserResourceRowBrowserTest : RestTreeBrowserFixture() {
 
     /** One row's full reading: computed styles, boxes and the tokens they must resolve to. */
     @Suppress("UNCHECKED_CAST")
-    private fun rowMetrics(
-        path: String,
-        label: String,
-    ): Map<String, Any?>? =
+    private fun rowMetrics(path: String): Map<String, Any?>? =
         page.evaluate(
             """(args) => {
           const control = document.querySelector(args.panel + " .dp-tree-activate[title='" + args.path + "']");
@@ -114,20 +111,27 @@ class BrowserResourceRowBrowserTest : RestTreeBrowserFixture() {
         label: String,
         expected: Double,
         tolerance: Double = 1.0,
-    ) = withClue(label) { num(label).shouldBeBetween(expected - tolerance, expected + tolerance, 0.0) }
+    ) {
+        withClue(label) { num(label).shouldBeBetween(expected - tolerance, expected + tolerance, 0.0) }
+    }
 
     private fun atLeast(
         label: String,
         floor: Double,
-    ) = withClue(label) { num(label).shouldBeGreaterThanOrEqual(floor) }
+    ) {
+        withClue(label) { num(label).shouldBeGreaterThanOrEqual(floor) }
+    }
 
     private fun matchesToken(
         label: String,
         token: String,
-    ) = withClue("$label resolves to $token") { (readings[label] as String) shouldBe (readings[token] as String) }
+    ) {
+        withClue(label) { readings[label] shouldBe readings[token] }
+    }
 
-    private fun isTransparent(label: String) =
+    private fun isTransparent(label: String) {
         withClue(label) { (readings[label] as String) shouldBe "rgba(0, 0, 0, 0)" }
+    }
 
     /** The resting state: geometry, the overlay surface, hover on a sibling, the long name wraps. */
     @Test
@@ -143,15 +147,15 @@ class BrowserResourceRowBrowserTest : RestTreeBrowserFixture() {
         page.waitForSelector(leaf("row/alpha") + " .dp-tree-version:not([hidden])")
 
         record("surface", surfaceMetrics())
-        record("row.alpha", rowMetrics("row/alpha", "row.alpha"))
-        record("row.beta", rowMetrics("row/beta", "row.beta"))
-        record("row.long", rowMetrics("row/" + "x".repeat(64), "row.long"))
-        record("row.folder", rowMetrics("row", "row.folder"))
+        record("row.alpha", rowMetrics("row/alpha"))
+        record("row.beta", rowMetrics("row/beta"))
+        record("row.long", rowMetrics("row/" + "x".repeat(64)))
+        record("row.folder", rowMetrics("row"))
         shot("rows-1440")
 
         // hover tints the hovered row's control, and nothing else
         page.hover(leaf("row/beta"))
-        record("row.beta.hover", rowMetrics("row/beta", "row.beta.hover"))
+        record("row.beta.hover", rowMetrics("row/beta"))
         page.mouse().move(5.0, 500.0)
 
         printReadings("rest")
@@ -193,10 +197,11 @@ class BrowserResourceRowBrowserTest : RestTreeBrowserFixture() {
 
         page.click(leaf("row/alpha"))
         page.waitForFunction(
-            "path => document.querySelector('#nav-tree-pipelines a[title=\"' + path + '\"]').closest('[role=treeitem]').getAttribute('aria-selected') === 'true'",
+            "path => document.querySelector('#nav-tree-pipelines a[title=\"' + path + '\"]')" +
+                ".closest('[role=treeitem]').getAttribute('aria-selected') === 'true'",
             "row/alpha",
         )
-        record("row.alpha", rowMetrics("row/alpha", "row.alpha"))
+        record("row.alpha", rowMetrics("row/alpha"))
         shot("row-selected-1440")
 
         printReadings("selected")
