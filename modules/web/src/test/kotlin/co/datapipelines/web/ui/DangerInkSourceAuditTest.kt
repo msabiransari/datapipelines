@@ -65,6 +65,24 @@ class DangerInkSourceAuditTest {
         hits(INK_READ).size shouldBeGreaterThanOrEqual MIN_INK_READS
     }
 
+    @Test
+    fun `no danger fill or raw text alias is consumed as text`() {
+        val aliases =
+            sheets.flatMap { (name, css) ->
+                Regex("""(--[\w-]+)\s*:\s*var\(\s*--(?:accent|text)-danger\s*[,)]""")
+                    .findAll(css)
+                    .filterNot { it.groupValues[1] == "--app-danger-ink" }
+                    .map { it.groupValues[1] to "$name: ${it.value}" }
+                    .toList()
+            }
+        val stray =
+            aliases.flatMap { (alias, declaration) ->
+                hits(Regex("""(?<![-\w])color\s*:\s*var\(\s*${Regex.escape(alias)}\s*[,)]"""))
+                    .map { "$declaration -> $it" }
+            }
+        withClue(stray.joinToString("\n")) { stray shouldBe emptyList() }
+    }
+
     private companion object {
         /** `color:` (never `border-color:` / `background-color:`) reading either red, bare or with a fallback. */
         val STRAY_TEXT = Regex("""(?<![-\w])color\s*:\s*var\(\s*--(?:accent-danger|text-danger)\s*[,)]""")

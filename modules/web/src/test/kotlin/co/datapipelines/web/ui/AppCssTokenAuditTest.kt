@@ -39,11 +39,9 @@ import org.springframework.core.io.support.PathMatchingResourcePatternResolver
  *
  * ## What it deliberately does NOT check
  *
- * The other stylesheets. `pipeline-editor.css` is round 080's file this cycle and
- * `template-tree.css`/`template-editor.css` were not part of this round's restyle; widening
- * the sweep to them without reading them would either fail the build on someone else's work
- * or, worse, pass with an exception list nobody revisits. The scope is stated rather than
- * assumed — see the `the sweep names its own scope` test.
+ * Other stylesheets have their own scope: EditorCssTokenAuditTest covers pipeline-editor.css,
+ * template-workspace.css and template-editor.css; AuthCssTokenAuditTest covers auth.css.
+ * This sweep remains scoped to app.css — see the non-vacuity test below.
  */
 class AppCssTokenAuditTest {
     private val resolver = PathMatchingResourcePatternResolver(javaClass.classLoader)
