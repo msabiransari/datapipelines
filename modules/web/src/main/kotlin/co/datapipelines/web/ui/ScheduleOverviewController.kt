@@ -31,6 +31,12 @@ import java.util.UUID
  * There is no agent section — no MCP tool creates or reads a schedule — so the guide's "How to
  * create one" is a person's steps on the explorer. A failed read says so and shows no number, never
  * a zero (the FamilyInventory rule). The §7.6 row is `schedule.read`, the explorer's own.
+ *
+ * #home-ops — on the v2 frame (ui-screens §4.20a): the four tiles are the strip's metrics (each
+ * help its note; enabled, paused and blocked dotted in their By condition bar's tone, so a dot and
+ * its bar never disagree), the total is the View all badge, each chart is a bars panel with a
+ * description and an info dialog, and Continue your work opens on See what runs next. There is no
+ * Unblock row: the explorer has no condition filter for it to open.
  */
 @Controller
 class ScheduleOverviewController(
@@ -57,7 +63,7 @@ class ScheduleOverviewController(
                 title = "Schedules",
                 catalogHref = "/schedules",
                 lensed = viewer.narrowed,
-                inventory = read.summary?.let(::panel),
+                inventory = read.summary?.let { panel(it, viewer.narrowed) },
                 unavailable = read.unavailable,
                 recent = recent(read.summary, Instant.now()),
                 guided = true,
@@ -86,17 +92,67 @@ class ScheduleOverviewController(
         return SummaryRead(summary, null)
     }
 
-    /** Four tiles and two charts, every number from the one summary. */
-    private fun panel(summary: ScheduleSummary): OverviewPage.InventoryPanel =
-        OverviewPage.InventoryPanel(
-            counts =
+    /**
+     * Four tiles and two charts, every number from the one summary; the tiles become the strip's
+     * metrics through the page's [lensed] flag, the charts its two panels.
+     */
+    private fun panel(
+        summary: ScheduleSummary,
+        lensed: Boolean,
+    ): OverviewPage.InventoryPanel {
+        val counts =
+            listOf(
+                count("schedules", "Schedules", summary.total, "Each live schedule once: enabled, paused and blocked added together."),
+                count("enabled", "Enabled", summary.enabled, "Firing on their pattern."),
+                count("paused", "Paused", summary.paused, "Kept, but not firing until resumed."),
+                count("blocked", "Blocked", summary.blocked, "Stopped by a failure until someone unblocks them."),
+            )
+        val condition = conditionChart(summary)
+        val charts = listOf(condition, lastRunChart(summary))
+        val tones = condition.bars.associate { it.key to it.tone }
+        return OverviewPage.InventoryPanel(
+            counts = counts,
+            charts = charts,
+            metrics = counts.map { OverviewPage.Metric.of(it, lensed).copy(tone = tones[it.key]) },
+            panels = charts.map { Panel.Bars.of(it).copy(description = DESCRIPTIONS.getValue(it.key), explain = it.key) },
+            viewAll = summary.total.toLong(),
+            explanations = listOf(conditionExplained(summary), lastRunExplained(summary)),
+        )
+    }
+
+    /** By condition's dialog: the three conditions, each counted, and why a bucket is not a filter. */
+    private fun conditionExplained(summary: ScheduleSummary): OverviewPage.Explanation =
+        OverviewPage.Explanation(
+            key = "condition",
+            title = "How conditions are counted",
+            paragraphs =
                 listOf(
-                    count("schedules", "Schedules", summary.total, "Each live schedule once: enabled, paused and blocked added together."),
-                    count("enabled", "Enabled", summary.enabled, "Firing on their pattern."),
-                    count("paused", "Paused", summary.paused, "Kept, but not firing until resumed."),
-                    count("blocked", "Blocked", summary.blocked, "Stopped by a failure until someone unblocks them."),
+                    "Each live schedule is counted once, in the condition the explorer shows on it. A schedule that " +
+                        "is both paused and blocked counts as blocked: blocked wins.",
+                    "The bars are not filters: View all opens the whole list, and each schedule's page names its condition.",
                 ),
-            charts = listOf(conditionChart(summary), lastRunChart(summary)),
+            terms =
+                listOf(
+                    OverviewPage.Term("Enabled", null, summary.enabled.toLong(), "Firing on its pattern."),
+                    OverviewPage.Term("Paused", null, summary.paused.toLong(), "Kept, but not firing until resumed."),
+                    OverviewPage.Term("Blocked", null, summary.blocked.toLong(), "Stopped until someone unblocks it."),
+                ),
+        )
+
+    /** Last run's dialog: which run states each bucket holds (§4.20a), each counted. */
+    private fun lastRunExplained(summary: ScheduleSummary): OverviewPage.Explanation =
+        OverviewPage.Explanation(
+            key = "last-run",
+            title = "How last runs are counted",
+            paragraphs =
+                listOf(
+                    "Each schedule is counted once, by the state of its newest run. Not a history: an earlier failure " +
+                        "followed by a success counts as succeeded.",
+                ),
+            terms =
+                LastRunOutcome.entries.map { outcome ->
+                    OverviewPage.Term(outcome.label(), null, summary.lastRun.getValue(outcome).toLong(), outcome.states())
+                },
         )
 
     private fun count(
@@ -162,6 +218,8 @@ class ScheduleOverviewController(
     ): OverviewPage.RecentPanel =
         OverviewPage.RecentPanel(
             review = null,
+            tasks = TASKS,
+            description = "A clear next step for your schedules",
             sections =
                 listOf(
                     section(
@@ -237,6 +295,29 @@ class ScheduleOverviewController(
         const val UP_NEXT = "Up next"
         const val RECENTLY_CHANGED = "Recently changed"
 
+        /** Each panel's line under its heading (#home-ops). */
+        private val DESCRIPTIONS =
+            mapOf(
+                "condition" to "Every live schedule once, by the condition the explorer shows.",
+                "last-run" to "Each schedule once, by how its latest run ended.",
+            )
+
+        /**
+         * Continue your work's row: the explorer, every schedule with its next run. No Unblock row —
+         * the explorer has no condition filter, and a bucket is not a filter (§4.20a).
+         */
+        private val TASKS =
+            listOf(
+                OverviewPage.TaskRow(
+                    "next",
+                    "calendar-clock",
+                    "See what runs next",
+                    "Every schedule with its next run, its condition and its runs.",
+                    "/schedules",
+                    "released",
+                ),
+            )
+
         /** The bar's key — the wire spelling of the bucket. */
         internal fun LastRunOutcome.wire(): String = name.lowercase().replace('_', '-')
 
@@ -247,6 +328,16 @@ class ScheduleOverviewController(
                 LastRunOutcome.IN_PROGRESS -> "In progress"
                 LastRunOutcome.DID_NOT_RUN -> "Did not run"
                 LastRunOutcome.NEVER_RAN -> "Never ran"
+            }
+
+        /** The run states a bucket holds, in words (§4.20a's mapping). */
+        internal fun LastRunOutcome.states(): String =
+            when (this) {
+                LastRunOutcome.SUCCEEDED -> "The newest run succeeded."
+                LastRunOutcome.FAILED -> "The newest run failed, was aborted or ended with an unknown outcome."
+                LastRunOutcome.IN_PROGRESS -> "The newest run is queued, starting or running."
+                LastRunOutcome.DID_NOT_RUN -> "The newest occurrence was not started, was skipped or was cancelled."
+                LastRunOutcome.NEVER_RAN -> "No run yet."
             }
 
         /** The frame's four tones only — warning for a failure, muted for what did not happen. */

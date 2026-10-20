@@ -51,14 +51,15 @@ class ApiOverviewController(
         val endpoints = read("endpoints", principal) { reads.endpoints(principal) }
         val keys = read("keys", principal) { reads.keys(principal) }
         val keysHeading = if (principal.holds(Permission.API_KEY_READ)) WORKSPACE_KEYS else YOUR_KEYS
+        val lensed = reads.lensed(principal)
         model.addAttribute(
             OverviewController.MODEL,
             OverviewPage(
                 family = FAMILY,
                 title = "API",
                 catalogHref = CONSOLE,
-                lensed = reads.lensed(principal),
-                inventory = endpoints?.let { ApiHomePage.panel(it, keys?.let { k -> KeyCounts.of(k, now) }, keysHeading) },
+                lensed = lensed,
+                inventory = endpoints?.let { ApiHomePage.panel(it, keys?.let { k -> KeyCounts.of(k, now) }, keysHeading, lensed) },
                 unavailable = if (endpoints == null) "The endpoints could not be read." else null,
                 recent = ApiHomePage.recent(endpoints, keys, now),
                 guided = true,
@@ -99,13 +100,22 @@ class ApiOverviewController(
     }
 }
 
-/** #585 — the API home's panel and recent card, built from the two reads alone so a chart never disagrees with its tiles. */
+/**
+ * #585 — the API home's panel and recent card, built from the two reads alone so a chart never
+ * disagrees with its tiles. #home-ops: the tiles are the strip's metrics, the charts its panels.
+ */
 internal object ApiHomePage {
-    /** The four tiles (three when the keys read failed) and the two charts. */
+    /**
+     * The four tiles (three when the keys read failed), the two charts, and the strip they make:
+     * the three endpoint metrics carry the page's [lensed] (the console's read is behind the promoter
+     * lens), the keys metric never does — the Keys page's read is not lensed (#621) — so a promoter's
+     * endpoint metrics each say they are admitted and the keys metric does not.
+     */
     fun panel(
         endpoints: EndpointInventory,
         keys: KeyCounts?,
         keysHeading: String,
+        lensed: Boolean,
     ): OverviewPage.InventoryPanel {
         val states = endpoints.counts()
         val tiles =
@@ -133,7 +143,7 @@ internal object ApiHomePage {
                 ),
                 keys?.let {
                     OverviewPage.Count(
-                        "keys",
+                        KEYS_TILE,
                         keysHeading,
                         it.visible,
                         "Live, expired and revoked — every key the Keys page lists for you.",
@@ -141,7 +151,22 @@ internal object ApiHomePage {
                     )
                 },
             )
-        return OverviewPage.InventoryPanel(tiles, listOf(endpointChart(states), keysChart(keys, keysHeading)))
+        val endpointChart = endpointChart(states)
+        val tones = endpointChart.bars.associate { it.key to it.tone }
+        val charts = listOf(endpointChart, keysChart(keys, keysHeading))
+        return OverviewPage.InventoryPanel(
+            counts = tiles,
+            charts = charts,
+            metrics =
+                tiles.map { tile ->
+                    OverviewPage.Metric
+                        .of(tile, lensed = lensed && tile.key != KEYS_TILE)
+                        .copy(tone = ApiHomeWords.METRIC_BARS[tile.key]?.let(tones::get))
+                },
+            panels = charts.map { ApiHomeWords.panel(it, readable = keys != null) },
+            viewAll = states.values.sum(),
+            explanations = listOfNotNull(ApiHomeWords.ENDPOINTS_EXPLAINED, keys?.let { ApiHomeWords.KEYS_EXPLAINED }),
+        )
     }
 
     private fun endpointChart(states: Map<EndpointState, Long>): OverviewPage.Chart =
@@ -200,6 +225,8 @@ internal object ApiHomePage {
     ): OverviewPage.RecentPanel =
         OverviewPage.RecentPanel(
             review = null,
+            tasks = ApiHomeWords.tasks(keysReadable = keys != null),
+            description = ApiHomeWords.CONTINUE,
             sections =
                 listOf(
                     OverviewPage.RecentSection(
@@ -223,7 +250,7 @@ internal object ApiHomePage {
                                 }
                             },
                         unavailable = if (endpoints == null) "The endpoints could not be read." else null,
-                        emptyNote = "Nothing is published yet. The three steps above say how.",
+                        emptyNote = "Nothing is published yet. Quick start says how.",
                     ),
                     OverviewPage.RecentSection(
                         heading = "Recently created keys",
@@ -292,6 +319,9 @@ internal object ApiHomePage {
         )
 
     private const val RECENT_LIMIT = 5
+
+    /** The keys tile's key: the one metric the promoter lens never narrows. */
+    private const val KEYS_TILE = "keys"
 
     /** The console's word for a pipeline deleted out from under its endpoint. */
     private const val DELETED_PIPELINE = "(deleted pipeline)"

@@ -191,7 +191,7 @@ class OverviewApiControllerTest {
             .map { it.entries } shouldContainExactly listOf(emptyList(), emptyList())
         page.recent.sections.map { it.emptyNote } shouldContainExactly
             listOf(
-                "Nothing is published yet. The three steps above say how.",
+                "Nothing is published yet. Quick start says how.",
                 "No keys yet. A key is created by a person on the Keys page.",
             )
     }

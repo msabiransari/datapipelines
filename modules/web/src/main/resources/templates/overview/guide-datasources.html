@@ -1,21 +1,24 @@
-<!--/* #583 — the Datasources overview's guide (shell design §8), shaped as guide-parameter-sets.html:
-     `overview/family.html` includes `intro` after the inventory and `related` beside Continue your
-     work. The one deliberate difference from the four authoring guides: registering a datasource
-     hands a live credential to the workspace, and no credential travels through an agent (094 §7.6
-     — there is no create tool), so the agent card's verb is EXPLORE and VERIFY, never register.
-     The starter prompt follows skill/datasources.md's can-do list — list, read, test, schemas,
-     tables, columns, preview rows, bounded read-only sql_probe — and stops at reporting. The
-     health chart's caveat (one latest recorded test per datasource, whoever ran it) is the
-     inventory card's, not repeated here. Copying sends nothing (overview.mjs). */-->
+<!--/* #583 — the Datasources overview's guide (shell design §8); #home-ops wrote its v2 fragments
+     (`overview/family.html` includes them): `subtitle` under the title, `quickstart` in the Quick
+     start card (the headline, one sentence and three short steps, as guide-pipelines.html), `prompt`
+     and `howitworks` as dialog sections (each its own data-dialog-section root, its data-title the
+     dialog's title), `related` at the foot of Continue your work. The one deliberate difference from
+     the four authoring guides: registering a datasource hands a live credential to the workspace, and
+     no credential travels through an agent (094 §7.6 — there is no create tool), so the agent's verb
+     is EXPLORE and VERIFY, never register, and How it works says who registers. The starter prompt
+     follows skill/datasources.md's can-do list — list, read, test, schemas, tables, columns, preview
+     rows, bounded read-only sql_probe — and stops at reporting. The health chart's caveat (one latest
+     recorded test per datasource, whoever ran it) is the panel's, not repeated here. Copying sends
+     nothing (overview.mjs). */-->
+<p xmlns:th="http://www.thymeleaf.org" th:fragment="subtitle" class="app-overview-subtitle">The database connections everything reads through. See what your workspace can reach, and whether it answers.</p>
+
 <th:block xmlns:th="http://www.thymeleaf.org" th:fragment="quickstart">
   <h2 class="app-overview-quickstart-title" id="overview-quickstart-h">Explore a datasource with your agent</h2>
-  <ol class="app-overview-steps">
-    <li>Register the datasource here in the workspace if it does not exist yet — a person does that,
-      because registering means handing over a credential. Test the connection from its page.</li>
-    <li>Ask a connected agent to explore what the datasource holds: its schemas, tables and columns,
-      a few preview rows, and whether a bounded read-only query answers your question better.</li>
-    <li>Read the report it returns and build on what it verified. The agent reads; changes to the
-      datasource itself stay in the workspace's hands.</li>
+  <p class="app-overview-panel-sub">A person registers the connection; your agent maps what it holds and reports back.</p>
+  <ol class="app-overview-steps app-overview-steps-row">
+    <li><b>Register</b><small>A person adds it here and tests it.</small></li>
+    <li><b>Explore</b><small>Your agent maps its tables and rows.</small></li>
+    <li><b>Build</b><small>Use what it verified in a pipeline.</small></li>
   </ol>
 </th:block>
 
@@ -46,19 +49,27 @@
     facts and credential, tested, and then granted to the workspaces that need it. What this page
     counts is what your workspace can see.
   </p>
-</div>
-
-<div xmlns:th="http://www.thymeleaf.org" th:fragment="related" class="app-overview-resources app-overview-prose" data-overview-related>
-  <h3 class="app-overview-sub" id="overview-related-h">Related resources and help</h3>
-  <ul class="app-overview-related">
-    <li><a hx-boost="true" th:href="@{/overview/pipelines}">Pipelines</a> read through a datasource's
-      connection when they run.</li>
-    <li><a hx-boost="true" th:href="@{/overview/templates}">Templates</a> offer choices that come from a
-      datasource's data.</li>
-    <li><a hx-boost="true" th:href="@{/overview/dashboards}">Dashboards</a> refresh through the pipelines
-      those datasources feed.</li>
-  </ul>
-  <p class="app-card-note">Registering or editing a datasource is done by a person with the workspace's
+  <ol class="app-overview-steps">
+    <li>Register the datasource here in the workspace if it does not exist yet — a person does that,
+      because registering means handing over a credential. Test the connection from its page.</li>
+    <li>Ask a connected agent to explore what the datasource holds: its schemas, tables and columns,
+      a few preview rows, and whether a bounded read-only query answers your question better.</li>
+    <li>Read the report it returns and build on what it verified. The agent reads; changes to the
+      datasource itself stay in the workspace's hands.</li>
+  </ol>
+  <h3 class="app-overview-sub">Humans register datasources</h3>
+  <p>Registering or editing a datasource is done by a person with the workspace's
     credentials — no agent or tool registers one.</p>
   <p><a th:href="@{/docs/mcp-server}">MCP server reference</a></p>
+</div>
+
+<div xmlns:th="http://www.thymeleaf.org" th:fragment="related" class="app-overview-resources app-overview-resources-row" data-overview-related>
+  <span class="app-overview-resources-k">Read through a datasource</span>
+  <a class="app-overview-link" hx-boost="true" th:href="@{/overview/pipelines}">Pipelines <svg class="ds-icon ds-icon-xs"
+     aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#arrow-right"></use></svg></a>
+  <a class="app-overview-link" hx-boost="true" th:href="@{/overview/templates}">Templates <svg class="ds-icon ds-icon-xs"
+     aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#arrow-right"></use></svg></a>
+  <a class="app-overview-link" hx-boost="true" th:href="@{/overview/dashboards}">Dashboards <svg class="ds-icon ds-icon-xs"
+     aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#arrow-right"></use></svg></a>
+  <a class="app-overview-link" th:href="@{/docs/mcp-server}">MCP server reference</a>
 </div>

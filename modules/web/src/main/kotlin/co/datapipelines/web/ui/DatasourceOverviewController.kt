@@ -29,6 +29,11 @@ import java.util.UUID
  * [DatasourceRepository.recentGrants]); a failed read says so and shows no number, never a
  * zero (the FamilyInventory rule). Nothing here writes; the §7.6 row is `datasource.read`, the
  * lowest operation whose row admits a metadata read (`ReadFloorTest`).
+ *
+ * #home-ops — on the v2 frame (ui-screens §4.5d): the tile is the strip's one metric (its help the
+ * note) and the View all badge, each chart is a bars panel with a description and an info dialog
+ * that states §4.5d's counting rule, and Continue your work opens on one task row, Browse
+ * datasources, above the grants.
  */
 @Controller
 class DatasourceOverviewController(
@@ -74,17 +79,22 @@ class DatasourceOverviewController(
                 log.warn("datasource overview counts unavailable for workspace {}: {}", workspaceId, failure.toString())
                 return CountsRead(null, "Inventory could not be read.")
             }
+        val total = totalTile(counts)
+        val charts = listOf(healthChart(counts), dialectChart(counts))
         val panel =
             OverviewPage.InventoryPanel(
-                counts = listOf(totalTile(counts)),
-                charts =
-                    listOf(
-                        healthChart(counts),
-                        dialectChart(counts),
-                    ),
+                counts = listOf(total),
+                charts = charts,
+                panels = charts.map(::panel),
+                viewAll = total.value,
+                explanations = listOf(HEALTH_EXPLAINED, DIALECT_EXPLAINED),
             )
         return CountsRead(panel, null)
     }
+
+    /** A chart as its analytics panel: the description under its heading, the info button opening its own dialog section. */
+    private fun panel(chart: OverviewPage.Chart): Panel.Bars =
+        Panel.Bars.of(chart).copy(description = DESCRIPTIONS.getValue(chart.key), explain = chart.key)
 
     /** The one tile: every datasource the workspace can see, however it was granted. */
     private fun totalTile(counts: List<DatasourceDialectCounts>): OverviewPage.Count =
@@ -161,6 +171,8 @@ class DatasourceOverviewController(
         try {
             OverviewPage.RecentPanel(
                 review = null,
+                tasks = TASKS,
+                description = CONTINUE,
                 sections =
                     listOf(
                         OverviewPage.RecentSection(
@@ -186,6 +198,8 @@ class DatasourceOverviewController(
             log.warn("datasource overview recent list unavailable for workspace {}: {}", workspaceId, failure.toString())
             OverviewPage.RecentPanel(
                 review = null,
+                tasks = TASKS,
+                description = CONTINUE,
                 sections =
                     listOf(
                         OverviewPage.RecentSection(
@@ -208,5 +222,52 @@ class DatasourceOverviewController(
     companion object {
         /** The overview path — also the layout's path rule for opening the datasources browser. */
         const val PATH = "/overview/datasources"
+
+        /** Each panel's line under its heading (#home-ops). */
+        private val DESCRIPTIONS =
+            mapOf(
+                "health" to "The last recorded test per datasource, one outcome each.",
+                "dialect" to "Every datasource once, by its SQL dialect.",
+            )
+
+        /** The panels' info dialogs: §4.5d's counting rule for each chart, in the reader's words. */
+        private val HEALTH_EXPLAINED =
+            OverviewPage.Explanation(
+                key = "health",
+                title = "How connection health is counted",
+                paragraphs =
+                    listOf(
+                        "Each datasource your workspace can see is counted once, by the outcome of its most recent recorded " +
+                            "connection test, whoever ran it: the connection was ok, it failed, or it was never tested.",
+                        "Never tested is a count of its own, never a blank. The bars are not filters: View all lists every " +
+                            "datasource with its last test.",
+                    ),
+            )
+        private val DIALECT_EXPLAINED =
+            OverviewPage.Explanation(
+                key = "dialect",
+                title = "How dialects are counted",
+                paragraphs =
+                    listOf(
+                        "Each datasource your workspace can see is counted once, under its SQL dialect. A dialect no " +
+                            "datasource uses has no bar.",
+                        "Each bar opens the datasource list filtered to that dialect.",
+                    ),
+            )
+
+        private const val CONTINUE = "A clear next step for your datasources"
+
+        /** Continue your work's one row: the list, where each datasource's connection facts and test live. */
+        private val TASKS =
+            listOf(
+                OverviewPage.TaskRow(
+                    "browse",
+                    "database",
+                    "Browse datasources",
+                    "Open one to read its connection facts and test it.",
+                    "/datasources",
+                    "released",
+                ),
+            )
     }
 }

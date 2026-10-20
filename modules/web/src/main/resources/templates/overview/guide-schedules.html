@@ -1,15 +1,17 @@
-<!--/* #584 — the Schedules home's guide (shell design §8), shaped as guide-datasources.html:
-     `overview/family.html` includes (since #home-frame) `primary` (the New schedule link) as the
-     heading's primary action, `quickstart` in the Quick start card, `howitworks` as a dialog section
-     and `related` at the foot of Continue your work. The one deliberate difference from the other
-     guides: there is NO agent card and no starter prompt — no MCP tool creates, edits or reads a
-     schedule (the manual's scheduling area is reserved, DocArea), so "How to create one" is a
-     PERSON's steps on the explorer, worded from docs/scheduler.md §2, §2.3 and §4. The New
+<!--/* #584 — the Schedules home's guide (shell design §8); #home-ops wrote its v2 fragments
+     (`overview/family.html` includes them): `subtitle` under the title, `primary` (the New schedule
+     link) as the heading's primary action, `quickstart` in the Quick start card, `howitworks` as a
+     dialog section and `related` at the foot of Continue your work. The one deliberate difference
+     from the other guides: there is NO agent card and no starter prompt — no MCP tool creates, edits
+     or reads a schedule (the manual's scheduling area is reserved, DocArea), so "How to create one"
+     is a PERSON's steps on the explorer, worded from docs/scheduler.md §2, §2.3 and §4. The New
      schedule link renders inside a canAuthor guard, the author / workspace admin / super admin set
      that is exactly the five schedule.create/update/pause/delete/run rows (SchedulesUiController's
      KDoc). Hiding is not authorization: the explorer's verbs are §20's routes, which enforce the
-     same rows. overview.mjs loads on every overview; here it opens the How it works dialog and
-     finds no prompt section — harmless (its prompt listeners are no-ops). */-->
+     same rows. overview.mjs loads on every overview; here it opens the dialogs and finds no prompt
+     section — harmless (its prompt listeners are no-ops). */-->
+<p xmlns:th="http://www.thymeleaf.org" th:fragment="subtitle" class="app-overview-subtitle">Run pipelines on a timetable. See what fires next and how each schedule last ran.</p>
+
 <th:block xmlns:th="http://www.thymeleaf.org" th:fragment="primary">
   <a th:if="${canAuthor == true}" class="ds-button ds-button-primary" hx-boost="true"
      th:href="@{/schedules}" data-overview-new-schedule>New schedule</a>
@@ -17,14 +19,16 @@
 
 <th:block xmlns:th="http://www.thymeleaf.org" th:fragment="quickstart">
   <h2 class="app-overview-quickstart-title" id="overview-quickstart-h">How to create one</h2>
+  <p class="app-overview-panel-sub">A person creates schedules on the Schedules list, in three steps.</p>
   <div class="app-overview-prose" data-overview-create>
     <ol class="app-overview-steps">
-      <li>Pick the pipeline to run. It needs a current version to follow; each run uses whatever
+      <li><b>Pick the pipeline.</b> It needs a current version to follow; each run uses whatever
         version is current then, with the parameter values you give.</li>
-      <li>Set the cron pattern and its timezone — the form previews the next occurrences — and the
-        missed-run policy: skip records missed occurrences, latest catches up the newest one.</li>
-      <li>Choose who is told about which events. The settings are saved with the schedule; scheduler
-        mail is not enabled yet, so nothing sends.</li>
+      <li><b>Set when it runs.</b> The cron pattern and its timezone — the form previews the next
+        occurrences — and the missed-run policy: skip records missed occurrences, latest catches up the
+        newest one.</li>
+      <li><b>Choose who is told.</b> Who hears about which events. The settings are saved with the
+        schedule; scheduler mail is not enabled yet, so nothing sends.</li>
     </ol>
     <p class="app-card-note" data-overview-create-note>
       <th:block th:if="${canAuthor == true}">New schedule opens the Schedules list, where the form is.</th:block>
@@ -43,17 +47,16 @@
     schedule, and it blocks itself when a run's outcome is unknown or something must be fixed,
     until someone unblocks it.
   </p>
+  <p>Schedules are managed here and over the REST API — no agent tool creates or reads one.</p>
+  <p><a th:href="@{/docs/rest-api}">REST API reference — §20 Schedules</a></p>
 </div>
 
-<div xmlns:th="http://www.thymeleaf.org" th:fragment="related" class="app-overview-resources app-overview-prose" data-overview-related>
-  <h3 class="app-overview-sub" id="overview-related-h">Related resources and help</h3>
-  <ul class="app-overview-related">
-    <li><a hx-boost="true" th:href="@{/overview/pipelines}">Pipelines</a> are what a schedule runs.</li>
-    <!--/* The promoter reads no executions (D11, the `execution.read` row): no link it cannot open. */-->
-    <li th:if="${canReadExecutions == true}"><a hx-boost="true" th:href="@{/executions}">Executions</a> show
-      what each run became, with its messages.</li>
-  </ul>
-  <p class="app-card-note">Schedules are managed here and over the REST API — no agent tool creates or
-    reads one.</p>
-  <p><a th:href="@{/docs/rest-api}">REST API reference — §20 Schedules</a></p>
+<div xmlns:th="http://www.thymeleaf.org" th:fragment="related" class="app-overview-resources app-overview-resources-row" data-overview-related>
+  <span class="app-overview-resources-k">What a schedule runs</span>
+  <a class="app-overview-link" hx-boost="true" th:href="@{/overview/pipelines}">Pipelines <svg class="ds-icon ds-icon-xs"
+     aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#arrow-right"></use></svg></a>
+  <!--/* The promoter reads no executions (D11, the `execution.read` row): no link it cannot open. */-->
+  <a class="app-overview-link" hx-boost="true" th:if="${canReadExecutions == true}" th:href="@{/executions}">Executions <svg
+     class="ds-icon ds-icon-xs" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#arrow-right"></use></svg></a>
+  <a class="app-overview-link" th:href="@{/docs/rest-api}">REST API reference — §20 Schedules</a>
 </div>

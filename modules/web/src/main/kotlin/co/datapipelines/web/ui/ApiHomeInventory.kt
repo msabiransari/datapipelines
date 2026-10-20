@@ -120,3 +120,87 @@ data class KeyCounts(
         }
     }
 }
+
+/**
+ * #home-ops — the API home's v2 words (ui-screens §4.18a): each panel's description and info
+ * dialog (§4.18a's counting rules in the reader's words), and Continue your work's rows — the
+ * console always, the Keys page only when the keys read answered (the keys tile's own condition).
+ */
+internal object ApiHomeWords {
+    const val CONTINUE = "A clear next step for your endpoints and keys"
+
+    /** Which state bar paints each metric's dot, so a dot and its bar never disagree; the others carry none. */
+    val METRIC_BARS = mapOf("release" to "serving-release", "draft" to "serving-draft")
+
+    /** A chart as its panel: a description under its heading and an info button — none for an unread keys chart. */
+    fun panel(
+        chart: OverviewPage.Chart,
+        readable: Boolean,
+    ): Panel.Bars {
+        val explained = chart.key == ENDPOINTS || readable
+        return Panel.Bars.of(chart).copy(
+            description = if (explained) DESCRIPTIONS.getValue(chart.key) else null,
+            explain = if (explained) chart.key else null,
+        )
+    }
+
+    fun tasks(keysReadable: Boolean): List<OverviewPage.TaskRow> =
+        listOfNotNull(
+            OverviewPage.TaskRow(
+                "console",
+                "activity",
+                "Open the console",
+                "Every published path, what it serves and how to call it.",
+                ApiOverviewController.CONSOLE,
+                "released",
+            ),
+            OverviewPage
+                .TaskRow(
+                    "keys",
+                    "key",
+                    "Manage keys",
+                    "See which keys are live, and which paths each one reaches.",
+                    ApiOverviewController.KEYS_PAGE,
+                    "released",
+                ).takeIf { keysReadable },
+        )
+
+    val ENDPOINTS_EXPLAINED =
+        OverviewPage.Explanation(
+            key = ENDPOINTS,
+            title = "How endpoints are counted",
+            paragraphs =
+                listOf(
+                    "Every published path is counted once, legacy paths included, by what a call to it runs now. The " +
+                        "four bars add up to Endpoints.",
+                    "Serving a release runs the pipeline's released version; serving a draft runs a draft, development " +
+                        "posture only; nothing to serve means the pipeline has no version to run. A legacy path was " +
+                        "stored before today's path rules and never serves.",
+                    "Call counts are not recorded anywhere in this system, so this page shows none.",
+                ),
+        )
+
+    val KEYS_EXPLAINED =
+        OverviewPage.Explanation(
+            key = KEYS,
+            title = "How keys are counted",
+            paragraphs =
+                listOf(
+                    "The keys are the ones the Keys page lists for you: the whole workspace's when you may read its " +
+                        "keys, otherwise your own MCP keys. The keys count includes live, expired and revoked keys.",
+                    "The bars count live keys only, one bar per kind; a kind with no live key shows zero. A key is " +
+                        "revoked before it is expired: one key, one bucket, and the note under the bars names how many of " +
+                        "each were not counted.",
+                    "A key is counted by name and kind. Its value is never shown here.",
+                ),
+        )
+
+    private const val ENDPOINTS = "endpoint-state"
+    private const val KEYS = "key-kind"
+
+    private val DESCRIPTIONS =
+        mapOf(
+            ENDPOINTS to "Every published path once, by what a call to it runs now.",
+            KEYS to "Live keys only, one bar per kind.",
+        )
+}
