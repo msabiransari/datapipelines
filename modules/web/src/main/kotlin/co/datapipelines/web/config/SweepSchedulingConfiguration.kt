@@ -6,6 +6,7 @@ import co.datapipelines.executor.ExecutorMetrics
 import co.datapipelines.executor.JdbcExecutionProgress
 import co.datapipelines.executor.StaleExecutionSweeper
 import co.datapipelines.web.sse.SseJson
+import io.micrometer.core.instrument.MeterRegistry
 import org.slf4j.LoggerFactory
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
@@ -95,6 +96,7 @@ class SweepSchedulingConfiguration {
         executions: ExecutionRepository,
         properties: ExecutionsProperties,
         executor: ExecutorProperties,
+        meterRegistry: MeterRegistry,
     ): StaleExecutionSweeper =
         StaleExecutionSweeper(
             executions,
@@ -102,6 +104,8 @@ class SweepSchedulingConfiguration {
             // 108 §D: the sweep's real cutoff is three of these; `stale-timeout-minutes` survives
             // only as the backstop for rows a pre-V21 instance left with no heartbeat at all.
             Duration.ofSeconds(executor.heartbeatSeconds),
+            // #326 — every failed tick counted (`job=stale_sweep`), a cancel at the statement bound included.
+            meterRegistry,
         )
 
     @Bean
@@ -196,5 +200,18 @@ class StaleExecutionSweepScheduler(
          * times as often is still nothing.
          */
         const val SWEEP_INTERVAL_MILLIS = 15_000L
+
+        /**
+         * #326 — the sweep's `UPDATE` statement bound, a JDBC `queryTimeout` passed to the execution
+         * repository (`EngineConfiguration`). Not a config key for the cadence's reason: a knob nobody
+         * should turn. Ten seconds is two-thirds of [SWEEP_INTERVAL_MILLIS], so a cancelled tick ends
+         * well before the next is due, and under `spring.lifecycle.timeout-per-shutdown-phase` (30 s), so
+         * a SIGTERM during a hung sweep ends inside the phase. The healthy statement is one `UPDATE` over a
+         * partial index (milliseconds); the bound only fires when it waits on a lock — an operator's DDL or
+         * `VACUUM FULL` — which until #326 held the `dp-scheduled` thread every job shares for the lock's
+         * whole life. A cancel (SQLState `57014`) rolls the `UPDATE` back whole, logs
+         * `event=execution.sweep_failed`, counts `job=stale_sweep`, and the next tick retries.
+         */
+        const val SWEEP_STATEMENT_TIMEOUT_SECONDS = 10
     }
 }

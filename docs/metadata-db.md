@@ -1,9 +1,9 @@
 # Metadata Database Schema Specification
 
-**Status:** v1.43 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
+**Status:** v1.44 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
 **Owner:** datapipelines.co core
 **Depends on:** all specs (this is the physical schema for every logical model)
-**Last updated:** 2026-10-03
+**Last updated:** 2026-10-20
 
 ---
 
@@ -1864,6 +1864,8 @@ DELETE FROM execution_events
 
 **Parameter evaluation records ride the same tick (#376; the workspace spec §2.3, the owner's §11.5 ruling).** After the dashboard refreshes, the step deletes finished `parameter_evaluations` rows that STARTED before the same cutoff, ONE bounded batch per tick — `DELETE FROM parameter_evaluations WHERE id IN (SELECT id FROM parameter_evaluations WHERE finished_at IS NOT NULL AND started_at < NOW() - make_interval(days => :eventRetentionDays) ORDER BY started_at LIMIT :batchSize)` over `idx_parameter_evaluations_finished`, `:batchSize` = 5,000 (a code constant, `ParameterEvaluationRetention`); the cascade takes their `parameter_evaluation_queries`. A full batch is a backlog, said once at WARN (`parameter.evaluation_retention_incomplete`); a purge that deleted rows logs `parameter.evaluations_purged`, a failed DELETE `parameter.evaluation_retention_failed` ([Observability §3.4M](observability.md#34m-the-parameter-evaluation-events-376)), and the next hour takes the next batch. No key of its own: a record is a bounded row with no payload, so the event retention is the policy (a retention key of its own would be an additive change). A `RUNNING` row is never deleted.
 
+The `execution_events` DELETE is bounded (#326): a JDBC `queryTimeout` of `RETENTION_STATEMENT_TIMEOUT_SECONDS` (25 s, a code constant beside the hourly cadence, not a key), so a DELETE queued behind a lock is cancelled with SQLState `57014` — one statement, so it deletes nothing — and the next tick retries; the dashboard-refresh and parameter-evaluation steps above are not bounded.
+
 This purges the **durable** 7-day record only. The 1-hour Redis event log ([§9](#9-what-is-not-in-this-database)) expires on its own TTL and is not this job's concern.
 
 ### 8.2 Audit log retention
@@ -1902,7 +1904,7 @@ UPDATE pipeline_executions
         OR (heartbeat_at IS NULL AND started_at < NOW() - make_interval(mins => :staleTimeoutMinutes)));
 ```
 
-`:staleTimeoutMinutes` ← [`datapipelines.executions.stale-timeout-minutes`](configuration.md#311-execution-history). `:instanceLostError` is the standard error envelope with code `pipeline.execution.instance_lost`.
+`:staleTimeoutMinutes` ← [`datapipelines.executions.stale-timeout-minutes`](configuration.md#311-execution-history). `:instanceLostError` is the standard error envelope with code `pipeline.execution.instance_lost`. The UPDATE is bounded (#326): a JDBC `queryTimeout` of `SWEEP_STATEMENT_TIMEOUT_SECONDS` (10 s, a code constant beside the 15 s cadence, not a key), so an UPDATE queued behind a lock is cancelled with SQLState `57014`, marks nothing, and the next tick retries.
 
 #### The heartbeat (108 §D, V21)
 
@@ -1989,6 +1991,7 @@ Three pieces of execution state that a reader might reasonably expect to find he
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-20 | v1.44 | 326 (#326) the scheduled jobs' statement bounds | **§8.1** and **§8.3** name the `execution_events` DELETE's 25 s and the stale sweep's 10 s JDBC bound — code constants beside the cadences, not keys — and the cancel's SQLState `57014`. No schema change. |
 | 2026-10-03 | v1.43 | 442a (#442) | Saved schedule notification settings: recipients and five event choices, validated and shown by role; omitted PUT settings preserved; mail remains off pending part b. |
 | 2026-10-03 | v1.42 | 418 (#418) the evaluation jobs' log events cited | **§8.1** and **§8.5** name the log events the parameter-evaluation retention and sweep write (`parameter.evaluations_purged`, `parameter.evaluation_retention_failed`, `parameter.evaluation_retention_incomplete`, `parameter.evaluation_swept`, `parameter.evaluation_sweep_failed`) and cite [Observability §3.4M](observability.md#34m-the-parameter-evaluation-events-376), where the rows are defined. No schema change. |
 | 2026-10-02 | v1.41 | V48 (#376, parameter-set workspace S3) the evaluation history | **§4.37 `parameter_evaluations` and §4.38 `parameter_evaluation_queries`** — the spec's §2.1/§2.2 verbatim with the owner's rulings: the status CHECK carries `ABORTED` beside the spec's five (§11.7), the query outcome CHECK carries `ABORTED` too, the caller CHECK all five values with `PIPELINE` dormant (§11.10); plus three CHECKs that pin the state machine (`finished_at` iff not `RUNNING`, `valid` iff `COMPLETED`, each code only on its own outcome) and the `parameter_set_version >= 1` floor. `principal_key_id` takes NO foreign key (the keys purge must not be blocked by a diagnostic row), and `outcome` is NULL while a statement is in flight. §5 gains six indexes (the spec's two, the §2.3 cutoff index, the queries' FK index the cascade and the detail need, two PKs); §5A classifies both tables **derived**. **§8.1** gains the evaluation retention (the event cutoff on `started_at`, one bounded batch of 5,000 per tick); **new §8.5** the stale sweep (`INCOMPLETE` past `evaluate-timeout-seconds` + 60 s, on the same hourly tick). Up-and-down rehearsal on a copy of the demo database is the lane's evidence. |

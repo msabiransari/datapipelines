@@ -3,11 +3,13 @@ package co.datapipelines.executor
 import ch.qos.logback.classic.Level
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
+import co.datapipelines.persistence.ScheduledJob
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import io.kotest.matchers.types.shouldBeInstanceOf
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
@@ -94,6 +96,25 @@ class StaleExecutionSweeperTest {
         warn.throwableProxy.shouldBeNull()
     }
 
+    /**
+     * #326: every failed tick is counted under `job=stale_sweep` — a statement cancelled at the sweep's
+     * bound is one (its `DataAccessException` carries `57014`). A real in-memory registry, read back: a
+     * strict double would make the missing increment the only passing state.
+     */
+    @Test
+    fun `a failed tick is counted under job=stale_sweep, a successful one is not`() {
+        val registry = SimpleMeterRegistry()
+        val executions = mockk<ExecutionRepository>()
+        every { executions.sweepStaleRunning(any(), any()) } returns 2 andThenThrows
+            DataAccessResourceFailureException("cancelled", SQLException("canceling statement due to statement timeout", "57014"))
+        val sweeper = StaleExecutionSweeper(executions, Duration.ofMinutes(60), HEARTBEAT, registry)
+
+        sweeper.sweepOnce() shouldBe 2
+        failedTicks(registry) shouldBe 0.0
+        sweeper.sweepOnce() shouldBe 0
+        failedTicks(registry) shouldBe 1.0
+    }
+
     @Test
     fun `a non-positive timeout is rejected at construction`() {
         val executions = mockk<ExecutionRepository>()
@@ -104,6 +125,9 @@ class StaleExecutionSweeperTest {
             .exceptionOrNull()
             .shouldBeInstanceOf<IllegalArgumentException>()
     }
+
+    private fun failedTicks(registry: SimpleMeterRegistry): Double =
+        registry.counter(ScheduledJob.FAILED_TICK_METER, ScheduledJob.JOB_TAG, "stale_sweep").count()
 
     /** Runs [block] with the sweeper's logger captured; returns its value and every line it logged. */
     private fun <T> captured(block: () -> T): Pair<T, List<ILoggingEvent>> {
