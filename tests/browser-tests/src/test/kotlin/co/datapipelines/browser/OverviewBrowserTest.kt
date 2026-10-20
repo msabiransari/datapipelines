@@ -174,8 +174,8 @@ class OverviewBrowserTest : RestTreeBrowserFixture() {
             page.locator("[data-count='retired'] a").count() shouldBe 0
         }
         // #593: the badge counts the three live groups, as the resource browser's header does. The two are
-        // not compared here: the header reads NavCounts' 60-second cache, filled at 0 when the workspace was
-        // created. OverviewStackedTest pins badge = objects - retired; FamilyRecentE2eTest pins the header's.
+        // not compared here: OverviewStackedTest pins badge = objects - retired; FamilyRecentE2eTest pins the
+        // header's (read on every render since #574, PipelineSidebarTreeStateBrowserTest's create case).
         withClue("#593: View all's badge counts the three live groups") {
             page.locator("[data-overview-view-all-count]").innerText().trim() shouldBe "2"
         }

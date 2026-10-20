@@ -1,9 +1,9 @@
 # UI Screens Inventory
 
-**Status:** v1.190
+**Status:** v1.191
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
-**Last updated:** 2026-10-20 (#599; #604; #home-ops; #home-frame; #610; #618; #627; #625; #598b); 2026-10-19 (#598a merge follow-up; #617; #609; #598a; #605; #619; #585; #584; #613; #509; #608; #614 + #611; #612; #615); 2026-10-18 (#583; #573; #607; #606; #565; #582; #581; #580; #579); 2026-10-17 (#556; #578; #554); 2026-10-16 (#551 merge follow-up; #551; #555; #552; #553; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
+**Last updated:** 2026-10-20 (#574; #599; #604; #home-ops; #home-frame; #610; #618; #627; #625; #598b); 2026-10-19 (#598a merge follow-up; #617; #609; #598a; #605; #619; #585; #584; #613; #509; #608; #614 + #611; #612; #615); 2026-10-18 (#583; #573; #607; #606; #565; #582; #581; #580; #579); 2026-10-17 (#556; #578; #554); 2026-10-16 (#551 merge follow-up; #551; #555; #552; #553; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
 ---
 
 ## 1. Purpose
@@ -315,14 +315,15 @@ foreign responses refuse admission, and a changed view clears cached levels befo
   `BrandMarkParityRenderTest` now renders and what its source sweep of every template forbids.
 - **Counts (#554: in the browser header).** The browser header carries the active family's admitted
   count from `NavCounts` — all five families, keyed by the closed `NavigationFamily` set, one cheap
-  `COUNT(*)` each behind a 60-second TTL keyed by workspace; for a lensed principal (a promoter) the count
-  is the SIZE of the admitted set, so the header never says "3 pipelines" beside an empty tree. Counts
-  are no longer repeated beside menu items (record §3). There is no general metadata cache in this
-  tree to reuse — `DatasourceMetadataCache` is keyed by datasource name and `AuthCache` lives
-  in `modules/auth`, which by design cannot see the `pipelines` or `templates` tables — so
-  `NavCounts` copies the former's discipline (ConcurrentHashMap, injected ticker, lazy expiry,
-  misses never cached) rather than its instance. A count that cannot be read — including a lens whose
-  higher environment is unavailable — renders **no count**, never a zero.
+  `COUNT(*)` each; for a lensed principal (a promoter) the count is the SIZE of the admitted set, so
+  the header never says "3 pipelines" beside an empty tree. Counts are no longer repeated beside menu
+  items (record §3). **Freshness (#574):** the counts are read on every shell render, with no cache —
+  the header and the tree are two reads of the same tables in the same navigation, so after a create,
+  release, discard or delete, in the UI or over MCP, they cannot disagree past one navigation (until
+  #574 a 60-second TTL with no eviction let the header say "Pipelines 0" above a new row). The read
+  waits for the first count the page renders, once per request — the shell's model is built for JSON
+  API requests too, and those read none. A count that cannot be read — including a lens whose higher
+  environment is unavailable — renders **no count**, never a zero.
 - **The Admin item follows the reader's authority (143, T315).** It leads only where its
   reader may go, or it is absent: a **super admin** gets `/admin/users` (instance user
   administration, `user.manage`, boosted like every item); a **workspace admin** gets
@@ -3076,6 +3077,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-20 | v1.191 | #574 the browser header's count has one source | **§3.4 Counts:** the 60-second TTL sentence and the "no general metadata cache" paragraph give way to the freshness rule — `NavCounts` reads the five counts on every shell render, so the header and the tree cannot disagree past one navigation after a create, release, discard or delete (UI or MCP), and the read is deferred to the first count a render reads, so a JSON API request pays none; the lens rule and the never-zero rule are unchanged. Guards: `PipelineSidebarTreeStateBrowserTest`'s create-then-navigate case (header = the catalog route's total, no clock advance) and `NavCountsTest`'s every-render and nothing-read-until-a-value cases. |
 | 2026-10-20 | v1.190 | #599 the Templates, Dashboards, Visualizations and Parameter Sets homes on the v2 frame (issue not yet updated: GitHub writes held) — renumbered at merge after #604's v1.189 | **§4.25:** the four object families are lifecycle homes: the strip of four metrics and its foot, Development activity and Release history, each from its own repository's `charts` (one `ChartInventorySource` statement over its own tables), in its own nouns; every lifecycle home's badge is `objects − discardedOnly`; the task rows and the links reach each family's own catalog; a new paragraph says each home reads its own lens arm and what the derived Dashboards and Visualizations arms admit (`PromotableView.dashboardArms`); the #621 sentence now records home-ops' keys metric; the Guards gain `FamilyInventoryTest`, the per-family render, E2E, sweep and browser cases; the four **Families as built** rows take the Pipelines row's shape (guide fragments, then the charts' source). **§4.6, §4.21, §4.23:** each catalog's Purpose names the strip's linked metrics and Review your drafts in place of the old counts and bars. |
 | 2026-10-20 | v1.189 | #604 the browser's rows on the record's resource row — renumbered at merge after #605's v1.177, then after #home-ops's v1.188 | **§3.4, §3.3:** the browser column sits on the overlay surface and a row is the record's card — the activate paints 12px padding and the 8px radius with the hover and selection tints (selection is primary ink over `--surface-selected`, not the link blue), the name is its own wrapping 12px `.dp-tree-title` at the resource-name role, the badges live in a trailing always-present `.dp-tree-meta` 8px under the title (no margin when nothing shows), and rows sit 4px apart; the row's DOM contract (control first on the line, `title` = full path, every `aria` attribute) is kept and the #516 ring stays on the row's line, which takes the card's radius while focused. The renderer's regions and `BrowserResourceRowBrowserTest`'s measurements carry the change. |
 | 2026-10-20 | v1.188 | #home-ops the Datasources, Schedules and API homes on the v2 frame's regions (provisional id: the issue number replaces it once filed); answers #621 | **§4.5d / §4.18a / §4.20a:** each Frame paragraph is rewritten for the v2 regions — the summary strip's metrics (help as the note; a dot only where it equals its chart's bar), View all's badge, the two charts as bars panels with a description and an info dialog stating the section's counting rule, Continue your work's task rows (Browse datasources; See what runs next; Open the console and, only when the keys read answered, Manage keys) and its related row, Quick start's three short steps with the prompt (text unchanged) and How it works as dialog sections. **#621:** §4.18a's lens sentence now says a promoter's three endpoint metrics each carry the lens note and the keys metric none, so the strip is headed "Inventory". Schedules has no "Unblock" row: the explorer has no condition filter for it. The API's empty endpoints note reads "Quick start says how." (the steps no longer sit above it). Guide and guard sentences updated; every counting rule is unchanged. No route, permission, migration or config key. |

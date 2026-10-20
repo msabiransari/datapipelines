@@ -33,8 +33,9 @@ import org.springframework.web.bind.annotation.ModelAttribute
  *   rail's highlighted item and the breadcrumb cannot disagree. `crumbGroup` is null for the
  *   Dashboard and for off-rail screens; the template then renders the page alone.
  * - **`navCounts`** — the resource browser header's per-family counts (#554; the rail's two
- *   badges before it), behind [NavCounts]'s 60s TTL, as ONE attribute so one request makes one
- *   cache lookup. A value is null when there is no workspace or the count could not be read;
+ *   badges before it), as ONE attribute whose values [NavCounts] reads on the first one the
+ *   template asks for (#574: no cache, and a JSON request, which this advice also serves, asks
+ *   for none). A value is null when there is no workspace or the count could not be read;
  *   the template omits that count rather than rendering a zero it does not know to be true.
  *
  * One extra `users` read per render is added by `currentUser`. That is the shape the app
@@ -70,9 +71,8 @@ class AppShellAdvice(
     fun themePalettes(): List<String> = UserSettingsController.listAvailableThemes().filterNot { it in MODES }
 
     // Every family's count in ONE attribute, so the template reads navCounts.pipelines …
-    // navCounts.parameterSets and the request makes exactly one cache lookup. Separate
-    // @ModelAttribute accessors would each call the cache — harmless, but it would make the
-    // cold path look like five reads to anyone tracing it.
+    // navCounts.parameterSets and a render makes exactly one read of the five (#574). Separate
+    // @ModelAttribute accessors would each read the five, or each need their own deferral.
     @ModelAttribute("navCounts")
     fun navCounts(): NavCounts.Counts {
         val principal = principal() ?: return navCounts.forWorkspace(null)
