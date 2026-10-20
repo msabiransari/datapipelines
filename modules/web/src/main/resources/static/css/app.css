@@ -1497,15 +1497,11 @@ button.app-busy::after {
   margin-top: var(--space-1);
 }
 
-/* #516's keyboard ring rides the row line; on the browser's card row it follows the
-   control's radius instead of squaring around the card. */
+/* #516's keyboard ring stays on the row LINE (the generic .dp-tree-item:focus-visible
+   rule draws it); inside the browser the focused line takes the card's radius, so the
+   ring follows the control's rounded shape without moving off the line. */
 .app-browser .dp-tree-item:focus-visible > .dp-tree-line {
-  outline: none;
-}
-
-.app-browser .dp-tree-item:focus-visible > .dp-tree-line > .dp-tree-activate {
-  outline: var(--focus-ring-width) solid var(--focus-ring);
-  outline-offset: calc(-1 * var(--space-px));
+  border-radius: var(--radius-md);
 }
 
 .app-browser-foot {

@@ -212,4 +212,40 @@ class BrowserResourceRowBrowserTest : RestTreeBrowserFixture() {
             isTransparent("row.alpha.lineBg")
         }
     }
+
+    /** #516's keyboard ring stays on the LINE and takes the card's radius; the control draws none. */
+    @Suppress("UNCHECKED_CAST")
+    @Test
+    fun `the keyboard ring rides the row line rounded to the card's radius, never the control`() {
+        startTrace()
+        readyTree()
+        seedPipeline("row/alpha")
+        openTree()
+        page.waitForSelector(folder("row"))
+        page.focus("$panel input")
+        page.keyboard().press("ArrowDown")
+        page.waitForFunction("() => document.activeElement?.getAttribute('role') === 'treeitem'")
+        val ring =
+            page.evaluate(
+                """() => {
+              const line = document.activeElement.querySelector(':scope > .dp-tree-line');
+              const control = line.querySelector('.dp-tree-activate');
+              const lcs = getComputedStyle(line), ccs = getComputedStyle(control);
+              return { lineOutlineWidth: lcs.outlineWidth, lineOutlineStyle: lcs.outlineStyle,
+                lineRadius: parseFloat(lcs.borderTopLeftRadius), controlRadius: parseFloat(ccs.borderTopLeftRadius),
+                controlOutlineStyle: ccs.outlineStyle };
+            }""",
+            ) as Map<String, Any?>
+        record("ring", ring)
+        shot("row-focus-ring-1440")
+
+        printReadings("ring")
+        assertSoftly {
+            withClue("ring.lineOutlineWidth") { readings["ring.lineOutlineWidth"] shouldBe "2px" }
+            withClue("ring.lineOutlineStyle") { readings["ring.lineOutlineStyle"] shouldBe "solid" }
+            near("ring.lineRadius", num("ring.controlRadius"), 0.05)
+            near("ring.controlRadius", 8.0, 0.05)
+            withClue("ring.controlOutlineStyle") { readings["ring.controlOutlineStyle"] shouldBe "none" }
+        }
+    }
 }
