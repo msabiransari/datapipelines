@@ -1,9 +1,9 @@
 # UI Screens Inventory
 
-**Status:** v1.191
+**Status:** v1.192
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
-**Last updated:** 2026-10-20 (#622; #599; #604; #home-ops; #home-frame; #610; #618; #627; #625; #598b); 2026-10-19 (#598a merge follow-up; #617; #609; #598a; #605; #619; #585; #584; #613; #509; #608; #614 + #611; #612; #615); 2026-10-18 (#583; #573; #607; #606; #565; #582; #581; #580; #579); 2026-10-17 (#556; #578; #554); 2026-10-16 (#551 merge follow-up; #551; #555; #552; #553; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
+**Last updated:** 2026-10-20 (#622 merge follow-up; #622; #599; #604; #home-ops; #home-frame; #610; #618; #627; #625; #598b); 2026-10-19 (#598a merge follow-up; #617; #609; #598a; #605; #619; #585; #584; #613; #509; #608; #614 + #611; #612; #615); 2026-10-18 (#583; #573; #607; #606; #565; #582; #581; #580; #579); 2026-10-17 (#556; #578; #554); 2026-10-16 (#551 merge follow-up; #551; #555; #552; #553; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
 ---
 
 ## 1. Purpose
@@ -2070,7 +2070,7 @@ no access. If the clipboard is refused or absent, the config is selected, the bu
 | Auth required | Yes — any member (`endpoint.read`; [Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative) names the route in the `endpoint.read` row's Surfaces cell). GET only; nothing on the page writes |
 | Purpose | The API family's home: how many paths are published and what they serve, which keys the reader can see by kind, the newest of each, how a program gets access, and the MCP connection |
 | Design primitives | the §4.25 frame (`overview/family.html`'s loops, the `.app-overview-*` rules, design tokens only); the MCP card is the console's fragment (`.ds-card`, `.app-chip`, `.app-code`) |
-| JS | `overview.mjs` (Copy prompt), through the page-assets template (§3.0); no other script |
+| JS | `overview.mjs` (Copy prompt), through the page-assets template (§3.0); `mcp-connection.mjs` (Copy config, #622), loaded by the shared MCP card's fragment (§4.18); no other script |
 | htmx | none of its own — every link is a boosted navigation |
 
 **Two reads, each failing on its own.** The endpoint numbers are the console's own reads —
@@ -2115,8 +2115,9 @@ no agent mints a key), call it (`GET /api/<category>/<version>/<path>` with the 
 and the note that call counts are not recorded. The prompt dialog, **Publish an endpoint with
 your agent**, holds an editable starter prompt that follows the skill's endpoints flow and stops
 at publishing. It never asks the agent to create, associate or
-copy a key. The shared MCP card follows, with no Copy button: `overview.mjs` copies a
-textarea, and the config is a `<pre>`. Related: Pipelines, Dashboards, and the REST, MCP and
+copy a key. The shared MCP card follows, with its own **Copy config** button since #622 (§4.18):
+the fragment's `mcp-connection.mjs` copies the `<pre>`'s placeholder config, and `overview.mjs`
+still copies only the prompt's textarea. Related: Pipelines, Dashboards, and the REST, MCP and
 Claude Code references.
 
 **Not a browser family.** Like Datasources (§4.5d), the API is not a `browserFamily`: the browser
@@ -3080,6 +3081,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-20 | v1.192 | #622 merge follow-up | **§4.18a:** the API home's MCP card paragraph and its JS row said the card has no Copy button and the page loads no script but `overview.mjs`; since #622 the card's fragment loads `mcp-connection.mjs` and its Copy config button copies the placeholder config (§4.18). Found by lane 622b. |
 | 2026-10-20 | v1.191 | #622 MCP config Copy button — renumbered at merge after #home-ops's v1.188, then after #599's v1.190 | **§4.18:** the shared card copies its placeholder config on the console and API home, announces “Config copied to the clipboard.”, sends no request and grants no access; a refused or absent clipboard selects the config for manual copying. One shared text copier also serves Copy prompt. |
 | 2026-10-20 | v1.190 | #599 the Templates, Dashboards, Visualizations and Parameter Sets homes on the v2 frame (issue not yet updated: GitHub writes held) — renumbered at merge after #604's v1.189 | **§4.25:** the four object families are lifecycle homes: the strip of four metrics and its foot, Development activity and Release history, each from its own repository's `charts` (one `ChartInventorySource` statement over its own tables), in its own nouns; every lifecycle home's badge is `objects − discardedOnly`; the task rows and the links reach each family's own catalog; a new paragraph says each home reads its own lens arm and what the derived Dashboards and Visualizations arms admit (`PromotableView.dashboardArms`); the #621 sentence now records home-ops' keys metric; the Guards gain `FamilyInventoryTest`, the per-family render, E2E, sweep and browser cases; the four **Families as built** rows take the Pipelines row's shape (guide fragments, then the charts' source). **§4.6, §4.21, §4.23:** each catalog's Purpose names the strip's linked metrics and Review your drafts in place of the old counts and bars. |
 | 2026-10-20 | v1.189 | #604 the browser's rows on the record's resource row — renumbered at merge after #605's v1.177, then after #home-ops's v1.188 | **§3.4, §3.3:** the browser column sits on the overlay surface and a row is the record's card — the activate paints 12px padding and the 8px radius with the hover and selection tints (selection is primary ink over `--surface-selected`, not the link blue), the name is its own wrapping 12px `.dp-tree-title` at the resource-name role, the badges live in a trailing always-present `.dp-tree-meta` 8px under the title (no margin when nothing shows), and rows sit 4px apart; the row's DOM contract (control first on the line, `title` = full path, every `aria` attribute) is kept and the #516 ring stays on the row's line, which takes the card's radius while focused. The renderer's regions and `BrowserResourceRowBrowserTest`'s measurements carry the change. |
