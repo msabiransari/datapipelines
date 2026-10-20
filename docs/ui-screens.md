@@ -1,9 +1,9 @@
 # UI Screens Inventory
 
-**Status:** v1.187
+**Status:** v1.188
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
-**Last updated:** 2026-10-20 (#home-frame; #610; #618; #627; #625; #598b); 2026-10-19 (#598a merge follow-up; #617; #609; #598a; #605; #619; #585; #584; #613; #509; #608; #614 + #611; #612; #615); 2026-10-18 (#583; #573; #607; #606; #565; #582; #581; #580; #579); 2026-10-17 (#556; #578; #554); 2026-10-16 (#551 merge follow-up; #551; #555; #552; #553; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
+**Last updated:** 2026-10-20 (#622; #home-frame; #610; #618; #627; #625; #598b); 2026-10-19 (#598a merge follow-up; #617; #609; #598a; #605; #619; #585; #584; #613; #509; #608; #614 + #611; #612; #615); 2026-10-18 (#583; #573; #607; #606; #565; #582; #581; #580; #579); 2026-10-17 (#556; #578; #554); 2026-10-16 (#551 merge follow-up; #551; #555; #552; #553; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
 ---
 
 ## 1. Purpose
@@ -2038,7 +2038,11 @@ Two cards.
 Since #585 the card is ONE fragment, `partials/mcp-connection.html` (`card(note)`), stamped by
 `McpConnectionCard` and shared with the API home (§4.18a): the config, the placeholder and the
 tool count cannot drift between the two pages; each page passes its own sentence under the
-config.
+config. Since #622 its **Copy config** button copies the `<pre>`'s placeholder config on both
+pages through that fragment's same-origin module. It says **Copied**, then restores the button
+label; the live status says **Config copied to the clipboard.** Copy sends no request and grants
+no access. If the clipboard is refused or absent, the config is selected, the button says
+**Select and copy**, and the status explains Ctrl+C (⌘C on a Mac).
 
 ### 4.18a API home (#585)
 
@@ -3014,6 +3018,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-20 | v1.188 | #622 MCP config Copy button | **§4.18:** the shared card copies its placeholder config on the console and API home, announces “Config copied to the clipboard.”, sends no request and grants no access; a refused or absent clipboard selects the config for manual copying. One shared text copier also serves Copy prompt. |
 | 2026-10-20 | v1.187 | #home-frame the home pages' v2 frame and the Pipelines home (provisional id: the issue number replaces it once filed) — renumbered at merge after #610's v1.186 | **§4.25:** the Hierarchy is rewritten as six regions — heading (icon eyebrow, subtitle, View all with its badge, the primary action), summary strip and foot, analytics grid, work grid (Continue your work with task rows, Recently updated and the related links; Quick start), the guide's `extra`, and ONE native `<dialog>` with five server-rendered sections (definitions, releases, activity, prompt, howitworks). New paragraphs give the metric rule, the per-metric lens words (#621: the mechanism; the API keys tiles wait for home-ops), and View all's badge = objects − discarded only (#593). The Pipelines charts are re-worded as columns (activity: twelve weeks, tiled in tenths, the headline the quarter's events, View data moving the table twin into the dialog) and bars (release history at one pitch, #620; the note's sentences = the bins), with every #598a/#598b invariant kept; Actively developed moves to the strip. The prompt dialog: the question field substitutes `[question]` as text, never overwriting an edit; Reset. Guards are updated; OverviewToneBrowserTest records two more Minimal rows under #631 (owner ruling 2026-10-20). **§4.5d / §4.18a / §4.20a:** one Frame sentence each. No route, permission, migration or config key. |
 | 2026-10-20 | v1.186 | #610 the phone top bar drops the breadcrumb — renumbered at merge after #618's v1.185 | **§3.6:** the ≤760px row's topbar cell loses "crumbs (leaf only)" — below the phone band the bar displays NO breadcrumb (the frozen prototype's rule): `.app-crumbs` is `display:none` in app.css's phone block, the element stays in the DOM for shell.js's boosted-swap writes, and `#mode-toggle` inherits the crumbs' `margin-right: auto` right-edge pin. **§3.4:** the breadcrumb bullet records the band and the return at 761. The 761–1100 leaf-only rule (110) and the ≥1101 group are unchanged. `MainFrameBrowserTest`'s four cases pin the hide at 320/390, the band guard at 761/1101 and the anonymous bar at 320. No route, permission, SQL or script change. |
 | 2026-10-20 | v1.185 | #618 success and warning text inks — renumbered at merge after #627's v1.184 | **§3.5:** the #509 sentence becomes three roles. Success and warning text read `--app-success-ink` / `--app-warning-ink`, each built like `--app-danger-ink`: `light-dark(oklch(from var(--text-<role>) calc(l - 0.03) c h), var(--text-<role>))`. Twenty-four text sites over six sheets move (app.css, pipeline-editor.css, template-workspace.css, auth.css, parameter-sets.css, dashboards.css), and nine literal fallbacks go. Borders, fills, dots and tints keep the accents. Ocean and saas success text takes the teal text role. New guards: `StatusInkContrastBrowserTest`, 270 pairs over ten passes, worst healthcare warning 4.82:1, and `StatusInkSourceAuditTest`. |
