@@ -6,15 +6,15 @@ import co.datapipelines.scripting.CanonicalJson
 import co.datapipelines.scripting.CompiledScript
 import co.datapipelines.scripting.ScriptEngine
 import co.datapipelines.scripting.ScriptingException
-import co.datapipelines.templates.TemplateDraft
-import co.datapipelines.templates.TemplateValidationFailure
-import co.datapipelines.templates.TemplateValidator
 import co.datapipelines.templates.ScriptBlocks
 import co.datapipelines.templates.ScriptContract
 import co.datapipelines.templates.ScriptInvariant
 import co.datapipelines.templates.ScriptTestCase
 import co.datapipelines.templates.ScriptTestRunner
 import co.datapipelines.templates.ScriptTestRunner.RunOutcome
+import co.datapipelines.templates.TemplateDraft
+import co.datapipelines.templates.TemplateValidationFailure
+import co.datapipelines.templates.TemplateValidator
 import java.time.Duration
 import java.util.UUID
 

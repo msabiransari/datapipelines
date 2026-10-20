@@ -19,13 +19,6 @@ import co.datapipelines.templates.ContractColumn
 import co.datapipelines.templates.ImplementingVersion
 import co.datapipelines.templates.LibraryResolver
 import co.datapipelines.templates.RepositoryTemplateRegistry
-import co.datapipelines.templates.Template
-import co.datapipelines.templates.TemplateDraft
-import co.datapipelines.templates.TemplateDraftService
-import co.datapipelines.templates.TemplateImplementsRepository
-import co.datapipelines.templates.TemplateRepository
-import co.datapipelines.templates.TemplateValidationFailure
-import co.datapipelines.templates.TemplateValidator
 import co.datapipelines.templates.ScriptBlocks
 import co.datapipelines.templates.ScriptContract
 import co.datapipelines.templates.ScriptInput
@@ -34,6 +27,13 @@ import co.datapipelines.templates.ScriptOutput
 import co.datapipelines.templates.ScriptTestCase
 import co.datapipelines.templates.ScriptTestExpect
 import co.datapipelines.templates.ScriptTestInput
+import co.datapipelines.templates.Template
+import co.datapipelines.templates.TemplateDraft
+import co.datapipelines.templates.TemplateDraftService
+import co.datapipelines.templates.TemplateImplementsRepository
+import co.datapipelines.templates.TemplateRepository
+import co.datapipelines.templates.TemplateValidationFailure
+import co.datapipelines.templates.TemplateValidator
 import co.datapipelines.typesystem.Dialect
 import co.datapipelines.typesystem.LogicalType
 import io.kotest.assertions.withClue

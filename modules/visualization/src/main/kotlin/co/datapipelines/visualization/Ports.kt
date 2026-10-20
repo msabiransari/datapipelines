@@ -2,12 +2,12 @@ package co.datapipelines.visualization
 
 import co.datapipelines.parameters.ParameterSetRepository
 import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.pipeline.ScriptContractView
 import co.datapipelines.pipeline.TemplateDryRenderer
 import co.datapipelines.pipeline.TemplateLookup
 import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.pipeline.TemplateVersionStatuses
-import co.datapipelines.pipeline.ScriptContractView
 import co.datapipelines.typesystem.LogicalType
 import java.util.UUID
 

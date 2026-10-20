@@ -2,12 +2,12 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.templates.ScriptBlocks
 import co.datapipelines.templates.Template
 import co.datapipelines.templates.TemplateDeserializationOutcome
 import co.datapipelines.templates.TemplateDeserializer
 import co.datapipelines.templates.TemplateDraft
 import co.datapipelines.templates.TemplateValidationFailure
-import co.datapipelines.templates.ScriptBlocks
 import com.fasterxml.jackson.annotation.JsonInclude
 import com.fasterxml.jackson.core.JsonProcessingException
 import com.fasterxml.jackson.core.util.DefaultIndenter

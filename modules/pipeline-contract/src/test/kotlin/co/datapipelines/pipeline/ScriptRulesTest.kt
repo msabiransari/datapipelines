@@ -9,9 +9,9 @@ import co.datapipelines.pipeline.ScriptRulesFixtures.REPORT_TEMPLATE
 import co.datapipelines.pipeline.ScriptRulesFixtures.SCRIPT_TEMPLATE
 import co.datapipelines.pipeline.ScriptRulesFixtures.VALUE_CONTRACT
 import co.datapipelines.pipeline.ScriptRulesFixtures.parameters
+import co.datapipelines.pipeline.ScriptRulesFixtures.scriptNode
 import co.datapipelines.pipeline.ScriptRulesFixtures.stageNode
 import co.datapipelines.pipeline.ScriptRulesFixtures.stub
-import co.datapipelines.pipeline.ScriptRulesFixtures.scriptNode
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.shouldBe

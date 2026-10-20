@@ -6,12 +6,12 @@ import co.datapipelines.auth.RequiredScope
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.WriteSurface
+import co.datapipelines.templates.ScriptTestRunner
 import co.datapipelines.templates.Template
 import co.datapipelines.templates.TemplateDraftService
 import co.datapipelines.templates.TemplateService
 import co.datapipelines.templates.TemplateValidationException
 import co.datapipelines.templates.TemplateValidator
-import co.datapipelines.templates.ScriptTestRunner
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.web.api.CorrelationId
 import co.datapipelines.web.api.currentPrincipal

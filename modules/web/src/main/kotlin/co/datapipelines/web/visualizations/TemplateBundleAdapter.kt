@@ -1,9 +1,9 @@
 package co.datapipelines.web.visualizations
 
 import co.datapipelines.pipeline.TemplateRef
+import co.datapipelines.templates.ScriptBlocks
 import co.datapipelines.templates.Template
 import co.datapipelines.templates.TemplateRepository
-import co.datapipelines.templates.ScriptBlocks
 import co.datapipelines.visualization.TemplateBundle
 import co.datapipelines.web.templates.TemplateImportService
 import com.fasterxml.jackson.databind.JsonNode

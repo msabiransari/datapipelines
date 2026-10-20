@@ -10,8 +10,8 @@ import co.datapipelines.pipeline.PipelineResolver
 import co.datapipelines.pipeline.PipelineSettings
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.ResolvedPipeline
-import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.pipeline.ScriptContractView
+import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.typesystem.LogicalType
 import co.datapipelines.visualization.ArtifactRef
 import co.datapipelines.visualization.OutputColumn

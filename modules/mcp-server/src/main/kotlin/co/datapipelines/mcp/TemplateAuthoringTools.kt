@@ -7,6 +7,10 @@ import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.pipeline.WriteSurface
 import co.datapipelines.templates.BindFailure
+import co.datapipelines.templates.ScriptBlocks
+import co.datapipelines.templates.ScriptContract
+import co.datapipelines.templates.ScriptInvariant
+import co.datapipelines.templates.ScriptTestCase
 import co.datapipelines.templates.Template
 import co.datapipelines.templates.TemplateDraft
 import co.datapipelines.templates.TemplateDraftService
@@ -16,10 +20,6 @@ import co.datapipelines.templates.TemplateNameGrammar
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateValidator
 import co.datapipelines.templates.TemplateVersionDetail
-import co.datapipelines.templates.ScriptBlocks
-import co.datapipelines.templates.ScriptContract
-import co.datapipelines.templates.ScriptInvariant
-import co.datapipelines.templates.ScriptTestCase
 import co.datapipelines.templates.WorkspaceTemplateEngines
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.Dialect
@@ -245,8 +245,7 @@ private const val ENGINE_FIELD_DESC =
         "with template.validation.engine_unsupported."
 
 /** The engine an omitted `engine` argument means: the type's one legal value (record §2.1). */
-private fun defaultEngineFor(type: TemplateType?): String =
-    if (type?.isScript == true) Template.NONE_ENGINE else Template.FREEMARKER_ENGINE
+private fun defaultEngineFor(type: TemplateType?): String = if (type?.isScript == true) Template.NONE_ENGINE else Template.FREEMARKER_ENGINE
 
 /**
  * `templates_create` (mcp-server.md §6.2.8). Permission: `template.create`.

@@ -1,8 +1,8 @@
 package co.datapipelines.templates
 
+import co.datapipelines.pipeline.ScriptContractView
 import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.pipeline.TemplateType
-import co.datapipelines.pipeline.ScriptContractView
 import co.datapipelines.typesystem.Dialect
 import co.datapipelines.typesystem.LogicalType
 import io.kotest.matchers.nulls.shouldBeNull

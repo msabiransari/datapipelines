@@ -3,14 +3,14 @@ package co.datapipelines.application.templates
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.templates.ContractColumn
-import co.datapipelines.templates.Template
-import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.ScriptContract
 import co.datapipelines.templates.ScriptInput
 import co.datapipelines.templates.ScriptMode
 import co.datapipelines.templates.ScriptOutput
 import co.datapipelines.templates.ScriptTestInput
 import co.datapipelines.templates.ScriptTestRunner
+import co.datapipelines.templates.Template
+import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.LogicalType
 import io.kotest.assertions.assertSoftly

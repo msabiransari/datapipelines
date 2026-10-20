@@ -293,6 +293,5 @@ object ScriptBlocks {
         }
 
     /** Reads one stored `tests_json` back. */
-    fun readTests(json: String?): List<ScriptTestCase>? =
-        json?.let { mapper.readValue(it, Array<ScriptTestCase>::class.java).toList() }
+    fun readTests(json: String?): List<ScriptTestCase>? = json?.let { mapper.readValue(it, Array<ScriptTestCase>::class.java).toList() }
 }

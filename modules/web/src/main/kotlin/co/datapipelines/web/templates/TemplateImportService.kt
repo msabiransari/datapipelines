@@ -7,6 +7,7 @@ import co.datapipelines.pipeline.RequestLimits
 import co.datapipelines.pipeline.WriteSurface
 import co.datapipelines.templates.CitableFacts
 import co.datapipelines.templates.ImplementsIds
+import co.datapipelines.templates.ScriptBlocks
 import co.datapipelines.templates.Template
 import co.datapipelines.templates.TemplateDeserializationOutcome
 import co.datapipelines.templates.TemplateDeserializer
@@ -17,7 +18,6 @@ import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateTypeRule
 import co.datapipelines.templates.TemplateValidationException
 import co.datapipelines.templates.TemplateValidator
-import co.datapipelines.templates.ScriptBlocks
 import co.datapipelines.web.api.ApiErrors
 import co.datapipelines.web.api.ApiException
 import co.datapipelines.web.api.RequestBodies

@@ -1,8 +1,8 @@
 package co.datapipelines.visualization
 
 import co.datapipelines.pipeline.PipelineVersionStatus
-import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.pipeline.ScriptContractView
+import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.pipeline.ValidationFailure
 import co.datapipelines.typesystem.LogicalType
 import co.datapipelines.visualization.DocumentFixtures.obj

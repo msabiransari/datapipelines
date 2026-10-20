@@ -6,9 +6,9 @@ import co.datapipelines.pipeline.ScriptRulesFixtures.READER_CONTRACT
 import co.datapipelines.pipeline.ScriptRulesFixtures.READER_TEMPLATE
 import co.datapipelines.pipeline.ScriptRulesFixtures.VALUE_CONTRACT
 import co.datapipelines.pipeline.ScriptRulesFixtures.parameters
+import co.datapipelines.pipeline.ScriptRulesFixtures.scriptNode
 import co.datapipelines.pipeline.ScriptRulesFixtures.stageNode
 import co.datapipelines.pipeline.ScriptRulesFixtures.stub
-import co.datapipelines.pipeline.ScriptRulesFixtures.scriptNode
 import co.datapipelines.typesystem.LogicalType
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.shouldBe

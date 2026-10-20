@@ -6,11 +6,11 @@ import co.datapipelines.application.templates.TemplateEvaluateService
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.ReadLens
+import co.datapipelines.pipeline.ScriptContractView
 import co.datapipelines.pipeline.TemplateDryRenderer
 import co.datapipelines.pipeline.TemplateRef
-import co.datapipelines.pipeline.ScriptContractView
-import co.datapipelines.templates.TemplateService
 import co.datapipelines.templates.ScriptTestInput
+import co.datapipelines.templates.TemplateService
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.visualization.ArtifactRef
 import co.datapipelines.visualization.DashboardErrorCodes
