@@ -154,7 +154,7 @@ class VisualizationService(
     }
 
     /**
-     * Restore DISCARDED version [version] — after its transform template pin is judged against today's state (#320, D7).
+     * Restore DISCARDED version [version] — after its script template pin is judged against today's state (#320, D7).
      * A DISCARDED version protects nothing, so the template version it pins may have been discarded meanwhile; restoring
      * it blind would bring back a RELEASED visualization whose transform cannot resolve. The refusal is the family's own
      * (`visualization.validation.transform_binding_invalid`, `reason: template_not_found` or `template_version_not_found`);

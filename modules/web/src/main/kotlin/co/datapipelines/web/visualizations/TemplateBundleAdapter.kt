@@ -3,7 +3,7 @@ package co.datapipelines.web.visualizations
 import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.templates.Template
 import co.datapipelines.templates.TemplateRepository
-import co.datapipelines.templates.TransformBlocks
+import co.datapipelines.templates.ScriptBlocks
 import co.datapipelines.visualization.TemplateBundle
 import co.datapipelines.web.templates.TemplateImportService
 import com.fasterxml.jackson.databind.JsonNode
@@ -84,11 +84,11 @@ internal class TemplateBundleAdapter(
         node.put("description", stored.description)
         node.put("body", stored.body)
         node.put("is_library", stored.isLibrary)
-        // The transform blocks are version content (inside the hash the receiver recomputes), so the payload
-        // carries them exactly when the type is a transform.
-        stored.contract?.let { node.set<JsonNode>("contract", TransformBlocks.mapper.valueToTree<JsonNode>(it)) }
-        stored.invariants?.let { node.set<JsonNode>("invariants", TransformBlocks.mapper.valueToTree<JsonNode>(it)) }
-        stored.tests?.let { node.set<JsonNode>("tests", TransformBlocks.mapper.valueToTree<JsonNode>(it)) }
+        // The script blocks are version content (inside the hash the receiver recomputes), so the payload
+        // carries them exactly when the type is a script.
+        stored.contract?.let { node.set<JsonNode>("contract", ScriptBlocks.mapper.valueToTree<JsonNode>(it)) }
+        stored.invariants?.let { node.set<JsonNode>("invariants", ScriptBlocks.mapper.valueToTree<JsonNode>(it)) }
+        stored.tests?.let { node.set<JsonNode>("tests", ScriptBlocks.mapper.valueToTree<JsonNode>(it)) }
         // The cited facts ride OUTSIDE the hash (transform-nodes §2.3); the import keeps the ids that resolve
         // there and drops the rest (owner ruling 2026-09-25) — TemplateImportService's own lenient half.
         stored.implements?.let { ids -> node.putArray("implements").apply { ids.forEach { add(it) } } }

@@ -223,7 +223,7 @@ class EngineConfiguration {
         metrics: ExecutorMetrics,
         subPipelineRunner: SubPipelineRunner,
         progress: ExecutionProgress,
-        transformSupport: co.datapipelines.executor.TransformSupport,
+        scriptSupport: co.datapipelines.executor.ScriptSupport,
     ): PipelineExecutor =
         pipelineExecutor(
             // The shared bean is a bean-of-record (mcp-server's @ConditionalOnBean); no
@@ -253,7 +253,7 @@ class EngineConfiguration {
             // happens to use the shared bean.
             subPipelineRunner = subPipelineRunner,
             progress = progress,
-            transforms = transformSupport,
+            scripts = scriptSupport,
         )
 
     /**

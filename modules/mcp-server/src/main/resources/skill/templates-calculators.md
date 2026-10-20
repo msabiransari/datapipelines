@@ -63,8 +63,8 @@ Four rules, and the third is the one that bites:
    in `inputs` OR as a `:bind` in its SQL — must depend on the producer, directly or
    transitively. Otherwise the save is refused with
    `pipeline.validation.calculator_input_unordered`, and the fix is one entry in `depends_on`.
-4. **Row-level transforms are NOT calculators.** A calculator computes one value — or one
-   named set — for the whole run. Transforming columns is SQL's job — on the source engine, in
+4. **Row-level scripts are NOT calculators.** A calculator computes one value — or one
+   named set — for the whole run. Scripting columns is SQL's job — on the source engine, in
    tempdb, or through a library template macro. There is no row calculator and there is not
    going to be one.
 

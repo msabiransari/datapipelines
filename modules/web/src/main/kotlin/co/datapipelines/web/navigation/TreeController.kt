@@ -30,7 +30,7 @@ import java.util.UUID
 /**
  * Literal first-party read surfaces; permission and credential admission retain the existing matrix.
  *
- * [reviewMarks] is the ONE citation read every template `needs_review` comes from (transform-nodes
+ * [reviewMarks] is the ONE citation read every template `needs_review` comes from (script-nodes
  * design §8.2): a templates page asks it once for its leaves' listed versions (#533).
  */
 @RestController

@@ -18,7 +18,7 @@ enum class DocArea(
     PIPELINES("pipelines"),
     EXECUTIONS("executions"),
     TEMPLATES("templates"),
-    TRANSFORMS("transforms"),
+    SCRIPTS("scripts"),
     DATASOURCES("datasources"),
     LAKE("lake"),
     ENDPOINTS("endpoints"),
@@ -43,7 +43,7 @@ enum class DocArea(
          * `pipelines`, `lake_tables_register` → `lake`). The exceptions are the record's own
          * placements, each a one-line ruling: `calculators_*` are DAG-authoring tools
          * (pipelines), `semantics_*` and `sql_probe` are discovery (datasources), and
-         * `templates_evaluate` is the transform evaluator (transforms).
+         * `templates_evaluate` is the script evaluator (scripts).
          */
         fun ofTool(toolName: String): DocArea {
             val prefix = toolName.substringBefore('_')
@@ -51,7 +51,7 @@ enum class DocArea(
                 "docs: tool '$toolName' maps to the reserved area '$prefix' — the record says the " +
                     "area is added by the lane that ships the capability, never listed before (§3.2)"
             }
-            if (toolName == "templates_evaluate") return TRANSFORMS
+            if (toolName == "templates_evaluate") return SCRIPTS
             return BY_PREFIX[prefix] ?: throw IllegalStateException(
                 "docs: tool '$toolName' has no area in the record §3.2 catalog — add the mapping " +
                     "here in the same commit that ships the tool",

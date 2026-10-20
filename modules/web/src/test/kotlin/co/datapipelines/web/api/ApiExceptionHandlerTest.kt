@@ -51,7 +51,7 @@ class ApiExceptionHandlerTest {
     @Test
     fun `stream constraints retain safe limit guidance without reflecting the converter message`() {
         val mapper =
-            co.datapipelines.templates.TransformBlocks.mapper
+            co.datapipelines.templates.ScriptBlocks.mapper
                 .copy()
         mapper.factory.setStreamReadConstraints(
             com.fasterxml.jackson.core.StreamReadConstraints
@@ -90,7 +90,7 @@ class ApiExceptionHandlerTest {
         val strictMvc =
             MockMvcBuilders
                 .standaloneSetup(ProbeController())
-                .setMessageConverters(MappingJackson2HttpMessageConverter(co.datapipelines.templates.TransformBlocks.mapper))
+                .setMessageConverters(MappingJackson2HttpMessageConverter(co.datapipelines.templates.ScriptBlocks.mapper))
                 .setControllerAdvice(ApiExceptionHandler())
                 .build()
         val cases =
@@ -125,7 +125,7 @@ class ApiExceptionHandlerTest {
 
     @Test
     fun `unreadable unknown keys are clipped and other unreadable causes use fixed prose`() {
-        val mapper = co.datapipelines.templates.TransformBlocks.mapper
+        val mapper = co.datapipelines.templates.ScriptBlocks.mapper
         val longKey = "bad\n\t" + "x".repeat(200)
         val wrapper =
             io.kotest.assertions.throwables.shouldThrow<IllegalArgumentException> {

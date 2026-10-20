@@ -158,7 +158,7 @@ class ViewerEditorRenderTest {
         html shouldNotContain "data-role-note=\"read-only\""
         interactive(mainOf(html)).contains("textarea#templateBody") shouldBe true
         interactive(mainOf(html)).contains("button#previewBtn") shouldBe true
-        // The Render tab exists for the author of a non-transform template.
+        // The Render tab exists for the author of a non-script template.
         html shouldContain "id=\"tw-tab-render\""
     }
 
@@ -278,7 +278,7 @@ class ViewerEditorRenderTest {
         setVariable("selectedStatus", "RELEASED")
         setVariable("releasedAt", null)
         setVariable("releasedBy", null)
-        setVariable("isTransform", false)
+        setVariable("isScript", false)
     }
 
     private fun WebContext.page(
@@ -320,7 +320,7 @@ class ViewerEditorRenderTest {
         setVariable("canAuthor", true)
         setVariable("activeTab", "source")
         setVariable("interpolations", emptyList<String>())
-        setVariable("isTransform", false)
+        setVariable("isScript", false)
         fillUsedByFacts()
         // The selector reads the admitted history; one row of each side of the fork.
         setVariable("versions", selectorRows())

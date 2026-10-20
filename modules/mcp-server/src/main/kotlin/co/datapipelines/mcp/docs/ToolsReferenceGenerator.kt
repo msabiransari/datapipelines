@@ -149,7 +149,7 @@ object ToolsReferenceGenerator {
             DocArea.PIPELINES to "Author, read, run and check pipelines, and the calculator catalog.",
             DocArea.EXECUTIONS to "List, read, page and cancel runs.",
             DocArea.TEMPLATES to "The SQL template surface: list, read, write, render, purge drafts.",
-            DocArea.TRANSFORMS to "Evaluate a transform template over a caller-supplied input.",
+            DocArea.SCRIPTS to "Evaluate a script template over a caller-supplied input.",
             DocArea.DATASOURCES to "Discovery, introspection, learned semantics and the SQL probe.",
             DocArea.LAKE to "The dp-lake registry writes: register, import, unregister.",
             DocArea.ENDPOINTS to "Publish and read the HTTP interfaces of released pipelines.",

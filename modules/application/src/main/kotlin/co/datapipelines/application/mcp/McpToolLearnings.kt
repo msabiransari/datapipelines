@@ -69,8 +69,8 @@ class McpToolLearnings(
      * `pipeline_versions.updated_at` are both `NOW()` at write), so the comparison carries
      * no cross-clock skew.
      *
-     * A successful `templates_evaluate` of a draft transform version counts as its render
-     * (7b, record §9.1): without it every draft pipeline pinning a draft transform would be
+     * A successful `templates_evaluate` of a draft script version counts as its render
+     * (7b, record §9.1): without it every draft pipeline pinning a draft script would be
      * refused at execute forever — the render-before-you-run check reads the same audit
      * rows, so it is one more name in the allow-set.
      */

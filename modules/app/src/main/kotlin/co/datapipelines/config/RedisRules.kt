@@ -5,7 +5,7 @@ import java.time.Duration
 
 /**
  * §7 / §3.1 (#488) — the Redis client bounds. Owns its file like `RequestLimitsRules` and
- * `TransformRules` — the validator's companion is the registry, not the home, of the §3.x
+ * `ScriptRules` — the validator's companion is the registry, not the home, of the §3.x
  * families, and this keeps the companion under the size the static analysis allows.
  */
 internal object RedisRules {

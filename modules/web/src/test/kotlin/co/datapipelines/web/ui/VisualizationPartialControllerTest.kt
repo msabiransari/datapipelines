@@ -168,7 +168,7 @@ class VisualizationPartialControllerTest {
     }
 
     @Test
-    fun `the overview reads the transform pin's status through the release cascade's port`() {
+    fun `the overview reads the script pin's status through the release cascade's port`() {
         authenticate(workspaceId, WorkspaceRole.VIEWER)
         twoVersions()
 
@@ -178,7 +178,7 @@ class VisualizationPartialControllerTest {
         model["name"] shouldBe VisualizationUiFixtures.NAME
         model["bodyHash"] shouldBe "hash-1"
         model["bundle"] shouldBe "2d"
-        model["transform"] shouldBe null
+        model["script"] shouldBe null
         model["caseCount"] shouldBe 0
     }
 

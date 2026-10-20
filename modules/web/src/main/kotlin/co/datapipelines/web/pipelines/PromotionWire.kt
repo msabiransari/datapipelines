@@ -133,7 +133,7 @@ object PromotionWire {
          * #10 L1c — the visualizations as NODES (rest-api §18.2; D61's order: they land after the
          * batch's templates/sets/pipelines and before the dashboards that pin them). Each entry is the
          * version's payload — the body with its lifecycle fields — never the §22 export envelope: the
-         * transform templates ride the batch's template closure, and the receiver strips the lifecycle
+         * script templates ride the batch's template closure, and the receiver strips the lifecycle
          * keys by name and binds the rest through the family READER. Defaulted empty so a sender that
          * predates the transfer still pushes a batch this receiver accepts.
          */

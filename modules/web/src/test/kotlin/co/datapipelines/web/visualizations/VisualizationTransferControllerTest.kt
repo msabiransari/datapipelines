@@ -164,7 +164,7 @@ class VisualizationTransferControllerTest {
      * the REAL transfer and adapter: a lens planted in the closure, or a pinned version dropped, is red here.
      */
     @Test
-    fun `export still bundles the pinned transform template the template lens hides (#344)`() {
+    fun `export still bundles the pinned script template the template lens hides (#344)`() {
         authenticate()
         every { visualizations.findWorking(workspaceId, admitsArtifact, id) } returns released()
         exportPath.stubRelease(released())
@@ -309,7 +309,7 @@ internal val VISUALIZATION_DOCUMENT =
      "renderer": {"kind": "plotly", "version": "4"},
      "inputs": {"revenue": {"columns": [{"name": "month", "type": "DATE", "nullable": false},
                                         {"name": "amount", "type": "DECIMAL", "nullable": false}]}},
-     "transform": {"template": {"name": "finance/transforms/revenue_bars", "version": 2}, "inputs": {"rows": "revenue"}},
+     "transform": {"template": {"name": "finance/scripts/revenue_bars", "version": 2}, "inputs": {"rows": "revenue"}},
      "config": {"data": [{"type": "bar", "x": "${'$'}.x", "y": "${'$'}.y"}], "layout": {"title": {"text": "Revenue"}}},
      "bindings": {"data[0].x": "month_labels", "data[0].y": "amounts"},
      "presentation": {"title": "Monthly revenue", "tokens": {"series": "categorical"}},
@@ -352,7 +352,7 @@ internal class RealExportPath {
      * pinned by nothing — the one name the #344 cases' template lens admits, and never part of a bundle.
      */
     fun stubTransformClosure() {
-        stubTemplate(TRANSFORM, 2, listOf(TemplateImport(LIBRARY, 1, "lib")))
+        stubTemplate(SCRIPT, 2, listOf(TemplateImport(LIBRARY, 1, "lib")))
         stubTemplate(LIBRARY, 1)
         stubTemplate(UNPINNED, 1)
     }
@@ -388,12 +388,12 @@ internal class RealExportPath {
     }
 
     companion object {
-        const val TRANSFORM = "finance/transforms/revenue_bars"
-        const val LIBRARY = "finance/transforms/bar_helpers"
-        const val UNPINNED = "finance/transforms/not_pinned"
+        const val SCRIPT = "finance/scripts/revenue_bars"
+        const val LIBRARY = "finance/scripts/bar_helpers"
+        const val UNPINNED = "finance/scripts/not_pinned"
 
         /** What the bundle must be: the pin, then its import — exactly, in the closure walk's order. */
-        val PINNED_CLOSURE = listOf(TRANSFORM to 2, LIBRARY to 1)
+        val PINNED_CLOSURE = listOf(SCRIPT to 2, LIBRARY to 1)
         private val STAMP: Instant = Instant.parse("2026-09-29T00:00:00Z")
         private val ACTOR: UUID = UUID.fromString("00000000-0000-0000-0000-000000000344")
     }

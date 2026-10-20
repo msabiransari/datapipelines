@@ -27,9 +27,9 @@ internal object TemplateFixtures {
         engine: String = Template.FREEMARKER_ENGINE,
         type: TemplateType? = null,
         schemaVersion: Int = Template.SUPPORTED_SCHEMA_VERSION,
-        contract: TransformContract? = null,
-        invariants: List<TransformInvariant>? = null,
-        tests: List<TransformTestCase>? = null,
+        contract: ScriptContract? = null,
+        invariants: List<ScriptInvariant>? = null,
+        tests: List<ScriptTestCase>? = null,
     ): TemplateDraft =
         TemplateDraft(
             schemaVersion = schemaVersion,

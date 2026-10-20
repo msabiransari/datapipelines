@@ -35,7 +35,7 @@ private const val NOT_AN_OBJECT = "The batch entry is not a JSON object."
  * ## The payload
  * The batch entry is the version's payload (the body with its lifecycle fields — the wire's
  * `visualization`/`dashboard` NODE, never the §22 export envelope): the id is KEPT (P24), the hash travels,
- * the transform templates do NOT — the sender merges them into the batch's template closure, and the receiver
+ * the script templates do NOT — the sender merges them into the batch's template closure, and the receiver
  * lands them first. A dashboard's pinned pipelines and set travel BY REFERENCE: the receiver's validation judges
  * them against the rows its own transaction has just landed.
  *

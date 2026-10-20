@@ -144,7 +144,7 @@ class WorkedExamplesTest {
                 "acme/finance/final_report.sql" to TemplateLookup.Found(Dialect.H2),
                 "acme/finance/report.sql" to TemplateLookup.Found(Dialect.H2),
                 "acme/finance/create_idx_revenue.sql" to TemplateLookup.Found(Dialect.H2),
-                "acme/finance/transform.sql" to TemplateLookup.Found(Dialect.H2),
+                "acme/finance/script.sql" to TemplateLookup.Found(Dialect.H2),
                 "acme/finance/select_orders.sql" to TemplateLookup.Found(Dialect.H2),
             )
     }

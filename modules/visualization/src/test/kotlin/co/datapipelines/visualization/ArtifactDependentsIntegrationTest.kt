@@ -36,7 +36,7 @@ class ArtifactDependentsIntegrationTest {
     private val arrows =
         listOf(
             Arrow(
-                "visualization -> transform template",
+                "visualization -> script template",
                 ArtifactKind.VISUALIZATION,
                 { name, version -> """{"transform": {"template": {"name": "$name", "version": $version}, "inputs": {}}}""" },
                 { d, workspace, name, version, scope -> d.visualizationsPinningTemplate(workspace, name, version, scope) },

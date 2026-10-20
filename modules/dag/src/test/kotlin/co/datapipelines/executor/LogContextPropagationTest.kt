@@ -52,8 +52,8 @@ class LogContextPropagationTest {
             val contractNode =
                 co.datapipelines.pipeline.Node(
                     id = "shape_orders",
-                    description = "transform shape_orders",
-                    type = NodeType.TRANSFORM,
+                    description = "script shape_orders",
+                    type = NodeType.SCRIPT,
                     source = "",
                     template = TemplateRef("shape_orders", 1),
                     output =
@@ -71,9 +71,9 @@ class LogContextPropagationTest {
             ExecutorHarness(
                 templateEngine = Fixtures.templateEngine(emptyMap()),
                 stagingFactory = stagingWithOrders(),
-                transforms =
-                    TransformSupport(
-                        resolver = TransformVersionResolver { _, _ -> resolvedTransform(padBody) },
+                scripts =
+                    ScriptSupport(
+                        resolver = ScriptVersionResolver { _, _ -> resolvedScript(padBody) },
                         pool = pool,
                         engines = mapOf(ScriptLanguage.JSONATA to JsonataEngine()),
                         maxInputRows = 100_000,
@@ -164,7 +164,7 @@ class LogContextPropagationTest {
     }
 
     /**
-     * A staging factory whose databases arrive with the transform's input table already staged —
+     * A staging factory whose databases arrive with the script's input table already staged —
      * the state an upstream DQL node would have left, so the node under test reaches its script.
      */
     private fun stagingWithOrders(): StagingFactory =
@@ -202,18 +202,18 @@ class LogContextPropagationTest {
                 }
         }
 
-    private fun resolvedTransform(body: String) =
-        ResolvedTransform(
+    private fun resolvedScript(body: String) =
+        ResolvedScript(
             type = co.datapipelines.pipeline.TemplateType.JSONATA,
             status = co.datapipelines.pipeline.PipelineVersionStatus.DRAFT,
             body = body,
             contract =
-                co.datapipelines.templates.TransformContract(
-                    mode = co.datapipelines.templates.TransformMode.ROW,
+                co.datapipelines.templates.ScriptContract(
+                    mode = co.datapipelines.templates.ScriptMode.ROW,
                     inputs =
                         mapOf(
                             "orders" to
-                                co.datapipelines.templates.TransformInput.Table(
+                                co.datapipelines.templates.ScriptInput.Table(
                                     listOf(
                                         co.datapipelines.templates.ContractColumn(
                                             "order_id",
@@ -232,7 +232,7 @@ class LogContextPropagationTest {
                                 ),
                         ),
                     output =
-                        co.datapipelines.templates.TransformOutput.Table(
+                        co.datapipelines.templates.ScriptOutput.Table(
                             listOf(
                                 co.datapipelines.templates.ContractColumn("order_id", co.datapipelines.typesystem.LogicalType.INTEGER),
                             ),

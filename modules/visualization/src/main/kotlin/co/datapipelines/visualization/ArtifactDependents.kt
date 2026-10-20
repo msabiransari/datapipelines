@@ -41,7 +41,7 @@ enum class PinScope {
 
 /**
  * The reverse arrows INTO other families from the two artifact families this module persists — "who pins this?"
- * for a transform template (a visualization's `transform.template`), a pipeline release (a dashboard source's
+ * for a script template (a visualization's `transform.template`), a pipeline release (a dashboard source's
  * `pipeline`) and a parameter-set release (a dashboard's `parameter_set`). #320: the design record §4.2 ("deletion and
  * purge guards keep referenced releases") for the dependencies OUTSIDE this module; [DashboardRepository.livePinsOf]
  * is the in-module arrow it sits beside.
@@ -64,7 +64,7 @@ enum class PinScope {
 class ArtifactDependents(
     private val jdbc: NamedParameterJdbcTemplate,
 ) {
-    /** The visualization versions that pin transform template [templateId] — at [version], or at any version when null. */
+    /** The visualization versions that pin script template [templateId] — at [version], or at any version when null. */
     fun visualizationsPinningTemplate(
         workspaceId: UUID,
         templateId: String,

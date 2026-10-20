@@ -15,7 +15,7 @@ import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.templates.Template
 import co.datapipelines.templates.TemplateRepository
-import co.datapipelines.templates.TransformBlocks
+import co.datapipelines.templates.ScriptBlocks
 import co.datapipelines.web.api.ApiErrors
 import co.datapipelines.web.api.ApiException
 import com.fasterxml.jackson.databind.JsonNode
@@ -527,12 +527,12 @@ class PromotionService(
             node.put("description", stored.description)
             node.put("body", stored.body)
             node.put("is_library", stored.isLibrary)
-            // 7b: the transform blocks are version content (inside the hash the receiver
-            // recomputes), so the payload carries them exactly when the type is a transform.
-            stored.contract?.let { node.set<JsonNode>("contract", TransformBlocks.mapper.valueToTree<JsonNode>(it)) }
-            stored.invariants?.let { node.set<JsonNode>("invariants", TransformBlocks.mapper.valueToTree<JsonNode>(it)) }
-            stored.tests?.let { node.set<JsonNode>("tests", TransformBlocks.mapper.valueToTree<JsonNode>(it)) }
-            // 7e: the cited facts ride the payload OUTSIDE the hash (transform-nodes §2.3); the
+            // 7b: the script blocks are version content (inside the hash the receiver
+            // recomputes), so the payload carries them exactly when the type is a script.
+            stored.contract?.let { node.set<JsonNode>("contract", ScriptBlocks.mapper.valueToTree<JsonNode>(it)) }
+            stored.invariants?.let { node.set<JsonNode>("invariants", ScriptBlocks.mapper.valueToTree<JsonNode>(it)) }
+            stored.tests?.let { node.set<JsonNode>("tests", ScriptBlocks.mapper.valueToTree<JsonNode>(it)) }
+            // 7e: the cited facts ride the payload OUTSIDE the hash (script-nodes §2.3); the
             // receiver keeps the ids that resolve there and drops the rest (owner ruling 2026-09-25).
             stored.implements?.let { ids -> node.putArray("implements").apply { ids.forEach { add(it) } } }
             node.put("version", stored.version)
@@ -564,7 +564,7 @@ class PromotionService(
             node.put("body_hash", pinned.bodyHash)
             releasedAt[pinned.id to pinned.version]?.let { node.put("released_at", it.toString()) }
             // #328 — the record rides beside `version`/`body_hash`, OUTSIDE the hash (like a
-            // transform's `implements`): the receiver's hash recompute reads the BODY only, and
+            // script's `implements`): the receiver's hash recompute reads the BODY only, and
             // the receiver validates the record's shape before storing it (never unchecked).
             pinned.callerOutputJson?.let { node.set<JsonNode>("caller_output", MAPPER.readTree(it)) }
             return node

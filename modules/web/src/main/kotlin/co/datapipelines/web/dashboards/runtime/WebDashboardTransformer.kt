@@ -8,9 +8,9 @@ import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.pipeline.TemplateDryRenderer
 import co.datapipelines.pipeline.TemplateRef
-import co.datapipelines.pipeline.TransformContractView
+import co.datapipelines.pipeline.ScriptContractView
 import co.datapipelines.templates.TemplateService
-import co.datapipelines.templates.TransformTestInput
+import co.datapipelines.templates.ScriptTestInput
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.visualization.ArtifactRef
 import co.datapipelines.visualization.DashboardErrorCodes
@@ -60,12 +60,12 @@ class WebDashboardTransformer(
         if (status != PipelineVersionStatus.RELEASED && !(allowDraft && status == PipelineVersionStatus.DRAFT)) {
             return TransformOutcome.Refused(DashboardErrorCodes.RUNTIME_DEPENDENCY_MISSING)
         }
-        val mode = contracts.transformContract(workspaceId, TemplateRef(template.name, template.version))?.mode
+        val mode = contracts.scriptContract(workspaceId, TemplateRef(template.name, template.version))?.mode
         val input =
-            if (mode == TransformContractView.Mode.ROW) {
-                TransformTestInput(rows = tables.values.singleOrNull().orEmpty(), inputs = emptyMap())
+            if (mode == ScriptContractView.Mode.ROW) {
+                ScriptTestInput(rows = tables.values.singleOrNull().orEmpty(), inputs = emptyMap())
             } else {
-                TransformTestInput(inputs = tables)
+                ScriptTestInput(inputs = tables)
             }
         return try {
             val evaluation = evaluate.evaluate(workspaceId, template.name, template.version, input, now)
@@ -79,6 +79,6 @@ class WebDashboardTransformer(
     }
 
     private companion object {
-        const val SHAPE_REFUSED = PipelineErrorCodes.Transform.ROW_SHAPE_MISMATCH
+        const val SHAPE_REFUSED = PipelineErrorCodes.Script.ROW_SHAPE_MISMATCH
     }
 }

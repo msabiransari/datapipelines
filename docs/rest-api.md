@@ -136,7 +136,7 @@ One envelope answers **before any handler**: a request body over the platform ca
 
 A body **within** the cap that cannot be read — not JSON, or nested past §13.21's stated depth of 100 — is the route family's malformed-body `400` with `details.reason: malformed_json` on EVERY route, including the ones that take their body as text and parse it themselves (#291): the templates routes (create, update, the lifecycle verbs, render, evaluate, import), pipelines create, update and import, execute, and the parameter-set routes (create, update, evaluate, import — #323; the family's code is `parameter.validation.body_invalid`). Until #291 a malformed body on templates create/update/import and pipelines create/update/import reached the `500` backstop, and those routes parsed under Jackson's inherited depth of 1000; the parameter-set routes did the same until #323.
 
-**Scalar shapes (#333).** A body that reads but carries a JSON value of the wrong SHAPE — a number or boolean where the contract declares a string, a string or float where it declares an integer — is refused with the path and the expected shape, never bound as text and never echoing the value (`"name": 12` is no longer the key named "12"). The answer is each family's own: `pipeline.validation.schema_version_unsupported` with `details.reason: "wrong_type"` on a pipeline body, `template.contract_invalid` with `details.rule: "wrong_type"` on a template body or a transform block (including the `input` of `…/evaluate`), and `pipeline.execution.invalid_parameter_type` with `details.reason` `wrong_type` / `unknown_key` / `missing` and `details.path` on the five routes that bind a typed request body (`POST /auth/api-keys` §16.1, `POST /endpoints` and `POST /endpoints/bindings` §19.5, `POST /promotion/push` §18.2, `POST /dashboards/bindings` §23.2). Every echoed path or key is clipped to 160 characters. The status stays `400`; see [Pipeline Contract §13.21](pipeline-contract.md#1321-request-limits).
+**Scalar shapes (#333).** A body that reads but carries a JSON value of the wrong SHAPE — a number or boolean where the contract declares a string, a string or float where it declares an integer — is refused with the path and the expected shape, never bound as text and never echoing the value (`"name": 12` is no longer the key named "12"). The answer is each family's own: `pipeline.validation.schema_version_unsupported` with `details.reason: "wrong_type"` on a pipeline body, `template.contract_invalid` with `details.rule: "wrong_type"` on a template body or a script block (including the `input` of `…/evaluate`), and `pipeline.execution.invalid_parameter_type` with `details.reason` `wrong_type` / `unknown_key` / `missing` and `details.path` on the five routes that bind a typed request body (`POST /auth/api-keys` §16.1, `POST /endpoints` and `POST /endpoints/bindings` §19.5, `POST /promotion/push` §18.2, `POST /dashboards/bindings` §23.2). Every echoed path or key is clipped to 160 characters. The status stays `400`; see [Pipeline Contract §13.21](pipeline-contract.md#1321-request-limits).
 
 ### 4.3 Pagination envelope
 
@@ -368,7 +368,7 @@ catalogues the code with HTTP `—`). The release dialog shows the same facts on
 **`caller_output` (#328, additive):** the body also carries the one word
 `recorded` | `declared` | `none` | `not_observed` — what the release did about its caller
 node's result columns ([pipeline-contract §3.3.1](pipeline-contract.md)): `recorded` — the
-flip copied the version's latest run's schema; `declared` — a transform caller, the pinned
+flip copied the version's latest run's schema; `declared` — a script caller, the pinned
 contract is the answer; `none` — no caller node; `not_observed` — a SQL caller with nothing
 observed, the release succeeded anyway and a dashboard save skips the input-contract check
 for it (dashboards §4.3). The audit row carries the same word, never the column list.
@@ -1100,11 +1100,11 @@ Content-Type: application/json
 
 Templates declare no parameter schema — variables are declared by the pipelines that reference the template, and validated there by dry-render ([Pipeline Contract §7.4](pipeline-contract.md#74-template-variable-resolution)).
 
-`type` is chosen here and never changes afterwards: `sql` (the default) requires `dialect` and is what pipeline nodes reference; `html` declares no `dialect`, renders through an auto-escaping engine configuration, and cannot be referenced by a pipeline node (templates.md §3.2, 046); `jsonata` and `javascript` are the transform types (7b) — `engine: "none"`, no `dialect`, no `imports`, `is_library: false`, and the three blocks `contract` / `invariants` / `tests` are required on create and update (templates.md §3.3; `javascript` is refused until round two).
+`type` is chosen here and never changes afterwards: `sql` (the default) requires `dialect` and is what pipeline nodes reference; `html` declares no `dialect`, renders through an auto-escaping engine configuration, and cannot be referenced by a pipeline node (templates.md §3.2, 046); `jsonata` and `javascript` are the script types (7b) — `engine: "none"`, no `dialect`, no `imports`, `is_library: false`, and the three blocks `contract` / `invariants` / `tests` are required on create and update (templates.md §3.3; `javascript` is refused until round two).
 
-A transform body may carry **`implements`** (7e, [Templates §3.4](templates.md#34-implements-and-drift)): an array of learned-fact ids — WORKSPACE `definition`/`exclusion`/`preference` facts of this workspace, at most 50 — the rules this transform implements. Not content: outside `body_hash`. An id the workspace cannot cite is `400 template.implements_unresolved` (`details.fact_id`, `details.reason`); on `sql`/`html` the field is `400 template.blocks_not_allowed`.
+A script body may carry **`implements`** (7e, [Templates §3.4](templates.md#34-implements-and-drift)): an array of learned-fact ids — WORKSPACE `definition`/`exclusion`/`preference` facts of this workspace, at most 50 — the rules this script implements. Not content: outside `body_hash`. An id the workspace cannot cite is `400 template.implements_unresolved` (`details.fact_id`, `details.reason`); on `sql`/`html` the field is `400 template.blocks_not_allowed`.
 
-Response: `201 Created` with full template (including `type`, version `1`, `created_at`, and on a transform `implements` / `needs_review`).
+Response: `201 Created` with full template (including `type`, version `1`, `created_at`, and on a script `implements` / `needs_review`).
 
 ### 8.2 Get template (working version)
 
@@ -1117,9 +1117,9 @@ template mirror of §5.2): the DRAFT when one exists, else the latest released v
 projection states its `version`, `status` and `body_hash`, and a `draft` pointer is present
 when a draft exists. Every template projection here and in §8.3/§8.5 carries **`needs_review`**
 (7e — `true` when a cited learned fact has been retired, computed on read, never stored) and,
-on a transform, **`implements`** (its cited fact ids, sorted) and — when marked —
+on a script, **`implements`** (its cited fact ids, sorted) and — when marked —
 **`retired_facts`** (`[{fact_id, retired_reason, superseded_by}]`) ([Templates §3.4](templates.md#34-implements-and-drift)).
-The pipeline editor's TRANSFORM card reads `needs_review` off §8.3's read.
+The pipeline editor's SCRIPT card reads `needs_review` off §8.3's read.
 
 ### 8.3 Get template (specific version)
 
@@ -1262,9 +1262,9 @@ POST /templates/render
 }
 ```
 
-Response: rendered SQL string. Useful for UI editor preview and for LLM-assisted authoring. A **transform type** (`jsonata`/`javascript`) has nothing to render — refused `400 template.render_not_applicable` with `details.use: "templates_evaluate"` (7b).
+Response: rendered SQL string. Useful for UI editor preview and for LLM-assisted authoring. A **script type** (`jsonata`/`javascript`) has nothing to render — refused `400 template.render_not_applicable` with `details.use: "templates_evaluate"` (7b).
 
-### 8.7A Evaluate a transform template (7b)
+### 8.7A Evaluate a script template (7b)
 
 ```
 POST /templates/evaluate
@@ -1279,7 +1279,7 @@ POST /templates/evaluate
 }
 ```
 
-The evaluate route — the MCP `templates_evaluate` tool's REST twin, the same service, the same bounded evaluation pool, the same timeout (`datapipelines.transform.evaluate-timeout-seconds`). `version` omitted = the working version (the draft when one exists, else the latest released); `input` is the template contract's input object (in row mode `rows` is the batch and `inputs` holds the value inputs only; in table/value mode `inputs` holds every input, tables as arrays); an optional `now` (ISO-8601) pins the clock for `$now()`/`$millis()` (absent, those builtins refuse). Response:
+The evaluate route — the MCP `templates_evaluate` tool's REST twin, the same service, the same bounded evaluation pool, the same timeout (`datapipelines.script.evaluate-timeout-seconds`). `version` omitted = the working version (the draft when one exists, else the latest released); `input` is the template contract's input object (in row mode `rows` is the batch and `inputs` holds the value inputs only; in table/value mode `inputs` holds every input, tables as arrays); an optional `now` (ISO-8601) pins the clock for `$now()`/`$millis()` (absent, those builtins refuse). Response:
 
 ```json
 {
@@ -1307,7 +1307,7 @@ Content-Type: application/json
 
 Library templates (Freemarker macros usable via `#import`) are stored like regular templates; they're just referenced by other templates rather than by pipelines directly. See [Templates spec](templates.md).
 
-A transform entry may carry `implements` (7e). The import keeps the ids that resolve to citable facts in THIS workspace and drops the rest without refusing (owner ruling 2026-09-25 — learned facts are environment-local and never promoted, so a promotion from another deployment lands with none); the kept ids land on the version the import wrote, and an idempotent re-import that wrote nothing writes no citations ([Templates §3.4](templates.md#34-implements-and-drift)).
+A script entry may carry `implements` (7e). The import keeps the ids that resolve to citable facts in THIS workspace and drops the rest without refusing (owner ruling 2026-09-25 — learned facts are environment-local and never promoted, so a promotion from another deployment lands with none); the kept ids land on the version the import wrote, and an idempotent re-import that wrote nothing writes no citations ([Templates §3.4](templates.md#34-implements-and-drift)).
 
 ---
 
@@ -1479,7 +1479,7 @@ Notes:
 
 - `drift`, `evidence_summary`, `source_pipeline` and `conflict` are omitted-when-absent (the §3.2 envelope convention). `trust` is `asserted` / `observed` / `verified` / `needs_review` / `stale` (a `definition`, `exclusion` or `preference` lands `asserted` even with evidence — a choice is confirmed by a person, never observed; datasources.md §7E); retired facts are never served here.
 - **The drift check runs at read** (design §6): `/columns` recomputes each fact's per-table fingerprint from the columns it just read, and a COMPLETE `/tables` listing (no `namespace`/`schema` filter, not truncated) checks each fact's tables; a demotion (`needs_review`, `stale`) is written back to the row before it is served — idempotent, one-way; nothing re-maps. `GET /datasources/{name}` opens no connection and serves facts as stored.
-- **`implemented_by` (7e, [Templates §3.4](templates.md#34-implements-and-drift)):** every rule under `definitions` carries `[{template_id, version}]` — the live template versions citing it as the transform implementing it, under the caller's `template.read` lens (a promoter's: RELEASED versions of the templates it may read); `[]` when none. DATASOURCE facts never carry it — nothing can cite them.
+- **`implemented_by` (7e, [Templates §3.4](templates.md#34-implements-and-drift)):** every rule under `definitions` carries `[{template_id, version}]` — the live template versions citing it as the script implementing it, under the caller's `template.read` lens (a promoter's: RELEASED versions of the templates it may read); `[]` when none. DATASOURCE facts never carry it — nothing can cite them.
 - **Visibility is the store's one predicate:** every DATASOURCE fact on a datasource the workspace can see, plus the workspace's own WORKSPACE facts. **Provenance stops at the reader's visibility (D-S9):** `from_this_workspace` says whether the active workspace recorded it, and `source_pipeline` is present only when the caller's workspace can read that pipeline. **Conflicts coexist (D-S5):** two live facts of one kind on the same refs both carry `conflict: true`.
 - Recording, listing and retiring facts are MCP verbs in round 1 (`semantics_record` / `semantics_list` / `semantics_retire`, [MCP §6.2.37–39](mcp-server.md#6237-semantics_record)); there is no REST write for facts yet. The refusal codes are [Pipeline Contract §13.15](pipeline-contract.md#1315-learned-semantics).
 
@@ -2681,7 +2681,7 @@ The seven lifecycle permissions govern the same thirteen routes as §22.2 under 
 | `GET /api/v1/dashboards/{id}/export` | `dashboard.read` | The export envelope (§12, [Dashboards §3.3](dashboards.md#33-export-and-import)): the dashboard's payload, each pinned visualization's OWN envelope inside it, and the manifest naming the pinned pipelines and set BY REFERENCE — a dashboard export assumes they were promoted first. Lensed before the export (§22.2's mould). The bundled closure — each pinned visualization and its templates — is the dashboard's pins, not lensed; the root is (#344). Audited `dashboard.exported`. |
 | `POST /api/v1/dashboards/import` | `dashboard.import` | Import the envelope ([Dashboards §3.3](dashboards.md#33-export-and-import)): every bundled visualization (D61), then the dashboard; the exported ids KEPT. The same §13.21 read + READER bind as §22.2's import — the two dashboard bounds hold, a non-array `visualizations` refuses, and the bundle is count-bounded (O7: at most `max-visualizations-per-dashboard` entries, `body_invalid` `reason: too_many` before any member binds). ONE transaction around templates → visualizations → dashboard (F1 of the L1c pass): a refused dashboard leaves NOTHING landed. Lands RELEASED, judged by the RELEASE rules (O2): a pinned set or visualization that exists here but is not RELEASED refuses `409 dashboard.release.dependency_not_released`; a pin the deployment lacks is `400 dashboard.import.missing_dependency`; an id another workspace's artifact holds is `409 dashboard.import.id_taken` (C29). The workspace-admin verb (the owner's ruling, exactly `visualization.import`'s row). Audited `dashboard.imported` — and one `visualization.imported` row per LANDED bundled visualization, each naming its id, its version and its own envelope manifest's evidence flag (F1's record honesty: nothing landed is unaudited). |
 
-A source whose pinned release does not DECLARE its caller columns — a SQL caller node; only a transform caller node's contract names them — is not judged against its visualization's input contract at save (`input_contract_mismatch` needs declared columns); the runtime judges the real columns ([Dashboards §2.2](dashboards.md#22-dashboard)). The export/import routes (L1c) are the `/export` and `/import` rows above; the runtime and refresh routes are §23.3, and L5's key-binding routes are here:
+A source whose pinned release does not DECLARE its caller columns — a SQL caller node; only a script caller node's contract names them — is not judged against its visualization's input contract at save (`input_contract_mismatch` needs declared columns); the runtime judges the real columns ([Dashboards §2.2](dashboards.md#22-dashboard)). The export/import routes (L1c) are the `/export` and `/import` rows above; the runtime and refresh routes are §23.3, and L5's key-binding routes are here:
 
 | Route | Permission | What |
 |---|---|---|

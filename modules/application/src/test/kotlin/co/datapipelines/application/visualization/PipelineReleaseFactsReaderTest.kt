@@ -11,7 +11,7 @@ import co.datapipelines.pipeline.PipelineSettings
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.ResolvedPipeline
 import co.datapipelines.pipeline.TemplateRef
-import co.datapipelines.pipeline.TransformContractView
+import co.datapipelines.pipeline.ScriptContractView
 import co.datapipelines.typesystem.LogicalType
 import co.datapipelines.visualization.ArtifactRef
 import co.datapipelines.visualization.OutputColumn
@@ -26,8 +26,8 @@ import java.util.UUID
 /**
  * The production pipeline-release port the dashboard validator reads (L1b): the status off the resolver, the
  * read-only rule's verdict, the parameters a caller must supply, and the caller columns — in #328's precedence:
- * a transform caller's DECLARED contract, a SQL caller's RECORDED release record, null only when neither exists.
- * The `outputColumns` cases are the decision the lane records: a transform caller node's table contract is the
+ * a script caller's DECLARED contract, a SQL caller's RECORDED release record, null only when neither exists.
+ * The `outputColumns` cases are the decision the lane records: a script caller node's table contract is the
  * only declaration; no caller node is an empty output; a SQL caller node (or a non-table contract) is null — the
  * validator's cue to skip rather than guess.
  */
@@ -72,14 +72,14 @@ class PipelineReleaseFactsReaderTest {
     }
 
     @Test
-    fun `a transform caller node declares its contract's table columns`() {
-        val pipeline = pipeline(dql("stage", NodeOutput.Tempdb("stg")), node("shape", NodeType.TRANSFORM, NodeOutput.Caller))
+    fun `a script caller node declares its contract's table columns`() {
+        val pipeline = pipeline(dql("stage", NodeOutput.Tempdb("stg")), node("shape", NodeType.SCRIPT, NodeOutput.Caller))
         val columns =
             listOf(
-                TransformContractView.Column("month", LogicalType.DATE, nullable = false),
-                TransformContractView.Column("amount", LogicalType.DECIMAL, nullable = true),
+                ScriptContractView.Column("month", LogicalType.DATE, nullable = false),
+                ScriptContractView.Column("amount", LogicalType.DECIMAL, nullable = true),
             )
-        val table = contract(TransformContractView.Output.Table(columns))
+        val table = contract(ScriptContractView.Output.Table(columns))
         val fact = reader(mapOf(REF to resolved(pipeline)), table).releaseOf(WORKSPACE, REF)
 
         checkNotNull(fact).outputColumns shouldBe
@@ -95,31 +95,31 @@ class PipelineReleaseFactsReaderTest {
     @Test
     fun `a SQL caller node declares no columns - null, never a guess`() {
         val pipeline = pipeline(dql("report", NodeOutput.Caller))
-        val column = TransformContractView.Column("x", LogicalType.STRING, nullable = true)
-        val tableContract = contract(TransformContractView.Output.Table(listOf(column)))
-        // Even with a contract lookup that WOULD answer, a DQL caller node is not a transform: nothing is declared.
+        val column = ScriptContractView.Column("x", LogicalType.STRING, nullable = true)
+        val tableContract = contract(ScriptContractView.Output.Table(listOf(column)))
+        // Even with a contract lookup that WOULD answer, a DQL caller node is not a script: nothing is declared.
         checkNotNull(reader(mapOf(REF to resolved(pipeline)), tableContract).releaseOf(WORKSPACE, REF)).outputColumns.shouldBeNull()
     }
 
     @Test
-    fun `a transform caller whose contract is missing or not a table declares no columns`() {
-        val pipeline = pipeline(node("shape", NodeType.TRANSFORM, NodeOutput.Caller))
+    fun `a script caller whose contract is missing or not a table declares no columns`() {
+        val pipeline = pipeline(node("shape", NodeType.SCRIPT, NodeOutput.Caller))
         val known = mapOf(REF to resolved(pipeline))
         assertAll(
             { checkNotNull(reader(known) { _, _ -> null }.releaseOf(WORKSPACE, REF)).outputColumns.shouldBeNull() },
             {
-                val value = contract(TransformContractView.Output.Value(LogicalType.INTEGER))
+                val value = contract(ScriptContractView.Output.Value(LogicalType.INTEGER))
                 checkNotNull(reader(known, value).releaseOf(WORKSPACE, REF)).outputColumns.shouldBeNull()
             },
             {
-                val obj = contract(TransformContractView.Output.Obj)
+                val obj = contract(ScriptContractView.Output.Obj)
                 checkNotNull(reader(known, obj).releaseOf(WORKSPACE, REF)).outputColumns.shouldBeNull()
             },
         )
     }
 
     /**
-     * #328 C (D4) — a non-transform (SQL) caller answers its release's RECORDED columns: the
+     * #328 C (D4) — a non-script (SQL) caller answers its release's RECORDED columns: the
      * D2 array read back name by name, type by type — and an absent-or-null `nullable` reads
      * as `true` (unknown admits). This is the acceptance's "answered from the release".
      */
@@ -149,12 +149,12 @@ class PipelineReleaseFactsReaderTest {
             .shouldBeNull()
     }
 
-    /** #328 C (D4) — the record never overrides a declared contract: a transform caller ignores it. */
+    /** #328 C (D4) — the record never overrides a declared contract: a script caller ignores it. */
     @Test
-    fun `a recorded column list never overrides a transform caller's contract`() {
-        val pipeline = pipeline(node("shape", NodeType.TRANSFORM, NodeOutput.Caller))
-        val columns = listOf(TransformContractView.Column("month", LogicalType.DATE, nullable = false))
-        val table = contract(TransformContractView.Output.Table(columns))
+    fun `a recorded column list never overrides a script caller's contract`() {
+        val pipeline = pipeline(node("shape", NodeType.SCRIPT, NodeOutput.Caller))
+        val columns = listOf(ScriptContractView.Column("month", LogicalType.DATE, nullable = false))
+        val table = contract(ScriptContractView.Output.Table(columns))
         val record = """[{"name":"other","type":"STRING","nullable":true}]"""
         val fact = checkNotNull(reader(mapOf(REF to resolved(pipeline, callerOutputJson = record)), table).releaseOf(WORKSPACE, REF))
 
@@ -165,14 +165,14 @@ class PipelineReleaseFactsReaderTest {
 
     private fun reader(
         known: Map<ArtifactRef, ResolvedPipeline>,
-        contracts: (UUID, TemplateRef) -> TransformContractView? = { _, _ -> null },
+        contracts: (UUID, TemplateRef) -> ScriptContractView? = { _, _ -> null },
     ): PipelineReleaseFactsReader {
         val resolver = PipelineResolver { _, name, version -> known[ArtifactRef(name, version)] }
         return PipelineReleaseFactsReader(resolver, ReadOnlyPipelineRule(resolver, MAX_DEPTH), contracts)
     }
 
-    private fun contract(output: TransformContractView.Output): (UUID, TemplateRef) -> TransformContractView? =
-        { _, _ -> TransformContractView(TransformContractView.Mode.TABLE, emptyMap(), output, rejects = false) }
+    private fun contract(output: ScriptContractView.Output): (UUID, TemplateRef) -> ScriptContractView? =
+        { _, _ -> ScriptContractView(ScriptContractView.Mode.TABLE, emptyMap(), output, rejects = false) }
 
     private fun resolved(
         pipeline: Pipeline,

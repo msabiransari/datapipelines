@@ -12,7 +12,7 @@
    *
    *  - The closed tab set and its wire names — the mirror of the server's
    *    TemplateWorkspaceTab enum. The server already resolves the page's tab (unknown or
-   *    missing → source; render without the author capability, or for a transform, → source
+   *    missing → source; render without the author capability, or for a script, → source
    *    BEFORE any render state is read); this module enforces the same rule on every
    *    CLIENT-side tab change, so a hidden tab is inert twice over.
    *  - Admission: Render is the render-context + preview tab — its POST is MUTATE

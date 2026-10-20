@@ -113,13 +113,13 @@ class TemplatePartialController(
      * uses. One component, two surfaces: a refusal the API would give is a refusal here.
      *
      * `type` is a create-time input and appears on no other form (§5.3 makes it immutable);
-     * `dialect` is conditional on it — required for `sql`, absent for `html` and the transform
+     * `dialect` is conditional on it — required for `sql`, absent for `html` and the script
      * types, with the database's `chk_type_dialect` as the backstop. There is no rename
      * affordance because §4.5 offers no rename: `name` is a create-time input, full stop.
      *
-     * 7d: a transform type (`jsonata` / `javascript`) also submits its three blocks — the modal
+     * 7d: a script type (`jsonata` / `javascript`) also submits its three blocks — the modal
      * prefills the design record's example — and they bind through the same binder the
-     * transform face's Save uses (7b's deserializer, strict), so a typo in a block is the
+     * script face's Save uses (7b's deserializer, strict), so a typo in a block is the
      * `contract_invalid` the REST create would give. The create then runs the suite (7b's gate).
      */
     @Suppress("LongParameterList", "LongMethod") // one form field per parameter; the two type families share one refusal path
@@ -150,19 +150,19 @@ class TemplatePartialController(
             }
             val shownName = displayName?.trim()?.takeIf { it.isNotEmpty() } ?: trimmedName
             val draft =
-                if (templateType.isTransform) {
+                if (templateType.isScript) {
                     val identity =
-                        TransformFace.Identity(
+                        ScriptFace.Identity(
                             trimmedName,
                             templateType.wire,
                             Template.NONE_ENGINE,
                             shownName,
                             description?.trim().orEmpty(),
                         )
-                    val panes = TransformPanes(body, contract.orEmpty(), invariants.orEmpty(), tests.orEmpty())
-                    when (val bound = TransformFace.bind(identity, panes)) {
-                        is TransformFace.Bound.Refused -> return refused(bound.refusals.joinToString(" ") { it.line })
-                        is TransformFace.Bound.Draft -> bound.draft
+                    val panes = ScriptPanes(body, contract.orEmpty(), invariants.orEmpty(), tests.orEmpty())
+                    when (val bound = ScriptFace.bind(identity, panes)) {
+                        is ScriptFace.Bound.Refused -> return refused(bound.refusals.joinToString(" ") { it.line })
+                        is ScriptFace.Bound.Draft -> bound.draft
                     }
                 } else {
                     TemplateDraft(
@@ -203,13 +203,13 @@ class TemplatePartialController(
         } catch (e: TemplateValidationException) {
             // The server's rejection is the one that counts (§9.5). The grammar hint rides
             // along only here, where a name-shape refusal is the likely cause.
-            if (templateType.isTransform) {
-                // 7d: a transform's refusals name their block and 7b's code — the suite ran,
+            if (templateType.isScript) {
+                // 7d: a script's refusals name their block and 7b's code — the suite ran,
                 // and "which case, which pane" is the whole answer. The grammar hint only when
                 // the NAME is what failed.
                 val nameFailed = e.result.failures.any { it.code == PipelineErrorCodes.Template.ID_INVALID }
                 refused(
-                    e.result.failures.joinToString(" ") { TransformFace.refusalOf(it).line } +
+                    e.result.failures.joinToString(" ") { ScriptFace.refusalOf(it).line } +
                         if (nameFailed) " " + TemplateNameGrammar.DESCRIPTION else "",
                 )
             } else {

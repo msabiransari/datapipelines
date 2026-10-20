@@ -13,11 +13,11 @@ import java.lang.reflect.Modifier
  * have to agree — the doc (the authority), `application.yml` (the shipped defaults) and
  * [SchedulerProperties] (the binding, which also enforces the bounds) — plus the `db-scheduler.*`
  * wiring that feeds the library FROM those keys, so its own defaults (ten threads, a 30-minute
- * shutdown wait) can never apply. The `TransformConfigKeysSpecDriftTest` shape.
+ * shutdown wait) can never apply. The `ScriptConfigKeysSpecDriftTest` shape.
  *
  * It also pins the NEIGHBOURS of the two YAML edits this lane made (MISTAKES.md, "a YAML block
  * inserted mid-file silently reparents its neighbours"): `management.health.diskspace.enabled`
- * beside the new `db-scheduler` health key, and the transform block the scheduler block follows.
+ * beside the new `db-scheduler` health key, and the script block the scheduler block follows.
  */
 class SchedulerConfigKeysSpecDriftTest {
     private val shipped: Map<String, Any?> by lazy { load("modules/app/src/main/resources/application.yml") }
@@ -76,7 +76,7 @@ class SchedulerConfigKeysSpecDriftTest {
     fun `the health key sits under management_health and its neighbours still bind where they did`() {
         shipped["management.health.db-scheduler.enabled"] shouldBe false
         shipped["management.health.diskspace.enabled"] shouldBe false
-        shipped["datapipelines.transform.max-depth"] shouldBe "\${DATAPIPELINES_TRANSFORM_MAX_DEPTH:100}"
+        shipped["datapipelines.script.max-depth"] shouldBe "\${DATAPIPELINES_SCRIPT_MAX_DEPTH:100}"
     }
 
     private fun defaultOf(key: String): String {

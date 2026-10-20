@@ -10,9 +10,9 @@ import com.fasterxml.jackson.annotation.JsonValue
  * The value drives executor behaviour (§8.4): `DQL` stages / returns / writes back a
  * ResultSet, `DML` records an affected-row count, `DDL` records success, `PIPELINE` executes
  * the pinned child pipeline and consumes its result (§8.5), `CALCULATOR` evaluates a pure
- * catalog function and writes one typed value into the shared Context (§4.10), and `TRANSFORM`
- * evaluates a pinned transform template over staged data (§4.12). It also decides whether an `output`
- * block is legal at all — `DQL` always may carry one, `TRANSFORM` may in `row`/`table` mode,
+ * catalog function and writes one typed value into the shared Context (§4.10), and `SCRIPT`
+ * evaluates a pinned script template over staged data (§4.12). It also decides whether an `output`
+ * block is legal at all — `DQL` always may carry one, `SCRIPT` may in `row`/`table` mode,
  * `PIPELINE` may when the pinned child has
  * a caller node (§12.9), `DML`/`DDL` never (§12.4).
  *
@@ -56,7 +56,7 @@ enum class NodeType(
      * it, the work is a template pin, not a catalog kind: the contract (inputs, output, rejects)
      * is the pinned version's, and §12.13 checks the node's `inputs`/`output` against it.
      */
-    TRANSFORM("TRANSFORM"),
+    SCRIPT("SCRIPT"),
     ;
 
     companion object {

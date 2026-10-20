@@ -1,6 +1,6 @@
 package co.datapipelines.visualization
 
-import co.datapipelines.pipeline.TransformContractView
+import co.datapipelines.pipeline.ScriptContractView
 import co.datapipelines.typesystem.LogicalType
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node.ObjectNode
@@ -14,7 +14,7 @@ import java.util.UUID
  *    unknown attributes, wrong types and unsupported traces refused with the path);
  * 2. **Binding** — every path resolves in `config`, every bound column is in the output contract, and the
  *    column's type is one the renderer accepts at that path ([BindingTypes], the renderer-specific table);
- * 3. **Fixture run** — through the pinned transformer ([TestFixtureEvaluator], the real bounded evaluator
+ * 3. **Fixture run** — through the pinned script ([TestFixtureEvaluator], the real bounded evaluator
  *    over `TemplateEvaluateService`), or, with no transform, the single input's fixture values through the
  *    same wire-form rules; every bound column must be present in every row's projection, and a present
  *    null passes only when the output column is nullable;
@@ -165,15 +165,15 @@ class VisualizationMechanicalCheck(
     private fun outputColumns(
         workspaceId: UUID,
         body: VisualizationBody,
-    ): Map<String, TransformContractView.Column> {
+    ): Map<String, ScriptContractView.Column> {
         val transform =
             body.transform ?: return body.inputs.values
                 .singleOrNull()
                 ?.columns
-                ?.associate { it.name to TransformContractView.Column(it.name, it.type, it.nullable) } ?: emptyMap()
+                ?.associate { it.name to ScriptContractView.Column(it.name, it.type, it.nullable) } ?: emptyMap()
         return when (val pin = templates.pinOf(workspaceId, transform.template)) {
             is TemplatePin.Transform -> {
-                (pin.contract.output as? TransformContractView.Output.Table)?.columns?.associateBy { it.name } ?: emptyMap()
+                (pin.contract.output as? ScriptContractView.Output.Table)?.columns?.associateBy { it.name } ?: emptyMap()
             }
 
             // The pin died after save; the fixture run's evaluator refusal names it per case.
@@ -185,7 +185,7 @@ class VisualizationMechanicalCheck(
 
     private fun bindings(
         body: VisualizationBody,
-        output: Map<String, TransformContractView.Column>,
+        output: Map<String, ScriptContractView.Column>,
         failures: FailureSink,
     ) {
         body.bindings.forEach { (path, column) ->
@@ -231,7 +231,7 @@ class VisualizationMechanicalCheck(
     private fun fixtureRun(
         workspaceId: UUID,
         body: VisualizationBody,
-        output: Map<String, TransformContractView.Column>,
+        output: Map<String, ScriptContractView.Column>,
         global: FailureSink,
     ): Map<String, CaseOutcome> {
         val cases = body.tests?.cases ?: return emptyMap()
@@ -243,7 +243,7 @@ class VisualizationMechanicalCheck(
     private fun runCase(
         workspaceId: UUID,
         body: VisualizationBody,
-        output: Map<String, TransformContractView.Column>,
+        output: Map<String, ScriptContractView.Column>,
         case: TestCase,
         index: Int,
     ): CaseOutcome {
@@ -275,7 +275,7 @@ class VisualizationMechanicalCheck(
 
     private fun projectedRows(
         body: VisualizationBody,
-        output: Map<String, TransformContractView.Column>,
+        output: Map<String, ScriptContractView.Column>,
         rows: List<Map<String, Any?>>,
         caseIndex: Int,
         outcome: CaseOutcome,
@@ -465,7 +465,7 @@ class VisualizationMechanicalCheck(
 
 /**
  * The no-transform case's fixture-value rules — the SAME wire-form rules the type gate applies to a
- * transform's input rows, applied to the single input's fixtures (the spec's §11.3 step 3, the brief's §B).
+ * script's input rows, applied to the single input's fixtures (the spec's §11.3 step 3, the brief's §B).
  * A non-nullable column must carry a value and every value must be in its column's wire form.
  */
 private object FixtureValues {
@@ -553,7 +553,7 @@ object BindingTypes {
 /** The fixture-run port: the real bounded evaluator behind it lives in `web` (over `TemplateEvaluateService`). */
 fun interface TestFixtureEvaluator {
     /**
-     * Evaluates one case's fixtures through the pinned transform. A refusal carries the evaluator's own
+     * Evaluates one case's fixtures through the pinned script. A refusal carries the evaluator's own
      * catalogued code — the mechanical report stores it verbatim. DRAFT pins are valid here (authoring).
      */
     fun evaluate(
@@ -565,7 +565,7 @@ fun interface TestFixtureEvaluator {
 
 /** The fixture evaluator's two answers. */
 sealed interface FixtureEvaluation {
-    /** The transform's output rows — every bound column is checked against each. */
+    /** The script's output rows — every bound column is checked against each. */
     data class Rows(
         val rows: List<Map<String, Any?>>,
     ) : FixtureEvaluation

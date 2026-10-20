@@ -38,7 +38,7 @@ class VisualizationTabModel(
     private val sessions: VisualizationTestSessionService,
     /** The Used-by tab's `pinnedBy` (lensed) and each dashboard's id for its link. */
     private val dashboards: DashboardService,
-    /** The Overview's transform-pin status — the port the release cascade itself reads. */
+    /** The Overview's script-pin status — the port the release cascade itself reads. */
     private val templateStatuses: TemplateVersionStatuses,
 ) {
     /**

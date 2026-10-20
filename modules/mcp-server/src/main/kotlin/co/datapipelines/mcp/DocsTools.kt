@@ -30,7 +30,7 @@ class DocsListTool(
                 "The served manual's catalog: the operating core (core) first, then every area's entry point " +
                     "— the area guide, or its tools reference where no guide exists yet — with each area's " +
                     "other documents nested under references (name, title, purpose, size). Optional area " +
-                    "filter (pipelines, executions, templates, transforms, datasources, lake, endpoints, core) " +
+                    "filter (pipelines, executions, templates, scripts, datasources, lake, endpoints, core) " +
                     "returns that area's documents flat. Documents flagged over_budget are served by section " +
                     "only. Read-only.",
             schema =
@@ -38,7 +38,7 @@ class DocsListTool(
                 {
                   "type": "object",
                   "properties": {
-                    "area": {"type": "string", "enum": ["core", "pipelines", "executions", "templates", "transforms", "datasources", "lake", "endpoints"], "description": "Return only this area's documents, flat."}
+                    "area": {"type": "string", "enum": ["core", "pipelines", "executions", "templates", "scripts", "datasources", "lake", "endpoints"], "description": "Return only this area's documents, flat."}
                   },
                   "additionalProperties": false
                 }
@@ -128,7 +128,7 @@ class DocsGetTool(
             name = "docs_get",
             description =
                 "One document of the served manual: `name` is `core` for the operating core, an area guide " +
-                    "name (pipelines-authoring, templates, transforms, lake, endpoints) or a reference name " +
+                    "name (pipelines-authoring, templates, scripts, lake, endpoints) or a reference name " +
                     "from docs_list. Optional `section`: a section id from docs_list, for the by-section read " +
                     "large documents require (they answer whole-document calls with their section list); a " +
                     "response carrying `next` continues at that id. Unknown names list the catalogued ones. " +

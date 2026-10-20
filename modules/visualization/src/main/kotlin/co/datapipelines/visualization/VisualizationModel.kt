@@ -36,14 +36,14 @@ data class VisualizationBody(
     val description: String? = null,
     @field:JsonProperty("renderer") @get:JsonProperty("renderer") @param:JsonProperty("renderer")
     val renderer: RendererSpec,
-    /** Named input contracts in declaration order (the transform contract's column vocabulary). */
+    /** Named input contracts in declaration order (the script contract's column vocabulary). */
     @field:JsonProperty("inputs") @get:JsonProperty("inputs") @param:JsonProperty("inputs")
     val inputs: Map<String, InputContract>,
     @field:JsonProperty("transform") @get:JsonProperty("transform") @param:JsonProperty("transform")
     val transform: TransformBinding? = null,
     @field:JsonProperty("config") @get:JsonProperty("config") @param:JsonProperty("config")
     val config: ObjectNode,
-    /** A JSON path into [config] → a column of the transform's OUTPUT (or of the single input). */
+    /** A JSON path into [config] → a column of the script's OUTPUT (or of the single input). */
     @field:JsonProperty("bindings") @get:JsonProperty("bindings") @param:JsonProperty("bindings")
     val bindings: Map<String, String> = emptyMap(),
     @field:JsonProperty("presentation") @get:JsonProperty("presentation") @param:JsonProperty("presentation")
@@ -89,7 +89,7 @@ data class InputContract(
     val columns: List<InputColumn>,
 )
 
-/** One column of an input contract — the transform contract's vocabulary (`TransformContractView.Column`). */
+/** One column of an input contract — the script contract's vocabulary (`ScriptContractView.Column`). */
 data class InputColumn(
     @field:JsonProperty("name") @get:JsonProperty("name") @param:JsonProperty("name")
     val name: String,
@@ -100,7 +100,7 @@ data class InputColumn(
 )
 
 /**
- * The owned transformer binding (D9, D33): the pinned template version and, per contract input name, the
+ * The owned transform binding (D9, D33): the pinned template version and, per contract input name, the
  * visualization input that feeds it. Absent, the renderer binds directly to the one input.
  */
 data class TransformBinding(
@@ -129,7 +129,7 @@ data class VisualizationTests(
 data class TestCase(
     @field:JsonProperty("name") @get:JsonProperty("name") @param:JsonProperty("name")
     val name: String,
-    /** Input name → rows in that input's column vocabulary (the `TransformTestInput.rows` shape). */
+    /** Input name → rows in that input's column vocabulary (the `ScriptTestInput.rows` shape). */
     @field:JsonProperty("fixtures") @get:JsonProperty("fixtures") @param:JsonProperty("fixtures")
     val fixtures: Map<String, List<ObjectNode>>,
     @field:JsonProperty("assertions") @get:JsonProperty("assertions") @param:JsonProperty("assertions")

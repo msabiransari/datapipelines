@@ -23,7 +23,7 @@ sealed interface TemplateTypeBehaviour {
     /** The type this behaviour answers for. */
     val type: TemplateType
 
-    /** The one legal `engine` value (transform-nodes design §2.1: freemarker iff sql/html, none iff a transform). */
+    /** The one legal `engine` value (transform-nodes design §2.1: freemarker iff sql/html, none iff a script). */
     val engine: String
 
     /** True only for `sql` — the one type that declares a dialect. */
@@ -40,13 +40,13 @@ sealed interface TemplateTypeBehaviour {
 
     /**
      * The `engine_unsupported` refusal for this type — per-type because the fix differs: a
-     * sql/html author picks the one engine v1 renders with; a transform author sets `none`.
+     * sql/html author picks the one engine v1 renders with; a script author sets `none`.
      */
     fun engineRefusal(draft: TemplateDraft): TemplateValidationFailure
 
     /**
      * The type's body checks, run after the shared length cap. The Freemarker types share the
-     * source scan / parse / AST scan / library-structure pipeline; a transform type compiles
+     * source scan / parse / AST scan / library-structure pipeline; a script type compiles
      * through the scripting engine (or, for `javascript`, refuses until round two).
      */
     fun validateBody(
@@ -100,7 +100,7 @@ sealed interface TemplateTypeBehaviour {
         override val scansHtmlEntities = false
         override val renders = false
 
-        override fun engineRefusal(draft: TemplateDraft) = transformEngineRefusal(draft)
+        override fun engineRefusal(draft: TemplateDraft) = scriptEngineRefusal(draft)
 
         override fun validateBody(
             draft: TemplateDraft,
@@ -121,7 +121,7 @@ sealed interface TemplateTypeBehaviour {
             } catch (err: ScriptResourceLimitException) {
                 // #314's compile-time nesting ceiling refuses the BODY before the library parses it: on the save and
                 // validate paths that is a validation failure like a syntax error (the 400 failure list every caller
-                // renders), never the transform family's catalogued 500 — the 307 merge's security pass.
+                // renders), never the script family's catalogued 500 — the 307 merge's security pass.
                 listOf(
                     TemplateValidationFailure(
                         code = PipelineErrorCodes.Template.SYNTAX_ERROR,
@@ -144,7 +144,7 @@ sealed interface TemplateTypeBehaviour {
         override val scansHtmlEntities = false
         override val renders = false
 
-        override fun engineRefusal(draft: TemplateDraft) = transformEngineRefusal(draft)
+        override fun engineRefusal(draft: TemplateDraft) = scriptEngineRefusal(draft)
 
         override fun validateBody(
             draft: TemplateDraft,
@@ -153,7 +153,7 @@ sealed interface TemplateTypeBehaviour {
         ): List<TemplateValidationFailure> =
             listOf(
                 TemplateValidationFailure(
-                    code = PipelineErrorCodes.Transform.JS_UNAVAILABLE,
+                    code = PipelineErrorCodes.Script.JS_UNAVAILABLE,
                     message =
                         "A 'javascript' template cannot be saved yet: the GraalJS isolate engine ships in " +
                             "round two (transform-nodes design §4.4). Only 'jsonata' saves today.",
@@ -186,12 +186,12 @@ sealed interface TemplateTypeBehaviour {
                     ),
             )
 
-        private fun transformEngineRefusal(draft: TemplateDraft) =
+        private fun scriptEngineRefusal(draft: TemplateDraft) =
             TemplateValidationFailure(
                 code = PipelineErrorCodes.Template.ENGINE_UNSUPPORTED,
                 message =
                     "Engine '${draft.engine.truncateForError()}' is not supported for type '${draft.type?.wire}'; " +
-                        "a transform template's engine is '${Template.NONE_ENGINE}' — the body is evaluated, " +
+                        "a script template's engine is '${Template.NONE_ENGINE}' — the body is evaluated, " +
                         "never rendered.",
                 details =
                     mapOf(

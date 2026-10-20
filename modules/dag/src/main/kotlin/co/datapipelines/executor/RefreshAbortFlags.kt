@@ -12,7 +12,7 @@ import java.util.UUID
  * premise 6) — [CancellationFlags]' shape, one level up.
  *
  * The executor's cancel flag (`dp:cancel:{execution_id}`) is per EXECUTION, so it reaches a running source but nothing
- * that belongs to the REFRESH itself: a pending transform, a source not yet started, the stream. The abort route lands
+ * that belongs to the REFRESH itself: a pending script, a source not yet started, the stream. The abort route lands
  * on an arbitrary instance while the refresh runs on another; it writes `dp:refresh-abort:{refresh_id}` here and
  * returns 202, and the OWNING instance's refresh coroutine reads it at every stage boundary and ends ABORTED with every
  * not-yet-started source skipped. Worst-case latency is one poll; the common same-instance abort never waits for one.

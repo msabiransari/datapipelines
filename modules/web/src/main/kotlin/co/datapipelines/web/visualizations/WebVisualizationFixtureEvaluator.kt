@@ -4,8 +4,8 @@ import co.datapipelines.application.templates.TemplateEvaluateService
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.TemplateDryRenderer
 import co.datapipelines.pipeline.TemplateRef
-import co.datapipelines.pipeline.TransformContractView
-import co.datapipelines.templates.TransformTestInput
+import co.datapipelines.pipeline.ScriptContractView
+import co.datapipelines.templates.ScriptTestInput
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.visualization.ArtifactRef
 import co.datapipelines.visualization.FixtureEvaluation
@@ -22,7 +22,7 @@ import java.util.UUID
  * path admits a DRAFT transform pin (the release cascade releases it later), and an explicitly selected draft
  * dashboard also admits it; published runtime requires RELEASED pins.
  *
- * Input shaping follows the contract: a `ROW`-mode transform receives the (single) table as `rows`; every
+ * Input shaping follows the contract: a `ROW`-mode script receives the (single) table as `rows`; every
  * other mode receives each table under `inputs[name]` (the shape authoring test cases use). The output
  * must be a TABLE — a list of row objects — because bindings name columns of it; anything else is refused
  * with the transformer's own shape code rather than bound blind.
@@ -37,10 +37,10 @@ class WebVisualizationFixtureEvaluator(
         fixtures: Map<String, List<ObjectNode>>,
     ): FixtureEvaluation =
         try {
-            val mode = contracts.transformContract(workspaceId, TemplateRef(pin.name, pin.version))?.mode
+            val mode = contracts.scriptContract(workspaceId, TemplateRef(pin.name, pin.version))?.mode
             val input =
-                if (mode == TransformContractView.Mode.ROW) {
-                    TransformTestInput(
+                if (mode == ScriptContractView.Mode.ROW) {
+                    ScriptTestInput(
                         rows =
                             fixtures.values
                                 .singleOrNull()
@@ -49,14 +49,14 @@ class WebVisualizationFixtureEvaluator(
                         inputs = emptyMap(),
                     )
                 } else {
-                    TransformTestInput(inputs = fixtures.mapValues { (_, rows) -> rows.map(::toRow) })
+                    ScriptTestInput(inputs = fixtures.mapValues { (_, rows) -> rows.map(::toRow) })
                 }
             val evaluation = evaluate.evaluate(workspaceId, pin.name, pin.version, input)
 
             @Suppress("UNCHECKED_CAST") // the type gate has already shaped the output; the cast only labels it
             val rows =
                 evaluation.output as? List<Map<String, Any?>>
-                    ?: return FixtureEvaluation.Refused(OUTPUT_SHAPE_REFUSED, "The transform's output is not a table of rows.")
+                    ?: return FixtureEvaluation.Refused(OUTPUT_SHAPE_REFUSED, "The script's output is not a table of rows.")
             FixtureEvaluation.Rows(rows)
         } catch (e: DatapipelinesException) {
             FixtureEvaluation.Refused(e.code, e.message ?: "The fixture run refused.")
@@ -74,6 +74,6 @@ class WebVisualizationFixtureEvaluator(
                 .ObjectMapper()
 
         /** The shape refusal the runtime transformer uses for a non-table output — the same verdict here. */
-        val OUTPUT_SHAPE_REFUSED = PipelineErrorCodes.Transform.ROW_SHAPE_MISMATCH
+        val OUTPUT_SHAPE_REFUSED = PipelineErrorCodes.Script.ROW_SHAPE_MISMATCH
     }
 }

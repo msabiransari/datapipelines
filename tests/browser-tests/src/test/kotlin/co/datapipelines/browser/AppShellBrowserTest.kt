@@ -310,7 +310,7 @@ class AppShellBrowserTest : BrowserSuite() {
      * Then the track on its own terms ([widenedBarOffenders]): it must hold against a bar wider
      * than the window, so the guard outlives the MCP-key chip that makes today's bar too wide.
      * The dashboard, the sql template editor and the pipeline editor are photographed light and
-     * dark at each width; the transform editor is TransformFaceBrowserTest's, which asserts the
+     * dark at each width; the script editor is ScriptFaceBrowserTest's, which asserts the
      * same edge.
      */
     @Test

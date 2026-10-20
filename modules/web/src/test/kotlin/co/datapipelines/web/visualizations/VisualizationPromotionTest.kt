@@ -245,7 +245,7 @@ class VisualizationPromotionTest {
         const val DASH_NAME = "finance/dashboards/revenue_overview"
 
         /** The judge's port seeds — the §3.1 worked transform pin and the dashboard's pinned set. */
-        val TRANSFORM_REF = co.datapipelines.visualization.ArtifactRef("finance/transforms/revenue_bars", 2)
+        val TRANSFORM_REF = co.datapipelines.visualization.ArtifactRef("finance/scripts/revenue_bars", 2)
         val SET_REF = co.datapipelines.visualization.ArtifactRef("finance/parameters/reporting_period", 1)
 
         /** The implementation spec's §3.1 worked document — the reader binds it unchanged. */
@@ -255,7 +255,7 @@ class VisualizationPromotionTest {
              "renderer": {"kind": "plotly", "version": "4"},
              "inputs": {"revenue": {"columns": [{"name": "month", "type": "DATE", "nullable": false},
                                                 {"name": "amount", "type": "DECIMAL", "nullable": false}]}},
-             "transform": {"template": {"name": "finance/transforms/revenue_bars", "version": 2}, "inputs": {"rows": "revenue"}},
+             "transform": {"template": {"name": "finance/scripts/revenue_bars", "version": 2}, "inputs": {"rows": "revenue"}},
              "config": {"data": [{"type": "bar", "x": "${'$'}.x", "y": "${'$'}.y"}], "layout": {"title": {"text": "Revenue"}}},
              "bindings": {"data[0].x": "month_labels", "data[0].y": "amounts"},
              "presentation": {"title": "Monthly revenue", "tokens": {"series": "categorical"}},

@@ -41,7 +41,7 @@ import java.util.UUID
  * number or status through this answer).
  *
  * ## The third arm (#320)
- * A VISUALIZATION pins a transform template by name and version (`transform.template`), so the
+ * A VISUALIZATION pins a script template by name and version (`script.template`), so the
  * same two questions are asked of `visualization_versions` through [ArtifactDependents], under
  * `view.visualizations`. The guards' evidence has its OWN two methods, both unlensed — a guard
  * runs over the whole workspace and the caller's view decides only what its refusal may echo:

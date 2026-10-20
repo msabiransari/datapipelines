@@ -64,7 +64,7 @@ object McpToolCatalog {
             // agent's edit verb: parse-only validation, then TemplateDraftService.write.
             Entry("templates_update", mutating = true, permission = Permission.TEMPLATE_UPDATE),
             Entry("templates_render", mutating = false, permission = Permission.TEMPLATE_RENDER),
-            // 7b — the transform evaluator (sql_probe's twin): reads one version and evaluates
+            // 7b — the script evaluator (sql_probe's twin): reads one version and evaluates
             // over a caller-supplied input; nothing is staged and nothing is stored.
             Entry("templates_evaluate", mutating = false, permission = Permission.TEMPLATE_EVALUATE),
             // 107 — the bounded D61/D62 self-service verb: hard-deletes a never-released,

@@ -174,7 +174,7 @@ class VisualizationsGetTool(
         McpTools.tool(
             name = "visualizations_get",
             description =
-                "Read one visualization by ID: the WORKING version's full document (renderer, inputs, transform, " +
+                "Read one visualization by ID: the WORKING version's full document (renderer, inputs, script, " +
                     "config, bindings, presentation, tests) and its lifecycle state — version and status name the " +
                     "returned row (the DRAFT when one exists, else the current release), current_version the latest " +
                     "release, body_hash what an update's expected_hash carries — plus used_by, the dashboards that pin " +
@@ -210,7 +210,7 @@ class VisualizationsCreateTool(
             description =
                 "Create a visualization: version 1 lands as a DRAFT (a human releases it; no tool releases anything). " +
                     "The document is validated in FULL at save — the renderer's configuration schema, every binding " +
-                    "path (it must already exist in config) and column, the transform pin's contract against the " +
+                    "path (it must already exist in config) and column, the script pin's contract against the " +
                     "inputs, the test cases — and a refusal names every failing path. A NEW top-level folder is refused " +
                     "until you confirm it: reuse an existing root, or ask the person first and then pass " +
                     "confirm_new_root: true. Returns the id the other tools take and the body_hash an update needs.",
@@ -308,9 +308,9 @@ private const val VISUALIZATION_DOCUMENT_PROPERTIES =
     "description": {"type": "string", "description": "Optional; 2000 characters max."},
     "renderer": {"type": "object", "description": "{kind, version}: kind is plotly, table or kpi (html and svg are reserved and refused); version is the renderer major the host must provide, as a string (\"4\")."},
     "inputs": {"type": "object", "description": "Named input contracts: {<input>: {columns: [{name, type, nullable}]}}; type is a LogicalType (STRING, INTEGER, DECIMAL, DATE, TIMESTAMP, BOOLEAN, ...). At most 8 inputs, 256 columns each."},
-    "transform": {"type": "object", "description": "Optional: {template: {name, version}, inputs: {<contract input>: <visualization input>}} — a pinned TRANSFORM template whose declared input columns equal the named inputs' columns. Absent: the renderer binds one input directly."},
+    "script": {"type": "object", "description": "Optional: {template: {name, version}, inputs: {<contract input>: <visualization input>}} — a pinned SCRIPT template whose declared input columns equal the named inputs' columns. Absent: the renderer binds one input directly."},
     "config": {"type": "object", "description": "The renderer's native configuration, stored verbatim and validated against its schema (plotly: a non-empty data array of supported traces). At most 262,144 bytes."},
-    "bindings": {"type": "object", "description": "Optional: {<path into config, e.g. data[0].y>: <column of the transform's output, or of the single input>}. Each path must already exist in config; its value is replaced by the column's values at render."},
+    "bindings": {"type": "object", "description": "Optional: {<path into config, e.g. data[0].y>: <column of the script's output, or of the single input>}. Each path must already exist in config; its value is replaced by the column's values at render."},
     "presentation": {"type": "object", "description": "Optional: {title, tokens} — tokens name theme tokens, never colours."},
     "tests": {"type": "object", "description": "{cases: [{name, fixtures: {<input>: [rows]}, assertions: [{kind}]}]}; kind is rendered, trace_count (with equals), no_console_errors, text_visible (with text), no_data or value_visible (with text). A release needs at least one case."}
     """

@@ -13,7 +13,7 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import java.util.UUID
 
 /**
- * 7b §A.3(3) — the transfer round trip of a transform template: exported from one workspace,
+ * 7b §A.3(3) — the transfer round trip of a script template: exported from one workspace,
  * imported into a scratch workspace, the three blocks survive the wire and the import hash
  * guard passes.
  *
@@ -55,22 +55,22 @@ class TemplateTransferRoundTripIntegrationTest {
     }
 
     private val contract =
-        TransformContract(
-            mode = TransformMode.ROW,
+        ScriptContract(
+            mode = ScriptMode.ROW,
             inputs =
                 mapOf(
-                    "orders" to TransformInput.Table(listOf(ContractColumn("order_id", LogicalType.INTEGER))),
-                    "tz" to TransformInput.Value(LogicalType.STRING),
+                    "orders" to ScriptInput.Table(listOf(ContractColumn("order_id", LogicalType.INTEGER))),
+                    "tz" to ScriptInput.Value(LogicalType.STRING),
                 ),
-            output = TransformOutput.Table(listOf(ContractColumn("order_id", LogicalType.INTEGER))),
+            output = ScriptOutput.Table(listOf(ContractColumn("order_id", LogicalType.INTEGER))),
         )
 
     private val cases =
         listOf(
-            TransformTestCase(
+            ScriptTestCase(
                 name = "empty",
-                input = TransformTestInput(rows = emptyList(), inputs = mapOf("tz" to "UTC")),
-                expect = TransformTestExpect(output = TransformBlocks.mapper.readTree("""{"rows": []}""")),
+                input = ScriptTestInput(rows = emptyList(), inputs = mapOf("tz" to "UTC")),
+                expect = ScriptTestExpect(output = ScriptBlocks.mapper.readTree("""{"rows": []}""")),
             ),
         )
 
@@ -122,9 +122,9 @@ class TemplateTransferRoundTripIntegrationTest {
                 isLibrary = imported.isLibrary,
                 importsJson = TemplateJson.writeImports(imported.imports),
                 body = imported.body,
-                contractJson = TransformBlocks.writeContract(imported.contract),
-                invariantsJson = TransformBlocks.writeInvariants(imported.invariants),
-                testsJson = TransformBlocks.writeTests(imported.tests),
+                contractJson = ScriptBlocks.writeContract(imported.contract),
+                invariantsJson = ScriptBlocks.writeInvariants(imported.invariants),
+                testsJson = ScriptBlocks.writeTests(imported.tests),
             )
         recomputed shouldBe exported.bodyHash
 

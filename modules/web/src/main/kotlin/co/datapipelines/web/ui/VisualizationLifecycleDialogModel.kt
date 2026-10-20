@@ -21,7 +21,7 @@ import java.util.UUID
  * the 094 §B discipline: the question is answered BEFORE the button exists, a refused branch carries no button, and
  * every fact is the SAME read the service's own guard makes, so the dialog and the POST cannot disagree:
  *
- * - Release: at least one test case (the service's first check), the transform pin's status through
+ * - Release: at least one test case (the service's first check), the script pin's status through
  *   [TemplateVersionStatuses] (the cascade's own read — RELEASED passes, DRAFT is the ONE consent's row,
  *   MISSING/DISCARDED refuse), then the [ReleaseEvidence] verdict for exactly this draft (the gate the release runs in
  *   its transaction: latest run for this hash, GREEN, the mechanical check passing now).
@@ -46,7 +46,7 @@ class VisualizationLifecycleDialogModel(
         val message: String,
     )
 
-    /** The transform pin as the release gate reads it. */
+    /** The script pin as the release gate reads it. */
     data class PinView(
         val name: String,
         val version: Int,
@@ -131,7 +131,7 @@ class VisualizationLifecycleDialogModel(
     }
 
     /**
-     * The release refusals in the service's order: no test cases, then a blocking transform pin, then — only when
+     * The release refusals in the service's order: no test cases, then a blocking script pin, then — only when
      * there are cases — the evidence gate's own verdict (the same port the POST consults).
      */
     private fun releaseRefusals(

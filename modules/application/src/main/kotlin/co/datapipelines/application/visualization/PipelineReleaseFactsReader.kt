@@ -8,7 +8,7 @@ import co.datapipelines.pipeline.PipelineJson
 import co.datapipelines.pipeline.PipelineResolver
 import co.datapipelines.pipeline.ResolvedPipeline
 import co.datapipelines.pipeline.TemplateRef
-import co.datapipelines.pipeline.TransformContractView
+import co.datapipelines.pipeline.ScriptContractView
 import co.datapipelines.typesystem.LogicalType
 import co.datapipelines.visualization.ArtifactRef
 import co.datapipelines.visualization.OutputColumn
@@ -26,7 +26,7 @@ import java.util.UUID
  * - **readOnly** — [ReadOnlyPipelineRule], the published-endpoint rule, transitively through child pipelines: a
  *   dashboard refresh re-runs its sources on every view, exactly as a `GET` does, so the same rule decides.
  * - **parameters** — the release's declared parameters; one a caller MUST supply is `required` with no default.
- * - **outputColumns** — the caller node's columns, in #328's precedence (§3.3.1): a TRANSFORM caller's pinned
+ * - **outputColumns** — the caller node's columns, in #328's precedence (§3.3.1): a SCRIPT caller's pinned
  *   contract names them (DECLARED — the record, when one exists, never overrides the contract); a release with no
  * caller node returns EMPTY (it returns no rows); any other caller node — a SQL node — answers the version's
  *   RECORDED columns (`caller_output_json`, the D1 record its release copied from the version's latest run),
@@ -38,8 +38,8 @@ import java.util.UUID
 class PipelineReleaseFactsReader(
     private val pipelines: PipelineResolver,
     private val readOnly: ReadOnlyPipelineRule,
-    /** A transform template version's contract — `TemplateDryRenderer.transformContract` in production. */
-    private val contracts: (UUID, TemplateRef) -> TransformContractView?,
+    /** A script template version's contract — `TemplateDryRenderer.scriptContract` in production. */
+    private val contracts: (UUID, TemplateRef) -> ScriptContractView?,
 ) : PipelineReleaseFacts {
     override fun releaseOf(
         workspaceId: UUID,
@@ -60,7 +60,7 @@ class PipelineReleaseFactsReader(
 
     /**
      * The caller node's columns, in #328's precedence: EMPTY with no caller node; the contract's table
-     * columns for a TRANSFORM caller; otherwise the version's RECORDED columns, null when none — never a
+     * columns for a SCRIPT caller; otherwise the version's RECORDED columns, null when none — never a
      * guess, and never the record over a declared contract.
      */
     private fun callerColumns(
@@ -69,10 +69,10 @@ class PipelineReleaseFactsReader(
         pipeline: Pipeline,
     ): List<OutputColumn>? {
         val caller = CallerNodeResolver.resolve(pipeline) ?: return emptyList()
-        if (caller.type == NodeType.TRANSFORM) {
+        if (caller.type == NodeType.SCRIPT) {
             return when (val output = contracts(workspaceId, caller.template)?.output) {
-                is TransformContractView.Output.Table -> output.columns.map { OutputColumn(it.name, it.type, it.nullable) }
-                is TransformContractView.Output.Value, TransformContractView.Output.Obj, null -> null
+                is ScriptContractView.Output.Table -> output.columns.map { OutputColumn(it.name, it.type, it.nullable) }
+                is ScriptContractView.Output.Value, ScriptContractView.Output.Obj, null -> null
             }
         }
         return recordedColumns(resolved.callerOutputJson)

@@ -57,16 +57,31 @@ class ConfigValidator(
          * name. 24 since 137 added the two mail rules (`MailRules`). 25 since 156 added
          * `checkExecutorQueryTimeoutByDialect` (#2). 26 since 188 added
          * `PostureRules.checkHardenedRedisPassword` (#189). 27 since 7b added
-         * `checkTransformBounds` (#7 — evaluate ≤ suite, abandon-grace ≥ 1). 29 since 224 added
+         * `checkScriptBounds` (#7 — evaluate ≤ suite, abandon-grace ≥ 1). 29 since 224 added
          * `checkDemoApiKey` and `checkEndpointKeyBudget`. 30 since #194 lane B added
          * `ParametersRules.checkParametersBounds` (§3.30). 31 since #279 added
          * `checkRequestLimits` (§3.31). 32 since #10 L1a added
          * `VisualizationRules.checkVisualizationBounds` (§3.33). 33 since #10 L2 added
          * `DashboardRuntimeRules.checkDashboardRuntimeBounds` (§3.34). 34 since #488 added
          * `RedisRules.checkRedisTimeoutBounds` (§3.1). 35 since #598b added
-         * `UiRules.checkUiActivelyDevelopedDays` (§3.10).
+         * `UiRules.checkUiActivelyDevelopedDays` (§3.10). 36 since the script-node rename added
+         * `checkRemovedTransformKeys` (§3.28 — the removed `datapipelines.transform.*` keys).
          */
-        internal const val CHECK_COUNT = 35
+        internal const val CHECK_COUNT = 36
+
+        /** The nine `datapipelines.transform.*` keys the rename removed (configuration.md §3.28). */
+        internal val REMOVED_TRANSFORM_KEY_SUFFIXES =
+            listOf(
+                "evaluate-timeout-seconds",
+                "suite-timeout-seconds",
+                "pool-size",
+                "pool-queue",
+                "abandon-grace-seconds",
+                "max-input-rows",
+                "max-value-bytes",
+                "max-string-bytes",
+                "max-depth",
+            )
 
         /**
          * `users.provider` values the system writes itself (`UserService.BOOTSTRAP_PROVIDER`,
@@ -127,6 +142,7 @@ class ConfigValidator(
             PostureRules.checkHardenedPosture(snapshot, violations, warnings)
             PostureRules.checkHardenedRedisPassword(snapshot, violations)
             checkRemovedWorkspaceKeys(snapshot, violations)
+            checkRemovedTransformKeys(snapshot, violations)
             checkBootstrapActorConfigured(snapshot, violations)
             checkReservedProviderNames(snapshot, violations)
             checkPromotionTarget(snapshot, violations)
@@ -139,10 +155,10 @@ class ConfigValidator(
             // §3.1 (#488) — the Redis client bounds, their own file like the request limits.
             RedisRules.checkRedisTimeoutBounds(snapshot, violations)
             checkOrgSettings(snapshot, violations)
-            TransformRules.checkTransformBounds(snapshot, violations)
-            // §3.30 (#194) — the parameter engine's limits, in their own file like the transform bounds.
+            ScriptRules.checkScriptBounds(snapshot, violations)
+            // §3.30 (#194) — the parameter engine's limits, in their own file like the script bounds.
             ParametersRules.checkParametersBounds(snapshot, violations)
-            // §3.31 (#279) — the platform's request-body cap, its own file like the transform bounds.
+            // §3.31 (#279) — the platform's request-body cap, its own file like the script bounds.
             RequestLimitsRules.checkRequestBounds(snapshot, violations)
             // §3.33 (#10) — the dashboard documents' collection bounds, their own file like the parameters' limits.
             VisualizationRules.checkVisualizationBounds(snapshot, violations)
@@ -481,6 +497,28 @@ class ConfigValidator(
                     "there is no self-service join — a super admin adds members, with their roles. " +
                     "Remove the key."
             }
+        }
+
+        /**
+         * §7 / §3.28 — the keys the TRANSFORM→SCRIPT node-type rename REMOVED, refused BY NAME
+         * (script-node-rename lane, owner ruling 2026-10-20).
+         *
+         * The script knobs moved from `datapipelines.transform.*` to `datapipelines.script.*`
+         * with no alias: the properties class binds the new tree, so a stale `transform` key
+         * would bind NOTHING and the deployment would silently run on defaults — the exact
+         * failure mode `checkRemovedWorkspaceKeys` refuses to allow. Any of the nine keys set
+         * at all is refused, naming the old key and the replacement.
+         */
+        private fun checkRemovedTransformKeys(
+            snapshot: ConfigSnapshot,
+            violations: MutableList<String>,
+        ) {
+            if (!snapshot.transformLegacyKeysSet) return
+            violations +=
+                "datapipelines.transform.* is set but was REMOVED by the TRANSFORM→SCRIPT node-type " +
+                "rename (§3.28): the script knobs now live under datapipelines.script.* and there is " +
+                "no alias — a datapipelines.transform.* key binds nothing. Rename the key(s): " +
+                REMOVED_TRANSFORM_KEY_SUFFIXES.joinToString(", ") { "datapipelines.transform.$it" } + "."
         }
 
         // §7 / §3.18 — the "an examples file nothing will read" check went with the
@@ -851,6 +889,12 @@ class ConfigValidator(
                 // being set at all, and `open-join: false` is still a deployment that believes
                 // in a knob that no longer exists.
                 workspacesOpenJoinSet = environment.getProperty("datapipelines.workspaces.open-join") != null,
+                // The rename's removed keys: any of the nine `datapipelines.transform.*` keys
+                // set at all is refused by name (the property class now binds
+                // `datapipelines.script.*`, so without this check a stale key would bind
+                // nothing and the deployment would run on defaults silently).
+                transformLegacyKeysSet =
+                    REMOVED_TRANSFORM_KEY_SUFFIXES.any { environment.getProperty("datapipelines.transform.$it") != null },
                 bootstrapDatasourcesFile = environment.getProperty("datapipelines.bootstrap.datasources-file"),
                 bootstrapExamplesFile = environment.getProperty("datapipelines.bootstrap.examples-file"),
                 bootstrapDemoApiKey = environment.getProperty("datapipelines.bootstrap.demo-api-key"),
@@ -884,32 +928,32 @@ class ConfigValidator(
                 orgFiscalStartDate = environment.getProperty("datapipelines.org.fiscal-start-date"),
                 orgWeekStart = environment.getProperty("datapipelines.org.week-start"),
                 orgTimezone = environment.getProperty("datapipelines.org.timezone"),
-                // §3.28 (7b, #7) — the transform budgets.
-                transformEvaluateTimeoutSeconds =
+                // §3.28 (7b, #7) — the script budgets.
+                scriptEvaluateTimeoutSeconds =
                     environment.getProperty(
-                        "datapipelines.transform.evaluate-timeout-seconds",
+                        "datapipelines.script.evaluate-timeout-seconds",
                         Long::class.java,
                     ),
-                transformSuiteTimeoutSeconds =
+                scriptSuiteTimeoutSeconds =
                     environment.getProperty(
-                        "datapipelines.transform.suite-timeout-seconds",
+                        "datapipelines.script.suite-timeout-seconds",
                         Long::class.java,
                     ),
-                transformAbandonGraceSeconds =
+                scriptAbandonGraceSeconds =
                     environment.getProperty(
-                        "datapipelines.transform.abandon-grace-seconds",
+                        "datapipelines.script.abandon-grace-seconds",
                         Long::class.java,
                     ),
-                transformPoolSize = environment.getProperty("datapipelines.transform.pool-size", Long::class.java),
-                transformPoolQueue = environment.getProperty("datapipelines.transform.pool-queue", Long::class.java),
-                transformMaxInputRows = environment.getProperty("datapipelines.transform.max-input-rows", Long::class.java),
-                transformMaxValueBytes = environment.getProperty("datapipelines.transform.max-value-bytes", Long::class.java),
-                transformMaxStringBytes =
+                scriptPoolSize = environment.getProperty("datapipelines.script.pool-size", Long::class.java),
+                scriptPoolQueue = environment.getProperty("datapipelines.script.pool-queue", Long::class.java),
+                scriptMaxInputRows = environment.getProperty("datapipelines.script.max-input-rows", Long::class.java),
+                scriptMaxValueBytes = environment.getProperty("datapipelines.script.max-value-bytes", Long::class.java),
+                scriptMaxStringBytes =
                     environment.getProperty(
-                        "datapipelines.transform.max-string-bytes",
+                        "datapipelines.script.max-string-bytes",
                         Long::class.java,
                     ),
-                transformMaxDepth = environment.getProperty("datapipelines.transform.max-depth", Long::class.java),
+                scriptMaxDepth = environment.getProperty("datapipelines.script.max-depth", Long::class.java),
                 // §3.30 (#194) — the parameter engine's limits, raw strings (a malformed value is a named violation).
                 parameters = ParametersRules.KEYS.associateWith { environment.getProperty(it) },
                 // §3.33 (#10) — the dashboard documents' bounds, raw strings (a malformed value is a named violation).
@@ -1101,6 +1145,13 @@ internal data class ConfigSnapshot(
     val workspacesProvisioningMode: String?,
     /** §3.17 — read here only for the open-join/closed cross-key rule; auth owns its semantics. */
     val workspacesOpenJoinSet: Boolean = false,
+    /**
+     * The TRANSFORM→SCRIPT node-type rename (script-node-rename lane, owner ruling
+     * 2026-10-20): whether any removed `datapipelines.transform.*` key is set at all.
+     * Presence, not value — like `workspacesOpenJoinSet`, a deployment that believes in a
+     * knob that no longer exists is refused even when the value would have been harmless.
+     */
+    val transformLegacyKeysSet: Boolean = false,
     /** §3.18 — unset (or blank) = bootstrap datasource registration is off. */
     val bootstrapDatasourcesFile: String?,
     /** §3.18 — unset (or blank) = example seeding is off. Carried so the §7 log reports it. */
@@ -1144,16 +1195,16 @@ internal data class ConfigSnapshot(
     val orgFiscalStartDate: String? = null,
     val orgWeekStart: String? = null,
     val orgTimezone: String? = null,
-    // §3.28 (7b, #7) — the transform budgets the bounds check reads.
-    val transformEvaluateTimeoutSeconds: Long? = null,
-    val transformSuiteTimeoutSeconds: Long? = null,
-    val transformAbandonGraceSeconds: Long? = null,
-    val transformPoolSize: Long? = null,
-    val transformPoolQueue: Long? = null,
-    val transformMaxInputRows: Long? = null,
-    val transformMaxValueBytes: Long? = null,
-    val transformMaxStringBytes: Long? = null,
-    val transformMaxDepth: Long? = null,
+    // §3.28 (7b, #7) — the script budgets the bounds check reads.
+    val scriptEvaluateTimeoutSeconds: Long? = null,
+    val scriptSuiteTimeoutSeconds: Long? = null,
+    val scriptAbandonGraceSeconds: Long? = null,
+    val scriptPoolSize: Long? = null,
+    val scriptPoolQueue: Long? = null,
+    val scriptMaxInputRows: Long? = null,
+    val scriptMaxValueBytes: Long? = null,
+    val scriptMaxStringBytes: Long? = null,
+    val scriptMaxDepth: Long? = null,
     /** §3.30 (#194) — every `datapipelines.parameters.*` key as its raw string (`ParametersRules.KEYS`). */
     val parameters: Map<String, String?> = emptyMap(),
     /** §3.33 (#10) — every `datapipelines.visualization.*` key as its raw string (`VisualizationRules.KEYS`). */
@@ -1200,6 +1251,7 @@ internal data class ConfigSnapshot(
             "resultTtlMaxSeconds=$resultTtlMaxSeconds, " +
             "workspacesProvisioningMode=$workspacesProvisioningMode, " +
             "workspacesOpenJoinSet=$workspacesOpenJoinSet, " +
+            "transformLegacyKeysSet=$transformLegacyKeysSet, " +
             "bootstrapDatasourcesFile=$bootstrapDatasourcesFile, " +
             "bootstrapExamplesFile=$bootstrapExamplesFile, " +
             "bootstrapAdminEmail=$bootstrapAdminEmail, " +
@@ -1218,15 +1270,15 @@ internal data class ConfigSnapshot(
             "orgCurrencySymbol=$orgCurrencySymbol, " +
             "orgFiscalStartDate=$orgFiscalStartDate, " +
             "orgWeekStart=$orgWeekStart, " +
-            "transformEvaluateTimeoutSeconds=$transformEvaluateTimeoutSeconds, " +
-            "transformSuiteTimeoutSeconds=$transformSuiteTimeoutSeconds, " +
-            "transformAbandonGraceSeconds=$transformAbandonGraceSeconds, " +
-            "transformPoolSize=$transformPoolSize, " +
-            "transformPoolQueue=$transformPoolQueue, " +
-            "transformMaxInputRows=$transformMaxInputRows, " +
-            "transformMaxValueBytes=$transformMaxValueBytes, " +
-            "transformMaxStringBytes=$transformMaxStringBytes, " +
-            "transformMaxDepth=$transformMaxDepth, " +
+            "scriptEvaluateTimeoutSeconds=$scriptEvaluateTimeoutSeconds, " +
+            "scriptSuiteTimeoutSeconds=$scriptSuiteTimeoutSeconds, " +
+            "scriptAbandonGraceSeconds=$scriptAbandonGraceSeconds, " +
+            "scriptPoolSize=$scriptPoolSize, " +
+            "scriptPoolQueue=$scriptPoolQueue, " +
+            "scriptMaxInputRows=$scriptMaxInputRows, " +
+            "scriptMaxValueBytes=$scriptMaxValueBytes, " +
+            "scriptMaxStringBytes=$scriptMaxStringBytes, " +
+            "scriptMaxDepth=$scriptMaxDepth, " +
             "parameters=$parameters, " +
             "webMaxRequestBytes=$webMaxRequestBytes, " +
             "orgTimezone=$orgTimezone, " +

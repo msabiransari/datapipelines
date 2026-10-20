@@ -27,7 +27,7 @@ import java.util.UUID
  *  - `implements` stated → exactly that list (`[]` clears);
  *  - absent (null) → INHERITED (owner ruling 2026-09-25): an in-place draft write and a
  *    no-op keep their own; a write that OPENED a new draft copies the released version's
- *    forward, so an edit that did not mention them — the transform face's Save draft never
+ *    forward, so an edit that did not mention them — the script face's Save draft never
  *    does — cannot silently drop the semantic link.
  * The ids were validated by [TemplateValidator] before the call (every surface validates
  * first). Deliberately not one transaction with the content write: the draft write recovers
@@ -116,7 +116,7 @@ class TemplateDraftService(
         // A NEW draft (not the §5.1 no-op, which answers RELEASED) inherits from the released
         // version its hash was checked against — `current_version` by the guard's own predicate.
         val base =
-            if (written.status == PipelineVersionStatus.DRAFT && latest.type.isTransform) {
+            if (written.status == PipelineVersionStatus.DRAFT && latest.type.isScript) {
                 templates.findLatest(workspaceId, id)?.version
             } else {
                 null

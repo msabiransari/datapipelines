@@ -5,11 +5,11 @@ import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.templates.ContractColumn
 import co.datapipelines.templates.Template
 import co.datapipelines.templates.TemplateRepository
-import co.datapipelines.templates.TransformContract
-import co.datapipelines.templates.TransformInput
-import co.datapipelines.templates.TransformMode
-import co.datapipelines.templates.TransformOutput
-import co.datapipelines.templates.TransformTestRunner
+import co.datapipelines.templates.ScriptContract
+import co.datapipelines.templates.ScriptInput
+import co.datapipelines.templates.ScriptMode
+import co.datapipelines.templates.ScriptOutput
+import co.datapipelines.templates.ScriptTestRunner
 import co.datapipelines.typesystem.LogicalType
 import io.kotest.assertions.assertSoftly
 import io.kotest.matchers.shouldBe
@@ -58,9 +58,9 @@ class TemplatesEvaluateToolTest {
         inputs.forEachIndexed { index, input ->
             val wrapper =
                 io.kotest.assertions.throwables.shouldThrow<IllegalArgumentException> {
-                    co.datapipelines.templates.TransformBlocks.mapper.convertValue(
+                    co.datapipelines.templates.ScriptBlocks.mapper.convertValue(
                         input,
-                        co.datapipelines.templates.TransformTestInput::class.java,
+                        co.datapipelines.templates.ScriptTestInput::class.java,
                     )
                 }
             println("381 mapper wrapper=${wrapper.javaClass.name} cause=${wrapper.cause?.javaClass?.name}")
@@ -102,7 +102,7 @@ class TemplatesEvaluateToolTest {
     @Test
     fun `optional input members stay absent and unrelated service faults stay internal errors`() {
         val service = mockk<TemplateEvaluateService>()
-        val input = co.datapipelines.templates.TransformTestInput(rows = emptyList())
+        val input = co.datapipelines.templates.ScriptTestInput(rows = emptyList())
         every { service.evaluate(any(), any(), any(), input, null) } returns
             TemplateEvaluateService.Evaluation(output = emptyMap<String, Any>(), rejects = emptyList(), invariants = emptyList())
         val sink = EvaluateRecordingAuditSink()
@@ -130,16 +130,16 @@ class TemplatesEvaluateToolTest {
 
     private val templates = mockk<TemplateRepository>()
     private val contract =
-        TransformContract(
-            mode = TransformMode.ROW,
+        ScriptContract(
+            mode = ScriptMode.ROW,
             inputs =
                 mapOf(
-                    "orders" to TransformInput.Table(listOf(ContractColumn("order_id", LogicalType.INTEGER))),
+                    "orders" to ScriptInput.Table(listOf(ContractColumn("order_id", LogicalType.INTEGER))),
                 ),
-            output = TransformOutput.Table(listOf(ContractColumn("order_id", LogicalType.INTEGER))),
+            output = ScriptOutput.Table(listOf(ContractColumn("order_id", LogicalType.INTEGER))),
         )
 
-    private val transformTemplate =
+    private val scriptTemplate =
         Template(
             id = "test/xform.jsonata",
             version = 1,
@@ -169,7 +169,7 @@ class TemplatesEvaluateToolTest {
 
     @Test
     fun `the tool through the real dispatcher evaluates and audits tool, template, version, outcome`() {
-        every { templates.findWorking(any(), "test/xform.jsonata") } returns transformTemplate
+        every { templates.findWorking(any(), "test/xform.jsonata") } returns scriptTemplate
         val sink = EvaluateRecordingAuditSink()
         val dispatcher = McpToolDispatcher(listOf(tool()), sink)
         val ctx = McpFixtures.ctx()
@@ -207,8 +207,8 @@ class TemplatesEvaluateToolTest {
     }
 
     @Test
-    fun `templates_render on a transform type is render_not_applicable pointing at evaluate`() {
-        every { templates.findWorking(any(), "test/xform.jsonata") } returns transformTemplate
+    fun `templates_render on a script type is render_not_applicable pointing at evaluate`() {
+        every { templates.findWorking(any(), "test/xform.jsonata") } returns scriptTemplate
         every { templates.lookupVersion(any(), "test/xform.jsonata", 1) } returns
             mockk<co.datapipelines.templates.TemplateVersion> {
                 every { type } returns TemplateType.JSONATA

@@ -15,7 +15,7 @@
    * db/table/boxes/workflow are the sprite's 059 LEGACY ids (db = lucide's database);
    * 085 §B gave CALCULATOR its honest glyph — the sprite's `calculator`, added when
    * the icon set was unfenced — retiring the `file` stand-in this comment used to
-   * apologise for. 7d (#7): TRANSFORM takes the sprite's `code` — a transform is a function
+   * apologise for. 7d (#7): SCRIPT takes the sprite's `code` — a script is a function
    * over staged data, and `code` is the glyph the rail already uses for templates, which is
    * what the node pins. */
   var TYPE_ICONS = {
@@ -24,7 +24,7 @@
     DDL: "boxes",
     PIPELINE: "workflow",
     CALCULATOR: "calculator",
-    TRANSFORM: "code",
+    SCRIPT: "code",
   };
 
   /* 150 — the execution boundaries (issue #126): view-only Start and End markers,
@@ -109,7 +109,7 @@
     DDL: "ddl",
     PIPELINE: "pipeline",
     CALCULATOR: "calc",
-    TRANSFORM: "transform",
+    SCRIPT: "script",
   };
 
   /* 105 §B — the arrowhead's size. Cytoscape's triangle scales linearly with
@@ -129,8 +129,8 @@
    * router (applyEdgeCurves) and minimap read the same number through node.width(). */
   var BOUNDARY_W = 72;
 
-  /* 7d: distinct TRANSFORM pins resolved per editor load — a bound, not a budget anyone
-   * should meet (each is one small GET); past it the remaining cards stay `transform ·`. */
+  /* 7d: distinct SCRIPT pins resolved per editor load — a bound, not a budget anyone
+   * should meet (each is one small GET); past it the remaining cards stay `script ·`. */
   var MAX_PIN_LOOKUPS = 50;
 
   function iconForType(type) {
@@ -527,11 +527,11 @@
   }
 
   /**
-   * 7d (#7) — what a TRANSFORM writes, as its fact line and the Details pane say it: a tempdb
+   * 7d (#7) — what a SCRIPT writes, as its fact line and the Details pane say it: a tempdb
    * table (`tempdb.order_lines`), the caller (`caller`), or — value mode — a Context key in
    * the `$key` form its own `inputs` use to read one.
    */
-  function transformOutputText(n) {
+  function scriptOutputText(n) {
     var o = n.output;
     if (o && o.target === "tempdb") return "tempdb." + (o.table || "—");
     if (o && o.target === "caller") return "caller";
@@ -540,16 +540,16 @@
   }
 
   /**
-   * 7d (#7) — a TRANSFORM card's three fact lines, pure (node --test drives it):
-   *   1. the language and the pin — `jsonata · …/order_lines.jsonata @ v3`; `transform ·`
+   * 7d (#7) — a SCRIPT card's three fact lines, pure (node --test drives it):
+   *   1. the language and the pin — `jsonata · …/order_lines.jsonata @ v3`; `script ·`
    *      until [pin] (the resolved template: its `type`) is known;
    *   2. what it reads → where it writes — `2 inputs → tempdb.order_lines`;
    *   3. rejects and strict, when set — `rejects → tempdb.bad · strict`.
    * Every text is escaped where the card is built (buildCardHtml), never here.
    */
-  function transformFacts(n, pin) {
+  function scriptFacts(n, pin) {
     var facts = [];
-    var language = pin && pin.language ? String(pin.language) : "transform";
+    var language = pin && pin.language ? String(pin.language) : "script";
     var tpl = templateLine(n.template);
     facts.push({
       kind: "language",
@@ -561,7 +561,7 @@
     facts.push({
       kind: "io",
       icon: "db",
-      text: count + " input" + (count === 1 ? "" : "s") + " → " + transformOutputText(n),
+      text: count + " input" + (count === 1 ? "" : "s") + " → " + scriptOutputText(n),
     });
     var rejects = n.output && n.output.rejects ? "rejects → tempdb." + n.output.rejects : null;
     var strict = n.strict === true ? "strict" : null;
@@ -576,7 +576,7 @@
    * template's `type`), the contract's `mode`, whether it declares rejects, and the
    * `needs_review` flag 7e adds to the read (absent until then, which reads as false).
    */
-  function transformPinFrom(template) {
+  function scriptPinFrom(template) {
     if (!template || typeof template !== "object") return null;
     var contract = template.contract || {};
     return {
@@ -688,7 +688,7 @@
       '</span><div class="pe-card-title"><div class="pe-card-id" title="' + esc(data.id) + '">' +
       esc(data.id) + '</div><div class="pe-card-kind">' + esc(String(data.type || "node").toLowerCase()) +
       // 7d (§8.2): the pinned version cites a retired fact — marked on the kind line, so the
-      // card keeps its height; 7e's flag arrives on the resolved pin (applyTransformPins).
+      // card keeps its height; 7e's flag arrives on the resolved pin (applyScriptPins).
       (data.needsReview
         ? ' <span class="pe-card-review" title="A fact the pinned template cites was retired — re-verify before you lean on it.">· needs review</span>'
         : "") +
@@ -870,7 +870,7 @@
 
     // The HTML card overlay (§reference route 1): the extension's label container is
     // pointer-events:none by default (verified against its 1.2.2 source), and its
-    // whole container carries the pan/zoom transform, so cards scale WITH the canvas
+    // whole container carries the pan/zoom script, so cards scale WITH the canvas
     // rather than fighting it. It re-runs the template on `data`/`style` events —
     // which is exactly how state dots and run lines arrive.
     if (this.cy.nodeHtmlLabel) {
@@ -985,7 +985,7 @@
     }
 
     this.loadDialects();
-    this.loadTransformPins();
+    this.loadScriptPins();
   };
 
   /** Teardown for the stage watcher (init.js teardown, before cy.destroy()). */
@@ -1051,8 +1051,8 @@
    * box's vertical centre) stop meeting the card's own port dots.
    *
    * `offsetHeight` is deliberate: the html-label container carries the canvas's
-   * pan/zoom TRANSFORM, so `getBoundingClientRect()` returns a scaled number and would
-   * feed the zoom back into the model. `offsetHeight` is layout, before transforms.
+   * pan/zoom SCRIPT, so `getBoundingClientRect()` returns a scaled number and would
+   * feed the zoom back into the model. `offsetHeight` is layout, before scripts.
    *
    * Returns whether a re-layout was started. Bounded at two passes: the second one
    * re-measures the same content and finds nothing to change, and a pathological
@@ -1217,19 +1217,19 @@
   };
 
   /**
-   * 7d (#7) — the TRANSFORM pins, resolved the way loadDialects resolves datasources: the
+   * 7d (#7) — the SCRIPT pins, resolved the way loadDialects resolves datasources: the
    * pipeline body names only `{ id, version }`, and the card's language and the Details
    * pane's mode live on the pinned template version. One `GET /api/v1/templates/versions`
    * per DISTINCT pin (template.read — every role that can open the editor holds it), in the
    * session, capped at MAX_PIN_LOOKUPS. A failure or a 404 (a promoter's lens hides the
-   * version) degrades to the unresolved card — `transform · …` — which is still true.
+   * version) degrades to the unresolved card — `script · …` — which is still true.
    */
-  PipelineGraph.prototype.loadTransformPins = function () {
+  PipelineGraph.prototype.loadScriptPins = function () {
     var self = this;
     if (typeof fetch !== "function" || !this.cy) return;
     var keys = {};
     (this.nodes || []).forEach(function (n) {
-      if (String(n.type || "").toUpperCase() !== "TRANSFORM") return;
+      if (String(n.type || "").toUpperCase() !== "SCRIPT") return;
       var key = pinKey(n.template);
       if (key && !keys[key]) keys[key] = n.template;
     });
@@ -1245,7 +1245,7 @@
             return res.ok ? res.json() : null;
           })
           .then(function (json) {
-            return [key, transformPinFrom(json && json.data)];
+            return [key, scriptPinFrom(json && json.data)];
           })
           .catch(function () {
             return [key, null];
@@ -1256,21 +1256,21 @@
       entries.forEach(function (e) {
         if (e[1]) byKey[e[0]] = e[1];
       });
-      self.applyTransformPins(byKey);
+      self.applyScriptPins(byKey);
     });
   };
 
   /**
-   * Writes resolved pins onto the TRANSFORM cards (fact line 1, the needs-review marker) and
-   * hands them to the editor for the Details pane (`transformPins`, reactive through the
+   * Writes resolved pins onto the SCRIPT cards (fact line 1, the needs-review marker) and
+   * hands them to the editor for the Details pane (`scriptPins`, reactive through the
    * Alpine instance, the nodeStates pattern).
    */
-  PipelineGraph.prototype.applyTransformPins = function (byKey) {
+  PipelineGraph.prototype.applyScriptPins = function (byKey) {
     if (!this.cy) return;
     var ed = (typeof window !== "undefined" && window.__peInstance) || this.editor;
-    if (ed && ed.transformPins) {
+    if (ed && ed.scriptPins) {
       Object.keys(byKey).forEach(function (key) {
-        ed.transformPins[key] = byKey[key];
+        ed.scriptPins[key] = byKey[key];
       });
     }
     var byId = {};
@@ -1278,11 +1278,11 @@
       byId[n.id] = n;
     });
     this.cy.nodes().forEach(function (node) {
-      var key = node.data("transformPinKey");
+      var key = node.data("scriptPinKey");
       var pin = key ? byKey[key] : null;
       var authored = byId[node.id()];
       if (!pin || !authored) return;
-      node.data("facts", transformFacts(authored, pin));
+      node.data("facts", scriptFacts(authored, pin));
       node.data("needsReview", pin.needsReview === true);
     });
   };
@@ -1730,7 +1730,7 @@
       classes.push("pipeline-node");
     } else if (type === "CALCULATOR") {
       classes.push("calculator-node");
-    } else if (type === "DQL" || type === "DML" || type === "DDL" || type === "TRANSFORM") {
+    } else if (type === "DQL" || type === "DML" || type === "DDL" || type === "SCRIPT") {
       classes.push("type-" + type.toLowerCase());
     }
     var caller =
@@ -1794,12 +1794,12 @@
       if (params.length) {
         data.facts.push({ kind: "params", icon: "file", text: params.slice(0, 2).join(", ") + (params.length > 2 ? " +" + (params.length - 2) : "") });
       }
-    } else if (type === "TRANSFORM") {
-      // 7d: the three facts of a TRANSFORM — the language and pin, what it reads → where it
+    } else if (type === "SCRIPT") {
+      // 7d: the three facts of a SCRIPT — the language and pin, what it reads → where it
       // writes, and the reject handling. The language is the pinned template's type, which
-      // is NOT on the node JSON: the card says `transform` until applyTransformPins resolves it.
-      data.facts = transformFacts(n, null);
-      data.transformPinKey = pinKey(n.template);
+      // is NOT on the node JSON: the card says `script` until applyScriptPins resolves it.
+      data.facts = scriptFacts(n, null);
+      data.scriptPinKey = pinKey(n.template);
       data.sourceName = null;
     } else if (type === "CALCULATOR") {
       // The fact the 072 brief asks for: `kind → context_key`. It answers the same
@@ -2306,9 +2306,9 @@
     iconForType: iconForType,
     typeToken: typeToken,
     escapeHtml: escapeHtml,
-    transformFacts: transformFacts,
-    transformOutputText: transformOutputText,
-    transformPinFrom: transformPinFrom,
+    scriptFacts: scriptFacts,
+    scriptOutputText: scriptOutputText,
+    scriptPinFrom: scriptPinFrom,
     pinKey: pinKey,
     FIT_PADDING: FIT_PADDING,
     FIT_MAX_ZOOM: FIT_MAX_ZOOM,

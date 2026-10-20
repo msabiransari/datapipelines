@@ -13,16 +13,16 @@ import java.util.UUID
 
 /** [TemplateContractFacts.over] — the production adapter composes the registry's lookup, contract view and status read. */
 class TemplateContractFactsTest {
-    private val ref = ArtifactRef("finance/transforms/revenue_bars", 2)
+    private val ref = ArtifactRef("finance/scripts/revenue_bars", 2)
 
     @Test
-    fun `each lookup answer maps to its pin - missing, a missing or discarded version, not a transform, a transform`() {
+    fun `each lookup answer maps to its pin - missing, a missing or discarded version, not a script, a transform`() {
         pin(TemplateLookup.TemplateNotFound, PipelineVersionStatus.RELEASED) shouldBe TemplatePin.NotFound
         pin(TemplateLookup.VersionNotFound, PipelineVersionStatus.RELEASED) shouldBe TemplatePin.VersionNotFound
         pin(TemplateLookup.Found(null, TemplateType.JSONATA), PipelineVersionStatus.DISCARDED) shouldBe TemplatePin.VersionNotFound
         pin(TemplateLookup.Found(null, TemplateType.JSONATA), null) shouldBe TemplatePin.VersionNotFound
         pin(TemplateLookup.Found(null, TemplateType.HTML), PipelineVersionStatus.RELEASED) shouldBe
-            TemplatePin.NotTransform(TemplateType.HTML)
+            TemplatePin.NotScript(TemplateType.HTML)
         pin(TemplateLookup.Found(null, TemplateType.JSONATA), PipelineVersionStatus.DRAFT) shouldBe
             TemplatePin.Transform(PipelineVersionStatus.DRAFT, ValidatorFakes.CONTRACT)
     }
@@ -56,10 +56,10 @@ class TemplateContractFactsTest {
                     ref: TemplateRef,
                 ): List<String> = error("not asked")
 
-                override fun transformContract(
+                override fun scriptContract(
                     workspaceId: UUID,
                     ref: TemplateRef,
-                ) = ValidatorFakes.CONTRACT.takeIf { (lookup as? TemplateLookup.Found)?.type?.isTransform == true }
+                ) = ValidatorFakes.CONTRACT.takeIf { (lookup as? TemplateLookup.Found)?.type?.isScript == true }
             }
         val statuses = TemplateVersionStatuses { _, name, version -> status.takeIf { name == ref.name && version == ref.version } }
         return TemplateContractFacts.over(renderer, statuses).pinOf(ValidatorFakes.WORKSPACE, ref)

@@ -5,12 +5,12 @@ import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.templates.ContractColumn
 import co.datapipelines.templates.Template
 import co.datapipelines.templates.TemplateRepository
-import co.datapipelines.templates.TransformContract
-import co.datapipelines.templates.TransformInput
-import co.datapipelines.templates.TransformMode
-import co.datapipelines.templates.TransformOutput
-import co.datapipelines.templates.TransformTestInput
-import co.datapipelines.templates.TransformTestRunner
+import co.datapipelines.templates.ScriptContract
+import co.datapipelines.templates.ScriptInput
+import co.datapipelines.templates.ScriptMode
+import co.datapipelines.templates.ScriptOutput
+import co.datapipelines.templates.ScriptTestInput
+import co.datapipelines.templates.ScriptTestRunner
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.LogicalType
 import io.kotest.assertions.assertSoftly
@@ -24,7 +24,7 @@ import java.time.Instant
 import java.util.UUID
 
 /**
- * The ONE evaluation service (transform-nodes §9.1) over a mocked repository and the REAL
+ * The ONE evaluation service (script-nodes §9.1) over a mocked repository and the REAL
  * runner / engine / pool: the working-version resolution, the type refusal, the input check,
  * the gated output and the invariant verdicts — the shape the MCP tool and the REST route map
  * verbatim.
@@ -34,12 +34,12 @@ class TemplateEvaluateServiceTest {
     private val workspaceId = UUID.randomUUID()
 
     private val contract =
-        TransformContract(
-            mode = TransformMode.ROW,
+        ScriptContract(
+            mode = ScriptMode.ROW,
             inputs =
                 mapOf(
                     "orders" to
-                        TransformInput.Table(
+                        ScriptInput.Table(
                             listOf(
                                 ContractColumn("order_id", LogicalType.INTEGER),
                                 ContractColumn("amount_cents", LogicalType.INTEGER),
@@ -47,7 +47,7 @@ class TemplateEvaluateServiceTest {
                         ),
                 ),
             output =
-                TransformOutput.Table(
+                ScriptOutput.Table(
                     listOf(
                         ContractColumn("order_id", LogicalType.INTEGER),
                         ContractColumn("amount", LogicalType.DECIMAL, precision = 12, scale = 2),
@@ -73,7 +73,7 @@ class TemplateEvaluateServiceTest {
             contract = contract,
             invariants =
                 listOf(
-                    co.datapipelines.templates.TransformInvariant(
+                    co.datapipelines.templates.ScriptInvariant(
                         "one_to_one",
                         "\$count(rows) = \$count(inputs.orders)",
                         "no row is lost",
@@ -84,7 +84,7 @@ class TemplateEvaluateServiceTest {
 
     private fun service(): TemplateEvaluateService {
         val runner =
-            TransformTestRunner(
+            ScriptTestRunner(
                 engines =
                     mapOf(
                         co.datapipelines.scripting.ScriptLanguage.JSONATA to
@@ -113,7 +113,7 @@ class TemplateEvaluateServiceTest {
                 "test/xform.jsonata",
                 version = null,
                 input =
-                    TransformTestInput(
+                    ScriptTestInput(
                         rows = listOf(mapOf("order_id" to 1, "amount_cents" to 1250)),
                         inputs = emptyMap(),
                     ),
@@ -128,16 +128,16 @@ class TemplateEvaluateServiceTest {
     }
 
     @Test
-    fun `a sql template is refused as not-a-transform`() {
+    fun `a sql template is refused as not-a-script`() {
         every { templates.findWorking(workspaceId, "test/plain.sql") } returns
             stored.copy(id = "test/plain.sql", type = TemplateType.SQL, contract = null, invariants = null, tests = null)
 
         val thrown =
             shouldThrow<DatapipelinesException> {
-                service().evaluate(workspaceId, "test/plain.sql", null, TransformTestInput(rows = emptyList()))
+                service().evaluate(workspaceId, "test/plain.sql", null, ScriptTestInput(rows = emptyList()))
             }
         thrown.code shouldBe PipelineErrorCodes.Template.CONTRACT_INVALID
-        thrown.details["rule"] shouldBe "type_not_transform"
+        thrown.details["rule"] shouldBe "type_not_script"
     }
 
     @Test
@@ -150,11 +150,11 @@ class TemplateEvaluateServiceTest {
                     workspaceId,
                     "test/xform.jsonata",
                     null,
-                    TransformTestInput(rows = listOf(mapOf("order_id" to "x")), inputs = emptyMap()),
+                    ScriptTestInput(rows = listOf(mapOf("order_id" to "x")), inputs = emptyMap()),
                 )
             }
         // The §13.18 constant is 7c's (declared privately in templates until then).
-        thrown.code shouldBe "pipeline.transform.input_contract_violation"
+        thrown.code shouldBe "pipeline.script.input_contract_violation"
     }
 
     @Test
@@ -163,7 +163,7 @@ class TemplateEvaluateServiceTest {
 
         val thrown =
             shouldThrow<DatapipelinesException> {
-                service().evaluate(workspaceId, "test/missing.jsonata", null, TransformTestInput(rows = emptyList()))
+                service().evaluate(workspaceId, "test/missing.jsonata", null, ScriptTestInput(rows = emptyList()))
             }
         thrown.code shouldBe PipelineErrorCodes.Template.NOT_FOUND
     }

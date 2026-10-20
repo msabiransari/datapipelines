@@ -56,10 +56,10 @@ internal object CalculatorRules {
         // FIRST writer wins the key, so a duplicate is reported once — on the node that came
         // second — and names the one that already owns it. Keeping the last writer instead would
         // report the collision on the FIRST node and name the second, which reads backwards.
-        // 7c: the map includes value-mode TRANSFORM writers, so a calculator (or a SQL node)
-        // binding a transform-written key resolves and orders it exactly like a calculator
-        // key; a transform's own collisions stay §12.13's to report (TransformRules).
-        val writers = pipeline.nodes.filter { it.type == NodeType.CALCULATOR || it.type == NodeType.TRANSFORM }
+        // 7c: the map includes value-mode SCRIPT writers, so a calculator (or a SQL node)
+        // binding a script-written key resolves and orders it exactly like a calculator
+        // key; a script's own collisions stay §12.13's to report (ScriptRules).
+        val writers = pipeline.nodes.filter { it.type == NodeType.CALCULATOR || it.type == NodeType.SCRIPT }
         val keyToWriter =
             writers
                 .flatMap { node -> writtenKeys(node).map { it to node.id } }
@@ -74,13 +74,13 @@ internal object CalculatorRules {
                     checkCalculatorNode(index, node, pipeline, deploymentKeys, keyToWriter, ancestors, kinds, into)
                 }
 
-                NodeType.TRANSFORM -> {
-                    // §12.13's exemption (record §3.1): a TRANSFORM legally carries `inputs` and
-                    // `context_key` — TransformRules validates them against the pinned contract —
+                NodeType.SCRIPT -> {
+                    // §12.13's exemption (record §3.1): a SCRIPT legally carries `inputs` and
+                    // `context_key` — ScriptRules validates them against the pinned contract —
                     // while `kind` and `context_keys` stay refused on it. The SQL-bind ordering
-                    // scan does not run either: a transform body is a script, not SQL, so there
-                    // are no `:bind`s to order (TransformRules scans the SQL nodes instead).
-                    checkTransformForeignFields(index, node, into)
+                    // scan does not run either: a script body is a script, not SQL, so there
+                    // are no `:bind`s to order (ScriptRules scans the SQL nodes instead).
+                    checkScriptForeignFields(index, node, into)
                 }
 
                 else -> {
@@ -91,8 +91,8 @@ internal object CalculatorRules {
         }
     }
 
-    /** The §12.13 exemption's refusal half: `kind` and `context_keys` on a TRANSFORM. */
-    private fun checkTransformForeignFields(
+    /** The §12.13 exemption's refusal half: `kind` and `context_keys` on a SCRIPT. */
+    private fun checkScriptForeignFields(
         index: Int,
         node: Node,
         into: FailureCollector,
@@ -106,8 +106,8 @@ internal object CalculatorRules {
         into.add(
             Validation.CALCULATOR_FIELDS_ON_NON_CALCULATOR,
             "nodes[$index]",
-            "TRANSFORM node '${node.id.truncateForError()}' declares ${present.joinToString()}, " +
-                "which only a CALCULATOR node carries (a TRANSFORM carries inputs and context_key instead).",
+            "SCRIPT node '${node.id.truncateForError()}' declares ${present.joinToString()}, " +
+                "which only a CALCULATOR node carries (a SCRIPT carries inputs and context_key instead).",
             mapOf("node" to node.id.truncateForError(), "fields" to present),
         )
     }

@@ -219,7 +219,7 @@ class SiteHandTypedCountsGuardTest {
 
         /** The SVG attributes whose values are layout geometry, never run data. */
         val SVG_GEOMETRY =
-            setOf("x", "y", "x1", "x2", "y1", "y2", "cx", "cy", "r", "rx", "ry", "width", "height", "d", "viewBox", "transform")
+            setOf("x", "y", "x1", "x2", "y1", "y2", "cx", "cy", "r", "rx", "ry", "width", "height", "d", "viewBox", "script")
 
         /** A numeric digit — one NOT hugged by a letter ("H2" is a product name, not a number). */
         val TYPED_DIGIT = Regex("""(?<![A-Za-z])\d""")

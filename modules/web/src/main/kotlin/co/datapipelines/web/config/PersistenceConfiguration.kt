@@ -22,7 +22,7 @@ import org.springframework.context.annotation.Configuration
  * emitter records through, and every writer's shutdown drain (dag-executor §10.1, configuration
  * §3.32). The audit log's writer is `auth`'s (`AuthConfiguration`); the drain collects it too.
  *
- * Kept out of [EngineConfiguration] for its size ceiling, as `TransformConfiguration` is; the pool
+ * Kept out of [EngineConfiguration] for its size ceiling, as `ScriptConfiguration` is; the pool
  * the direct fallbacks run on, `eventPersistenceExecutor`, stays there beside its dispatcher.
  */
 @Configuration
