@@ -80,9 +80,9 @@ class FamilyInventory(
     /**
      * #598a — the lifecycle and maturity charts from ONE statement, under the same rules as
      * [forFamily]: an unavailable lens fails closed before any read, and a read failure (a lazy
-     * lens's included) is [ChartsResult.Unavailable], never zeros. Only Pipelines builds these
-     * charts this round; any other family answers [NOT_CHARTED] without a read and nothing calls
-     * it for one (`OverviewPage.Family.charts`), until #599 wires the four siblings' repositories.
+     * lens's included) is [ChartsResult.Unavailable], never zeros. #599: every family reads its
+     * own repository through its OWN arm of [view] — the arm [forFamily] reads, so a family's
+     * charts and its counts can never be lensed by another family's view.
      * #598b: the activity chart is counted at [now], actively developed over the last [activeDays]
      * days (`datapipelines.ui.actively-developed-days`); both reach the statement unchanged.
      */
@@ -95,9 +95,16 @@ class FamilyInventory(
         activeDays: Int,
     ): ChartsResult {
         view.unavailable?.let { return ChartsResult.Unavailable(it.reason) }
-        if (family != NavigationFamily.PIPELINES) return ChartsResult.Unavailable(NOT_CHARTED)
         return try {
-            ChartsResult.Available(pipelines.charts(workspaceId, view.pipelines, now, activeDays))
+            val charts =
+                when (family) {
+                    NavigationFamily.PIPELINES -> pipelines.charts(workspaceId, view.pipelines, now, activeDays)
+                    NavigationFamily.TEMPLATES -> templates.charts(workspaceId, view.templates, now, activeDays)
+                    NavigationFamily.DASHBOARDS -> dashboards.charts(workspaceId, view.dashboards, now, activeDays)
+                    NavigationFamily.VISUALIZATIONS -> visualizations.charts(workspaceId, view.visualizations, now, activeDays)
+                    NavigationFamily.PARAMETER_SETS -> parameterSets.charts(workspaceId, view.parameterSets, now, activeDays)
+                }
+            ChartsResult.Available(charts)
         } catch (failure: Exception) {
             log.warn("charts unavailable for workspace {} family {}: {}", workspaceId, family, failure.toString())
             ChartsResult.Unavailable(UNREADABLE)
@@ -107,6 +114,5 @@ class FamilyInventory(
     companion object {
         /** The one reason a failed read gives — the same words for the counts and the charts. */
         const val UNREADABLE = "Inventory could not be read."
-        const val NOT_CHARTED = "These charts are not built for this family yet."
     }
 }

@@ -215,8 +215,8 @@ data class OverviewPage(
 
     /**
      * The family facts an overview names. Parameter sets' route is `parameter-sets`. [charts] is
-     * the inventory card the family carries (#598a: Pipelines the stacked charts; the four
-     * siblings the four counts and bars until #599).
+     * the inventory card the family carries: since #599 all five are lifecycle homes (#598a/b,
+     * #home-frame: the strip, the activity columns and the release history from one chart read).
      */
     enum class Family(
         val navigation: NavigationFamily,
@@ -246,6 +246,7 @@ data class OverviewPage(
             CatalogLifecycle.TEMPLATES,
             guided = true,
             icon = "code",
+            charts = OverviewStacked.ChartSet.LIFECYCLE,
         ),
         DASHBOARDS(
             NavigationFamily.DASHBOARDS,
@@ -255,6 +256,7 @@ data class OverviewPage(
             CatalogLifecycle.DASHBOARDS,
             guided = true,
             icon = "boxes",
+            charts = OverviewStacked.ChartSet.LIFECYCLE,
         ),
         VISUALIZATIONS(
             NavigationFamily.VISUALIZATIONS,
@@ -264,6 +266,7 @@ data class OverviewPage(
             CatalogLifecycle.VISUALIZATIONS,
             guided = true,
             icon = "chart-line",
+            charts = OverviewStacked.ChartSet.LIFECYCLE,
         ),
         PARAMETER_SETS(
             NavigationFamily.PARAMETER_SETS,
@@ -273,6 +276,7 @@ data class OverviewPage(
             CatalogLifecycle.PARAMETER_SETS,
             guided = true,
             icon = "sliders-horizontal",
+            charts = OverviewStacked.ChartSet.LIFECYCLE,
         ),
         ;
 

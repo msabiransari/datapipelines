@@ -6,10 +6,12 @@ import org.junit.jupiter.api.Test
 
 /**
  * #580 — the Dashboards overview in real Chromium: the menu's Dashboards item lands on
- * `/overview/dashboards` with the family's resource browser open beside it; the inventory, the chart
- * and Recently updated are the workspace's draft; Review drafts opens the catalog filtered to
- * `with-drafts` with the control showing it; Copy prompt makes no request whether the clipboard
- * answers or refuses (the clipboard stubbed per case, as in [OverviewBrowserTest]).
+ * `/overview/dashboards` with the family's resource browser open beside it; Copy prompt makes no
+ * request whether the clipboard answers or refuses (the clipboard stubbed per case, as in
+ * [OverviewBrowserTest]). #599: the page is the v2 lifecycle home — the summary strip and its foot,
+ * the twelve weeks' columns and the release-history bins are the workspace's draft; the definitions
+ * dialog opens from the foot and gives focus back; Review your drafts opens the catalog filtered to
+ * `draft` with the control showing it; the screenshots land in build/reports/599-object-family-homes.
  */
 class OverviewDashboardsBrowserTest : RestTreeBrowserFixture() {
     private fun stubClipboard(refuse: Boolean) {
@@ -44,10 +46,8 @@ class OverviewDashboardsBrowserTest : RestTreeBrowserFixture() {
         )
     }
 
-    private fun count(key: String): String = page.locator("[data-count='$key'] .app-overview-count-v").innerText().trim()
-
     @Test
-    fun `the Dashboards item lands on the overview with its browser tree, and Review drafts filters the catalog`() {
+    fun `the Dashboards item lands on the v2 home with its browser tree, strip, columns and bins, and Review your drafts filters`() {
         startTrace()
         readyTree()
         seedDraftDashboard("acme/boards/sales")
@@ -60,19 +60,32 @@ class OverviewDashboardsBrowserTest : RestTreeBrowserFixture() {
         page.locator("#app-browser-title [data-browser-family=dashboards]").isVisible shouldBe true
         page.locator("#app-browser-title [data-browser-family=dashboards]").innerText() shouldBe "Dashboards"
         page.locator("#app-browser-title [data-browser-family=pipelines]").isHidden shouldBe true
-        count("objects") shouldBe "1"
-        count("with-drafts") shouldBe "1"
-        count("with-releases") shouldBe "0"
-        page.locator("[data-bar='draft'] rect").getAttribute("width") shouldBe "100.0"
-        page.locator("[data-bar='released'] rect").getAttribute("width") shouldBe "0.0"
+        OverviewHomeBrowserSupport.metrics(
+            page,
+            "total" to "1",
+            "live" to "0",
+            "in-development" to "1",
+            "actively-developed" to "1",
+            "live-changes" to "0",
+            "retired" to "0",
+        )
+        page.locator("[data-count='live'] a").getAttribute("href") shouldContain "/dashboards?lifecycle=released"
+        page.locator("[data-count='retired'] a").count() shouldBe 0
+        page.locator("[data-overview-view-all-count]").innerText().trim() shouldBe "1"
+        OverviewHomeBrowserSupport.columnsAndBins(page, created = 1, released = 0, "r0:draft-open" to 1, "r1:no-draft" to 0)
+        page.locator("[data-overview-panel='maturity'] [data-bar='r0'] rect").getAttribute("width") shouldBe "100.0"
         page.locator("[data-overview-recent] .app-overview-recent li a").allInnerTexts() shouldBe listOf("acme/boards/sales")
         page.locator("[data-overview-recent] li .ds-badge").innerText().trim() shouldBe "draft"
         page.locator("#overview-prompt").inputValue() shouldContain "build a draft dashboard"
+        page.locator("[data-overview-review]").count() shouldBe 0
+        OverviewHomeBrowserSupport.definitionsRoundTrip(page, total = 1)
+        OverviewHomeBrowserSupport.screenshots(page, "dashboards")
 
-        page.locator("[data-overview-review]").click()
-        page.waitForURL("**/dashboards?lifecycle=with-drafts")
+        page.locator("[data-task='drafts'] small").innerText().trim() shouldBe "1 dashboard is working toward its first release."
+        page.locator("[data-task='drafts'] a").click()
+        page.waitForURL("**/dashboards?lifecycle=draft")
         page.waitForSelector("#dash-list-wrapper")
-        page.locator("#dashboard-filter-lifecycle").inputValue() shouldBe "with-drafts"
+        page.locator("#dashboard-filter-lifecycle").inputValue() shouldBe "draft"
         page.locator("#dash-list-wrapper a.tpl-result").count() shouldBe 1
         page.locator(".app-nav-link.active").getAttribute("data-nav-section") shouldBe "/dashboards"
     }
