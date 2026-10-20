@@ -26,6 +26,7 @@ import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.test.annotation.DirtiesContext
+import java.time.Instant
 import java.util.UUID
 
 /**
@@ -156,25 +157,38 @@ class OverviewE2eTest {
      * #598a — the Pipelines home's chart group (`FamilyInventory.chartsFor`, one statement) and the
      * four-bucket inventory read the same lifecycle, bucket for bucket, unlensed and through the
      * narrowed lens; every object sits in one release bin. So each lifecycle part's link opens a
-     * catalog whose total is the part's number (the equality cases above).
+     * catalog whose total is the part's number (the equality cases above). #598b: the same read's
+     * activity never names more new objects than the lifecycle holds, nor more actively developed
+     * ones than hold a draft; through the narrowed lens nobody is actively developing.
      */
     @Test
     fun `the chart group's lifecycle is the inventory's, unlensed and narrowed`() {
         val narrowed = ReadLens.Only(setOf("a/draft", "b/released", "c/both_hidden_draft", "d/discarded", "absent/name"))
         listOf(ReadLens.Everything, narrowed).forEach { lens ->
-            val charts = (inventory.chartsFor(NavigationFamily.PIPELINES, workspace, view(lens)) as ChartsResult.Available).charts
+            val charts = charts(lens)
             println("event=598a.overview.charts lens=${if (lens == narrowed) "narrowed" else "everything"} $charts")
             charts.lifecycle shouldBe counted(lens)
             charts.maturity.sumOf { it.total } shouldBe charts.lifecycle.objects
+            withClue("#598b: every row was stamped just now, so each admitted object is new and each admitted draft active") {
+                charts.activity.weeks.sumOf { it.created } shouldBe charts.lifecycle.objects
+                charts.activity.activelyDeveloped shouldBe charts.lifecycle.withDrafts
+                if (lens == narrowed) charts.activity.activelyDeveloped shouldBe 0L
+            }
             CatalogLifecycle.PIPELINES.forEach { bucket ->
                 withClue(bucket) {
                     service.page(workspace, lens, null, 0, PAGE, bucket).total.toLong() shouldBe bucket.countIn(charts.lifecycle)
                 }
             }
         }
-        val unlensed = (inventory.chartsFor(NavigationFamily.PIPELINES, workspace, LensedView.EVERYTHING) as ChartsResult.Available).charts
+        val unlensed = charts(ReadLens.Everything)
         unlensed.maturity.map { it.draftOpen to it.noDraft } shouldBe listOf(2L to 2L, 2L to 2L, 0L to 1L, 0L to 0L, 0L to 0L)
+        unlensed.activity.activelyDeveloped shouldBe 4L
+        unlensed.activity.weeks.sumOf { it.released } shouldBe 6L
     }
+
+    private fun charts(lens: ReadLens) =
+        (inventory.chartsFor(NavigationFamily.PIPELINES, workspace, view(lens), Instant.now(), ACTIVE_DAYS) as ChartsResult.Available)
+            .charts
 
     private data class Row(
         val bucket: LifecycleBucket,
@@ -270,5 +284,6 @@ class OverviewE2eTest {
 
     private companion object {
         const val PAGE = 100
+        const val ACTIVE_DAYS = 14
     }
 }

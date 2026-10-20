@@ -63,9 +63,10 @@ class ConfigValidator(
          * `checkRequestLimits` (§3.31). 32 since #10 L1a added
          * `VisualizationRules.checkVisualizationBounds` (§3.33). 33 since #10 L2 added
          * `DashboardRuntimeRules.checkDashboardRuntimeBounds` (§3.34). 34 since #488 added
-         * `RedisRules.checkRedisTimeoutBounds` (§3.1).
+         * `RedisRules.checkRedisTimeoutBounds` (§3.1). 35 since #598b added
+         * `UiRules.checkUiActivelyDevelopedDays` (§3.10).
          */
-        internal const val CHECK_COUNT = 34
+        internal const val CHECK_COUNT = 35
 
         /**
          * `users.provider` values the system writes itself (`UserService.BOOTSTRAP_PROVIDER`,
@@ -113,6 +114,7 @@ class ConfigValidator(
             checkSecretStrength(snapshot, violations)
             checkKeyProvider(snapshot, violations)
             checkUiTheme(snapshot, violations, warnings)
+            UiRules.checkUiActivelyDevelopedDays(snapshot, violations)
             checkOidcProviders(snapshot, violations)
             checkResultTtlOrdering(snapshot, violations)
             checkEndpointsTimeoutOrdering(snapshot, violations)
@@ -831,6 +833,7 @@ class ConfigValidator(
                         .orElse(emptyMap()),
                 dbEncryptionKeyCurrent = environment.getProperty("datapipelines.db.encryption-key-current"),
                 uiTheme = environment.getProperty("datapipelines.ui.theme"),
+                uiActivelyDevelopedDays = environment.getProperty("datapipelines.ui.actively-developed-days"),
                 oidcProviders = oidcProviders(environment),
                 resultTtlMinSeconds = environment.getProperty("datapipelines.result.ttl-min-seconds", Long::class.java),
                 resultTtlDefaultSeconds = environment.getProperty("datapipelines.result.ttl-default-seconds", Long::class.java),
@@ -1082,6 +1085,8 @@ internal data class ConfigSnapshot(
     /** §3.20 — which configured version new encryptions use; unset = the highest configured. */
     val dbEncryptionKeyCurrent: String? = null,
     val uiTheme: String?,
+    /** §3.10 (#598b) — the actively developed window in days, raw so a bad value is a NAMED violation; null = key absent. */
+    val uiActivelyDevelopedDays: String? = null,
     val oidcProviders: List<OidcProviderSnapshot>,
     val resultTtlMinSeconds: Long?,
     val resultTtlDefaultSeconds: Long?,
@@ -1188,6 +1193,7 @@ internal data class ConfigSnapshot(
             "dbEncryptionKeys=<redacted, versions=${dbEncryptionKeys.keys.sorted()}>, " +
             "dbEncryptionKeyCurrent=$dbEncryptionKeyCurrent, " +
             "uiTheme=$uiTheme, " +
+            "uiActivelyDevelopedDays=$uiActivelyDevelopedDays, " +
             "oidcProviders=$oidcProviders, " +
             "resultTtlMinSeconds=$resultTtlMinSeconds, " +
             "resultTtlDefaultSeconds=$resultTtlDefaultSeconds, " +
