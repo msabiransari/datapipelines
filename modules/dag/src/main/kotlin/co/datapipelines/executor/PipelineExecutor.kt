@@ -106,10 +106,6 @@ class PipelineExecutor(
     private val calculatorKinds: (String) -> co.datapipelines.calculators.CalculatorKind? =
         co.datapipelines.calculators.CalculatorRegistry::find,
 ) {
-    init {
-        metrics.bindConcurrency(executionSlots)
-    }
-
     /**
      * Runs one execution end to end (§5.1).
      *

@@ -122,11 +122,14 @@ class EngineConfiguration {
     fun executorDispatcher(config: ExecutorConfig): ExecutorDispatcher = ExecutorDispatcher.forConfig(config)
 
     @Bean
-    fun executionSlots(config: ExecutorConfig): ExecutionSlots =
+    fun executionSlots(
+        config: ExecutorConfig,
+        metrics: ExecutorMetrics,
+    ): ExecutionSlots =
         ExecutionSlots(
             maxPerUser = config.maxConcurrentExecutionsPerUser,
             maxPerInstance = config.maxConcurrentExecutionsPerInstance,
-        )
+        ).also { metrics.bindConcurrency(it) }
 
     @Bean
     @ConditionalOnMissingBean(MeterRegistry::class)
