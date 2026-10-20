@@ -1,5 +1,6 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.pipeline.Activity
 import co.datapipelines.pipeline.ChartInventory
 import co.datapipelines.pipeline.Inventory
 import co.datapipelines.pipeline.MaturityBin
@@ -309,7 +310,7 @@ class OverviewRenderTest {
                 bin(ReleaseBin.FOUR_TO_NINE, 0, 1),
                 bin(ReleaseBin.TEN_PLUS, 1, 0),
             )
-        val page = pipelines(ChartInventory(Inventory(2, 4, 3, 2), bins))
+        val page = pipelines(ChartInventory(Inventory(2, 4, 3, 2), bins, Activity.empty(NOW, ACTIVE_DAYS)))
         val model = page.inventory!!.stacked.first { it.key == "maturity" }
         val doc = render(page)
 
@@ -339,7 +340,7 @@ class OverviewRenderTest {
 
     @Test
     fun `an empty pipelines workspace draws all-zero stacked charts, not a divide by zero`() {
-        val doc = render(pipelines(ChartInventory.EMPTY))
+        val doc = render(pipelines(ChartInventory.empty(NOW, ACTIVE_DAYS)))
 
         doc.select("[data-stacked] rect").map { it.attr("width") }.distinct() shouldContainExactly listOf("0")
         doc.select("[data-stacked] rect").map { it.attr("x") }.distinct() shouldContainExactly listOf("0")
@@ -480,6 +481,7 @@ class OverviewRenderTest {
                     else -> bin(releases, 0, 0)
                 }
             },
+            Activity.empty(NOW, ACTIVE_DAYS),
         )
 
     private fun bin(
@@ -534,6 +536,7 @@ class OverviewRenderTest {
 
     private companion object {
         val NOW: Instant = Instant.parse("2026-10-17T12:00:00Z")
+        const val ACTIVE_DAYS = 14
         val STANDARD = OverviewPage.Family.TEMPLATES
         const val EPSILON = 0.001
         const val TENTHS = 10.0

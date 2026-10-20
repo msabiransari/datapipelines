@@ -19,6 +19,7 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.EnumSource
 import org.springframework.dao.DataAccessResourceFailureException
+import java.time.Instant
 import java.util.UUID
 
 class FamilyInventoryTest {
@@ -89,27 +90,39 @@ class FamilyInventoryTest {
         verify { listOf(dashboards, visualizations) wasNot Called }
     }
 
-    /** #598a — the chart group keeps forFamily's rules: the caller's own lens, fail closed, never zeros. */
+    /**
+     * #598a — the chart group keeps forFamily's rules: the caller's own lens, fail closed, never zeros.
+     * #598b — the request's clock and the configured window reach the repository unchanged.
+     */
     @Test
     fun `the pipelines charts read the pipelines lens once and a failure is unavailable, never zeros`() {
         val lens = ReadLens.Only(setOf("pipeline"))
         val view = LensedView(lens, ReadLens.Everything, parameterSets = ReadLens.Everything)
-        every { pipelines.charts(workspace, lens) } returns ChartInventory.EMPTY
-        service.chartsFor(NavigationFamily.PIPELINES, workspace, view) shouldBe ChartsResult.Available(ChartInventory.EMPTY)
-        verify(exactly = 1) { pipelines.charts(workspace, lens) }
+        val empty = ChartInventory.empty(NOW, ACTIVE_DAYS)
+        every { pipelines.charts(workspace, lens, NOW, ACTIVE_DAYS) } returns empty
+        service.chartsFor(NavigationFamily.PIPELINES, workspace, view, NOW, ACTIVE_DAYS) shouldBe ChartsResult.Available(empty)
+        verify(exactly = 1) { pipelines.charts(workspace, lens, NOW, ACTIVE_DAYS) }
 
-        every { pipelines.charts(workspace, ReadLens.Everything) } throws DataAccessResourceFailureException("read failed")
-        service.chartsFor(NavigationFamily.PIPELINES, workspace, LensedView.EVERYTHING) shouldBe
+        every { pipelines.charts(workspace, ReadLens.Everything, any(), any()) } throws DataAccessResourceFailureException("read failed")
+        service.chartsFor(NavigationFamily.PIPELINES, workspace, LensedView.EVERYTHING, NOW, ACTIVE_DAYS) shouldBe
             ChartsResult.Unavailable("Inventory could not be read.")
     }
 
     @Test
     fun `an unavailable view and an uncharted family read nothing`() {
         val unavailable = LensedView(ReadLens.Everything, ReadLens.Everything, LensedView.Unavailable("target", "unreachable"))
-        NavigationFamily.entries.forEach { service.chartsFor(it, workspace, unavailable) shouldBe ChartsResult.Unavailable("unreachable") }
+        NavigationFamily.entries.forEach {
+            service.chartsFor(it, workspace, unavailable, NOW, ACTIVE_DAYS) shouldBe ChartsResult.Unavailable("unreachable")
+        }
         NavigationFamily.entries.filter { it != NavigationFamily.PIPELINES }.forEach {
-            service.chartsFor(it, workspace, LensedView.EVERYTHING) shouldBe ChartsResult.Unavailable(FamilyInventory.NOT_CHARTED)
+            service.chartsFor(it, workspace, LensedView.EVERYTHING, NOW, ACTIVE_DAYS) shouldBe
+                ChartsResult.Unavailable(FamilyInventory.NOT_CHARTED)
         }
         verify { listOf(pipelines, templates, dashboards, visualizations, sets) wasNot Called }
+    }
+
+    private companion object {
+        val NOW: Instant = Instant.parse("2026-10-14T12:00:00Z")
+        const val ACTIVE_DAYS = 7
     }
 }
