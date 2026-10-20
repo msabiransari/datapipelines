@@ -416,7 +416,7 @@ class PromoterLensSweepTest {
     /**
      * The overview's four counts and the bars' values, by key (the discarded bar's key is its count's);
      * #598a: and the charts' hidden-table cells, a maturity row's as `row:part` (`r1:no-draft`); #598b:
-     * the week rows' cells summed by part (`activity:created`). #home-frame: the Pipelines strip and
+     * the week rows' cells summed by part (`activity:created`). #638: the Pipelines strip and
      * its foot are counts too (`total`, `live`, …; Actively developed as `active`), only the four
      * lifecycle bars are read as bars, and the derived cells are skipped: a row's `total` is its parts'
      * sum and a bars table's `value` repeats its bar, both pinned by `OverviewRenderTest`.
@@ -1020,7 +1020,7 @@ class PromoterLensSweepTest {
 
         /**
          * #556 — one overview count (`data-count`) and one lifecycle bar (`data-bar`) with its number;
-         * #home-frame: a count is a strip cell (`dd`) or a foot cell (`b`, Retired's carries a title).
+         * #638: a count is a strip cell (`dd`) or a foot cell (`b`, Retired's carries a title).
          */
         private val OVERVIEW_COUNT =
             Regex(
@@ -1034,7 +1034,7 @@ class PromoterLensSweepTest {
                 RegexOption.DOT_MATCHES_ALL,
             )
 
-        /** #598a — one hidden-table row and one part's cell in it; #home-frame: the cells no chart states on its own. */
+        /** #598a — one hidden-table row and one part's cell in it; #638: the cells no chart states on its own. */
         private val DERIVED_CELLS = setOf("total", "value")
         private val STACKED_ROW = Regex("""<tr data-row="([a-z0-9-]+)"[^>]*>(.*?)</tr>""", RegexOption.DOT_MATCHES_ALL)
         private val STACKED_CELL = Regex("""data-part="([a-z-]+)"[^>]*>(\d+)</td>""")

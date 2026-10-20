@@ -65,7 +65,7 @@ class OverviewApiBrowserTest : RestTreeBrowserFixture() {
         count("keys") shouldBe "1"
         page.locator("[data-chart='key-kind'] [data-bar='mcp'] .app-overview-bar-v").innerText() shouldBe "1"
         page.locator("[data-overview-recent] .app-overview-recent li a").allInnerTexts() shouldBe listOf("$name · MCP key · live")
-        // #home-ops: the keys panel's info button opens its own section, and the keys row leads to the Keys page.
+        // #639: the keys panel's info button opens its own section, and the keys row leads to the Keys page.
         page.locator("[data-overview-recent] [data-task='keys'] a").getAttribute("href") shouldBe "/api-keys"
         page.click("[data-overview-panel='key-kind'] [data-open='key-kind']")
         page.waitForFunction("() => document.querySelector('dialog[data-overview-dialog]').open")
@@ -118,7 +118,7 @@ class OverviewApiBrowserTest : RestTreeBrowserFixture() {
         Files.createDirectories(dir)
         // A fresh load at each width (a live resize keeps the wider layout's menu state), then the
         // top, the quick start and the MCP card — the access steps sit in How it works since
-        // #home-ops: <main> scrolls inside the frame, so a full-page shot would show only the first
+        // #639: <main> scrolls inside the frame, so a full-page shot would show only the first
         // screen.
         SHOT_SIZES.forEach { (width, height) ->
             page.setViewportSize(width, height)
@@ -144,7 +144,7 @@ class OverviewApiBrowserTest : RestTreeBrowserFixture() {
 }
 
 /**
- * #home-ops — the evidence set the three ops homes share (the home-frame lane's OverviewBrowserTest
+ * #639 — the evidence set the three ops homes share (the home-frame lane's OverviewBrowserTest
  * exemplar): the page at 1512 and 390, light then dark, each as the viewport and as the overview
  * root's own shot (the shell scrolls an inner container, so a full-page shot stops at the
  * viewport), and the named panel's info dialog at both widths; leaves the light theme on and the

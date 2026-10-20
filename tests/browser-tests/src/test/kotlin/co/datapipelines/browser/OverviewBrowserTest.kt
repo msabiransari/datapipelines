@@ -19,7 +19,7 @@ import java.nio.file.Paths
  * the clipboard and makes no request, a refused clipboard selects the text and says how to finish,
  * and the prompt names the workspace the menu shows after a switch.
  *
- * #home-frame re-cut the page on the approved 2026-10-20 direction: the summary strip (Total, Live,
+ * #638 re-cut the page on the approved 2026-10-20 direction: the summary strip (Total, Live,
  * In development, Actively developed; the foot's Live with changes and Retired), the activity
  * columns and the release-history bars, Continue your work and Quick start, and ONE dialog the
  * openers fill by key. The first case reads the strip, the columns and the bars after two and then

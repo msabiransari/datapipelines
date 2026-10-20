@@ -11,7 +11,7 @@ import org.junit.jupiter.api.Test
  * `/overview/schedules` (the explorer stays at `/schedules`, View all), lit as the Schedules item
  * with the resource browser closed — Schedules is not a tree family. A fresh workspace reads
  * zeros, the two empty notes and an author's New schedule; one schedule later, the page counts it
- * and its Up next row opens the explorer's detail for that schedule. #home-ops: on the v2 frame a
+ * and its Up next row opens the explorer's detail for that schedule. #639: on the v2 frame a
  * panel's info button opens its dialog section, the task row leads to the explorer, and a viewer
  * sees no New schedule, only who creates schedules.
  */
@@ -49,7 +49,7 @@ class OverviewSchedulesBrowserTest : SchedulesBrowserSuite() {
         }
         page.locator("[data-overview-prompt], [data-overview-copy]").count() shouldBe 0
 
-        // #home-ops: the condition panel's info button opens its own dialog section; Escape closes
+        // #639: the condition panel's info button opens its own dialog section; Escape closes
         // it and focus returns to the button.
         page.click("[data-overview-panel='condition'] [data-open='condition']")
         page.waitForFunction("() => document.querySelector('dialog[data-overview-dialog]').open")
@@ -82,7 +82,7 @@ class OverviewSchedulesBrowserTest : SchedulesBrowserSuite() {
         page.locator("[data-chart='last-run'] [data-bar='never-ran'] rect").getAttribute("width") shouldBe "100.0"
         HomeOpsShots.take(page, "schedules", "condition")
 
-        // The first link of the sections, not the card: Continue your work opens on its task row (#home-ops).
+        // The first link of the sections, not the card: Continue your work opens on its task row (#639).
         page.locator("[data-overview-recent] [data-task='next'] a").getAttribute("href") shouldBe "/schedules"
         val upNext = page.locator("[data-overview-recent] .app-overview-recent li a").first()
         upNext.innerText().trim() shouldBe "$root/nightly/rows"

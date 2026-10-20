@@ -40,7 +40,7 @@ import kotlin.math.roundToLong
  * number; the Pipelines guide substitutes the workspace through `th:text`; a family without a
  * guide renders the framework and nothing else (amendment 1: no placeholder prose).
  *
- * #598a: the Pipelines home reads a [ChartsResult] instead. #home-frame re-cut the Pipelines home on
+ * #598a: the Pipelines home reads a [ChartsResult] instead. #638 re-cut the Pipelines home on
  * the approved 2026-10-20 direction: the summary strip (four exclusive lifecycle groups summing to
  * Total, plus Actively developed), the activity columns, the release history bars, the task rows
  * and the page's one dialog — each invariant of #598 kept below. #599: the four siblings are
@@ -239,7 +239,7 @@ class OverviewRenderTest {
     }
 
     /**
-     * #home-frame / #593 — the summary strip: Total, Live, In development and Actively developed,
+     * #638 / #593 — the summary strip: Total, Live, In development and Actively developed,
      * then the foot's Live with changes and Retired. The four exclusive lifecycle groups (two in
      * the strip, two in its foot) sum to Total, every number read from the one [ChartInventory];
      * the #556 counts, bars and #598 stacked hooks are gone.
@@ -556,7 +556,7 @@ class OverviewRenderTest {
     /**
      * A family without a guide renders the frame and none of the guide's regions (amendment 1: no
      * placeholder prose). Every family is guided today, so the case un-guides each; the script loads
-     * regardless, since the dialog exists on every family (#home-frame).
+     * regardless, since the dialog exists on every family (#638).
      */
     @ParameterizedTest
     @EnumSource(OverviewPage.Family::class)

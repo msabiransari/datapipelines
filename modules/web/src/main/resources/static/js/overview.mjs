@@ -1,5 +1,5 @@
 // #556 — the family overview's interactions (templates/overview/family.html, guide-*.html):
-// Copy prompt, and since #home-frame the page's one <dialog>, the starter prompt's question field
+// Copy prompt, and since #638 the page's one <dialog>, the starter prompt's question field
 // and Reset.
 //
 // Copy: the prompt is the textarea's CURRENT text, edits included, and it goes to the clipboard and

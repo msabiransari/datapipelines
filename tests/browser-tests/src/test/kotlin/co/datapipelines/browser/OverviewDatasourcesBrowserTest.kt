@@ -114,7 +114,7 @@ class OverviewDatasourcesBrowserTest : RestTreeBrowserFixture() {
             .first()
             .getAttribute("href") shouldBe "/datasources/$untested2"
 
-        // #home-ops: View all's badge is the one metric; the health panel's info button opens its
+        // #639: View all's badge is the one metric; the health panel's info button opens its
         // own dialog section; the task row leads to the list.
         page.locator("[data-overview-view-all-count]").innerText().trim() shouldBe "4"
         page.locator("[data-overview-recent] [data-task='browse'] a").getAttribute("href") shouldBe "/datasources"

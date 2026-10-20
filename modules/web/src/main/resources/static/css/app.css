@@ -3899,7 +3899,7 @@ pre.tf-pane-input {
 .dp-tree-status { padding: var(--gap-xs); color: var(--text-muted); }
 
 /* #556 — the family overviews (templates/overview/family.html; ui-screens §4.25, shell design §8),
-   re-cut by #home-frame on the approved 2026-10-20 direction (store notes/2026-10-20-home-pages-
+   re-cut by #638 on the approved 2026-10-20 direction (store notes/2026-10-20-home-pages-
    direction.md §2: tokens only, the house type scale, the house breakpoints). Regions in order: the
    heading, the summary strip (four equal cells and a foot), the analytics grid (1.6fr / 1fr), the
    work grid (1fr / 1.2fr), the guide's extra card, and the page's one <dialog>. From 1100.98px down

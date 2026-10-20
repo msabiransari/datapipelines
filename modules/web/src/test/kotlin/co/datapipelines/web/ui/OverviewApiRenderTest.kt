@@ -62,7 +62,7 @@ class OverviewApiRenderTest {
     }
 
     /**
-     * #home-ops — the page the CONTROLLER builds, rendered: four metrics whose notes are the tiles'
+     * #639 — the page the CONTROLLER builds, rendered: four metrics whose notes are the tiles'
      * help sentences and whose dots are their state bars' tones, the View all badge equal to the
      * Endpoints metric, the two panels with descriptions and info dialogs, the console and keys
      * task rows above the two sections, the guide's v2 quick start with How a program gets access
@@ -157,7 +157,7 @@ class OverviewApiRenderTest {
         prompt.`val`() shouldContain "endpoints_create"
         prompt.`val`() shouldContain "endpoints_get"
         prompt.children().shouldBeEmpty()
-        // #home-ops moved the guide around the prompt, never the prompt: its text is the base's, byte for byte.
+        // #639 moved the guide around the prompt, never the prompt: its text is the base's, byte for byte.
         prompt.`val`() shouldBe
             "In workspace <b>acme</b>, publish the released pipeline [pipeline] as a read-only GET endpoint. Read " +
             "the endpoints reference in the manual first. Use the category [category] (our namespace, never " +

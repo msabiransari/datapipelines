@@ -68,7 +68,7 @@ class OverviewDatasourcesRenderTest {
     }
 
     /**
-     * #home-ops — the page the CONTROLLER builds, rendered: the strip's one metric with its help as
+     * #639 — the page the CONTROLLER builds, rendered: the strip's one metric with its help as
      * the note, the View all badge equal to it, the two panels with their descriptions and info
      * dialogs, the Browse datasources task row above the grants, and the guide's v2 words.
      */
@@ -119,7 +119,7 @@ class OverviewDatasourcesRenderTest {
         prompt.`val`() shouldContain "one bounded read-only SQL probe"
         prompt.`val`() shouldContain "Do not register or change anything"
         prompt.children().shouldBeEmpty()
-        // #home-ops moved the guide around the prompt, never the prompt: its text is the base's, byte for byte.
+        // #639 moved the guide around the prompt, never the prompt: its text is the base's, byte for byte.
         prompt.`val`() shouldBe
             "In workspace <b>acme</b>, explore the datasource [name] and tell me what I can build on it. List the " +
             "datasources I can see, read [name]'s connection facts, and test its connection. Map its schemas and " +

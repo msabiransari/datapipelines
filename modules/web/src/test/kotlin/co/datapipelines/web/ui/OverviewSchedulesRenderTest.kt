@@ -67,7 +67,7 @@ class OverviewSchedulesRenderTest {
     }
 
     /**
-     * #home-ops — the page the CONTROLLER builds, rendered: four metrics whose notes are the tiles'
+     * #639 — the page the CONTROLLER builds, rendered: four metrics whose notes are the tiles'
      * help sentences and whose dots are their condition bars' tones, the View all badge equal to
      * the total, the two panels with descriptions and info dialogs, the See what runs next row
      * above Up next and Recently changed, and the guide's v2 words.
