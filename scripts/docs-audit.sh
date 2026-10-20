@@ -99,6 +99,8 @@ if [[ "${1:-}" == "--self-test" ]]; then
     echo 'Raises `parameter.evaluate.nonexistent_code` here.'
     echo 'Cites `user.raed` here.'
     echo 'Reads `docs.css` here.'
+    echo 'Reads `auth.css` here.'
+    echo 'Raises `auth.nonexistent_code` here.'
     echo '```'
     echo 'a fenced JSON path cites `user.name`'
     echo '```'
@@ -112,8 +114,8 @@ if [[ "${1:-}" == "--self-test" ]]; then
   # sends a deployer to a file 081 deleted must fail exactly like a stale spec line.
   echo '# see deploy/env/posture/development.env' >> "$tmp/deploy/compose.yml"
   # The doctoring must fail EXACTLY as planted (#307's non-vacuity: the probe count,
-  # the one permission probe CAUGHT, and the two negatives — the docs.css filename
-  # and the fenced JSON path — never named). 13 = A:1 B:1 C:8 (7 codes/events + the
+  # the permission and auth probes CAUGHT, and the negatives — the docs.css/auth.css
+  # filenames and the fenced JSON path — never named). 14 = A:1 B:1 C:9 (8 codes/events + the
   # permission probe) D:2 E:1 (the invented test-file citation; its Change-Log twin
   # is exempt, so exactly ONE 'cited test file not in tree' line may appear).
   out=$( (cd "$tmp" && bash scripts/docs-audit.sh 2>&1) || true)
@@ -121,12 +123,12 @@ if [[ "${1:-}" == "--self-test" ]]; then
      echo "$out" | grep -q "user\.raed" && \
      echo "$out" | grep -q "cited test file not in tree: NoSuchThingTest\.kt" && \
      [ "$(printf '%s\n' "$out" | grep -c 'cited test file not in tree')" -eq 1 ] && \
-     ! echo "$out" | grep -E "docs\.css|user\.name" | grep -q "^  " && \
-     [ "$(printf '%s\n' "$out" | grep -c '^  [A-E] ')" -eq 13 ]; then
-    echo "self-test OK: doctored docs fail with all 13 planted defects — the permission probe and the invented test-file citation caught; the filename, fence and Change-Log-row negatives clean"
+     ! echo "$out" | grep -E "docs\.css|auth\.css|user\.name" | grep -q "^  " && \
+     [ "$(printf '%s\n' "$out" | grep -c '^  [A-E] ')" -eq 14 ]; then
+    echo "self-test OK: doctored docs fail with all 14 planted defects — the permission, auth and invented test-file probes caught; the filename, fence and Change-Log-row negatives clean"
     exit 0
   else
-    echo "SELF-TEST FAILED: doctored docs did not fail exactly as planted (expected 13 failures, the user.raed permission and the invented test-file citation caught, no docs.css/user.name line, the Change-Log row not flagged)" >&2
+    echo "SELF-TEST FAILED: doctored docs did not fail exactly as planted (expected 14 failures, the user.raed permission, auth.nonexistent_code and invented test-file citation caught, no docs.css/auth.css/user.name line, the Change-Log row not flagged)" >&2
     printf '%s\n' "$out" | tail -25 >&2
     exit 1
   fi
@@ -379,7 +381,8 @@ for p, t in texts.items():
         for c in set(re.findall(CODE_RE, line)):
             # A FILENAME is not a code: `dashboard.html` (a Thymeleaf template ui-screens cites) joined the
             # .js/.md skip when #10 L1a added `dashboard` to CODE_RE.
-            if c.startswith(CONFIG_PREFIXES) or c.endswith((".js", ".md", ".html")):
+            # #624: auth.css is a filename too, even under an error-code namespace.
+            if c.startswith(CONFIG_PREFIXES) or c.endswith((".js", ".md", ".html", ".css")):
                 continue
             if (c + "(") in line:   # Kotlin method call, e.g. pipeline.copy(...)
                 continue
