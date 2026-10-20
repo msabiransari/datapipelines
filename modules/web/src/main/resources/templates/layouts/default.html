@@ -542,7 +542,10 @@
            re-derived client-side by shell.js after a boosted swap (the top bar is
            outside #app-main, so the swap never re-renders it). 110: below 1100px the
            group and separator are hidden and the leaf truncates, so the element
-           carries its full path as title — 106's pattern on the explorer's title. -->
+           carries its full path as title — 106's pattern on the explorer's title.
+           #610: below 760px (the phone band) the element stays in the DOM — shell.js
+           still writes into it — but the bar displays none of it (app.css's phone
+           block hides .app-crumbs), the frozen prototype's ≤760 rule. -->
       <div class="app-crumbs" id="app-crumbs">
         <!-- Rendered ALWAYS and hidden when empty, never omitted: the shell is outside
              #app-main, so a boosted navigation cannot re-render it, and shell.js mirrors
