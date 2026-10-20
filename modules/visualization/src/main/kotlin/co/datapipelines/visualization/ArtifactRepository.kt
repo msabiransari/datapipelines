@@ -45,26 +45,34 @@ open class ArtifactRepository<B : Any>(
         workspaceId: UUID,
         lens: co.datapipelines.pipeline.ReadLens,
     ): co.datapipelines.pipeline.Inventory =
-        co.datapipelines.pipeline.InventorySource.aggregate(
-            jdbc,
-            when (kind) {
-                ArtifactKind.VISUALIZATION -> co.datapipelines.pipeline.NavigationFamily.VISUALIZATIONS
-                ArtifactKind.DASHBOARD -> co.datapipelines.pipeline.NavigationFamily.DASHBOARDS
-            },
-            workspaceId,
-            lens,
-        )
+        co.datapipelines.pipeline.InventorySource
+            .aggregate(jdbc, family, workspaceId, lens)
+
+    /**
+     * #599 — this artifact family's overview charts (lifecycle, release history, activity) from one statement, under
+     * the same workspace and lens as [inventory] (`PipelineRepository.charts`'s shape): the activity counted at [now],
+     * actively developed over the last [activeDays] days. The family is this repository's [kind]'s, never the other's.
+     */
+    fun charts(
+        workspaceId: UUID,
+        lens: co.datapipelines.pipeline.ReadLens,
+        now: Instant,
+        activeDays: Int,
+    ): co.datapipelines.pipeline.ChartInventory =
+        co.datapipelines.pipeline.ChartInventorySource
+            .aggregate(jdbc, family, workspaceId, lens, now, activeDays)
 
     /** Complete navigation projection, shared by both artifact families. */
     fun navigation(request: co.datapipelines.pipeline.NavigationRequest): List<co.datapipelines.pipeline.NavigationRow> =
-        co.datapipelines.pipeline.NavigationSource.page(
-            jdbc,
-            when (kind) {
-                ArtifactKind.VISUALIZATION -> co.datapipelines.pipeline.NavigationFamily.VISUALIZATIONS
-                ArtifactKind.DASHBOARD -> co.datapipelines.pipeline.NavigationFamily.DASHBOARDS
-            },
-            request,
-        )
+        co.datapipelines.pipeline.NavigationSource
+            .page(jdbc, family, request)
+
+    /** The storage descriptor of this repository's [kind]: the one place the two artifact families part. */
+    private val family: co.datapipelines.pipeline.NavigationFamily =
+        when (kind) {
+            ArtifactKind.VISUALIZATION -> co.datapipelines.pipeline.NavigationFamily.VISUALIZATIONS
+            ArtifactKind.DASHBOARD -> co.datapipelines.pipeline.NavigationFamily.DASHBOARDS
+        }
 
     private val sql = ArtifactSql(kind)
     private val codes = kind.codes

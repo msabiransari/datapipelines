@@ -1,6 +1,6 @@
 # Configuration Reference
 
-**Status:** v1.56 (single source of truth for every config key)
+**Status:** v1.57 (single source of truth for every config key)
 **Owner:** datapipelines.co core
 **Last updated:** 2026-10-20
 
@@ -183,7 +183,7 @@ There is deliberately **no fail-open key**. When the limiter's Redis is unreacha
 | YAML path | Default | Description |
 |---|---|---|
 | `datapipelines.ui.theme` | `dark` | Design system theme name. Validated at startup against the vendored themes in `modules/web/src/main/resources/static/vendor/design-system/` |
-| `datapipelines.ui.actively-developed-days` | `14` | Days since a draft's last write within which a pipeline counts as actively developed on the Pipelines home (#598). Integer ≥ 1. |
+| `datapipelines.ui.actively-developed-days` | `14` | Days since a draft's last write within which an object counts as actively developed on every lifecycle home (Pipelines since #598; Templates, Dashboards, Visualizations and Parameter Sets since #599). Integer ≥ 1. |
 
 ### 3.11 Execution History
 
@@ -1041,7 +1041,8 @@ Validation runs in `@PostConstruct` of a `ConfigValidator` bean. Failures stop s
 
 | Date | Version | Author | Change |
 |---|---|---|---|
-| 2026-10-20 | v1.56 | 326 (#326) the scheduled jobs' statement bounds | **§3.11** gains a "not a key" note: the stale sweep's 10 s and the hourly retention's 25 s statement bounds are code constants beside their cadences, not configuration keys. No key is added, renamed or removed. |
+| 2026-10-20 | v1.57 | 326 (#326) the scheduled jobs' statement bounds | **§3.11** gains a "not a key" note: the stale sweep's 10 s and the hourly retention's 25 s statement bounds are code constants beside their cadences, not configuration keys. No key is added, renamed or removed. |
+| 2026-10-20 | v1.56 | 599 merge follow-up (#599) the window counts on every lifecycle home | **§3.10 row** `datapipelines.ui.actively-developed-days`: the description names every lifecycle home (the four object families read the same window since #599), not the Pipelines home only. No key, default or validation change. |
 | 2026-10-20 | v1.55 | 598b (#598) the Pipelines home's activity chart | New **§3.10 row** `datapipelines.ui.actively-developed-days` (default `14`, `DATAPIPELINES_UI_ACTIVELY_DEVELOPED_DAYS`): the window of the Pipelines home's "actively developed" count — a pipeline whose draft was last written within that many days ([UI screens §4.25](ui-screens.md)). §5's template gains the line; **§7** gains the rule (`UiRules.checkUiActivelyDevelopedDays`, registered in `ConfigValidator`; `CHECK_COUNT` 34 → 35): a present value that is not an integer ≥ 1 refuses startup naming the key and the value. `UiConfigKeysSpecDriftTest` pins the `datapipelines.ui.*` keys in this document, `application.yml` and the validator. |
 | 2026-10-16 | v1.54 | 467 (#467) the over-cap screenshot refusal reaches the client | **§3.13's `server.tomcat.max-swallow-size` row** names the screenshot route's own bounded drain (its cap + 2 MiB, fixed; the key is unchanged and does not move it) and the `application.yml` comment says the same. No key, default or validation change |
 | 2026-10-15 | v1.53 | 500 (#500) | Redis has one authority: `RedisClientProperties` binds §3.1 and builds the Lettuce factory in `dag`; the framework bridge is removed from §3.14 and §5. The §7 validator judges that binding. Test registrations use operator keys with explicit passwords, and the defaults guard reads the operator block. Merge follow-up: the binding note states that operators change nothing and that a hand-set `SPRING_DATA_REDIS_*` variable is now ignored. |

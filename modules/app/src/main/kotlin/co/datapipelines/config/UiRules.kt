@@ -8,8 +8,9 @@ package co.datapipelines.config
  */
 internal object UiRules {
     /**
-     * The Pipelines home's actively developed window is a whole number of days, at least one:
-     * zero would count nobody and a negative window is meaningless. Judged on the raw value, so
+     * The lifecycle homes' actively developed window (every family since #599) is a whole number
+     * of days, at least one: zero would count nobody and a negative window is meaningless. Judged
+     * on the raw value, so
      * a bad one is this named violation rather than a binding stack trace; unset uses the yml
      * default.
      */

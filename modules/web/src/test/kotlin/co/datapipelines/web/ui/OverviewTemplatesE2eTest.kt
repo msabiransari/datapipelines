@@ -17,6 +17,7 @@ import com.zaxxer.hikari.HikariDataSource
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
+import org.jsoup.Jsoup
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -26,6 +27,7 @@ import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.test.annotation.DirtiesContext
+import java.time.Instant
 import java.util.UUID
 
 /**
@@ -166,6 +168,29 @@ class OverviewTemplatesE2eTest {
         val counted: Long,
     )
 
+    /**
+     * #599 A.2 — the Templates home from a real read: the chart group renders a strip whose four exclusive
+     * groups sum to Total, the inventory's objects, and the page carries the family's guide words, the
+     * starter prompt equal to today's text. RED at the base: the family had no chart group there.
+     */
+    @Test
+    fun `the strip's four metrics sum to Total and the page carries the family's words`() {
+        val now = Instant.now()
+        val charts =
+            inventory.chartsFor(
+                NavigationFamily.TEMPLATES,
+                workspace,
+                LensedView.EVERYTHING,
+                now,
+                OverviewRenderSupport.ACTIVE_DAYS,
+            )
+        val page = OverviewPage.of(OverviewPage.Family.TEMPLATES, false, charts, RecentResult.Available(emptyList()), now)
+        val doc = Jsoup.parse(OverviewRenderSupport.html(page))
+
+        OverviewRenderSupport.assertStripSumsTo(doc, counted(ReadLens.Everything).objects)
+        OverviewRenderSupport.assertGuideWords(doc, OverviewPage.Family.TEMPLATES, WORDS)
+    }
+
     private fun equalityTable(
         lens: ReadLens,
         counted: Inventory,
@@ -254,6 +279,36 @@ class OverviewTemplatesE2eTest {
     }
 
     private companion object {
+        /**
+         * #599 — the templates guide's words; [OverviewRenderSupport.GuideWords.prompt] is the
+         * textarea's text at the base, byte for byte.
+         */
+        val WORDS =
+            OverviewRenderSupport.GuideWords(
+                subtitle = "Reuse query and transformation logic across requests. Understand what’s live and what’s next.",
+                headline = "From a query to a reusable template.",
+                sentence =
+                    "Write the logic once with parameters, so the same template answers different requests.",
+                steps =
+                    listOf(
+                        "Describe" to "The query, its inputs and its dialect.",
+                        "Build" to "Your agent creates a draft and renders it.",
+                        "Review" to "Try it with your own inputs. Release when ready.",
+                    ),
+                prompt =
+                    "In workspace acme, create or reuse a draft template for [query or transformation]. Its inputs are " +
+                        "[parameters/input shape] and its output should be [columns or structure]. Read the current template " +
+                        "guide, inspect the source or input contract, and use the appropriate supported dialect or engine. " +
+                        "Render or test it with representative inputs and explain the output contract and limitations. Return " +
+                        "its name/version, draft link and validation evidence. Leave release to me.",
+                howItWorksTitle = "Create, render, then release",
+                howItWorks =
+                    "Templates hold reusable query or transformation logic that other resources can use. Parameters let " +
+                        "the same logic answer different requests without duplicating it. For example, aggregate trips by " +
+                        "zone for a selected period.",
+                related = listOf("/overview/pipelines"),
+            )
+
         const val PAGE = 100
     }
 }

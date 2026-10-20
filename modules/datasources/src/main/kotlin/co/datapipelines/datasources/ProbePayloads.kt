@@ -3,9 +3,6 @@ package co.datapipelines.datasources
 import co.datapipelines.typesystem.LogicalType
 import co.datapipelines.typesystem.ParameterCoercion
 import co.datapipelines.typesystem.ParameterLift
-import java.time.Instant
-import java.time.OffsetDateTime
-import java.time.ZoneOffset
 
 /*
  * The §7D SQL-probe payloads, one home per the `SchemaPayloads` precedent. The wire projections
@@ -76,18 +73,6 @@ internal fun SqlProbeParameter.toJdbcValue(parameter: String): Any? {
         is ParameterCoercion.Outcome.Rejected -> throw SqlProbeParameterException.coercion(parameter, type)
     }
 }
-
-/**
- * The JDBC form of a canonical value — the [ReadOnlyStatementLease] rule verbatim: spring-jdbc's
- * `TYPE_UNKNOWN` path hands anything but a String, a `java.util.Date` or a Calendar to `setObject`,
- * and pgjdbc cannot infer a SQL type for an `Instant` ("Can't infer the SQL type to use for an
- * instance of java.time.Instant"), so an `Instant` binds as an `OffsetDateTime` at UTC — what the
- * coercion produces for TIMESTAMP, and what every pinned driver maps to `timestamptz`. Every other
- * canonical value the coercion returns (String, BigDecimal, BigInteger, Boolean, Int, ByteArray,
- * LocalDate, LocalTime) binds through the drivers' own table. The conversion changes only the
- * value's Java form, never what is bound.
- */
-private fun jdbcForm(value: Any?): Any? = if (value is Instant) OffsetDateTime.ofInstant(value, ZoneOffset.UTC) else value
 
 /**
  * A summarized EXPLAIN plan. [scan] is the short per-dialect access description (`seq`,

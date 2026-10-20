@@ -1,12 +1,12 @@
 package co.datapipelines.web.ui
 
 import co.datapipelines.application.lens.LensedView
+import co.datapipelines.pipeline.Activity
+import co.datapipelines.pipeline.ChartInventory
 import co.datapipelines.pipeline.Inventory
 import co.datapipelines.pipeline.NavigationFamily
 import co.datapipelines.pipeline.RecentRow
-import co.datapipelines.pipeline.SearchNeedle
 import co.datapipelines.visualization.DashboardRepository
-import co.datapipelines.web.ui.site.REPORT_PROBLEM_URL
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.nulls.shouldBeNull
@@ -19,35 +19,17 @@ import io.mockk.mockk
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.junit.jupiter.api.Test
-import org.springframework.mock.web.MockHttpServletRequest
-import org.springframework.mock.web.MockHttpServletResponse
-import org.springframework.mock.web.MockServletContext
-import org.thymeleaf.context.WebContext
-import org.thymeleaf.spring6.SpringTemplateEngine
-import org.thymeleaf.templateresolver.ClassLoaderTemplateResolver
-import org.thymeleaf.web.servlet.JakartaServletWebApplication
 import java.time.Instant
 import java.util.UUID
 
 /**
  * #580 — the Dashboards overview at the RENDER (`overview/family.html` + `overview/guide-dashboards.html`):
- * the guide's introduction, steps, starter prompt and related links; the bars, counts and Review
- * drafts filtering the dashboards catalog; the framework's Unavailable and empty states reached
- * through UiConfig's production [FamilyInventory] and [FamilyRecent] over a [DashboardRepository]
- * stub; and the path rule's singular trap.
+ * the guide's introduction, steps, starter prompt and related links; the strip and the task rows
+ * filtering the dashboards catalog (#599: the lifecycle home); the framework's Unavailable and empty
+ * states reached through UiConfig's production [FamilyInventory] and [FamilyRecent] over a
+ * [DashboardRepository] stub; and the path rule's singular trap.
  */
 class OverviewDashboardsRenderTest {
-    private val engine =
-        SpringTemplateEngine().apply {
-            setTemplateResolver(
-                ClassLoaderTemplateResolver().apply {
-                    prefix = "templates/"
-                    suffix = ".html"
-                    characterEncoding = "UTF-8"
-                },
-            )
-        }
-
     @Test
     fun `the guide renders the introduction, the steps, the starter prompt and the related families`() {
         val html = html(page(Inventory(1, 0, 0, 0)), workspace = "<b>acme</b>")
@@ -81,16 +63,16 @@ class OverviewDashboardsRenderTest {
     }
 
     @Test
-    fun `the dashboards links filter the catalog and the discarded bar stays unlinked`() {
+    fun `the dashboards strip links the filtered catalog and Retired stays unlinked`() {
         val doc = render(page(Inventory(1, 1, 1, 1)))
 
-        doc.select("[data-overview-chart] [data-bar] a").map { it.attr("href") } shouldContainExactly
-            listOf("/dashboards?lifecycle=draft", "/dashboards?lifecycle=released", "/dashboards?lifecycle=released-with-draft")
-        doc.selectFirst("[data-bar=discarded] a").shouldBeNull()
         doc.select("[data-overview-inventory] [data-count] a").map { it.attr("href") } shouldContainExactly
-            listOf("/dashboards?lifecycle=with-drafts", "/dashboards?lifecycle=with-releases")
+            listOf("/dashboards?lifecycle=released", "/dashboards?lifecycle=draft", "/dashboards?lifecycle=released-with-draft")
+        doc.selectFirst("[data-count=retired] a").shouldBeNull()
         doc.selectFirst("[data-overview-view-all]")!!.attr("href") shouldBe "/dashboards"
-        doc.selectFirst("[data-overview-review]")!!.attr("href") shouldBe "/dashboards?lifecycle=with-drafts"
+        doc.select("[data-task] a").map { it.attr("href") } shouldContainExactly
+            listOf("/dashboards?lifecycle=draft", "/dashboards?lifecycle=released")
+        doc.selectFirst("[data-overview-review]").shouldBeNull()
     }
 
     /**
@@ -102,13 +84,13 @@ class OverviewDashboardsRenderTest {
     fun `a throwing dashboards repository is unavailable with no digit, an answering one renders its counts`() {
         val failing =
             mockk<DashboardRepository> {
-                every { inventory(any(), any()) } throws IllegalStateException("database down")
+                every { charts(any(), any(), any(), any()) } throws IllegalStateException("database down")
                 every { recent(any(), any(), any()) } throws IllegalStateException("database down")
             }
         val down = render(through(failing))
         val area = down.selectFirst("[data-overview-inventory]").shouldNotBeNull()
         area.selectFirst("[data-overview-unavailable]").shouldNotBeNull().text() shouldContain "Inventory could not be read."
-        area.select("[data-overview-chart], [data-count], [data-overview-table]").shouldBeEmpty()
+        area.select("[data-overview-panel], [data-count], [data-overview-table]").shouldBeEmpty()
         Regex("""\d""").containsMatchIn(area.text()) shouldBe false
         down.selectFirst("[data-overview-recent]")!!.text() shouldContain "Recently updated could not be read."
         down.selectFirst("textarea#overview-prompt").shouldNotBeNull()
@@ -116,13 +98,18 @@ class OverviewDashboardsRenderTest {
         val id = UUID.fromString("00000000-0000-0000-0000-000000000580")
         val answering =
             mockk<DashboardRepository> {
-                every { inventory(any(), any()) } returns Inventory(4, 2, 2, 1)
+                every { charts(any(), any(), any(), any()) } returns
+                    OverviewRenderSupport.chartsOf(Inventory(4, 2, 2, 1), Activity.empty(NOW, OverviewRenderSupport.ACTIVE_DAYS))
                 every { recent(any(), any(), any()) } returns listOf(RecentRow(id, "acme/boards/sales", NOW.minusSeconds(60), true))
             }
         val up = render(through(answering))
-        up.select("[data-overview-inventory] [data-count] dd.app-overview-count-v").map { it.text() } shouldContainExactly
-            listOf("9", "6", "4", "1")
-        val row = up.selectFirst("[data-overview-recent] li").shouldNotBeNull()
+        up
+            .select(
+                "[data-overview-inventory] dl.app-overview-counts [data-count] .app-overview-count-v",
+            ).map { it.text() } shouldContainExactly
+            listOf("9", "2", "4", "0")
+        up.select("[data-overview-foot] [data-count] .app-overview-count-v").map { it.text() } shouldContainExactly listOf("2", "1")
+        val row = up.selectFirst("[data-overview-recent] .app-overview-recent li").shouldNotBeNull()
         row.selectFirst("a")!!.attr("href") shouldBe "/dashboards/$id"
         row.selectFirst(".ds-badge")!!.text() shouldBe "draft"
     }
@@ -131,14 +118,15 @@ class OverviewDashboardsRenderTest {
     fun `an empty workspace shows zeros, the empty recent line and the prompt`() {
         val empty =
             mockk<DashboardRepository> {
-                every { inventory(any(), any()) } returns Inventory(0, 0, 0, 0)
+                every { charts(any(), any(), any(), any()) } returns ChartInventory.empty(NOW, OverviewRenderSupport.ACTIVE_DAYS)
                 every { recent(any(), any(), any()) } returns emptyList()
             }
         val doc = render(through(empty))
 
-        doc.select("[data-overview-inventory] [data-count] dd.app-overview-count-v").map { it.text() } shouldContainExactly
-            listOf("0", "0", "0", "0")
-        doc.select("[data-overview-chart] rect").map { it.attr("width") } shouldContainExactly listOf("0", "0", "0", "0")
+        doc.select("[data-overview-inventory] [data-count] .app-overview-count-v").map { it.text() }.distinct() shouldContainExactly
+            listOf("0")
+        doc.select("[data-column] rect").map { it.attr("height") }.distinct() shouldContainExactly listOf("0")
+        doc.select("[data-overview-panel=maturity] rect").map { it.attr("width") }.distinct() shouldContainExactly listOf("0")
         doc.selectFirst("[data-overview-recent-empty]").shouldNotBeNull()
         doc.selectFirst("textarea#overview-prompt").shouldNotBeNull()
     }
@@ -159,7 +147,7 @@ class OverviewDashboardsRenderTest {
         return OverviewPage.of(
             OverviewPage.Family.DASHBOARDS,
             false,
-            inventory.forFamily(NavigationFamily.DASHBOARDS, workspace, LensedView.EVERYTHING),
+            inventory.chartsFor(NavigationFamily.DASHBOARDS, workspace, LensedView.EVERYTHING, NOW, OverviewRenderSupport.ACTIVE_DAYS),
             recent.forFamily(NavigationFamily.DASHBOARDS, workspace, LensedView.EVERYTHING),
             NOW,
         )
@@ -169,7 +157,7 @@ class OverviewDashboardsRenderTest {
         OverviewPage.of(
             OverviewPage.Family.DASHBOARDS,
             false,
-            InventoryResult.Available(inventory),
+            ChartsResult.Available(OverviewRenderSupport.chartsOf(inventory, Activity.empty(NOW, OverviewRenderSupport.ACTIVE_DAYS))),
             RecentResult.Available(emptyList()),
             NOW,
         )
@@ -180,28 +168,7 @@ class OverviewDashboardsRenderTest {
         page: OverviewPage,
         workspace: String = "acme",
         canAuthor: Boolean = true,
-    ): String {
-        val path = "/overview/${page.family}"
-        val context =
-            WebContext(
-                JakartaServletWebApplication
-                    .buildApplication(MockServletContext())
-                    .buildExchange(MockHttpServletRequest(), MockHttpServletResponse()),
-            ).withRoles(canAuthor = canAuthor)
-        context.setVariable("_csrf", mapOf("token" to "t", "parameterName" to "_csrf"))
-        context.setVariable("workspaceHeaderFragment", "")
-        context.setVariable("workspaceOptions", emptyList<Any>())
-        context.setVariable("activeWorkspace", workspace)
-        context.setVariable("activeTheme", "saas")
-        context.setVariable("authenticated", true)
-        context.setVariable("currentPath", path)
-        context.setVariable("crumbGroup", AppNav.crumbFor(path)?.first)
-        context.setVariable("crumbPage", AppNav.crumbFor(path)?.second)
-        context.setVariable("searchMaxLength", SearchNeedle.MAX_LENGTH)
-        context.setVariable("reportProblemUrl", REPORT_PROBLEM_URL)
-        context.setVariable(OverviewController.MODEL, page)
-        return engine.process(OverviewController.VIEW, context)
-    }
+    ): String = OverviewRenderSupport.html(page, workspace, canAuthor)
 
     private companion object {
         val NOW: Instant = Instant.parse("2026-10-18T05:00:00Z")

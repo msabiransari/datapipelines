@@ -1,13 +1,17 @@
 package co.datapipelines.browser
 
 import io.kotest.assertions.withClue
-import io.kotest.matchers.doubles.shouldBeGreaterThan
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldStartWith
 import org.junit.jupiter.api.Test
 
-/** #581 — Visualizations menu, clipboard outcomes without requests, navigation and workspace isolation. */
+/**
+ * #581 — Visualizations menu, clipboard outcomes without requests, navigation and workspace isolation.
+ * #599: the page is the v2 lifecycle home — the summary strip and its foot, the twelve weeks' columns and
+ * the release-history bins are the workspace's two drafts; the definitions dialog opens from the foot and
+ * gives focus back; the screenshots land in build/reports/599-object-family-homes.
+ */
 class OverviewVisualizationsBrowserTest : VisualizationBrowserSuite() {
     private fun stubClipboard(refuse: Boolean) {
         page.evaluate(
@@ -34,7 +38,7 @@ class OverviewVisualizationsBrowserTest : VisualizationBrowserSuite() {
     private fun count(key: String): String = page.locator("[data-count='$key'] .app-overview-count-v").innerText().trim()
 
     @Test
-    fun `the Visualizations item lands on the overview with its browser tree, inventory, chart and recent list`() {
+    fun `the Visualizations item lands on the v2 home with its browser tree, strip, columns, bins and recent list`() {
         startTrace()
         ready("viz-overview")
         createVisualization("acme/charts/one")
@@ -44,15 +48,21 @@ class OverviewVisualizationsBrowserTest : VisualizationBrowserSuite() {
         page.locator(".app-nav-link.active").getAttribute("data-nav-section") shouldBe "/visualizations"
         page.locator("#app-crumbs .app-crumb-page").innerText().trim() shouldBe "Visualizations"
         page.locator("#app-browser").isVisible shouldBe true
-        count("objects") shouldBe "2"
-        count("with-releases") shouldBe "0"
-        count("with-drafts") shouldBe "2"
-        page.locator("[data-bar='draft'] .app-overview-bar-v").innerText().trim() shouldBe "2"
-        page.locator("[data-bar='draft'] rect").getAttribute("width") shouldBe "100.0"
-        page.locator("[data-bar='released'] rect").getAttribute("width") shouldBe "0.0"
-        val chart = page.locator("[data-overview-chart]").boundingBox()
-        println("581-overview chart height=${chart.height} width=${chart.width}")
-        chart.height shouldBeGreaterThan 0.0
+        OverviewHomeBrowserSupport.metrics(
+            page,
+            "total" to "2",
+            "live" to "0",
+            "in-development" to "2",
+            "actively-developed" to "2",
+            "live-changes" to "0",
+            "retired" to "0",
+        )
+        page.locator("[data-count='in-development'] a").getAttribute("href") shouldContain "/visualizations?lifecycle=draft"
+        OverviewHomeBrowserSupport.columnsAndBins(page, created = 2, released = 0, "r0:draft-open" to 2, "r1:no-draft" to 0)
+        page.locator("[data-overview-panel='maturity'] [data-bar='r0'] .app-overview-bar-v").innerText().trim() shouldBe "2"
+        page.locator("[data-task='drafts'] small").innerText().trim() shouldBe "2 visualizations are working toward their first release."
+        OverviewHomeBrowserSupport.definitionsRoundTrip(page, total = 2)
+        OverviewHomeBrowserSupport.screenshots(page, "visualizations")
         withClue("Recently updated is newest first: the second draft was created after the first") {
             page.locator("[data-overview-recent] .app-overview-recent li a").allInnerTexts() shouldBe
                 listOf("acme/charts/two", "acme/charts/one")
@@ -126,12 +136,12 @@ class OverviewVisualizationsBrowserTest : VisualizationBrowserSuite() {
         ready("viz-overview")
         createVisualization("acme/charts/one")
         openOverview()
-        count("objects") shouldBe "1"
+        count("total") shouldBe "1"
 
         val second = "second-" + generatedPassword("ws").lowercase()
         createWorkspace(second)
         openOverview()
-        count("objects") shouldBe "0"
+        count("total") shouldBe "0"
         page.locator("#overview-prompt").inputValue() shouldStartWith "In workspace $second, create a draft visualization"
         page.locator("[data-overview-context] b").innerText().trim() shouldBe second
         page.locator("[data-overview-recent-empty]").isVisible shouldBe true

@@ -175,7 +175,7 @@ class OverviewApiRenderTest {
     }
 
     @Test
-    fun `the MCP card is the console's - the placeholder config and the catalog's tool count, no Copy`() {
+    fun `the MCP card is the console's - the placeholder config and the catalog's tool count, and the one Copy config button`() {
         val html = html(page())
         val card = Jsoup.parse(html).select("[data-mcp-connection]").single()
 
@@ -187,7 +187,8 @@ class OverviewApiRenderTest {
         config shouldContain "\"DP-API-Key\": \"dpk_…\""
         card.text() shouldContain "The config wants an MCP key where the placeholder stands"
         card.text() shouldNotContain "top bar"
-        card.select("[data-overview-copy], button").shouldBeEmpty()
+        card.select("[data-mcp-copy]").single().attr("type") shouldBe "button"
+        card.select("[data-overview-copy]").shouldBeEmpty()
         // The only dpk_ on the whole page is the config's placeholder.
         Regex("dpk_").findAll(html).count() shouldBe 1
     }

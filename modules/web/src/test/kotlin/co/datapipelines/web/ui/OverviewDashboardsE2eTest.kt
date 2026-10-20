@@ -26,6 +26,7 @@ import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.mockk.mockk
+import org.jsoup.Jsoup
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -36,6 +37,7 @@ import org.springframework.context.annotation.Configuration
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.test.annotation.DirtiesContext
 import org.springframework.ui.ExtendedModelMap
+import java.time.Instant
 import java.util.UUID
 import javax.sql.DataSource
 
@@ -301,6 +303,30 @@ class OverviewDashboardsE2eTest {
         val counted: Long,
     )
 
+    /**
+     * #599 A.2 — the Dashboards home from a real read: the chart group renders a strip whose four exclusive
+     * groups sum to Total, the inventory's objects, and the page carries the family's guide words, the
+     * starter prompt equal to today's text. RED at the base: the family had no chart group there.
+     */
+    @Test
+    fun `the strip's four metrics sum to Total and the page carries the family's words`() {
+        fixture()
+        val now = Instant.now()
+        val charts =
+            inventory.chartsFor(
+                NavigationFamily.DASHBOARDS,
+                workspace,
+                LensedView.EVERYTHING,
+                now,
+                OverviewRenderSupport.ACTIVE_DAYS,
+            )
+        val page = OverviewPage.of(OverviewPage.Family.DASHBOARDS, false, charts, RecentResult.Available(emptyList()), now)
+        val doc = Jsoup.parse(OverviewRenderSupport.html(page))
+
+        OverviewRenderSupport.assertStripSumsTo(doc, counted(LensedView.EVERYTHING).objects)
+        OverviewRenderSupport.assertGuideWords(doc, OverviewPage.Family.DASHBOARDS, WORDS)
+    }
+
     private fun equalityTable(
         view: LensedView,
         counted: Inventory,
@@ -501,6 +527,40 @@ class OverviewDashboardsE2eTest {
                 DashboardRepository(jdbc),
                 VisualizationRepository(jdbc),
                 ParameterSetRepository(jdbc),
+            )
+    }
+
+    private companion object {
+        /**
+         * #599 — the dashboards guide's words; [OverviewRenderSupport.GuideWords.prompt] is the
+         * textarea's text at the base, byte for byte.
+         */
+        val WORDS =
+            OverviewRenderSupport.GuideWords(
+                subtitle = "Bring results, visualizations and controls together in one view. Understand what’s live and what’s next.",
+                headline = "From a question to a dashboard.",
+                sentence =
+                    "Combine pipeline results, visualizations and controls so people can explore a question without " +
+                        "rebuilding the analysis.",
+                steps =
+                    listOf(
+                        "Describe" to "The audience, question, sources and filters.",
+                        "Build" to "Your agent creates, validates and tests a draft.",
+                        "Review" to "Refresh the board on live data. Release when ready.",
+                    ),
+                prompt =
+                    "In workspace acme, build a draft dashboard that helps [audience] answer [question]. Use [existing " +
+                        "pipelines or ask me to choose sources], include [charts, tables or KPIs], and provide [filters]. " +
+                        "Read the current dashboard guide, reuse suitable resources, verify the source-output and " +
+                        "visualization-input contracts, validate the dashboard and run the supported visualization tests. " +
+                        "Explain any live-data behavior I still need to check in the UI. Return the draft link, dependencies " +
+                        "and test evidence. Leave release to me.",
+                howItWorksTitle = "Create, validate, then release",
+                howItWorks =
+                    "Dashboards bring pipeline results, visualizations and controls together in one view. They help " +
+                        "people explore a question and compare outcomes without rebuilding the underlying analysis. For " +
+                        "example, combine trip volume and market-share charts with borough and period filters.",
+                related = listOf("/overview/pipelines", "/overview/visualizations", "/overview/parameter-sets"),
             )
     }
 }

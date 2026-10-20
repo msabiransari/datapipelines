@@ -20,6 +20,8 @@ import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.EnumSource
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.context.annotation.Bean
@@ -53,6 +55,7 @@ class OverviewE2eTest {
     private val service: PipelineService by lazy { pipelineServiceOver(repository) }
     private val workspace = UUID.randomUUID()
     private val otherWorkspace = UUID.randomUUID()
+    private val familyWorkspace = UUID.randomUUID()
     private val actor = UUID.randomUUID()
 
     @BeforeEach
@@ -61,7 +64,7 @@ class OverviewE2eTest {
             "INSERT INTO users (id, email, display_name, provider, provider_subject) VALUES (:id, :email, 'Overview', 'google', :email)",
             mapOf("id" to actor, "email" to "$actor@overview.test"),
         )
-        listOf(workspace, otherWorkspace).forEach { id ->
+        listOf(workspace, otherWorkspace, familyWorkspace).forEach { id ->
             jdbc.update(
                 "INSERT INTO workspaces (id, name, display_name) VALUES (:id, :name, 'Overview')",
                 mapOf(
@@ -84,8 +87,8 @@ class OverviewE2eTest {
 
     @AfterEach
     fun cleanOwnRows() {
-        val params = mapOf("ids" to listOf(workspace, otherWorkspace))
-        jdbc.update("DELETE FROM pipelines WHERE workspace_id IN (:ids)", params)
+        val params = mapOf("ids" to listOf(workspace, otherWorkspace, familyWorkspace))
+        NavigationFamily.entries.forEach { jdbc.update("DELETE FROM ${it.table} WHERE workspace_id IN (:ids)", params) }
         jdbc.update("DELETE FROM workspaces WHERE id IN (:ids)", params)
         jdbc.update("DELETE FROM users WHERE id = :id", mapOf("id" to actor))
     }
@@ -184,6 +187,112 @@ class OverviewE2eTest {
         unlensed.maturity.map { it.draftOpen to it.noDraft } shouldBe listOf(2L to 2L, 2L to 2L, 0L to 1L, 0L to 0L, 0L to 0L)
         unlensed.activity.activelyDeveloped shouldBe 4L
         unlensed.activity.weeks.sumOf { it.released } shouldBe 6L
+    }
+
+    /**
+     * #599 — every family's home reads ITS OWN chart group from a real statement. All five families
+     * are seeded into one workspace, each with a different number of fresh draft-only objects (the
+     * family's ordinal + 1), so a family that read another's rows — an artifact repository ignoring
+     * its kind, a `chartsFor` arm pointing at the wrong repository — counts the wrong number. Each
+     * family also holds one stale draft (written before the window), one object released twice, one
+     * released with a draft and one discarded; every object was created now.
+     */
+    @ParameterizedTest
+    @EnumSource(NavigationFamily::class)
+    fun `each family's chart group is its own seeded lifecycle, weeks and actively developed`(family: NavigationFamily) {
+        NavigationFamily.entries.forEach(::seedFamily)
+        val now = Instant.now()
+        val fresh = family.ordinal + 1L
+        val charts = familyCharts(family, ReadLens.Everything, now)
+        println("event=599.overview.charts family=$family lens=everything $charts")
+
+        charts.lifecycle shouldBe Inventory(draftOnly = fresh + 1, releasedOnly = 1, releasedWithDraft = 1, discardedOnly = 1)
+        charts.maturity.map { it.draftOpen to it.noDraft } shouldBe listOf(fresh + 1 to 1L, 1L to 0L, 0L to 1L, 0L to 0L, 0L to 0L)
+        withClue("the twelve weeks sum to the seeded creations and releases (a discarded version is no release)") {
+            charts.activity.weeks.sumOf { it.created } shouldBe charts.lifecycle.objects
+            charts.activity.weeks.sumOf { it.released } shouldBe SEEDED_RELEASES
+            withClue("every object was created in the week that holds now") {
+                charts.activity.weeks
+                    .last()
+                    .created shouldBe charts.lifecycle.objects
+            }
+        }
+        withClue("actively developed = the drafts written inside the $ACTIVE_DAYS-day window; the stale draft is not") {
+            charts.activity.activelyDeveloped shouldBe fresh + 1
+            charts.activity.windowDays shouldBe ACTIVE_DAYS
+        }
+
+        val narrowed = familyCharts(family, ReadLens.Only(setOf("f/released", "f/both", "f/draft_0")), now)
+        println("event=599.overview.charts family=$family lens=narrowed $narrowed")
+        withClue("a narrowed lens admits RELEASED rows only: two released objects, no draft, nobody developing") {
+            narrowed.lifecycle shouldBe Inventory(draftOnly = 0, releasedOnly = 2, releasedWithDraft = 0, discardedOnly = 0)
+            narrowed.activity.activelyDeveloped shouldBe 0L
+            narrowed.activity.weeks.sumOf { it.released } shouldBe SEEDED_RELEASES
+        }
+    }
+
+    private fun familyCharts(
+        family: NavigationFamily,
+        lens: ReadLens,
+        now: Instant,
+    ) = (inventory.chartsFor(family, familyWorkspace, familyView(family, lens), now, ACTIVE_DAYS) as ChartsResult.Available).charts
+
+    private fun familyView(
+        family: NavigationFamily,
+        lens: ReadLens,
+    ): LensedView =
+        LensedView(
+            pipelines = if (family == NavigationFamily.PIPELINES) lens else ReadLens.NOTHING,
+            templates = if (family == NavigationFamily.TEMPLATES) lens else ReadLens.NOTHING,
+            parameterSets = if (family == NavigationFamily.PARAMETER_SETS) lens else ReadLens.NOTHING,
+            visualizations = if (family == NavigationFamily.VISUALIZATIONS) lens else ReadLens.NOTHING,
+            dashboards = if (family == NavigationFamily.DASHBOARDS) lens else ReadLens.NOTHING,
+        )
+
+    private fun seedFamily(family: NavigationFamily) {
+        repeat(family.ordinal + 1) { seedObject(family, "f/draft_$it", listOf("DRAFT")) }
+        seedObject(family, "f/stale_draft", listOf("DRAFT"), draftWrittenDaysAgo = ACTIVE_DAYS + 1L)
+        seedObject(family, "f/released", listOf("RELEASED", "RELEASED"))
+        seedObject(family, "f/both", listOf("RELEASED", "DRAFT"))
+        seedObject(family, "f/discarded", listOf("DISCARDED"))
+    }
+
+    /** One object of [family] in the family workspace, its versions stamped now (a draft's write [draftWrittenDaysAgo] back). */
+    private fun seedObject(
+        family: NavigationFamily,
+        name: String,
+        statuses: List<String>,
+        draftWrittenDaysAgo: Long = 0,
+    ) {
+        val id = UUID.randomUUID()
+        val owner = if (family == NavigationFamily.PIPELINES) "owner_id" else "created_by"
+        val current = statuses.indexOfLast { it == "RELEASED" }.takeIf { it >= 0 }?.plus(1)
+        jdbc.update(
+            "INSERT INTO ${family.table} (id, workspace_id, name, display_name, current_version, $owner) " +
+                "VALUES (:id, :workspace, :name, :name, :current, :actor)",
+            mapOf("id" to id, "workspace" to familyWorkspace, "name" to name, "current" to current, "actor" to actor),
+        )
+        val contentColumns = if (family == NavigationFamily.TEMPLATES) "body, dialect" else "body_json"
+        val content = if (family == NavigationFamily.TEMPLATES) "'select 1', 'POSTGRES'" else "CAST('{}' AS jsonb)"
+        val versions = family.table.removeSuffix("s") + "_versions"
+        statuses.forEachIndexed { index, status ->
+            jdbc.update(
+                "INSERT INTO $versions (${family.foreignKey}, version, $contentColumns, status, body_hash, created_by, " +
+                    "released_at, released_by, discarded_at, discarded_by, created_at, updated_at) " +
+                    "VALUES (:id, :version, $content, :status, :hash, :actor, " +
+                    "CASE WHEN :status <> 'DRAFT' THEN NOW() END, CASE WHEN :status <> 'DRAFT' THEN :actor END, " +
+                    "CASE WHEN :status = 'DISCARDED' THEN NOW() END, CASE WHEN :status = 'DISCARDED' THEN :actor END, " +
+                    "NOW() - make_interval(days => :ago), NOW() - make_interval(days => :ago))",
+                mapOf(
+                    "id" to id,
+                    "version" to index + 1,
+                    "status" to status,
+                    "hash" to "a".repeat(64),
+                    "actor" to actor,
+                    "ago" to if (status == "DRAFT") draftWrittenDaysAgo.toInt() else 0,
+                ),
+            )
+        }
     }
 
     private fun charts(lens: ReadLens) =
@@ -285,5 +394,8 @@ class OverviewE2eTest {
     private companion object {
         const val PAGE = 100
         const val ACTIVE_DAYS = 14
+
+        /** Per family: `f/released`'s two releases and `f/both`'s one. */
+        const val SEEDED_RELEASES = 3L
     }
 }
