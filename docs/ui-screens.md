@@ -1,9 +1,9 @@
 # UI Screens Inventory
 
-**Status:** v1.188
+**Status:** v1.189
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
-**Last updated:** 2026-10-20 (#home-ops; #home-frame; #610; #618; #627; #625; #598b); 2026-10-19 (#598a merge follow-up; #617; #609; #598a; #605; #619; #585; #584; #613; #509; #608; #614 + #611; #612; #615); 2026-10-18 (#583; #573; #607; #606; #565; #582; #581; #580; #579); 2026-10-17 (#556; #578; #554); 2026-10-16 (#551 merge follow-up; #551; #555; #552; #553; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
+**Last updated:** 2026-10-20 (#599; #home-ops; #home-frame; #610; #618; #627; #625; #598b); 2026-10-19 (#598a merge follow-up; #617; #609; #598a; #605; #619; #585; #584; #613; #509; #608; #614 + #611; #612; #615); 2026-10-18 (#583; #573; #607; #606; #565; #582; #581; #580; #579); 2026-10-17 (#556; #578; #554); 2026-10-16 (#551 merge follow-up; #551; #555; #552; #553; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
 ---
 
 ## 1. Purpose
@@ -1305,7 +1305,7 @@ Guards: `DatasourceOverviewControllerTest` (the model: tile, charts, buckets, re
 |---|---|
 | URL | `GET /templates` (`?q=` — the deep link every "find this template" link uses; the search covers id/path, display name, description and the dialect badge's wire value, the §5.1 Search rule) |
 | Auth required | Yes (`read` to browse; `author` to create — the create button is role-gated per [§4.3e](#43e-role-visibility--every-verb-and-the-role-boolean-that-renders-it-114-normative)) |
-| Purpose | The **catalog**: one flat, server-paged list of full paths — every template the caller may read when `q` is empty, or the matches of `q` — with the dialect and type filters, and (an author's) the create modal. Each row links into the template workspace (§4.7). The folder TREE is the sidebar's (§3.4). The menu's Templates item lands on `/overview/templates` (§4.25, #579), whose View all, bars, counts and Review drafts lead here — the bars and counts with `?lifecycle=` (the five offered buckets; `discarded` and unknown values are the house 400) |
+| Purpose | The **catalog**: one flat, server-paged list of full paths — every template the caller may read when `q` is empty, or the matches of `q` — with the dialect and type filters, and (an author's) the create modal. Each row links into the template workspace (§4.7). The folder TREE is the sidebar's (§3.4). The menu's Templates item lands on `/overview/templates` (§4.25, #579), whose View all, linked metrics (since #599 the summary strip's and its foot's) and Review your drafts lead here — the metrics and the row with `?lifecycle=` (the five offered buckets; `discarded` and unknown values are the house 400) |
 | Design primitives | `.ds-input`, `.ds-badge`, `.ds-button`, `.ds-empty`; the rows are `template-tree.css`'s `.tpl-results` / `a.tpl-result`; the create modal is `.u-backdrop` + `.ds-card` |
 | JS | the create modal's lifecycle (`/js/template-create-modal.js`: open/close, inline refusal, dialect-conditional-on-type, the transform blocks); none of its own otherwise — `tree/sidebar.mjs` owns **Browse folders** (`data-nav-tree-reveal`), which shows the resource browser's Templates tree and puts focus in its search |
 | htmx | the search input and the two filter selects re-fetch ONLY the list into its stable root `#template-list-wrapper` (`GET /partials/templates`, `outerHTML`); the sidebar uses REST tree/search (§3.4) |
@@ -2252,7 +2252,7 @@ Guards: `ScheduleSummaryTest` (every run state in exactly one bucket; the counts
 |---|---|
 | URL | `GET /dashboards` (`?q=&lifecycle=&offset=` the deep links) |
 | Auth required | Yes — `dashboard.read`, every role (a promoter through the lens: released dashboards whose every source pipeline her pipeline lens admits; a hidden one is absent from the list) |
-| Purpose | The flat catalog landing (since #580 the menu's Dashboards item links `/overview/dashboards`, §4.25, which reaches this page through View all, its counts and bars, and Review drafts): every dashboard the caller may read — or the matches of `q` (a dashboard whose name, display name or description contains the term, case-insensitive, `%` and `_` literal; the term trimmed and cut to 200 characters first, #504b) — one row each, a row linking the workspace. The page and the pager's total come from the lensed SQL read, so a match past the 200th dashboard is listed and counted (#512). With `lifecycle` (#580) the list is one lifecycle bucket, chosen by the inventory's own predicate (§4.3's rule): `draft`, `released`, `released-with-draft`, `with-drafts` or `with-releases`; `discarded` is not offered, since a discarded-only dashboard has no workspace page, and an unknown or unoffered value is the house 400 |
+| Purpose | The flat catalog landing (since #580 the menu's Dashboards item links `/overview/dashboards`, §4.25, which reaches this page through View all, the summary strip's linked metrics and Review your drafts — since #599): every dashboard the caller may read — or the matches of `q` (a dashboard whose name, display name or description contains the term, case-insensitive, `%` and `_` literal; the term trimmed and cut to 200 characters first, #504b) — one row each, a row linking the workspace. The page and the pager's total come from the lensed SQL read, so a match past the 200th dashboard is listed and counted (#512). With `lifecycle` (#580) the list is one lifecycle bucket, chosen by the inventory's own predicate (§4.3's rule): `draft`, `released`, `released-with-draft`, `with-drafts` or `with-releases`; `discarded` is not offered, since a discarded-only dashboard has no workspace page, and an unknown or unoffered value is the house 400 |
 | Design primitives | §4.3's catalog shape ([Pipelines](#43-pipelines--the-catalog-page-and-the-resource-browser-350-554), #350's owner ruling — one flat, server-paged list, no tree, no detail pane): `.app-catalog-search`, `.tpl-results`, the shared pager; `dashboards.css` dresses the page's own bits |
 | JS | None of its own — the search control is the htmx SPA pattern (a debounced `hx-get` into the stable `#dash-list-wrapper` root, focus and value preserved) |
 | htmx | Yes — the search, the lifecycle control and the pager re-fetch `GET /partials/dashboards` into `#dash-list-wrapper`, `outerHTML`, each carrying the other's value |
@@ -2381,7 +2381,7 @@ capability page — its public route admits nothing of the workspace.
 |---|---|
 | URL | `GET /parameter-sets` (`?q=` searches it, `?lifecycle=` keeps one inventory bucket, `?offset=` pages it) |
 | Auth required | Yes — `parameter_set.read`, every role (a promoter through the lens: only sets whose current version is RELEASED and admitted; a hidden set is absent — not listed, not counted, not paged, not a search hit) |
-| Purpose | Find a parameter set and open its workspace. Since #582 the menu's Parameter Sets item leads to `/overview/parameter-sets` (§4.25), whose counts and bars link here filtered; View all — the overview's and the resource browser's — lands here unfiltered |
+| Purpose | Find a parameter set and open its workspace. Since #582 the menu's Parameter Sets item leads to `/overview/parameter-sets` (§4.25), whose linked metrics and Review your drafts link here filtered (since #599 the summary strip's); View all — the overview's and the resource browser's — lands here unfiltered |
 | Design primitives | The house list: `.ds-empty` for the empty state, the shared §5 pager; `parameter-sets.css` (`ps-*`), head-loaded (§3.0 is normative) |
 | JS | None of its own |
 | htmx | The route's rows are the same read the sidebar's tree is built from; a row preserves the rail through main-content navigation |
@@ -2644,8 +2644,10 @@ An unguided overview shows the heading, the strip, the panels and Continue your 
 start, no prompt, no placeholder prose.
 
 **The summary strip.** A metric is a label, a value and a help line, read from the same value as
-the charts. A STANDARD family (Templates, Dashboards, Visualizations, Parameter Sets) shows its four
-counts as metrics until #599; Datasources, Schedules and API show their own counts. Pipelines shows:
+the charts. The five lifecycle families (Pipelines; Templates, Dashboards, Visualizations and Parameter
+Sets since #599) show the same four metrics and foot, each in its family's nouns ("Total dashboards",
+"Retired parameter sets have no page."); Datasources, Schedules and API show their own counts.
+Pipelines shows:
 
 - **Total pipelines** (objects; "Across this workspace");
 - **Live** (released only; "Released, with no open changes");
@@ -2662,13 +2664,14 @@ draft changes / Discarded only; #626).
 
 **Lens words, per metric (#621):** the strip's heading reads "Admitted inventory", and the heading's
 sentence names the lens, only when EVERY metric passed the lens. Otherwise each lensed metric carries
-"Admitted inventory: only what your promotion view shows." under its value ("(admitted)" in the foot). The siblings' controllers still give every tile the page's
-flag, so their strips read as before. The API home's keys tiles, which the lens does not narrow, take
-`lensed = false` in the home-ops lane; #621 stays open until then.
+"Admitted inventory: only what your promotion view shows." under its value ("(admitted)" in the foot). Every metric of a lifecycle home passes its family's
+lens (#599), so a promoter's strip there is headed "Admitted inventory". The API home's keys metric,
+which the lens does not narrow, takes `lensed = false` (#home-ops, §4.18a), so a promoter's API strip
+is headed "Inventory".
 
 **View all's badge** counts what the catalog and the resource browser's header count: the three live
-groups, objects minus discarded only (#593). A STANDARD family's badge is the same `objects −
-discardedOnly`, and a lensed page's is the admitted count. An unavailable inventory renders View all
+groups, objects minus discarded only (#593). Every lifecycle home's badge is the same `objects −
+discardedOnly` (#599), and a lensed page's is the admitted count. An unavailable inventory renders View all
 with no badge, and so does a family whose panel names no such count (Datasources, Schedules, API).
 
 **The counting model**, restated once (the record's §8; #553's `FamilyInventory`): one SQL snapshot
@@ -2688,7 +2691,10 @@ A visually hidden table repeats the four rows for assistive technology.
 **The Pipelines charts (#598a, re-cut by #home-frame).** The same snapshot, extended by each
 admitted pipeline's count of RELEASED versions, feeds the strip, its foot and both panels from ONE
 statement. That statement is `ChartInventorySource`, built on `InventorySource`'s own `admitted` CTE
-and its four lifecycle columns.
+and its four lifecycle columns. Since #599 the four object families read the same statement over
+their own object and versions tables (`TemplateRepository.charts`, `ArtifactRepository.charts` for
+dashboards and for visualizations, `ParameterSetRepository.charts`), so everything below about a
+pipeline holds for a template, dashboard, visualization or parameter set, in that family's words.
 
 **Release history** has five bars, one per bin: No releases, 1 release, 2–3, 4–9 and 10+. Each bar
 is the number of pipelines with that many releases, and the tallest is full width. No releases takes
@@ -2705,8 +2711,8 @@ not executions, then the note.
 A release since discarded is not counted (only RELEASED rows are), so a retired pipeline has 0.
 Every pipeline sits in exactly one bin, so the bins total the strip's Total. `ChartInventory` refuses
 a value whose bins disagree with the lifecycle total, and the page then reads unavailable. The
-chart's words are its own: the catalog filter keeps `CatalogLifecycle.label`'s. The other families'
-panels keep their bars and tables.
+chart's words are its own: the catalog filter keeps `CatalogLifecycle.label`'s. Datasources, Schedules
+and API keep their own bars and tables (§4.5d, §4.20a, §4.18a).
 
 The definitions dialog says why Total can exceed the resource browser's header count: "The resource
 browser and View all count the three groups that are not retired: N. Retired pipelines have no
@@ -2761,7 +2767,8 @@ overview links differently, as its model allows: each By-dialect bar links `/dat
 (#home-frame), the strip's Live and In development and the foot's Live with changes link
 `/pipelines?lifecycle=released`, `draft` and `released-with-draft`. Total, Actively developed and
 Retired stay unlinked, as do the release-history bars and the activity legend. The task rows link
-`?lifecycle=draft` and `?lifecycle=released`.
+`?lifecycle=draft` and `?lifecycle=released`. The four object homes (#599) link the same metrics
+and rows to their own catalogs (`/templates`, `/dashboards`, `/visualizations`, `/parameter-sets`).
 
 **The prompt dialog (Pipelines; every guide with a `prompt`).** Create with your agent and
 Prepare a starter prompt open it. The dialog holds:
@@ -2792,7 +2799,9 @@ and the MCP server reference.
   `?lifecycle=draft`;
 - **Explore live pipelines**: linking `?lifecycle=released`.
 
-A family whose catalog offers no such filter gets no row for it. Then comes **Recently updated**:
+A family whose catalog offers no such filter gets no row for it. The four object homes (#599) carry
+the same two rows in their nouns ("1 dashboard is working toward its first release.", "Explore live
+visualizations"). Then comes **Recently updated**:
 up to five pipelines that hold a draft or a release, newest change first. Each is a link to its
 workspace, with a draft badge when it has one and a relative time (the absolute time as its title).
 The time is the latest of the pipeline's own update and its versions' draft write, release and
@@ -2809,6 +2818,17 @@ narrowed inventory admits an object with ANY released version, while the lensed 
 current-pointer rule; the two can differ for an object whose current pointer is not a released version
 (#563). Neither rule changes here.
 
+**Each object home reads its own arm of the lens (#599).** `FamilyInventory.chartsFor` picks the same
+member of the promoter's view that `forFamily` picks, so a family's charts are never narrowed by
+another family's arm. Templates and Parameter Sets are narrowed as Pipelines are: a RELEASED current
+version newer than the target's entry (absent there, or a different body at a higher version). The
+Dashboards and Visualizations arms are **derived** (#330, `PromotableView.dashboardArms`, computed once
+on the first read of either): a dashboard is admitted when its current version is RELEASED, EVERY
+pipeline it sources is admitted by the pipeline arm, and it is newer than the target's entry; a
+visualization is admitted when an admitted dashboard pins it and it is RELEASED (#563). So a draft
+dashboard, a dashboard the target already holds, or a visualization pinned only by that dashboard
+moves no number on either home (`PromoterLensSweepTest` seeds each).
+
 **States.** An inventory that cannot be read says "The inventory is unavailable." with a reason in
 the strip's place. The page then shows no number at all: no panel, no badge, no worded count (the
 drafts row reads "Pipelines working toward their first release."). An unknown count never reads as
@@ -2823,23 +2843,38 @@ Guards:
   digit; links; escaping; unguided families bare. For Pipelines (#home-frame): the strip sums to
   Total; Retired unlinked; the badge = the three live groups; the drafts words; twelve columns,
   oldest first, tiling, each title its table row; the release note = the bins; the dialog's five
-  sections; per-metric lens words.
+  sections; per-metric lens words. For all five lifecycle families (#599, `OverviewRenderSupport`):
+  the strip sums to Total and links the family's own catalog in its own words, an empty workspace
+  draws all-zero panels, and a family without a guide renders the frame bare; the Dashboards,
+  Visualizations and Parameter Sets render tests add their own words.
 - `ChartInventorySourceTest` and `ChartInventorySourceIntegrationTest`: the statement's text and
-  binds; counts against a Kotlin oracle, unlensed and narrowed.
+  binds; counts against a Kotlin oracle, unlensed and narrowed; each family's statement reads its own
+  object and versions tables only (#599).
+- `FamilyInventoryTest` (#599): each family's charts read its own repository with its own lens arm,
+  once; a failed read or an unavailable view is unavailable, never zeros; a failed lazy dashboard
+  derivation makes only the two artifact homes unavailable, and the other families never derive it.
 - `OverviewStackedTest`: random inventories. The strip sums to Total, the badge counts all but
   Retired, every column tiles its own height, the bars are shares of the tallest, and the note is
   worded for none, one, some and all.
 - `ShellRenderTest`: the family paths and the Datasources overview light their item, crumb and
   panel.
 - `FamilyRecentE2eTest`.
-- `OverviewE2eTest`: each catalog lifecycle count equals the inventory's, unlensed and narrowed.
-- `PromoterLensSweepTest`: every metric and table cell through the lens.
+- `OverviewE2eTest`: each catalog lifecycle count equals the inventory's, unlensed and narrowed;
+  each family's chart group is its own seeded lifecycle, weeks and actively developed (#599). Each
+  `Overview<Family>E2eTest` (#599): the strip's four metrics sum to Total in the family's words.
+- `PromoterLensSweepTest`: every metric and table cell through the lens; since #599 every family's
+  home, the promoter's numbers against the viewer's over one seed with hidden drafts and a derived
+  dashboard and visualization arm.
 - `overview.test.mjs`: fill, compose, no overwrite, Reset, open by key, title as text, focus
   return, the borrowed table, backdrop versus inside, zero requests.
 - `OverviewBrowserTest`: the landing, with geometry at 1512 (four equal strip cells, twelve columns
   at one pitch, the plot 192px), no horizontal overflow at 390/768/1024/1280, and screenshots; the
   definitions dialog with Escape and focus return; View data leaves one table; the question composes
   and markup stays words; copy resolves and refuses with zero requests; a workspace switch.
+- `OverviewDashboardsBrowserTest`, `OverviewVisualizationsBrowserTest`,
+  `OverviewParameterSetsBrowserTest` (#599): the strip and foot, the twelve columns and the bins as
+  their tables state them, the definitions dialog with Escape and focus return, Review your drafts
+  landing on the catalog filtered to `draft`, screenshots at 1512 and 390 in both themes.
 - `OverviewToneBrowserTest`: every tone site reads one colour, and the columns' and bars' tones are
   distinct from the track, the panel and the text. On Minimal, two more ΔE-0 rows (In
   development/text, Live/text) are recorded under #631 on the owner's ruling of 2026-10-20.
@@ -2850,10 +2885,10 @@ served (inventory only) and its menu item still links the catalog.
 | Family | Menu item links the overview since | Guide | Recently updated | Catalog `lifecycle` filter |
 |---|---|---|---|---|
 | Pipelines | #556 | `overview/guide-pipelines.html` — subtitle, Quick start, the prompt and How it works dialogs, related: Visualizations, Dashboards, MCP server reference | `PipelineRepository.recent` | `/pipelines?lifecycle=` — every bucket but `discarded` (§4.3); since #home-frame the summary strip and its foot, Development activity (#598b) and Release history (#598a), all from `PipelineRepository.charts`, one statement |
-| Templates | #579 | `overview/guide-templates.html` — related: Pipelines, MCP server reference | `TemplateRepository.recent`, the same `RecentSource` rule; each entry links `/templates/<name>`, every segment URL-encoded (the tree's form) | `/templates?lifecycle=` — every bucket but `discarded` (§4.6); a bucket read places an object by its latest version (`TemplateRepository.listWhere`); `OverviewTemplatesE2eTest` pins each count equal to the inventory's, unlensed and through a narrowed lens |
-| Dashboards | #580 | `overview/guide-dashboards.html` — related: Pipelines, Visualizations, Parameter Sets, MCP server reference | `DashboardRepository.recent`, the same `RecentSource` rule | `/dashboards?lifecycle=` — every bucket but `discarded` (§4.21); `OverviewDashboardsE2eTest` pins each count equal to the inventory's, unlensed and through the promoter's real lens; `OverviewDashboardsRenderTest`, `OverviewDashboardsBrowserTest` |
-| Visualizations | #581 | `overview/guide-visualizations.html` — related: Pipelines, Dashboards, MCP server reference | `VisualizationRepository.recent`, the same `RecentSource` rule; through a narrowed lens, admitted RELEASED versions and their release time alone | `/visualizations?lifecycle=` — every bucket but `discarded` (§4.24); `OverviewVisualizationsE2eTest` pins each count equal to the inventory's, unlensed and through a narrowed lens |
-| Parameter Sets | #582 | `overview/guide-parameter-sets.html` — what parameter sets are for, a starter prompt that drafts a set and checks it by evaluating; related: Templates, Dashboards | `ParameterSetRepository.recent`, the same `RecentSource` rule; each entry links `/parameter-sets/<id>` | `/parameter-sets?lifecycle=` — every bucket but `discarded` (§4.23); guards `OverviewParameterSetsRenderTest`, `OverviewParameterSetsE2eTest`, `OverviewParameterSetsBrowserTest` |
+| Templates | #579 | `overview/guide-templates.html` — since #599 subtitle, Quick start, the prompt and How it works dialogs, related: Pipelines, MCP server reference | `TemplateRepository.recent`, the same `RecentSource` rule; each entry links `/templates/<name>`, every segment URL-encoded (the tree's form) | `/templates?lifecycle=` — every bucket but `discarded` (§4.6); a bucket read places an object by its latest version (`TemplateRepository.listWhere`); `OverviewTemplatesE2eTest` pins each count equal to the inventory's, unlensed and through a narrowed lens; since #599 the summary strip and its foot, Development activity and Release history, all from `TemplateRepository.charts`, one statement |
+| Dashboards | #580 | `overview/guide-dashboards.html` — since #599 subtitle, Quick start, the prompt and How it works dialogs, related: Pipelines, Visualizations, Parameter Sets, MCP server reference | `DashboardRepository.recent`, the same `RecentSource` rule | `/dashboards?lifecycle=` — every bucket but `discarded` (§4.21); `OverviewDashboardsE2eTest` pins each count equal to the inventory's, unlensed and through the promoter's real lens; `OverviewDashboardsRenderTest`, `OverviewDashboardsBrowserTest`; since #599 the summary strip and its foot, Development activity and Release history, all from `ArtifactRepository.charts` (the dashboard kind), one statement |
+| Visualizations | #581 | `overview/guide-visualizations.html` — since #599 subtitle, Quick start, the prompt and How it works dialogs, related: Pipelines, Dashboards, MCP server reference | `VisualizationRepository.recent`, the same `RecentSource` rule; through a narrowed lens, admitted RELEASED versions and their release time alone | `/visualizations?lifecycle=` — every bucket but `discarded` (§4.24); `OverviewVisualizationsE2eTest` pins each count equal to the inventory's, unlensed and through a narrowed lens; since #599 the summary strip and its foot, Development activity and Release history, all from `ArtifactRepository.charts` (the visualization kind), one statement |
+| Parameter Sets | #582 | `overview/guide-parameter-sets.html` — since #599 subtitle, Quick start, the prompt (drafts a set and checks it by evaluating) and How it works dialogs, related: Templates, Dashboards, MCP server reference | `ParameterSetRepository.recent`, the same `RecentSource` rule; each entry links `/parameter-sets/<id>` | `/parameter-sets?lifecycle=` — every bucket but `discarded` (§4.23); guards `OverviewParameterSetsRenderTest`, `OverviewParameterSetsE2eTest`, `OverviewParameterSetsBrowserTest`; since #599 the summary strip and its foot, Development activity and Release history, all from `ParameterSetRepository.charts`, one statement |
 | Datasources (#583) | #583 | `overview/guide-datasources.html` — what datasources are for, a register-first starter prompt; related: Pipelines, Templates, Dashboards, MCP server reference | `DatasourceRepository.recentGrants` — GRANTS, not modifications: `granted_at` newest first, name ASC tie-break, each entry linking `/datasources/<name>`, no lifecycle badge | no `?lifecycle=` filter — the By-dialect bars link the catalog's `?dialect=` filter and the health bars stay unlinked; NOT a browser family (the browser never opens); guards `DatasourceOverviewControllerTest`, `OverviewDatasourcesRenderTest`, `DatasourceRepositoryIntegrationTest`, `WorkspaceSurfacesE2eTest`, `OverviewDatasourcesBrowserTest` |
 | Schedules (#584) | #584 | `overview/guide-schedules.html` — what schedules are for, How to create one (a person's steps, New schedule for an authoring role); NO agent section or starter prompt; related: Pipelines, Executions (a role that reads them), REST reference | `ScheduleService.summary` — Up next (enabled and unblocked, soonest first) and Recently changed (`updated_at`, newest first), each linking `/schedules?id=<id>`, no lifecycle badge | no `?lifecycle=` filter — a schedule has no lifecycle; the By-condition and Last-run bars stay unlinked; NOT a browser family; guards `OverviewSchedulesControllerTest`, `OverviewSchedulesRenderTest`, `ScheduleSummaryIntegrationTest`, `OverviewSchedulesE2eTest`, `OverviewSchedulesBrowserTest` (§4.20a) |
 | API (#585) | #585 | `overview/guide-api-console.html` — what the API is for, How a program gets access (publish / key / call, who does each), a publish starter prompt that never handles a key, the shared MCP card; related: Pipelines, Dashboards, REST/MCP/Claude Code references | two sections, not `RecentSource`: Recently published (`EndpointPublishService.list`, lensed, valid rows only, links `/api-console`) and Recently created keys (the Keys page's narrowing, by name, links `/api-keys`) | no `?lifecycle=` filter — the state bars link the console, the kind bars `/api-keys`; NOT a browser family; guards `OverviewApiInventoryTest`, `OverviewApiControllerTest`, `OverviewApiRenderTest`, `OverviewApiE2eTest`, `OverviewApiBrowserTest` (§4.18a) |
@@ -3023,6 +3058,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-20 | v1.189 | #599 the Templates, Dashboards, Visualizations and Parameter Sets homes on the v2 frame (issue not yet updated: GitHub writes held) | **§4.25:** the four object families are lifecycle homes: the strip of four metrics and its foot, Development activity and Release history, each from its own repository's `charts` (one `ChartInventorySource` statement over its own tables), in its own nouns; every lifecycle home's badge is `objects − discardedOnly`; the task rows and the links reach each family's own catalog; a new paragraph says each home reads its own lens arm and what the derived Dashboards and Visualizations arms admit (`PromotableView.dashboardArms`); the #621 sentence now records home-ops' keys metric; the Guards gain `FamilyInventoryTest`, the per-family render, E2E, sweep and browser cases; the four **Families as built** rows take the Pipelines row's shape (guide fragments, then the charts' source). **§4.6, §4.21, §4.23:** each catalog's Purpose names the strip's linked metrics and Review your drafts in place of the old counts and bars. |
 | 2026-10-20 | v1.188 | #home-ops the Datasources, Schedules and API homes on the v2 frame's regions (provisional id: the issue number replaces it once filed); answers #621 | **§4.5d / §4.18a / §4.20a:** each Frame paragraph is rewritten for the v2 regions — the summary strip's metrics (help as the note; a dot only where it equals its chart's bar), View all's badge, the two charts as bars panels with a description and an info dialog stating the section's counting rule, Continue your work's task rows (Browse datasources; See what runs next; Open the console and, only when the keys read answered, Manage keys) and its related row, Quick start's three short steps with the prompt (text unchanged) and How it works as dialog sections. **#621:** §4.18a's lens sentence now says a promoter's three endpoint metrics each carry the lens note and the keys metric none, so the strip is headed "Inventory". Schedules has no "Unblock" row: the explorer has no condition filter for it. The API's empty endpoints note reads "Quick start says how." (the steps no longer sit above it). Guide and guard sentences updated; every counting rule is unchanged. No route, permission, migration or config key. |
 | 2026-10-20 | v1.187 | #home-frame the home pages' v2 frame and the Pipelines home (provisional id: the issue number replaces it once filed) — renumbered at merge after #610's v1.186 | **§4.25:** the Hierarchy is rewritten as six regions — heading (icon eyebrow, subtitle, View all with its badge, the primary action), summary strip and foot, analytics grid, work grid (Continue your work with task rows, Recently updated and the related links; Quick start), the guide's `extra`, and ONE native `<dialog>` with five server-rendered sections (definitions, releases, activity, prompt, howitworks). New paragraphs give the metric rule, the per-metric lens words (#621: the mechanism; the API keys tiles wait for home-ops), and View all's badge = objects − discarded only (#593). The Pipelines charts are re-worded as columns (activity: twelve weeks, tiled in tenths, the headline the quarter's events, View data moving the table twin into the dialog) and bars (release history at one pitch, #620; the note's sentences = the bins), with every #598a/#598b invariant kept; Actively developed moves to the strip. The prompt dialog: the question field substitutes `[question]` as text, never overwriting an edit; Reset. Guards are updated; OverviewToneBrowserTest records two more Minimal rows under #631 (owner ruling 2026-10-20). **§4.5d / §4.18a / §4.20a:** one Frame sentence each. No route, permission, migration or config key. |
 | 2026-10-20 | v1.186 | #610 the phone top bar drops the breadcrumb — renumbered at merge after #618's v1.185 | **§3.6:** the ≤760px row's topbar cell loses "crumbs (leaf only)" — below the phone band the bar displays NO breadcrumb (the frozen prototype's rule): `.app-crumbs` is `display:none` in app.css's phone block, the element stays in the DOM for shell.js's boosted-swap writes, and `#mode-toggle` inherits the crumbs' `margin-right: auto` right-edge pin. **§3.4:** the breadcrumb bullet records the band and the return at 761. The 761–1100 leaf-only rule (110) and the ≥1101 group are unchanged. `MainFrameBrowserTest`'s four cases pin the hide at 320/390, the band guard at 761/1101 and the anonymous bar at 320. No route, permission, SQL or script change. |
