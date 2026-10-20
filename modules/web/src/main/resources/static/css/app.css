@@ -1360,7 +1360,7 @@ button.app-busy::after {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  background: var(--surface-default);
+  background: var(--surface-overlay);
   border-right: 1px solid var(--border-faint);
 }
 
@@ -1443,23 +1443,78 @@ button.app-busy::after {
   padding: var(--gap-xs) var(--gap-sm);
 }
 
-/* Record §7: a resource label wraps — a long unbroken name included — and never clips or
-   line-clamps; its badges (version, draft, needs review) wrap onto their own line inside
-   the row rather than pushing the row wider. */
-.app-browser .dp-tree-line,
-.app-browser .dp-tree-activate {
+/* Record §5/§7 (#604): a browser row is a card on the overlay surface. The control
+   paints the 12px padding, the 8px radius, the hover tint and the selection tint; the
+   line stays transparent so the surface shows through. The name is its own 12px title
+   that wraps — a long unbroken name included — and never clips or line-clamps; the
+   badges wrap onto their own metadata line in the title's column, 8px under the
+   title's last line, in muted ink. */
+.app-browser .dp-tree-line {
+  display: block;
   min-width: 0;
 }
 
 .app-browser .dp-tree-activate {
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: var(--space-2);
+  row-gap: 0;
+  align-items: start;
+  min-width: 0;
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
   white-space: normal;
   text-align: start;
 }
 
-.app-browser .dp-tree-activate > span:not(.ds-badge) {
+.app-browser .dp-tree-activate:hover {
+  background: var(--surface-hover);
+}
+
+.app-browser .dp-tree-title {
   min-width: 0;
   overflow-wrap: anywhere;
+  font-size: var(--app-text-name);
+  line-height: var(--app-leading-name);
+}
+
+.app-browser .dp-tree-meta {
+  grid-column: 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  min-width: 0;
+  margin-top: var(--space-2);
+  color: var(--text-secondary);
+}
+
+/* A row with no visible badge carries no metadata line at all — the title's box is
+   the row's whole content, with no dead space beneath it. */
+.app-browser .dp-tree-meta:not(:has(> .ds-badge:not([hidden]))) {
+  margin-top: 0;
+}
+
+/* #604: selection is primary ink over the tint on the CONTROL — the generic line
+   paint (the tint on the line, the link-blue ink) is scoped out of the browser. */
+.app-browser .dp-tree-item[aria-selected="true"] > .dp-tree-line {
+  background: transparent;
+  color: var(--text-primary);
+}
+
+.app-browser .dp-tree-item[aria-selected="true"] > .dp-tree-line > .dp-tree-activate {
+  background: var(--surface-selected);
+}
+
+/* #604: the record's 4px rhythm between rows on the browser surface. */
+.app-browser .dp-tree-item + .dp-tree-item {
+  margin-top: var(--space-1);
+}
+
+/* #516's keyboard ring stays on the row LINE (the generic .dp-tree-item:focus-visible
+   rule draws it); inside the browser the focused line takes the card's radius, so the
+   ring follows the control's rounded shape without moving off the line. */
+.app-browser .dp-tree-item:focus-visible > .dp-tree-line {
+  border-radius: var(--radius-md);
 }
 
 .app-browser-foot {

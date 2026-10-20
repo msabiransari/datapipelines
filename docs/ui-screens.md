@@ -1,9 +1,9 @@
 # UI Screens Inventory
 
-**Status:** v1.188
+**Status:** v1.189
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
-**Last updated:** 2026-10-20 (#home-ops; #home-frame; #610; #618; #627; #625; #598b); 2026-10-19 (#598a merge follow-up; #617; #609; #598a; #605; #619; #585; #584; #613; #509; #608; #614 + #611; #612; #615); 2026-10-18 (#583; #573; #607; #606; #565; #582; #581; #580; #579); 2026-10-17 (#556; #578; #554); 2026-10-16 (#551 merge follow-up; #551; #555; #552; #553; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
+**Last updated:** 2026-10-20 (#604; #home-ops; #home-frame; #610; #618; #627; #625; #598b); 2026-10-19 (#598a merge follow-up; #617; #609; #598a; #605; #619; #585; #584; #613; #509; #608; #614 + #611; #612; #615); 2026-10-18 (#583; #573; #607; #606; #565; #582; #581; #580; #579); 2026-10-17 (#556; #578; #554); 2026-10-16 (#551 merge follow-up; #551; #555; #552; #553; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
 ---
 
 ## 1. Purpose
@@ -256,6 +256,23 @@ use buttons. The common renderer owns roving focus, arrow navigation, Home/End a
 separate from current-page selection, and the focus ring answers keyboard focus alone, drawn on the
 focused row's line and never around the subtree its item contains (#516) — a mouse click leaves the
 selected-row tint. Labels use text sinks and fixed vendored lucide icons.
+
+**The row (#604).** The browser column sits on the record's browser surface: `--surface-overlay`, one step
+above the page. A row is a card there — the activate (`.dp-tree-activate`) paints the 12px padding
+(`--space-3`), the 8px radius (`--radius-md`) and the tints: hover `--surface-hover`, selection
+`--surface-selected` with the title in primary ink (`--text-primary`) and the metadata in secondary
+(`--text-secondary`) — the record's primary-ink selection, not the link blue the other trees keep. The
+name is its own region, `span.dp-tree-title` at the **resource name** role (`--app-text-name`, 12px on
+1.55 leading) wrapping at `overflow-wrap: anywhere` — a long unbroken name included, never clipped or
+line-clamped. The badges live in a trailing `span.dp-tree-meta` — the same column as the title, 8px
+(`--space-2`) under its last line, flex-wrapped, always present in the DOM so the title's box never
+changes when a badge appears or leaves, and carrying no margin at all when no badge is visible. The row's
+DOM contract is kept: the control stays the line's first child (folders' is a button, leaves' an anchor
+whose `title` is the full path), the icon region leads it, and every `aria` attribute is untouched. Rows
+sit 4px (`--space-1`) apart, and the #516 keyboard ring stays on the row's line, which takes the card's
+radius while focused on the browser's rows.
+`BrowserResourceRowBrowserTest` measures the row — surface token, padding, radius, title role, the
+metadata line's geometry, the 4px rhythm, hover and selection colours, and the wrap — off the real page.
 
 **Width (#554).** The menu's two widths are fixed; the browser's is the reader's. Its default follows the
 band — 320px at 1600px and wider, 300px from 1101 to 1599px, 270px from 761 to 1100px — and the
@@ -565,6 +582,7 @@ Spacing has no role tokens: the record's 4/8/12/16/20/24/32/40/48 scale is the d
 | Coarse pointer | every button, input and select ≥44px high; a small or icon button ≥44×44 — the HIT REGION grows, never the type or the glyph |
 | Primary navigation row (`.app-nav-link`) | 13px/400, 1.5 leading; ≥36px; 8px/12px padding; 12px icon gap; 8px radius; 12px menu gutters; primary selected label and accent icon (Minimal: inverted ink), tint plus 3px indicator |
 | Workspace switcher (`.app-ws`) | 12px padding/gap, 32px avatar, 8px radius; UI workspace name, 11px role badge, no redundant caption; transparent select remains operable |
+| Resource row (`.app-browser .dp-tree-activate`) | 12px/18.6px title that wraps, a metadata line 8px below, 12px padding, 8px icon gap, 8px radius, 4px between rows; selected: tint + primary-ink title, secondary metadata |
 
 **House exceptions (ruled).** Where the house departs from the application-shell record on purpose, the departure is listed here with its reason and its measurement; nothing else in this section departs from the record.
 
@@ -3023,6 +3041,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-20 | v1.189 | #604 the browser's rows on the record's resource row — renumbered at merge after #605's v1.177, then after #home-ops's v1.188 | **§3.4, §3.3:** the browser column sits on the overlay surface and a row is the record's card — the activate paints 12px padding and the 8px radius with the hover and selection tints (selection is primary ink over `--surface-selected`, not the link blue), the name is its own wrapping 12px `.dp-tree-title` at the resource-name role, the badges live in a trailing always-present `.dp-tree-meta` 8px under the title (no margin when nothing shows), and rows sit 4px apart; the row's DOM contract (control first on the line, `title` = full path, every `aria` attribute) is kept and the #516 ring stays on the row's line, which takes the card's radius while focused. The renderer's regions and `BrowserResourceRowBrowserTest`'s measurements carry the change. |
 | 2026-10-20 | v1.188 | #home-ops the Datasources, Schedules and API homes on the v2 frame's regions (provisional id: the issue number replaces it once filed); answers #621 | **§4.5d / §4.18a / §4.20a:** each Frame paragraph is rewritten for the v2 regions — the summary strip's metrics (help as the note; a dot only where it equals its chart's bar), View all's badge, the two charts as bars panels with a description and an info dialog stating the section's counting rule, Continue your work's task rows (Browse datasources; See what runs next; Open the console and, only when the keys read answered, Manage keys) and its related row, Quick start's three short steps with the prompt (text unchanged) and How it works as dialog sections. **#621:** §4.18a's lens sentence now says a promoter's three endpoint metrics each carry the lens note and the keys metric none, so the strip is headed "Inventory". Schedules has no "Unblock" row: the explorer has no condition filter for it. The API's empty endpoints note reads "Quick start says how." (the steps no longer sit above it). Guide and guard sentences updated; every counting rule is unchanged. No route, permission, migration or config key. |
 | 2026-10-20 | v1.187 | #home-frame the home pages' v2 frame and the Pipelines home (provisional id: the issue number replaces it once filed) — renumbered at merge after #610's v1.186 | **§4.25:** the Hierarchy is rewritten as six regions — heading (icon eyebrow, subtitle, View all with its badge, the primary action), summary strip and foot, analytics grid, work grid (Continue your work with task rows, Recently updated and the related links; Quick start), the guide's `extra`, and ONE native `<dialog>` with five server-rendered sections (definitions, releases, activity, prompt, howitworks). New paragraphs give the metric rule, the per-metric lens words (#621: the mechanism; the API keys tiles wait for home-ops), and View all's badge = objects − discarded only (#593). The Pipelines charts are re-worded as columns (activity: twelve weeks, tiled in tenths, the headline the quarter's events, View data moving the table twin into the dialog) and bars (release history at one pitch, #620; the note's sentences = the bins), with every #598a/#598b invariant kept; Actively developed moves to the strip. The prompt dialog: the question field substitutes `[question]` as text, never overwriting an edit; Reset. Guards are updated; OverviewToneBrowserTest records two more Minimal rows under #631 (owner ruling 2026-10-20). **§4.5d / §4.18a / §4.20a:** one Frame sentence each. No route, permission, migration or config key. |
 | 2026-10-20 | v1.186 | #610 the phone top bar drops the breadcrumb — renumbered at merge after #618's v1.185 | **§3.6:** the ≤760px row's topbar cell loses "crumbs (leaf only)" — below the phone band the bar displays NO breadcrumb (the frozen prototype's rule): `.app-crumbs` is `display:none` in app.css's phone block, the element stays in the DOM for shell.js's boosted-swap writes, and `#mode-toggle` inherits the crumbs' `margin-right: auto` right-edge pin. **§3.4:** the breadcrumb bullet records the band and the return at 761. The 761–1100 leaf-only rule (110) and the ≥1101 group are unchanged. `MainFrameBrowserTest`'s four cases pin the hide at 320/390, the band guard at 761/1101 and the anonymous bar at 320. No route, permission, SQL or script change. |
