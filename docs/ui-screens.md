@@ -269,7 +269,8 @@ line-clamped. The badges live in a trailing `span.dp-tree-meta` — the same col
 changes when a badge appears or leaves, and carrying no margin at all when no badge is visible. The row's
 DOM contract is kept: the control stays the line's first child (folders' is a button, leaves' an anchor
 whose `title` is the full path), the icon region leads it, and every `aria` attribute is untouched. Rows
-sit 4px (`--space-1`) apart, and the #516 keyboard ring follows the card's radius on the browser's rows.
+sit 4px (`--space-1`) apart, and the #516 keyboard ring stays on the row's line, which takes the card's
+radius while focused on the browser's rows.
 `BrowserResourceRowBrowserTest` measures the row — surface token, padding, radius, title role, the
 metadata line's geometry, the 4px rhythm, hover and selection colours, and the wrap — off the real page.
 
