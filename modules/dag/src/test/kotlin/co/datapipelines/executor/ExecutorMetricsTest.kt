@@ -40,7 +40,8 @@ class ExecutorMetricsTest {
             val metrics = ExecutorMetrics(registry)
             val slots = ExecutionSlots(2, 2)
             val logger = LoggerFactory.getLogger("io.micrometer.core.instrument.MeterRegistry") as Logger
-            val logs = ListAppender<ILoggingEvent>().apply { start() }
+            val logs = ListAppender<ILoggingEvent>()
+            logs.start()
             val previousLevel = logger.level
             logger.level = Level.DEBUG
             logger.addAppender(logs)
