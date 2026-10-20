@@ -1,6 +1,7 @@
 package co.datapipelines.browser
 
 import com.microsoft.playwright.Page
+import com.microsoft.playwright.options.WaitForSelectorState
 import io.kotest.assertions.assertSoftly
 import io.kotest.assertions.withClue
 import io.kotest.matchers.doubles.shouldBeBetween
@@ -353,7 +354,13 @@ class MainFrameBrowserTest : DashboardBrowserSuite() {
         page.setViewportSize(width, height)
         for (screen in listOf("pipelines", "overview/visualizations", "settings")) {
             page.navigate("$baseUrl/$screen")
-            page.waitForSelector("#app-crumbs .app-crumb-page")
+            // The element stays in the DOM below the band (#610) — shell.js still writes
+            // into it — but the bar displays none of it, so ATTACHED, not the default
+            // visible: visibility is the assertion's job, not the wait's.
+            page.waitForSelector(
+                "#app-crumbs .app-crumb-page",
+                Page.WaitForSelectorOptions().setState(WaitForSelectorState.ATTACHED),
+            )
             settle()
             readBarFit("bar.$screen")
             printReadings("$case-$screen")
@@ -394,7 +401,12 @@ class MainFrameBrowserTest : DashboardBrowserSuite() {
         ready("mf610band")
         page.setViewportSize(CRUMB_LEAF_W, CRUMB_BAND_H)
         page.navigate("$baseUrl/pipelines")
-        page.waitForSelector("#app-crumbs .app-crumb-page")
+        // ATTACHED, not visible: a hide that leaks out of the phone band (#610) must fail
+        // the crumbsDisplayed ASSERTION, not time out the wait.
+        page.waitForSelector(
+            "#app-crumbs .app-crumb-page",
+            Page.WaitForSelectorOptions().setState(WaitForSelectorState.ATTACHED),
+        )
         settle()
         readBarFit("bar.761")
         printReadings("610-761")

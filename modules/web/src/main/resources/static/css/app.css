@@ -3438,6 +3438,19 @@ button.app-busy::after {
     padding-inline: var(--app-main-pad);
   }
 
+  /* #610: below the phone band the breadcrumb leaves the bar entirely — the record §3.6
+     phone band and the frozen prototype's ≤760 rule. The crumbs' margin-right: auto was
+     also what pinned the right controls to the bar's edge, so the mode toggle inherits
+     the pin. Nothing else in the bar stacks (A.0 measured): the four controls keep their
+     ≥48px boxes on one line at the 320px floor with room to spare. */
+  .app-crumbs {
+    display: none;
+  }
+
+  .app-topbar #mode-toggle {
+    margin-left: auto;
+  }
+
   /* --- the drawer --- */
 
   .app-rail,
@@ -3519,8 +3532,9 @@ button.app-busy::after {
     width: auto;
   }
 
-  /* Nothing in the bar wraps: the crumbs absorb the squeeze (min-width: 0 +
-     ellipsis) so the controls keep their boxes. */
+  /* Nothing in the bar wraps: with the crumbs gone (#610) the bar is icon controls only,
+     each fixed at its own ≥48px box — nothing absorbs a squeeze because there is none to
+     absorb at these widths. */
   .app-topbar {
     flex-wrap: nowrap;
   }
