@@ -1,9 +1,9 @@
 # UI Screens Inventory
 
-**Status:** v1.185
+**Status:** v1.186
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
-**Last updated:** 2026-10-20 (#618; #627; #625; #598b); 2026-10-19 (#598a merge follow-up; #617; #609; #598a; #605; #619; #585; #584; #613; #509; #608; #614 + #611; #612; #615); 2026-10-18 (#583; #573; #607; #606; #565; #582; #581; #580; #579); 2026-10-17 (#556; #578; #554); 2026-10-16 (#551 merge follow-up; #551; #555; #552; #553; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
+**Last updated:** 2026-10-20 (#home-frame; #618; #627; #625; #598b); 2026-10-19 (#598a merge follow-up; #617; #609; #598a; #605; #619; #585; #584; #613; #509; #608; #614 + #611; #612; #615); 2026-10-18 (#583; #573; #607; #606; #565; #582; #581; #580; #579); 2026-10-17 (#556; #578; #554); 2026-10-16 (#551 merge follow-up; #551; #555; #552; #553; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
 ---
 
 ## 1. Purpose
@@ -1283,6 +1283,8 @@ Until this round the detail route served only LAKE; every other dialect's row ha
 | JS | `overview.mjs` (Copy prompt), through the page-assets template (§3.0); no other script |
 | htmx | none of its own — every link is a boosted navigation |
 
+**Frame (#home-frame).** The page renders on the v2 frame (§4.25): its tile is the summary strip, its two charts are analytics panels at the one bar pitch, Recently added sits inside Continue your work, and the guide's quick start, prompt and How it works are the Quick start card and two dialog sections; nothing it counts or links changes.
+
 **Inventory.** One count tile — the visible set (`listVisible`: active-bound + granted + global, repository-level, §4.5) — and two charts. **Connection health** buckets each admitted datasource by its last test outcome: ok, failed, never tested; the bars are unlinked (a bucket is not a filter — the list's search covers last-test state, §4.5) and "never tested" is a bucket, never a blank (the §4.5 Last-test rule). **By dialect** renders one bar per dialect PRESENT, each linking the catalog's existing `?dialect=` filter (the register-row precedent, #186); a dialect nobody holds renders no bar at all.
 
 **Recently added to this workspace** lists up to five GRANTS of the active workspace (`datasource_workspaces.granted_at`, newest first, name ASC as tie-break), each a link to the datasource's detail page. There is no lifecycle badge — a datasource has no draft/release lifecycle — and no "Review drafts": the section's only action is each entry's link. An entry is granted, not modified: the timestamp is the grant's.
@@ -2054,6 +2056,8 @@ the frame's unavailable inventory (no tile, no number, the sentence "The endpoin
 read."); a failed keys read drops only the keys tile, empties only the keys chart (caption "Keys
 by kind — unavailable") and says so in Recently created keys. The endpoints card still answers.
 
+**Frame (#home-frame).** The page renders on the v2 frame (§4.25): its tiles are the summary strip, its two charts are analytics panels, its two recent sections sit inside Continue your work, the guide's `extra` (How a program gets access, the shared MCP card) renders full width, and the publish prompt is the prompt dialog; nothing it counts or links changes.
+
 **Inventory.** Four tiles: **Endpoints** (every published path, legacy ones included — the four
 state bars added together; links the console), **Serving a release**, **Serving a draft**, and
 **Your keys** — or **Workspace keys** for a reader holding `api_key.read` — counting every key the
@@ -2212,6 +2216,8 @@ Guards: `SchedulesUiControllerTest` (the route's row, `canAuthor` = the five wri
 | htmx | none of its own — every link is a boosted navigation |
 
 **One read.** Every number and list on the page comes from ONE `ScheduleService.summary`: §20.1's own `list` at the workspace cap (`max-schedules-per-workspace`) through the reader's lens, plus one read of each admitted schedule's newest run state (`ScheduleRunRepository.latestStates`, scoped to the workspace). The page and the explorer therefore count the same admitted set by construction — §4.20's rule that no second list query sits beside §20.1. The summary reads one row past the cap, so a workspace holding more live schedules than its cap renders the unavailable state ("This workspace holds more schedules than its limit…"), never a short count. The read never touches `notification_recipients`, and a block's reason is not rendered here (the explorer's detail names it).
+
+**Frame (#home-frame).** The page renders on the v2 frame (§4.25): its tiles are the summary strip, its two charts are analytics panels at the one bar pitch, Up next and Recently changed sit inside Continue your work with the gap between them (#620), New schedule is the heading's primary action (the guide's `primary` fragment), and How it works is a dialog section with no prompt dialog beside it; nothing it counts or links changes.
 
 **Inventory.** Four count tiles — Schedules (each live schedule once), Enabled, Paused, Blocked — and two charts. **By condition**: enabled / paused / blocked, the condition the explorer shows (blocked wins over paused). **Last run**: each schedule once, by its newest run's state — Succeeded (`succeeded`); Failed (`failed`, `aborted`, `unknown`); In progress (`queued`, `starting`, `running`); Did not run (`not_started`, `skipped`, `cancelled`); Never ran (no run). Its note says it is a snapshot, not a history. Tiles and bars are unlinked: the explorer has no condition or outcome filter (a bucket is not a filter, the §4.5d rule), and View all opens the whole list.
 
@@ -2574,8 +2580,8 @@ violations, the promoter's page issuing no lifecycle request, the 2d and 3d bund
 | URL | `GET /overview/pipelines`, `/overview/templates`, `/overview/dashboards`, `/overview/visualizations`, `/overview/parameter-sets` — five literal routes, no path variable, no query; the Datasources overview joins them since #583 as `GET /overview/datasources` (§4.5d) |
 | Auth required | Yes — each family's own read permission (`pipeline.read`, `template.read`, `dashboard.read`, `visualization.read`, `parameter_set.read`, and the Datasources overview's `datasource.read`; [Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative) names each route in its row's Surfaces cell); every role, a promoter through the lens (Datasources has no lens). GET only; nothing on the page writes |
 | Purpose | A family's home page: what the workspace holds in that family, by lifecycle, and — for a family whose guide is written — what the family is for, how to start one with an agent, and where work left off |
-| Design primitives | `.app-page-h`, `.ds-card` (`.app-card-h`/`.app-card-b`), `.ds-button`, `.ds-badge`, `.ds-textarea`; the house data-table frame (§3.7) around the visually hidden table; the `.app-overview-*` rules in `app.css`, design tokens only |
-| JS | `overview.mjs` (Copy prompt), on a guided overview only, through the page-assets template (§3.0); no other script |
+| Design primitives | `.ds-card`, `.ds-button`, `.ds-badge`, `.ds-input`, `.ds-textarea`, `.ds-icon` (vendored lucide glyphs), one native `<dialog>`; the house data-table frame (§3.7) around each visually hidden table twin; the `.app-overview-*` rules in `app.css`, design tokens, the house type scale and the house breakpoints only (#home-frame) |
+| JS | `overview.mjs` on every overview, through the page-assets template (§3.0): the dialog (opened by key, closed by Escape, the close button or a backdrop click, focus returned, the table twin borrowed and given back), the question field, Copy prompt and Reset; no other script |
 | htmx | none of its own — every link is a boosted navigation |
 
 One template, `overview/family.html`, renders all five over one model (`OverviewController`,
@@ -2591,15 +2597,66 @@ Since #556 the Pipelines menu item links `/overview/pipelines`; Templates is a m
 since #579, and the other three stay linked from Pipelines' related list until #580–#582; the
 Datasources item links `/overview/datasources` since #583.
 
-**Hierarchy.** The family title, the workspace line ("In workspace <name>."; a promoter's adds that
-the counts are the admitted inventory) and **View all** (the catalog). Then the **Inventory** card
-("Admitted inventory" through a lens): four counts — Objects, With drafts, With releases, Discarded
-only, each with a one-line help — and four bars: Draft only, Released only, Released with draft
-changes, Discarded only. The Pipelines card carries neither since #598a: its total line and two stacked
-charts replace them (**The Pipelines charts**, below). For a guided family (all six as built — Pipelines and Templates since #579, Dashboards #580, Visualizations #581, Parameter Sets #582, Datasources #583; `overview/guide-<family>.html`), **What
-pipelines are for**, **Create with your agent**, and side by side **Continue your work** and **Related
-resources and help** follow. An unguided overview shows the inventory card and nothing else — no
-placeholder prose, no script.
+**Hierarchy (#home-frame, the approved 2026-10-20 direction).** Six regions, in order, each a
+`<section>` (or the dialog) named by its heading and carrying a `data-overview-*` hook:
+
+1. **Heading** — an eyebrow with the family's icon, "Workspace" and the workspace name as a chip;
+   the family title; the guide's `subtitle` line when it has one (Pipelines: "Build repeatable
+   workflows. Understand what's live and what's next."); a promoter's line that the counts are the
+   admitted inventory; **View all** (the catalog) with its count badge; and the primary action:
+   **Create with your agent** (opens the prompt dialog) for a guide with a `prompt` fragment, else
+   the guide's `primary` fragment (Schedules' New schedule), else none.
+2. **Summary strip** (`data-overview-summary`) — the family's metrics side by side, each a label, a
+   value and a one-line help; the Pipelines strip has a foot (below).
+3. **Analytics grid** (`data-overview-analytics`) — one panel per chart: its visible heading names
+   the chart (#620), then an optional description and period, an info button for the chart's
+   explanation, the chart, a footer line and the chart's visually hidden table twin
+   (`data-chart-table`, §3.7).
+4. **Work grid** (`data-overview-work`) — **Continue your work** (`data-overview-recent`): the task
+   rows, then **Recently updated** (the family's recent sections, unchanged: heading, note, rows
+   with badge and time, the empty note `data-overview-recent-empty`, the unavailable line), then the
+   guide's `related` links ("Build on your results"); and **Quick start**
+   (`data-overview-quickstart`): the guide's `quickstart` (a headline, one sentence, the numbered
+   steps), with **Prepare a starter prompt** and **How it works**.
+5. The guide's `extra` fragment, full width (the API home's access and MCP cards).
+6. **The dialog** — ONE native `<dialog data-overview-dialog>` per page, with a kicker (the family),
+   a title, a close button and server-rendered sections keyed `definitions`, `releases`,
+   `activity`, `prompt` and `howitworks`. `overview.mjs` shows the section the opener's `data-open`
+   names, takes the title from its `data-title`, opens the dialog modal, and returns focus to the
+   opener on close (Escape, the close button or a backdrop click). The `::backdrop` reuses
+   `.u-backdrop`'s scrim (owner ruling 2026-10-20). A section with no content on a page is absent,
+   and so is its opener.
+
+An unguided overview shows the heading, the strip, the panels and Continue your work — no Quick
+start, no prompt, no placeholder prose.
+
+**The summary strip.** A metric is a label, a value and a help line, read from the same value as
+the charts. A STANDARD family (Templates, Dashboards, Visualizations, Parameter Sets) shows its four
+counts as metrics until #599; Datasources, Schedules and API show their own counts. Pipelines shows:
+
+- **Total pipelines** (objects; "Across this workspace");
+- **Live** (released only; "Released, with no open changes");
+- **In development** (draft only; "Awaiting their first release");
+- **Actively developed** (a separate measure; "Draft edited in the last N days", the configured
+  window).
+
+The strip's foot holds **Live with changes** (released with draft changes), **Retired** (discarded
+only; unlinked, titled "Retired pipelines have no page.") and **How these are counted** (the
+definitions dialog). The four lifecycle groups — Live, In development, Live with changes, Retired —
+are exclusive and sum to Total. Actively developed overlaps them, and the definitions dialog says so.
+The dialog also names each group in the catalog's words (Draft only / Released only / Released with
+draft changes / Discarded only; #626).
+
+**Lens words, per metric (#621):** the strip's heading reads "Admitted inventory", and the heading's
+sentence names the lens, only when EVERY metric passed the lens. Otherwise each lensed metric carries
+"Admitted inventory: only what your promotion view shows." under its value ("(admitted)" in the foot). The siblings' controllers still give every tile the page's
+flag, so their strips read as before. The API home's keys tiles, which the lens does not narrow, take
+`lensed = false` in the home-ops lane; #621 stays open until then.
+
+**View all's badge** counts what the catalog and the resource browser's header count: the three live
+groups, objects minus discarded only (#593). A STANDARD family's badge is the same `objects −
+discardedOnly`, and a lensed page's is the admitted count. An unavailable inventory renders View all
+with no badge, and so does a family whose panel names no such count (Datasources, Schedules, API).
 
 **The counting model**, restated once (the record's §8; #553's `FamilyInventory`): one SQL snapshot
 places each object of the workspace in exactly one of the four buckets by its versions. Objects is
@@ -2615,107 +2672,171 @@ and count. Two measured gaps are listed in the sweep, not hidden: on professiona
 0.073 from the link (#633); minimal paints the three series one black (#631).
 A visually hidden table repeats the four rows for assistive technology.
 
-**The Pipelines charts (#598a).** The same snapshot, extended by each admitted pipeline's count of
-RELEASED versions, feeds the Pipelines card from ONE statement (`ChartInventorySource`, built on
-`InventorySource`'s own `admitted` CTE and its four lifecycle columns): a total line ("12 pipelines"),
-then **Pipelines by lifecycle** — one stacked bar whose four parts sum to the total, in the owner's
-words: In development (draft only), Live (released only), Live, changes in progress (released with
-draft changes) and Retired (discarded only) — and **Pipelines by number of releases** — five rows (0,
-1, 2–3, 4–9, 10+ releases), each split into No draft and Draft open, the longest row full width. A
-release since discarded is not counted (only RELEASED rows are), so a retired pipeline has 0. Every
-pipeline sits in exactly one bin, so both charts total the same; `ChartInventory` refuses a value whose
-bins disagree with the lifecycle total, and the card then reads unavailable. A part is a `rect`
-positioned by its `x` and `width` attributes, tiled in tenths so the parts meet exactly and end at the
-row's width, with a `<title>`; each row's SVG is labelled with every part's count; a legend names every
-series (the lifecycle legend with its count); each chart has its own visually hidden table (a row
-heading, one column per part, the total). The chart's words are its own: the catalog filter keeps
-`CatalogLifecycle.label`'s. The other families' cards are unchanged.
-Under the lifecycle chart the card says why its total can exceed the resource browser's header count:
-"The resource browser and View all count the three live parts; retired pipelines have no page." The
-header counts draft only, released only and released with draft changes (`FamilyRecentE2eTest`), and
-Retired is the discarded-only bucket (#593; `OverviewRenderTest` pins the sentence).
+**The Pipelines charts (#598a, re-cut by #home-frame).** The same snapshot, extended by each
+admitted pipeline's count of RELEASED versions, feeds the strip, its foot and both panels from ONE
+statement. That statement is `ChartInventorySource`, built on `InventorySource`'s own `admitted` CTE
+and its four lifecycle columns.
 
-**The activity chart (#598b).** The same statement also counts the third chart, **Pipelines activity,
-last 12 weeks**, against the request's one clock reading (`:now`) and the configured window. The twelve
-rows are UTC calendar weeks, Monday 00:00Z to Sunday, bucketed on `AT TIME ZONE 'UTC'` so the database
-session's time zone never moves a boundary; they read oldest first, each named by its Monday ("6 Oct"),
-and the newest — the week holding `:now` — says "(this week so far)". Each row stacks the week's
-**Released** (admitted RELEASED versions by `released_at`; a release since discarded is not counted, the
-releases chart's rule) and **Created** (admitted pipelines by `created_at`, in the draft tone: a new
-pipeline is a draft) into one bar of events; the busiest week is full width and a quiet quarter is all
-zero-width bars beside their "0". The legend carries the twelve-week sums, unlinked (the catalog has no
-week filter). Above the chart a headline reads "N pipelines actively developed": admitted pipelines
-holding an admitted DRAFT last written (`COALESCE(updated_at, created_at)`) at or after `:now` minus
+**Release history** has five bars, one per bin: No releases, 1 release, 2–3, 4–9 and 10+. Each bar
+is the number of pipelines with that many releases, and the tallest is full width. No releases takes
+the draft tone; the rest take the released tone. A bar reads name · track · value, the track a `rect`
+whose `width` attribute is the share. Every bar chart on a page sits at ONE row pitch (`--space-10`),
+with the chart at least the 192px floor (#620).
+
+The note under the bars states the bins' sums in two sentences, worded for none, one, some and all
+("All 4 unreleased pipelines have a draft." / "3 of the 10 released pipelines have open changes.";
+`OverviewStacked.releaseNote`). The table keeps the Draft open / No draft / Total columns. The info
+button opens **Understanding release history**: one bin per pipeline, the bars compare pipelines and
+not executions, then the note.
+
+A release since discarded is not counted (only RELEASED rows are), so a retired pipeline has 0.
+Every pipeline sits in exactly one bin, so the bins total the strip's Total. `ChartInventory` refuses
+a value whose bins disagree with the lifecycle total, and the page then reads unavailable. The
+chart's words are its own: the catalog filter keeps `CatalogLifecycle.label`'s. The other families'
+panels keep their bars and tables.
+
+The definitions dialog says why Total can exceed the resource browser's header count: "The resource
+browser and View all count the three groups that are not retired: N. Retired pipelines have no
+page." The header counts draft only, released only and released with draft changes
+(`FamilyRecentE2eTest`), and Retired is the discarded-only bucket (#593).
+
+**The activity chart (#598b, re-cut by #home-frame).** The same statement also counts
+**Development activity**. It is counted against the request's one clock reading (`:now`) and the
+configured window.
+
+The chart is twelve columns, one per UTC calendar week (Monday 00:00Z to Sunday), bucketed on
+`AT TIME ZONE 'UTC'` so the database session's time zone never moves a boundary. The columns read
+oldest first, each named by its Monday ("6 Oct"); on the phone band only every third name shows.
+
+Each column stacks two parts from the baseline:
+
+- **Released** at the bottom: admitted RELEASED versions by `released_at`. A release since discarded
+  is not counted, the release-history rule.
+- **Created** on top: admitted pipelines by `created_at`, in the draft tone, since a new pipeline is
+  a draft.
+
+Each part is a `rect` whose `y` and `height` attributes tile the column in tenths, with no gap or
+overlap however the shares round. The busiest week is full height, and a quiet quarter is all
+zero-height parts at the baseline. Each column's `<title>` is its table row's sentence ("Week of 6
+Oct: 3 created, 2 released, this week so far"). The axis labels the busiest count, its half and 0.
+
+The headline is the quarter's events ("16 events"). The legend carries the twelve-week sums,
+unlinked: the catalog has no week filter. The footer reads "No events this week" or "N events this
+week so far". **View data** opens the activity dialog, which says "Events, not distinct pipelines. A
+pipeline created and released in the same week contributes to both counts. Weeks begin Monday
+(UTC); discarded releases are excluded." The panel's table twin MOVES into the dialog while it is
+open and back when it closes, so the page holds one copy. The table's columns are Week of, Created,
+Released, Events.
+
+**Actively developed** is the strip's fourth metric: admitted pipelines holding an admitted DRAFT
+last written (`COALESCE(updated_at, created_at)`) at or after `:now` minus
 `datapipelines.ui.actively-developed-days` days (configuration §3.10, default 14, inclusive at the
-edge). A draft keeps only its last write, so this is a count today, not a history, and per-week draft
-edits are not shown (the owner's ruling on #598); through a promoter's lens no DRAFT is admitted, so it
-reads 0. `ChartInventory` refuses an actively developed count above the pipelines holding a draft, or
-more created in the weeks than pipelines in total, and the card then reads unavailable. The note says
-"Weeks start on Monday (UTC). A release since discarded is not counted. Actively developed: a draft
-written in the last N days — a draft keeps only its last write, so this is a count today, not a
-history." with the configured N. The hidden table's columns are Week, Released, Created, Events. The
-rows stand at half the inventory pitch (`--space-6`, 24px), so the twelve rows measure 288px at 1512
-(`OverviewBrowserTest` prints it).
+edge). A draft keeps only its last write, so this is a count today, not a history. Per-week draft
+edits are not shown (the owner's ruling on #598). Through a promoter's lens no DRAFT is admitted, so
+it reads 0. `ChartInventory` refuses an actively developed count above the pipelines holding a
+draft, or more created in the weeks than pipelines in total, and the page then reads unavailable.
 
 **Links.** On the four-count card (the Pipelines card's until #598a), With drafts, With releases and
 the Draft only, Released only and Released with draft changes bars link the catalog filtered to that
-bucket (`/<family>?lifecycle=…`, §4.3);
+bucket (`/<family>?lifecycle=…`, §4.3; on the frame since #home-frame, the strip's metrics and the
+lifecycle chart's bars);
 Objects links nothing (View all is the unfiltered catalog) and Discarded only stays unlinked, since a
 discarded-only pipeline has no workspace page. An unguided family links no count or bar until its
 catalog offers the filter; Templates offers it since #579 and links that way. The Datasources
 overview links differently, as its model allows: each By-dialect bar links `/datasources?dialect=`
-(the catalog's existing filter) and the health bars stay unlinked (§4.5d). Since #598a the Pipelines
-card's In development, Live and Live, changes in progress parts and legend entries link
-`/pipelines?lifecycle=draft`, `released` and `released-with-draft`; Retired stays unlinked and the
-releases chart links nothing.
+(the catalog's existing filter) and the health bars stay unlinked (§4.5d). On the Pipelines home
+(#home-frame), the strip's Live and In development and the foot's Live with changes link
+`/pipelines?lifecycle=released`, `draft` and `released-with-draft`. Total, Actively developed and
+Retired stay unlinked, as do the release-history bars and the activity legend. The task rows link
+`?lifecycle=draft` and `?lifecycle=released`.
 
-**Create with your agent (Pipelines).** Three steps and a starter prompt in an editable textarea, the
-workspace name the menu shows substituted server-side and the bracketed parts left for the reader. The
-prompt names no key, credential, datasource configuration or hidden resource. **Copy prompt** puts the
-textarea's current text, edits included, on the clipboard: on success the button reads "Copied" and
-returns; when the clipboard refuses or is absent, the text is selected, the button reads "Select and
-copy" and a status line says how to finish by hand. Copying sends no request and grants nothing; the note
-under it says so, and, for a role that does not author pipelines, suggests copying it for a collaborator.
+**The prompt dialog (Pipelines; every guide with a `prompt`).** Create with your agent and
+Prepare a starter prompt open it. The dialog holds:
 
-**Continue your work (Pipelines).** **Recently updated**: up to five pipelines that hold a draft or a
-release, newest change first, each a link to its workspace with a draft badge when it has one and a
-relative time (the absolute time as its title). The time is the latest of the pipeline's own update and
-its versions' draft write, release and discard (`RecentSource`). It is the workspace's modification data,
-not anyone's history (#557 owns Recent and Pinned). **Review drafts** opens the catalog filtered to With
-drafts.
+- the question field ("What should this pipeline do?");
+- the starter prompt in an editable textarea, with the workspace name the menu shows substituted
+  server-side and the bracketed parts left for the reader;
+- **Copy prompt** and **Reset**;
+- the note.
+
+Typing in the question field substitutes the prompt's first `[question]` by index and slice, as text,
+never as markup, and only while the textarea still holds the text the field last wrote. An edited
+prompt is never overwritten by typing. Reset restores the server's text and clears the question. The
+prompt names no key, credential, datasource configuration or hidden resource.
+
+**Copy prompt** puts the textarea's current text, edits included, on the clipboard. On success the
+button reads "Copied" and returns. When the clipboard refuses or is absent, the text is selected,
+the button reads "Select and copy", and a status line says how to finish by hand. Copying sends no
+request and grants nothing. The note says so and, for a role that does not author pipelines,
+suggests copying it for a collaborator.
+
+**How it works** is the guide's longer steps, the chain to templates, visualizations and dashboards,
+and the MCP server reference.
+
+**Continue your work (Pipelines).** Two task rows come first:
+
+- **Review your drafts**: the In development count, worded for 0, 1 and many, linking
+  `?lifecycle=draft`;
+- **Explore live pipelines**: linking `?lifecycle=released`.
+
+A family whose catalog offers no such filter gets no row for it. Then comes **Recently updated**:
+up to five pipelines that hold a draft or a release, newest change first. Each is a link to its
+workspace, with a draft badge when it has one and a relative time (the absolute time as its title).
+The time is the latest of the pipeline's own update and its versions' draft write, release and
+discard (`RecentSource`). It is the workspace's modification data, not anyone's history (#557 owns
+Recent and Pinned).
 
 **Through a promoter's lens** every surface reads the same admitted set: the admitted names' RELEASED
-versions only. The counts and bars, the recent list (ordered by release time alone, so a hidden draft's
+versions only. The strip, its foot, the counts and bars, the recent list (ordered by release time alone, so a hidden draft's
 write moves nothing) and the filtered catalog all omit a hidden draft (`PromoterLensSweepTest`); the
-Pipelines charts count the admitted names' RELEASED versions alone, so a hidden draft moves no part and
-no releases bin (the sweep reads every part and cell), and the activity chart counts only admitted
+Pipelines charts count the admitted names' RELEASED versions alone, so a hidden draft moves no metric
+and no releases bin (the sweep reads every metric and table cell), and the activity chart counts only admitted
 releases and admitted pipelines, with nobody actively developed (#598b). The
 narrowed inventory admits an object with ANY released version, while the lensed catalogs keep their
 current-pointer rule; the two can differ for an object whose current pointer is not a released version
 (#563). Neither rule changes here.
 
-**States.** An inventory that cannot be read says "The inventory is unavailable." with a reason and
-shows no number at all — an unknown count never reads as zero. Recently updated has its own unavailable
+**States.** An inventory that cannot be read says "The inventory is unavailable." with a reason in
+the strip's place. The page then shows no number at all: no panel, no badge, no worded count (the
+drafts row reads "Pipelines working toward their first release."). An unknown count never reads as
+zero. Recently updated has its own unavailable
 line and, in an empty workspace, a note pointing at the starter prompt. A real zero is a "0".
 
 **Storage:** none — no browser key, cookie or server preference.
 
-Guards: `OverviewRenderTest` (one inventory feeds counts, bars and table; widths; unavailable without a
-digit; links; escaping; unguided families bare; the Pipelines card's three stacked charts, legend = table =
-model; #598b's twelve Monday-keyed weeks and the configured window in the note), `ChartInventorySourceTest` and `ChartInventorySourceIntegrationTest` (the statement's text and
-binds; counts against a Kotlin oracle, unlensed and narrowed), `OverviewStackedTest` (random rows tile
-exactly), `ShellRenderTest` (the family paths and the Datasources overview light their item,
-crumb and panel), `FamilyRecentE2eTest`, `OverviewE2eTest` (each catalog lifecycle count equals the
-inventory's, unlensed and narrowed), `PromoterLensSweepTest`, `overview.test.mjs` and
-`OverviewBrowserTest` (copy resolves and refuses with zero requests; the menu lands on the overview with
-its tree and its charts; a workspace switch).
+Guards:
+
+- `OverviewRenderTest`: one inventory feeds counts, bars and table; widths; unavailable without a
+  digit; links; escaping; unguided families bare. For Pipelines (#home-frame): the strip sums to
+  Total; Retired unlinked; the badge = the three live groups; the drafts words; twelve columns,
+  oldest first, tiling, each title its table row; the release note = the bins; the dialog's five
+  sections; per-metric lens words.
+- `ChartInventorySourceTest` and `ChartInventorySourceIntegrationTest`: the statement's text and
+  binds; counts against a Kotlin oracle, unlensed and narrowed.
+- `OverviewStackedTest`: random inventories. The strip sums to Total, the badge counts all but
+  Retired, every column tiles its own height, the bars are shares of the tallest, and the note is
+  worded for none, one, some and all.
+- `ShellRenderTest`: the family paths and the Datasources overview light their item, crumb and
+  panel.
+- `FamilyRecentE2eTest`.
+- `OverviewE2eTest`: each catalog lifecycle count equals the inventory's, unlensed and narrowed.
+- `PromoterLensSweepTest`: every metric and table cell through the lens.
+- `overview.test.mjs`: fill, compose, no overwrite, Reset, open by key, title as text, focus
+  return, the borrowed table, backdrop versus inside, zero requests.
+- `OverviewBrowserTest`: the landing, with geometry at 1512 (four equal strip cells, twelve columns
+  at one pitch, the plot 192px), no horizontal overflow at 390/768/1024/1280, and screenshots; the
+  definitions dialog with Escape and focus return; View data leaves one table; the question composes
+  and markup stays words; copy resolves and refuses with zero requests; a workspace switch.
+- `OverviewToneBrowserTest`: every tone site reads one colour, and the columns' and bars' tones are
+  distinct from the track, the panel and the text. On Minimal, two more ΔE-0 rows (In
+  development/text, Live/text) are recorded under #631 on the owner's ruling of 2026-10-20.
 
 **Families as built.** Each family's row lands with the lane that builds its home page; a family without a row is
 served (inventory only) and its menu item still links the catalog.
 
 | Family | Menu item links the overview since | Guide | Recently updated | Catalog `lifecycle` filter |
 |---|---|---|---|---|
-| Pipelines | #556 | `overview/guide-pipelines.html` | `PipelineRepository.recent` | `/pipelines?lifecycle=` — every bucket but `discarded` (§4.3); since #598a the card is the lifecycle stacked bar and the releases chart (`PipelineRepository.charts`, one statement), and the activity chart (#598b) |
+| Pipelines | #556 | `overview/guide-pipelines.html` — subtitle, Quick start, the prompt and How it works dialogs, related: Visualizations, Dashboards, MCP server reference | `PipelineRepository.recent` | `/pipelines?lifecycle=` — every bucket but `discarded` (§4.3); since #home-frame the summary strip and its foot, Development activity (#598b) and Release history (#598a), all from `PipelineRepository.charts`, one statement |
 | Templates | #579 | `overview/guide-templates.html` — related: Pipelines, MCP server reference | `TemplateRepository.recent`, the same `RecentSource` rule; each entry links `/templates/<name>`, every segment URL-encoded (the tree's form) | `/templates?lifecycle=` — every bucket but `discarded` (§4.6); a bucket read places an object by its latest version (`TemplateRepository.listWhere`); `OverviewTemplatesE2eTest` pins each count equal to the inventory's, unlensed and through a narrowed lens |
 | Dashboards | #580 | `overview/guide-dashboards.html` — related: Pipelines, Visualizations, Parameter Sets, MCP server reference | `DashboardRepository.recent`, the same `RecentSource` rule | `/dashboards?lifecycle=` — every bucket but `discarded` (§4.21); `OverviewDashboardsE2eTest` pins each count equal to the inventory's, unlensed and through the promoter's real lens; `OverviewDashboardsRenderTest`, `OverviewDashboardsBrowserTest` |
 | Visualizations | #581 | `overview/guide-visualizations.html` — related: Pipelines, Dashboards, MCP server reference | `VisualizationRepository.recent`, the same `RecentSource` rule; through a narrowed lens, admitted RELEASED versions and their release time alone | `/visualizations?lifecycle=` — every bucket but `discarded` (§4.24); `OverviewVisualizationsE2eTest` pins each count equal to the inventory's, unlensed and through a narrowed lens |
@@ -2889,6 +3010,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-20 | v1.186 | #home-frame the home pages' v2 frame and the Pipelines home (provisional id: the issue number replaces it once filed) | **§4.25:** the Hierarchy is rewritten as six regions — heading (icon eyebrow, subtitle, View all with its badge, the primary action), summary strip and foot, analytics grid, work grid (Continue your work with task rows, Recently updated and the related links; Quick start), the guide's `extra`, and ONE native `<dialog>` with five server-rendered sections (definitions, releases, activity, prompt, howitworks). New paragraphs give the metric rule, the per-metric lens words (#621: the mechanism; the API keys tiles wait for home-ops), and View all's badge = objects − discarded only (#593). The Pipelines charts are re-worded as columns (activity: twelve weeks, tiled in tenths, the headline the quarter's events, View data moving the table twin into the dialog) and bars (release history at one pitch, #620; the note's sentences = the bins), with every #598a/#598b invariant kept; Actively developed moves to the strip. The prompt dialog: the question field substitutes `[question]` as text, never overwriting an edit; Reset. Guards are updated; OverviewToneBrowserTest records two more Minimal rows under #631 (owner ruling 2026-10-20). **§4.5d / §4.18a / §4.20a:** one Frame sentence each. No route, permission, migration or config key. |
 | 2026-10-20 | v1.185 | #618 success and warning text inks — renumbered at merge after #627's v1.184 | **§3.5:** the #509 sentence becomes three roles. Success and warning text read `--app-success-ink` / `--app-warning-ink`, each built like `--app-danger-ink`: `light-dark(oklch(from var(--text-<role>) calc(l - 0.03) c h), var(--text-<role>))`. Twenty-four text sites over six sheets move (app.css, pipeline-editor.css, template-workspace.css, auth.css, parameter-sets.css, dashboards.css), and nine literal fallbacks go. Borders, fills, dots and tints keep the accents. Ocean and saas success text takes the teal text role. New guards: `StatusInkContrastBrowserTest`, 270 pairs over ten passes, worst healthcare warning 4.82:1, and `StatusInkSourceAuditTest`. |
 | 2026-10-20 | v1.184 | #627 overview mixed tone — renumbered at merge after #625's v1.183 | **§4.25:** bars, stacked parts and legend swatches share four lifecycle tones; mixed reads the info series (`--chart-series-1`) rather than the brand. `OverviewToneBrowserTest` measures all nine themes and both auto schemes at the unchanged OKLab distance floor of 0.08, with measured, stale-checking palette gaps for professional (#633) and minimal (#631). |
 | 2026-10-20 | v1.183 | #625 template version selector selection — renumbered at merge after #598b's v1.182 | **§4.7:** the version selector's viewed row takes the menu's selection expression (§3.1): `--brand-soft` tint, `--text-primary` ink (Minimal `--text-inverted`), the 3px `--border-focus` bar from `--app-nav-indicator-w` instead of the 2px `--focus-ring-offset`, reserved transparent on every row; the viewed row's `· current` suffix inherits the label's ink (owner, 2026-10-20 — muted on the tint measured 2.96–3.83:1). `TemplateVersionSelectorBrowserTest` measures bar, ink, contrast and geometry on nine themes plus auto's dark half. |
