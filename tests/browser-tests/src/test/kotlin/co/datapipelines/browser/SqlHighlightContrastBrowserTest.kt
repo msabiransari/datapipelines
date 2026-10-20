@@ -41,7 +41,8 @@ class SqlHighlightContrastBrowserTest : BrowserSuite() {
             }
             val themes =
                 page.evaluate(
-                    "() => [...document.querySelectorAll('#app-appearance [data-mode], .app-swatch[data-swatch]')].map(e => e.dataset.mode || e.dataset.swatch)",
+                    "() => [...document.querySelectorAll('#app-appearance [data-mode], .app-swatch[data-swatch]')]" +
+                        ".map(e => e.dataset.mode || e.dataset.swatch)",
                 ) as List<String>
             themes.size shouldBeGreaterThanOrEqual MIN_THEMES
             for ((theme, scheme) in themes.map { it to ColorScheme.LIGHT } + ("auto" to ColorScheme.DARK)) {
@@ -49,21 +50,7 @@ class SqlHighlightContrastBrowserTest : BrowserSuite() {
                 page.evaluate(SWAP_THEME, theme) shouldBe true
                 val pairs = page.evaluate(MEASURE, pane) as List<Map<String, Any>>
                 pairs.map { it["role"] }.toSet() shouldBe TOKEN_KINDS.toSet()
-                pairs.forEach { p ->
-                    val ratio = (p["ratio"] as Number).toDouble()
-                    val row = "634-measure|$theme|${scheme.name.lowercase()}|$pane|${p["role"]}|${"%.2f".format(
-                        ratio,
-                    )}|text=${p["text"]} on ${p["background"]}"
-                    lines += row
-                    // Only measured, enumerated follow-ups may miss; a new or worse miss fails.
-                    val key = "$theme|${scheme.name.lowercase()}|$pane|${p["role"]}"
-                    if (ratio < TEXT_FLOOR) {
-                        observedMisses += key
-                        val knownFloor = KNOWN_MISSES[key]
-                        if (knownFloor == null || ratio < knownFloor) failures += row
-                    }
-                    if (p["ink"] != null && p["text"] != p["ink"]) failures += "$row expected ink=${p["ink"]}"
-                }
+                judge("$theme|${scheme.name.lowercase()}|$pane", pairs, lines, failures, observedMisses)
             }
         }
         val report = lines.joinToString("\n") + "\n"
@@ -74,6 +61,30 @@ class SqlHighlightContrastBrowserTest : BrowserSuite() {
         withClue(report) {
             failures shouldBe emptyList()
             observedMisses shouldBe KNOWN_MISSES.keys
+        }
+    }
+
+    private fun judge(
+        label: String,
+        pairs: List<Map<String, Any>>,
+        lines: MutableList<String>,
+        failures: MutableList<String>,
+        observedMisses: MutableSet<String>,
+    ) {
+        pairs.forEach { p ->
+            val ratio = (p["ratio"] as Number).toDouble()
+            val row = "634-measure|$label|${p["role"]}|${"%.2f".format(
+                ratio,
+            )}|text=${p["text"]} on ${p["background"]}"
+            lines += row
+            // Only measured, enumerated follow-ups may miss; a new or worse miss fails.
+            val key = "$label|${p["role"]}"
+            if (ratio < TEXT_FLOOR) {
+                observedMisses += key
+                val knownFloor = KNOWN_MISSES[key]
+                if (knownFloor == null || ratio < knownFloor) failures += row
+            }
+            if (p["ink"] != null && p["text"] != p["ink"]) failures += "$row expected ink=${p["ink"]}"
         }
     }
 
