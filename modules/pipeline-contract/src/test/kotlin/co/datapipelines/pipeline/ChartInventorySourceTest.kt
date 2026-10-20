@@ -66,6 +66,27 @@ class ChartInventorySourceTest {
         }
     }
 
+    /**
+     * #599 — four more families chart from this statement, so each one's text names ITS tables and
+     * no other family's: the object table, its versions table and the join on its own foreign key.
+     */
+    @ParameterizedTest
+    @EnumSource(NavigationFamily::class)
+    fun `each family's statement reads its own object and version tables only`(family: NavigationFamily) {
+        listOf(false, true).forEach { narrowed ->
+            val sql = ChartInventorySource.sql(family, narrowed)
+            val versions = family.table.removeSuffix("s") + "_versions"
+            sql shouldContain "FROM ${family.table} s\n"
+            sql shouldContain "JOIN $versions v ON v.${family.foreignKey} = s.id"
+            NavigationFamily.entries.filter { it != family }.forEach { other ->
+                withClue("$family's statement must not read $other's tables") {
+                    Regex("\\b${other.table}\\b").containsMatchIn(sql) shouldBe false
+                    sql shouldNotContain other.foreignKey
+                }
+            }
+        }
+    }
+
     /** Week 0 contains now; the Monday 00:00:00Z starts a week, the Sunday 23:59:59.999Z before it ends the last. */
     @Test
     fun `the twelve weeks are consecutive UTC Mondays ending with the one that contains now`() {

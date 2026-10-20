@@ -106,7 +106,10 @@ class OverviewToneBrowserTest : RestTreeBrowserFixture() {
         }
     }
 
-    /** TemplateWorkspaceBrowserTest's REST sequence: release v1, then open a distinct v2 draft. */
+    /**
+     * TemplateWorkspaceBrowserTest's REST sequence: release v1, then open a distinct v2 draft. #599: the
+     * Templates home is a lifecycle home, so the mixed tone it paints is the foot's Live with changes dot.
+     */
     private fun siblingScreenshot() {
         val name = "tone627/card.sql"
 
@@ -118,10 +121,10 @@ class OverviewToneBrowserTest : RestTreeBrowserFixture() {
         val released = api("GET", "/api/v1/templates?name=$name", null)
         api("PUT", "/api/v1/templates", body("v2"), field(released, "body_hash"))
         page.navigate("$baseUrl/overview/templates")
-        page.waitForSelector(".app-overview-bar[data-tone='mixed'] .app-overview-bar-fill")
+        page.waitForSelector("[data-count='live-changes'] .app-overview-dot[data-tone='mixed']")
         page.emulateMedia(Page.EmulateMediaOptions().setColorScheme(ColorScheme.LIGHT))
         page.evaluate(SWAP_THEME, "light") shouldBe true
-        page.locator(".app-overview-bar[data-tone='mixed'] .app-overview-bar-fill").getAttribute("width") shouldBe "100.0"
+        page.locator("[data-count='live-changes'] .app-overview-count-v").innerText().trim() shouldBe "1"
         page.evaluate("() => document.fonts.ready")
         page.screenshot(Page.ScreenshotOptions().setPath(shotDir().resolve("overview-templates-light-1512.png")))
     }

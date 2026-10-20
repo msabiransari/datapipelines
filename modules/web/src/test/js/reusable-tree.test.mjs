@@ -249,7 +249,8 @@ test("a refresh cancelled by collapsing its level does not go on to refetch the 
 });
 
 // A minimal DOM stand-in for the renderer: elements with attributes, ordered children, the
-// `hidden` property, text nodes and the two selector shapes render.mjs uses (`[name]`, `[name="v"]`).
+// `hidden` property, text nodes and the selector shapes render.mjs and these tests use
+// (`[name]`, `[name="v"]`, `.class` — #604's region assertions read `.dp-tree-title`/`.dp-tree-meta`).
 function fakeDocument() {
   const document = { activeElement: null };
   const detach = node => {
@@ -257,6 +258,8 @@ function fakeDocument() {
     const siblings = node.parentNode.childNodes; siblings.splice(siblings.indexOf(node), 1); node.parentNode = null;
   };
   const matches = (element, selector) => {
+    const classShape = selector.match(/^\.([\w-]+)$/);
+    if (classShape) return element.className.split(" ").includes(classShape[1]);
     const [, name, value] = selector.match(/^\[([\w-]+)(?:="([^"]*)")?\]$/) || [];
     if (!name) throw new Error(`unsupported selector ${selector}`);
     if (name === "hidden") return element.hidden === true;
@@ -323,11 +326,13 @@ test("a leaf whose listed version needs review carries the catalog's marker, and
   const state = createTreeState({ source });
   const renderer = createTreeRenderer(host, state, { label: "Templates", getHref: node => `/templates/${node.path}` });
   const control = key => host.querySelectorAll(`[data-tree-key="${key}"]`)[0].children[0].children[0];
-  const badges = key => control(key).children.filter(child => child.className.startsWith("ds-badge")).map(child => child.className.split(" ").at(-1));
+  // #604: the badges live in the row's trailing metadata region, in the same order as before.
+  const meta = key => control(key).querySelectorAll(".dp-tree-meta")[0];
+  const badges = key => meta(key).children.filter(child => child.className.startsWith("ds-badge")).map(child => child.className.split(" ").at(-1));
   const markers = () => host.querySelectorAll("[data-needs-review]");
   await state.initialize(); renderer.render(); await state.expand("folder:a"); renderer.render();
 
-  const marker = control("artifact:a/active_orders.jsonata").lastChild;
+  const marker = meta("artifact:a/active_orders.jsonata").lastChild;
   assert.equal(marker.className, "ds-badge ds-badge-warning dp-tree-review");
   assert.equal(marker.getAttribute("data-needs-review"), "");
   assert.equal(marker.textContent, "needs review");
@@ -348,5 +353,38 @@ test("a leaf whose listed version needs review carries the catalog's marker, and
   assert.deepEqual(badges("artifact:a/active_orders.jsonata"), ["dp-tree-version", "dp-tree-review"], "and a raised one re-appends it");
   assert.deepEqual(badges("artifact:a/next.jsonata"), ["dp-tree-version", "dp-tree-draft", "dp-tree-review"], "the returning draft stays before it");
   assert.equal(markers().length, 2);
+  renderer.dispose();
+});
+
+// #604 — the row's regions (record §5/§7): the label is its own title span, the badges
+// live in a trailing metadata region, and a folder carries the same structure with
+// nothing visible in its region. The control stays the line's first child and every
+// aria attribute is untouched — the browser tree tests are that contract's witness.
+test("a row is an icon, a title span and a trailing metadata region; a folder's region shows no badge", async () => {
+  const document = fakeDocument(); const host = document.createElement("div"); document.body.append(host);
+  const source = { async loadChildren(parent) {
+    if (parent === null) return page([folder("region"), { ...leaf("region/row.jsonata"), version: 3, draftVersion: 4, needsReview: true }]);
+    return page([]);
+  } };
+  const state = createTreeState({ source });
+  const renderer = createTreeRenderer(host, state, { label: "Templates", getHref: node => `/templates/${node.path}` });
+  await state.initialize(); renderer.render();
+  const controlOf = key => host.querySelectorAll(`[data-tree-key="${key}"]`)[0].children[0].children[0];
+
+  const row = controlOf("artifact:region/row.jsonata");
+  const title = row.children[1];
+  assert.equal(title.className, "dp-tree-title", "the label is the title region");
+  assert.equal(title.textContent, "region/row.jsonata");
+  const meta = row.children.at(-1);
+  assert.equal(meta.className, "dp-tree-meta", "the metadata region is the control's last child");
+  assert.deepEqual(meta.children.map(child => child.className.split(" ").at(-1)),
+    ["dp-tree-version", "dp-tree-draft", "dp-tree-review"], "the three badges, in order, inside the region");
+  assert.equal(meta.children.find(child => child.className.includes("dp-tree-version")).textContent, "v4");
+
+  const folderRow = controlOf("folder:region");
+  assert.equal(folderRow.children[1].className, "dp-tree-title", "a folder carries the same title region");
+  const folderMeta = folderRow.children.at(-1);
+  assert.equal(folderMeta.className, "dp-tree-meta");
+  assert.equal(folderMeta.children.filter(child => !child.hidden).length, 0, "a folder's region shows no badge");
   renderer.dispose();
 });
