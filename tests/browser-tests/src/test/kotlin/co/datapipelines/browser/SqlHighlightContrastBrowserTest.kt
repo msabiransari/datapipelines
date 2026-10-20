@@ -181,6 +181,17 @@ class SqlHighlightContrastBrowserTest : BrowserSuite() {
               $HELPERS
               const root = document.querySelector(pane === 'pipeline' ? '#pe-node-sql' : '#previewPane');
               if (!root) throw new Error('missing pane ' + pane);
+              if (pane === 'pipeline') {
+                const reference = document.createElement('div');
+                reference.className = 'u-backdrop u-backdrop-hidden';
+                document.body.appendChild(reference);
+                const modal = document.querySelector('.pe-modal-backdrop');
+                if (!modal) throw new Error('missing error-modal scrim');
+                const actual = rgba(getComputedStyle(modal).backgroundColor);
+                const expected = rgba(getComputedStyle(reference).backgroundColor);
+                reference.remove();
+                if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error('error-modal scrim differs from house backdrop');
+              }
               await settle(root);
               const pairs = [];
               for (const kind of ['keyword', 'string', 'comment', 'number', 'parameter', 'punct']) {
