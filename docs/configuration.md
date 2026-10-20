@@ -1,8 +1,8 @@
 # Configuration Reference
 
-**Status:** v1.54 (single source of truth for every config key)
+**Status:** v1.55 (single source of truth for every config key)
 **Owner:** datapipelines.co core
-**Last updated:** 2026-10-16
+**Last updated:** 2026-10-20
 
 ---
 
@@ -183,6 +183,7 @@ There is deliberately **no fail-open key**. When the limiter's Redis is unreacha
 | YAML path | Default | Description |
 |---|---|---|
 | `datapipelines.ui.theme` | `dark` | Design system theme name. Validated at startup against the vendored themes in `modules/web/src/main/resources/static/vendor/design-system/` |
+| `datapipelines.ui.actively-developed-days` | `14` | Days since a draft's last write within which a pipeline counts as actively developed on the Pipelines home (#598). Integer ≥ 1. |
 
 ### 3.11 Execution History
 
@@ -782,6 +783,7 @@ datapipelines:
 
   ui:
     theme: ${DATAPIPELINES_UI_THEME:dark}
+    actively-developed-days: ${DATAPIPELINES_UI_ACTIVELY_DEVELOPED_DAYS:14}
 
   executions:
     event-retention-days: ${DATAPIPELINES_EXECUTIONS_EVENT_RETENTION_DAYS:7}
@@ -995,6 +997,7 @@ On startup, the app validates:
 - `DATAPIPELINES_DB_ENCRYPTION_KEY` is exactly 32 bytes decoded.
 - **Key provider (§3.20):** `datapipelines.db.key-provider` names a provider this build ships (a violation lists them and points at `docs/key-providers.md`), and that provider's own settings are present and well-formed. For `env`: every entry of `datapipelines.db.encryption-keys` has an integer version in `1..255` that is not `1`, and a value that decodes to exactly 32 bytes; `datapipelines.db.encryption-key-current` is an integer naming a configured version (the violation lists which versions ARE configured). An unknown provider name short-circuits the rest — reporting `env`'s key rules to an operator who asked for `aws-kms` is noise they cannot act on.
 - `DATAPIPELINES_UI_THEME` matches a vendored theme directory.
+- **Actively developed window (§3.10, #598b):** `datapipelines.ui.actively-developed-days`, when present, is an integer ≥ 1 — `0`, a negative or a non-integer refuses startup naming the key and the value. An absent key is not a violation: the binder default (14) applies.
 - At least one authentication method: a fully-configured OIDC provider (non-empty `client-id`, `client-secret`, and `issuer-uri`) or `datapipelines.auth.local.enabled=true`. A provider entry with an empty `client-id` is ignored with a WARN — it does not count, and it is not a violation on its own.
 - `datapipelines.auth.local.bootstrap-password` and `datapipelines.auth.local.bootstrap-password-hash` are never both set; either seed requires `datapipelines.auth.local.enabled=true` AND `datapipelines.auth.bootstrap-admin-email` — each violation names both keys.
 - `datapipelines.auth.local.lockout.max-failures` and `datapipelines.auth.local.lockout.duration-minutes` are positive integers.
@@ -1036,6 +1039,7 @@ Validation runs in `@PostConstruct` of a `ConfigValidator` bean. Failures stop s
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-20 | v1.55 | 598b (#598) the Pipelines home's activity chart | New **§3.10 row** `datapipelines.ui.actively-developed-days` (default `14`, `DATAPIPELINES_UI_ACTIVELY_DEVELOPED_DAYS`): the window of the Pipelines home's "actively developed" count — a pipeline whose draft was last written within that many days ([UI screens §4.25](ui-screens.md)). §5's template gains the line; **§7** gains the rule (`ConfigValidator.checkUiActivelyDevelopedDays`): a present value that is not an integer ≥ 1 refuses startup naming the key and the value. `UiConfigKeysSpecDriftTest` pins the `datapipelines.ui.*` keys in this document, `application.yml` and the validator. |
 | 2026-10-16 | v1.54 | 467 (#467) the over-cap screenshot refusal reaches the client | **§3.13's `server.tomcat.max-swallow-size` row** names the screenshot route's own bounded drain (its cap + 2 MiB, fixed; the key is unchanged and does not move it) and the `application.yml` comment says the same. No key, default or validation change |
 | 2026-10-15 | v1.53 | 500 (#500) | Redis has one authority: `RedisClientProperties` binds §3.1 and builds the Lettuce factory in `dag`; the framework bridge is removed from §3.14 and §5. The §7 validator judges that binding. Test registrations use operator keys with explicit passwords, and the defaults guard reads the operator block. Merge follow-up: the binding note states that operators change nothing and that a hand-set `SPRING_DATA_REDIS_*` variable is now ignored. |
 | 2026-10-09 | v1.52 | 488 (#488) | **§3.1's two Redis timeout rows** and a new **§7 rule** (`RedisRules.checkRedisTimeoutBounds`, check 34): `datapipelines.redis.command-timeout` / `.connect-timeout` must parse as a duration above 0 and at most `60s` (the owner's ceiling: Lettuce's own default, never more); malformed, blank, zero, negative and over-ceiling values refuse startup naming the key and the value. Verified in Lettuce 6.6's source and by `RedisZeroCommandTimeoutIntegrationTest`: a zero command timeout is NO bound (a GET against a stopped Redis still pending at 3 s while the shipped 2 s client failed in 2,002 ms) and also a zero handshake deadline (a silent server fails the connect in one timer tick, ~100 ms). `0s` on the connect timeout and negative values were already loud (Lettuce asserts); zero on the command timeout was the silent case. |
