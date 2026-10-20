@@ -206,10 +206,13 @@ class LocalLoginE2eTest {
                 .statusCode(200)
                 .extract()
         val csrf = checkNotNull(CSRF_FIELD.find(dashboard.asString())) { "no _csrf hidden input on the dashboard" }.groupValues[1]
-        // The rail names the active workspace (`<b th:text="${activeWorkspace}">`); switching to
-        // it is a membership the user certainly holds, so the answer is the /dashboard bounce.
+        // The rail names the active workspace (`<b th:text="${activeWorkspace}">` inside the
+        // switcher's `.app-ws-text`; #605 removed the `app-workspace-label` caption this read
+        // anchored on, and the rendered layout comment between the two needs the wide window);
+        // switching to it is a membership the user certainly holds, so the answer is the
+        // /dashboard bounce.
         val active =
-            checkNotNull(Regex("""app-workspace-label[\s\S]{0,400}?<b>([a-z0-9_-]+)</b>""").find(dashboard.asString())) {
+            checkNotNull(Regex("""class="app-ws-text[^"]*"[\s\S]{0,1200}?<b>([a-z0-9_-]+)</b>""").find(dashboard.asString())) {
                 "no active workspace in the rail"
             }.groupValues[1]
         val cookies =
