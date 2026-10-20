@@ -1,6 +1,8 @@
 <!--/* #585 — the API home's guide (ui-screens.md §4.18a; shell design §8), shaped as
-     guide-datasources.html: `overview/family.html` includes `intro` after the inventory and
-     `related` beside Continue your work. What a program needs is three things, and the page says
+     guide-datasources.html: `overview/family.html` includes (since #home-frame) `quickstart` (how a
+     program gets access) in the Quick start card, `prompt` and `howitworks` as dialog sections,
+     `extra` (the MCP card) full width under the work grid, and `related` at the foot of Continue
+     your work. What a program needs is three things, and the page says
      who does each: a published endpoint (an agent CAN do this — endpoints_create — or a program's
      POST; there is no form for it in the app), a key (a PERSON on /api-keys: there is no
      key-minting tool, on purpose — skill/endpoints.md), and the connection (the MCP card, the
@@ -9,94 +11,86 @@
      agent to create, associate or copy a credential. The MCP card carries no Copy here:
      overview.mjs copies a [data-overview-prompt] root's TEXTAREA, and the config is the shared
      card's <pre>. Copying sends nothing (overview.mjs). */-->
-<th:block xmlns:th="http://www.thymeleaf.org" th:fragment="intro">
-  <section class="ds-card" aria-labelledby="overview-intro-h" data-overview-intro>
-    <div class="app-card-h"><h2 class="ds-title" id="overview-intro-h">What the API is for</h2></div>
-    <div class="app-card-b app-overview-prose">
-      <p>
-        A released, read-only pipeline can be published at a stable URL under
-        <span class="ds-mono">/api/&lt;category&gt;/&lt;version&gt;/…</span>, so an application fetches its rows
-        with one GET. Every call carries a key in the <span class="ds-mono" th:text="${mcpHeader}">DP-API-Key</span>
-        header, and an API key reaches only the paths it is associated with. Agents connect through the MCP
-        server instead, with a key of their own.
-      </p>
-    </div>
-  </section>
-
-  <section class="ds-card" aria-labelledby="overview-access-h" data-overview-access>
-    <div class="app-card-h"><h2 class="ds-title" id="overview-access-h">How a program gets access</h2></div>
-    <div class="app-card-b app-overview-prose">
-      <ol class="app-overview-steps">
-        <li><b>Publish a path.</b> A released, read-only pipeline is published at a path by your agent
-          (<span class="ds-mono">endpoints_create</span>) or by a program calling
-          <span class="ds-mono">POST /api/v1/endpoints</span> — authors and admins only. There is no form for it in
-          the app.</li>
-        <li><b>Create and associate a key.</b> A workspace admin creates an API key on the Keys page and
-          associates it with the path; no agent can create one.
-          <a th:if="${canAdminWorkspace == true or isSuperAdmin == true}" th:href="@{/api-keys}"
-             data-overview-manage-keys>Manage API keys</a>
-          <th:block th:unless="${canAdminWorkspace == true or isSuperAdmin == true}">Ask a workspace admin for
-            this step.</th:block></li>
-        <li><b>Call it.</b> An application sends
-          <span class="ds-mono">GET /api/&lt;category&gt;/&lt;version&gt;/&lt;path&gt;</span> with the key in the
-          <span class="ds-mono" th:text="${mcpHeader}">DP-API-Key</span> header. An agent connects with the
-          MCP server card below.</li>
-      </ol>
-    </div>
-  </section>
-
-  <section class="ds-card" aria-labelledby="overview-agent-h" data-overview-prompt>
-    <div class="app-card-h"><h2 class="ds-title" id="overview-agent-h">Publish an endpoint with your agent</h2></div>
-    <div class="app-card-b app-overview-prose">
-      <ol class="app-overview-steps">
-        <li>Release the read-only pipeline you want served: a published path runs its released version.</li>
-        <li>Copy the prompt, fill in the bracketed parts and give it to a connected agent. It publishes the
-          path and reads it back.</li>
-        <li>Then a workspace admin associates a key with the path on the Keys page — the agent's part ends
-          at publishing.</li>
-      </ol>
-      <label class="app-overview-label" for="overview-prompt">Starter prompt — edit the bracketed parts before you copy it</label>
-      <textarea id="overview-prompt" class="ds-textarea app-overview-prompt" rows="7" spellcheck="false"
-                aria-describedby="overview-prompt-note"
-                th:text="|In workspace ${activeWorkspace ?: '[workspace]'}, publish the released pipeline [pipeline] as a read-only GET endpoint. Read the endpoints reference in the manual first. Use the category [category] (our namespace, never v-number or api), the version [v1] and the path [path, e.g. revenue/{region}], with a timeout of [60] seconds. Check that the pipeline is released and read-only, publish it with endpoints_create, then call endpoints_get on the same path. Report the URL it is served at, the pipeline and version it runs, and its timeout. Stop once it is published: a workspace admin grants programs access.|">In workspace [workspace], publish the released pipeline [pipeline] as a read-only GET endpoint.</textarea>
-      <div class="app-overview-copy">
-        <button type="button" class="ds-button ds-button-primary ds-button-sm"
-                data-overview-copy data-copy-label="Copy prompt" aria-controls="overview-prompt">Copy prompt</button>
-        <span class="app-card-note" role="status" data-overview-copy-status></span>
-      </div>
-      <p class="app-card-note" id="overview-prompt-note">
-        Copying puts the text on your clipboard and nothing else: it sends no request and grants no access.
-        <th:block th:if="${canAuthor == true}">Your agent works with the permissions of its own MCP key.</th:block>
-        <th:block th:unless="${canAuthor == true}">Your role here does not publish endpoints, so copy the request
-          for a collaborator who can.</th:block>
-      </p>
-    </div>
-  </section>
-
-  <div th:replace="~{partials/mcp-connection :: card(~{overview/guide-api-console :: homeMcpNote})}">
-    <span th:ref="homeMcpNote">The config wants an <b>MCP key</b> where the placeholder stands. A person creates
-      one on the <a th:href="@{/api-keys}">Keys page</a> — every role but a viewer may — because no agent mints a key.
-      An API key is confined to the endpoints it is associated with, and a server key to this deployment's
-      promotion routes.</span>
+<th:block xmlns:th="http://www.thymeleaf.org" th:fragment="quickstart">
+  <h2 class="app-overview-quickstart-title" id="overview-quickstart-h">How a program gets access</h2>
+  <div data-overview-access>
+    <ol class="app-overview-steps">
+      <li><b>Publish a path.</b> A released, read-only pipeline is published at a path by your agent
+        (<span class="ds-mono">endpoints_create</span>) or by a program calling
+        <span class="ds-mono">POST /api/v1/endpoints</span> — authors and admins only. There is no form for it in
+        the app.</li>
+      <li><b>Create and associate a key.</b> A workspace admin creates an API key on the Keys page and
+        associates it with the path; no agent can create one.
+        <a th:if="${canAdminWorkspace == true or isSuperAdmin == true}" th:href="@{/api-keys}"
+           data-overview-manage-keys>Manage API keys</a>
+        <th:block th:unless="${canAdminWorkspace == true or isSuperAdmin == true}">Ask a workspace admin for
+          this step.</th:block></li>
+      <li><b>Call it.</b> An application sends
+        <span class="ds-mono">GET /api/&lt;category&gt;/&lt;version&gt;/&lt;path&gt;</span> with the key in the
+        <span class="ds-mono" th:text="${mcpHeader}">DP-API-Key</span> header. An agent connects with the
+        MCP server card below.</li>
+    </ol>
   </div>
 </th:block>
 
-<th:block xmlns:th="http://www.thymeleaf.org" th:fragment="related">
-  <section class="ds-card" aria-labelledby="overview-related-h" data-overview-related>
-    <div class="app-card-h"><h2 class="ds-title" id="overview-related-h">Related resources and help</h2></div>
-    <div class="app-card-b app-overview-prose">
-      <ul class="app-overview-related">
-        <li><a hx-boost="true" th:href="@{/overview/pipelines}">Pipelines</a> are what an endpoint serves — a
-          released, read-only one.</li>
-        <li><a hx-boost="true" th:href="@{/overview/dashboards}">Dashboards</a> are shared through dashboard keys,
-          created on the same Keys page.</li>
-      </ul>
-      <p class="app-card-note">Call counts are not recorded anywhere in this system, so this page shows none.</p>
-      <p>
-        <a th:href="@{/docs/rest-api}">REST API reference</a> ·
-        <a th:href="@{/docs/mcp-server}">MCP server reference</a> ·
-        <a th:href="@{/add-mcp-server-to-claude-code}">Connect Claude Code</a>
-      </p>
-    </div>
-  </section>
+<div xmlns:th="http://www.thymeleaf.org" th:fragment="prompt" class="app-overview-dialog-section app-overview-prose"
+     data-dialog-section="prompt" data-title="Publish an endpoint with your agent" data-overview-prompt hidden>
+  <ol class="app-overview-steps">
+    <li>Release the read-only pipeline you want served: a published path runs its released version.</li>
+    <li>Copy the prompt, fill in the bracketed parts and give it to a connected agent. It publishes the
+      path and reads it back.</li>
+    <li>Then a workspace admin associates a key with the path on the Keys page — the agent's part ends
+      at publishing.</li>
+  </ol>
+  <label class="app-overview-label" for="overview-prompt">Starter prompt — edit the bracketed parts before you copy it</label>
+  <textarea id="overview-prompt" class="ds-textarea app-overview-prompt" rows="7" spellcheck="false"
+            aria-describedby="overview-prompt-note"
+            th:text="|In workspace ${activeWorkspace ?: '[workspace]'}, publish the released pipeline [pipeline] as a read-only GET endpoint. Read the endpoints reference in the manual first. Use the category [category] (our namespace, never v-number or api), the version [v1] and the path [path, e.g. revenue/{region}], with a timeout of [60] seconds. Check that the pipeline is released and read-only, publish it with endpoints_create, then call endpoints_get on the same path. Report the URL it is served at, the pipeline and version it runs, and its timeout. Stop once it is published: a workspace admin grants programs access.|">In workspace [workspace], publish the released pipeline [pipeline] as a read-only GET endpoint.</textarea>
+  <div class="app-overview-copy">
+    <button type="button" class="ds-button ds-button-primary ds-button-sm"
+            data-overview-copy data-copy-label="Copy prompt" aria-controls="overview-prompt">Copy prompt</button>
+    <span class="app-card-note" role="status" data-overview-copy-status></span>
+  </div>
+  <p class="app-card-note" id="overview-prompt-note">
+    Copying puts the text on your clipboard and nothing else: it sends no request and grants no access.
+    <th:block th:if="${canAuthor == true}">Your agent works with the permissions of its own MCP key.</th:block>
+    <th:block th:unless="${canAuthor == true}">Your role here does not publish endpoints, so copy the request
+      for a collaborator who can.</th:block>
+  </p>
+</div>
+
+<div xmlns:th="http://www.thymeleaf.org" th:fragment="howitworks" class="app-overview-dialog-section app-overview-prose"
+     data-dialog-section="howitworks" data-title="What the API is for" data-overview-intro hidden>
+  <p>
+    A released, read-only pipeline can be published at a stable URL under
+    <span class="ds-mono">/api/&lt;category&gt;/&lt;version&gt;/…</span>, so an application fetches its rows
+    with one GET. Every call carries a key in the <span class="ds-mono" th:text="${mcpHeader}">DP-API-Key</span>
+    header, and an API key reaches only the paths it is associated with. Agents connect through the MCP
+    server instead, with a key of their own.
+  </p>
+</div>
+
+<th:block xmlns:th="http://www.thymeleaf.org" th:fragment="extra">
+<div th:replace="~{partials/mcp-connection :: card(~{overview/guide-api-console :: homeMcpNote})}">
+  <span th:ref="homeMcpNote">The config wants an <b>MCP key</b> where the placeholder stands. A person creates
+    one on the <a th:href="@{/api-keys}">Keys page</a> — every role but a viewer may — because no agent mints a key.
+    An API key is confined to the endpoints it is associated with, and a server key to this deployment's
+    promotion routes.</span>
+</div>
 </th:block>
+
+<div xmlns:th="http://www.thymeleaf.org" th:fragment="related" class="app-overview-resources app-overview-prose" data-overview-related>
+  <h3 class="app-overview-sub" id="overview-related-h">Related resources and help</h3>
+  <ul class="app-overview-related">
+    <li><a hx-boost="true" th:href="@{/overview/pipelines}">Pipelines</a> are what an endpoint serves — a
+      released, read-only one.</li>
+    <li><a hx-boost="true" th:href="@{/overview/dashboards}">Dashboards</a> are shared through dashboard keys,
+      created on the same Keys page.</li>
+  </ul>
+  <p class="app-card-note">Call counts are not recorded anywhere in this system, so this page shows none.</p>
+  <p>
+    <a th:href="@{/docs/rest-api}">REST API reference</a> ·
+    <a th:href="@{/docs/mcp-server}">MCP server reference</a> ·
+    <a th:href="@{/add-mcp-server-to-claude-code}">Connect Claude Code</a>
+  </p>
+</div>

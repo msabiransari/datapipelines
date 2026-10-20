@@ -64,7 +64,7 @@ class OverviewParameterSetsBrowserTest : ParameterSetBrowserSuite() {
         page.locator("[data-bar='draft'] .app-overview-bar-v").innerText().trim() shouldBe "1"
         page.locator("[data-overview-intro]").innerText() shouldContain "Parameter sets define reusable inputs"
         withClue("Recently updated is newest first: draft_one was created after released_one's release") {
-            page.locator("[data-overview-recent] li a").allInnerTexts() shouldBe
+            page.locator("[data-overview-recent] .app-overview-recent li a").allInnerTexts() shouldBe
                 listOf("$root/parameters/draft_one", "$root/parameters/released_one")
         }
         page.locator("[data-overview-recent] time").first().getAttribute("datetime") shouldStartWith "20"
@@ -84,6 +84,7 @@ class OverviewParameterSetsBrowserTest : ParameterSetBrowserSuite() {
         ready("ps582copy")
         val workspace = activeWorkspace()
         openOverview()
+        page.click("[data-overview-agent]")
         val prompt = page.locator("#overview-prompt")
         prompt.inputValue() shouldStartWith "In workspace $workspace, create a draft parameter set for"
         prompt.fill(prompt.inputValue().replace("[inputs]", "a year and a month"))
@@ -105,6 +106,7 @@ class OverviewParameterSetsBrowserTest : ParameterSetBrowserSuite() {
         startTrace()
         ready("ps582refuse")
         openOverview()
+        page.click("[data-overview-agent]")
         stubClipboard(refuse = true)
         val requests = mutableListOf<String>()
         page.onRequest { requests += "${it.method()} ${it.url()}" }

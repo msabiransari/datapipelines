@@ -1,6 +1,7 @@
 <!--/* #579 — the Templates overview's guide (shell design §8), shaped like guide-pipelines.html:
      What this is for, Create with your agent, and the related families. `overview/family.html`
-     includes `intro` after the inventory and `related` beside Continue your work. The introduction
+     includes (since #home-frame) `quickstart` in the Quick start card, `prompt` and `howitworks` as
+     dialog sections, and `related` at the foot of Continue your work. The introduction
      is the record's, checked against the template specification (docs/templates.md v1.21) and the
      agent guide (skill/templates.md). The starter prompt follows that guide's workflow: create or
      reuse (step 1 Write — templates_list before creating, dialect declared), render with
@@ -8,57 +9,51 @@
      pipelines alone here (TemplateUsageService), so the related list names Pipelines and invents
      no other consumer. The workspace name is the one the menu shows; the bracketed placeholders
      are the reader's to fill. Copying sends nothing (overview.mjs). */-->
-<th:block xmlns:th="http://www.thymeleaf.org" th:fragment="intro">
-  <section class="ds-card" aria-labelledby="overview-intro-h" data-overview-intro>
-    <div class="app-card-h"><h2 class="ds-title" id="overview-intro-h">What templates are for</h2></div>
-    <div class="app-card-b app-overview-prose">
-      <p>
-        Templates hold reusable query or transformation logic that other resources can use. Parameters
-        let the same logic answer different requests without duplicating it. For example, aggregate
-        trips by zone for a selected period.
-      </p>
-    </div>
-  </section>
-
-  <section class="ds-card" aria-labelledby="overview-agent-h" data-overview-prompt>
-    <div class="app-card-h"><h2 class="ds-title" id="overview-agent-h">Create with your agent</h2></div>
-    <div class="app-card-b app-overview-prose">
-      <ol class="app-overview-steps">
-        <li>Describe the query or transformation, the inputs it should accept and the dialect it targets.</li>
-        <li>Ask a connected agent to build the template as a draft and render it with representative inputs.</li>
-        <li>Open the draft it returns, read its description and rendered output, and try it with your own
-          inputs. Someone allowed to release templates releases it from its workspace when it is ready.</li>
-      </ol>
-      <label class="app-overview-label" for="overview-prompt">Starter prompt — edit the bracketed parts before you copy it</label>
-      <textarea id="overview-prompt" class="ds-textarea app-overview-prompt" rows="7" spellcheck="false"
-                aria-describedby="overview-prompt-note"
-                th:text="|In workspace ${activeWorkspace ?: '[workspace]'}, create or reuse a draft template for [query or transformation]. Its inputs are [parameters/input shape] and its output should be [columns or structure]. Read the current template guide, inspect the source or input contract, and use the appropriate supported dialect or engine. Render or test it with representative inputs and explain the output contract and limitations. Return its name/version, draft link and validation evidence. Leave release to me.|">In workspace [workspace], create or reuse a draft template for [query or transformation].</textarea>
-      <div class="app-overview-copy">
-        <button type="button" class="ds-button ds-button-primary ds-button-sm"
-                data-overview-copy data-copy-label="Copy prompt" aria-controls="overview-prompt">Copy prompt</button>
-        <span class="app-card-note" role="status" data-overview-copy-status></span>
-      </div>
-      <p class="app-card-note" id="overview-prompt-note">
-        Copying puts the text on your clipboard and nothing else: it sends no request and grants no access.
-        <th:block th:if="${canAuthor == true}">Your agent works with the permissions of its own API key.</th:block>
-        <th:block th:unless="${canAuthor == true}">Your role here does not author templates, so copy the request
-          for a collaborator who can.</th:block>
-      </p>
-    </div>
-  </section>
+<th:block xmlns:th="http://www.thymeleaf.org" th:fragment="quickstart">
+  <h2 class="app-overview-quickstart-title" id="overview-quickstart-h">Create with your agent</h2>
+  <ol class="app-overview-steps">
+    <li>Describe the query or transformation, the inputs it should accept and the dialect it targets.</li>
+    <li>Ask a connected agent to build the template as a draft and render it with representative inputs.</li>
+    <li>Open the draft it returns, read its description and rendered output, and try it with your own
+      inputs. Someone allowed to release templates releases it from its workspace when it is ready.</li>
+  </ol>
 </th:block>
 
-<th:block xmlns:th="http://www.thymeleaf.org" th:fragment="related">
-  <section class="ds-card" aria-labelledby="overview-related-h" data-overview-related>
-    <div class="app-card-h"><h2 class="ds-title" id="overview-related-h">Related resources and help</h2></div>
-    <div class="app-card-b app-overview-prose">
-      <ul class="app-overview-related">
-        <li><a hx-boost="true" th:href="@{/overview/pipelines}">Pipelines</a> pin a template in their nodes
-          by id and version.</li>
-      </ul>
-      <p class="app-card-note">A release keeps rendering the same SQL even while the template's next draft
-        is being edited: a change is a new version, never a silent edit.</p>
-      <p><a th:href="@{/docs/mcp-server}">MCP server reference</a></p>
-    </div>
-  </section>
-</th:block>
+<div xmlns:th="http://www.thymeleaf.org" th:fragment="prompt" class="app-overview-dialog-section app-overview-prose"
+     data-dialog-section="prompt" data-title="Create with your agent" data-overview-prompt hidden>
+  <label class="app-overview-label" for="overview-prompt">Starter prompt — edit the bracketed parts before you copy it</label>
+  <textarea id="overview-prompt" class="ds-textarea app-overview-prompt" rows="7" spellcheck="false"
+            aria-describedby="overview-prompt-note"
+            th:text="|In workspace ${activeWorkspace ?: '[workspace]'}, create or reuse a draft template for [query or transformation]. Its inputs are [parameters/input shape] and its output should be [columns or structure]. Read the current template guide, inspect the source or input contract, and use the appropriate supported dialect or engine. Render or test it with representative inputs and explain the output contract and limitations. Return its name/version, draft link and validation evidence. Leave release to me.|">In workspace [workspace], create or reuse a draft template for [query or transformation].</textarea>
+  <div class="app-overview-copy">
+    <button type="button" class="ds-button ds-button-primary ds-button-sm"
+            data-overview-copy data-copy-label="Copy prompt" aria-controls="overview-prompt">Copy prompt</button>
+    <span class="app-card-note" role="status" data-overview-copy-status></span>
+  </div>
+  <p class="app-card-note" id="overview-prompt-note">
+    Copying puts the text on your clipboard and nothing else: it sends no request and grants no access.
+    <th:block th:if="${canAuthor == true}">Your agent works with the permissions of its own API key.</th:block>
+    <th:block th:unless="${canAuthor == true}">Your role here does not author templates, so copy the request
+      for a collaborator who can.</th:block>
+  </p>
+</div>
+
+<div xmlns:th="http://www.thymeleaf.org" th:fragment="howitworks" class="app-overview-dialog-section app-overview-prose"
+     data-dialog-section="howitworks" data-title="What templates are for" data-overview-intro hidden>
+  <p>
+    Templates hold reusable query or transformation logic that other resources can use. Parameters
+    let the same logic answer different requests without duplicating it. For example, aggregate
+    trips by zone for a selected period.
+  </p>
+</div>
+
+<div xmlns:th="http://www.thymeleaf.org" th:fragment="related" class="app-overview-resources app-overview-prose" data-overview-related>
+  <h3 class="app-overview-sub" id="overview-related-h">Related resources and help</h3>
+  <ul class="app-overview-related">
+    <li><a hx-boost="true" th:href="@{/overview/pipelines}">Pipelines</a> pin a template in their nodes
+      by id and version.</li>
+  </ul>
+  <p class="app-card-note">A release keeps rendering the same SQL even while the template's next draft
+    is being edited: a change is a new version, never a silent edit.</p>
+  <p><a th:href="@{/docs/mcp-server}">MCP server reference</a></p>
+</div>
