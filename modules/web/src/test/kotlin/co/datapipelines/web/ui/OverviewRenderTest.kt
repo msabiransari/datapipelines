@@ -6,6 +6,7 @@ import co.datapipelines.pipeline.Inventory
 import co.datapipelines.pipeline.MaturityBin
 import co.datapipelines.pipeline.ReleaseBin
 import co.datapipelines.pipeline.SearchNeedle
+import co.datapipelines.pipeline.WeekActivity
 import co.datapipelines.web.ui.site.REPORT_PROBLEM_URL
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContain
@@ -40,7 +41,8 @@ import java.util.UUID
  *
  * #598a: the Pipelines home carries the stacked charts instead (the total, the lifecycle bar and
  * the maturity chart, `OverviewStacked`), so its cases build a [ChartsResult]; the four-count
- * and four-bar cases run on the four siblings, which keep that card until #599.
+ * and four-bar cases run on the four siblings, which keep that card until #599. #598b adds the
+ * third chart, the twelve weeks of activity under the actively developed headline.
  */
 class OverviewRenderTest {
     private val engine =
@@ -226,20 +228,24 @@ class OverviewRenderTest {
         doc.selectFirst("[data-overview-review]").shouldBeNull()
     }
 
-    /** #598a — the Pipelines card: the total, two stacked charts in order, and none of the four counts or bars. */
+    /** #598a — the Pipelines card: the total, the stacked charts in order (#598b: three), and none of the four counts or bars. */
     @Test
-    fun `the pipelines panel is the total, the lifecycle bar and the maturity chart, with no count`() {
+    fun `the pipelines panel is the total, the lifecycle bar, the maturity chart and the activity chart, with no count`() {
         val doc = render(page(Inventory(2, 3, 1, 1)))
         val area = doc.selectFirst("[data-overview-inventory]").shouldNotBeNull()
+        val captions = listOf("Pipelines by lifecycle", "Pipelines by number of releases", "Pipelines activity, last 12 weeks")
 
         area.select("[data-count], [data-overview-chart], dl.app-overview-counts").shouldBeEmpty()
-        area.select("[data-stacked]").map { it.attr("data-stacked") } shouldContainExactly listOf("lifecycle", "maturity")
-        area.select("[data-stacked-total]").single().text() shouldBe "7 pipelines"
-        area.select("h3").map { it.text() } shouldContainExactly listOf("Pipelines by lifecycle", "Pipelines by number of releases")
-        area.select("[data-stacked]").map { it.attr("aria-label") } shouldContainExactly
-            listOf("Pipelines by lifecycle", "Pipelines by number of releases")
-        area.select("[data-overview-table]").map { it.selectFirst("caption")!!.text() } shouldContainExactly
-            listOf("Pipelines by lifecycle", "Pipelines by number of releases")
+        area.select("[data-stacked-chart]").map { it.attr("data-stacked-chart") } shouldContainExactly
+            listOf("lifecycle", "maturity", "activity")
+        area.select("[data-stacked]").map { it.attr("data-stacked") } shouldContainExactly listOf("lifecycle", "maturity", "activity")
+        area.select("[data-stacked-total]").map { it.attr("data-stacked-total") to it.text() } shouldContainExactly
+            listOf("lifecycle" to "7 pipelines", "activity" to "0 pipelines actively developed")
+        area.select("h3").map { it.text() } shouldContainExactly captions
+        area.select("[data-stacked]").map { it.attr("aria-label") } shouldContainExactly captions
+        area.select("[data-overview-table]").map { it.selectFirst("caption")!!.text() } shouldContainExactly captions
+        area.select("[data-chart-table=activity] thead th").map { it.text() } shouldContainExactly
+            listOf("Week", "Released", "Created", "Events")
         area.select("[data-chart-table=lifecycle] thead th").map { it.text() } shouldContainExactly
             listOf("Lifecycle", "In development", "Live", "Live, changes in progress", "Retired", "Pipelines")
         area.select("[data-chart-table=maturity] thead th").map { it.text() } shouldContainExactly
@@ -344,10 +350,84 @@ class OverviewRenderTest {
 
         doc.select("[data-stacked] rect").map { it.attr("width") }.distinct() shouldContainExactly listOf("0")
         doc.select("[data-stacked] rect").map { it.attr("x") }.distinct() shouldContainExactly listOf("0")
-        doc.select("[data-stacked-total]").single().text() shouldBe "0 pipelines"
+        doc.select("[data-stacked-total]").map { it.text() } shouldContainExactly
+            listOf("0 pipelines", "0 pipelines actively developed")
         doc.select("[data-overview-table] tbody td").map { it.text() }.distinct() shouldContainExactly listOf("0")
         doc.select("[data-stacked-chart=lifecycle] .app-overview-legend-v").map { it.text() } shouldContainExactly
             listOf("0", "0", "0", "0")
+        // #598b: an empty quarter is twelve all-zero weeks and zero sums, never a divide by zero.
+        doc.select("[data-stacked=activity] [data-row]").size shouldBe Activity.WEEKS
+        doc.select("[data-stacked=activity] .app-overview-stack-v b").map { it.text() }.distinct() shouldContainExactly listOf("0")
+        doc.select("[data-stacked-chart=activity] .app-overview-legend-v").map { it.text() } shouldContainExactly listOf("0", "0")
+    }
+
+    /** #598b — the headline counts the actively developed pipelines in the family's words: 0, 1 and many. */
+    @Test
+    fun `the activity headline words 0, 1 and 3 pipelines actively developed`() {
+        listOf(0L to "0 pipelines actively developed", 1L to "1 pipeline actively developed", 3L to "3 pipelines actively developed")
+            .forEach { (active, words) ->
+                val activity = Activity.empty(NOW, ACTIVE_DAYS).copy(activelyDeveloped = active)
+                val doc = render(pipelines(charts(Inventory(2, 3, 1, 1), activity)))
+
+                doc.select("[data-stacked-total=activity]").single().text() shouldBe words
+            }
+    }
+
+    /**
+     * #598b — twelve weekly rows, OLDEST first, keyed by the UTC Monday: `NOW` (Saturday 17 Oct)
+     * sits in the week of Monday 12 Oct, the newest and the only one "so far"; eleven weeks earlier
+     * is 27 Jul. Each row's numbers are the model's in the SVG, beside the bar and in the hidden
+     * table; the legend sums the twelve weeks.
+     */
+    @Test
+    fun `the activity rows are the twelve weeks oldest first and every number is the model's`() {
+        val activity = Activity(weeks(), activelyDeveloped = 2, windowDays = ACTIVE_DAYS)
+        val page = pipelines(charts(Inventory(2, 3, 1, 1), activity))
+        val model = page.inventory!!.stacked.first { it.key == "activity" }
+        val doc = render(page)
+
+        val rows = doc.select("[data-stacked=activity] [data-row]")
+        rows.map { it.attr("data-row") }.first() shouldBe "week-2026-07-27"
+        rows.map { it.attr("data-row") }.last() shouldBe "week-2026-10-12"
+        rows.map { it.attr("data-row") } shouldContainExactly Activity.weekStarts(NOW).map { "week-$it" }
+        rows.map { it.selectFirst(".app-overview-stack-name")!!.text() }.takeLast(3) shouldContainExactly
+            listOf("28 Sep", "5 Oct", "12 Oct")
+        rows.map { it.select(".app-overview-stack-detail").text() } shouldContainExactly List(Activity.WEEKS - 1) { "" } +
+            "(this week so far)"
+        rows.map { row -> row.select("rect").map { it.attr("data-part") to it.attr("data-tone") } }.distinct().single() shouldContainExactly
+            listOf("released" to "released", "created" to "draft")
+        rows.map { it.selectFirst(".app-overview-stack-v b")!!.text().toLong() } shouldContainExactly activity.weeks.map { it.events }
+        rows.zip(model.rows).forEach { (row, modelled) ->
+            row.select("rect").map { it.attr("width") } shouldContainExactly modelled.parts.map { it.width }
+            tiles(row.select("rect").map { it.attr("x") to it.attr("width") }) shouldBe modelled.width.toDouble()
+        }
+        rows[Activity.WEEKS - 1].selectFirst("svg")!!.attr("aria-label") shouldBe "12 Oct: 4 events; Released 3; Created 1"
+        rows[1].selectFirst("svg")!!.attr("aria-label") shouldBe "3 Aug: 1 event; Released 1; Created 0"
+        model.rows.maxOf { it.width.toDouble() } shouldBe 100.0
+
+        val table = doc.select("[data-chart-table=activity] tbody tr")
+        table.map { it.attr("data-row") } shouldContainExactly rows.map { it.attr("data-row") }
+        table.map { tr -> tr.select("td[data-part]").map { it.text().toLong() } } shouldContainExactly
+            activity.weeks.map { listOf(it.released, it.created) }
+        table.map { it.selectFirst("td[data-row-total]")!!.text().toLong() } shouldContainExactly activity.weeks.map { it.events }
+        doc.select("[data-stacked-chart=activity] [data-legend]").map { it.attr("data-legend") to it.text() } shouldContainExactly
+            listOf(
+                "released" to "Released ${activity.weeks.sumOf { it.released }}",
+                "created" to "Created ${activity.weeks.sumOf { it.created }}",
+            )
+        doc.select("[data-stacked-chart=activity] a").shouldBeEmpty()
+    }
+
+    /** #598b — the note states the configured window: the default 14 days, and 7 when configured so. */
+    @Test
+    fun `the activity note names the configured actively developed window`() {
+        listOf(ACTIVE_DAYS, 7).forEach { days ->
+            val doc = render(pipelines(charts(Inventory(2, 3, 1, 1), Activity.empty(NOW, days))))
+
+            doc.select("[data-stacked-chart=activity] .app-card-note").single().text() shouldBe
+                "Weeks start on Monday (UTC). A release since discarded is not counted. Actively developed: a draft written " +
+                "in the last $days days — a draft keeps only its last write, so this is a count today, not a history."
+        }
     }
 
     @Test
@@ -471,7 +551,10 @@ class OverviewRenderTest {
         OverviewPage.of(OverviewPage.Family.PIPELINES, false, ChartsResult.Available(charts), RecentResult.Available(emptyList()), NOW)
 
     /** A consistent chart group for [inventory]: never released objects in bin 0, every other in bin 1. */
-    private fun charts(inventory: Inventory): ChartInventory =
+    private fun charts(
+        inventory: Inventory,
+        activity: Activity = Activity.empty(NOW, ACTIVE_DAYS),
+    ): ChartInventory =
         ChartInventory(
             inventory,
             ReleaseBin.entries.map { releases ->
@@ -481,8 +564,15 @@ class OverviewRenderTest {
                     else -> bin(releases, 0, 0)
                 }
             },
-            Activity.empty(NOW, ACTIVE_DAYS),
+            activity,
         )
+
+    /** Twelve weeks ending with `NOW`'s: releases 0,1,2,0,1,2,… with the newest 3, three new pipelines (≤ any test inventory's 7). */
+    private fun weeks(): List<WeekActivity> =
+        Activity.weekStarts(NOW).mapIndexed { index, monday ->
+            val newest = index == Activity.WEEKS - 1
+            WeekActivity(monday, released = if (newest) 3 else (index % 3).toLong(), created = if (index % 4 == 3 || newest) 1 else 0)
+        }
 
     private fun bin(
         releases: ReleaseBin,
