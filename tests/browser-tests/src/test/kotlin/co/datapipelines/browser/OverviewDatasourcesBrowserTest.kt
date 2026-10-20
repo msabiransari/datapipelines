@@ -114,6 +114,19 @@ class OverviewDatasourcesBrowserTest : RestTreeBrowserFixture() {
             .first()
             .getAttribute("href") shouldBe "/datasources/$untested2"
 
+        // #home-ops: View all's badge is the one metric; the health panel's info button opens its
+        // own dialog section; the task row leads to the list.
+        page.locator("[data-overview-view-all-count]").innerText().trim() shouldBe "4"
+        page.locator("[data-overview-recent] [data-task='browse'] a").getAttribute("href") shouldBe "/datasources"
+        page.click("[data-overview-panel='health'] [data-open='health']")
+        page.waitForFunction("() => document.querySelector('dialog[data-overview-dialog]').open")
+        page.locator("[data-overview-dialog-title]").innerText().trim() shouldBe "How connection health is counted"
+        page.locator("[data-dialog-section='health']").isVisible shouldBe true
+        page.locator("[data-dialog-section='dialect']").isVisible shouldBe false
+        page.keyboard().press("Escape")
+        page.waitForFunction("() => !document.querySelector('dialog[data-overview-dialog]').open")
+        HomeOpsShots.take(page, "datasources", "health")
+
         // The dialect bar is a link: it filters the catalog to the workspace's H2 rows.
         page.locator("[data-chart='dialect'] a[href='/datasources?dialect=H2']").click()
         page.waitForURL("**/datasources?dialect=H2")
