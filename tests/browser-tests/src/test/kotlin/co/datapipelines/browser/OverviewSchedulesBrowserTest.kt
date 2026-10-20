@@ -3,6 +3,7 @@ package co.datapipelines.browser
 import co.datapipelines.browser.ScheduleFixtures.createSchedule
 import co.datapipelines.browser.ScheduleFixtures.releasedPipeline
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
 
 /**
@@ -10,7 +11,9 @@ import org.junit.jupiter.api.Test
  * `/overview/schedules` (the explorer stays at `/schedules`, View all), lit as the Schedules item
  * with the resource browser closed — Schedules is not a tree family. A fresh workspace reads
  * zeros, the two empty notes and an author's New schedule; one schedule later, the page counts it
- * and its Up next row opens the explorer's detail for that schedule.
+ * and its Up next row opens the explorer's detail for that schedule. #home-ops: on the v2 frame a
+ * panel's info button opens its dialog section, the task row leads to the explorer, and a viewer
+ * sees no New schedule, only who creates schedules.
  */
 class OverviewSchedulesBrowserTest : SchedulesBrowserSuite() {
     private fun openOverview() {
@@ -46,6 +49,17 @@ class OverviewSchedulesBrowserTest : SchedulesBrowserSuite() {
         }
         page.locator("[data-overview-prompt], [data-overview-copy]").count() shouldBe 0
 
+        // #home-ops: the condition panel's info button opens its own dialog section; Escape closes
+        // it and focus returns to the button.
+        page.click("[data-overview-panel='condition'] [data-open='condition']")
+        page.waitForFunction("() => document.querySelector('dialog[data-overview-dialog]').open")
+        page.locator("[data-overview-dialog-title]").innerText().trim() shouldBe "How conditions are counted"
+        page.locator("[data-dialog-section='condition']").isVisible shouldBe true
+        page.locator("[data-dialog-section='howitworks']").isVisible shouldBe false
+        page.keyboard().press("Escape")
+        page.waitForFunction("() => !document.querySelector('dialog[data-overview-dialog]').open")
+        page.evaluate("() => document.activeElement?.getAttribute('data-open')") shouldBe "condition"
+
         // New schedule opens the explorer, where the form is.
         page.click("[data-overview-new-schedule]")
         page.waitForURL("**/schedules")
@@ -66,12 +80,36 @@ class OverviewSchedulesBrowserTest : SchedulesBrowserSuite() {
         bar("condition", "enabled") shouldBe "1"
         bar("last-run", "never-ran") shouldBe "1"
         page.locator("[data-chart='last-run'] [data-bar='never-ran'] rect").getAttribute("width") shouldBe "100.0"
+        HomeOpsShots.take(page, "schedules", "condition")
 
-        val upNext = page.locator("[data-overview-recent] li a").first()
+        // The first link of the sections, not the card: Continue your work opens on its task row (#home-ops).
+        page.locator("[data-overview-recent] [data-task='next'] a").getAttribute("href") shouldBe "/schedules"
+        val upNext = page.locator("[data-overview-recent] .app-overview-recent li a").first()
         upNext.innerText().trim() shouldBe "$root/nightly/rows"
         upNext.getAttribute("href") shouldBe "/schedules?id=$id"
         upNext.click()
         page.waitForURL("**/schedules?id=$id")
         detail().waitFor()
+    }
+
+    @Test
+    fun `a viewer lands on the home with no New schedule and reads who creates schedules`() {
+        startTrace()
+        // The viewer is a member of `default`; the home reads that workspace.
+        val viewer =
+            seedLocalUser(
+                uniqueEmail("schov-viewer-" + suffix()),
+                generatedPassword("pw"),
+                mustChange = false,
+                isAdmin = false,
+                role = "viewer",
+            )
+        login(viewer.email, viewer.oneTimePassword)
+        page.waitForURL("**/dashboard")
+        openOverview()
+        // Absent, not hidden: the canAuthor guard renders no link at all.
+        page.locator("[data-overview-new-schedule]").count() shouldBe 0
+        page.locator("[data-overview-create-note]").innerText() shouldContain "an author or a workspace admin"
+        page.locator("[data-overview-recent] [data-task='next'] a").getAttribute("href") shouldBe "/schedules"
     }
 }
