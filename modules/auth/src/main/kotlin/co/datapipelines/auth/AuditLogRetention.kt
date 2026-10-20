@@ -1,6 +1,7 @@
 package co.datapipelines.auth
 
 import co.datapipelines.persistence.FailureShape
+import co.datapipelines.persistence.ScheduledJob
 import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.MeterRegistry
 import org.slf4j.LoggerFactory
@@ -41,11 +42,21 @@ import java.time.OffsetDateTime
  * deleted and counted, the tick WARNs with what it purged, and the next tick retries — the
  * `ExecutionEventRetention` shape.
  *
+ * ## Every statement is bounded — by the template it is given (#326)
+ * The application hands this job a [jdbc] whose every statement carries a JDBC `queryTimeout`
+ * (`RetentionSchedulingConfiguration`, the retention cadence's `RETENTION_STATEMENT_TIMEOUT_SECONDS`):
+ * the cutoff read and each batch. A batch of [batchSize] rows by index takes milliseconds, so the
+ * bound fires only on a hang — a batch queued behind a lock that never goes. A cancelled batch
+ * (SQLState `57014`) is rolled back alone; the batches before it are committed and stay deleted, the
+ * failure handling above. The tick budget is checked BETWEEN batches; the statement bound is what
+ * ends a batch that never returns.
+ *
  * ## What it logs
  * One INFO line per tick that deleted anything (`event=audit.retention`), a WARN when the tick
  * stopped with work left (`event=audit.retention_incomplete`) or failed
- * (`event=audit.retention_failed`), and the [PURGED_METER] counter. Counts and the cutoff only —
- * never a row's content.
+ * (`event=audit.retention_failed`), the [PURGED_METER] counter, and one
+ * [ScheduledJob.FAILED_TICK_METER] increment (`job=audit_retention`) per failed tick. Counts and the
+ * cutoff only — never a row's content.
  */
 class AuditLogRetention(
     private val jdbc: NamedParameterJdbcTemplate,
@@ -60,6 +71,13 @@ class AuditLogRetention(
         Counter
             .builder(PURGED_METER)
             .description("audit_log rows deleted by the retention job")
+            .register(meterRegistry)
+
+    private val failedTicks: Counter =
+        Counter
+            .builder(ScheduledJob.FAILED_TICK_METER)
+            .description(ScheduledJob.FAILED_TICK_DESCRIPTION)
+            .tag(ScheduledJob.JOB_TAG, ScheduledJob.AUDIT_RETENTION.tag)
             .register(meterRegistry)
 
     init {
@@ -134,6 +152,7 @@ class AuditLogRetention(
                     e.javaClass.simpleName,
                     FailureShape.sqlState(e),
                 )
+                failedTicks.increment()
                 Stop.FAILED
             }
         purgedCounter.increment(purged.toDouble())

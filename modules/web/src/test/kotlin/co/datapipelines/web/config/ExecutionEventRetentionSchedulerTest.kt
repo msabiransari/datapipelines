@@ -6,12 +6,14 @@ import ch.qos.logback.core.read.ListAppender
 import co.datapipelines.auth.AuditLogRetention
 import co.datapipelines.auth.KeyRetentionPurge
 import co.datapipelines.executor.ExecutionEventRetention
+import co.datapipelines.persistence.ScheduledJob
 import co.datapipelines.web.dashboards.runtime.DashboardRefreshRetention
 import co.datapipelines.web.parameters.ParameterEvaluationRetention
 import co.datapipelines.web.parameters.ParameterEvaluationSweeper
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -140,6 +142,55 @@ class ExecutionEventRetentionSchedulerTest {
         lines.filter { it.level == Level.ERROR }.map { it.formattedMessage.substringAfter("step=").substringBefore(' ') } shouldBe
             listOf("execution_events", "dashboard_refreshes", "parameter_evaluation_sweep", "parameter_evaluations", "keys", "audit_log")
     }
+
+    /**
+     * #326: the keys purge has no catch of its own (one transaction), so its failed tick — a statement
+     * cancelled at the retention bound included — is counted by the tick's step, `job=keys_purge`, once.
+     */
+    @Test
+    fun `a failing keys purge is counted once under job=keys_purge`() {
+        val registry = SimpleMeterRegistry()
+        val counted = ExecutionEventRetentionScheduler(events, keys, audit, dashboards, evaluationSweeper, evaluations, registry)
+        every { keys.purgeOnce() } throws DataAccessResourceFailureException("canceling statement due to statement timeout")
+
+        counted.retain()
+
+        failedTicks(registry) shouldBe mapOf("event_retention" to 0.0, "keys_purge" to 1.0, "audit_retention" to 0.0)
+    }
+
+    /**
+     * What escaped a job's own catch is counted under that job; a step outside the counted set (the
+     * dashboard and evaluation steps — not bounded, not counted) adds nothing, and a quiet tick nothing.
+     */
+    @Test
+    fun `only a counted job's escaped failure is counted - never an uncounted step's, never a quiet tick`() {
+        val registry = SimpleMeterRegistry()
+        val counted = ExecutionEventRetentionScheduler(events, keys, audit, dashboards, evaluationSweeper, evaluations, registry)
+        // Read before anything below registers a counter by reading it: the closed tag set, as built.
+        registry
+            .find(ScheduledJob.FAILED_TICK_METER)
+            .counters()
+            .map { it.id.getTag(ScheduledJob.JOB_TAG) }
+            .toSet() shouldBe
+            setOf("event_retention", "keys_purge", "audit_retention")
+
+        counted.retain()
+        failedTicks(registry).values.sum() shouldBe 0.0
+
+        every { events.retainOnce() } throws IllegalStateException("a")
+        every { dashboards.retainOnce() } throws IllegalStateException("b")
+        every { evaluationSweeper.sweepOnce() } throws IllegalStateException("c")
+        every { evaluations.retainOnce() } throws IllegalStateException("d")
+        every { audit.purgeOnce() } throws IllegalStateException("f")
+        counted.retain()
+
+        failedTicks(registry) shouldBe mapOf("event_retention" to 1.0, "keys_purge" to 0.0, "audit_retention" to 1.0)
+    }
+
+    private fun failedTicks(registry: SimpleMeterRegistry): Map<String, Double> =
+        listOf("event_retention", "keys_purge", "audit_retention").associateWith { job ->
+            registry.counter(ScheduledJob.FAILED_TICK_METER, ScheduledJob.JOB_TAG, job).count()
+        }
 
     private fun captured(block: () -> Unit): List<ILoggingEvent> {
         val logger = LoggerFactory.getLogger(ExecutionEventRetentionScheduler::class.java) as ch.qos.logback.classic.Logger

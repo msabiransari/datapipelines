@@ -1,9 +1,9 @@
 # DAG Executor Specification
 
-**Status:** v1.31 (revised — see Change Log)
+**Status:** v1.32 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Contract spec](pipeline-contract.md), [Templates spec](templates.md), [Datasources spec](datasources.md), [Staging spec](staging.md)
-**Last updated:** 2026-10-03
+**Last updated:** 2026-10-20
 
 ---
 
@@ -1515,7 +1515,7 @@ The executor exports Micrometer metrics. **[Observability §4.1](observability.m
 |---|---|---|
 | `datapipelines.executions.total` | counter | `status` (success/failed/aborted), `pipeline_id` |
 | `datapipelines.executions.duration` | timer | `pipeline_id` |
-| `datapipelines.executions.concurrent` | gauge | (none) — bound to the live execution-slot count |
+| `datapipelines.executions.concurrent` | gauge | (none) — bound to the live execution-slot count by the execution-slot bean, once per instance |
 | `datapipelines.executions.aborted` | counter | `reason` (`client_disconnect`/`cancelled`/`shutdown`) |
 | `datapipelines.nodes.duration` | timer | `pipeline_id`, `node_id`, `source` |
 | `datapipelines.nodes.rows_out` | counter | `pipeline_id`, `node_id` |
@@ -1620,6 +1620,7 @@ document a customer can read before they need it.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-20 | v1.32 | #569 | The concurrency gauge is bound by the execution-slot bean, once per instance. Executor construction does not register it; rebinding the same pool is a no-op and a different pool fails fast. |
 | 2026-10-03 | v1.31 | #403 never-started reservation release | **§11.2/§11.3**: REST and MCP release before-start failures using atomic execution-id compare-and-delete; started reservations stay claimed. Stored JSON field names corrected to camelCase; crashed originals and attached followers retain the id-free 410. |
 | 2026-10-02 | v1.30 | 328 (#328) the result history gains the schema | **The result-history bookkeeping** (`recordResult` — the surfaces' write that fills `result_row_count` / `result_size_bytes` after `execute` returns the result ref) now also records `result_schema_json` (V47) — the materialized result's columns as the driver reported them, `{name, type, nullable}` (pipeline-contract §3.3.1). History, not availability: it survives the Redis TTL, and the release flip copies it. Past the record bounds (256 columns, 128 characters per name) the record is NULL with a `warn` — never a failed execution. A `direct`/`directSink` delivery (a PIPELINE child, a dashboard refresh) writes no stored result and therefore no record, exactly as it writes no row count. |
 | 2026-10-02 | v1.29 | lane 324 (#324) | §11.2: the retry's behaviour inside the original's start window is stated — a retry landing before the original's first event (up to the 10 s lifecycle write bound) waits for it (the attach follows the log for ~15 s, above the bound) and then streams the original's events, instead of the premature `410` with an id whose row did not resolve yet; a never-started original answers the id-free `410 result.expired` (`reason: original_not_started`), an expired log keeps `reason: event_log_expired` with the id. The attach consults the execution row; no new config key (the wait is the log follower's existing give-up patience). |

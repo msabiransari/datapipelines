@@ -1,6 +1,9 @@
 package co.datapipelines.executor
 
 import co.datapipelines.persistence.FailureShape
+import co.datapipelines.persistence.ScheduledJob
+import io.micrometer.core.instrument.Counter
+import io.micrometer.core.instrument.MeterRegistry
 import org.slf4j.LoggerFactory
 import org.springframework.dao.DataAccessException
 import java.time.Duration
@@ -31,7 +34,10 @@ import java.time.Instant
  * ## Failure handling
  * A metadata-DB fault fails the tick, never the scheduler: the exception is logged and the
  * next tick retries. A sweep that crashed its scheduling thread would re-create exactly the
- * stuck-`RUNNING` hole it exists to close.
+ * stuck-`RUNNING` hole it exists to close. The `UPDATE` carries a statement bound (#326,
+ * [ExecutionRepository]'s `sweepStatementTimeoutSeconds`), so a tick queued behind a lock that
+ * never goes ends at the bound as one of these faults (`sql_state=57014`). Every failed tick is
+ * counted ([ScheduledJob.FAILED_TICK_METER], `job=stale_sweep`).
  */
 class StaleExecutionSweeper(
     private val executions: ExecutionRepository,
@@ -43,7 +49,18 @@ class StaleExecutionSweeper(
      * costs data, where waiting an extra 30 seconds costs an operator nothing.
      */
     private val heartbeatInterval: Duration,
+    /** The failed-tick counter's registry; null (every direct construction, tests) counts nothing. */
+    metrics: MeterRegistry? = null,
 ) {
+    private val failedTicks: Counter? =
+        metrics?.let { registry ->
+            Counter
+                .builder(ScheduledJob.FAILED_TICK_METER)
+                .description(ScheduledJob.FAILED_TICK_DESCRIPTION)
+                .tag(ScheduledJob.JOB_TAG, ScheduledJob.STALE_SWEEP.tag)
+                .register(registry)
+        }
+
     init {
         require(!staleTimeout.isNegative && !staleTimeout.isZero) { "staleTimeout must be positive, was $staleTimeout" }
         require(!heartbeatInterval.isNegative && !heartbeatInterval.isZero) {
@@ -74,6 +91,7 @@ class StaleExecutionSweeper(
                     FailureShape.cause(e),
                     FailureShape.sqlState(e),
                 )
+                failedTicks?.increment()
                 return 0
             }
         if (swept > 0) {
