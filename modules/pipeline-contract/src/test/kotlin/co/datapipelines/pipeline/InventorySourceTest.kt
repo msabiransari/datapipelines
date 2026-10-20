@@ -72,7 +72,9 @@ class InventorySourceTest {
     fun `admitted appends the per-object aggregates after the flags`(family: NavigationFamily) {
         val flags = selectList(InventorySource.admitted(family, narrowed = false))
         val extended = selectList(InventorySource.admitted(family, narrowed = false, perObject = ", count(*) AS n"))
-        extended shouldStartWith "bool_or(v.status = 'DRAFT') AS d, bool_or(v.status = 'RELEASED') AS r, bool_or(v.status = 'DISCARDED') AS x"
+        val threeFlags =
+            "bool_or(v.status = 'DRAFT') AS d, bool_or(v.status = 'RELEASED') AS r, bool_or(v.status = 'DISCARDED') AS x"
+        extended shouldStartWith threeFlags
         extended shouldEndWith ", count(*) AS n"
         extended shouldBe "$flags, count(*) AS n"
     }
