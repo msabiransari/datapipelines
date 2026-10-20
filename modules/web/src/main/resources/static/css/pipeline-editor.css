@@ -158,13 +158,13 @@
   padding: var(--space-0-5) var(--space-2);
   border-radius: var(--app-radius-badge);
   background: var(--accent-success-bg, #dcfce7);
-  color: var(--accent-success, #15803d);
+  color: var(--app-success-ink);
   white-space: nowrap;
 }
 
 .pe-vchip-draft {
   background: var(--accent-warning-bg, #fef9c3);
-  color: var(--accent-warning, #a16207);
+  color: var(--app-warning-ink);
 }
 
 /* The run status: dot + text; the dot pulses brand while running (stopped under
@@ -270,7 +270,7 @@
 
 .pe-banner.connection-lost {
   background: var(--accent-warning-bg, #fef9c3);
-  color: var(--text-warning, #a16207);
+  color: var(--app-warning-ink);
 }
 
 .pe-banner-dismiss {
@@ -694,7 +694,7 @@
   width: 160px;
   height: 96px;
   background: var(--surface-raised, #fff);
-  border: 1px solid var(--border-subtle, #b2b7bf);
+  border: 1px solid var(--border-default);
   border-radius: var(--radius-md, 8px);
   box-shadow: var(--shadow-md, 0 4px 10px -2px rgb(15 23 42 / 0.1));
   overflow: hidden;
@@ -753,7 +753,7 @@
   padding: var(--gap-xs, 4px);
   border-radius: var(--radius-md, 8px);
   background: var(--surface-raised, #fff);
-  border: 1px solid var(--border-subtle, #b2b7bf);
+  border: 1px solid var(--border-default);
   box-shadow: var(--shadow-md, 0 4px 10px -2px rgb(15 23 42 / 0.1));
   z-index: var(--z-dropdown, 100);
 }
@@ -1117,7 +1117,7 @@
 }
 
 .pe-port-waiting .pe-port-line {
-  color: var(--accent-warning, #b45309);
+  color: var(--app-warning-ink);
 }
 
 /* writing — the measured write: the success accent, the flow on the stub, the dot filled. */
@@ -1134,7 +1134,7 @@
 
 .pe-port-writing .pe-port-line,
 .pe-port-finalizing .pe-port-line {
-  color: var(--accent-success, #15803d);
+  color: var(--app-success-ink);
 }
 
 /* finalizing / combined (CTAS — the write is inside the statement): a soft ring pulse on
@@ -1323,7 +1323,7 @@
 }
 
 .pe-card-success .pe-marker-word {
-  color: var(--accent-success, #15803d);
+  color: var(--app-success-ink);
 }
 
 .pe-card-failed .pe-marker-word {
@@ -1331,7 +1331,7 @@
 }
 
 .pe-card-aborted .pe-marker-word {
-  color: var(--accent-warning, #b45309);
+  color: var(--app-warning-ink);
 }
 
 .pe-marker-elapsed {
@@ -1566,7 +1566,7 @@
   flex: 0 1 auto;
   min-height: 0;
   background: var(--surface-default, #fff);
-  border-top: 1px solid var(--border-subtle, #b2b7bf);
+  border-top: 1px solid var(--border-default);
   transition: grid-template-rows 0.2s;
   /* 104 §B: the containing block for the resize handle that overlays the top border. The
      handle is ABSOLUTE on purpose — a third child in flow would open a third grid row. */
@@ -1719,7 +1719,7 @@ html.dp-splitting-y * {
 
 .pe-dock-count-ok {
   background: var(--accent-success-bg, #dcfce7);
-  color: var(--accent-success, #15803d);
+  color: var(--app-success-ink);
 }
 
 /* "previous run": the Results tab is still showing a page from an earlier

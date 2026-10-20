@@ -65,7 +65,7 @@ class OverviewDashboardsBrowserTest : RestTreeBrowserFixture() {
         count("with-releases") shouldBe "0"
         page.locator("[data-bar='draft'] rect").getAttribute("width") shouldBe "100.0"
         page.locator("[data-bar='released'] rect").getAttribute("width") shouldBe "0.0"
-        page.locator("[data-overview-recent] li a").allInnerTexts() shouldBe listOf("acme/boards/sales")
+        page.locator("[data-overview-recent] .app-overview-recent li a").allInnerTexts() shouldBe listOf("acme/boards/sales")
         page.locator("[data-overview-recent] li .ds-badge").innerText().trim() shouldBe "draft"
         page.locator("#overview-prompt").inputValue() shouldContain "build a draft dashboard"
 
@@ -82,6 +82,7 @@ class OverviewDashboardsBrowserTest : RestTreeBrowserFixture() {
         startTrace()
         readyTree()
         openOverview()
+        page.click("[data-overview-agent]")
         val prompt = page.locator("#overview-prompt")
         prompt.fill(prompt.inputValue().replace("[question]", "which region missed its target?"))
         stubClipboard(refuse = false)
@@ -101,6 +102,7 @@ class OverviewDashboardsBrowserTest : RestTreeBrowserFixture() {
         startTrace()
         readyTree()
         openOverview()
+        page.click("[data-overview-agent]")
         stubClipboard(refuse = true)
         val requests = mutableListOf<String>()
         page.onRequest { requests += "${it.method()} ${it.url()}" }

@@ -3,7 +3,11 @@ package co.datapipelines.web.ui
 import co.datapipelines.application.endpoints.PublishedEndpoint
 import co.datapipelines.auth.ApiKey
 import co.datapipelines.auth.ApiKeyKind
+import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthProperties
+import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.WorkspaceContext
+import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.mcp.McpToolCatalog
 import co.datapipelines.pipeline.SearchNeedle
 import co.datapipelines.web.ui.site.REPORT_PROBLEM_URL
@@ -14,12 +18,17 @@ import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
+import io.mockk.every
+import io.mockk.mockk
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
+import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.springframework.mock.web.MockHttpServletRequest
 import org.springframework.mock.web.MockHttpServletResponse
 import org.springframework.mock.web.MockServletContext
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
+import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.ui.ExtendedModelMap
 import org.thymeleaf.context.WebContext
 import org.thymeleaf.spring6.SpringTemplateEngine
@@ -47,6 +56,85 @@ class OverviewApiRenderTest {
             )
         }
 
+    @AfterEach
+    fun clearContext() {
+        SecurityContextHolder.clearContext()
+    }
+
+    /**
+     * #home-ops — the page the CONTROLLER builds, rendered: four metrics whose notes are the tiles'
+     * help sentences and whose dots are their state bars' tones, the View all badge equal to the
+     * Endpoints metric, the two panels with descriptions and info dialogs, the console and keys
+     * task rows above the two sections, the guide's v2 quick start with How a program gets access
+     * in the How it works dialog — and no key's id or hash anywhere in the page.
+     */
+    @Test
+    fun `the controller's page renders the v2 regions - metrics, panels with dialogs, the task rows, the quick start`() {
+        val html = controllerHtml(WorkspaceRole.WORKSPACE_ADMIN)
+        val doc = Jsoup.parse(html)
+
+        doc.select("[data-overview-summary] [data-count]").map { it.attr("data-count") } shouldContainExactly
+            listOf("endpoints", "release", "draft", "keys")
+        doc.select("[data-overview-summary] .app-overview-count-help").map { it.text() } shouldContainExactly
+            listOf(
+                "Every published path, legacy ones included: the four bars below added together.",
+                "A call runs the pipeline's released version.",
+                "A call runs a draft version — development posture only.",
+                "Live, expired and revoked — every key the Keys page lists for you.",
+            )
+        doc.select("[data-count=endpoints] .app-overview-dot, [data-count=keys] .app-overview-dot").shouldBeEmpty()
+        doc.selectFirst("[data-count=release] .app-overview-dot")!!.attr("data-tone") shouldBe
+            doc.selectFirst("[data-chart=endpoint-state] [data-bar=serving-release]")!!.attr("data-tone")
+        doc.selectFirst("[data-count=draft] .app-overview-dot")!!.attr("data-tone") shouldBe
+            doc.selectFirst("[data-chart=endpoint-state] [data-bar=serving-draft]")!!.attr("data-tone")
+        doc.selectFirst("[data-overview-view-all-count]")!!.text() shouldBe "3"
+        doc.select("[data-overview-panel] .app-overview-panel-sub").map { it.text() } shouldContainExactly
+            listOf("Every published path once, by what a call to it runs now.", "Live keys only, one bar per kind.")
+        doc.select("[data-overview-panel] [data-open]").map { it.attr("data-open") } shouldContainExactly
+            listOf("endpoint-state", "key-kind")
+        doc.selectFirst("[data-dialog-section=endpoint-state]")!!.text() shouldContain "never serves"
+        doc.selectFirst("[data-dialog-section=key-kind]")!!.text() shouldContain "revoked before it is expired"
+        doc.select("[data-overview-recent] [data-task] a").map { it.attr("href") } shouldContainExactly listOf("/api-console", "/api-keys")
+        doc.select("[data-overview-recent] [data-task] b").map { it.text() } shouldContainExactly listOf("Open the console", "Manage keys")
+        doc.selectFirst(".app-overview-subtitle").shouldNotBeNull()
+        doc.select("[data-overview-quickstart] .app-overview-steps-row li b").map { it.text() } shouldContainExactly
+            listOf("Publish", "Grant", "Call")
+        doc.selectFirst("[data-overview-prepare]").shouldNotBeNull()
+        doc.select("[data-dialog-section=howitworks] [data-overview-access] .app-overview-steps li").size shouldBe 3
+        html shouldNotContain "SENTINEL"
+    }
+
+    /**
+     * #621 — the keys read is not lensed: a promoter's endpoint metrics each say they are the
+     * admitted inventory, the keys metric does not, and the strip as a whole is not headed
+     * "Admitted inventory" (the page-level sentence is absent).
+     */
+    @Test
+    fun `a promoter's endpoint metrics carry the lens words and the keys metric does not`() {
+        val doc = Jsoup.parse(controllerHtml(WorkspaceRole.PROMOTER, lensed = true))
+
+        doc.selectFirst("#overview-inventory-h")!!.text() shouldBe "Inventory"
+        doc.selectFirst(".app-overview-lens").shouldBeNull()
+        doc.select("[data-overview-summary] [data-count]:has(.app-overview-count-lens)").map { it.attr("data-count") } shouldContainExactly
+            listOf("endpoints", "release", "draft")
+        doc
+            .selectFirst("[data-count=keys]")
+            .shouldNotBeNull()
+            .select(".app-overview-count-lens")
+            .shouldBeEmpty()
+    }
+
+    /** A failed keys read: no keys metric, no Manage keys row; the console row stays. */
+    @Test
+    fun `a failed keys read offers no keys row`() {
+        val doc = Jsoup.parse(controllerHtml(WorkspaceRole.WORKSPACE_ADMIN, keysFail = true))
+
+        doc.select("[data-overview-summary] [data-count]").map { it.attr("data-count") } shouldContainExactly
+            listOf("endpoints", "release", "draft")
+        doc.select("[data-overview-recent] [data-task]").map { it.attr("data-task") } shouldContainExactly listOf("console")
+        doc.select("[data-overview-panel=key-kind] [data-open]").shouldBeEmpty()
+    }
+
     @Test
     fun `the guide renders the introduction, the three access steps, the prompt and the related links`() {
         val html = html(page(), workspace = "<b>acme</b>")
@@ -69,6 +157,14 @@ class OverviewApiRenderTest {
         prompt.`val`() shouldContain "endpoints_create"
         prompt.`val`() shouldContain "endpoints_get"
         prompt.children().shouldBeEmpty()
+        // #home-ops moved the guide around the prompt, never the prompt: its text is the base's, byte for byte.
+        prompt.`val`() shouldBe
+            "In workspace <b>acme</b>, publish the released pipeline [pipeline] as a read-only GET endpoint. Read " +
+            "the endpoints reference in the manual first. Use the category [category] (our namespace, never " +
+            "v-number or api), the version [v1] and the path [path, e.g. revenue/{region}], with a timeout of " +
+            "[60] seconds. Check that the pipeline is released and read-only, publish it with endpoints_create, " +
+            "then call endpoints_get on the same path. Report the URL it is served at, the pipeline and version " +
+            "it runs, and its timeout. Stop once it is published: a workspace admin grants programs access."
         // The agent never mints, associates or copies a credential (skill/endpoints.md): the
         // prompt names no key at all, and carries nothing that looks like one.
         listOf("key", "dpk_", "password", "secret", "token", "://").forEach { prompt.`val`().lowercase() shouldNotContain it }
@@ -112,12 +208,12 @@ class OverviewApiRenderTest {
         doc.select("[data-chart-table=key-kind] thead th").map { it.text() } shouldContainExactly listOf("Kind", "Live keys")
         doc.select("[data-overview-chart][data-chart=endpoint-state] a").map { it.attr("href") }.toSet() shouldBe setOf("/api-console")
         doc.select("[data-overview-chart][data-chart=key-kind] a").map { it.attr("href") }.toSet() shouldBe setOf("/api-keys")
-        doc.select("[data-overview-inventory] .app-card-note").joinToString(" ") { it.text() } shouldContain
+        doc.select("[data-overview-inventory] [data-overview-note]").joinToString(" ") { it.text() } shouldContain
             "Not counted: 1 expired, 1 revoked."
         doc.selectFirst("[data-overview-review]").shouldBeNull()
-        doc.select("[data-overview-recent] h3").map { it.text() } shouldContainExactly
+        doc.select("[data-overview-recent] .app-overview-recent-section h3").map { it.text() } shouldContainExactly
             listOf("Recently published", "Recently created keys")
-        doc.select("[data-overview-recent] li a").map { it.text() } shouldContainExactly
+        doc.select("[data-overview-recent] .app-overview-recent li a").map { it.text() } shouldContainExactly
             listOf(
                 "/api/nyc/v1/newest · Revenue · v2 · draft",
                 "/api/nyc/v1/oldest · Mobility · v3",
@@ -175,9 +271,10 @@ class OverviewApiRenderTest {
 
         doc.select("[data-overview-inventory] [data-count]").map { it.attr("data-count") } shouldContainExactly
             listOf("endpoints", "release", "draft")
-        doc.selectFirst("[data-overview-chart][data-chart=key-kind]")!!.attr("aria-label") shouldBe "Keys by kind — unavailable"
+        val keyKind = doc.selectFirst("[data-overview-chart][data-chart=key-kind]")!!.attr("aria-labelledby")
+        doc.getElementById(keyKind)!!.text() shouldBe "Keys by kind — unavailable"
         doc.select("[data-overview-chart][data-chart=key-kind] li").shouldBeEmpty()
-        doc.select("[data-overview-inventory] .app-card-note").joinToString(" ") { it.text() } shouldContain
+        doc.select("[data-overview-inventory] [data-overview-note]").joinToString(" ") { it.text() } shouldContain
             "The keys could not be read, so no key is counted here."
         doc.selectFirst("[data-overview-recent]")!!.text() shouldContain "The keys could not be read."
     }
@@ -197,7 +294,7 @@ class OverviewApiRenderTest {
         empty.select("[data-overview-chart] rect").map { it.attr("width") }.toSet() shouldBe setOf("0")
         empty.select("[data-overview-recent-empty]").map { it.text() } shouldContainExactly
             listOf(
-                "Nothing is published yet. The three steps above say how.",
+                "Nothing is published yet. Quick start says how.",
                 "No keys yet. A key is created by a person on the Keys page.",
             )
         empty.select("[data-overview-access] .app-overview-steps li").size shouldBe 3
@@ -213,7 +310,7 @@ class OverviewApiRenderTest {
             title = "API",
             catalogHref = ApiOverviewController.CONSOLE,
             lensed = false,
-            inventory = ApiHomePage.panel(endpoints, keys?.let { KeyCounts.of(it, NOW) }, keysHeading),
+            inventory = ApiHomePage.panel(endpoints, keys?.let { KeyCounts.of(it, NOW) }, keysHeading, lensed = false),
             unavailable = null,
             recent = ApiHomePage.recent(endpoints, keys, NOW),
             guided = true,
@@ -255,6 +352,40 @@ class OverviewApiRenderTest {
             updatedAt = createdAt,
         )
 
+    /** The controller's model over [inventory] and [KEYS] for [role], rendered with its own attributes. */
+    private fun controllerHtml(
+        role: WorkspaceRole,
+        lensed: Boolean = false,
+        keysFail: Boolean = false,
+    ): String {
+        SecurityContextHolder.getContext().authentication =
+            UsernamePasswordAuthenticationToken(
+                AuthenticatedPrincipal(
+                    UUID.randomUUID(),
+                    "a@b.c",
+                    "A",
+                    AuthMethod.OIDC,
+                    workspace = WorkspaceContext(UUID.randomUUID(), "acme", role),
+                ),
+                null,
+            )
+        val reads = mockk<ApiHomeReads>()
+        every { reads.lensed(any()) } returns lensed
+        every { reads.endpoints(any()) } returns inventory()
+        if (keysFail) {
+            every { reads.keys(any()) } throws IllegalStateException("database down")
+        } else {
+            every { reads.keys(any()) } returns KEYS
+        }
+        val model = ExtendedModelMap()
+        ApiOverviewController(
+            reads,
+            McpConnectionCard(AuthProperties(baseUrl = "https://app.example")),
+            mockk { every { resolve(any()) } returns "saas" },
+        ).overview(model, MockHttpServletRequest())
+        return html(model[OverviewController.MODEL] as OverviewPage, extra = model)
+    }
+
     private fun render(
         page: OverviewPage,
         canAuthor: Boolean = true,
@@ -268,6 +399,7 @@ class OverviewApiRenderTest {
         canAuthor: Boolean = true,
         canAdminWorkspace: Boolean = true,
         isSuperAdmin: Boolean = true,
+        extra: Map<String, Any?> = emptyMap(),
     ): String {
         val path = ApiOverviewController.PATH
         val context =
@@ -291,6 +423,7 @@ class OverviewApiRenderTest {
         ExtendedModelMap()
             .also { McpConnectionCard(AuthProperties(baseUrl = "https://app.example")).stamp(it) }
             .forEach { (name, value) -> context.setVariable(name, value) }
+        extra.forEach { (name, value) -> context.setVariable(name, value) }
         context.setVariable(OverviewController.MODEL, page)
         return engine.process(OverviewController.VIEW, context)
     }

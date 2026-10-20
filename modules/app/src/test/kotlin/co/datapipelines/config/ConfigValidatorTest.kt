@@ -106,6 +106,19 @@ class ConfigValidatorTest {
         empty.violations.shouldHaveSize(1)
     }
 
+    /** §3.10 (#598b) — the actively developed window is an integer of at least one day; unset is the binder default. */
+    @Test
+    fun `ui actively developed days must be an integer of at least one`() {
+        listOf("0", "-1", "two", "1.5", " ").forEach { raw ->
+            val bad = ConfigValidator.validate(validSnapshot().copy(uiActivelyDevelopedDays = raw))
+            bad.violations.shouldHaveSize(1)
+            bad.violations.single() shouldContain "datapipelines.ui.actively-developed-days '$raw' must be an integer ≥ 1; §3.10."
+        }
+        listOf("1", "14", " 30 ", null).forEach { raw ->
+            ConfigValidator.validate(validSnapshot().copy(uiActivelyDevelopedDays = raw)).violations.shouldBeEmpty()
+        }
+    }
+
     @Test
     fun `ui theme check defers with a warning while no theme assets are vendored (pre-P8)`() {
         val report = ConfigValidator.validate(validSnapshot().copy(vendoredThemes = null))

@@ -56,7 +56,7 @@ class OverviewDashboardsRenderTest {
         doc.selectFirst("h1")!!.text() shouldBe "Dashboards"
         doc.selectFirst("[data-overview-intro]")!!.text() shouldContain
             "Dashboards bring pipeline results, visualizations and controls together in one view."
-        doc.select("[data-overview-prompt] .app-overview-steps li").size shouldBe 3
+        doc.select("[data-overview-quickstart] .app-overview-steps li").size shouldBe 3
         // Escaped on the wire: a workspace name is text, never markup (th:text, not th:utext).
         html shouldNotContain "<b>acme</b>"
         val prompt = doc.selectFirst("textarea#overview-prompt").shouldNotBeNull()

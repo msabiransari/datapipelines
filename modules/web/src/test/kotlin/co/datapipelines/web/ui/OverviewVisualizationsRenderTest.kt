@@ -53,9 +53,9 @@ class OverviewVisualizationsRenderTest {
             listOf("/visualizations?lifecycle=draft", "/visualizations?lifecycle=released", "/visualizations?lifecycle=released-with-draft")
         doc.select("[data-bar=discarded] a").isEmpty() shouldBe true
         requireNotNull(doc.selectFirst("[data-overview-review]")).attr("href") shouldBe "/visualizations?lifecycle=with-drafts"
-        doc.select("[data-overview-prompt] ol li").size shouldBe 3
+        doc.select("[data-overview-quickstart] ol li").size shouldBe 3
         doc.select("[data-overview-intro]").text() shouldContain "each borough's rideshare share"
-        doc.select("[data-overview-prompt]").text() shouldContain "Preview (test fixtures)"
+        doc.select("[data-overview-quickstart]").text() shouldContain "Preview (test fixtures)"
     }
 
     @Test

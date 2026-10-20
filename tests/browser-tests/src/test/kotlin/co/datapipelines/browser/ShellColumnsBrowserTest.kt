@@ -161,6 +161,9 @@ class ShellColumnsBrowserTest : RestTreeBrowserFixture() {
         println("554-A4d on /pipelines main=$familyMain browser=$browser")
         page.click(".app-nav-link[data-nav-section='/executions']")
         page.waitForURL("**/executions")
+        // #586: the URL commits before htmx:afterSettle runs sidebar.mjs's sync(), which is
+        // what hides the column; measure only once the state the case asserts is on the page.
+        page.waitForFunction("() => document.getElementById('app-browser').hidden === true")
         settle()
         mainWidth() shouldBe familyMain + browser
         page.locator("#app-browser").isVisible shouldBe false
@@ -169,6 +172,8 @@ class ShellColumnsBrowserTest : RestTreeBrowserFixture() {
         // Back to the family: the column returns with the same instance.
         page.goBack()
         page.waitForURL("**/pipelines")
+        page.waitForFunction("() => document.getElementById('app-browser').hidden === false")
+        settle()
         page.locator("#app-browser").isVisible shouldBe true
         mainWidth() shouldBe familyMain
     }

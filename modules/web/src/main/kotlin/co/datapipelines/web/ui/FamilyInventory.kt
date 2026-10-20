@@ -2,6 +2,7 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.application.lens.LensedView
 import co.datapipelines.parameters.ParameterSetRepository
+import co.datapipelines.pipeline.ChartInventory
 import co.datapipelines.pipeline.Inventory
 import co.datapipelines.pipeline.NavigationFamily
 import co.datapipelines.pipeline.PipelineRepository
@@ -9,6 +10,7 @@ import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.visualization.DashboardRepository
 import co.datapipelines.visualization.VisualizationRepository
 import org.slf4j.LoggerFactory
+import java.time.Instant
 import java.util.UUID
 
 /** Unknown inventory is distinct from a successfully read empty workspace. */
@@ -20,6 +22,17 @@ sealed interface InventoryResult {
     data class Unavailable(
         val reason: String,
     ) : InventoryResult
+}
+
+/** #598a — the overview's chart group, or why it is unknown; an unknown chart is never drawn as zeros. */
+sealed interface ChartsResult {
+    data class Available(
+        val charts: ChartInventory,
+    ) : ChartsResult
+
+    data class Unavailable(
+        val reason: String,
+    ) : ChartsResult
 }
 
 /**
@@ -60,7 +73,40 @@ class FamilyInventory(
             InventoryResult.Available(inventory)
         } catch (failure: Exception) {
             log.warn("inventory unavailable for workspace {} family {}: {}", workspaceId, family, failure.toString())
-            InventoryResult.Unavailable("Inventory could not be read.")
+            InventoryResult.Unavailable(UNREADABLE)
         }
+    }
+
+    /**
+     * #598a — the lifecycle and maturity charts from ONE statement, under the same rules as
+     * [forFamily]: an unavailable lens fails closed before any read, and a read failure (a lazy
+     * lens's included) is [ChartsResult.Unavailable], never zeros. Only Pipelines builds these
+     * charts this round; any other family answers [NOT_CHARTED] without a read and nothing calls
+     * it for one (`OverviewPage.Family.charts`), until #599 wires the four siblings' repositories.
+     * #598b: the activity chart is counted at [now], actively developed over the last [activeDays]
+     * days (`datapipelines.ui.actively-developed-days`); both reach the statement unchanged.
+     */
+    @Suppress("TooGenericExceptionCaught") // the same read boundary as forFamily's
+    fun chartsFor(
+        family: NavigationFamily,
+        workspaceId: UUID,
+        view: LensedView,
+        now: Instant,
+        activeDays: Int,
+    ): ChartsResult {
+        view.unavailable?.let { return ChartsResult.Unavailable(it.reason) }
+        if (family != NavigationFamily.PIPELINES) return ChartsResult.Unavailable(NOT_CHARTED)
+        return try {
+            ChartsResult.Available(pipelines.charts(workspaceId, view.pipelines, now, activeDays))
+        } catch (failure: Exception) {
+            log.warn("charts unavailable for workspace {} family {}: {}", workspaceId, family, failure.toString())
+            ChartsResult.Unavailable(UNREADABLE)
+        }
+    }
+
+    companion object {
+        /** The one reason a failed read gives — the same words for the counts and the charts. */
+        const val UNREADABLE = "Inventory could not be read."
+        const val NOT_CHARTED = "These charts are not built for this family yet."
     }
 }

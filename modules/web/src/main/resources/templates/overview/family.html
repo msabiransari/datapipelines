@@ -3,65 +3,144 @@
       th:replace="~{layouts/default :: page(~{::content})}">
 <th:block th:fragment="content">
   <!--/* #556 — a family overview (ui-screens.md §4.25; shell design §8), ONE template for all
-       families over `overview` (OverviewController, OverviewPage). Hierarchy: heading, workspace
-       line and View all; the inventory (counts, then the panel's charts, each with its table
-       twin); then, for a family whose guide is written (`overview/guide-<family>.html`), What
-       this is for and Create with your agent; Continue your work where the family has a recent
-       adapter; related families and help from the guide. Every number on the page is read from
-       `o.inventory` and `o.recent`, the values the page's controller built, so a chart cannot
-       disagree with its totals. #583 generalized the frame: the panel's charts and the recent
-       card's sections are lists — the five lifecycle families build one of each. */-->
-  <div class="app-overview" th:with="o=${overview}" th:attr="data-overview=${o.family}">
-    <template data-page-assets th:if="${o.guided}">
+       families over `overview` (OverviewController, OverviewPage, and the three sibling
+       controllers). #home-frame re-cut it on the approved 2026-10-20 direction (store
+       notes/2026-10-20-home-pages-direction.md): the regions, in order, are the heading (eyebrow,
+       title, the guide's `subtitle`, View all with its badge, the primary action), the summary
+       strip (`o.metrics`, its foot), the analytics grid (`inventory.panels`: columns or bars, each
+       with its table twin), the work grid (Continue your work: task rows, the recent sections, the
+       guide's `related`; Quick start: the guide's `quickstart`), the guide's `extra` full width,
+       and ONE <dialog> whose sections are server-rendered here — the inventory's explanations and
+       the guide's `prompt` and `howitworks` fragments — shown by key by overview.mjs. A guide
+       fragment the guide does not declare renders nothing (`~{…} ?: ~{}`). Every number on the
+       page is read from `o.inventory` and `o.recent`, the values the page's controller built, so a
+       chart cannot disagree with its totals. Every string is a text sink (th:text / th:attr); the
+       CSP admits no inline script or style, so geometry is SVG attributes. */-->
+  <div class="app-overview" th:attr="data-overview=${overview.family}"
+       th:with="o=${overview}, guide=${'overview/guide-' + overview.family}, hasPrompt=${overview.guided} and ~{${guide} :: prompt},
+                hasQuickstart=${overview.guided} and ~{${guide} :: quickstart}, hasRelated=${overview.guided} and ~{${guide} :: related},
+                hasHowitworks=${overview.guided} and ~{${guide} :: howitworks}">
+    <!--/* The dialogs exist on every family (the definitions dialog needs no guide), so the
+         script loads on every overview. */-->
+    <template data-page-assets>
       <script type="module" th:src="@{/js/overview.mjs}"></script>
     </template>
 
-    <div class="app-page-h">
-      <div>
-        <h1 class="ds-headline" th:text="${o.title}">Pipelines</h1>
-        <p class="app-page-sub" data-overview-context>
-          <th:block th:if="${activeWorkspace != null}">In workspace <b th:text="${activeWorkspace}">acme</b>.</th:block>
-          <th:block th:if="${o.lensed}">These counts are the admitted inventory: only what your promotion view shows.</th:block>
+    <div class="app-overview-heading">
+      <div class="app-overview-heading-text" data-overview-context>
+        <p class="app-overview-eyebrow">
+          <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use th:attr="href=${'/vendor/icons/lucide-sprite.svg#' + o.icon}"></use></svg>
+          <th:block th:if="${activeWorkspace != null}">Workspace <b class="app-overview-chip" th:text="${activeWorkspace}">acme</b></th:block>
         </p>
+        <h1 class="ds-headline app-overview-title" th:text="${o.title}">Pipelines</h1>
+        <th:block th:if="${o.guided}"><th:block th:replace="~{${guide} :: subtitle} ?: ~{}"></th:block></th:block>
+        <p class="app-overview-lens" th:if="${o.lensed and o.admitted}">These counts are the admitted inventory: only what your promotion view shows.</p>
       </div>
-      <div class="app-page-actions">
-        <a class="ds-button ds-button-secondary" hx-boost="true" th:href="@{${o.catalogHref}}"
-           data-overview-view-all>View all</a>
+      <div class="app-overview-actions">
+        <!--/* The badge is the objects View all lists (the three live groups, never the total;
+             a lensed page's admitted count); an unknown inventory shows no badge. */-->
+        <a class="ds-button ds-button-secondary" hx-boost="true" th:href="@{${o.catalogHref}}" data-overview-view-all>View all<th:block
+           th:if="${o.inventory != null and o.inventory.viewAll != null}"> <span class="app-overview-badge"
+           th:text="${o.inventory.viewAll}" data-overview-view-all-count>14</span></th:block></a>
+        <!--/* The primary action, frozen for every family: a guide with a `prompt` fragment gets
+             Create with your agent (opens the prompt dialog, every role); one without but with a
+             `primary` fragment renders that; one with neither renders none. */-->
+        <th:block th:if="${o.guided}">
+          <button type="button" class="ds-button ds-button-primary" th:if="${hasPrompt}" data-open="prompt"
+                  data-overview-agent><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use
+                  href="/vendor/icons/lucide-sprite.svg#plus"></use></svg>Create with your agent</button>
+          <th:block th:unless="${hasPrompt}"><th:block th:replace="~{${guide} :: primary} ?: ~{}"></th:block></th:block>
+        </th:block>
       </div>
     </div>
 
-    <!--/* The reserved inventory area: an unknown inventory says so and shows no number (record §8
-         "States": unknown counts never appear as zero). */-->
-    <section class="ds-card app-overview-inventory" aria-labelledby="overview-inventory-h" data-overview-inventory>
-      <div class="app-card-h">
-        <h2 class="ds-title" id="overview-inventory-h" th:text="${o.lensed ? 'Admitted inventory' : 'Inventory'}">Inventory</h2>
-      </div>
-      <div class="app-card-b">
+    <div class="app-overview-inventory" data-overview-inventory>
+      <!--/* The summary strip. An unknown inventory says so and shows no number (record §8
+           "States": unknown counts never appear as zero). #621: "Admitted inventory" heads the
+           strip only when every metric passed the lens; otherwise a lensed metric says so. */-->
+      <section class="ds-card app-overview-summary" aria-labelledby="overview-inventory-h" data-overview-summary>
+        <h2 class="app-visually-hidden" id="overview-inventory-h" th:text="${o.admitted ? 'Admitted inventory' : 'Inventory'}">Inventory</h2>
         <p th:if="${o.inventory == null}" class="app-overview-unavailable" role="status" data-overview-unavailable>
           <b>The inventory is unavailable.</b> <span th:text="${o.unavailable}">Inventory could not be read.</span>
         </p>
-        <th:block th:if="${o.inventory != null}" th:with="inv=${o.inventory}">
-          <dl class="app-overview-counts">
-            <div class="app-overview-count" th:each="c : ${inv.counts}" th:attr="data-count=${c.key}">
-              <dt class="ds-caption">
-                <a th:if="${c.href != null}" hx-boost="true" th:href="@{${c.href}}" th:text="${c.label}">With drafts</a>
-                <th:block th:if="${c.href == null}" th:text="${c.label}">Objects</th:block>
+        <th:block th:if="${o.inventory != null}">
+          <dl class="app-overview-counts" th:unless="${#lists.isEmpty(o.metrics)}">
+            <div class="app-overview-count" th:each="m : ${o.metrics}" th:attr="data-count=${m.key}">
+              <dt class="app-overview-count-k">
+                <span class="app-overview-dot" th:if="${m.tone != null}" th:attr="data-tone=${m.tone}" aria-hidden="true"></span>
+                <a th:if="${m.href != null}" hx-boost="true" th:href="@{${m.href}}" th:text="${m.label}">Live</a>
+                <th:block th:if="${m.href == null}" th:text="${m.label}">Total pipelines</th:block>
               </dt>
-              <dd class="app-overview-count-v" th:text="${c.value}">0</dd>
-              <dd class="app-overview-count-help" th:text="${c.help}">Each counted once.</dd>
+              <dd class="app-overview-count-v" th:text="${m.value}">0</dd>
+              <dd class="app-overview-count-help" th:if="${m.note != null}" th:text="${m.note}">Across this workspace</dd>
+              <dd class="app-overview-count-lens" th:if="${o.lensNote(m)}">Admitted inventory: only what your promotion view shows.</dd>
             </div>
           </dl>
-          <!--/* #583: the panel's charts, one loop — most families carry the one lifecycle chart,
-               a family whose inventory reads differently carries its own. Each chart's caption
-               names it everywhere words go (the list's aria-label, the hidden table's caption);
-               a chart's note is the caveat sentence under its bars, absent when the model
-               passes none. Bars: numbers outside the bars, widths as SVG attributes (the CSP
-               admits no style), a zero is a zero-width rect beside its "0". The visually hidden
-               table repeats each chart's rows for assistive technology, in the house frame
-               (§3.7). */-->
-          <th:block th:each="chart : ${inv.charts}">
-            <ul class="app-overview-chart" th:attr="aria-label=${chart.caption}, data-chart=${chart.key}" data-overview-chart>
-              <li class="app-overview-bar" th:each="b : ${chart.bars}" th:attr="data-bar=${b.key}, data-tone=${b.tone}">
+          <div class="app-overview-foot" th:unless="${#lists.isEmpty(o.foot)}" data-overview-foot>
+            <span class="app-overview-foot-item" th:each="m : ${o.foot}" th:attr="data-count=${m.key}, title=${m.title}">
+              <span class="app-overview-dot" th:if="${m.tone != null}" th:attr="data-tone=${m.tone}" aria-hidden="true"></span>
+              <a th:if="${m.href != null}" hx-boost="true" th:href="@{${m.href}}" th:text="${m.label}">Live with changes</a>
+              <th:block th:if="${m.href == null}" th:text="${m.label}">Retired</th:block>
+              <b class="app-overview-count-v" th:text="${m.value}">0</b>
+              <span class="app-overview-count-lens" th:if="${o.lensNote(m)}">(admitted)</span>
+            </span>
+            <button type="button" class="app-overview-link" data-open="definitions"
+                    th:if="${#lists.contains(o.inventory.explanations.![key], 'definitions')}">How these are counted <svg
+                    class="ds-icon ds-icon-xs" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#info"></use></svg></button>
+          </div>
+        </th:block>
+      </section>
+
+      <!--/* The analytics grid: one panel per chart. Columns (the activity chart): each week an SVG
+           whose rects stack bottom up with y/height ATTRIBUTES in a 0–100 viewBox, its <title> the
+           week's sentence. Bars: name · track · value, a zero a zero-width rect beside its "0".
+           Each panel's heading is visible and names its chart (#620); the visually hidden table
+           repeats the chart's rows in the house frame (§3.7); the columns' table moves into the
+           activity dialog while it is open (one copy in the DOM). */-->
+      <div class="app-overview-analytics" th:if="${o.inventory != null and !#lists.isEmpty(o.inventory.panels)}" data-overview-analytics>
+        <section class="ds-card app-overview-panel" th:each="p : ${o.inventory.panels}"
+                 th:attr="aria-labelledby=${'overview-panel-' + p.key + '-h'}, data-overview-panel=${p.key}, data-panel-kind=${p.kind}">
+          <div class="app-overview-panel-h">
+            <div>
+              <h3 class="app-overview-panel-title" th:id="${'overview-panel-' + p.key + '-h'}" th:text="${p.heading}">Development activity</h3>
+              <p class="app-overview-panel-sub" th:if="${p.description != null}" th:text="${p.description}">Creation and release events over time</p>
+            </div>
+            <span class="app-overview-period" th:if="${p.period != null}" th:text="${p.period}">Last 12 weeks</span>
+            <button type="button" class="app-overview-icon-button" th:if="${p.explain != null}" th:attr="data-open=${p.explain},
+                    aria-label=${'Explain ' + #strings.toLowerCase(p.heading)}"><svg class="ds-icon ds-icon-sm" aria-hidden="true"
+                    focusable="false"><use href="/vendor/icons/lucide-sprite.svg#info"></use></svg></button>
+          </div>
+
+          <th:block th:if="${p.kind == 'columns'}">
+            <div class="app-overview-headline">
+              <strong><th:block th:text="${p.headline}">24</th:block> <span th:text="${p.unit}">events</span></strong>
+              <ul class="app-overview-legend">
+                <li th:each="l : ${p.legend}" th:attr="data-legend=${l.key}, data-tone=${l.tone}"><span class="app-overview-dot"
+                    aria-hidden="true"></span><th:block th:text="${l.value + ' ' + l.name}">14 created</th:block></li>
+              </ul>
+            </div>
+            <div class="app-overview-plot" data-overview-columns>
+              <div class="app-overview-axis" aria-hidden="true"><span th:each="a : ${p.axis}" th:text="${a}">24</span></div>
+              <div class="app-overview-plot-area">
+                <div class="app-overview-gridlines" aria-hidden="true"><span></span><span></span><span></span></div>
+                <ol class="app-overview-columns" th:attr="aria-labelledby=${'overview-panel-' + p.key + '-h'}, data-overview-chart=${p.key}">
+                  <li class="app-overview-column" th:each="c : ${p.columns}"
+                      th:attr="data-column=${c.key}, data-current=${c.current ? 'true' : null}, data-sparse=${c.sparse ? 'true' : null}">
+                    <svg class="app-overview-column-track" viewBox="0 0 1 100" preserveAspectRatio="none" role="img"
+                         th:attr="aria-label=${c.label}"><title th:text="${c.label}">Week of 14 Sep: 14 created, 10 released</title><rect
+                         class="app-overview-column-fill" th:each="s : ${c.stacks}" x="0" width="1"
+                         th:attr="y=${s.y}, height=${s.height}, data-part=${s.key}, data-tone=${s.tone}"></rect></svg>
+                    <span class="app-overview-column-name" aria-hidden="true" th:text="${c.name}">14 Sep</span>
+                  </li>
+                </ol>
+              </div>
+            </div>
+          </th:block>
+
+          <th:block th:if="${p.kind == 'bars'}">
+            <ul class="app-overview-chart" th:attr="aria-labelledby=${'overview-panel-' + p.key + '-h'}, data-chart=${p.key}" data-overview-chart>
+              <li class="app-overview-bar" th:each="b : ${p.bars}" th:classappend="${b.value == 0} ? 'is-zero'"
+                  th:attr="data-bar=${b.key}, data-tone=${b.tone}">
                 <span class="app-overview-bar-name">
                   <a th:if="${b.href != null}" hx-boost="true" th:href="@{${b.href}}" th:text="${b.name}">Draft only</a>
                   <th:block th:if="${b.href == null}" th:text="${b.name}">Discarded only</th:block>
@@ -72,43 +151,68 @@
                 <span class="app-overview-bar-v" th:text="${b.value}">0</span>
               </li>
             </ul>
-            <p class="app-card-note" th:if="${chart.note != null}" th:text="${chart.note}">Chart note</p>
-            <div class="dt-frame app-visually-hidden">
-              <div class="dt-viewport" tabindex="-1">
-                <table class="ds-table" th:attr="data-chart-table=${chart.key}" data-overview-table>
-                  <caption th:text="${chart.caption}">Pipelines by lifecycle</caption>
-                  <thead><tr><th scope="col" th:each="h : ${chart.headings}" th:text="${h}">Lifecycle</th></tr></thead>
-                  <tbody>
-                    <tr th:each="b : ${chart.bars}"><th scope="row" th:text="${b.name}">Draft only</th><td th:text="${b.value}">0</td></tr>
-                  </tbody>
-                </table>
-              </div>
+            <div class="app-overview-note" th:unless="${#lists.isEmpty(p.notes)}" data-overview-note>
+              <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#info"></use></svg>
+              <p><th:block th:each="n, it : ${p.notes}"><span th:text="${n}">All 4 unreleased pipelines have a draft.</span><br th:unless="${it.last}"></th:block></p>
             </div>
           </th:block>
-        </th:block>
+
+          <div class="app-overview-panel-foot" th:if="${p.footer != null or p.kind == 'columns'}">
+            <span th:if="${p.footer != null}"><span class="app-overview-dot" data-tone="discarded" aria-hidden="true"></span><th:block
+                  th:text="${p.footer}">No events this week</th:block></span>
+            <button type="button" class="app-overview-link" th:if="${p.kind == 'columns'}" th:attr="data-open=${p.viewData}"
+                    data-overview-view-data>View data <svg class="ds-icon ds-icon-xs" aria-hidden="true" focusable="false"><use
+                    href="/vendor/icons/lucide-sprite.svg#arrow-right"></use></svg></button>
+          </div>
+
+          <div class="dt-frame app-visually-hidden" th:attr="data-table-home=${p.table.key}">
+            <div class="dt-viewport" tabindex="-1">
+              <table class="ds-table" th:attr="data-chart-table=${p.table.key}" data-overview-table>
+                <caption th:text="${p.table.caption}">Pipelines activity, last 12 weeks</caption>
+                <thead><tr><th scope="col" th:each="h : ${p.table.headings}" th:text="${h}">Week of</th></tr></thead>
+                <tbody>
+                  <tr th:each="r : ${p.table.rows}" th:attr="data-row=${r.key}"><th scope="row" th:text="${r.name}">14 Sep</th><td
+                      th:each="cell : ${r.cells}" th:attr="data-part=${cell.key}" th:text="${cell.value}">0</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
       </div>
-    </section>
+    </div>
 
-    <th:block th:if="${o.guided}">
-      <th:block th:replace="~{${'overview/guide-' + o.family} :: intro}"></th:block>
-    </th:block>
-
-    <div class="app-overview-pair" th:if="${o.recent != null or o.guided}">
-      <!--/* Recently updated is the family's modification data (RecentSource), not anyone's
-           personal history (#567 owns Recent/Pinned). */-->
-      <section class="ds-card" th:if="${o.recent != null}" aria-labelledby="overview-recent-h" data-overview-recent>
-        <div class="app-card-h">
-          <h2 class="ds-title" id="overview-recent-h">Continue your work</h2>
+    <div class="app-overview-work" data-overview-work
+         th:if="${o.recent != null or hasRelated or hasQuickstart}">
+      <!--/* Continue your work: the task rows, then the recent sections (Recently updated is the
+           family's modification data — RecentSource — not anyone's personal history; #567 owns
+           Recent/Pinned), then the guide's related links. */-->
+      <section class="ds-card app-overview-continue" aria-labelledby="overview-recent-h" data-overview-recent
+               th:if="${o.recent != null or hasRelated}">
+        <div class="app-overview-panel-h">
+          <div>
+            <h2 class="app-overview-panel-title" id="overview-recent-h">Continue your work</h2>
+            <p class="app-overview-panel-sub" th:if="${o.recent != null and o.recent.description != null}" th:text="${o.recent.description}">A clear next step for your pipelines</p>
+          </div>
           <!--/* #583: the card's one action, when the model carries one — a family whose catalog
                offers no filter for it renders no dead link. */-->
-          <a class="ds-button ds-button-ghost ds-button-sm" hx-boost="true" th:if="${o.recent.review != null}"
+          <a class="ds-button ds-button-ghost ds-button-sm" hx-boost="true" th:if="${o.recent != null and o.recent.review != null}"
              th:href="@{${o.recent.review.href}}" th:text="${o.recent.review.label}" data-overview-review>Review drafts</a>
         </div>
-        <div class="app-card-b">
-          <!--/* #583: the card's sections, one loop — heading, note, and then exactly one of:
-               the unavailable line (the read failed; entries are null), the empty note (the read
+        <th:block th:if="${o.recent != null}">
+          <ul class="app-overview-tasks" th:unless="${#lists.isEmpty(o.recent.tasks)}">
+            <li th:each="t : ${o.recent.tasks}" th:attr="data-task=${t.key}">
+              <a class="app-overview-task" hx-boost="true" th:href="@{${t.href}}">
+                <span class="app-overview-task-icon" th:attr="data-tone=${t.tone}" aria-hidden="true"><svg class="ds-icon ds-icon-sm"
+                      focusable="false"><use th:attr="href=${'/vendor/icons/lucide-sprite.svg#' + t.icon}"></use></svg></span>
+                <span class="app-overview-task-text"><b th:text="${t.title}">Review your drafts</b><small th:text="${t.text}">4 pipelines are working toward their first release.</small></span>
+                <svg class="ds-icon ds-icon-sm app-overview-task-arrow" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#arrow-right"></use></svg>
+              </a>
+            </li>
+          </ul>
+          <!--/* #583: the card's sections, one loop — heading, note, and then exactly one of: the
+               unavailable line (the read failed; entries are null), the empty note (the read
                answered and found nothing), or the rows. */-->
-          <th:block th:each="s : ${o.recent.sections}">
+          <div class="app-overview-recent-section" th:each="s : ${o.recent.sections}">
             <h3 class="app-overview-sub" th:text="${s.heading}">Recently updated</h3>
             <p class="app-card-note" th:if="${s.note != null}" th:text="${s.note}">The latest changes in this workspace, newest first.</p>
             <p th:if="${s.entries == null}" class="app-overview-unavailable" role="status">
@@ -123,13 +227,65 @@
                 <time th:attr="datetime=${r.datetime}" th:title="${r.absolute}" th:text="${r.ago}">3 hours ago</time>
               </li>
             </ul>
-          </th:block>
+          </div>
+        </th:block>
+        <th:block th:if="${hasRelated}"><th:block th:replace="~{${guide} :: related}"></th:block></th:block>
+      </section>
+
+      <!--/* Quick start: the guide's headline, sentence and steps; then the two dialog openers the
+           guide's fragments make real. */-->
+      <section class="ds-card app-overview-quickstart" aria-labelledby="overview-quickstart-h" data-overview-quickstart
+               th:if="${hasQuickstart}">
+        <p class="app-overview-kicker"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use
+           href="/vendor/icons/lucide-sprite.svg#book-open"></use></svg> Quick start</p>
+        <th:block th:replace="~{${guide} :: quickstart}"></th:block>
+        <div class="app-overview-quickstart-actions">
+          <button type="button" class="ds-button ds-button-secondary" th:if="${hasPrompt}" data-open="prompt"
+                  data-overview-prepare><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use
+                  href="/vendor/icons/lucide-sprite.svg#copy"></use></svg>Prepare a starter prompt</button>
+          <button type="button" class="app-overview-link" th:if="${hasHowitworks}" data-open="howitworks">How it works <svg
+                  class="ds-icon ds-icon-xs" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#arrow-right"></use></svg></button>
         </div>
       </section>
-      <th:block th:if="${o.guided}">
-        <th:block th:replace="~{${'overview/guide-' + o.family} :: related}"></th:block>
-      </th:block>
     </div>
+
+    <th:block th:if="${o.guided}"><th:block th:replace="~{${guide} :: extra} ?: ~{}"></th:block></th:block>
+
+    <!--/* The page's one dialog: a kicker (the family), the title the open section names, a close
+         button, and every section server-rendered and hidden until overview.mjs shows the one
+         whose key the opener's data-open names. Sections: the inventory's explanations (a
+         section with a table receives that panel's table twin while open), then the guide's
+         prompt and howitworks fragments, each its own data-dialog-section root. */-->
+    <dialog class="app-overview-dialog" aria-labelledby="overview-dialog-title" data-overview-dialog>
+      <div class="app-overview-dialog-h">
+        <div>
+          <p class="app-overview-kicker" th:text="${o.title}">Pipelines</p>
+          <h2 class="app-overview-dialog-title" id="overview-dialog-title" data-overview-dialog-title>Details</h2>
+        </div>
+        <button type="button" class="app-overview-icon-button" aria-label="Close dialog" data-overview-dialog-close><svg
+                class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#x"></use></svg></button>
+      </div>
+      <div class="app-overview-dialog-b">
+        <th:block th:if="${o.inventory != null}">
+          <section class="app-overview-dialog-section" th:each="e : ${o.inventory.explanations}" hidden
+                   th:attr="data-dialog-section=${e.key}, data-title=${e.title}">
+            <p th:each="para : ${e.paragraphs}" th:text="${para}">Each pipeline belongs to one lifecycle group.</p>
+            <dl class="app-overview-terms" th:unless="${#lists.isEmpty(e.terms)}">
+              <div th:each="term : ${e.terms}">
+                <dt><th:block th:text="${term.name}">In development</th:block> <b th:text="${term.value}">4</b></dt>
+                <dd><th:block th:text="${term.text}">A draft, and no release yet.</th:block><th:block th:if="${term.catalog != null}">
+                  <span class="app-overview-term-catalog" th:text="${'The catalog calls this ' + term.catalog + '.'}">The catalog calls this Draft only.</span></th:block></dd>
+              </div>
+            </dl>
+            <div class="app-overview-dialog-table" th:if="${e.table != null}" th:attr="data-dialog-table=${e.table}"></div>
+          </section>
+        </th:block>
+        <th:block th:if="${o.guided}">
+          <th:block th:replace="~{${guide} :: prompt} ?: ~{}"></th:block>
+          <th:block th:replace="~{${guide} :: howitworks} ?: ~{}"></th:block>
+        </th:block>
+      </div>
+    </dialog>
   </div>
 </th:block>
 </html>

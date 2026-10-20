@@ -49,6 +49,20 @@
     return isNum ? "number" : "text";
   }
 
+  /** Authored header text, excluding the house visually-hidden utilities and resize handle. */
+  function visibleHeaderText(th) {
+    return Array.prototype.map.call(th.childNodes, function (node) {
+      if (node.nodeType === 1 && ["u-sr-only", "app-visually-hidden", "sr-only", "ps-visually-hidden", "dt-resizer"]
+        .some(function (cls) { return node.classList.contains(cls); })) return "";
+      return node.nodeType === 1 || node.nodeType === 3 ? node.textContent : "";
+    }).join("");
+  }
+
+  /** The same decision used by ensureHeader: visible action labels can explicitly opt out. */
+  function isSortableHeader(th) {
+    return th.getAttribute("data-sort") !== "off" && visibleHeaderText(th).trim() !== "";
+  }
+
   /** The first number a cell carries — "v4", "1,234", "250 ms", "−3" — or null. */
   function parseNumber(text) {
     if (isNullText(text)) return null;
@@ -170,6 +184,8 @@
   var api = {
     isNullText: isNullText,
     columnType: columnType,
+    visibleHeaderText: visibleHeaderText,
+    isSortableHeader: isSortableHeader,
     parseNumber: parseNumber,
     parseDate: parseDate,
     sortKey: sortKey,
@@ -280,7 +296,7 @@
     cells.forEach(function (th, i) {
       if (!th.hasAttribute("scope")) th.setAttribute("scope", "col");
       var button = childWithClass(th, "dt-sort");
-      var sortable = th.getAttribute("data-sort") !== "off" && th.textContent.trim() !== "";
+      var sortable = isSortableHeader(th);
       if (sortable && !button) {
         button = document.createElement("button");
         button.type = "button";

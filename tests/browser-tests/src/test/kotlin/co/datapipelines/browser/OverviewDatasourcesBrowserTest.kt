@@ -106,13 +106,26 @@ class OverviewDatasourcesBrowserTest : RestTreeBrowserFixture() {
 
         // Recently added is grant order, newest first, each entry linking the catalog row —
         // and no lifecycle badge: datasources carry no draft/release lifecycle.
-        page.locator("[data-overview-recent] li a").allInnerTexts() shouldBe
+        page.locator("[data-overview-recent] .app-overview-recent li a").allInnerTexts() shouldBe
             listOf(untested2, untested1, failed, ok)
         page.locator("[data-overview-recent] .ds-badge").count() shouldBe 0
         page
-            .locator("[data-overview-recent] li a")
+            .locator("[data-overview-recent] .app-overview-recent li a")
             .first()
             .getAttribute("href") shouldBe "/datasources/$untested2"
+
+        // #home-ops: View all's badge is the one metric; the health panel's info button opens its
+        // own dialog section; the task row leads to the list.
+        page.locator("[data-overview-view-all-count]").innerText().trim() shouldBe "4"
+        page.locator("[data-overview-recent] [data-task='browse'] a").getAttribute("href") shouldBe "/datasources"
+        page.click("[data-overview-panel='health'] [data-open='health']")
+        page.waitForFunction("() => document.querySelector('dialog[data-overview-dialog]').open")
+        page.locator("[data-overview-dialog-title]").innerText().trim() shouldBe "How connection health is counted"
+        page.locator("[data-dialog-section='health']").isVisible shouldBe true
+        page.locator("[data-dialog-section='dialect']").isVisible shouldBe false
+        page.keyboard().press("Escape")
+        page.waitForFunction("() => !document.querySelector('dialog[data-overview-dialog]').open")
+        HomeOpsShots.take(page, "datasources", "health")
 
         // The dialect bar is a link: it filters the catalog to the workspace's H2 rows.
         page.locator("[data-chart='dialect'] a[href='/datasources?dialect=H2']").click()
@@ -129,6 +142,7 @@ class OverviewDatasourcesBrowserTest : RestTreeBrowserFixture() {
         startTrace()
         readyTree()
         openOverview()
+        page.click("[data-overview-agent]")
         val prompt = page.locator("#overview-prompt")
         prompt.fill(prompt.inputValue().replace("[name]", "example"))
         page.evaluate(

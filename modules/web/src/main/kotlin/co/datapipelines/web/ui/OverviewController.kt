@@ -19,9 +19,12 @@ import java.time.Instant
  * [RequiredScope], and a literal leaves no value a variable would have to refuse. One template,
  * `overview/family`, renders all five from an [OverviewPage].
  *
- * One request renders the whole page: the inventory is read ONCE ([FamilyInventory.forFamily], one
- * SQL snapshot) and so is Recently updated, both under the caller's [PromoterLens] view — a
- * promoter's numbers and list are the admitted ones, never the workspace's. Nothing here writes;
+ * One request renders the whole page: the inventory is read ONCE ([FamilyInventory.forFamily], or
+ * [FamilyInventory.chartsFor] for a family carrying the #598 charts — one SQL snapshot either way)
+ * and so is Recently updated, both under the caller's [PromoterLens] view — a
+ * promoter's numbers and list are the admitted ones, never the workspace's. The clock is read
+ * ONCE per request too (#598b): the chart read's weeks and the recent list's ages share it, and
+ * the actively developed window is [UiProperties.activelyDevelopedDays]. Nothing here writes;
  * the page's one interaction, copying the starter prompt, is clipboard-only (`overview.mjs`).
  */
 @Controller
@@ -30,6 +33,7 @@ class OverviewController(
     private val recent: FamilyRecent,
     private val themeResolver: ThemeResolver,
     private val lens: PromoterLens,
+    private val ui: UiProperties,
 ) {
     @GetMapping("/overview/pipelines")
     @RequiredScope(Permission.PIPELINE_READ)
@@ -76,12 +80,25 @@ class OverviewController(
         val principal = currentPrincipal()
         val workspaceId = principal.requireWorkspace().id
         val view = lens.viewFor(principal)
-        val counted = inventory.forFamily(family.navigation, workspaceId, view)
         val latest = recent.forFamily(family.navigation, workspaceId, view)
         // A lazy dashboard arm whose derivation failed has already made both reads Unavailable;
         // asking it again must not turn the page into a 500, and an unknown arm reads as lensed.
         val lensed = runCatching { !family.lens(view).isEverything }.getOrDefault(true)
-        model.addAttribute(MODEL, OverviewPage.of(family, lensed, counted, latest, Instant.now()))
+        val now = Instant.now()
+        // #598a: still ONE inventory read per request — the chart group for a family that carries
+        // the stacked charts, the four-bucket inventory for every other.
+        val page =
+            when (family.charts) {
+                OverviewStacked.ChartSet.LIFECYCLE -> {
+                    val charts = inventory.chartsFor(family.navigation, workspaceId, view, now, ui.activelyDevelopedDays)
+                    OverviewPage.of(family, lensed, charts, latest, now)
+                }
+
+                OverviewStacked.ChartSet.STANDARD -> {
+                    OverviewPage.of(family, lensed, inventory.forFamily(family.navigation, workspaceId, view), latest, now)
+                }
+            }
+        model.addAttribute(MODEL, page)
         return VIEW
     }
 

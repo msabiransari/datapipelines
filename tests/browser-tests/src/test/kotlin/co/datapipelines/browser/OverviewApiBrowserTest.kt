@@ -1,11 +1,13 @@
 package co.datapipelines.browser
 
+import com.microsoft.playwright.Locator
 import com.microsoft.playwright.Page
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
 import java.nio.file.Files
+import java.nio.file.Path
 import java.nio.file.Paths
 
 /**
@@ -62,11 +64,21 @@ class OverviewApiBrowserTest : RestTreeBrowserFixture() {
         openHome()
         count("keys") shouldBe "1"
         page.locator("[data-chart='key-kind'] [data-bar='mcp'] .app-overview-bar-v").innerText() shouldBe "1"
-        page.locator("[data-overview-recent] li a").allInnerTexts() shouldBe listOf("$name · MCP key · live")
+        page.locator("[data-overview-recent] .app-overview-recent li a").allInnerTexts() shouldBe listOf("$name · MCP key · live")
+        // #home-ops: the keys panel's info button opens its own section, and the keys row leads to the Keys page.
+        page.locator("[data-overview-recent] [data-task='keys'] a").getAttribute("href") shouldBe "/api-keys"
+        page.click("[data-overview-panel='key-kind'] [data-open='key-kind']")
+        page.waitForFunction("() => document.querySelector('dialog[data-overview-dialog]').open")
+        page.locator("[data-overview-dialog-title]").innerText().trim() shouldBe "How keys are counted"
+        page.locator("[data-dialog-section='key-kind']").isVisible shouldBe true
+        page.locator("[data-dialog-section='endpoint-state']").isVisible shouldBe false
+        page.keyboard().press("Escape")
+        page.waitForFunction("() => !document.querySelector('dialog[data-overview-dialog]').open")
         val html = page.content()
         html shouldNotContain secret
         html shouldNotContain secret.substringBefore('.')
         shots()
+        HomeOpsShots.take(page, "api-console", "key-kind")
 
         // The chip is the console's own fragment: one catalog size on both pages.
         page.click("[data-overview-view-all]")
@@ -79,6 +91,7 @@ class OverviewApiBrowserTest : RestTreeBrowserFixture() {
         startTrace()
         readyTree()
         openHome()
+        page.click("[data-overview-agent]")
         val prompt = page.locator("#overview-prompt")
         prompt.inputValue() shouldNotContain "key"
         prompt.fill(prompt.inputValue().replace("[pipeline]", "example/served"))
@@ -104,13 +117,15 @@ class OverviewApiBrowserTest : RestTreeBrowserFixture() {
         val dir = Paths.get("build", "browser-evidence")
         Files.createDirectories(dir)
         // A fresh load at each width (a live resize keeps the wider layout's menu state), then the
-        // top, the access steps and the MCP card: <main> scrolls inside the frame, so a full-page
-        // shot would show only the first screen.
+        // top, the quick start and the MCP card — the access steps sit in How it works since
+        // #home-ops: <main> scrolls inside the frame, so a full-page shot would show only the first
+        // screen.
         SHOT_SIZES.forEach { (width, height) ->
             page.setViewportSize(width, height)
             page.reload()
             page.waitForSelector(".app-overview[data-overview='api-console']")
-            listOf("top" to null, "access" to "[data-overview-access]", "mcp" to "[data-mcp-connection]").forEach { (part, anchor) ->
+            val parts = listOf("top" to null, "quickstart" to "[data-overview-quickstart]", "mcp" to "[data-mcp-connection]")
+            parts.forEach { (part, anchor) ->
                 anchor?.let { page.locator(it).scrollIntoViewIfNeeded() }
                 page.evaluate("() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))")
                 page.screenshot(Page.ScreenshotOptions().setPath(dir.resolve("585-api-home-$width-$part.png")))
@@ -125,5 +140,75 @@ class OverviewApiBrowserTest : RestTreeBrowserFixture() {
         val SHOT_SIZES = listOf(1512 to 982, 900 to 900, 390 to 844)
         const val FIXTURE_WIDTH = 1440
         const val FIXTURE_HEIGHT = 900
+    }
+}
+
+/**
+ * #home-ops — the evidence set the three ops homes share (the home-frame lane's OverviewBrowserTest
+ * exemplar): the page at 1512 and 390, light then dark, each as the viewport and as the overview
+ * root's own shot (the shell scrolls an inner container, so a full-page shot stops at the
+ * viewport), and the named panel's info dialog at both widths; leaves the light theme on and the
+ * caller's viewport restored and reloaded. Files land in build/reports/home-ops-<family>.
+ */
+internal object HomeOpsShots {
+    private const val WIDE = 1512
+    private const val WIDE_H = 900
+    private const val PHONE = 390
+    private const val PHONE_H = 844
+    private val SIZES = listOf(WIDE to WIDE_H, PHONE to PHONE_H)
+
+    fun take(
+        page: Page,
+        family: String,
+        panel: String,
+    ) {
+        val dir = Paths.get("build", "reports", "home-ops-$family")
+        val viewport = page.viewportSize()
+        Files.createDirectories(dir)
+        listOf("light", "dark").forEach { mode ->
+            themeOn(page, mode)
+            SIZES.forEach { (width, height) -> shot(page, dir, "$family-$width-$mode", width, height) }
+        }
+        themeOn(page, "light")
+        SIZES.forEach { (width, height) ->
+            page.setViewportSize(width, height)
+            page.reload()
+            page.waitForSelector("[data-overview-summary]")
+            page.click("[data-overview-panel='$panel'] [data-open='$panel']")
+            page.waitForFunction("() => document.querySelector('dialog[data-overview-dialog]').open")
+            page.screenshot(Page.ScreenshotOptions().setPath(dir.resolve("$family-dialog-$panel-$width.png")))
+            page.keyboard().press("Escape")
+        }
+        page.setViewportSize(viewport.width, viewport.height)
+        page.reload()
+        page.waitForSelector("[data-overview-summary]")
+    }
+
+    private fun shot(
+        page: Page,
+        dir: Path,
+        name: String,
+        width: Int,
+        height: Int,
+    ) {
+        page.setViewportSize(width, height)
+        page.reload()
+        page.waitForSelector("[data-overview-summary]")
+        page.evaluate("() => document.fonts.ready")
+        page.screenshot(Page.ScreenshotOptions().setPath(dir.resolve("$name.png")))
+        page.locator("[data-overview]").screenshot(Locator.ScreenshotOptions().setPath(dir.resolve("$name-content.png")))
+    }
+
+    /** The user's stored theme wins over an emulated colour scheme, so the shots flip it through the top bar's toggle. */
+    private fun themeOn(
+        page: Page,
+        mode: String,
+    ) {
+        val wanted = "/themes/$mode.css"
+        val current = page.locator("#theme-link").first().getAttribute("href") ?: ""
+        if (current.contains(wanted)) return
+        page.waitForResponse("**/partials/profile/theme") { page.locator("#mode-toggle").click() }
+        page.waitForFunction("() => document.getElementById('theme-link').getAttribute('href').includes('$wanted')")
+        page.locator("html[data-theme='$mode']").waitFor()
     }
 }

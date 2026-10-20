@@ -217,7 +217,7 @@ fieldset.dp-dashboard-parameter > .dp-dashboard-parameter-error {
   position: relative;
   min-width: 0;
   overflow-y: auto;
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--border-default);
   border-radius: var(--radius-md);
   background: var(--surface-default);
   padding: var(--gap-md);
@@ -822,7 +822,7 @@ fieldset.dp-dashboard-parameter > .dp-dashboard-parameter-error {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--border-default);
   border-radius: var(--radius-md);
   background: var(--surface-default);
   --dp-dock-pane-h: 200px;
@@ -976,7 +976,7 @@ fieldset.dp-dashboard-parameter > .dp-dashboard-parameter-error {
 }
 
 .dp-board-event-severity[data-dp-severity="warning"] {
-  color: var(--text-warning);
+  color: var(--app-warning-ink);
 }
 
 .dp-board-event-kind {

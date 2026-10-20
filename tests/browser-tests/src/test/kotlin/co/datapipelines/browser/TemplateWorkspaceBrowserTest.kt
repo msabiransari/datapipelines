@@ -369,7 +369,7 @@ class TemplateWorkspaceBrowserTest : BrowserSuite() {
     }
 
     @Test
-    fun `#608 - the Versions tab's sr-only Actions header renders nothing a pointer can hit`() {
+    fun `#608 #617 - the Versions tab's sr-only Actions header renders nothing a pointer can hit`() {
         startTrace()
         loginReadyUser("tlwsr")
         val name = "test/ws_sr_${generatedPassword("n").take(6).lowercase()}.sql"
@@ -378,17 +378,18 @@ class TemplateWorkspaceBrowserTest : BrowserSuite() {
         page.navigate("$baseUrl/templates/$name?tab=versions")
         page.waitForSelector(".tw-root")
         page.waitForSelector("#tw-pane-versions:not([hidden]) [data-version-row]")
-        // Screenshot before the assertions, so a red run still leaves
-        // the "before" picture for the handback.
-        // The Actions header's span, found by STRUCTURE so the case measures the element the
-        // author meant whatever its class. The house table's sort decoration (data-table.js)
-        // moves the th's own children INSIDE button.dt-sort > span and adds its resizer as a
-        // direct child of the th — the authored span is the label span's own child.
-        val headerSpan = page.locator("#tw-pane-versions .ds-table thead tr th:last-child .dt-sort > span > span")
+        val header = page.locator("#tw-pane-versions .ds-table thead tr th:last-child")
+        header.textContent().trim() shouldBe "Actions"
+        // Wait for the enhancer on a visible neighbour before checking its absent control.
+        page.locator("#tw-pane-versions .ds-table thead .dt-sort").first().waitFor()
+        withClue("#617 Actions header has no .dt-sort") { header.locator(".dt-sort").count() shouldBe 0 }
+        header.getAttribute("aria-sort") shouldBe null
+        // Structure, not a utility-class selector: the authored span remains a direct child.
+        val headerSpan = page.locator("#tw-pane-versions .ds-table thead tr th:last-child > span").first()
         headerSpan.waitFor()
         headerSpan.scrollIntoViewIfNeeded()
-        val shot = Paths.get("build", "reports", "608-template-versions-header-row.png")
-        headerSpan.screenshot(Locator.ScreenshotOptions().setPath(shot))
+        val shot = Paths.get("build", "reports", "617-template-versions-header-row.png")
+        page.locator("#tw-pane-versions .ds-table thead").screenshot(Locator.ScreenshotOptions().setPath(shot))
 
         // The box is 1x1 or smaller and nothing of the span sits under the pointer at the
         // header cell's centre — the geometry the helper exists for, asserted FIRST so the
@@ -412,6 +413,12 @@ class TemplateWorkspaceBrowserTest : BrowserSuite() {
         // The class is the house helper and the text survives for a screen reader.
         headerSpan.getAttribute("class") shouldContain "u-sr-only"
         headerSpan.textContent().isNotBlank() shouldBe true
+        headerSpan.textContent() shouldBe "Actions"
+        val firstRow = page.locator("#tw-pane-versions [data-version-row]").first()
+        val before = firstRow.innerText()
+        header.click()
+        firstRow.innerText() shouldBe before
+        header.getAttribute("aria-sort") shouldBe null
         consoleErrors shouldBe emptyList()
     }
 

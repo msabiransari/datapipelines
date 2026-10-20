@@ -1,9 +1,9 @@
 # UI Screens Inventory
 
-**Status:** v1.178
+**Status:** v1.189
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
-**Last updated:** 2026-10-19 (#605; #619; #585; #584; #613; #509; #608; #614 + #611; #612; #615); 2026-10-18 (#583; #573; #607; #606; #565; #582; #581; #580; #579); 2026-10-17 (#556; #578; #554); 2026-10-16 (#551 merge follow-up; #551; #555; #552; #553; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
+**Last updated:** 2026-10-20 (#604; #home-ops; #home-frame; #610; #618; #627; #625; #598b); 2026-10-19 (#598a merge follow-up; #617; #609; #598a; #605; #619; #585; #584; #613; #509; #608; #614 + #611; #612; #615); 2026-10-18 (#583; #573; #607; #606; #565; #582; #581; #580; #579); 2026-10-17 (#556; #578; #554); 2026-10-16 (#551 merge follow-up; #551; #555; #552; #553; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
 ---
 
 ## 1. Purpose
@@ -420,7 +420,11 @@ From 761 to 1100px the search field itself hides (§3.6) and a search **icon but
 - **The breadcrumb** is server-rendered from `AppNav.crumbFor(currentPath)` and re-derived
   client-side after a boosted swap from the active rail link's own `data-nav-group` /
   `data-nav-label`. `ShellRenderTest` asserts the Kotlin table and the rendered markup agree
-  for every link, so the highlighted section and the crumb cannot drift apart.
+  for every link, so the highlighted section and the crumb cannot drift apart. #610: below
+  760px (the phone band, §3.6) the bar displays NONE of it — the frozen prototype's ≤760
+  rule; the element stays in the DOM so the boosted-swap writes keep working, and the band
+  returns it at 761 (`MainFrameBrowserTest` pins the hide at 320 and 390 and the
+  leaf-only/group split at 761/1101).
 - **The search field is real (161, #155).** A `<input role="combobox">` in the top bar — and
   the same control in the menu drawer's head at 760px and below — opens a palette on focus/click or
   **⌘K / Ctrl+K** and fetches `GET /partials/search?q=…` over htmx (`input changed
@@ -599,12 +603,12 @@ Owner, 2026-09-08: *"algoschool.app looks so native SPA than datapipelines altho
 2. **The status pill waits 150ms.** `#app-status-pill` (`role="status"`, `aria-live="polite"`, one element, class-toggled, no inline style) shows a spinner and "Loading…" only if the swap has still not arrived after 150ms — the same no-flash arm, for the same reason, as §5.1's delayed skeleton. It is `hidden` when off rather than transparent: a live region announces when its content becomes rendered, and a permanently-rendered region with unchanging text announces nothing.
 3. **The pending state is cleared by the union of three endings**, because no one of them is total: `htmx:afterSettle` (the normal path — `htmx:afterRequest` would clear it one frame early, while the outgoing screen is still painted), every htmx error/abort event (`afterSettle` never fires for a response error, a network error, a timeout or an abort — 085 §D's finding), and `pageshow` (a bfcache restore re-paints the DOM with `is-pending` still on it and fires no htmx event at all).
 4. **The swap arrives with motion.** After a boosted swap the new `#app-main` carries `app-enter`: a 150ms fade plus a 4px slide-up, **transform and opacity only**, so it cannot move a box and cannot spend the 0.05 cumulative-layout-shift budget `ExplorerPaneGeometryBrowserTest` holds over boosted navigation. The class comes off on `animationend` **and** on a fallback timer, because under `prefers-reduced-motion: reduce` app.css sets `animation: none` and an animation that never runs never ends. Which swaps qualify is decided by the `htmx:beforeSwap` handler that retargets the response and carried on a one-shot — htmx's own swap events carry the swap's `eventInfo`, not the response's, and have no `boosted` flag. **The class is applied on `htmx:afterSettle`, not `htmx:afterSwap`:** at afterSwap the element is still mid-ceremony (`htmx-swapping htmx-added htmx-settling`) and htmx replaces it a frame later, which starts the entrance and then CANCELS it — measured at `animationstart@771 … animationcancel@788`, with every class-level assertion still passing. `ShellFeelBrowserTest` therefore asserts the animation EVENTS (start, then end, never cancel), not the class.
-5. **The ground is the page (#606):** `--surface-page`, plain and unpatterned, as the owner-approved application-shell record's §6 and frozen prototype specify (owner ruling, 2026-10-18). The old `.app-backdrop` glow and dot-grid element and its stacking layer are removed; the editor's flow-canvas grid, login-stage grid and drawer scrim remain. Body text is measured against the main's painted page surface on every vendored theme. Boundaries keep the 3:1 role and required separators the 2:1 role; only nonessential edges use the lighter decorative role (§2 principle 8).
+5. **The ground is the page (#606):** `--surface-page`, plain and unpatterned, as the owner-approved application-shell record's §6 and frozen prototype specify (owner ruling, 2026-10-18). The old `.app-backdrop` glow and dot-grid element and its stacking layer are removed; the editor's flow-canvas grid, login-stage grid and drawer scrim remain. Body text is measured against the main's painted page surface on every vendored theme. Boundaries keep the 3:1 role and required separators the 2:1 role; only nonessential edges use the lighter decorative role (§2 principle 8). The shared components follow the same roles (#609). The dashboard filters pane and dock, the parameter card, the editor's minimap, view controls and dock top, and the version-row menu are `--border-default` boundaries. List and dialog rows, code and JSON blocks, the editor's keyboard hint, the schedule fieldset and the evidence screenshot frame are `--border-subtle` separators. `ComponentBoundariesBrowserTest` measures each edge against both adjacent surfaces on every vendored theme. Four vendored pairs stay below their floor, listed in that test and tracked by #628: `--border-default` on `--surface-page` (2.81–2.93:1, seven light themes) and on `--surface-hover` (2.53–2.77:1, under the version menu); `--border-subtle` on `--surface-page` (1.87–1.94:1, seven light themes) and on `--surface-inset` (1.76–1.84:1, every light theme).
 6. **Cards are drawn; dialogs float** (#555 amends 103's "cards read as raised"). An ordinary card or panel carries NO shadow — its 1px boundary is the whole edge (§2 principle 8 is normative: a card boundary is a line), as the application-shell record's §6 asks. The hover lift (`translateY(-1px)` + `--shadow-md`) stays only on a card that is itself a link, which promises the click it has; a card that merely carries a primary action no longer lifts — the button is the affordance. A dialog (`.app-modal`) is the one raised panel: `--shadow-lg`.
 7. **Headings carry weight.** Page titles are §3.3's title role — 24px (`--text-2xl`) at semibold with `−0.025em` and a 1.35 leading (#555 amends 103's bold and tight leading to the record's values; 21px on a phone) — still a property of `.ds-headline` inside `.app-main` so no screen picks its own size (`TypeScaleAuditTest`). Card titles are 12px semibold on the UI leading (#555: at 12px the old bold and tight tracking closed the word up). `.app-eyebrow` generalises the login page's `.app-auth-eyebrow` — uppercase, the 10px meta role with the 0.12em caption tracking (#555; was `--text-xs` at 0.08em), brand colour. **Inter only; no second face** (owner ruling, 2026-09-08).
 8. **Controls transition.** The design system already transitions `.ds-button` and `.ds-input` colour, border and shadow (`primitives.css`) — what this round adds is the missing half: a 1px `:active` press on buttons, focus transitions on the bare `<select>`/`<textarea>` controls that are not `.ds-input`, and a 100ms background transition on rail rows. All token durations and easings; all silenced by the `prefers-reduced-motion` block.
 
-**Text contrast on the page surface** is measured by `ShellFeelBrowserTest`: it reads the main's actual text color and its painted ancestor background on **every** vendored theme. The theme list comes from the rendered appearance controls, derived from `VendoredThemes.names()`, so a new vendored theme joins the sweep automatically. Each pair must meet §2 principle 8's 4.5:1 text floor. **Danger text has one colour, `--app-danger-ink` (#509)**, never the fill red `--accent-danger` (the solid danger button's slab, 2.74–3.89:1 as text on the dark surfaces) and never the vendored `--text-danger` read directly. The ink is the design system's `--text-danger` in dark, and in light that red at 3% lower oklch lightness, hue and chroma kept, because light, saas and ocean miss the floor on the inset and hover surfaces with the unadjusted red (owner ruling 2026-10-19). Danger borders and fills keep `--accent-danger` (3:1, non-text). `DangerInkContrastBrowserTest` measures the chip, the ghost danger button at rest and hovered, and the ink on every surface on every vendored theme, plus `auto`'s dark half. `DangerInkSourceAuditTest` holds every first-party text site to the ink. `ShellSurfacesBrowserTest` measures page, top bar and rail surfaces at 1512, 390 and 1920px and checks the classified shell edges against their roles across the same themes.
+**Text contrast on the page surface** is measured by `ShellFeelBrowserTest`: it reads the main's actual text color and its painted ancestor background on **every** vendored theme. The theme list comes from the rendered appearance controls, derived from `VendoredThemes.names()`, so a new vendored theme joins the sweep automatically. Each pair must meet §2 principle 8's 4.5:1 text floor. **Danger, success and warning text each have one colour: `--app-danger-ink` (#509), `--app-success-ink` and `--app-warning-ink` (#618)**. None of them is the role's fill accent: `--accent-danger` is the solid danger button's slab, 2.74–3.89:1 as text on the dark surfaces, and `--accent-success` / `--accent-warning` read 4.39 / 4.31:1 on professional's inset surface, with forest's warning at 3.88:1. None is the vendored `--text-danger|success|warning` read directly either. Each ink is built the same way from the design system's text role. In dark it is the role as vendored. In light it is that colour at 3% lower oklch lightness, hue and chroma kept, because the unadjusted roles miss the floor on the inset and hover surfaces: light, saas and ocean's red (owner ruling 2026-10-19), and light's and healthcare's warning (4.43, 4.23). So on ocean and saas, success text is the theme's teal text role, not its green accent. Borders, fills, dots and chip tints keep the accents (3:1, non-text). The vendored `.ds-badge-*` and `.ds-toast-*` keep their accents on their own tints (computed ≥ 4.54:1, not swept). `DangerInkContrastBrowserTest` measures the chip, the ghost danger button at rest and hovered, and the ink on every surface on every vendored theme, plus `auto`'s dark half. `StatusInkContrastBrowserTest` does the same for success and warning: the `.u-*` utilities and each ink on the five surfaces, the chips and the warning alert on their tints, and a hovered ghost button. `DangerInkSourceAuditTest` and `StatusInkSourceAuditTest` hold every first-party text site to its ink. `ShellSurfacesBrowserTest` measures page, top bar and rail surfaces at 1512, 390 and 1920px and checks the classified shell edges against their roles across the same themes.
 
 **Not in scope:** the three list-screen first-paint strategies (rows / skeleton+load / empty+load) are 097's `BrowseModel` work and are untouched here.
 
@@ -617,7 +621,7 @@ One breakpoint table for the whole shell — the menu, the resource browser, the
 | ≥ 1600 px | 202px expanded; 64px compact on the user's choice (`rail-collapsed`, remembered in `dp-rail`) | 320px default; the user's 240–480px preference, clamped to leave main 320px | as today | `--app-main-pad` = 40px (`--space-10`) |
 | 1101–1599 px | as above | 300px default, same range and clamp | as today | `--app-main-pad` = 32px (`--space-8`) |
 | 761–1100 px | **starts compact** (64px, icons + named tooltips) unless the user expanded it — same class, same key: a stored `"0"` (`rail-expanded`) opts out of the band default | 270px default, same range; with the menu expanded the clamp tightens (378px at a 900px viewport) | search text hidden and the search ICON BUTTON stands in (#159: it reveals the topbar copy in place; ⌘K drives it too), crumbs truncate to the LEAF with the full path in `title` (106's pattern on `h2.tplx-detail-title`) | `--app-main-pad` = 24px (`--space-6`) |
-| ≤ 760 px | **off-canvas Navigation drawer** (`rail-open`): not in the grid (`grid-template-columns: 1fr`), `position: fixed`, `z-index: var(--z-drawer)`, translated off-screen, 232px (`--app-menu-drawer`, the drawer width before #554: its brand row also seats the 48px close control) with its labels whatever `dp-rail` says | **off-canvas Browse resources drawer** (`browser-open`), at most 360px and never wider than the viewport | `#rail-open` (Navigation) first, `#browser-open` (Browse resources, folder glyph) on a family page, crumbs (leaf only), workspace switcher as its avatar only, user menu; **nothing wraps**; the search moves INTO the menu drawer's head — side padding `--app-main-pad` (20px, #613 — the bar and `<main>` share a left edge) | `--app-main-pad` = 20px (`--space-5`); the top bar pads the same token (#613) |
+| ≤ 760 px | **off-canvas Navigation drawer** (`rail-open`): not in the grid (`grid-template-columns: 1fr`), `position: fixed`, `z-index: var(--z-drawer)`, translated off-screen, 232px (`--app-menu-drawer`, the drawer width before #554: its brand row also seats the 48px close control) with its labels whatever `dp-rail` says | **off-canvas Browse resources drawer** (`browser-open`), at most 360px and never wider than the viewport | `#rail-open` (Navigation) first, `#browser-open` (Browse resources, folder glyph) on a family page, **no breadcrumb** (#610 — the frozen prototype's ≤760 rule: `.app-crumbs` is `display:none` in app.css's phone block, the element stays in the DOM for shell.js's boosted-swap writes, and `#mode-toggle` inherits the crumbs' `margin-right: auto` right-edge pin), workspace switcher as its avatar only, user menu; **nothing wraps**; the search moves INTO the menu drawer's head — side padding `--app-main-pad` (20px, #613 — the bar and `<main>` share a left edge) | `--app-main-pad` = 20px (`--space-5`); the top bar pads the same token (#613) |
 
 The main gutter is one token (#573): every rule whose geometry assumes it reads `--app-main-pad`, never a spacing token directly, so a band change moves them together — the full-height calcs of `.pe-root` (`pipeline-editor.css`), `.dp-workspace` on its board tab (`dashboards.css`), `.tplx-page` (`template-tree.css`), `.tw-root` (`template-workspace.css`) and the page-flow table's `--dt-flow-max-h` (`data-table.css`), and the status pill's three offsets (`app.css`: desktop, anonymous shell, phone). The desktop and anonymous offsets also add `--app-frame-inset`, the 1500px frame's centring offset in its track (0 on a canvas page and wherever the track is 1500 or less), so on a wider framed page the pill starts at the content's edge rather than the track's (#614; `MainFrameBrowserTest` reads it at 2200 framed, on the editor and signed out, and at 1512). `.tplx-splitter`'s `--gap-lg` is `.tplx-body`'s own column gap, not the gutter. `MainFrameBrowserTest` reads `<main>`'s vertical overflow on the editor, the template workspace and the board at 1512: a calc left on the old token overflows by twice the difference. The desktop top bar is NOT banded (owner rulings 2026-10-19, ruling 1's second half): above 760px it keeps its own 24px `--gap-lg` at every width, measured identical at the 1512 and 1600 bands while `<main>` moves 32 → 40 (`MainFrameBrowserTest` reads the bar at both bands; #613).
 
@@ -684,7 +688,7 @@ Dense data is FIXED; a short list a person reads top to bottom is PAGE-FLOW. `te
 
 **Modifiers.** `dt-flush` — the card's own border closes the box (a separator line meets the card head); `dt-nowrap` — one line per row, an ellipsis where a column is narrower than its value; `dt-freeze` — the first column is sticky at the left and casts a soft shadow once the viewport has scrolled sideways (`is-scrolled-x`); `dt-fit` — the frame hugs its table ("never the full row", was `.tplx-fit-table`); `dt-compact` and `dt-zebra` — the preview's density and zebra switches, available, used by no screen yet.
 
-**Sort** (client-side, over the rendered rows). Every header cell with text becomes a `<button class="dt-sort">` (the label and the sprite's `chevron-right`, turned) unless it carries `data-sort="off"` (the Actions and Send columns). A click walks **none → ascending → descending → none**, sets `aria-sort` on that cell (`none` on the others) and MOVES the rendered `<tr>` nodes; it never rebuilds a row. The type is the header's `data-type` (`number`, `date`, `text`), else `number` for a `.num` column, else text; a cell sorts by its `data-sort-value` when the server gave one (a relative age's instant — the keys page), else a `<time datetime>` inside it, else the chosen option of a `<select>` in it (a member's role), else its text. **Nulls sort last in both directions** (an empty cell or a lone dash); equal keys keep their natural order. A paged list sorts the page it shows, and the button's title says so (`data-dt-paged` → "Sort this page by …"); **a page-sized replacement clears the client sort** (288): when every data row is new to the table — the htmx pagers swapping their frame, or any keyed-by-content re-render — the new page shows the server's order and every `aria-sort` returns to `none`, so the state the label claims is always the state the rows are in. A row edit and an append keep the sort. **A held sort names itself** (288): while a column is sorted, its button's title becomes "Sorting this page by X — click for highest first / — click to clear" beside the `aria-sort`, which matters on the one producer whose paging keeps the sort (the dock's cursor paging re-renders its rows in place, index-keyed, so the held sort persists by element identity — never silently). State rows (a single cell spanning the row, `.dt-state-row`, `.dt-skeleton-row`) never move.
+**Sort** (client-side, over the rendered rows). Every header cell with visible text becomes a `<button class="dt-sort">` (the label and the sprite's `chevron-right`, turned) unless it carries `data-sort="off"` (visible-text action columns: Actions, Send). A header whose only text is screen-reader-only (`u-sr-only` — the Edit, Actions and Details columns of the versions, keys and evidence partials) is not sortable and gets no control (#617). The same rule excludes the other visually hidden utilities (`app-visually-hidden`, `sr-only`, `ps-visually-hidden`) and resize handles from the header text. A click walks **none → ascending → descending → none**, sets `aria-sort` on that cell (`none` on the others) and MOVES the rendered `<tr>` nodes; it never rebuilds a row. The type is the header's `data-type` (`number`, `date`, `text`), else `number` for a `.num` column, else text; a cell sorts by its `data-sort-value` when the server gave one (a relative age's instant — the keys page), else a `<time datetime>` inside it, else the chosen option of a `<select>` in it (a member's role), else its text. **Nulls sort last in both directions** (an empty cell or a lone dash); equal keys keep their natural order. A paged list sorts the page it shows, and the button's title says so (`data-dt-paged` → "Sort this page by …"); **a page-sized replacement clears the client sort** (288): when every data row is new to the table — the htmx pagers swapping their frame, or any keyed-by-content re-render — the new page shows the server's order and every `aria-sort` returns to `none`, so the state the label claims is always the state the rows are in. A row edit and an append keep the sort. **A held sort names itself** (288): while a column is sorted, its button's title becomes "Sorting this page by X — click for highest first / — click to clear" beside the `aria-sort`, which matters on the one producer whose paging keeps the sort (the dock's cursor paging re-renders its rows in place, index-keyed, so the held sort persists by element identity — never silently). State rows (a single cell spanning the row, `.dt-state-row`, `.dt-skeleton-row`) never move.
 
 **Resize.** Every header cell carries a resize handle at its right edge (`.dt-resizer`, `--dt-handle` wide; `data-resize="off"` opts out). A drag freezes the rendered widths onto a `<colgroup>` the script owns and switches the table to `table-layout: fixed` with its width the sum of its columns, so a drag changes ONE column's width and no other (the table grows or shrinks); `--dt-col-min` is the floor; a double-click gives the column back its width from before the drags. A `dt-nowrap` table is frozen at load (each column at most `--dt-col-max`, the slack shared so it still fills its viewport) and re-fitted when its frame changes width until a person has dragged; a wrapping table stays in the browser's own layout until the first drag. Widths are not remembered across page loads.
 
@@ -698,7 +702,9 @@ Dense data is FIXED; a short list a person reads top to bottom is PAGE-FLOW. `te
 
 **The legacy table classes** — `.ds-table`'s boxed block (app.css, 076 §D / 079 §E): folded into `data-table.css` (the frame draws the box; an unframed table keeps it as the fallback); `.app-card-table`: reduced to ONE rule, a card whose body is a flush data table (`padding: 0; overflow: clip` — `clip`, never a scroll container, or it would take a page-flow header's scroller away from `<main>`); its identifier-breaking rules (098 §A) moved to `data-table.css` for every wrapping frame, its header-wrap rule retired; `.u-scroll-x` and its `:has(> .ds-table)` frame rule: retired (their one user, the execution result, is a frame); `.tplx-fit-table` (template-tree.css): retired, now `dt-fit`; `.pe-result-table-container` (pipeline-editor.css): reduced to the dock's inset and flex placement — the frame draws the box and its viewport scrolls, 032's rule (the box belongs to what does not scroll) kept; `.tplx-scroll` stays for the one non-table list that wears it (the template detail pane). `.facts-table` and `.mini-table` are the MARKETING SITE's (`static/site/css/site.css`, `templates/site/**`), which loads neither `app.css` nor this layout — untouched.
 
-**Guards.** `DataTableCssTokenTest` (tokens only; the load order; the folded layers gone from their old sheets; every app template's `<table>` directly inside a `.dt-viewport` in a `.dt-frame`), `data-table.test.mjs` on `node --test` (the type, the cell value, the comparator with nulls last, the stable sort, the cycle, the width clamp and fill, the length resolution), `AppCssTokenAuditTest` (the card clips, the viewport scrolls), and `DataTableBrowserTest` in a real browser WITH scrollbars (Playwright hides them by default, which would prove the cap only at 0px): the executions list's header holds at `scrollTop = 200`, `--dt-sbw` equals the measured scrollbar and the cap is that wide and the header's height tall, a header click reorders the page and sets `aria-sort`, a drag moves one column; the dock's header holds and its frozen column sits at the viewport's left at `scrollLeft = 300`; a page-flow header sticks under the top bar; zero CSP violations; screenshots light and dark at 1440 / 1024 / 400.
+**Guards.** `DataTableCssTokenTest` (tokens only; the load order; the folded layers gone from their old sheets; every app template's `<table>` directly inside a `.dt-viewport` in a `.dt-frame`), `data-table.test.mjs` on `node --test` (visible versus screen-reader-only header text, mixed visible/hidden labels, explicit sort opt-out, empty headers, hidden utility aliases and resize handles; the type, the cell value, the comparator with nulls last, the stable sort, the cycle, the width clamp and fill, the length resolution), `AppCssTokenAuditTest` (the card clips, the viewport scrolls), and `DataTableBrowserTest` in a real browser WITH scrollbars (Playwright hides them by default, which would prove the cap only at 0px): the executions list's header holds at `scrollTop = 200`, `--dt-sbw` equals the measured scrollbar and the cap is that wide and the header's height tall, a header click reorders the page and sets `aria-sort`, a drag moves one column; the dock's header holds and its frozen column sits at the viewport's left at `scrollLeft = 300`; a page-flow header sticks under the top bar; zero CSP violations; screenshots light and dark at 1440 / 1024 / 400.
+
+`TemplateWorkspaceBrowserTest` and `DashboardWorkspaceBrowserTest` pin the screen-reader-only Actions and Edit headers (#608/#617): accessible text and 1×1 geometry remain, no sort control or `aria-sort` is added, and clicking the header leaves the first data row unchanged.
 
 **Not in scope:** a grid library (the CSP, above), virtual scrolling (every list is server-paged), server-side sort (a paged list sorts its page, and says so), remembered column widths, sorting across pages.
 
@@ -1168,7 +1174,7 @@ Fully specified in [Pipeline Editor spec](pipeline-editor.md). Only the rows tha
 - **Dependency arrows are orderings; the write is a port (151, #127):** every `depends_on` entry is one **dependency** edge — "the node it points to waits for the node it leaves", which is all a dependency on a DDL node means too — whose states are static facts about its two nodes: `active` while the target runs (dashed brand, **still**), `satisfied` once the source completed (`--edge-done`), `unmet` once the source failed or was aborted. **No count ever rides an edge** (the pre-151 client copied the producer's `rows_out` onto every outgoing arrow, so one staged table read by two consumers looked like two writes) and **nothing moves along an edge** (the rAF dash flow is retired). What a node writes, and where, is its **output port**: one row on the producer's own card — a stub with the port dot leading into the destination (`tempdb.stg`, `warehouse.facts`, `caller`; a DML statement names its source, no table; DDL, an output-less PIPELINE and a CALCULATOR have none) — driven by the #125 `node_progress` samples through the 149 reducer: `waiting for tempdb connection` (amber, still), `writing · N written` (the ONLY write-flow on the canvas, on the stub), `committing`/`finalizing`, `committed · N rows` / `N written · commit not observed` / `failed · rolled back`, and `one statement` for a CTAS whose write is inside the statement. A lost stream freezes every indicator and appends "— stream lost" rather than inventing an outcome; the recovery poll settles End from the polled status and closes open operations as not observed. The legend gains **Depends on** / **Output write** chips (not aria-hidden — they are the graph's key); the Details pane gains `Depends on` (each ordering with its state) and `Required by` rows; tapping an arrow announces what it means and selects the waiting node ([Pipeline Editor §5.3a](pipeline-editor.md)). Guarded by `graph-dependency-edges.test.mjs`, `graph-output-port.test.mjs`, `sse-stream-loss.test.mjs`, `PipelineEditorArrowClarityBrowserTest` (one port with `committed · 900,000 rows`, two unlabelled dependencies, a real run) and `PipelineEditorLeaseWaitBrowserTest` (a real wait on one staging connection).
 - **Execution boundaries (150, #126; redesigned by 151, #144):** the canvas derives two view-only **Start** and **End** markers from the authored graph — Start connects to every node with no `depends_on`, every leaf connects to End. Since 151 they are **shapes, not pills**: Start a disc with the `play` glyph, End a rounded square with `square`, the word under the shape, in a compact transparent box so nothing about them reads as a card. **Start is the run button** for a viewer who may execute — the SAME server-rendered `canExecute` that renders the toolbar's Execute, stamped on `.pe-root` as `data-can-execute` (never re-derived in JS): `role="button"`, focusable, Enter/Space, `aria-label="Start execution"`, filled in the run button's own accent; its activation calls the same `executePipeline()` the toolbar calls — one code path, parameters and draft pin identical. **While the run is active the same disc is the Cancel control (159, #148)**: named `Cancel execution`, the word `Cancel`, the toolbar Cancel's square glyph and danger fill under the running pulse, never `aria-disabled`, and its activation calls the same `cancelExecution()` the toolbar's Cancel calls — the mirror of Execute → Running… + Cancel; on any terminal state it is Start again. A viewer who may not execute sees the plain marker in every state (reading `Running…` while the run is active). A press on the disc is a button press, not a canvas gesture: it is stopped before Cytoscape in the capture phase, because Cytoscape's own mousedown re-rendered the disc under a held button and a hand's click then never became a click (the cause of "Start does nothing" on the live editor); keyboard focus stays on the disc across its re-renders. In a browser session every workspace member may execute (D-R3), viewers included; a render without the right draws a plain outlined disc (`role="img"`, no affordance — `RoleVisibilityRenderTest`). They are still not executable NODES — no authored JSON, no NodeType, no statistics, unselectable, nothing to open, synthetic ids that cannot collide with an authored id (the kind is data). **End is never a trigger**: a muted outline while idle, then the authoritative outcome's fill and word — `Finished` (success) on `pipeline_completed`, `Failed` (danger) on `pipeline_failed`, `Stopped` (warning) on `execution_aborted` — with the run clock's elapsed time under it; never a node event, so one finished branch never reads as a finished execution, and eligible roots (execution started, node not yet) show no `active` connector until their `node_started`. Boundary connectors are their own kind and never labelled; the minimap keeps the two silhouettes; `#cy-canvas` is `role="group"` (an image role would hide the button from assistive tech). A cancelled-or-never-started node ends Aborted beside them (#135). ([Pipeline Editor §5.3b](pipeline-editor.md); `graph-markers.test.mjs`, `PipelineEditorStartMarkerBrowserTest`, `PipelineEditorBoundariesBrowserTest`.)
 - **The v2 canvas (080, owner-approved mock):** dotted-grid stage, the mock's node card (type-accent icon tile, id + eyebrow, mono facts, footer state + run numbers), bezier edges with three states, minimap, legend, controls and the fit-that-never-zooms-in ceiling. Its tokens are ONE block at the top of `app.css` (`/* app tokens (080): node-type accents */`) — the five node-type accent pairs plus `--brand(-soft)`, `--border-faint`, `--grid-dot` and the `--edge*` strokes — bridged to design-system tokens so every theme re-skins it. 079's shell v2 is told the block exists and must not redeclare it.
-- **The dock (080):** Details | Results | Errors | Events — the 065 inspector overlay is a tab now (owner ruling 2026-09-05), the dock is always present, the chevron collapse is the only contraction, and there is still no close. **Notifications:** unchanged in shape — `pipeline_completed` and `execution_aborted` toast via `DpToast.show` (§5.1 Shape D), `pipeline_failed` keeps the modal — but exactly-once is now structural: the 076 afterSettle rescue stacked Alpine components on a history-restored root (one click → N executions → N toasts), and it destroys the stale tree before re-binding (`editor-toast-once.test.mjs`). Every SSE event of every kind also lands in the **Events** tab in arrival order. **The dock's height is the user's (104).** It was a fixed 232px that could only be collapsed and restored — the owner's report was *"it has a fixed height. You can min/max it but cannot change the height. I want it to be flexible and the user should be able to drag the height."* A `role="separator"` handle straddles the dock's top border (drag, or focus it and use the arrows: ±16px, Shift ±64px, Home/End for the floor and ceiling, double-click to reset). Since 141 the grip is a visible pill at rest (`40px × 3px`, `--border-default`; brand on hover/focus/drag) rather than a transparent strip that only lit on hover. The floor is 120px and the ceiling leaves the canvas a 180px readable strip (160 until #615). **On a short window (#615, owner ruling 2026-10-19)** the canvas keeps room for its view controls: `.pe-body` never goes below `--pe-dock-canvas-floor` (180px; the controls are a 159px column 16px off the canvas's bottom edge, kept 4px clear of its top) and the dock's pane row is `minmax(0, --pe-dock-pane-h)`, so an opening dock (a node, a tab, a run's first failure) takes only what is left. The dock also STARTS collapsed when opening it at its default would leave the canvas under `--pe-dock-auto-collapse-below` (320px: the controls plus a 150px drag above the floor), unless a remembered pane height says the person chose one. Collapsed at 1280×720 and 1440×900, open at the 1512×982 reference. Until anything moves the dock (a tab, a node, the chevron, a run) the default follows `.pe-panes` as it resizes — the heading above settles after the first measurement, and the window can change — and then the state is the person's. A dock the start-up default collapsed opens on a run's first results; one the person collapsed stays collapsed (065). `dock.js` `defaultState` decides; `PipelineEditorDockResizeBrowserTest` pins all three windows. The size is one CSS custom property (`--pe-dock-pane-h`) written on `<html>` and remembered in `localStorage` under `dp.pane.editor-dock`; `static/js/splitter.js` is a parser-blocking script ABOVE the markup, so a remembered height is the height of the FIRST frame rather than a shift onto it. Collapse still wins while it is on — expanding restores the remembered height. **The canvas follows:** `.pe-body` is `flex: 1`, so a taller dock is a shorter stage, and graph.js's stage `ResizeObserver` now routes through `handleStageResize` — `cy.resize()` always, re-fit ONLY if the view was still the fit (082/098: fit never zooms IN, and a user who has panned to a corner keeps their view). One path also covers the rail collapsing and the window resizing. The row transition is switched off for the duration of a drag, which is also the only motion `prefers-reduced-motion` users would have met here.
+- **The dock (080):** Details | Results | Errors | Events — the 065 inspector overlay is a tab now (owner ruling 2026-09-05), the dock is always present, the chevron collapse is the only contraction, and there is still no close. **Notifications:** unchanged in shape — `pipeline_completed` and `execution_aborted` toast via `DpToast.show` (§5.1 Shape D), `pipeline_failed` keeps the modal — but exactly-once is now structural: the 076 afterSettle rescue stacked Alpine components on a history-restored root (one click → N executions → N toasts), and it destroys the stale tree before re-binding (`editor-toast-once.test.mjs`). Every SSE event of every kind also lands in the **Events** tab in arrival order. **The dock's height is the user's (104).** It was a fixed 232px that could only be collapsed and restored — the owner's report was *"it has a fixed height. You can min/max it but cannot change the height. I want it to be flexible and the user should be able to drag the height."* A `role="separator"` handle straddles the dock's top border, a `--border-default` boundary since #609 (drag, or focus it and use the arrows: ±16px, Shift ±64px, Home/End for the floor and ceiling, double-click to reset). Since 141 the grip is a visible pill at rest (`40px × 3px`, `--border-default`; brand on hover/focus/drag) rather than a transparent strip that only lit on hover. The floor is 120px and the ceiling leaves the canvas a 180px readable strip (160 until #615). **On a short window (#615, owner ruling 2026-10-19)** the canvas keeps room for its view controls: `.pe-body` never goes below `--pe-dock-canvas-floor` (180px; the controls are a 159px column 16px off the canvas's bottom edge, kept 4px clear of its top) and the dock's pane row is `minmax(0, --pe-dock-pane-h)`, so an opening dock (a node, a tab, a run's first failure) takes only what is left. The dock also STARTS collapsed when opening it at its default would leave the canvas under `--pe-dock-auto-collapse-below` (320px: the controls plus a 150px drag above the floor), unless a remembered pane height says the person chose one. Collapsed at 1280×720 and 1440×900, open at the 1512×982 reference. Until anything moves the dock (a tab, a node, the chevron, a run) the default follows `.pe-panes` as it resizes — the heading above settles after the first measurement, and the window can change — and then the state is the person's. A dock the start-up default collapsed opens on a run's first results; one the person collapsed stays collapsed (065). `dock.js` `defaultState` decides; `PipelineEditorDockResizeBrowserTest` pins all three windows. The size is one CSS custom property (`--pe-dock-pane-h`) written on `<html>` and remembered in `localStorage` under `dp.pane.editor-dock`; `static/js/splitter.js` is a parser-blocking script ABOVE the markup, so a remembered height is the height of the FIRST frame rather than a shift onto it. Collapse still wins while it is on — expanding restores the remembered height. **The canvas follows:** `.pe-body` is `flex: 1`, so a taller dock is a shorter stage, and graph.js's stage `ResizeObserver` now routes through `handleStageResize` — `cy.resize()` always, re-fit ONLY if the view was still the fit (082/098: fit never zooms IN, and a user who has panned to a corner keeps their view). One path also covers the rail collapsing and the window resizing. The row transition is switched off for the duration of a drag, which is also the only motion `prefers-reduced-motion` users would have met here.
 - **The settings sidebar is withdrawn (#349, spec §4.1) — 141's resize contract went with it.** 141 made the 280px settings sidebar the user's width (a `splitter.js` handle, `--pe-sidebar-w` on `<html>`, the `dp.pane.editor-sidebar` key, a 220px floor and a 50vw ceiling, a drawer below 1024px). The owner's workspace ruling of 2026-09-30 withdraws the PANE: the graph owns the available width, and the description and the declared parameters live in the Overview and Parameters tabs (the six-tabs bullet above; [Pipeline Editor §4.3](pipeline-editor.md)). `pe-sidebar` and the `editor-sidebar` splitter occur zero times in `editor.html`, `pipeline-editor.css` and `init.js`; `PipelineWorkspaceLayoutBrowserTest` pins their absence (no settings sidebar, no second splitter handle), re-reads the dock's drag contract as the composition's control and asserts the tab strip stays reachable while the dock is collapsed. The 141 sidebar-resize suite is deleted with the pane; the dock's own resize (the bullet above) is unchanged and remains `PipelineEditorDockResizeBrowserTest`'s. Since #535 the module carries no wiring for the withdrawn pane either: `static/js/splitter.js` wires the dock and the explorer tree only.
 - **SQL section (§8.3 there):** the Details tab loads `GET /partials/pipelines/{id}/nodes/{nodeId}/sql` (a `pipeline.read` read partial, htmx.ajax on selection) and highlights it client-side with the zero-dependency `sql-highlight.js`; the copy confirmation is a live-region announcement plus a 1.5s button-label swap — deliberately NOT a toast (high-frequency, self-evident). CALCULATOR and PIPELINE nodes skip the fetch (client-built evaluation / child mapping).
 - **The data blobs cannot break out of their script blocks (185):** the editor's two `<script type="application/json">` blocks (`#pipeline-data`, `#pipeline-lifecycle`) are inserted with `th:utext`, so the controller writes both through `ScriptSafeJson.forScriptBlock` — a closing-tag sequence inside any free-text field the pipeline carries (display name, description, node labels, template names) is escaped and the JSON parses back unchanged client-side; `ScriptBlockUtextAuditTest` holds the document's closed `th:utext` allowlist and `PipelineEditorJsonRenderTest` reads the render back through a real HTML parser.
@@ -1299,15 +1305,17 @@ Until this round the detail route served only LAKE; every other dialect's row ha
 | JS | `overview.mjs` (Copy prompt), through the page-assets template (§3.0); no other script |
 | htmx | none of its own — every link is a boosted navigation |
 
+**Frame (#home-frame; regions #home-ops).** The page renders the v2 frame's regions (§4.25). The **summary strip** holds one metric, Datasources, with its help "Granted to this workspace." as the note and no dot; View all's badge is the same number. The **analytics grid** holds the two charts as bars panels at the one bar pitch, each with a one-line description — "The last recorded test per datasource, one outcome each." and "Every datasource once, by its SQL dialect." — and an info button opening its own dialog section, "How connection health is counted" and "How dialects are counted", which state the Inventory rules below in the reader's words. **Continue your work** reads "A clear next step for your datasources" and opens on one task row, **Browse datasources** (`/datasources`), above Recently added; the guide's related links close it as one row, "Read through a datasource". **Quick start** reads "Explore a datasource with your agent", one sentence and three short steps — Register (a person), Explore (the agent), Build — with Prepare a starter prompt (the prompt dialog; its text is unchanged) and How it works (the dialog section: what datasources are for, the three detailed steps, and **Humans register datasources**). Nothing it counts or links changes.
+
 **Inventory.** One count tile — the visible set (`listVisible`: active-bound + granted + global, repository-level, §4.5) — and two charts. **Connection health** buckets each admitted datasource by its last test outcome: ok, failed, never tested; the bars are unlinked (a bucket is not a filter — the list's search covers last-test state, §4.5) and "never tested" is a bucket, never a blank (the §4.5 Last-test rule). **By dialect** renders one bar per dialect PRESENT, each linking the catalog's existing `?dialect=` filter (the register-row precedent, #186); a dialect nobody holds renders no bar at all.
 
 **Recently added to this workspace** lists up to five GRANTS of the active workspace (`datasource_workspaces.granted_at`, newest first, name ASC as tie-break), each a link to the datasource's detail page. There is no lifecycle badge — a datasource has no draft/release lifecycle — and no "Review drafts": the section's only action is each entry's link. An entry is granted, not modified: the timestamp is the grant's.
 
 **Not a browser family.** The overview is NOT a `browserFamily`: the resource browser and its opener stay hidden (§3.4), because there is no datasources tree — the page is an ordinary section page like the catalog. The rail's Datasources item still lights and the crumb names Datasources: its active rule covers both `/datasources` and `/overview/datasources` inline in the layout, and `AppNav.matches` already reads the overview path as the section's. The menu item links the overview like the five tree families (§4.25 rule 1 as built).
 
-**States.** An empty workspace — the first-run state — renders a "0" tile, zero-width health bars, an EMPTY dialect chart (no bar, no 500: the widths are shares of the tallest of an empty set, taken as zero) and the section note "No datasources have been added to this workspace yet." A read that fails says so with no number (§4.25's rule). The guide (`overview/guide-datasources.html`) follows the guided frame: what datasources are for, a register-first starter prompt with the register-is-human note, and related families.
+**States.** An empty workspace — the first-run state — renders a "0" tile, zero-width health bars, an EMPTY dialect chart (no bar, no 500: the widths are shares of the tallest of an empty set, taken as zero) and the section note "No datasources have been added to this workspace yet." A read that fails says so with no number (§4.25's rule). The guide (`overview/guide-datasources.html`) fills the frame's fragments: a subtitle, the Quick start steps, an explore-first starter prompt with the register-is-human note in its How it works, and related families.
 
-Guards: `DatasourceOverviewControllerTest` (the model: tile, charts, buckets, recent, fail-closed reads, the empty workspace), `OverviewDatasourcesRenderTest` (the loops: widths, links, escaping, the guide, the empty notes), `DatasourceRepositoryIntegrationTest` (the partition, ordering and workspace scoping in SQL), `WorkspaceSurfacesE2eTest` (the wire: exactly the admitted set's numbers, another workspace's rows absent), `OverviewDatasourcesBrowserTest` (modal-seeded rows through the real probe; the item lands on the overview; the browser stays closed; Copy prompt with zero requests).
+Guards: `DatasourceOverviewControllerTest` (the model: tile, charts, buckets, recent, fail-closed reads, the empty workspace), `OverviewDatasourcesRenderTest` (the loops: widths, links, escaping, the guide, the empty notes; #home-ops: the v2 regions through the real controller — the metric's note, the badge, both panels' descriptions and dialogs, the task row, the Quick start steps, the prompt equal to its base text byte for byte), `DatasourceRepositoryIntegrationTest` (the partition, ordering and workspace scoping in SQL), `WorkspaceSurfacesE2eTest` (the wire: exactly the admitted set's numbers, another workspace's rows absent), `OverviewDatasourcesBrowserTest` (modal-seeded rows through the real probe; the item lands on the overview; the browser stays closed; View all's badge, the task row, the health dialog opening and closing; Copy prompt with zero requests).
 
 ### 4.6 Templates — the catalog page and the resource browser (#398, #554)
 
@@ -1420,7 +1428,7 @@ Every capability the old two-pane explorer offered has a new home and an execute
 | URL | `GET /templates/{*name}?version={N}&tab={source\|overview\|render\|runs\|used-by\|versions}` — the name IS the id, the folder path; it travels in the path HERE only (the capture-everything variable; `TemplateWorkspaceRouteTest` pins the routing: a dotted, multi-segment name captures whole and the literal `/templates` and `/templates/editor` routes win). Everywhere else the name stays a query parameter (§9.6) |
 | Auth required | Yes — the page floors at `read` (`template.read`, the pipelines workspace's rule): the screen's lowest role reads it. Edit and Save post to `template.update` routes; Preview posts to `template.render`; Run suite posts to `template.evaluate`; the lifecycle verbs are their own rows — [§4.3e](#43e-role-visibility--every-verb-and-the-role-boolean-that-renders-it-114-normative) |
 | Purpose | THE place a template is read, rendered, evaluated and version-managed: version-explicit (the current release by default; an explicit version never falls back; a draft is explicit and visibly a draft), tabbed, with nothing of the old explorer or editor missing (§4.6b) |
-| Design primitives | `.ds-card`, `.ds-button`, `.ds-badge`, `.ds-form` + `static/css/template-editor.css` (the source column and the transform face, unchanged) and `static/css/template-workspace.css` (the top bar, the selector, the tab strip — design tokens only) — both head-loaded (§3.0 is normative: no page template carries its own stylesheet link) |
+| Design primitives | `.ds-card`, `.ds-button`, `.ds-badge`, `.ds-form` + `static/css/template-editor.css` (the source column and the transform face, unchanged) and `static/css/template-workspace.css` (the top bar, the selector, the tab strip — design tokens only) — both head-loaded (§3.0 is normative: no page template carries its own stylesheet link). The version selector's viewed row carries the menu's selection expression (§3.1, §2.8; #625): the `--brand-soft` tint, `--text-primary` ink for the label and its `· current` suffix (Minimal `--text-inverted`) and a 3px `--border-focus` left bar from `--app-nav-indicator-w`, which every row reserves transparent so a version switch moves nothing; `TemplateVersionSelectorBrowserTest` measures it on every bundled theme and both halves of auto |
 | JS | One `template[data-page-assets="on-mount"]` catalog through the page-script loader (§3.2), once per document: `/js/pipeline-editor/sql-highlight.js`, `/js/template-editor/preview.js`, `/js/csrf.js` (before lifecycle), then lifecycle, transform face and lifecycle dialogs; `/js/template-editor/workspace.js` is LAST with `data-page-mount` (`TemplateWorkspaceMount`), wiring each live or restored tab strip once and synchronizing lifecycle's context mode with the visible Key/Value or JSON controls. `/js/template-editor/workspace.js` (the tab state machine — pure, node-tested; the tab strip and `?tab=` URL are its DOM glue), `/js/template-editor/lifecycle.js` (the Render tab's context rows, the Key/Value ⇄ JSON toggle, the preview call), `/js/template-transform-face.js` (the unsaved-changes marker, the result scroll), `/js/lifecycle-dialog.js` (§4.3d's dialogs into `#tx-dialog`); the preview output is highlighted with the shared dependency-free SQL tokenizer (032) — the editable textarea is deliberately plain |
 | htmx | the version selector and every Open are FULL navigations (`hx-boost="false"` — the resolution is server-side, R5 by construction); the Runs tab lazy-loads once (`GET /partials/templates/runs`); **Edit** posts to `/partials/templates/editor/edit` (`#tpl-edit-refusal`, `innerHTML`; success answers `HX-Redirect` onto the workspace with the draft explicit); **Save draft** posts the face to `/partials/templates/transform-face/save`; **Preview** posts to `/partials/templates/render` |
 
@@ -2062,13 +2070,17 @@ config.
 | htmx | none of its own — every link is a boosted navigation |
 
 **Two reads, each failing on its own.** The endpoint numbers are the console's own reads —
-`EndpointPublishService.list` and `listLegacy`, behind the promoter lens, so a promoter's numbers
-are the admitted pipelines' endpoints and the frame says "Admitted inventory". The key numbers
-are the Keys page's narrowing (`keysVisibleTo`: the whole workspace with `api_key.read`,
-otherwise the reader's own `mcp` keys). The keys read is NOT lensed. A failed endpoints read is
+`EndpointPublishService.list` and `listLegacy`, behind the promoter lens, so a promoter's three
+endpoint metrics are the admitted pipelines' endpoints and each says so under its value (the
+frame's per-metric lens note, #621). The key numbers are the Keys page's narrowing
+(`keysVisibleTo`: the whole workspace with `api_key.read`, otherwise the reader's own `mcp`
+keys). The keys read is NOT lensed: the keys metric carries no lens note, so a promoter's strip
+is headed "Inventory" — the frame says "Admitted inventory" only when every metric passed the lens. A failed endpoints read is
 the frame's unavailable inventory (no tile, no number, the sentence "The endpoints could not be
 read."); a failed keys read drops only the keys tile, empties only the keys chart (caption "Keys
 by kind — unavailable") and says so in Recently created keys. The endpoints card still answers.
+
+**Frame (#home-frame; regions #home-ops).** The page renders the v2 frame's regions (§4.25). The **summary strip** holds the four tiles below as metrics, each with its help as the note; Serving a release and Serving a draft carry the dot of their state bar (`released`, `draft`), Endpoints and the keys metric none. View all's badge is Endpoints. The **analytics grid** holds the two charts as bars panels with descriptions — "Every published path once, by what a call to it runs now." and "Live keys only, one bar per kind." — and info buttons opening "How endpoints are counted" and "How keys are counted"; when the keys read fails, the keys panel has no description, no info button and no dialog section. **Continue your work** reads "A clear next step for your endpoints and keys" and opens on **Open the console** (`/api-console`) and — only when the keys read answered — **Manage keys** (`/api-keys`), above the two recent sections; the related links close it as one row, "What keys reach". **Quick start** reads "Publish an endpoint with your agent", one sentence and three short steps — Publish, Grant, Call — with Prepare a starter prompt (the prompt dialog; its text is unchanged) and How it works. The shared MCP card (`extra`) renders full width under the work grid. Nothing it counts or links changes.
 
 **Inventory.** Four tiles: **Endpoints** (every published path, legacy ones included — the four
 state bars added together; links the console), **Serving a release**, **Serving a draft**, and
@@ -2090,13 +2102,15 @@ page. A key's id, prefix, hash or sealed copy never reaches the model, so no `dp
 the page beyond the config's placeholder. `RecentItem` carries one name, so the secondary facts
 ride in it. There is no Review drafts.
 
-**Guide.** `overview/guide-api-console.html`: **What the API is for**; **How a program gets
-access** — three steps naming who does each: publish (an agent's `endpoints_create`, or a
+**Guide.** `overview/guide-api-console.html`: a subtitle and Quick start's three short steps;
+How it works, titled **How a program gets access** — what the API is for, then three steps
+naming who does each: publish (an agent's `endpoints_create`, or a
 program's `POST /api/v1/endpoints`; there is no form in the app), create and associate a key (a
 workspace admin on the Keys page, with a Manage API keys link for a workspace or super admin;
-no agent mints a key), call it (`GET /api/<category>/<version>/<path>` with the key header).
-Then **Publish an endpoint with your agent**: an editable starter prompt that follows the
-skill's endpoints flow and stops at publishing. It never asks the agent to create, associate or
+no agent mints a key), call it (`GET /api/<category>/<version>/<path>` with the key header),
+and the note that call counts are not recorded. The prompt dialog, **Publish an endpoint with
+your agent**, holds an editable starter prompt that follows the skill's endpoints flow and stops
+at publishing. It never asks the agent to create, associate or
 copy a key. The shared MCP card follows, with no Copy button: `overview.mjs` copies a
 textarea, and the config is a `<pre>`. Related: Pipelines, Dashboards, and the REST, MCP and
 Claude Code references.
@@ -2106,18 +2120,23 @@ and its opener stay hidden; the rail's API item lights on `/api-console` and
 `/overview/api-console` alike (the layout's `startsWith` rule) and the crumb names API.
 
 **States.** An empty workspace renders four "0" tiles, zero-width bars, "Nothing is published
-yet. The three steps above say how." and "No keys yet. A key is created by a person on the Keys
-page." The three steps are always shown.
+yet. Quick start says how." and "No keys yet. A key is created by a person on the Keys
+page." The steps are always shown, short in Quick start and in full in How it works.
 
 Guards: `OverviewApiInventoryTest` (the buckets, every kind, live/expired/revoked once, the Keys
 page's narrowing by role), `OverviewApiControllerTest` (tiles, charts, recent entries, the
 independent failures, no key id or hash in the model), `OverviewApiRenderTest` (the guide, the
 prompt's words, the shared card's placeholder and catalog size, exactly one `dpk_`, the manage
-link by role, the unavailable and empty states), `OverviewApiE2eTest` (real database and lens:
+link by role, the unavailable and empty states; #home-ops: the v2 regions through the real
+controller — the four notes, the two dots equal to their bars, the badge, the panels and dialogs,
+the task rows, the prompt equal to its base text byte for byte; a promoter's endpoint metrics
+lensed and the keys metric not, under "Inventory" (#621); a failed keys read with no keys metric,
+row or info button), `OverviewApiE2eTest` (real database and lens:
 for viewer, author, promoter and workspace admin the tiles equal the console's rows and the Keys
 page's rows; a second workspace leaks nothing), `ShellRenderTest` (the item lights on both paths,
 the browser hidden), `OverviewApiBrowserTest` (the rail lands here; a key counted by name, its
-value nowhere; the chip equals the console's; Copy prompt with zero requests; screenshots at
+value nowhere; the Manage keys row and the keys dialog; the chip equals the console's; Copy
+prompt with zero requests; screenshots at
 1512, 900 and 390), `AppShellBrowserTest` (rail → home → View all → console).
 
 ---
@@ -2229,17 +2248,19 @@ Guards: `SchedulesUiControllerTest` (the route's row, `canAuthor` = the five wri
 
 **One read.** Every number and list on the page comes from ONE `ScheduleService.summary`: §20.1's own `list` at the workspace cap (`max-schedules-per-workspace`) through the reader's lens, plus one read of each admitted schedule's newest run state (`ScheduleRunRepository.latestStates`, scoped to the workspace). The page and the explorer therefore count the same admitted set by construction — §4.20's rule that no second list query sits beside §20.1. The summary reads one row past the cap, so a workspace holding more live schedules than its cap renders the unavailable state ("This workspace holds more schedules than its limit…"), never a short count. The read never touches `notification_recipients`, and a block's reason is not rendered here (the explorer's detail names it).
 
+**Frame (#home-frame; regions #home-ops).** The page renders the v2 frame's regions (§4.25). The **summary strip** holds the four tiles below as metrics, each with its help as the note; Enabled, Paused and Blocked carry the dot of their By condition bar (`released`, `discarded`, `draft`), Schedules none. Every metric passes the lens, so a promoter's strip is headed "Admitted inventory". View all's badge is Schedules. The **analytics grid** holds the two charts as bars panels at the one bar pitch, with descriptions — "Every live schedule once, by the condition the explorer shows." and "Each schedule once, by how its latest run ended." — and info buttons opening "How conditions are counted" and "How last runs are counted", each naming its buckets with their counts. **Continue your work** reads "A clear next step for your schedules" and opens on one task row, **See what runs next** (`/schedules`), above Up next and Recently changed with the gap between them (#620); the related links close it as one row, "What a schedule runs". There is no "Unblock" row: the explorer has no condition filter for one to open, and a row that opens the whole list would not do what it says. New schedule is the heading's primary action (the guide's `primary` fragment). **Quick start** holds How to create one; How it works is a dialog section with no prompt dialog beside it. Nothing it counts or links changes.
+
 **Inventory.** Four count tiles — Schedules (each live schedule once), Enabled, Paused, Blocked — and two charts. **By condition**: enabled / paused / blocked, the condition the explorer shows (blocked wins over paused). **Last run**: each schedule once, by its newest run's state — Succeeded (`succeeded`); Failed (`failed`, `aborted`, `unknown`); In progress (`queued`, `starting`, `running`); Did not run (`not_started`, `skipped`, `cancelled`); Never ran (no run). Its note says it is a snapshot, not a history. Tiles and bars are unlinked: the explorer has no condition or outcome filter (a bucket is not a filter, the §4.5d rule), and View all opens the whole list.
 
 **Continue your work.** **Up next** — up to five schedules the dispatcher would fire (enabled AND not blocked; a paused schedule keeps a stale `next_due_at` and is never listed), soonest next run first, name as the tie-break; a due time already past reads "due now". **Recently changed** — up to five by `updated_at`, newest first. Each entry links the explorer's leaf, `/schedules?id=<id>`. There is no Review drafts (a schedule has no lifecycle) and no condition on a row (owner ruling 2026-10-19 on #584: the frame's entry has no slot for one; the condition is on the schedule's page).
 
-**Guide** (`overview/guide-schedules.html`). What schedules are for, then **How to create one** — a person's three steps on the explorer (the pipeline and its current version; the pattern, zone, preview and missed-run policy; recipients, with "scheduler mail is not enabled yet, so nothing sends") and, for `canAuthor` only, **New schedule** (to `/schedules`, where the form is); every other role reads who creates schedules. There is NO agent section and no starter prompt: no MCP tool creates or reads a schedule (§4.20's "Not in this slice"). Related: Pipelines; Executions for a role that reads them (`canReadExecutions` — never the promoter's); the REST reference (§20).
+**Guide** (`overview/guide-schedules.html`). A subtitle; How it works says what schedules are for, that schedules are managed here and over the REST API with no agent tool, and links §20. Quick start is **How to create one** — a person's three steps on the explorer (the pipeline and its current version; the pattern, zone, preview and missed-run policy; recipients, with "scheduler mail is not enabled yet, so nothing sends") and, for `canAuthor` only, **New schedule** (to `/schedules`, where the form is); every other role reads who creates schedules. There is NO agent section and no starter prompt: no MCP tool creates or reads a schedule (§4.20's "Not in this slice"). Related: Pipelines; Executions for a role that reads them (`canReadExecutions` — never the promoter's); the REST reference (§20).
 
 **Not a browser family.** As §4.5d: the browser and its opener stay hidden. The rail's Schedules item links the home and lights on both `/schedules` and `/overview/schedules` (the layout's `navPath`, the overview root taken off); the crumb names Schedules.
 
 **States.** An empty workspace renders four "0" tiles, zero-width bars and the notes "No enabled schedule is waiting to run." and "No schedules yet." A failed read says "Schedules could not be read." with no number, and each list says it could not be read.
 
-Guards: `ScheduleSummaryTest` (every run state in exactly one bucket; the counts from §20.1's list, never `countLive`; the Up next predicate; the cap; the projection carries no recipient), `ScheduleSummaryIntegrationTest` (newest run per schedule in SQL, workspace-scoped; the summary equals the list unlensed and narrowed), `OverviewSchedulesControllerTest`, `OverviewSchedulesRenderTest` (no agent card; New schedule by role; related links by role; the charts' tables; escaping; no digit when unavailable), `ShellRenderTest` (the item, crumb and hidden browser), `MatrixRowReachabilityTest` (the §7.6 cell), `OverviewSchedulesE2eTest` (the page total equals `GET /api/v1/schedules` for a viewer and through the promoter's real lens; another workspace absent), `OverviewSchedulesBrowserTest` (the item lands on the home; zeros and New schedule in a fresh workspace; an Up next row opens its detail).
+Guards: `ScheduleSummaryTest` (every run state in exactly one bucket; the counts from §20.1's list, never `countLive`; the Up next predicate; the cap; the projection carries no recipient), `ScheduleSummaryIntegrationTest` (newest run per schedule in SQL, workspace-scoped; the summary equals the list unlensed and narrowed), `OverviewSchedulesControllerTest`, `OverviewSchedulesRenderTest` (no agent card; New schedule by role; related links by role; the charts' tables; escaping; no digit when unavailable; #home-ops: the v2 regions through the real controller — the four notes in order, each dot equal to its bar, the badge, the panels and dialogs, exactly one task row even with blocked schedules, New schedule for an author and never a viewer), `ShellRenderTest` (the item, crumb and hidden browser), `MatrixRowReachabilityTest` (the §7.6 cell), `OverviewSchedulesE2eTest` (the page total equals `GET /api/v1/schedules` for a viewer and through the promoter's real lens; another workspace absent), `OverviewSchedulesBrowserTest` (the item lands on the home; zeros and New schedule in a fresh workspace; the condition dialog opens and closes with focus back on its button; the task row; an Up next row opens its detail).
 
 ### 4.21 Dashboards — the catalog, the resource browser and the workspace (#400, #554; the L3b pages before it)
 
@@ -2590,8 +2611,8 @@ violations, the promoter's page issuing no lifecycle request, the 2d and 3d bund
 | URL | `GET /overview/pipelines`, `/overview/templates`, `/overview/dashboards`, `/overview/visualizations`, `/overview/parameter-sets` — five literal routes, no path variable, no query; the Datasources overview joins them since #583 as `GET /overview/datasources` (§4.5d) |
 | Auth required | Yes — each family's own read permission (`pipeline.read`, `template.read`, `dashboard.read`, `visualization.read`, `parameter_set.read`, and the Datasources overview's `datasource.read`; [Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative) names each route in its row's Surfaces cell); every role, a promoter through the lens (Datasources has no lens). GET only; nothing on the page writes |
 | Purpose | A family's home page: what the workspace holds in that family, by lifecycle, and — for a family whose guide is written — what the family is for, how to start one with an agent, and where work left off |
-| Design primitives | `.app-page-h`, `.ds-card` (`.app-card-h`/`.app-card-b`), `.ds-button`, `.ds-badge`, `.ds-textarea`; the house data-table frame (§3.7) around the visually hidden table; the `.app-overview-*` rules in `app.css`, design tokens only |
-| JS | `overview.mjs` (Copy prompt), on a guided overview only, through the page-assets template (§3.0); no other script |
+| Design primitives | `.ds-card`, `.ds-button`, `.ds-badge`, `.ds-input`, `.ds-textarea`, `.ds-icon` (vendored lucide glyphs), one native `<dialog>`; the house data-table frame (§3.7) around each visually hidden table twin; the `.app-overview-*` rules in `app.css`, design tokens, the house type scale and the house breakpoints only (#home-frame) |
+| JS | `overview.mjs` on every overview, through the page-assets template (§3.0): the dialog (opened by key, closed by Escape, the close button or a backdrop click, focus returned, the table twin borrowed and given back), the question field, Copy prompt and Reset; no other script |
 | htmx | none of its own — every link is a boosted navigation |
 
 One template, `overview/family.html`, renders all five over one model (`OverviewController`,
@@ -2607,14 +2628,66 @@ Since #556 the Pipelines menu item links `/overview/pipelines`; Templates is a m
 since #579, and the other three stay linked from Pipelines' related list until #580–#582; the
 Datasources item links `/overview/datasources` since #583.
 
-**Hierarchy.** The family title, the workspace line ("In workspace <name>."; a promoter's adds that
-the counts are the admitted inventory) and **View all** (the catalog). Then the **Inventory** card
-("Admitted inventory" through a lens): four counts — Objects, With drafts, With releases, Discarded
-only, each with a one-line help — and four bars: Draft only, Released only, Released with draft
-changes, Discarded only. For a guided family (all six as built — Pipelines and Templates since #579, Dashboards #580, Visualizations #581, Parameter Sets #582, Datasources #583; `overview/guide-<family>.html`), **What
-pipelines are for**, **Create with your agent**, and side by side **Continue your work** and **Related
-resources and help** follow. An unguided overview shows the inventory card and nothing else — no
-placeholder prose, no script.
+**Hierarchy (#home-frame, the approved 2026-10-20 direction).** Six regions, in order, each a
+`<section>` (or the dialog) named by its heading and carrying a `data-overview-*` hook:
+
+1. **Heading** — an eyebrow with the family's icon, "Workspace" and the workspace name as a chip;
+   the family title; the guide's `subtitle` line when it has one (Pipelines: "Build repeatable
+   workflows. Understand what's live and what's next."); a promoter's line that the counts are the
+   admitted inventory; **View all** (the catalog) with its count badge; and the primary action:
+   **Create with your agent** (opens the prompt dialog) for a guide with a `prompt` fragment, else
+   the guide's `primary` fragment (Schedules' New schedule), else none.
+2. **Summary strip** (`data-overview-summary`) — the family's metrics side by side, each a label, a
+   value and a one-line help; the Pipelines strip has a foot (below).
+3. **Analytics grid** (`data-overview-analytics`) — one panel per chart: its visible heading names
+   the chart (#620), then an optional description and period, an info button for the chart's
+   explanation, the chart, a footer line and the chart's visually hidden table twin
+   (`data-chart-table`, §3.7).
+4. **Work grid** (`data-overview-work`) — **Continue your work** (`data-overview-recent`): the task
+   rows, then **Recently updated** (the family's recent sections, unchanged: heading, note, rows
+   with badge and time, the empty note `data-overview-recent-empty`, the unavailable line), then the
+   guide's `related` links ("Build on your results"); and **Quick start**
+   (`data-overview-quickstart`): the guide's `quickstart` (a headline, one sentence, the numbered
+   steps), with **Prepare a starter prompt** and **How it works**.
+5. The guide's `extra` fragment, full width (the API home's access and MCP cards).
+6. **The dialog** — ONE native `<dialog data-overview-dialog>` per page, with a kicker (the family),
+   a title, a close button and server-rendered sections keyed `definitions`, `releases`,
+   `activity`, `prompt` and `howitworks`. `overview.mjs` shows the section the opener's `data-open`
+   names, takes the title from its `data-title`, opens the dialog modal, and returns focus to the
+   opener on close (Escape, the close button or a backdrop click). The `::backdrop` reuses
+   `.u-backdrop`'s scrim (owner ruling 2026-10-20). A section with no content on a page is absent,
+   and so is its opener.
+
+An unguided overview shows the heading, the strip, the panels and Continue your work — no Quick
+start, no prompt, no placeholder prose.
+
+**The summary strip.** A metric is a label, a value and a help line, read from the same value as
+the charts. A STANDARD family (Templates, Dashboards, Visualizations, Parameter Sets) shows its four
+counts as metrics until #599; Datasources, Schedules and API show their own counts. Pipelines shows:
+
+- **Total pipelines** (objects; "Across this workspace");
+- **Live** (released only; "Released, with no open changes");
+- **In development** (draft only; "Awaiting their first release");
+- **Actively developed** (a separate measure; "Draft edited in the last N days", the configured
+  window).
+
+The strip's foot holds **Live with changes** (released with draft changes), **Retired** (discarded
+only; unlinked, titled "Retired pipelines have no page.") and **How these are counted** (the
+definitions dialog). The four lifecycle groups — Live, In development, Live with changes, Retired —
+are exclusive and sum to Total. Actively developed overlaps them, and the definitions dialog says so.
+The dialog also names each group in the catalog's words (Draft only / Released only / Released with
+draft changes / Discarded only; #626).
+
+**Lens words, per metric (#621):** the strip's heading reads "Admitted inventory", and the heading's
+sentence names the lens, only when EVERY metric passed the lens. Otherwise each lensed metric carries
+"Admitted inventory: only what your promotion view shows." under its value ("(admitted)" in the foot). The siblings' controllers still give every tile the page's
+flag, so their strips read as before. The API home's keys tiles, which the lens does not narrow, take
+`lensed = false` in the home-ops lane; #621 stays open until then.
+
+**View all's badge** counts what the catalog and the resource browser's header count: the three live
+groups, objects minus discarded only (#593). A STANDARD family's badge is the same `objects −
+discardedOnly`, and a lensed page's is the admitted count. An unavailable inventory renders View all
+with no badge, and so does a family whose panel names no such count (Datasources, Schedules, API).
 
 **The counting model**, restated once (the record's §8; #553's `FamilyInventory`): one SQL snapshot
 places each object of the workspace in exactly one of the four buckets by its versions. Objects is
@@ -2623,57 +2696,178 @@ plus released with draft changes, so those two overlap by design and say so. Eve
 counts, bars, bar labels and the table — is read from that one value, so the chart cannot disagree with
 its totals. A bar's width is its value relative to the tallest, 0–100, written as the SVG `rect`'s
 `width` attribute (the CSP admits no style); a zero is a zero-width bar beside its "0", never a
-visible minimum. A visually hidden table repeats the four rows for assistive technology.
+visible minimum. Bars, parts and legend swatches are painted by four tones — draft the warning series,
+released the success series, released with draft changes the info series (`--chart-series-1`; #627 —
+never the brand), discarded the muted series — and never by colour alone: every part carries its words
+and count. Two measured gaps are listed in the sweep, not hidden: on professional the info series sits
+0.073 from the link (#633); minimal paints the three series one black (#631).
+A visually hidden table repeats the four rows for assistive technology.
 
-**Links.** For Pipelines, With drafts, With releases and the Draft only, Released only and Released
-with draft changes bars link the catalog filtered to that bucket (`/pipelines?lifecycle=…`, §4.3);
+**The Pipelines charts (#598a, re-cut by #home-frame).** The same snapshot, extended by each
+admitted pipeline's count of RELEASED versions, feeds the strip, its foot and both panels from ONE
+statement. That statement is `ChartInventorySource`, built on `InventorySource`'s own `admitted` CTE
+and its four lifecycle columns.
+
+**Release history** has five bars, one per bin: No releases, 1 release, 2–3, 4–9 and 10+. Each bar
+is the number of pipelines with that many releases, and the tallest is full width. No releases takes
+the draft tone; the rest take the released tone. A bar reads name · track · value, the track a `rect`
+whose `width` attribute is the share. Every bar chart on a page sits at ONE row pitch (`--space-10`),
+with the chart at least the 192px floor (#620).
+
+The note under the bars states the bins' sums in two sentences, worded for none, one, some and all
+("All 4 unreleased pipelines have a draft." / "3 of the 10 released pipelines have open changes.";
+`OverviewStacked.releaseNote`). The table keeps the Draft open / No draft / Total columns. The info
+button opens **Understanding release history**: one bin per pipeline, the bars compare pipelines and
+not executions, then the note.
+
+A release since discarded is not counted (only RELEASED rows are), so a retired pipeline has 0.
+Every pipeline sits in exactly one bin, so the bins total the strip's Total. `ChartInventory` refuses
+a value whose bins disagree with the lifecycle total, and the page then reads unavailable. The
+chart's words are its own: the catalog filter keeps `CatalogLifecycle.label`'s. The other families'
+panels keep their bars and tables.
+
+The definitions dialog says why Total can exceed the resource browser's header count: "The resource
+browser and View all count the three groups that are not retired: N. Retired pipelines have no
+page." The header counts draft only, released only and released with draft changes
+(`FamilyRecentE2eTest`), and Retired is the discarded-only bucket (#593).
+
+**The activity chart (#598b, re-cut by #home-frame).** The same statement also counts
+**Development activity**. It is counted against the request's one clock reading (`:now`) and the
+configured window.
+
+The chart is twelve columns, one per UTC calendar week (Monday 00:00Z to Sunday), bucketed on
+`AT TIME ZONE 'UTC'` so the database session's time zone never moves a boundary. The columns read
+oldest first, each named by its Monday ("6 Oct"); on the phone band only every third name shows.
+
+Each column stacks two parts from the baseline:
+
+- **Released** at the bottom: admitted RELEASED versions by `released_at`. A release since discarded
+  is not counted, the release-history rule.
+- **Created** on top: admitted pipelines by `created_at`, in the draft tone, since a new pipeline is
+  a draft.
+
+Each part is a `rect` whose `y` and `height` attributes tile the column in tenths, with no gap or
+overlap however the shares round. The busiest week is full height, and a quiet quarter is all
+zero-height parts at the baseline. Each column's `<title>` is its table row's sentence ("Week of 6
+Oct: 3 created, 2 released, this week so far"). The axis labels the busiest count, its half and 0.
+
+The headline is the quarter's events ("16 events"). The legend carries the twelve-week sums,
+unlinked: the catalog has no week filter. The footer reads "No events this week" or "N events this
+week so far". **View data** opens the activity dialog, which says "Events, not distinct pipelines. A
+pipeline created and released in the same week contributes to both counts. Weeks begin Monday
+(UTC); discarded releases are excluded." The panel's table twin MOVES into the dialog while it is
+open and back when it closes, so the page holds one copy. The table's columns are Week of, Created,
+Released, Events.
+
+**Actively developed** is the strip's fourth metric: admitted pipelines holding an admitted DRAFT
+last written (`COALESCE(updated_at, created_at)`) at or after `:now` minus
+`datapipelines.ui.actively-developed-days` days (configuration §3.10, default 14, inclusive at the
+edge). A draft keeps only its last write, so this is a count today, not a history. Per-week draft
+edits are not shown (the owner's ruling on #598). Through a promoter's lens no DRAFT is admitted, so
+it reads 0. `ChartInventory` refuses an actively developed count above the pipelines holding a
+draft, or more created in the weeks than pipelines in total, and the page then reads unavailable.
+
+**Links.** On the four-count card (the Pipelines card's until #598a), With drafts, With releases and
+the Draft only, Released only and Released with draft changes bars link the catalog filtered to that
+bucket (`/<family>?lifecycle=…`, §4.3; on the frame since #home-frame, the strip's metrics and the
+lifecycle chart's bars);
 Objects links nothing (View all is the unfiltered catalog) and Discarded only stays unlinked, since a
 discarded-only pipeline has no workspace page. An unguided family links no count or bar until its
-catalog offers the filter; Templates offers it since #579 and links like Pipelines. The Datasources
+catalog offers the filter; Templates offers it since #579 and links that way. The Datasources
 overview links differently, as its model allows: each By-dialect bar links `/datasources?dialect=`
-(the catalog's existing filter) and the health bars stay unlinked (§4.5d).
+(the catalog's existing filter) and the health bars stay unlinked (§4.5d). On the Pipelines home
+(#home-frame), the strip's Live and In development and the foot's Live with changes link
+`/pipelines?lifecycle=released`, `draft` and `released-with-draft`. Total, Actively developed and
+Retired stay unlinked, as do the release-history bars and the activity legend. The task rows link
+`?lifecycle=draft` and `?lifecycle=released`.
 
-**Create with your agent (Pipelines).** Three steps and a starter prompt in an editable textarea, the
-workspace name the menu shows substituted server-side and the bracketed parts left for the reader. The
-prompt names no key, credential, datasource configuration or hidden resource. **Copy prompt** puts the
-textarea's current text, edits included, on the clipboard: on success the button reads "Copied" and
-returns; when the clipboard refuses or is absent, the text is selected, the button reads "Select and
-copy" and a status line says how to finish by hand. Copying sends no request and grants nothing; the note
-under it says so, and, for a role that does not author pipelines, suggests copying it for a collaborator.
+**The prompt dialog (Pipelines; every guide with a `prompt`).** Create with your agent and
+Prepare a starter prompt open it. The dialog holds:
 
-**Continue your work (Pipelines).** **Recently updated**: up to five pipelines that hold a draft or a
-release, newest change first, each a link to its workspace with a draft badge when it has one and a
-relative time (the absolute time as its title). The time is the latest of the pipeline's own update and
-its versions' draft write, release and discard (`RecentSource`). It is the workspace's modification data,
-not anyone's history (#557 owns Recent and Pinned). **Review drafts** opens the catalog filtered to With
-drafts.
+- the question field ("What should this pipeline do?");
+- the starter prompt in an editable textarea, with the workspace name the menu shows substituted
+  server-side and the bracketed parts left for the reader;
+- **Copy prompt** and **Reset**;
+- the note.
+
+Typing in the question field substitutes the prompt's first `[question]` by index and slice, as text,
+never as markup, and only while the textarea still holds the text the field last wrote. An edited
+prompt is never overwritten by typing. Reset restores the server's text and clears the question. The
+prompt names no key, credential, datasource configuration or hidden resource.
+
+**Copy prompt** puts the textarea's current text, edits included, on the clipboard. On success the
+button reads "Copied" and returns. When the clipboard refuses or is absent, the text is selected,
+the button reads "Select and copy", and a status line says how to finish by hand. Copying sends no
+request and grants nothing. The note says so and, for a role that does not author pipelines,
+suggests copying it for a collaborator.
+
+**How it works** is the guide's longer steps, the chain to templates, visualizations and dashboards,
+and the MCP server reference.
+
+**Continue your work (Pipelines).** Two task rows come first:
+
+- **Review your drafts**: the In development count, worded for 0, 1 and many, linking
+  `?lifecycle=draft`;
+- **Explore live pipelines**: linking `?lifecycle=released`.
+
+A family whose catalog offers no such filter gets no row for it. Then comes **Recently updated**:
+up to five pipelines that hold a draft or a release, newest change first. Each is a link to its
+workspace, with a draft badge when it has one and a relative time (the absolute time as its title).
+The time is the latest of the pipeline's own update and its versions' draft write, release and
+discard (`RecentSource`). It is the workspace's modification data, not anyone's history (#557 owns
+Recent and Pinned).
 
 **Through a promoter's lens** every surface reads the same admitted set: the admitted names' RELEASED
-versions only. The counts and bars, the recent list (ordered by release time alone, so a hidden draft's
-write moves nothing) and the filtered catalog all omit a hidden draft (`PromoterLensSweepTest`). The
+versions only. The strip, its foot, the counts and bars, the recent list (ordered by release time alone, so a hidden draft's
+write moves nothing) and the filtered catalog all omit a hidden draft (`PromoterLensSweepTest`); the
+Pipelines charts count the admitted names' RELEASED versions alone, so a hidden draft moves no metric
+and no releases bin (the sweep reads every metric and table cell), and the activity chart counts only admitted
+releases and admitted pipelines, with nobody actively developed (#598b). The
 narrowed inventory admits an object with ANY released version, while the lensed catalogs keep their
 current-pointer rule; the two can differ for an object whose current pointer is not a released version
 (#563). Neither rule changes here.
 
-**States.** An inventory that cannot be read says "The inventory is unavailable." with a reason and
-shows no number at all — an unknown count never reads as zero. Recently updated has its own unavailable
+**States.** An inventory that cannot be read says "The inventory is unavailable." with a reason in
+the strip's place. The page then shows no number at all: no panel, no badge, no worded count (the
+drafts row reads "Pipelines working toward their first release."). An unknown count never reads as
+zero. Recently updated has its own unavailable
 line and, in an empty workspace, a note pointing at the starter prompt. A real zero is a "0".
 
 **Storage:** none — no browser key, cookie or server preference.
 
-Guards: `OverviewRenderTest` (one inventory feeds counts, bars and table; widths; unavailable without a
-digit; links; escaping; unguided families bare), `ShellRenderTest` (the family paths and the Datasources overview light their item,
-crumb and panel), `FamilyRecentE2eTest`, `OverviewE2eTest` (each catalog lifecycle count equals the
-inventory's, unlensed and narrowed), `PromoterLensSweepTest`, `overview.test.mjs` and
-`OverviewBrowserTest` (copy resolves and refuses with zero requests; the menu lands on the overview with
-its tree; a workspace switch).
+Guards:
+
+- `OverviewRenderTest`: one inventory feeds counts, bars and table; widths; unavailable without a
+  digit; links; escaping; unguided families bare. For Pipelines (#home-frame): the strip sums to
+  Total; Retired unlinked; the badge = the three live groups; the drafts words; twelve columns,
+  oldest first, tiling, each title its table row; the release note = the bins; the dialog's five
+  sections; per-metric lens words.
+- `ChartInventorySourceTest` and `ChartInventorySourceIntegrationTest`: the statement's text and
+  binds; counts against a Kotlin oracle, unlensed and narrowed.
+- `OverviewStackedTest`: random inventories. The strip sums to Total, the badge counts all but
+  Retired, every column tiles its own height, the bars are shares of the tallest, and the note is
+  worded for none, one, some and all.
+- `ShellRenderTest`: the family paths and the Datasources overview light their item, crumb and
+  panel.
+- `FamilyRecentE2eTest`.
+- `OverviewE2eTest`: each catalog lifecycle count equals the inventory's, unlensed and narrowed.
+- `PromoterLensSweepTest`: every metric and table cell through the lens.
+- `overview.test.mjs`: fill, compose, no overwrite, Reset, open by key, title as text, focus
+  return, the borrowed table, backdrop versus inside, zero requests.
+- `OverviewBrowserTest`: the landing, with geometry at 1512 (four equal strip cells, twelve columns
+  at one pitch, the plot 192px), no horizontal overflow at 390/768/1024/1280, and screenshots; the
+  definitions dialog with Escape and focus return; View data leaves one table; the question composes
+  and markup stays words; copy resolves and refuses with zero requests; a workspace switch.
+- `OverviewToneBrowserTest`: every tone site reads one colour, and the columns' and bars' tones are
+  distinct from the track, the panel and the text. On Minimal, two more ΔE-0 rows (In
+  development/text, Live/text) are recorded under #631 on the owner's ruling of 2026-10-20.
 
 **Families as built.** Each family's row lands with the lane that builds its home page; a family without a row is
 served (inventory only) and its menu item still links the catalog.
 
 | Family | Menu item links the overview since | Guide | Recently updated | Catalog `lifecycle` filter |
 |---|---|---|---|---|
-| Pipelines | #556 | `overview/guide-pipelines.html` | `PipelineRepository.recent` | `/pipelines?lifecycle=` — every bucket but `discarded` (§4.3) |
+| Pipelines | #556 | `overview/guide-pipelines.html` — subtitle, Quick start, the prompt and How it works dialogs, related: Visualizations, Dashboards, MCP server reference | `PipelineRepository.recent` | `/pipelines?lifecycle=` — every bucket but `discarded` (§4.3); since #home-frame the summary strip and its foot, Development activity (#598b) and Release history (#598a), all from `PipelineRepository.charts`, one statement |
 | Templates | #579 | `overview/guide-templates.html` — related: Pipelines, MCP server reference | `TemplateRepository.recent`, the same `RecentSource` rule; each entry links `/templates/<name>`, every segment URL-encoded (the tree's form) | `/templates?lifecycle=` — every bucket but `discarded` (§4.6); a bucket read places an object by its latest version (`TemplateRepository.listWhere`); `OverviewTemplatesE2eTest` pins each count equal to the inventory's, unlensed and through a narrowed lens |
 | Dashboards | #580 | `overview/guide-dashboards.html` — related: Pipelines, Visualizations, Parameter Sets, MCP server reference | `DashboardRepository.recent`, the same `RecentSource` rule | `/dashboards?lifecycle=` — every bucket but `discarded` (§4.21); `OverviewDashboardsE2eTest` pins each count equal to the inventory's, unlensed and through the promoter's real lens; `OverviewDashboardsRenderTest`, `OverviewDashboardsBrowserTest` |
 | Visualizations | #581 | `overview/guide-visualizations.html` — related: Pipelines, Dashboards, MCP server reference | `VisualizationRepository.recent`, the same `RecentSource` rule; through a narrowed lens, admitted RELEASED versions and their release time alone | `/visualizations?lifecycle=` — every bucket but `discarded` (§4.24); `OverviewVisualizationsE2eTest` pins each count equal to the inventory's, unlensed and through a narrowed lens |
@@ -2847,8 +3041,18 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
-| 2026-10-19 | v1.178 | #604 the browser's rows on the record's resource row — renumbered at merge after #605's v1.177 | **§3.4, §3.3:** the browser column sits on the overlay surface and a row is the record's card — the activate paints 12px padding and the 8px radius with the hover and selection tints (selection is primary ink over `--surface-selected`, not the link blue), the name is its own wrapping 12px `.dp-tree-title` at the resource-name role, the badges live in a trailing always-present `.dp-tree-meta` 8px under the title (no margin when nothing shows), and rows sit 4px apart; the row's DOM contract (control first on the line, `title` = full path, every `aria` attribute) is kept and the #516 ring follows the card's radius. The renderer's regions and `BrowserResourceRowBrowserTest`'s measurements carry the change. |
-=======
+| 2026-10-20 | v1.189 | #604 the browser's rows on the record's resource row — renumbered at merge after #605's v1.177, then after #home-ops's v1.188 | **§3.4, §3.3:** the browser column sits on the overlay surface and a row is the record's card — the activate paints 12px padding and the 8px radius with the hover and selection tints (selection is primary ink over `--surface-selected`, not the link blue), the name is its own wrapping 12px `.dp-tree-title` at the resource-name role, the badges live in a trailing always-present `.dp-tree-meta` 8px under the title (no margin when nothing shows), and rows sit 4px apart; the row's DOM contract (control first on the line, `title` = full path, every `aria` attribute) is kept and the #516 ring stays on the row's line, which takes the card's radius while focused. The renderer's regions and `BrowserResourceRowBrowserTest`'s measurements carry the change. |
+| 2026-10-20 | v1.188 | #home-ops the Datasources, Schedules and API homes on the v2 frame's regions (provisional id: the issue number replaces it once filed); answers #621 | **§4.5d / §4.18a / §4.20a:** each Frame paragraph is rewritten for the v2 regions — the summary strip's metrics (help as the note; a dot only where it equals its chart's bar), View all's badge, the two charts as bars panels with a description and an info dialog stating the section's counting rule, Continue your work's task rows (Browse datasources; See what runs next; Open the console and, only when the keys read answered, Manage keys) and its related row, Quick start's three short steps with the prompt (text unchanged) and How it works as dialog sections. **#621:** §4.18a's lens sentence now says a promoter's three endpoint metrics each carry the lens note and the keys metric none, so the strip is headed "Inventory". Schedules has no "Unblock" row: the explorer has no condition filter for it. The API's empty endpoints note reads "Quick start says how." (the steps no longer sit above it). Guide and guard sentences updated; every counting rule is unchanged. No route, permission, migration or config key. |
+| 2026-10-20 | v1.187 | #home-frame the home pages' v2 frame and the Pipelines home (provisional id: the issue number replaces it once filed) — renumbered at merge after #610's v1.186 | **§4.25:** the Hierarchy is rewritten as six regions — heading (icon eyebrow, subtitle, View all with its badge, the primary action), summary strip and foot, analytics grid, work grid (Continue your work with task rows, Recently updated and the related links; Quick start), the guide's `extra`, and ONE native `<dialog>` with five server-rendered sections (definitions, releases, activity, prompt, howitworks). New paragraphs give the metric rule, the per-metric lens words (#621: the mechanism; the API keys tiles wait for home-ops), and View all's badge = objects − discarded only (#593). The Pipelines charts are re-worded as columns (activity: twelve weeks, tiled in tenths, the headline the quarter's events, View data moving the table twin into the dialog) and bars (release history at one pitch, #620; the note's sentences = the bins), with every #598a/#598b invariant kept; Actively developed moves to the strip. The prompt dialog: the question field substitutes `[question]` as text, never overwriting an edit; Reset. Guards are updated; OverviewToneBrowserTest records two more Minimal rows under #631 (owner ruling 2026-10-20). **§4.5d / §4.18a / §4.20a:** one Frame sentence each. No route, permission, migration or config key. |
+| 2026-10-20 | v1.186 | #610 the phone top bar drops the breadcrumb — renumbered at merge after #618's v1.185 | **§3.6:** the ≤760px row's topbar cell loses "crumbs (leaf only)" — below the phone band the bar displays NO breadcrumb (the frozen prototype's rule): `.app-crumbs` is `display:none` in app.css's phone block, the element stays in the DOM for shell.js's boosted-swap writes, and `#mode-toggle` inherits the crumbs' `margin-right: auto` right-edge pin. **§3.4:** the breadcrumb bullet records the band and the return at 761. The 761–1100 leaf-only rule (110) and the ≥1101 group are unchanged. `MainFrameBrowserTest`'s four cases pin the hide at 320/390, the band guard at 761/1101 and the anonymous bar at 320. No route, permission, SQL or script change. |
+| 2026-10-20 | v1.185 | #618 success and warning text inks — renumbered at merge after #627's v1.184 | **§3.5:** the #509 sentence becomes three roles. Success and warning text read `--app-success-ink` / `--app-warning-ink`, each built like `--app-danger-ink`: `light-dark(oklch(from var(--text-<role>) calc(l - 0.03) c h), var(--text-<role>))`. Twenty-four text sites over six sheets move (app.css, pipeline-editor.css, template-workspace.css, auth.css, parameter-sets.css, dashboards.css), and nine literal fallbacks go. Borders, fills, dots and tints keep the accents. Ocean and saas success text takes the teal text role. New guards: `StatusInkContrastBrowserTest`, 270 pairs over ten passes, worst healthcare warning 4.82:1, and `StatusInkSourceAuditTest`. |
+| 2026-10-20 | v1.184 | #627 overview mixed tone — renumbered at merge after #625's v1.183 | **§4.25:** bars, stacked parts and legend swatches share four lifecycle tones; mixed reads the info series (`--chart-series-1`) rather than the brand. `OverviewToneBrowserTest` measures all nine themes and both auto schemes at the unchanged OKLab distance floor of 0.08, with measured, stale-checking palette gaps for professional (#633) and minimal (#631). |
+| 2026-10-20 | v1.183 | #625 template version selector selection — renumbered at merge after #598b's v1.182 | **§4.7:** the version selector's viewed row takes the menu's selection expression (§3.1): `--brand-soft` tint, `--text-primary` ink (Minimal `--text-inverted`), the 3px `--border-focus` bar from `--app-nav-indicator-w` instead of the 2px `--focus-ring-offset`, reserved transparent on every row; the viewed row's `· current` suffix inherits the label's ink (owner, 2026-10-20 — muted on the tint measured 2.96–3.83:1). `TemplateVersionSelectorBrowserTest` measures bar, ink, contrast and geometry on nine themes plus auto's dark half. |
+| 2026-10-20 | v1.182 | #598b Pipelines activity chart | **§4.25:** the Pipelines card's third chart, **Pipelines activity, last 12 weeks**, from the same statement: twelve UTC weeks (Monday-first, oldest first, the newest "this week so far"), each stacking Released (admitted RELEASED versions by `released_at`) and Created (admitted pipelines by `created_at`) into a bar of events, the busiest week full width; the headline "N pipelines actively developed" (an admitted draft last written within `datapipelines.ui.actively-developed-days`, default 14, inclusive; a count today, no per-week draft history; 0 through a promoter's lens); the note; the hidden table's Week, Released, Created, Events; rows at half the inventory pitch (`--space-6`). The lens paragraph, the guards and the Pipelines row of Families as built name it. |
+| 2026-10-19 | v1.181 | #598a merge follow-up: §4.25 records #593's count sentence | **§4.25:** the Pipelines charts paragraph quotes the card's note on why its total can exceed the resource browser's header count (the header counts the three live parts; Retired is discarded only, with no page) — #593's acceptance asked the counting model to say what the page says; the Links paragraph's four-count sentence now names the Pipelines card's as until #598a. |
+| 2026-10-19 | v1.180 | #617 screen-reader-only headers — renumbered at merge after #609's v1.179 | **§3.7:** sort controls require visible header text; screen-reader-only labels and resize handles do not qualify. Explicit `data-sort="off"` remains. Node decision tests and the template Versions/dashboard Keys browser witnesses pin the rule. |
+| 2026-10-19 | v1.179 | #609 shared-component edge roles — renumbered at merge after #598a's v1.178 | **§3.1 item 5:** the shared components' edges take #606's three roles. Seven boundaries move from `--border-subtle` to `--border-default`: the dashboard filters pane and dock, the parameter card, the editor's minimap, view controls and dock top, and the version-row menu. The release dialog's switch and check rows read `--border-subtle` directly instead of the `--border-faint` alias (same colour). Seven edges stay separators. `ComponentBoundariesBrowserTest` is the sweep. Its four vendored-pair exceptions are tracked by #628. **§4.4:** the dock's top border is named a boundary. |
+| 2026-10-19 | v1.178 | #598a the Pipelines charts — renumbered at merge after #605's v1.177 | **§4.25:** the Pipelines card's four counts and four bars give way to a total line and two stacked charts from ONE statement — Pipelines by lifecycle (In development, Live, Live, changes in progress, Retired; the three live parts link the filtered catalog) and Pipelines by number of releases (0, 1, 2–3, 4–9, 10+, each split No draft / Draft open; only RELEASED rows count); both total the same, each with its hidden table; the promoter's lens; the guards; the Pipelines row of **Families as built**. The other families' cards are unchanged. |
 | 2026-10-19 | v1.177 | #605 menu typography | **§3.4/§3.3:** recorded menu rows, captions, wordmark, switcher and top-bar type roles; shared 650 emphasis weight; dedicated normative 3px indicator; selected primary/accent inks with accessible inverted ink for Minimal. Browser measurements and all-theme selected-ink contrast. |
 | 2026-10-19 | v1.176 | #619 login companion design — renumbered at merge after #509's v1.172, then after #585's v1.175 | **§4.1:** the record §13 two-column login, 360px form, bundled Noto Sans, dark/light and form-first phone layout; the DAG ceremony retired; `auth.css` new; `login.js` progressively enhances password visibility and inline validation; `eye`/`eye-off` vendored (46 glyphs). Authentication, CSRF and redirects preserved. |
 | 2026-10-19 | v1.175 | #585 the API home — renumbered at merge after #509's v1.172, then after #584's v1.174 | **§4.18a (new):** `GET /overview/api-console` — Endpoints, Serving a release, Serving a draft and Your keys / Workspace keys tiles; Endpoints by state and Keys by kind (live only) charts; Recently published and Recently created keys; How a program gets access; a publish starter prompt that stops at publishing; the shared MCP card. Each of the two reads fails on its own. **§4.18:** the console is the home's View all; its MCP card is one shared fragment. **§4.25:** the API row of the **Families as built** table. |

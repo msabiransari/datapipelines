@@ -47,7 +47,7 @@
 
 .ps-card {
   background: var(--surface-raised);
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--border-default);
   border-radius: var(--radius-lg);
   padding: var(--space-4);
   min-width: 0;
@@ -103,7 +103,7 @@
 }
 
 .ps-form-host .dp-dashboard-parameter-reset {
-  color: var(--text-warning);
+  color: var(--app-warning-ink);
 }
 
 .ps-insp-title {
