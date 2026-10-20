@@ -104,7 +104,7 @@
 .app-login-preview-body { padding: var(--space-5); }
 .app-login-preview-title { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
 .app-login-preview-title b { font-size: var(--app-text-support); }
-.app-login-status { font-size: var(--app-text-meta); color: var(--accent-success); background: var(--accent-success-bg); border-radius: var(--radius-sm); padding: var(--space-1) var(--space-2); white-space: nowrap; }
+.app-login-status { font-size: var(--app-text-meta); color: var(--app-success-ink); background: var(--accent-success-bg); border-radius: var(--radius-sm); padding: var(--space-1) var(--space-2); white-space: nowrap; }
 .app-login-preview-subtitle { color: var(--text-muted); font-family: var(--font-mono); font-size: var(--app-text-badge); margin: var(--space-1) 0 var(--space-5); overflow-wrap: anywhere; }
 .app-login-steps { display: grid; grid-template-columns: 1fr var(--space-6) 1fr var(--space-6) 1fr; align-items: center; padding-block: var(--space-6); background-image: radial-gradient(var(--grid-dot) var(--app-auth-dot-radius), transparent var(--app-auth-dot-radius)); background-size: var(--app-auth-dot-cell) var(--app-auth-dot-cell); }
 .app-login-step { background: var(--surface-raised); border: var(--space-px) solid var(--border-default); border-radius: var(--radius-md); padding: var(--space-3); min-width: 0; }
@@ -115,7 +115,7 @@
 .app-login-connector::after { content: ""; position: absolute; right: 0; top: calc(0px - var(--space-1)); width: var(--space-2); height: var(--space-2); border-top: var(--space-px) solid var(--border-default); border-right: var(--space-px) solid var(--border-default); transform: rotate(45deg); }
 .app-login-result { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding-top: var(--space-4); margin-top: var(--space-2); border-top: var(--space-px) solid var(--app-line-decorative); font-size: var(--app-text-badge); color: var(--text-muted); }
 .app-login-result span { display: flex; gap: var(--space-2); align-items: center; }
-.app-login-result .ds-icon { color: var(--accent-success); }
+.app-login-result .ds-icon { color: var(--app-success-ink); }
 .app-login-caption { margin: var(--space-5) 0 0; color: var(--text-secondary); font-size: var(--app-text-support); line-height: var(--leading-relaxed); }
 .app-login-caption strong { color: var(--text-primary); font-weight: var(--weight-bold); }
 .app-login-signin { padding: var(--space-12) var(--app-auth-gutter) var(--space-16); display: flex; align-items: center; min-width: 0; }

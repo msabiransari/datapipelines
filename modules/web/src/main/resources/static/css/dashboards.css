@@ -976,7 +976,7 @@ fieldset.dp-dashboard-parameter > .dp-dashboard-parameter-error {
 }
 
 .dp-board-event-severity[data-dp-severity="warning"] {
-  color: var(--text-warning);
+  color: var(--app-warning-ink);
 }
 
 .dp-board-event-kind {

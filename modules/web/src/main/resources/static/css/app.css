@@ -344,6 +344,19 @@
      DangerInkContrastBrowserTest; DangerInkSourceAuditTest keeps every text site on it. */
   --app-danger-ink: light-dark(oklch(from var(--text-danger) calc(l - 0.03) c h), var(--text-danger));
 
+  /* #618 — the success and warning INKS: #509's shape for the other two status roles, the
+     colour of their TEXT, never a fill. The accents are the fills and dots, and as text they
+     miss the 4.5:1 floor on the light inset and hover surfaces (professional and auto's light
+     half 4.39 success / 4.31 warning; forest's warning 3.88). The design system's text roles,
+     `--text-success` / `--text-warning`, do better but not enough: light's warning (the accent
+     itself there) 4.43 and healthcare's 4.23 on those surfaces. So the light half is the text
+     role at 3% lower oklch lightness, hue and chroma kept, and the dark half is the role as
+     vendored (6.89:1 at worst). `light-dark()` follows each theme's own `color-scheme`, `auto`
+     included. Measured on every theme by StatusInkContrastBrowserTest;
+     StatusInkSourceAuditTest keeps every text site on them. */
+  --app-success-ink: light-dark(oklch(from var(--text-success) calc(l - 0.03) c h), var(--text-success));
+  --app-warning-ink: light-dark(oklch(from var(--text-warning) calc(l - 0.03) c h), var(--text-warning));
+
   /* #502 — the focus RING's width, the length half of the design system's focus state:
      primitives.css builds its ring as a 2px box-shadow band around `--focus-ring`
      (`.ds-button:focus-visible`, `0 0 0 var(--focus-ring-offset) var(--surface-default),
@@ -2372,7 +2385,7 @@ button.app-busy::after {
 
 .app-chip-ok {
   background: var(--accent-success-bg);
-  color: var(--accent-success);
+  color: var(--app-success-ink);
 }
 
 .app-chip-bad {
@@ -2387,7 +2400,7 @@ button.app-busy::after {
 
 .app-chip-warn {
   background: var(--accent-warning-bg);
-  color: var(--accent-warning);
+  color: var(--app-warning-ink);
 }
 
 .app-chip-mono {
@@ -2765,16 +2778,16 @@ button.app-busy::after {
 .u-muted { color: var(--text-muted); }
 .u-primary { color: var(--text-primary); }
 .u-danger { color: var(--app-danger-ink); }
-.u-success { color: var(--accent-success); }
-.u-warning { color: var(--accent-warning); }
+.u-success { color: var(--app-success-ink); }
+.u-warning { color: var(--app-warning-ink); }
 
 /* 097 §C — the admin-users row actions carried their colour as an inline `style` written in
    Kotlin. As classes they need the hover state spelled out: `.ds-button-ghost:hover` (0,2,0)
    would otherwise repaint them `--text-primary`, which the inline style used to win against
    by being inline. Same colour, same states, no attribute. */
 .ds-button-ghost.u-danger:hover { color: var(--app-danger-ink); }
-.ds-button-ghost.u-success:hover { color: var(--accent-success); }
-.ds-button-ghost.u-warning:hover { color: var(--accent-warning); }
+.ds-button-ghost.u-success:hover { color: var(--app-success-ink); }
+.ds-button-ghost.u-warning:hover { color: var(--app-warning-ink); }
 
 /* layout */
 .u-row { display: flex; align-items: center; gap: var(--gap-sm); }
@@ -3024,7 +3037,7 @@ button.app-busy::after {
 
 .app-alert-warning {
   background: var(--accent-warning-bg);
-  color: var(--accent-warning);
+  color: var(--app-warning-ink);
 }
 
 .app-alert-danger {
@@ -3691,7 +3704,7 @@ pre.tf-pane-input {
 }
 
 .tf-outcome-ok {
-  color: var(--accent-success);
+  color: var(--app-success-ink);
 }
 
 .tf-outcome-refused {
@@ -3740,7 +3753,7 @@ pre.tf-pane-input {
 
 .tf-case-pass > .tf-case-head .tf-mark,
 .tf-inv-pass > .tf-mark {
-  color: var(--accent-success);
+  color: var(--app-success-ink);
 }
 
 .tf-case-fail > .tf-case-head .tf-mark,
@@ -3794,7 +3807,7 @@ pre.tf-pane-input {
 /* 7d (§8.2) — the node card's needs-review marker rides the kind line (graph.js
    buildCardHtml), so it adds no height to a card the layout already measured. */
 .pe-card-review {
-  color: var(--accent-warning);
+  color: var(--app-warning-ink);
   text-transform: none;
 }
 
