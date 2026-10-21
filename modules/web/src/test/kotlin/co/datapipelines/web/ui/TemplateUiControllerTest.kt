@@ -20,6 +20,7 @@ import io.mockk.mockk
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.springframework.http.HttpStatus
+import org.springframework.mock.web.MockHttpServletResponse
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.ui.ExtendedModelMap
@@ -194,7 +195,7 @@ class TemplateUiControllerTest {
         stubFlatList()
 
         val model = ExtendedModelMap()
-        val viewName = partialController.list(model, q = null, dialect = null, type = null, offset = 0, lifecycle = null)
+        val viewName = partialController.list(model, MockHttpServletResponse(), q = null, dialect = null, type = null, offset = 0, lifecycle = null)
 
         viewName shouldBe TemplateBrowseModel.SEARCH_VIEW
         model["rootId"] shouldBe TemplateBrowseModel.CATALOG_ROOT_ID

@@ -141,7 +141,7 @@ class DashboardBrowseModelSearchTest {
                 dashboards,
             )
 
-        val view = controller.dashboardCatalog(ui, q = needle, offset = null, lifecycle = null)
+        val view = controller.dashboardCatalog(ui, MockHttpServletResponse(), q = needle, offset = null, lifecycle = null)
         val html = render(view, ui)
 
         // The row is a dashboard whose NAME does not contain the term - only its display name does,

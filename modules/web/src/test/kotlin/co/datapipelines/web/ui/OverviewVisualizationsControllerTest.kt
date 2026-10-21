@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import org.springframework.http.HttpStatus
 import org.springframework.mock.web.MockHttpServletRequest
+import org.springframework.mock.web.MockHttpServletResponse
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.ui.ExtendedModelMap
 import org.springframework.web.server.ResponseStatusException
@@ -42,7 +43,10 @@ class OverviewVisualizationsControllerTest {
         val full = ExtendedModelMap()
         page.list(full, MockHttpServletRequest(), " rev ", 25, "with-drafts") shouldBe VisualizationUiController.LIST_VIEW
         val fragment = ExtendedModelMap()
-        partial.catalog(fragment, " rev ", 25, "with-drafts") shouldBe VisualizationBrowseModel.WRAPPER_VIEW
+        val response = MockHttpServletResponse()
+        partial.catalog(fragment, response, " rev ", 25, "with-drafts") shouldBe VisualizationBrowseModel.WRAPPER_VIEW
+        // #591: the address bar follows the list — built from the bound values, q trimmed.
+        response.getHeader(CatalogUrl.HEADER) shouldBe "/visualizations?q=rev&lifecycle=with-drafts&offset=25"
         listOf(full, fragment).forEach { model ->
             model["lifecycle"] shouldBe "with-drafts"
             model["lifecycleLabel"] shouldBe "With drafts"
@@ -56,7 +60,10 @@ class OverviewVisualizationsControllerTest {
     fun `unknown and unoffered filters are a constant 400 on both routes`() {
         listOf("discarded", "DRAFT", "unknown", "x' OR true --").forEach { value ->
             val full = assertThrows<ResponseStatusException> { page.list(ExtendedModelMap(), MockHttpServletRequest(), null, null, value) }
-            val fragment = assertThrows<ResponseStatusException> { partial.catalog(ExtendedModelMap(), null, null, value) }
+            val response = MockHttpServletResponse()
+            val fragment = assertThrows<ResponseStatusException> { partial.catalog(ExtendedModelMap(), response, null, null, value) }
+            // #591: a refused value never reaches the URL helper — the 400 fires first.
+            response.getHeader(CatalogUrl.HEADER) shouldBe null
             listOf(full, fragment).forEach { failure ->
                 failure.statusCode shouldBe HttpStatus.BAD_REQUEST
                 failure.reason shouldBe CatalogLifecycle.BAD_LIFECYCLE
