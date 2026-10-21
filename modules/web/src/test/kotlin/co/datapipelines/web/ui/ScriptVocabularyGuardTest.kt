@@ -10,8 +10,9 @@ import kotlin.text.RegexOption.IGNORE_CASE
  * ruling 2026-10-20): the product noun for the JSONata/JavaScript node is SCRIPT everywhere;
  * TRANSFORM survives ONLY in the senses this file's allowlist names.
  *
- * The scan walks every tracked text source under the repository root (never `build/`, never
- * `.git/` or `.pregate-logs/`) and fails on any line containing `transform` that neither
+ * The scan reads every text source the git index tracks (`git ls-files`), so an untracked
+ * scratch file, a build output or a lane worktree is never the tree (#640), and fails on any
+ * line containing `transform` that neither
  *
  *   - matches one of the GLOBAL exemptions (the same line shape everywhere in the tree), nor
  *   - lives in a file matched by a [PATH_EXEMPTIONS] entry whose per-line regex admits it.
@@ -130,21 +131,38 @@ class ScriptVocabularyGuardTest {
     private fun scanTargets(): List<File> {
         val extensions =
             setOf("kt", "kts", "java", "md", "html", "js", "mjs", "json", "yml", "yaml", "sql", "properties", "toml", "sh", "txt", "xml")
-        val excludedDirs = setOf("build", ".git", ".claude", ".pregate-logs", "node_modules", "out", "target")
-        return repoRoot()
-            .walkTopDown()
-            .onEnter { dir -> dir.name !in excludedDirs }
-            .filter { it.isFile && it.extension in extensions && it.length() < 4_000_000 }
-            .filter { file ->
-                val p = file.relativeTo(repoRoot()).invariantSeparatorsPath
-                !p.startsWith("modules/visualization/") &&
+        val root = repoRoot()
+        return trackedPaths(root)
+            .filter { p ->
+                p.substringAfterLast('/').substringAfterLast('.', "") in extensions &&
+                    !p.startsWith("modules/visualization/") &&
                     !p.startsWith("docs/superpowers/") &&
                     !p.startsWith("static/vendor/") &&
                     !p.startsWith("modules/web/src/main/resources/static/vendor/") &&
                     !p.startsWith("scripts/sample-data") &&
                     !p.contains("/overview/") &&
                     !p.endsWith(".css")
-            }.toList()
+            }.map { File(root, it) }
+            // a tracked path deleted in the working tree has nothing to read
+            .filter { it.isFile && it.length() < 4_000_000 }
+    }
+
+    /** The index's paths, NUL-separated so no file name is quoted or split; a git failure fails the suite. */
+    private fun trackedPaths(root: File): List<String> {
+        val errors = File.createTempFile("vocabulary-guard-git", ".err")
+        try {
+            val process =
+                ProcessBuilder("git", "ls-files", "-z")
+                    .directory(root)
+                    .redirectError(ProcessBuilder.Redirect.to(errors))
+                    .start()
+            val listing = process.inputStream.bufferedReader().readText()
+            val exit = process.waitFor()
+            if (exit != 0) fail("git ls-files exited $exit in $root: ${errors.readText().trim()}")
+            return listing.split('\u0000').filter { it.isNotEmpty() }
+        } finally {
+            errors.delete()
+        }
     }
 
     private fun repoRoot(): File {
