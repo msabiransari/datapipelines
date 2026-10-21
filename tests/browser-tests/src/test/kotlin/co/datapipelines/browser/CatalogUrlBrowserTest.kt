@@ -41,7 +41,14 @@ class CatalogUrlBrowserTest : VisualizationBrowserSuite() {
     ) {
         PIPELINES("/pipelines", "pipeline-filter-q", "pipeline-filter-lifecycle", "pipeline-list-wrapper", "/partials/pipelines", "flows"),
         TEMPLATES("/templates", "template-filter-q", "template-filter-lifecycle", "template-list-wrapper", "/partials/templates", "sql"),
-        DASHBOARDS("/dashboards", "dashboard-filter-q", "dashboard-filter-lifecycle", "dash-list-wrapper", "/partials/dashboards", "boards"),
+        DASHBOARDS(
+            "/dashboards",
+            "dashboard-filter-q",
+            "dashboard-filter-lifecycle",
+            "dash-list-wrapper",
+            "/partials/dashboards",
+            "boards",
+        ),
         VISUALIZATIONS(
             "/visualizations",
             "visualization-filter-q",
@@ -65,19 +72,31 @@ class CatalogUrlBrowserTest : VisualizationBrowserSuite() {
         val name = ready("cat591") + "/" + family.folder + "/one"
         val body =
             when (family) {
-                Family.PIPELINES ->
+                Family.PIPELINES -> {
                     """{"name":"$name","display_name":"one","nodes":[{"id":"n1","type":"CALCULATOR","kind":"fiscal_quarter",""" +
-                        """"context_key":"run_q_n1","inputs":{"date":"${'$'}current_date","fiscal_start":"${'$'}org_fiscal_start_date"}}]}"""
-                Family.TEMPLATES ->
-                    """{"id":"$name","type":"sql","dialect":"POSTGRES","display_name":"one","description":"#591 fixture","body":"SELECT 1"}"""
-                Family.DASHBOARDS ->
+                        """"context_key":"run_q_n1","inputs":{"date":"${'$'}current_date",""" +
+                        """"fiscal_start":"${'$'}org_fiscal_start_date"}}]}"""
+                }
+
+                Family.TEMPLATES -> {
+                    """{"id":"$name","type":"sql","dialect":"POSTGRES","display_name":"one",""" +
+                        """"description":"#591 fixture","body":"SELECT 1"}"""
+                }
+
+                Family.DASHBOARDS -> {
                     """{"name":"$name","display_name":"one","visualizations":[],"layout":{"columns":12,"grid":[]}}"""
-                Family.VISUALIZATIONS -> null
-                Family.PARAMETER_SETS ->
+                }
+
+                Family.VISUALIZATIONS -> {
+                    null
+                }
+
+                Family.PARAMETER_SETS -> {
                     """{"name":"$name","display_name":"one","description":"#591 fixture","parameters":[""" +
                         """{"name":"kind","label":"Kind","type":"STRING","kind":"SELECT","cardinality":"SINGLE","required":true,""" +
                         """"source":{"constants":[{"value":"a","display_value":"A","is_default":true}]},""" +
                         """"presentation":{"control":"dropdown"}}]}"""
+                }
             }
         if (body == null) createVisualization(name) else api("POST", "/api/v1" + family.path, body)
         return name
@@ -128,7 +147,9 @@ class CatalogUrlBrowserTest : VisualizationBrowserSuite() {
         // sprite a row's glyph uses) is a resource load the base page would make too, not a call.
         val record =
             Consumer<Request> {
-                if (it.resourceType() == "xhr" || it.resourceType() == "fetch") requests += "${it.method()} ${it.url().removePrefix(baseUrl)}"
+                if (it.resourceType() == "xhr" || it.resourceType() == "fetch") {
+                    requests += "${it.method()} ${it.url().removePrefix(baseUrl)}"
+                }
             }
         page.evaluate("() => { window.__settled = 0; document.body.addEventListener('htmx:afterSettle', () => window.__settled++); }")
         page.onRequest(record)
