@@ -400,6 +400,8 @@ shipped default. `scripts/compose-env-audit.sh` diffs the compose block against
 pass-through, a diverged default, a variable declared in both tracked files or in neither,
 or a posture-dependent key passed with a default instead of in the valueless form. It runs
 on **every `./gradlew build`**, not when someone remembers to run it.
+It also inventories every app-container environment name, refuses JVM code-loading names,
+and requires a reasoned allowlist for names outside `DATAPIPELINES_*`, rejecting stale entries.
 
 ### 6.3A Promotion: a receiver deployment (055)
 
