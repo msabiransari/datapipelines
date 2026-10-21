@@ -601,8 +601,10 @@ class RoleWalkE2eTest {
         private const val MINIMUM_ROUTES = 65
         private const val MINIMUM_HANDLERS = 105
         private const val MINIMUM_ROUTE_LITERALS = 335
+
         // Include nested braces in a variable's regex constraint, such as an id's length quantifier.
         private val ROUTE_VARIABLE = Regex("\\{(?:[^{}]|\\{[^{}]*})+}")
+
         private const val MINIMUM_TOOLS = 61
         private const val ALLOWED_FLOOR = 25
         private const val VIEWER_REFUSED_FLOOR = 40
